@@ -1,35 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { 
   Search, RefreshCw, Bell, Trash2, Clock, Plus, Zap,
-  CheckCircle2, Calendar, Users, Wallet, BarChart2, Award, Settings, History
+  CheckCircle2, MonitorSmartphone
 } from 'lucide-react';
 import { NotificationsModal } from '../NotificationsModal';
 import { SyncCenterModal } from '../sync/SyncCenterModal';
+import { SyncHeaderButton } from '../sync/SyncHeaderButton';
+import { pairWithPeer } from '../../services/sync/syncClient';
+import { motion } from 'motion/react';
 
 interface DesktopTopBarProps {
-  onRefresh: () => void;
-  isSyncModalOpen: boolean;
-  setIsSyncModalOpen: (open: boolean) => void;
-  activityLogs: { id: string; message: string; time: string }[];
-  onPair: (ip: string, pin: string) => Promise<void>;
-  onForceSync: () => Promise<void>;
-  onUnpair: (deviceId: string) => Promise<void>;
-  onRenamePeer: (deviceId: string, name: string) => Promise<void>;
-  onRenameLocalDevice: (name: string) => Promise<void>;
+  onOpenSyncModal?: () => void;
 }
 
-export const DesktopTopBar: React.FC<DesktopTopBarProps> = ({
-  onRefresh,
-  isSyncModalOpen,
-  setIsSyncModalOpen,
-  activityLogs,
-  onPair,
-  onForceSync,
-  onUnpair,
-  onRenamePeer,
-  onRenameLocalDevice
-}) => {
+export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
   const {
     activeTab,
     notifications,
@@ -37,7 +22,6 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = ({
     setIsGlobalSearchOpen,
     setIsRecentlyDeletedModalOpen,
     setIsAddLessonModalOpen,
-    setIsAddQuickLessonModalOpen,
     setIsStartLessonNowModalOpen,
     lessons,
     openLessonControl,
@@ -49,21 +33,129 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = ({
     devicePresences,
     autoSyncEnabled,
     setAutoSyncEnabled,
+    triggerSync,
+    forceSyncPeer,
     getPendingOutbox,
     getSyncHistory,
     clearSyncHistory,
-    forceSyncPeer,
-    startHosting
+    updateSyncState,
+    startHosting,
+    refreshCalendarAndDashboard
   } = useApp();
 
   const [showNotifications, setShowNotifications] = useState(false);
   const [showToast, setShowToast] = useState(false);
 
+  // Sync state management
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [activityLogs, setActivityLogs] = useState<{ id: string; message: string; time: string }[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+
   const unreadCount = notifications.filter(n => !n.read).length;
   const deletedCount = recentlyDeleted.students.length + recentlyDeleted.groups.length + recentlyDeleted.lessons.length;
 
+  const onlineCount = useMemo(() => {
+    if (!syncState?.pairedPeers) return 0;
+    return syncState.pairedPeers.filter(p => {
+      const presence = devicePresences?.get(p.deviceId);
+      return presence ? presence.isOnline : false;
+    }).length;
+  }, [syncState?.pairedPeers, devicePresences]);
+
+  const syncStatus = isSyncing ? 'syncing' : (onlineCount > 0 ? 'online' : 'offline');
+
+  const addLog = (msg: string) => {
+    setActivityLogs(prev => [
+      { id: Date.now().toString(), message: msg, time: new Date().toLocaleTimeString() },
+      ...prev
+    ].slice(0, 50));
+  };
+
+  const handlePair = async (ip: string, pin: string) => {
+    if (!syncState) return;
+    try {
+      const localDevice = { deviceId: syncState.localDeviceId, deviceName: syncState.localDeviceName };
+      const token = await pairWithPeer(ip, 0, pin, localDevice);
+      if (token) {
+        const actualToken = typeof token === 'string' ? token : (token as any).pairingToken || (token as any).token || 'token';
+        const actualPeerId = typeof token === 'string' ? `peer_${Date.now()}` : (token as any).peerId || `peer_${Date.now()}`;
+        const actualPeerName = typeof token === 'string' ? `Device (${ip})` : (token as any).deviceName || `Companion Device`;
+        const negotiatedVersion = (token as any).negotiatedVersion || 1;
+        const agreedCapabilities = (token as any).agreedCapabilities || ['core_entities'];
+        
+        const newPeer = { 
+          deviceId: actualPeerId, 
+          deviceName: actualPeerName, 
+          lastKnownIp: 'P2P (WebRTC)',
+          port: 0,
+          pairingToken: actualToken,
+          protocolVersion: negotiatedVersion,
+          capabilities: agreedCapabilities,
+          lastSyncedTimestamp: Date.now(),
+          isOnline: true,
+          lastHeartbeat: Date.now()
+        };
+        const updatedPeers = [...(syncState.pairedPeers || []).filter(p => p.deviceId !== actualPeerId), newPeer];
+        await updateSyncState({ ...syncState, pairedPeers: updatedPeers });
+        addLog(`Paired with ${actualPeerName} (${actualPeerId.substring(0, 10)})`);
+      } else {
+        addLog(`Could not connect to device ${ip} (Device is offline or invalid PIN)`);
+        throw new Error(`Device (${ip}) is offline or PIN was not found`);
+      }
+    } catch (err: any) {
+      addLog(`Failed to pair with ${ip}: ${err.message || 'Offline'}`);
+      throw err;
+    }
+  };
+
+  const handleForceSync = async (peerId?: string) => {
+    if (!syncState) return;
+    setIsSyncing(true);
+    try {
+      if (peerId) {
+        const success = await triggerSync(peerId);
+        addLog(success ? `Synced with device ${peerId.substring(0, 6)}` : `Sync failed for device ${peerId.substring(0, 6)}`);
+      } else {
+        const peersToSync = syncState.pairedPeers?.filter(p => {
+          const presence = devicePresences?.get(p.deviceId);
+          return presence ? presence.isOnline : false;
+        }) || [];
+        for (const peer of peersToSync) {
+          await triggerSync(peer.deviceId);
+        }
+        addLog(`Synced with ${peersToSync.length} device(s)`);
+      }
+    } catch {
+      addLog('Sync error occurred');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleUnpair = async (peerId: string) => {
+    if (!syncState) return;
+    const updatedPeers = (syncState.pairedPeers || []).filter(p => p.deviceId !== peerId);
+    await updateSyncState({ ...syncState, pairedPeers: updatedPeers });
+    addLog(`Unpaired device ${peerId.substring(0, 6)}`);
+  };
+
+  const handleRenameLocalDevice = async (newName: string) => {
+    if (!syncState) return;
+    await updateSyncState({ ...syncState, localDeviceName: newName });
+    addLog(`Renamed local device to ${newName}`);
+  };
+
+  const handleRenamePeer = async (peerId: string, newName: string) => {
+    if (!syncState) return;
+    const updatedPeers = (syncState.pairedPeers || []).map(p => 
+      p.deviceId === peerId ? { ...p, deviceName: newName } : p
+    );
+    await updateSyncState({ ...syncState, pairedPeers: updatedPeers });
+    addLog(`Renamed peer to ${newName}`);
+  };
+
   const handleRefreshClick = () => {
-    onRefresh();
+    refreshCalendarAndDashboard();
     setShowToast(true);
     setTimeout(() => setShowToast(false), 2000);
   };
@@ -143,14 +235,14 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = ({
           {/* Quick Search Field */}
           <button
             onClick={() => setIsGlobalSearchOpen(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface-hover/80 dark:bg-surface-border/40 border border-surface-border hover:border-primary/40 text-text-muted text-xs font-medium transition-all cursor-pointer w-48 xl:w-60 justify-between"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface-hover/80 dark:bg-surface-border/40 border border-surface-border hover:border-primary/40 text-text-muted text-xs font-medium transition-all cursor-pointer w-44 xl:w-56 justify-between"
           >
             <div className="flex items-center gap-2 truncate">
               <Search className="w-3.5 h-3.5 text-text-muted" />
-              <span className="truncate">{t('search_placeholder') || 'Schüler, Stunden suchen...'}</span>
+              <span className="truncate">{t('search_placeholder') || 'Suchen...'}</span>
             </div>
             <kbd className="text-[10px] font-mono px-1 py-0.5 rounded bg-surface-border/60 text-text-muted">
-              Ctrl+K
+              ⌘K
             </kbd>
           </button>
 
@@ -173,6 +265,43 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = ({
 
           {/* Divider */}
           <div className="h-6 w-px bg-surface-border/80 mx-1" />
+
+          {/* P2P Sync Center Button */}
+          {isSyncReady && syncState && (
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setIsSyncModalOpen(true)}
+              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-bold ${
+                onlineCount > 0
+                  ? 'bg-emerald-500/10 dark:bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20'
+                  : isSyncing
+                  ? 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20'
+                  : 'bg-surface-hover/60 hover:bg-surface-hover text-text-muted hover:text-text-main border-surface-border'
+              }`}
+              title={
+                onlineCount > 0
+                  ? `${onlineCount} Gerät(e) online & synchronisiert`
+                  : 'P2P Synchronisations-Zentrum öffnen'
+              }
+            >
+              {isSyncing ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-500" />
+              ) : (
+                <MonitorSmartphone className={`w-3.5 h-3.5 ${onlineCount > 0 ? 'text-emerald-500' : 'text-text-muted'}`} />
+              )}
+              <span className="hidden xl:inline text-[11px]">
+                {isSyncing
+                  ? 'Synchronisiere...'
+                  : onlineCount > 0
+                  ? `${onlineCount} Online`
+                  : 'Sync'}
+              </span>
+              {onlineCount > 0 && (
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse xl:hidden" />
+              )}
+            </motion.button>
+          )}
 
           {/* Refresh button */}
           <button
@@ -229,7 +358,9 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = ({
           isOpen={isSyncModalOpen}
           onClose={() => setIsSyncModalOpen(false)}
           syncStatus={
-            syncState.pairedPeers && syncState.pairedPeers.some(p => devicePresences?.get(p.deviceId)?.isOnline)
+            isSyncing
+              ? 'syncing'
+              : syncState.pairedPeers && syncState.pairedPeers.some(p => devicePresences?.get(p.deviceId)?.isOnline)
               ? 'connected'
               : 'offline'
           }
@@ -240,12 +371,12 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = ({
           }
           nextAutoSyncTime="in 5 mins"
           localDevice={{ name: syncState.localDeviceName, id: syncState.localDeviceId }}
-          onRenameLocalDevice={onRenameLocalDevice}
+          onRenameLocalDevice={handleRenameLocalDevice}
           pairedPeers={syncState.pairedPeers || []}
-          onPair={onPair}
-          onForceSync={onForceSync}
-          onUnpair={onUnpair}
-          onRenamePeer={onRenamePeer}
+          onPair={handlePair}
+          onForceSync={handleForceSync}
+          onUnpair={handleUnpair}
+          onRenamePeer={handleRenamePeer}
           activityLogs={activityLogs}
           onStartHosting={startHosting}
           connectionState={connectionState}
