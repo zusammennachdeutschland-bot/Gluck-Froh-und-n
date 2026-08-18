@@ -1,0 +1,280 @@
+{
+  "corrupted": [
+    {
+      "file": "android/app/src/main/assets/public/bg.png",
+      "size": 33461,
+      "mtime": "2026-08-14T23:18:08.977Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "android/app/src/main/assets/public/fg.png",
+      "size": 51597,
+      "mtime": "2026-08-14T23:18:08.977Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "android/app/src/main/assets/public/icons/icon-128.webp",
+      "size": 8466,
+      "mtime": "2026-08-14T23:18:08.981Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "android/app/src/main/assets/public/icons/icon-192.webp",
+      "size": 15061,
+      "mtime": "2026-08-14T23:18:08.981Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "android/app/src/main/assets/public/icons/icon-256.webp",
+      "size": 21851,
+      "mtime": "2026-08-14T23:18:08.981Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "android/app/src/main/assets/public/icons/icon-48.webp",
+      "size": 2355,
+      "mtime": "2026-08-14T23:18:08.981Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "android/app/src/main/assets/public/icons/icon-512.webp",
+      "size": 54032,
+      "mtime": "2026-08-14T23:18:08.981Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "android/app/src/main/assets/public/icons/icon-72.webp",
+      "size": 3880,
+      "mtime": "2026-08-14T23:18:08.982Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "android/app/src/main/assets/public/icons/icon-96.webp",
+      "size": 5748,
+      "mtime": "2026-08-14T23:18:08.982Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "android/app/src/main/assets/public/logo.png",
+      "size": 56946,
+      "mtime": "2026-08-14T23:18:08.977Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "public/bg.png",
+      "size": 33461,
+      "mtime": "2026-08-14T23:11:39.545Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "public/fg.png",
+      "size": 51597,
+      "mtime": "2026-08-14T23:11:39.492Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "public/icons/icon-128.webp",
+      "size": 8466,
+      "mtime": "2026-08-14T23:11:39.408Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "public/icons/icon-192.webp",
+      "size": 15061,
+      "mtime": "2026-08-14T23:11:39.406Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "public/icons/icon-256.webp",
+      "size": 21851,
+      "mtime": "2026-08-14T23:11:39.509Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "public/icons/icon-48.webp",
+      "size": 2355,
+      "mtime": "2026-08-14T23:11:39.472Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "public/icons/icon-512.webp",
+      "size": 54032,
+      "mtime": "2026-08-14T23:11:39.526Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "public/icons/icon-72.webp",
+      "size": 3880,
+      "mtime": "2026-08-14T23:11:39.557Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "public/icons/icon-96.webp",
+      "size": 5748,
+      "mtime": "2026-08-14T23:11:39.534Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    },
+    {
+      "file": "public/logo.png",
+      "size": 56946,
+      "mtime": "2026-08-14T23:11:39.535Z",
+      "reason": [
+        "Contains UTF-8 replacement character (EF BF BD)",
+        "Invalid magic bytes"
+      ]
+    }
+  ],
+  "unverified": [
+    "android/app/src/main/assets/public/apple-touch-icon.png",
+    "android/app/src/main/assets/public/downloads/DeutschLehrer_OS_v1.2.4.apk",
+    "android/app/src/main/assets/public/favicon.png",
+    "android/app/src/main/assets/public/icon.png",
+    "android/app/src/main/assets/public/icons/icon-128.png",
+    "android/app/src/main/assets/public/icons/icon-192.png",
+    "android/app/src/main/assets/public/icons/icon-256.png",
+    "android/app/src/main/assets/public/icons/icon-48.png",
+    "android/app/src/main/assets/public/icons/icon-512.png",
+    "android/app/src/main/assets/public/icons/icon-72.png",
+    "android/app/src/main/assets/public/icons/icon-96.png",
+    "android/app/src/main/assets/public/logo.svg",
+    "android/app/src/main/res/drawable/splash.png",
+    "android/app/src/main/res/drawable-land-hdpi/splash.png",
+    "android/app/src/main/res/drawable-land-ldpi/splash.png",
+    "android/app/src/main/res/drawable-land-mdpi/splash.png",
+    "android/app/src/main/res/drawable-land-night-hdpi/splash.png",
+    "android/app/src/main/res/drawable-land-night-ldpi/splash.png",
+    "android/app/src/main/res/drawable-land-night-mdpi/splash.png",
+    "android/app/src/main/res/drawable-land-night-xhdpi/splash.png",
+    "android/app/src/main/res/drawable-land-night-xxhdpi/splash.png",
+    "android/app/src/main/res/drawable-land-night-xxxhdpi/splash.png",
+    "android/app/src/main/res/drawable-land-xhdpi/splash.png",
+    "android/app/src/main/res/drawable-land-xxhdpi/splash.png",
+    "android/app/src/main/res/drawable-land-xxxhdpi/splash.png",
+    "android/app/src/main/res/drawable-night/splash.png",
+    "android/app/src/main/res/drawable-port-hdpi/splash.png",
+    "android/app/src/main/res/drawable-port-ldpi/splash.png",
+    "android/app/src/main/res/drawable-port-mdpi/splash.png",
+    "android/app/src/main/res/drawable-port-night-hdpi/splash.png",
+    "android/app/src/main/res/drawable-port-night-ldpi/splash.png",
+    "android/app/src/main/res/drawable-port-night-mdpi/splash.png",
+    "android/app/src/main/res/drawable-port-night-xhdpi/splash.png",
+    "android/app/src/main/res/drawable-port-night-xxhdpi/splash.png",
+    "android/app/src/main/res/drawable-port-night-xxxhdpi/splash.png",
+    "android/app/src/main/res/drawable-port-xhdpi/splash.png",
+    "android/app/src/main/res/drawable-port-xxhdpi/splash.png",
+    "android/app/src/main/res/drawable-port-xxxhdpi/splash.png",
+    "android/app/src/main/res/mipmap-hdpi/ic_launcher.png",
+    "android/app/src/main/res/mipmap-hdpi/ic_launcher_background.png",
+    "android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png",
+    "android/app/src/main/res/mipmap-hdpi/ic_launcher_monochrome.png",
+    "android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png",
+    "android/app/src/main/res/mipmap-ldpi/ic_launcher.png",
+    "android/app/src/main/res/mipmap-ldpi/ic_launcher_background.png",
+    "android/app/src/main/res/mipmap-ldpi/ic_launcher_foreground.png",
+    "android/app/src/main/res/mipmap-ldpi/ic_launcher_round.png",
+    "android/app/src/main/res/mipmap-mdpi/ic_launcher.png",
+    "android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png",
+    "android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png",
+    "android/app/src/main/res/mipmap-mdpi/ic_launcher_monochrome.png",
+    "android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png",
+    "android/app/src/main/res/mipmap-xhdpi/ic_launcher.png",
+    "android/app/src/main/res/mipmap-xhdpi/ic_launcher_background.png",
+    "android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png",
+    "android/app/src/main/res/mipmap-xhdpi/ic_launcher_monochrome.png",
+    "android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png",
+    "android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png",
+    "android/app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png",
+    "android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png",
+    "android/app/src/main/res/mipmap-xxhdpi/ic_launcher_monochrome.png",
+    "android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png",
+    "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+    "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png",
+    "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png",
+    "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_monochrome.png",
+    "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png",
+    "assets/icon-background.png",
+    "assets/icon-foreground.png",
+    "assets/icon-monochrome.png",
+    "assets/icon.png",
+    "assets/logo.svg",
+    "assets/splash-dark.png",
+    "assets/splash.png",
+    "icon.svg",
+    "icon_foreground.svg",
+    "icon_monochrome.svg",
+    "logo.svg",
+    "public/apple-touch-icon.png",
+    "public/downloads/DeutschLehrer_OS_v1.2.4.apk",
+    "public/favicon.png",
+    "public/icon.png",
+    "public/icons/icon-128.png",
+    "public/icons/icon-192.png",
+    "public/icons/icon-256.png",
+    "public/icons/icon-48.png",
+    "public/icons/icon-512.png",
+    "public/icons/icon-72.png",
+    "public/icons/icon-96.png",
+    "public/logo.svg",
+    "resources/bg.svg",
+    "resources/fg.svg",
+    "resources/icon.svg"
+  ],
+  "total": 113
+}

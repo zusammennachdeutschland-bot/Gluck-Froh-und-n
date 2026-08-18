@@ -1,0 +1,52 @@
+name: Build Linux AppImage
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Build AppImage
+        run: npx electron-builder --linux AppImage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify AppImage Generated
+        run: |
+          echo "=== Verifying AppImage Artifacts ==="
+          if ! compgen -G "release/*.AppImage" > /dev/null; then
+            echo "::error::No .AppImage file found in release/ directory!"
+            echo "Directory contents of release/:"
+            ls -la release/ || true
+            exit 1
+          fi
+          echo "Found generated AppImage artifact(s):"
+          ls -lh release/*.AppImage
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gluck-linux-appimage
+          path: release/*.AppImage
+          if-no-files-found: error
+

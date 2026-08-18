@@ -1,0 +1,12 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Germany Flag Background -->
+  <rect x="0" y="0" width="1024" height="341.33" fill="#000000" />
+  <rect x="0" y="341.33" width="1024" height="341.33" fill="#DD0000" />
+  <rect x="0" y="682.66" width="1024" height="341.34" fill="#FFCC00" />
+  
+  <!-- Drop shadow for text -->
+  <text x="512" y="575" font-family="Arial, sans-serif" font-weight="900" font-size="380" text-anchor="middle" fill="#000000">AGS</text>
+  
+  <!-- White Text -->
+  <text x="512" y="560" font-family="Arial, sans-serif" font-weight="900" font-size="380" text-anchor="middle" fill="#FFFFFF">AGS</text>
+</svg>

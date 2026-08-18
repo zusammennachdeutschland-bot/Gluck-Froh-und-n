@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <g transform="translate(15, 180) scale(0.55)">
+    <style>
+      .brand-title {
+        font-family: 'Arial Black', Impact, sans-serif;
+        font-size: 140px;
+        fill: #eb5e45;
+        font-weight: 900;
+        letter-spacing: 5px;
+      }
+      .brand-title-shadow {
+        font-family: 'Arial Black', Impact, sans-serif;
+        font-size: 140px;
+        fill: #f5b7b1;
+        font-weight: 900;
+        letter-spacing: 5px;
+      }
+      .umlaut {
+        fill: #eb5e45;
+      }
+      .subtitle {
+        font-family: 'Arial', sans-serif;
+        font-size: 40px;
+        fill: #3b5978;
+        font-weight: bold;
+      }
+      .line {
+        stroke: #f3a968;
+        stroke-width: 4;
+        stroke-linecap: round;
+      }
+    </style>
+    <text x="30" y="210" class="brand-title-shadow">GLUCK</text>
+    <text x="25" y="205" class="brand-title">GLUCK</text>
+    <circle cx="210" cy="65" r="12" class="umlaut" />
+    <circle cx="250" cy="65" r="12" class="umlaut" />
+    <text x="680" y="150" class="subtitle" text-anchor="middle">HERR ABDUL RHMAN</text>
+    <text x="680" y="200" class="subtitle" text-anchor="middle">01156435802</text>
+    <line x1="25" y1="240" x2="850" y2="240" class="line" />
+  </g>
+</svg>

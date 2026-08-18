@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600">
+  <defs>
+    <!-- Background -->
+    <rect id="bg" width="1000" height="600" fill="#ffffff" />
+    
+    <style>
+      .brand-title {
+        font-family: 'Arial Black', Impact, sans-serif;
+        font-size: 140px;
+        fill: #eb5e45;
+        font-weight: 900;
+        letter-spacing: 5px;
+      }
+      .brand-title-shadow {
+        font-family: 'Arial Black', Impact, sans-serif;
+        font-size: 140px;
+        fill: #f5b7b1;
+        font-weight: 900;
+        letter-spacing: 5px;
+      }
+      .umlaut {
+        fill: #eb5e45;
+      }
+      .subtitle {
+        font-family: 'Arial', sans-serif;
+        font-size: 40px;
+        fill: #3b5978;
+        font-weight: bold;
+      }
+      .line {
+        stroke: #f3a968;
+        stroke-width: 4;
+        stroke-linecap: round;
+      }
+    </style>
+  </defs>
+
+  <use href="#bg" />
+
+  <!-- Shadow text -->
+  <text x="180" y="325" class="brand-title-shadow">GLUCK</text>
+  
+  <!-- Main text GLUCK -->
+  <text x="170" y="320" class="brand-title">GLUCK</text>
+
+  <!-- Custom Umlaut dots over U -->
+  <circle cx="350" cy="180" r="12" class="umlaut" />
+  <circle cx="390" cy="180" r="12" class="umlaut" />
+
+  <!-- Subtitles -->
+  <text x="650" y="270" class="subtitle" text-anchor="middle">HERR ABDUL RHMAN</text>
+  <text x="650" y="320" class="subtitle" text-anchor="middle">01156435802</text>
+
+  <!-- Orange Line -->
+  <line x1="170" y1="350" x2="850" y2="350" class="line" />
+
+</svg>

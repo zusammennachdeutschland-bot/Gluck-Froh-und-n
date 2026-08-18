@@ -1,0 +1,2382 @@
+{
+  "auto_please_enter_student_name": {
+    "ar": "يرجى إدخال اسم الطالب",
+    "en": "Please enter student name",
+    "de": "Bitte Schülernamen eingeben"
+  },
+  "auto_parent_phone_number_is_require": {
+    "ar": "رقم هاتف ولي الأمر مطلوب للطالب",
+    "en": "Parent phone number is required for the student",
+    "de": "Telefonnummer der Eltern ist für den Schüler erforderlich"
+  },
+  "auto_import_group_students_with_a": {
+    "ar": "استيراد مجموعة + طلاب بالذكاء الاصطناعي",
+    "en": "Import Group + Students with AI",
+    "de": "Import Group + Students with AI"
+  },
+  "auto_create_group_and_all_students": {
+    "ar": "أنشئ المجموعة والطلاب دفعة واحدة بنص جاهز",
+    "en": "Create group and all students at once with AI text",
+    "de": "Create group and all students at once with AI text"
+  },
+  "auto_ai_import": {
+    "ar": "تجربة الاستيراد",
+    "en": "AI Import",
+    "de": "AI Import"
+  },
+  "auto_create_a_student_for_this_grou": {
+    "ar": "إنشاء طالب مع هذه المجموعة (درس خصوصي 1 لـ 1)",
+    "en": "Create a Student for This Group / Private Student (1-to-1)",
+    "de": "Schüler für diese Gruppe erstellen (Privatunterricht 1:1)"
+  },
+  "auto_initial_student_information": {
+    "ar": "بيانات الطالب الأولية",
+    "en": "Initial Student Information",
+    "de": "Schülerinformationen"
+  },
+  "auto_student_name": {
+    "ar": "اسم الطالب *",
+    "en": "Student Name *",
+    "de": "Schüler Name *"
+  },
+  "auto_e_g_ahmed_ali": {
+    "ar": "مثال: أحمد علي",
+    "en": "e.g. Ahmed Ali",
+    "de": "z. B. Ahmed Ali"
+  },
+  "auto_parent_name": {
+    "ar": "اسم ولي الأمر",
+    "en": "Parent Name",
+    "de": "Name des Erziehungsberechtigten"
+  },
+  "auto_e_g_ali_mahmoud": {
+    "ar": "مثال: علي محمود",
+    "en": "e.g. Ali Mahmoud",
+    "de": "z. B. Ali Mahmoud"
+  },
+  "auto_parent_phone": {
+    "ar": "هاتف ولي الأمر",
+    "en": "Parent Phone",
+    "de": "Telefon Eltern"
+  },
+  "auto_grade": {
+    "ar": "المرحلة الدراسية",
+    "en": "Grade",
+    "de": "Klassenstufe"
+  },
+  "auto_student_notes": {
+    "ar": "ملاحظات الطالب",
+    "en": "Student Notes",
+    "de": "Lernnotizen"
+  },
+  "auto_additional_student_notes": {
+    "ar": "ملاحظات إضافية حول الطالب...",
+    "en": "Additional student notes...",
+    "de": "Besondere Schwerpunkte..."
+  },
+  "auto_save_group": {
+    "ar": "حفظ المجموعة",
+    "en": "Save Group",
+    "de": "Gruppe speichern"
+  },
+  "auto_parent_phone_number_is_require_1": {
+    "ar": "رقم هاتف ولي الأمر مطلوب إجبارياً",
+    "en": "Parent phone number is required",
+    "de": "Telefonnummer der Eltern ist erforderlich"
+  },
+  "auto_add_new_student": {
+    "ar": "إضافة طالب جديد",
+    "en": "Add New Student",
+    "de": "Neuen Schüler anlegen"
+  },
+  "auto_automatic_group_pricing_inheri": {
+    "ar": "توريث تسعير المجموعة تلقائياً",
+    "en": "Automatic Group Pricing Inheritance",
+    "de": "Automatische Gruppenpreisvererbung"
+  },
+  "auto_assigned_group": {
+    "ar": "تعيين المجموعة / الدورة *",
+    "en": "Assigned Group *",
+    "de": "Gruppe / Kurs zuweisen *"
+  },
+  "auto_inherited_pricing": {
+    "ar": "الأسعار الموروثة تلقائياً:",
+    "en": "Inherited Pricing:",
+    "de": "Automatischer Preisschlüssel:"
+  },
+  "auto_package": {
+    "ar": "الباقة: ",
+    "en": "Package: ",
+    "de": "Package: "
+  },
+  "auto_sessions": {
+    "ar": "حصص",
+    "en": "sessions",
+    "de": "Sitzungen"
+  },
+  "auto_inherited_automatically_from": {
+    "ar": " يتم التوريث تلقائياً من ${selectedGroup.name}.",
+    "en": " Inherited automatically from ${selectedGroup.name}.",
+    "de": " Preis wird automatisch von ${selectedGroup.name} übernommen."
+  },
+  "auto_grade_level": {
+    "ar": "المرحلة الدراسية",
+    "en": "Grade Level",
+    "de": "Klassenstufe"
+  },
+  "auto_parent_phone_2": {
+    "ar": "هاتف ولي الأمر *",
+    "en": "Parent Phone *",
+    "de": "Telefon Eltern *"
+  },
+  "auto_student_phone_optional": {
+    "ar": "هاتف الطالب (اختياري)",
+    "en": "Student Phone (Optional)",
+    "de": "Telefon Schüler (Optional)"
+  },
+  "auto_special_focus_notes_or_weakn": {
+    "ar": "ملاحظات إضافية حول الطالب...",
+    "en": "Special focus, notes, or weaknesses...",
+    "de": "Besondere Schwerpunkte, Schwächen oder Vorkenntnisse..."
+  },
+  "auto_save_student": {
+    "ar": "حفظ الطالب",
+    "en": "Save Student",
+    "de": "Schüler Speichern"
+  },
+  "auto_import_group_students_ai_te": {
+    "ar": "استيراد مجموعة + طلاب (AI Import)",
+    "en": "Import Group + Students (AI Template)",
+    "de": "Import Group + Students (AI Template)"
+  },
+  "auto_create_an_entire_group_and_all": {
+    "ar": "أنشئ المجموعة وجميع الطلاب دفعة واحدة بنص ذكي",
+    "en": "Create an entire group and all students in one step",
+    "de": "Create an entire group and all students in one step"
+  },
+  "auto_group_students_imported_succ": {
+    "ar": "تم استيراد المجموعة والطلاب بنجاح!",
+    "en": "Group & Students Imported Successfully!",
+    "de": "Group & Students Imported Successfully!"
+  },
+  "auto_group_name": {
+    "ar": "اسم المجموعة:",
+    "en": "Group Name:",
+    "de": "Group Name:"
+  },
+  "auto_grade_level_3": {
+    "ar": "الصف / المرحلة:",
+    "en": "Grade Level:",
+    "de": "Grade Level:"
+  },
+  "auto_students_imported": {
+    "ar": "عدد الطلاب:",
+    "en": "Students Imported:",
+    "de": "Students Imported:"
+  },
+  "auto_students": {
+    "ar": "الطلاب",
+    "en": "Students",
+    "de": "Students"
+  },
+  "auto_schedule": {
+    "ar": "المواعيد:",
+    "en": "Schedule:",
+    "de": "Schedule:"
+  },
+  "auto_view_group_profile": {
+    "ar": "فتح ملف المجموعة",
+    "en": "View Group Profile",
+    "de": "View Group Profile"
+  },
+  "auto_close": {
+    "ar": "إغلاق",
+    "en": "Close",
+    "de": "Schließen"
+  },
+  "auto_copy_prompt_orders_for_ai": {
+    "ar": "أوامر للذكاء الاصطناعي (AI Prompt Orders)",
+    "en": "Copy Prompt / Orders for AI",
+    "de": "Copy Prompt / Orders for AI"
+  },
+  "auto_prompt_copied": {
+    "ar": "تم نسخ الأوامر!",
+    "en": "Prompt Copied!",
+    "de": "Prompt Copied!"
+  },
+  "auto_copy_ai_prompt_orders": {
+    "ar": "نسخ أوامر ChatGPT / Gemini",
+    "en": "Copy AI Prompt Orders",
+    "de": "Copy AI Prompt Orders"
+  },
+  "auto_copied": {
+    "ar": "تم النسخ!",
+    "en": "Copied!",
+    "de": "Kopiert!"
+  },
+  "auto_sample_data": {
+    "ar": "تجربة نموذج جاهز",
+    "en": "Sample Data",
+    "de": "Sample Data"
+  },
+  "auto_click_copy_ai_prompt_orders": {
+    "ar": "اضغط على \"نسخ أوامر ChatGPT / Gemini\" والصقها في برنامج الذكاء الاصطناعي مع قائمة أسماء طلابك وملاحظات المجموعة، ثم انسخ الرد والصقه في الصندوق بالأسفل مباشرة.",
+    "en": "Click \"Copy AI Prompt Orders\" and paste it into ChatGPT/Gemini along with your raw group list/notes. Then copy the AI response and paste it into the box below.",
+    "de": "Click \"Copy AI Prompt Orders\" and paste it into ChatGPT/Gemini along with your raw group list/notes. Then copy the AI response and paste it into the box below."
+  },
+  "auto_ai_generated_text": {
+    "ar": "النص المستورد من الذكاء الاصطناعي:",
+    "en": "AI Generated Text:",
+    "de": "AI Generated Text:"
+  },
+  "auto_strict_zero_data_loss_validati": {
+    "ar": "يدعم التحقق الفوري بدون أخطاء",
+    "en": "Strict Zero-Data-Loss Validation",
+    "de": "Strict Zero-Data-Loss Validation"
+  },
+  "auto_all_fields_validated_success": {
+    "ar": "✓ البيانات سليمة 100% ومجهزة للاستيراد الآمن",
+    "en": "✓ All fields validated successfully. Ready for import.",
+    "de": "✓ All fields validated successfully. Ready for import."
+  },
+  "auto_data_preview_before_import": {
+    "ar": "معاينة البيانات قبل الاعتماد:",
+    "en": "Data Preview Before Import:",
+    "de": "Data Preview Before Import:"
+  },
+  "auto_students_4": {
+    "ar": "طلاب",
+    "en": "students",
+    "de": "students"
+  },
+  "auto_group_name_5": {
+    "ar": "اسم المجموعة",
+    "en": "Group Name",
+    "de": "Group Name"
+  },
+  "auto_grade_type": {
+    "ar": "الصف والنوع",
+    "en": "Grade & Type",
+    "de": "Grade & Type"
+  },
+  "auto_days_time": {
+    "ar": "المواعيد",
+    "en": "Days & Time",
+    "de": "Days & Time"
+  },
+  "auto_zoom_link": {
+    "ar": "رابط زووم",
+    "en": "Zoom Link",
+    "de": "Zoom Link"
+  },
+  "auto_address": {
+    "ar": "العنوان / المكان",
+    "en": "Address",
+    "de": "Address"
+  },
+  "auto_student_name_6": {
+    "ar": "اسم الطالب",
+    "en": "Student Name",
+    "de": "Student Name"
+  },
+  "auto_parent_phone_req": {
+    "ar": "هاتف ولي الأمر (مطلوب)",
+    "en": "Parent Phone (Req)",
+    "de": "Parent Phone (Req)"
+  },
+  "auto_student_phone_opt": {
+    "ar": "هاتف الطالب (اختياري)",
+    "en": "Student Phone (Opt)",
+    "de": "Student Phone (Opt)"
+  },
+  "auto_cancel": {
+    "ar": "إلغاء",
+    "en": "Cancel",
+    "de": "Cancel"
+  },
+  "auto_confirm_import": {
+    "ar": "تأكيد الاستيراد (Confirm Import)",
+    "en": "Confirm Import",
+    "de": "Confirm Import"
+  },
+  "auto_share_session_report": {
+    "ar": "مشاركة تقرير الحصة",
+    "en": "Share Session Report",
+    "de": "Unterrichtsbericht teilen"
+  },
+  "auto_bulk_group_report_groups": {
+    "ar": "📊 تقرير مجمع للمجموعة (${groupStudents.length} طلاب)",
+    "en": "📊 Bulk Group Report (${groupStudents.length} students)",
+    "de": "📊 Sammelbericht für Gruppe (${groupStudents.length} Schüler)"
+  },
+  "auto_individual_student_report": {
+    "ar": "👤 تقرير فردي لكل طالب",
+    "en": "👤 Individual Student Report",
+    "de": "👤 Einzelner Schülerbericht"
+  },
+  "auto_select_a_student_to_preview": {
+    "ar": "👥 اختر طالب لمعاينة تقريره الفردي:",
+    "en": "👥 Select a student to preview individual report:",
+    "de": "👥 Wählen Sie einen Schüler für die Vorschau aus:"
+  },
+  "auto_student": {
+    "ar": "👤 الطالب:",
+    "en": "👤 Student:",
+    "de": "👤 Schüler:"
+  },
+  "auto_not_specified": {
+    "ar": "غير محدد",
+    "en": "Not specified",
+    "de": "Nicht angegeben"
+  },
+  "auto_parent_phone_7": {
+    "ar": "📱 رقم ولي الأمر:",
+    "en": "📱 Parent Phone:",
+    "de": "📱 Eltern-Telefon:"
+  },
+  "auto_not_registered": {
+    "ar": "غير مسجل",
+    "en": "Not registered",
+    "de": "Nicht registriert"
+  },
+  "auto_group": {
+    "ar": "👥 مجموعة:",
+    "en": "👥 Group:",
+    "de": "👥 Gruppe:"
+  },
+  "auto_german_group": {
+    "ar": "مجموعة اللغة الألمانية",
+    "en": "German Group",
+    "de": "Deutschgruppe"
+  },
+  "auto_whatsapp_group_connected": {
+    "ar": "جروب الواتساب متصل ✅",
+    "en": "WhatsApp Group Connected ✅",
+    "de": "WhatsApp-Gruppe verbunden ✅"
+  },
+  "auto_group_link_not_linked_yet": {
+    "ar": "⚠️ لم يتم ربط رابط الجروب بعد",
+    "en": "⚠️ Group link not linked yet",
+    "de": "⚠️ Gruppenlink noch nicht verknüpft"
+  },
+  "auto_tip_you_can_edit_the_group_to": {
+    "ar": "نصيحة: يمكنك تعديل المجموعة لإدخال \"رابط جروب الواتساب\" الخاص بأولياء الأمور لتتمكن من إرسال هذا التقرير المجمع للجروب بنقرة واحدة!",
+    "en": "Tip: You can edit the group to enter the parents\\' \"WhatsApp Group Link\" to send this bulk report in one click!",
+    "de": "Tipp: Sie können die Gruppe bearbeiten, um den \"WhatsApp-Gruppenlink\" der Eltern einzugeben und diesen Sammelbericht mit einem Klick zu senden!"
+  },
+  "auto_preview_edit_message": {
+    "ar": "معاينة وتعديل نص الرسالة:",
+    "en": "Preview & Edit Message:",
+    "de": "Nachrichtenvorschau & Bearbeitung:"
+  },
+  "auto_copy_text": {
+    "ar": "نسخ النص",
+    "en": "Copy Text",
+    "de": "Copy Text"
+  },
+  "auto_send_to_whatsapp_group": {
+    "ar": "إرسال لجروب الواتساب",
+    "en": "Send to WhatsApp Group",
+    "de": "An WhatsApp-Gruppe senden"
+  },
+  "auto_send_via_whatsapp": {
+    "ar": "إرسال عبر واتساب",
+    "en": "Send via WhatsApp",
+    "de": "Über WhatsApp senden"
+  },
+  "auto_print": {
+    "ar": "طباعة",
+    "en": "Print",
+    "de": "Drucken"
+  },
+  "auto_phone_call": {
+    "ar": "اتصال هاتفى",
+    "en": "Phone Call",
+    "de": "Telefonanruf"
+  },
+  "auto_go_to_homescreen": {
+    "ar": "الرئيسية",
+    "en": "Go to Homescreen",
+    "de": "Startseite"
+  },
+  "auto_free_hours": {
+    "ar": "ساعات فارغة",
+    "en": "Free Hours",
+    "de": "Freie Stunden"
+  },
+  "auto_slots": {
+    "ar": "فترات (١س)",
+    "en": "Slots",
+    "de": "Slots"
+  },
+  "auto_next_slot": {
+    "ar": "التالي",
+    "en": "Next Slot",
+    "de": "Nächster"
+  },
+  "auto_none": {
+    "ar": "لا يوجد",
+    "en": "None",
+    "de": "Keiner"
+  },
+  "auto_excellent": {
+    "ar": "🟢 ممتاز",
+    "en": "🟢 Excellent",
+    "de": "🟢 Ausgezeichnet"
+  },
+  "auto_needs_cleanup": {
+    "ar": "🟡 يحتاج تنظيف",
+    "en": "🟡 Needs Cleanup",
+    "de": "🟡 Wartung erforderlich"
+  },
+  "auto_critical": {
+    "ar": "🔴 حرج",
+    "en": "🔴 Critical",
+    "de": "🔴 Kritisch"
+  },
+  "auto_students_without_group": {
+    "ar": "طلاب بدون مجموعة",
+    "en": "Students Without Group",
+    "de": "Schüler ohne Gruppe"
+  },
+  "auto_sessions_without_group": {
+    "ar": "حصص بدون مجموعة",
+    "en": "Sessions Without Group",
+    "de": "Sitzungen ohne Gruppe"
+  },
+  "auto_calendar_sessions_without_grou": {
+    "ar": "أحداث تقويم بدون مجموعة",
+    "en": "Calendar Sessions Without Group",
+    "de": "Kalenderevents ohne Gruppe"
+  },
+  "auto_payments_without_group": {
+    "ar": "مدفوعات بدون مجموعة",
+    "en": "Payments Without Group",
+    "de": "Zahlungen ohne Gruppe"
+  },
+  "auto_attendance_records_without_gro": {
+    "ar": "سجلات حضور بدون مجموعة",
+    "en": "Attendance Records Without Group",
+    "de": "Anwesenheit ohne Gruppe"
+  },
+  "auto_homework_records_without_group": {
+    "ar": "سجلات واجبات بدون مجموعة",
+    "en": "Homework Records Without Group",
+    "de": "Hausaufgaben ohne Gruppe"
+  },
+  "auto_exam_records_without_group": {
+    "ar": "سجلات اختبارات بدون مجموعة",
+    "en": "Exam Records Without Group",
+    "de": "Prüfungen ohne Gruppe"
+  },
+  "auto_data_health_center": {
+    "ar": "مركز صحة البيانات والتنظيف",
+    "en": "Data Health Center",
+    "de": "Daten-Gesundheitszentrum"
+  },
+  "auto_last_scan_lastscantime": {
+    "ar": "آخر فحص: ${lastScanTime}",
+    "en": "Last scan: ${lastScanTime}",
+    "de": "Letzter Scan: ${lastScanTime}"
+  },
+  "auto_scan_database": {
+    "ar": "فحص قاعدة البيانات",
+    "en": "Scan Database",
+    "de": "Scan durchführen"
+  },
+  "auto_data_health_summary": {
+    "ar": "ملخص صحة البيانات",
+    "en": "Data Health Summary",
+    "de": "Zusammenfassung der Datengesundheit"
+  },
+  "auto_database_health_score": {
+    "ar": "مؤشر السلامة",
+    "en": "Database Health Score",
+    "de": "Gesundheitswert"
+  },
+  "auto_healthy_records": {
+    "ar": "سجلات سليمة",
+    "en": "Healthy Records",
+    "de": "Gesunde Datensätze"
+  },
+  "auto_orphaned_records": {
+    "ar": "سجلات معزولة",
+    "en": "Orphaned Records",
+    "de": "Isolierte Datensätze"
+  },
+  "auto_storage_used": {
+    "ar": "المساحة",
+    "en": "Storage Used",
+    "de": "Speicherplatz"
+  },
+  "auto_clean_all_orphan_data": {
+    "ar": "تنظيف كافة البيانات المعزولة الآن",
+    "en": "Clean All Orphan Data",
+    "de": "Alle isolierten Daten bereinigen"
+  },
+  "auto_data_integrity_cleanup": {
+    "ar": "سلامة البيانات والتنظيف",
+    "en": "Data Integrity & Cleanup",
+    "de": "Integrität & Datenbereinigung"
+  },
+  "auto_detect_unlinked_orphaned_data": {
+    "ar": "الكشف عن البيانات غير المرتبطة بمجموعات",
+    "en": "Detect unlinked orphaned data",
+    "de": "Verwaiste Daten erkennen"
+  },
+  "auto_1_students_without_group": {
+    "ar": "1. طلاب بدون مجموعة",
+    "en": "1. Students Without Group",
+    "de": "1. Schüler ohne Gruppe"
+  },
+  "auto_student_records_whose_groupid": {
+    "ar": "سجلات الطلاب التي تفتقد groupId أو تشير إلى مجموعة محذوفة.",
+    "en": "Student records whose groupId is missing, invalid, or points to a deleted group.",
+    "de": "Schüler ohne gültige Gruppenzuweisung."
+  },
+  "auto_2_sessions_without_group": {
+    "ar": "2. حصص بدون مجموعة",
+    "en": "2. Sessions Without Group",
+    "de": "2. Sitzungen ohne Gruppe"
+  },
+  "auto_lesson_sessions_whose_groupid": {
+    "ar": "سجلات الحصص المنفذة والتاريخية غير المرتبطة بمجموعة صحيحة.",
+    "en": "Lesson sessions whose groupId is missing, invalid, or linked to a deleted group.",
+    "de": "Unterrichtssitzungen ohne zugewiesene Gruppe."
+  },
+  "auto_3_calendar_sessions_without_g": {
+    "ar": "3. أحداث تقويم بدون مجموعة",
+    "en": "3. Calendar Sessions Without Group",
+    "de": "3. Kalenderevents ohne Gruppe"
+  },
+  "auto_calendar_events_whose_groupid": {
+    "ar": "أحداث المواعيد المجدولة في التقويم غير المرتبطة بمجموعة مفعّلة.",
+    "en": "Calendar events whose groupId is missing, invalid, or linked to a deleted group.",
+    "de": "Geplante Kalendertermine ohne gültige Gruppe."
+  },
+  "auto_4_payments_without_group": {
+    "ar": "4. مدفوعات بدون مجموعة",
+    "en": "4. Payments Without Group",
+    "de": "4. Zahlungen ohne Gruppe"
+  },
+  "auto_payment_records_linked_to_miss": {
+    "ar": "سجلات المعاملات والرسوم المالية المرتبطة بمجموعات محذوفة.",
+    "en": "Payment records linked to missing or deleted groups.",
+    "de": "Zahlungsdatensätze ohne verknüpfte Gruppe."
+  },
+  "auto_5_attendance_records_without": {
+    "ar": "5. سجلات حضور بدون مجموعة",
+    "en": "5. Attendance Records Without Group",
+    "de": "5. Anwesenheit ohne Gruppe"
+  },
+  "auto_attendance_records_linked_to_m": {
+    "ar": "سجلات كشوف الحضور والغياب لل حصص غير المرتبطة بمجموعة.",
+    "en": "Attendance records linked to missing or deleted groups.",
+    "de": "Anwesenheitseinträge ohne zugewiesene Gruppe."
+  },
+  "auto_6_homework_records_without_gr": {
+    "ar": "6. سجلات واجبات بدون مجموعة",
+    "en": "6. Homework Records Without Group",
+    "de": "6. Hausaufgaben ohne Gruppe"
+  },
+  "auto_homework_records_linked_to_mis": {
+    "ar": "بيانات متابعة الواجبات المنزلية المرتبطة بمجموعات ملغاة.",
+    "en": "Homework records linked to missing or deleted groups.",
+    "de": "Hausaufgabeneinträge ohne verknüpfte Gruppe."
+  },
+  "auto_7_exam_quiz_records_without_g": {
+    "ar": "7. سجلات اختبارات بدون مجموعة",
+    "en": "7. Exam/Quiz Records Without Group",
+    "de": "7. Prüfungen ohne Gruppe"
+  },
+  "auto_exam_results_linked_to_missing": {
+    "ar": "درجات الامتحانات والاختبارات القصيرة المرتبطة بمجموعات غير موجودة.",
+    "en": "Exam results linked to missing or deleted groups.",
+    "de": "Prüfungsergebnisse ohne zugewiesene Gruppe."
+  },
+  "auto_profile_field_integrity": {
+    "ar": "اكتمل الملف والتفاصيل",
+    "en": "Profile Field Integrity",
+    "de": "Profilvollständigkeit"
+  },
+  "auto_students_with_complete_data": {
+    "ar": "طالب مكتمل البيانات",
+    "en": "Students with complete data",
+    "de": "Schüler mit vollständigen Daten"
+  },
+  "auto_students_missing_parent_phone": {
+    "ar": "طلاب بدون رقم ولي أمر",
+    "en": "Students missing parent phone",
+    "de": "Students missing parent phone"
+  },
+  "auto_fix_now": {
+    "ar": "إصلاح",
+    "en": "Fix Now",
+    "de": "Fix Now"
+  },
+  "auto_groups_missing_schedule": {
+    "ar": "جروب بدون جدول زمني",
+    "en": "Groups missing schedule",
+    "de": "Groups missing schedule"
+  },
+  "auto_groups_missing_session_price": {
+    "ar": "جروب بدون سعر حصة",
+    "en": "Groups missing session price",
+    "de": "Groups missing session price"
+  },
+  "auto_online_groups_missing_zoom_lin": {
+    "ar": "جروب أونلاين بدون رابط زووم",
+    "en": "Online groups missing Zoom link",
+    "de": "Online groups missing Zoom link"
+  },
+  "auto_offline_groups_missing_locatio": {
+    "ar": "جروب أوفلاين بدون عنوان المكان",
+    "en": "Offline groups missing location address",
+    "de": "Offline groups missing location address"
+  },
+  "auto_total_orphaned_records_getc": {
+    "ar": "إجمالي السجلات المعزولة: ${getCategoryCount(viewCategory)}",
+    "en": "Total orphaned records: ${getCategoryCount(viewCategory)}",
+    "de": "Verwaiste Einträge: ${getCategoryCount(viewCategory)}"
+  },
+  "auto_no_orphaned_records_in_this_ca": {
+    "ar": "لا توجد سجلات معزولة في هذه الفئة!",
+    "en": "No orphaned records in this category!",
+    "de": "Keine verwaisten Einträge in dieser Kategorie!"
+  },
+  "auto_delete_all_in_category": {
+    "ar": "حذف الكل لهذا القسم",
+    "en": "Delete All in Category",
+    "de": "Alle in dieser Kategorie löschen"
+  },
+  "auto_cleanup_orphan_data": {
+    "ar": "⚠️ تنظيف البيانات المعزولة",
+    "en": "⚠️ Cleanup Orphan Data",
+    "de": "⚠️ Verwaiste Daten bereinigen"
+  },
+  "auto_the_selected_records_are_not_l": {
+    "ar": "السجلات المحددة غير مرتبطة بأي مجموعة حالية أو تم إلغاء مجموعتها.",
+    "en": "The selected records are not linked to any existing group.",
+    "de": "Die ausgewählten Datensätze sind mit keiner bestehenden Gruppe verknüpft."
+  },
+  "auto_records_to_delete_singledel": {
+    "ar": "السجلات المراد حذفها: ${singleDeleteItemId ? 1 : confirmDeleteTarget === 'all' ? totalOrphanedRecords : getCategoryCount(confirmDeleteTarget)}",
+    "en": "Records to delete: ${singleDeleteItemId ? 1 : confirmDeleteTarget === 'all' ? totalOrphanedRecords : getCategoryCount(confirmDeleteTarget)}",
+    "de": "Zu löschende Datensätze: ${singleDeleteItemId ? 1 : confirmDeleteTarget === 'all' ? totalOrphanedRecords : getCategoryCount(confirmDeleteTarget)}"
+  },
+  "auto_this_action_cannot_be_undone": {
+    "ar": "هذا الإجراء نهائي ولا يمكن التراجع عنه.",
+    "en": "This action cannot be undone.",
+    "de": "Diese Aktion kann nicht rückgängig gemacht werden."
+  },
+  "auto_delete_permanently": {
+    "ar": "حذف نهائياً",
+    "en": "Delete Permanently",
+    "de": "Endgültig löschen"
+  },
+  "auto_cleanup_complete": {
+    "ar": "اكتمل التنظيف بنجاح",
+    "en": "Cleanup Complete",
+    "de": "Bereinigung abgeschlossen"
+  },
+  "auto_dashboard_views_automaticall": {
+    "ar": "تم تحديث الشاشات والقواعد تلقائياً",
+    "en": "Dashboard & views automatically refreshed",
+    "de": "Ansichten automatisch aktualisiert"
+  },
+  "auto_deleted_records_breakdown": {
+    "ar": "السجلات التي تم حذفها:",
+    "en": "Deleted Records Breakdown:",
+    "de": "Gelöschte Datensätze:"
+  },
+  "auto_sessions_8": {
+    "ar": "الحصص",
+    "en": "Sessions",
+    "de": "Sitzungen"
+  },
+  "auto_calendar_events": {
+    "ar": "أحداث التقويم",
+    "en": "Calendar Events",
+    "de": "Kalendertermine"
+  },
+  "auto_payments": {
+    "ar": "Zahlungen",
+    "en": "Payments",
+    "de": "Zahlungen"
+  },
+  "auto_attendance": {
+    "ar": "سجلات الحضور",
+    "en": "Attendance",
+    "de": "Attendance"
+  },
+  "auto_homework": {
+    "ar": "سجلات الواجبات",
+    "en": "Homework",
+    "de": "Homework"
+  },
+  "auto_exams": {
+    "ar": "الاختبارات",
+    "en": "Exams",
+    "de": "Prüfungen"
+  },
+  "auto_storage_recovered_cleanupre": {
+    "ar": "المساحة المستردة: ${cleanupResults.storageRecoveredMb} MB",
+    "en": "Storage Recovered: ${cleanupResults.storageRecoveredMb} MB",
+    "de": "Freigegebener Speicher: ${cleanupResults.storageRecoveredMb} MB"
+  },
+  "auto_done": {
+    "ar": "تم العودة للتطوير",
+    "en": "Done",
+    "de": "Fertig"
+  },
+  "auto_view": {
+    "ar": "عرض",
+    "en": "View",
+    "de": "Anzeigen"
+  },
+  "auto_delete_all": {
+    "ar": "حذف الكل",
+    "en": "Delete All",
+    "de": "Alle löschen"
+  },
+  "auto_delete_this_record": {
+    "ar": "حذف هذا السجل فقط",
+    "en": "Delete this record",
+    "de": "Diesen Eintrag löschen"
+  },
+  "auto_zoom_link_is_required_for_onli": {
+    "ar": "رابط زووم مطلوب للمجموعات الأونلاين",
+    "en": "Zoom link is required for online groups",
+    "de": "Zoom-Link ist für Online-Gruppen erforderlich"
+  },
+  "auto_address_location_is_required": {
+    "ar": "العنوان / المكان مطلوب للمجموعات الأوفلاين",
+    "en": "Address / Location is required for offline groups",
+    "de": "Adresse / Ort ist für Offline-Gruppen erforderlich"
+  },
+  "auto_refresh_data": {
+    "ar": "تحديث البيانات",
+    "en": "Refresh Data",
+    "de": "Daten aktualisieren"
+  },
+  "auto_daily_inspiration": {
+    "ar": "إلهام اليوم",
+    "en": "Daily Inspiration",
+    "de": "Tägliche Inspiration"
+  },
+  "auto_teacher_reminder_motivation": {
+    "ar": "تذكير للمعلم وخطوة للبركة",
+    "en": "Teacher Reminder & Motivation",
+    "de": "Teacher Reminder & Motivation"
+  },
+  "auto_another_message": {
+    "ar": "رسالة أخرى",
+    "en": "Another Message",
+    "de": "Another Message"
+  },
+  "auto_dismiss": {
+    "ar": "إغلاق",
+    "en": "Dismiss",
+    "de": "Dismiss"
+  },
+  "auto_quick_review": {
+    "ar": "ملخص سريع",
+    "en": "Quick Review",
+    "de": "Kurze Zusammenfassung"
+  },
+  "auto_report_saved": {
+    "ar": "✓ تم حفظ التقرير",
+    "en": "✓ Report saved",
+    "de": "✓ Bericht gespeichert"
+  },
+  "auto_1_attendance": {
+    "ar": "١. الحضور",
+    "en": "1. Attendance",
+    "de": "1. Anwesenheit"
+  },
+  "auto_present": {
+    "ar": "✓ حاضر",
+    "en": "✓ Present",
+    "de": "✓ Anwesend"
+  },
+  "auto_late": {
+    "ar": "⚠️ متأخر",
+    "en": "⚠️ Late",
+    "de": "⚠️ Verspätet"
+  },
+  "auto_absent": {
+    "ar": "✕ غائب",
+    "en": "✕ Absent",
+    "de": "✕ Abwesend"
+  },
+  "auto_2_homework": {
+    "ar": "٢. الواجب",
+    "en": "2. Homework",
+    "de": "2. Hausaufgaben"
+  },
+  "auto_completed": {
+    "ar": "مكتمل",
+    "en": "Completed",
+    "de": "Erledigt"
+  },
+  "auto_assigned": {
+    "ar": "مطلوب",
+    "en": "Assigned",
+    "de": "Aufgegeben"
+  },
+  "auto_not_completed": {
+    "ar": "غير مكتمل",
+    "en": "Not completed",
+    "de": "Nicht erledigt"
+  },
+  "auto_3_teacher_notes": {
+    "ar": "٣. ملاحظات المعلم",
+    "en": "3. Teacher Notes",
+    "de": "3. Lehrernotizen"
+  },
+  "auto_edit_report": {
+    "ar": "تعديل التقرير",
+    "en": "Edit Report",
+    "de": "Bericht bearbeiten"
+  },
+  "auto_before_starting": {
+    "ar": "قبل بدء الدرس",
+    "en": "Before Starting",
+    "de": "Vor Unterrichtsbeginn"
+  },
+  "auto_send_lesson_reminder": {
+    "ar": "إرسال تذكير الحصة",
+    "en": "Send Lesson Reminder",
+    "de": "Lektionserinnerung senden"
+  },
+  "auto_open_zoom_link": {
+    "ar": "فتح رابط زووم",
+    "en": "Open Zoom Link",
+    "de": "Zoom-Link öffnen"
+  },
+  "auto_open_google_meet": {
+    "ar": "فتح جوجل ميت",
+    "en": "Open Google Meet",
+    "de": "Google Meet öffnen"
+  },
+  "auto_send_lesson_started_notice": {
+    "ar": "إرسال إشعار بدء الحصة",
+    "en": "Send Lesson Started Notice",
+    "de": "Unterrichtsbeginn senden"
+  },
+  "auto_send_payment_request": {
+    "ar": "إرسال مطالبة بالدفع",
+    "en": "Send Payment Request",
+    "de": "Zahlungsaufforderung senden"
+  },
+  "auto_open_google_maps_navigation": {
+    "ar": "فتح خرائط جوجل",
+    "en": "Open Google Maps Navigation",
+    "de": "Google Maps Navigation öffnen"
+  },
+  "auto_live_lesson_timer": {
+    "ar": "مؤقت الحصة المباشر",
+    "en": "Live Lesson Timer",
+    "de": "Live-Unterrichts-Timer"
+  },
+  "auto_completed_9": {
+    "ar": "مكتملة ✅",
+    "en": "Completed ✅",
+    "de": "Abgeschlossen ✅"
+  },
+  "auto_cancelled": {
+    "ar": "ملغاة ✕",
+    "en": "Cancelled ✕",
+    "de": "Storniert ✕"
+  },
+  "auto_in_progress": {
+    "ar": "جاري التشغيل 🟢",
+    "en": "In Progress 🟢",
+    "de": "In Bearbeitung 🟢"
+  },
+  "auto_paused": {
+    "ar": "موقوف مؤقتاً ⏸️",
+    "en": "Paused ⏸️",
+    "de": "Pausiert ⏸️"
+  },
+  "auto_scheduled": {
+    "ar": "مجدولة 📅",
+    "en": "Scheduled 📅",
+    "de": "Geplant 📅"
+  },
+  "auto_duration_selectedlesson_dur": {
+    "ar": "المدة: ${selectedLesson.durationMinutes} دقيقة",
+    "en": "Duration: ${selectedLesson.durationMinutes} min",
+    "de": "Dauer: ${selectedLesson.durationMinutes} Min"
+  },
+  "auto_elapsed_time": {
+    "ar": "الوقت المنقضي",
+    "en": "Elapsed Time",
+    "de": "Vergangene Zeit"
+  },
+  "auto_start_session": {
+    "ar": "بدء الحصة (Start)",
+    "en": "Start Session",
+    "de": "Unterricht starten"
+  },
+  "auto_cancel_session": {
+    "ar": "إلغاء الحصة",
+    "en": "Cancel Session",
+    "de": "Unterricht stornieren"
+  },
+  "auto_resume_session": {
+    "ar": "استئناف الحصة",
+    "en": "Resume Session",
+    "de": "Fortsetzen"
+  },
+  "auto_pause": {
+    "ar": "إيقاف مؤقت",
+    "en": "Pause",
+    "de": "Pausieren"
+  },
+  "auto_confirm_lesson_cancellation": {
+    "ar": "تأكيد إلغاء الحصة",
+    "en": "Confirm Lesson Cancellation",
+    "de": "Stornierung der Lektion bestätigen"
+  },
+  "auto_are_you_sure_you_want_to_cance": {
+    "ar": "هل أنت متأكد من إلغاء هذه الحصة؟ سيتم توثيق السبب وحفظ الحصة كـ ملغاة.",
+    "en": "Are you sure you want to cancel this lesson? The reason will be documented and saved.",
+    "de": "Sind Sie sicher, dass Sie diese Lektion stornieren möchten? Der Grund wird dokumentiert."
+  },
+  "auto_enter_cancellation_reason_opt": {
+    "ar": "أدخل سبب إلغاء الحصة (اختياري)...",
+    "en": "Enter cancellation reason (optional)...",
+    "de": "Stornierungsgrund eingeben (optional)..."
+  },
+  "auto_back": {
+    "ar": "عودة",
+    "en": "Back",
+    "de": "Back"
+  },
+  "auto_yes_cancel_lesson": {
+    "ar": "نعم، إلغاء الحصة",
+    "en": "Yes, Cancel Lesson",
+    "de": "Ja, Lektion stornieren"
+  },
+  "auto_unified_session_report": {
+    "ar": "تقرير الحصة والطلاب الموحد",
+    "en": "Unified Session Report",
+    "de": "Einheitlicher Unterrichtsbericht"
+  },
+  "auto_hide_report": {
+    "ar": "إخفاء التقرير",
+    "en": "Hide Report",
+    "de": "Bericht ausblenden"
+  },
+  "auto_subject_taught_content_less": {
+    "ar": "ماذا تم في الحصة (المحتوى والدروس المعطاة):",
+    "en": "Subject Taught (Content & Lessons Covered):",
+    "de": "Behandelter Stoff (Inhalt & durchgegangene Lektionen):"
+  },
+  "auto_enter_topics_taught_new_gramm": {
+    "ar": "أدخل الموضوعات التي تم شرحها، القواعد الجديدة، والكلمات التي تم تغطيتها في الحصة...",
+    "en": "Enter topics taught, new grammar rules, and vocabulary covered in the lesson...",
+    "de": "Geben Sie die erklärten Themen, neue Grammatikregeln und den behandelten Wortschatz ein..."
+  },
+  "auto_next_homework_assigned_to_stud": {
+    "ar": "الواجب القادم المطلوب من الطلاب:",
+    "en": "Next Homework Assigned to Students:",
+    "de": "Nächste Hausaufgabe für die Schüler:"
+  },
+  "auto_enter_details_of_homework_pag": {
+    "ar": "أدخل تفاصيل الواجب والصفحات المطلوبة والتمارين المحددة للحصة القادمة...",
+    "en": "Enter details of homework, pages required, and exercises assigned for next lesson...",
+    "de": "Geben Sie Details zu Hausaufgaben, benötigten Seiten und zugewiesenen Übungen für die nächste Stunde ein..."
+  },
+  "auto_status_performance_of_eac": {
+    "ar": "👥 حالة وأداء كل طالب في المجموعة:",
+    "en": "👥 Status & Performance of Each Student in the Group:",
+    "de": "👥 Status & Leistung jedes Schülers in der Gruppe:"
+  },
+  "auto_previous_homework_lastse": {
+    "ar": "🎒 واجب الحصة السابقة: ${lastSessionHwStatus === 'yes' ? 'تم الحل بالكامل 👍' : 'لم يتم الحل 👎'}",
+    "en": "🎒 Previous Homework: ${lastSessionHwStatus === 'yes' ? 'Completed 👍' : 'Not Done 👎'}",
+    "de": "🎒 Letzte Hausaufgabe: ${lastSessionHwStatus === 'yes' ? 'Erledigt 👍' : 'Nicht erledigt 👎'}"
+  },
+  "auto_present_10": {
+    "ar": "حضر ✅",
+    "en": "Present ✅",
+    "de": "Anwesend ✅"
+  },
+  "auto_absent_11": {
+    "ar": "غاب ✕",
+    "en": "Absent ✕",
+    "de": "Abwesend ✕"
+  },
+  "auto_previous_homework_performance": {
+    "ar": "أداء الواجب السابق:",
+    "en": "Previous Homework Performance:",
+    "de": "Vorherige Hausaufgabenleistung:"
+  },
+  "auto_completed_12": {
+    "ar": "عمل الواجب 👍",
+    "en": "Completed 👍",
+    "de": "Erledigt 👍"
+  },
+  "auto_not_completed_13": {
+    "ar": "لم يعمل الواجب 👎",
+    "en": "Not Completed 👎",
+    "de": "Nicht erledigt 👎"
+  },
+  "auto_dictation_grade_out_of_10": {
+    "ar": "درجة الإملاء (من 10):",
+    "en": "Dictation Grade (out of 10):",
+    "de": "Diktatnote (von 10):"
+  },
+  "auto_exam_quiz_grade_out_of_10": {
+    "ar": "درجة الامتحان/الـ Quiz (من 10):",
+    "en": "Exam/Quiz Grade (out of 10):",
+    "de": "Prüfungs-/Quiznote (von 10):"
+  },
+  "auto_parent_student_notes_option": {
+    "ar": "ملاحظات ولي الأمر والطالب (اختياري):",
+    "en": "Parent & Student Notes (Optional):",
+    "de": "Eltern- & Schülernotizen (Optional):"
+  },
+  "auto_e_g_excellent_listening_skill": {
+    "ar": "مثال: متميز جداً اليوم في الاستماع، يحتاج مراجعة أدوات الاستفهام...",
+    "en": "e.g. Excellent listening skills today, needs review on question words...",
+    "de": "z.B. Heute hervorragend beim Hören, muss Fragewörter wiederholen..."
+  },
+  "auto_absent_exempt_from_grades": {
+    "ar": "✕ غائب - معفى من الدرجات والواجب لهذه الحصة",
+    "en": "✕ Absent - Exempt from grades and homework for this session",
+    "de": "✕ Abwesend - Befreit von Noten und Hausaufgaben für diese Stunde"
+  },
+  "auto_please_complete_the_following": {
+    "ar": "يرجى إكمال الحقول التالية لحفظ الحصة:",
+    "en": "Please complete the following fields to save the lesson:",
+    "de": "Bitte füllen Sie die folgenden Felder aus, um die Stunde zu speichern:"
+  },
+  "auto_subject_taught_field": {
+    "ar": "حقل ماذا تم شرحه في الحصة",
+    "en": "Subject Taught field",
+    "de": "Feld \"Behandelter Stoff\""
+  },
+  "auto_next_homework_field": {
+    "ar": "حقل الواجب المنزلي القادم",
+    "en": "Next Homework field",
+    "de": "Feld \"Nächste Hausaufgabe\""
+  },
+  "auto_homework_status": {
+    "ar": "حالة الواجب",
+    "en": "Homework Status",
+    "de": "Hausaufgabenstatus"
+  },
+  "auto_dictation_grade": {
+    "ar": "درجة الإملاء",
+    "en": "Dictation Grade",
+    "de": "Diktatnote"
+  },
+  "auto_exam_grade": {
+    "ar": "درجة الامتحان",
+    "en": "Exam Grade",
+    "de": "Prüfungsnote"
+  },
+  "auto_student_14": {
+    "ar": "الطالب",
+    "en": "Student",
+    "de": "Schüler"
+  },
+  "auto_needs": {
+    "ar": "يحتاج",
+    "en": "needs",
+    "de": "benötigt"
+  },
+  "auto": {
+    "ar": "، ",
+    "en": ", ",
+    "de": ", "
+  },
+  "auto_end_session_save_report": {
+    "ar": "إنهاء الحصة وحفظ التقرير",
+    "en": "End Session & Save Report",
+    "de": "Stunde beenden & Bericht speichern"
+  },
+  "auto_parent_communication": {
+    "ar": "التواصل مع أولياء الأمور:",
+    "en": "Parent Communication:",
+    "de": "Eltern-Kommunikation:"
+  },
+  "auto_egp": {
+    "ar": "ج.م",
+    "en": "EGP",
+    "de": "EGP"
+  },
+  "auto_back_to_settings": {
+    "ar": "العودة للإعدادات",
+    "en": "Back to Settings",
+    "de": "Back to Settings"
+  },
+  "auto_notification_alert_settings": {
+    "ar": "إعدادات الإشعارات والتنبيهات",
+    "en": "Notification & Alert Settings",
+    "de": "Benachrichtigungseinstellungen"
+  },
+  "auto_sync_schedule": {
+    "ar": "تحديث الجدول",
+    "en": "Sync Schedule",
+    "de": "Zeitplan synchronisieren"
+  },
+  "auto_customize_all_system_notificat": {
+    "ar": "تخصيص جميع إشعارات النظام، مواعيد التذكير بالححص، وتصريحات Android",
+    "en": "Customize all system notifications, lesson reminders, and device permissions",
+    "de": "Systembenachrichtigungen, Lektionserinnerungen und Geräteeinstellungen anpassen"
+  },
+  "auto_no_pending_scheduled_notificat": {
+    "ar": "لا توجد إشعارات معلقة في الانتظار حالياً",
+    "en": "No pending scheduled notifications currently",
+    "de": "Derzeit keine ausstehenden Benachrichtigungen"
+  },
+  "auto_click_rebuild_schedules_to_p": {
+    "ar": "اضغط على \"إعادة بناء الجدول\" لأداء فحص فوري وجدولة الحصص القادمة.",
+    "en": "Click \"Rebuild Schedules\" to perform an immediate check and schedule upcoming lessons.",
+    "de": "Klicken Sie auf \"Zeitpläne neu erstellen\", um anstehende Lektionen zu planen."
+  },
+  "auto_automatic_system_alerts": {
+    "ar": "تنبيهات النظام التلقائية",
+    "en": "Automatic System Alerts",
+    "de": "Automatische Systemalarme"
+  },
+  "auto_mark_all_as_read": {
+    "ar": "تحديد الكل كمقروء",
+    "en": "Mark all as read",
+    "de": "Alle als gelesen markieren"
+  },
+  "auto_clear_all": {
+    "ar": "حذف الكل",
+    "en": "Clear All",
+    "de": "Alle löschen"
+  },
+  "auto_no_new_notifications": {
+    "ar": "لا توجد إشعارات جديدة.",
+    "en": "No new notifications.",
+    "de": "Keine neuen Benachrichtigungen."
+  },
+  "auto_open_lesson": {
+    "ar": "فتح الحصة",
+    "en": "Open Lesson",
+    "de": "Lektion öffnen"
+  },
+  "auto_completed_lesson_dates": {
+    "ar": "• مواعيد الحصص المكتملة",
+    "en": "• Completed lesson dates",
+    "de": "• Termine der absolvierten Lektionen"
+  },
+  "auto_flexible_prorated_billing": {
+    "ar": "الفوترة الجزئية وإنهاء الدورة مبكراً",
+    "en": "Flexible & Prorated Billing",
+    "de": "Flexible & anteilige Abrechnung"
+  },
+  "auto_you_can_end_the_current_cycle": {
+    "ar": "يمكنك إنهاء الدورة الحالية للطلاب مبكراً والمطالبة بالدفع بناءً على الحصص التي حضروها فعلياً.",
+    "en": "You can end the current cycle early for students and bill based on actually attended lessons.",
+    "de": "Sie können den aktuellen Kurs für Schüler vorzeitig beenden und basierend auf den tatsächlich besuchten Lektionen abrechnen."
+  },
+  "auto_there_are_currently_no_student": {
+    "ar": "لا يوجد طلاب لديهم حصص مكتملة غير مفوترة حالياً تحت الحد الأقصى للدورة.",
+    "en": "There are currently no students with completed unbilled lessons under the cycle limit.",
+    "de": "Derzeit gibt es keine Schüler mit abgeschlossenen, nicht abgerechneten Lektionen unter dem Kurslimit."
+  },
+  "auto_prorated_amount": {
+    "ar": "القيمة المقترحة",
+    "en": "Prorated Amount",
+    "de": "Vorgeschlagener Betrag"
+  },
+  "auto_attended_lessons": {
+    "ar": "الحصص المكتملة:",
+    "en": "Attended Lessons:",
+    "de": "Besuchte Lektionen:"
+  },
+  "auto_lessons": {
+    "ar": "حصة",
+    "en": "lessons",
+    "de": "Lektionen"
+  },
+  "auto_force_cycle_bill": {
+    "ar": "إنهاء الدورة والفوترة",
+    "en": "Force Cycle & Bill",
+    "de": "Kurs beenden & abrechnen"
+  },
+  "auto_force_end_current_cycle_bill": {
+    "ar": "إنهاء الدورة الحالية والمطالبة بالدفع",
+    "en": "Force End Current Cycle & Bill",
+    "de": "Aktuellen Kurs beenden & abrechnen"
+  },
+  "auto_student_name_15": {
+    "ar": "اسم الطالب:",
+    "en": "Student Name:",
+    "de": "Schülername:"
+  },
+  "auto_group_16": {
+    "ar": "المجموعة:",
+    "en": "Group:",
+    "de": "Gruppe:"
+  },
+  "auto_attendance_progress": {
+    "ar": "معدل الحضور:",
+    "en": "Attendance Progress:",
+    "de": "Anwesenheitsfortschritt:"
+  },
+  "auto_attended_proratemodalitem_le": {
+    "ar": "حضر ${prorateModalItem.lessonDates.length} حصص من أصل دورة من ${prorateModalItem.cycleLength} حصص",
+    "en": "Attended ${prorateModalItem.lessonDates.length} of ${prorateModalItem.cycleLength} cycle lessons",
+    "de": "${prorateModalItem.lessonDates.length} von ${prorateModalItem.cycleLength} Lektionen besucht"
+  },
+  "auto_completed_lesson_dates_17": {
+    "ar": "تواريخ الحصص المنجزة:",
+    "en": "Completed Lesson Dates:",
+    "de": "Termine der absolvierten Lektionen:"
+  },
+  "auto_adjust_prorated_due_amount": {
+    "ar": "تعديل القيمة المستحقة للدفع الجزئي:",
+    "en": "Adjust Prorated Due Amount:",
+    "de": "Anteiligen fälligen Betrag anpassen:"
+  },
+  "auto_the_suggested_amount_is_calc": {
+    "ar": "* تم حساب القيمة المقترحة تلقائياً بناءً على متوسط قيمة الحصة الواحدة. يمكنك تعديل المبلغ يدوياً قبل تأكيد الفاتورة.",
+    "en": "* The suggested amount is calculated automatically based on per-lesson cost. You can adjust it manually before confirming.",
+    "de": "* Der vorgeschlagene Betrag wird automatisch berechnet. Sie können ihn vor der Bestätigung anpassen."
+  },
+  "auto_mark_as_unpaid_invoice": {
+    "ar": "تسجيل كفاتورة غير مدفوعة",
+    "en": "Mark as Unpaid Invoice",
+    "de": "Als unbezahlte Rechnung markieren"
+  },
+  "auto_flexible_prorated_payment_p": {
+    "ar": "دفع جزئي مرن (${prorateModalItem.lessonDates.length}/${prorateModalItem.cycleLength} حصص)",
+    "en": "Flexible prorated payment (${prorateModalItem.lessonDates.length}/${prorateModalItem.cycleLength} lessons)",
+    "de": "Anteilige Zahlung (${prorateModalItem.lessonDates.length}/${prorateModalItem.cycleLength} Lektionen)"
+  },
+  "auto_mark_paid_now": {
+    "ar": "تسجيل كمدفوع بالكامل فوراً",
+    "en": "Mark Paid Now",
+    "de": "Sofort als bezahlt markieren"
+  },
+  "auto_profile_work_schedule": {
+    "ar": "الملف الشخصي للمعلم",
+    "en": "Profile & Work Schedule",
+    "de": "Lehrerprofil"
+  },
+  "auto_personal_information_contact": {
+    "ar": "الاسم، البريد، ساعات العمل والعملة",
+    "en": "Personal information, contact details & weekly availability",
+    "de": "Name, E-Mail, Arbeitszeiten & Währung"
+  },
+  "auto_payments_finance": {
+    "ar": "بيانات التحويل والدفع",
+    "en": "Payments & Finance",
+    "de": "Zahlungsinformationen"
+  },
+  "auto_financial_information_transfe": {
+    "ar": "رقم الهاتف، انستا باي، فودافون كاش والروابط",
+    "en": "Financial information, transfer methods & payment sharing",
+    "de": "Telefon, InstaPay, Vodafone Cash & Bank"
+  },
+  "auto_messages_communication": {
+    "ar": "قوالب رسائل أولياء الأمور",
+    "en": "Messages & Communication",
+    "de": "Elternnachrichten Vorlagen"
+  },
+  "auto_automated_parent_communication": {
+    "ar": "إدارة قوالب الواجبات، الحضور، الغياب والتقارير",
+    "en": "Automated parent communication templates",
+    "de": "Vorlagen für Hausaufgaben, Anwesenheit & Berichte"
+  },
+  "auto_6_templates": {
+    "ar": "6 قوالب",
+    "en": "6 Templates",
+    "de": "6 Templates"
+  },
+  "auto_notifications_alerts": {
+    "ar": "الإشعارات والتنبيهات",
+    "en": "Notifications & Alerts",
+    "de": "Benachrichtigungen & Alarme"
+  },
+  "auto_reminders_lesson_alerts_dai": {
+    "ar": "التحكم الشامل بإشعارات الحصص، المواعيد، المستحقات والملخص اليومي",
+    "en": "Reminders, lesson alerts & daily summaries",
+    "de": "Umfassende Steuerung für Lektionserinnerungen, Zahlungen & Berichte"
+  },
+  "auto_active": {
+    "ar": "مفعلة",
+    "en": "Active",
+    "de": "Active"
+  },
+  "auto_disabled": {
+    "ar": "معطل (عدم الإظهار)",
+    "en": "Disabled",
+    "de": "Disabled"
+  },
+  "auto_appearance_language": {
+    "ar": "اللغة والمظهر",
+    "en": "Appearance & Language",
+    "de": "Sprache & Erscheinungsbild"
+  },
+  "auto_personalize_the_interface_expe": {
+    "ar": "لغة الواجهة ووضع المظهر الداكن/الفاتح",
+    "en": "Personalize the interface experience",
+    "de": "Oberflächensprache & Dunkelmodus"
+  },
+  "auto_motivation_gratitude": {
+    "ar": "الإلهام والامتنان",
+    "en": "Motivation & Gratitude",
+    "de": "Inspiration & Dankbarkeit"
+  },
+  "auto_daily_inspiration_and_positive": {
+    "ar": "تذكيرات وأدعية للمعلم عن العلم والرزق والتعليم",
+    "en": "Daily inspiration and positive reminders",
+    "de": "Tägliche Motivation & Dankbarkeits-Erinnerungen"
+  },
+  "auto_daily": {
+    "ar": "تذكير يومي",
+    "en": "Daily",
+    "de": "Daily"
+  },
+  "auto_before_lesson": {
+    "ar": "قبل أول حصة",
+    "en": "Before Lesson",
+    "de": "Before Lesson"
+  },
+  "auto_random": {
+    "ar": "عشوائي يومي",
+    "en": "Random",
+    "de": "Random"
+  },
+  "auto_data_backup": {
+    "ar": "النسخ الاحتياطي والبيانات",
+    "en": "Data & Backup",
+    "de": "Sicherung & Daten"
+  },
+  "auto_backup_restore_and_data_manag": {
+    "ar": "تنزيل واستعادة النسخة الاحتياطية وإعادة ضبط البيانات",
+    "en": "Backup, restore and data management",
+    "de": "Sicherung herunterladen, wiederherstellen & zurücksetzen"
+  },
+  "auto_about": {
+    "ar": "حول التطبيق",
+    "en": "About",
+    "de": "About"
+  },
+  "auto_application_information_and_ve": {
+    "ar": "تفاصيل التطبيق، الميزات، المطور والتواصل",
+    "en": "Application information and version details",
+    "de": "App-Info, Entwickler & Version"
+  },
+  "auto_select_a_section_to_manage_app": {
+    "ar": "اختر قسماً لإدارة إعدادات التطبيق",
+    "en": "Select a section to manage application settings",
+    "de": "Wählen Sie einen Bereich zur Verwaltung aus"
+  },
+  "auto_search_settings": {
+    "ar": "ابحث في الإعدادات...",
+    "en": "Search settings...",
+    "de": "Einstellungen durchsuchen..."
+  },
+  "auto_no_results_found": {
+    "ar": "لا توجد نتائج",
+    "en": "No results found",
+    "de": "Keine Ergebnisse"
+  },
+  "auto_select_a_category": {
+    "ar": "اختر قسماً",
+    "en": "Select a Category",
+    "de": "Wählen Sie eine Kategorie"
+  },
+  "auto_choose_a_category_from_the_sid": {
+    "ar": "اختر قسماً من القائمة الجانبية لعرض وإدارة الإعدادات الخاصة به.",
+    "en": "Choose a category from the sidebar to view and manage its settings.",
+    "de": "Wählen Sie eine Kategorie aus der Seitenleiste aus, um die Einstellungen anzuzeigen und zu verwalten."
+  },
+  "auto_language_appearance": {
+    "ar": "اللغة والمظهر",
+    "en": "Language & Appearance",
+    "de": "Sprache & Erscheinungsbild"
+  },
+  "auto_choose_application_language_an": {
+    "ar": "اختر لغة التطبيق ومظهر الشاشة",
+    "en": "Choose application language and theme mode",
+    "de": "Choose application language and theme mode"
+  },
+  "auto_note_the_selected_language_ap": {
+    "ar": "ملاحظة: اللسان واللغة المختارة تنطبق على واجهة التطبيق بالكامل. رسائل أولياء الأمور والتقارير الموجهة للأهالي تظل دائماً باللغة العربية.",
+    "en": "Note: The selected language applies to the entire application interface. Parent messages and reports always remain in Arabic.",
+    "de": "Note: The selected language applies to the entire application interface. Parent messages and reports always remain in Arabic."
+  },
+  "auto_accent_color": {
+    "ar": "لون الواجهة (Accent Color)",
+    "en": "Accent Color",
+    "de": "Akzentfarbe"
+  },
+  "auto_select_your_preferred_accent_c": {
+    "ar": "اختر لون التمييز المفضل لجميع الأزرار والأيقونات والتبويبات النشطة وعناصر الواجهة التفاعلية.",
+    "en": "Select your preferred accent color for all buttons, icons, active tabs, and interactive controls.",
+    "de": "Wählen Sie die bevorzugte Akzentfarbe für alle Schaltflächen, Symbole, Tabs und Steuerelemente."
+  },
+  "auto_teacher_profile": {
+    "ar": "الملف الشخصي للمعلم",
+    "en": "Teacher Profile",
+    "de": "Teacher Profile"
+  },
+  "auto_manage_personal_details_worki": {
+    "ar": "إدارة البيانات الشخصية وساعات العمل والعملة",
+    "en": "Manage personal details, working hours & currency",
+    "de": "Manage personal details, working hours & currency"
+  },
+  "auto_edit_profile": {
+    "ar": "تعديل البيانات",
+    "en": "Edit Profile",
+    "de": "Edit Profile"
+  },
+  "auto_weekly_working_hours": {
+    "ar": "ساعات العمل الأسبوعية",
+    "en": "Weekly Working Hours",
+    "de": "Weekly Working Hours"
+  },
+  "auto_sat": {
+    "ar": "السبت",
+    "en": "Sat",
+    "de": "Sat"
+  },
+  "auto_sun": {
+    "ar": "الأحد",
+    "en": "Sun",
+    "de": "Sun"
+  },
+  "auto_mon": {
+    "ar": "الإثنين",
+    "en": "Mon",
+    "de": "Mon"
+  },
+  "auto_tue": {
+    "ar": "الثلاثاء",
+    "en": "Tue",
+    "de": "Tue"
+  },
+  "auto_wed": {
+    "ar": "الأربعاء",
+    "en": "Wed",
+    "de": "Wed"
+  },
+  "auto_thu": {
+    "ar": "الخميس",
+    "en": "Thu",
+    "de": "Thu"
+  },
+  "auto_fri": {
+    "ar": "الجمعة",
+    "en": "Fri",
+    "de": "Fri"
+  },
+  "auto_reminder_settings": {
+    "ar": "إعدادات التنبيهات والتذكير",
+    "en": "Reminder Settings",
+    "de": "Reminder Settings"
+  },
+  "auto_in_app_lesson_alerts_within_3": {
+    "ar": "تنبيهات الحصص المباشرة (قبل 30 دقيقة)",
+    "en": "In-App Lesson Alerts (Within 30 mins)",
+    "de": "In-App Lesson Alerts (Within 30 mins)"
+  },
+  "auto_browser_push_notifications": {
+    "ar": "إشعارات المتصفح والسطح",
+    "en": "Browser Push Notifications",
+    "de": "Browser Push Notifications"
+  },
+  "auto_payment_information": {
+    "ar": "بيانات التحويل والدفع",
+    "en": "Payment Information",
+    "de": "Payment Information"
+  },
+  "auto_information_used_when_sending": {
+    "ar": "البيانات المستخدمة عند إرسال مطالبات الرسوم لأولياء الأمور",
+    "en": "Information used when sending payment requests to parents",
+    "de": "Information used when sending payment requests to parents"
+  },
+  "auto_direct_electronic_payment_prof": {
+    "ar": "بيانات الدفع الإلكتروني المباشر",
+    "en": "Direct Electronic Payment Profile",
+    "de": "Direct Electronic Payment Profile"
+  },
+  "auto_copy_payment_info": {
+    "ar": "نسخ بيانات التحويل",
+    "en": "Copy Payment Info",
+    "de": "Copy Payment Info"
+  },
+  "auto_parent_message_templates": {
+    "ar": "قوالب رسائل أولياء الأمور",
+    "en": "Parent Message Templates",
+    "de": "Parent Message Templates"
+  },
+  "auto_manage_templates_for_homework": {
+    "ar": "تخصيص الرسائل التلقائية للواجبات، الحضور، الغياب والتقارير",
+    "en": "Manage templates for homework, attendance, absence, payment & reports",
+    "de": "Manage templates for homework, attendance, absence, payment & reports"
+  },
+  "auto_absence": {
+    "ar": "الغياب",
+    "en": "Absence",
+    "de": "Absence"
+  },
+  "auto_exam_reports": {
+    "ar": "الاختبارات",
+    "en": "Exam Reports",
+    "de": "Exam Reports"
+  },
+  "auto_lesson_summary": {
+    "ar": "ملخص الدرس",
+    "en": "Lesson Summary",
+    "de": "Lesson Summary"
+  },
+  "auto_message_template_text_arabic": {
+    "ar": "نص قالب الرسالة (بالعربية)",
+    "en": "Message Template Text (Arabic)",
+    "de": "Message Template Text (Arabic)"
+  },
+  "auto_available_dynamic_placeholders": {
+    "ar": "المتغيرات المتاحة للاستخدام تلقائياً:",
+    "en": "Available Dynamic Placeholders:",
+    "de": "Available Dynamic Placeholders:"
+  },
+  "auto_reset_to_default": {
+    "ar": "استعادة الافتراضي",
+    "en": "Reset to Default",
+    "de": "Reset to Default"
+  },
+  "auto_save_templates": {
+    "ar": "حفظ القوالب",
+    "en": "Save Templates",
+    "de": "Save Templates"
+  },
+  "auto_inspiration_gratitude": {
+    "ar": "الإلهام والامتنان",
+    "en": "Inspiration & Gratitude",
+    "de": "Inspiration & Dankbarkeit"
+  },
+  "auto_teacher_reminders_motivation": {
+    "ar": "تذكيرات وأدعية للمعلم",
+    "en": "Teacher reminders & motivation",
+    "de": "Motivation & Dankbarkeits-Erinnerungen"
+  },
+  "auto_display_settings": {
+    "ar": "إعدادات الظهور",
+    "en": "Display Settings",
+    "de": "Display Settings"
+  },
+  "auto_frequency": {
+    "ar": "تكرار التذكير",
+    "en": "Frequency",
+    "de": "Frequency"
+  },
+  "auto_once_daily": {
+    "ar": "مرة واحدة يومياً",
+    "en": "Once Daily",
+    "de": "Once Daily"
+  },
+  "auto_before_first_lesson": {
+    "ar": "قبل الحصة الأولى في اليوم",
+    "en": "Before First Lesson",
+    "de": "Before First Lesson"
+  },
+  "auto_randomly_during_day": {
+    "ar": "عشوائي خلال اليوم",
+    "en": "Randomly During Day",
+    "de": "Randomly During Day"
+  },
+  "auto_display_method": {
+    "ar": "طريقة العرض",
+    "en": "Display Method",
+    "de": "Display Method"
+  },
+  "auto_in_app_only_card": {
+    "ar": "داخل التطبيق فقط (بطاقة)",
+    "en": "In-App Only (Card)",
+    "de": "In-App Only (Card)"
+  },
+  "auto_system_notification_only": {
+    "ar": "إشعار نظام فقط",
+    "en": "System Notification Only",
+    "de": "System Notification Only"
+  },
+  "auto_in_app_notification": {
+    "ar": "داخل التطبيق + إشعار",
+    "en": "In-App & Notification",
+    "de": "In-App & Notification"
+  },
+  "auto_message_source": {
+    "ar": "مصدر الرسائل",
+    "en": "Message Source",
+    "de": "Message Source"
+  },
+  "auto_all_messages": {
+    "ar": "جميع الرسائل",
+    "en": "All Messages",
+    "de": "All Messages"
+  },
+  "auto_favorites_only": {
+    "ar": "المفضلة فقط",
+    "en": "Favorites Only",
+    "de": "Favorites Only"
+  },
+  "auto_test_reminder_now": {
+    "ar": "تجربة التذكير الآن",
+    "en": "Test Reminder Now",
+    "de": "Test Reminder Now"
+  },
+  "auto_messages": {
+    "ar": "رسالة",
+    "en": "Messages",
+    "de": "Messages"
+  },
+  "auto_manage_the_motivational_quotes": {
+    "ar": "إدارة العبارات التحفيزية والأدعية التي تظهر لك. يمكنك إضافة رسائلك الخاصة أو تفضيل الرسائل التي تحبها.",
+    "en": "Manage the motivational quotes and prayers. Add your own custom messages or favorite the ones you like.",
+    "de": "Manage the motivational quotes and prayers. Add your own custom messages or favorite the ones you like."
+  },
+  "auto_manage_messages": {
+    "ar": "إدارة الرسائل",
+    "en": "Manage Messages",
+    "de": "Manage Messages"
+  },
+  "auto_all": {
+    "ar": "الكل",
+    "en": "All",
+    "de": "All"
+  },
+  "auto_favorites": {
+    "ar": "المفضلة",
+    "en": "Favorites",
+    "de": "Favorites"
+  },
+  "auto_add_message": {
+    "ar": "إضافة رسالة",
+    "en": "Add Message",
+    "de": "Add Message"
+  },
+  "auto_restore_default_messages": {
+    "ar": "استعادة الرسائل الافتراضية",
+    "en": "Restore Default Messages",
+    "de": "Restore Default Messages"
+  },
+  "auto_custom": {
+    "ar": "مخصص",
+    "en": "Custom",
+    "de": "Custom"
+  },
+  "auto_are_you_sure": {
+    "ar": "هل أنت متأكد من الحذف؟",
+    "en": "Are you sure?",
+    "de": "Are you sure?"
+  },
+  "auto_no_messages_found": {
+    "ar": "لا توجد رسائل",
+    "en": "No messages found",
+    "de": "No messages found"
+  },
+  "auto_edit_message": {
+    "ar": "تعديل الرسالة",
+    "en": "Edit Message",
+    "de": "Edit Message"
+  },
+  "auto_add_new_message": {
+    "ar": "إضافة رسالة جديدة",
+    "en": "Add New Message",
+    "de": "Add New Message"
+  },
+  "auto_write_your_message": {
+    "ar": "اكتب رسالتك أو دعاءك هنا...",
+    "en": "Write your message...",
+    "de": "Write your message..."
+  },
+  "auto_restore_defaults": {
+    "ar": "استعادة الرسائل الافتراضية",
+    "en": "Restore Defaults",
+    "de": "Restore Defaults"
+  },
+  "auto_default_messages_will_be_resto": {
+    "ar": "سيتم استعادة الرسائل والأدعية الافتراضية. رسائلك المخصصة لن يتم حذفها.",
+    "en": "Default messages will be restored. Your custom messages will not be deleted.",
+    "de": "Default messages will be restored. Your custom messages will not be deleted."
+  },
+  "auto_restore": {
+    "ar": "استعادة",
+    "en": "Restore",
+    "de": "Restore"
+  },
+  "auto_backup_data_management_cente": {
+    "ar": "مركز النسخ الاحتياطي وإدارة البيانات",
+    "en": "Backup & Data Management Center",
+    "de": "Backup & Data Management Center"
+  },
+  "auto_create_full_backups_password": {
+    "ar": "إنشاء نسخ احتياطية شاملة، تشفير بكلمة مرور، استعادة انتقائية، وإدارة التعديلات",
+    "en": "Create full backups, password encrypt, selectively restore & manage safety checkpoints",
+    "de": "Create full backups, password encrypt, selectively restore & manage safety checkpoints"
+  },
+  "auto_smart_data_validation_health": {
+    "ar": "التدقيق الذكي وصحة البيانات",
+    "en": "Smart Data Validation & Health Audit",
+    "de": "Smart Data Validation & Health Audit"
+  },
+  "auto_inspect_record_consistency_de": {
+    "ar": "فحص اتساق السجلات، الكشف عن الأخطاء المحتملة في العلاقات المالية والطلابية، وحساب مؤشر الصحة.",
+    "en": "Inspect record consistency, detect potential relationship or financial anomalies, and view data health score.",
+    "de": "Inspect record consistency, detect potential relationship or financial anomalies, and view data health score."
+  },
+  "auto_open_data_audit_health_repor": {
+    "ar": "فتح تقرير التدقيق وصحة البيانات",
+    "en": "Open Data Audit & Health Report",
+    "de": "Open Data Audit & Health Report"
+  },
+  "auto_danger_zone_data_reset": {
+    "ar": "منطقة الخطر (إعادة ضبط البيانات)",
+    "en": "Danger Zone (Data Reset)",
+    "de": "Danger Zone (Data Reset)"
+  },
+  "auto_sensitive_actions_resetting_d": {
+    "ar": "إجراءات حساسة: سيؤدي هذا إلى حذف كافة الطلاب والمجموعات والحصص والمدفوعات نهائياً من هذا الجهاز.",
+    "en": "Sensitive actions: Resetting data will permanently delete all students, groups, lessons, and payment records.",
+    "de": "Sensitive actions: Resetting data will permanently delete all students, groups, lessons, and payment records."
+  },
+  "auto_application_details_features": {
+    "ar": "معلومات التطبيق والميزات وتفاصيل التواصل مع المطور",
+    "en": "Application details, features & developer contacts",
+    "de": "Application details, features & developer contacts"
+  },
+  "auto_german_teacher_management_syst": {
+    "ar": "نظام إداري متكامل لمعلمي اللغة الألمانية والدروس الخاصة",
+    "en": "German Teacher Management System",
+    "de": "German Teacher Management System"
+  },
+  "auto_description": {
+    "ar": "الوصف",
+    "en": "Description",
+    "de": "Description"
+  },
+  "auto_features": {
+    "ar": "الميزات الرئيسية (Features)",
+    "en": "Features",
+    "de": "Features"
+  },
+  "auto_developer": {
+    "ar": "تطوير وتصميم",
+    "en": "Developer",
+    "de": "Developer"
+  },
+  "auto_please_select_at_least_one_cat": {
+    "ar": "⚠️ يرجى اختيار فئة واحدة على الأقل للتصدير.",
+    "en": "Please select at least one category to export.",
+    "de": "Please select at least one category to export."
+  },
+  "auto_gathering_and_preparing_backup": {
+    "ar": "جاري تجميع وإعداد البيانات...",
+    "en": "Gathering and preparing backup payload...",
+    "de": "Gathering and preparing backup payload..."
+  },
+  "auto_encrypting_payload_with_passwo": {
+    "ar": "جاري تشفير البيانات بكلمة المرور...",
+    "en": "Encrypting payload with password...",
+    "de": "Encrypting payload with password..."
+  },
+  "auto_backup_file_created_and_down": {
+    "ar": "✓ تم إنشاء وتنزيل ملف النسخة الاحتياطية بنجاح!",
+    "en": "✓ Backup file created and downloaded successfully!",
+    "de": "✓ Backup file created and downloaded successfully!"
+  },
+  "auto_quick_backup_created_and_sav": {
+    "ar": "✓ تم إنشاء وتنزيل النسخة الاحتياطية بنجاح!",
+    "en": "✓ Quick backup created and saved successfully!",
+    "de": "✓ Quick backup created and saved successfully!"
+  },
+  "auto_backup_failed": {
+    "ar": "❌ فشل إنشاء النسخة الاحتياطية: ",
+    "en": "❌ Backup failed: ",
+    "de": "❌ Backup failed: "
+  },
+  "auto_all_data_restored_successful": {
+    "ar": "✓ تم استعادة جميع البيانات بنجاح تام وتم حفظ الملف!",
+    "en": "✓ All data restored successfully!",
+    "de": "✓ All data restored successfully!"
+  },
+  "auto_failed_to_restore_data_plea": {
+    "ar": "❌ فشل استعادة البيانات. يرجى التأكد من اختيار ملف JSON صحيح.",
+    "en": "❌ Failed to restore data. Please make sure to choose a valid JSON backup file.",
+    "de": "❌ Failed to restore data. Please make sure to choose a valid JSON backup file."
+  },
+  "auto_incorrect_password_or_corrupte": {
+    "ar": "كلمة المرور غير صحيحة أو الملف تالف.",
+    "en": "Incorrect password or corrupted file.",
+    "de": "Incorrect password or corrupted file."
+  },
+  "auto_selected_categories_restored": {
+    "ar": "✓ تم استعادة البيانات المحددة بنجاح مع إنشاء نقطة استعادة تلقائية!",
+    "en": "✓ Selected categories restored successfully with auto restore point!",
+    "de": "✓ Selected categories restored successfully with auto restore point!"
+  },
+  "auto_rollback_successful_restore": {
+    "ar": "✓ تم التراجع واستعادة النسخة السابقة بنجاح!",
+    "en": "✓ Rollback successful! Restored database to previous state.",
+    "de": "✓ Rollback successful! Restored database to previous state."
+  },
+  "auto_smart_backup_restore_center": {
+    "ar": "مركز النسخ الاحتياطي والاستعادة الذكي",
+    "en": "Smart Backup & Restore Center",
+    "de": "Sicherungs- & Wiederherstellungszentrum"
+  },
+  "auto_professional_data_management": {
+    "ar": "إدارة شاملة لآمان البيانات، التشفير بكلمة المرور، الاستعادة الانتقائية والتراجع التلقائي",
+    "en": "Professional data management, password encryption, selective restore & 1-click rollback",
+    "de": "Professional data management, password encryption, selective restore & 1-click rollback"
+  },
+  "auto_undo_last_restore": {
+    "ar": "التراجع عن آخر عملية استعادة",
+    "en": "Undo last restore",
+    "de": "Undo last restore"
+  },
+  "auto_undo_last_restore_18": {
+    "ar": "التراجع عن آخر استعادة",
+    "en": "Undo Last Restore",
+    "de": "Undo Last Restore"
+  },
+  "auto_1_tap_backup": {
+    "ar": "نسخ سريع (1-Tap)",
+    "en": "1-Tap Backup",
+    "de": "1-Tap Backup"
+  },
+  "auto_custom_export": {
+    "ar": "تصدير مخصص",
+    "en": "Custom Export",
+    "de": "Custom Export"
+  },
+  "auto_custom_restore": {
+    "ar": "استعادة مخصصة",
+    "en": "Custom Restore",
+    "de": "Custom Restore"
+  },
+  "auto_auto_backups": {
+    "ar": "النسخ التلقائي",
+    "en": "Auto Backups",
+    "de": "Auto Backups"
+  },
+  "auto_restore_history": {
+    "ar": "سجل الاستعادة",
+    "en": "Restore History",
+    "de": "Restore History"
+  },
+  "auto_instant_1_click_backup": {
+    "ar": "حفظ نسخة احتياطية سريعة",
+    "en": "Instant 1-Click Backup",
+    "de": "Instant 1-Click Backup"
+  },
+  "auto_export_and_save_a_complete_bac": {
+    "ar": "قم بتنزيل أو حفظ ملف يحتوي على كامل بيانات التطبيق (المعلمين، الطلاب، المجموعات، الحصص، والمدفوعات) بضغطة واحدة وبدون تعقيدات.",
+    "en": "Export and save a complete backup containing all application data (teachers, students, groups, schedule, and financial records) in one simple tap.",
+    "de": "Export and save a complete backup containing all application data (teachers, students, groups, schedule, and financial records) in one simple tap."
+  },
+  "auto_saving_and_sharing": {
+    "ar": "جاري الحفظ والمشاركة...",
+    "en": "Saving and Sharing...",
+    "de": "Saving and Sharing..."
+  },
+  "auto_tap_to_backup_save_everythin": {
+    "ar": "اضغط للنسخ الاحتياطي والحفظ",
+    "en": "Tap to Backup & Save Everything",
+    "de": "Tap to Backup & Save Everything"
+  },
+  "auto_instant_1_click_restore": {
+    "ar": "استعادة كاملة بضغطة واحدة",
+    "en": "Instant 1-Click Restore",
+    "de": "Instant 1-Click Restore"
+  },
+  "auto_select_a_backup_json_file_you": {
+    "ar": "اختر ملف نسخة احتياطية (ملف JSON تم تحميله سابقاً) وسيقوم التطبيق فوراً باستعادة كافة السجلات وإرجاع حالتها الأصلية مع الحفاظ التلقائي على نسخة احتياطية للتراجع.",
+    "en": "Select a backup JSON file you downloaded previously to restore and replace all system data instantly. An automatic restore point will be saved first for safety.",
+    "de": "Select a backup JSON file you downloaded previously to restore and replace all system data instantly. An automatic restore point will be saved first for safety."
+  },
+  "auto_restoring_all_data": {
+    "ar": "جاري استعادة البيانات والملفات...",
+    "en": "Restoring All Data...",
+    "de": "Restoring All Data..."
+  },
+  "auto_choose_file_restore_all": {
+    "ar": "اختر ملف واسترجع الآن",
+    "en": "Choose File & Restore All",
+    "de": "Choose File & Restore All"
+  },
+  "auto_automatic_data_protection": {
+    "ar": "حماية تلقائية للبيانات",
+    "en": "Automatic Data Protection",
+    "de": "Automatic Data Protection"
+  },
+  "auto_before_performing_any_restore": {
+    "ar": "عندما تقوم بعملية استعادة سريعة، يقوم النظام تلقائياً بأخذ لقطة تأمينية لبياناتك الحالية. في حال رغبت بالتراجع عن الاستعادة وإرجاع بياناتك السابقة، يمكنك الضغط على زر \"التراجع عن آخر استعادة\" باللون البرتقالي في الأعلى.",
+    "en": "Before performing any restore action, the app secures your current state. You can revert any restore process back to your previous state instantly by clicking the \"Undo Last Restore\" button above.",
+    "de": "Before performing any restore action, the app secures your current state. You can revert any restore process back to your previous state instantly by clicking the \"Undo Last Restore\" button above."
+  },
+  "auto_select_all": {
+    "ar": "تحديد الكل",
+    "en": "Select All",
+    "de": "Select All"
+  },
+  "auto_deselect_all": {
+    "ar": "إلغاء التحديد",
+    "en": "Deselect All",
+    "de": "Deselect All"
+  },
+  "auto_full_backup_selected_100": {
+    "ar": "تحديد كامل (100%)",
+    "en": "Full Backup Selected (100%)",
+    "de": "Full Backup Selected (100%)"
+  },
+  "auto_partial_selection_selectedc": {
+    "ar": "تحديد جزئي (${selectedCategories.length}/${ALL_BACKUP_CATEGORIES.length})",
+    "en": "Partial Selection (${selectedCategories.length}/${ALL_BACKUP_CATEGORIES.length})",
+    "de": "Partial Selection (${selectedCategories.length}/${ALL_BACKUP_CATEGORIES.length})"
+  },
+  "auto_full_backup_preview": {
+    "ar": "معاينة النسخة الاحتياطية الكاملة",
+    "en": "Full Backup Preview",
+    "de": "Full Backup Preview"
+  },
+  "auto_partial_backup_preview": {
+    "ar": "معاينة النسخة الاحتياطية الجزئية",
+    "en": "Partial Backup Preview",
+    "de": "Partial Backup Preview"
+  },
+  "auto_payload_details_and_estimated": {
+    "ar": "تفاصيل البيانات المشمولة والحجم التقديري قبل التصدير",
+    "en": "Payload details and estimated size before export",
+    "de": "Payload details and estimated size before export"
+  },
+  "auto_total_records": {
+    "ar": "سجل إجمالي",
+    "en": "Total Records",
+    "de": "Total Records"
+  },
+  "auto_groups": {
+    "ar": "المجموعات",
+    "en": "Groups",
+    "de": "Groups"
+  },
+  "auto_estimated_size": {
+    "ar": "الحجم التقديري",
+    "en": "Estimated Size",
+    "de": "Estimated Size"
+  },
+  "auto_estimated_time": {
+    "ar": "وقت التخمين",
+    "en": "Estimated Time",
+    "de": "Estimated Time"
+  },
+  "auto_password_protect_encrypt_bac": {
+    "ar": "حماية الملف بكلمة مرور (تشفير AES)",
+    "en": "Password Protect & Encrypt Backup File",
+    "de": "Password Protect & Encrypt Backup File"
+  },
+  "auto_enter_encryption_password": {
+    "ar": "أدخل كلمة مرور حماية الملف...",
+    "en": "Enter encryption password...",
+    "de": "Enter encryption password..."
+  },
+  "auto_this_password_will_be_required": {
+    "ar": "سيتطلب فتح الملف أو استعادته إدخال هذه كلمة المرور.",
+    "en": "This password will be required when restoring this backup file.",
+    "de": "This password will be required when restoring this backup file."
+  },
+  "auto_creating_backup_file": {
+    "ar": "جاري إنشاء الملف...",
+    "en": "Creating backup file...",
+    "de": "Creating backup file..."
+  },
+  "auto_download_full_backup_json": {
+    "ar": "تنزيل النسخة الاحتياطية الكاملة (JSON)",
+    "en": "Download Full Backup (JSON)",
+    "de": "Download Full Backup (JSON)"
+  },
+  "auto_download_partial_backup_sel": {
+    "ar": "تنزيل النسخة الاحتياطية الجزئية (${selectedCategories.length} فئات)",
+    "en": "Download Partial Backup (${selectedCategories.length} categories)",
+    "de": "Download Partial Backup (${selectedCategories.length} categories)"
+  },
+  "auto_select_or_drop_backup_file_js": {
+    "ar": "اختر أو أسقط ملف النسخة الاحتياطية (JSON)",
+    "en": "Select or drop backup file (JSON)",
+    "de": "Select or drop backup file (JSON)"
+  },
+  "auto_supports_standard_and_password": {
+    "ar": "يدعم ملفات النسخ الاحتياطي العادية والمشفرة بكلمة مرور",
+    "en": "Supports standard and password encrypted JSON backups",
+    "de": "Supports standard and password encrypted JSON backups"
+  },
+  "auto_browse_json_file": {
+    "ar": "تصفح الجهاز لملف JSON",
+    "en": "Browse JSON File",
+    "de": "Browse JSON File"
+  },
+  "auto_this_backup_file_is_password_p": {
+    "ar": "هذا الملف مشفر بكلمة مرور",
+    "en": "This backup file is password protected",
+    "de": "This backup file is password protected"
+  },
+  "auto_enter_password_to_unlock": {
+    "ar": "أدخل كلمة المرور لفك التشفير...",
+    "en": "Enter password to unlock...",
+    "de": "Enter password to unlock..."
+  },
+  "auto_unlock": {
+    "ar": "فك التشفير",
+    "en": "Unlock",
+    "de": "Unlock"
+  },
+  "auto_backup_type_analysis_backup": {
+    "ar": "نوع النسخة: ${analysis.backupType}",
+    "en": "Backup Type: ${analysis.backupType}",
+    "de": "Backup Type: ${analysis.backupType}"
+  },
+  "auto_verified_structure": {
+    "ar": "تحليل آمن للبيانات",
+    "en": "Verified Structure",
+    "de": "Verified Structure"
+  },
+  "auto_restore_mode": {
+    "ar": "طريقة الاستعادة (Restore Mode)",
+    "en": "Restore Mode",
+    "de": "Restore Mode"
+  },
+  "auto_smart_restore_default": {
+    "ar": "استعادة ذكية (مستحسن)",
+    "en": "Smart Restore (Default)",
+    "de": "Smart Restore (Default)"
+  },
+  "auto_detect_duplicates_update_exis": {
+    "ar": "اكتشاف التكرارات، تحديث السجلات الحالية، وإضافة الجديدة بدون فقدان البيانات.",
+    "en": "Detect duplicates, update existing, add missing, maintain links.",
+    "de": "Detect duplicates, update existing, add missing, maintain links."
+  },
+  "auto_merge_mode": {
+    "ar": "دمج البيانات (Merge)",
+    "en": "Merge Mode",
+    "de": "Merge Mode"
+  },
+  "auto_keep_current_data_add_importe": {
+    "ar": "الاحتفاظ بالبيانات الحالية مع إضافة جميع سجلات الاستيراد بدون حذف.",
+    "en": "Keep current data, add imported records without deletion.",
+    "de": "Keep current data, add imported records without deletion."
+  },
+  "auto_replace_mode": {
+    "ar": "استبدال كلي (Replace)",
+    "en": "Replace Mode",
+    "de": "Replace Mode"
+  },
+  "auto_replace_current_data_with_impo": {
+    "ar": "استبدال البيانات الحالية تماماً بالبيانات المستوردة.",
+    "en": "Replace current data with imported data for selected categories.",
+    "de": "Replace current data with imported data for selected categories."
+  },
+  "auto_categories_to_restore": {
+    "ar": "اختر الفئات المراد استعادتها",
+    "en": "Categories to Restore",
+    "de": "Categories to Restore"
+  },
+  "auto_select_all_available": {
+    "ar": "تحديد كل فئات الملف",
+    "en": "Select All Available",
+    "de": "Select All Available"
+  },
+  "auto_restore_impact_report": {
+    "ar": "تقرير التأثير قبل الاستعادة (Restore Impact Report)",
+    "en": "Restore Impact Report",
+    "de": "Restore Impact Report"
+  },
+  "auto_records_to_add": {
+    "ar": "سجلات جديدة ستضاف",
+    "en": "Records to Add",
+    "de": "Records to Add"
+  },
+  "auto_records_to_update": {
+    "ar": "سجلات سيتم تحديثها",
+    "en": "Records to Update",
+    "de": "Records to Update"
+  },
+  "auto_duplicates_detected": {
+    "ar": "سجلات مكررة",
+    "en": "Duplicates Detected",
+    "de": "Duplicates Detected"
+  },
+  "auto_potential_conflicts": {
+    "ar": "تعارضات محتملة",
+    "en": "Potential Conflicts",
+    "de": "Potential Conflicts"
+  },
+  "auto_creating_restore_point_apply": {
+    "ar": "جاري إنشاء نقطة استعادة وتطبيق التغييرات...",
+    "en": "Creating Restore Point & Applying...",
+    "de": "Creating Restore Point & Applying..."
+  },
+  "auto_warning_replace_mode_will_ove": {
+    "ar": "تنبيه هام: وضع الاستبدال سيقوم باستبدال البيانات الحالية!",
+    "en": "Warning: Replace Mode will overwrite current data!",
+    "de": "Warning: Replace Mode will overwrite current data!"
+  },
+  "auto_an_automatic_restore_point_sna": {
+    "ar": "سيتم أخذ نقطة استعادة تلقائية قبل التطبيق حتى تتمكن من التراجع في أي وقت.",
+    "en": "An automatic Restore Point snapshot will be captured first so you can Undo anytime.",
+    "de": "An automatic Restore Point snapshot will be captured first so you can Undo anytime."
+  },
+  "auto_confirm_replace_restore": {
+    "ar": "تأكيد الاستبدال والاستعادة",
+    "en": "Confirm Replace & Restore",
+    "de": "Confirm Replace & Restore"
+  },
+  "auto_restore_everything": {
+    "ar": "استعادة كل شيء (Restore Everything)",
+    "en": "Restore Everything",
+    "de": "Restore Everything"
+  },
+  "auto_restore_selected_categories": {
+    "ar": "استعادة الفئات المحددة (${selectedRestoreCategories.length})",
+    "en": "Restore Selected Categories (${selectedRestoreCategories.length})",
+    "de": "Restore Selected Categories (${selectedRestoreCategories.length})"
+  },
+  "auto_automatic_backup_retention_s": {
+    "ar": "إعدادات النسخ الاحتياطي التلقائي وسجل الاحتفاظ",
+    "en": "Automatic Backup & Retention Schedule",
+    "de": "Automatic Backup & Retention Schedule"
+  },
+  "auto_schedule_periodic_background_s": {
+    "ar": "حفظ نسخ احتياطية دورية تلقائياً وتحديد عدد النسخ المحتفظ بها",
+    "en": "Schedule periodic background snapshots & set retention limits",
+    "de": "Schedule periodic background snapshots & set retention limits"
+  },
+  "auto_daily_automatic_backup": {
+    "ar": "نسخة احتياطية يومية",
+    "en": "Daily Automatic Backup",
+    "de": "Daily Automatic Backup"
+  },
+  "auto_capture_a_daily_data_snapshot": {
+    "ar": "حفظ لقطة يومية من البيانات عند فتح التطبيق",
+    "en": "Capture a daily data snapshot upon app launch",
+    "de": "Capture a daily data snapshot upon app launch"
+  },
+  "auto_weekly_automatic_backup": {
+    "ar": "نسخة احتياطية أسبوعية",
+    "en": "Weekly Automatic Backup",
+    "de": "Weekly Automatic Backup"
+  },
+  "auto_capture_a_weekly_snapshot_auto": {
+    "ar": "حفظ لقطة أسبوعية منتظمة من البيانات",
+    "en": "Capture a weekly snapshot automatically",
+    "de": "Capture a weekly snapshot automatically"
+  },
+  "auto_monthly_automatic_backup": {
+    "ar": "نسخة احتياطية شهرية",
+    "en": "Monthly Automatic Backup",
+    "de": "Monthly Automatic Backup"
+  },
+  "auto_capture_a_monthly_snapshot_for": {
+    "ar": "حفظ لقطة شهرية لمراجعة نهاية الشهر",
+    "en": "Capture a monthly snapshot for record archives",
+    "de": "Capture a monthly snapshot for record archives"
+  },
+  "auto_backup_retention_policy": {
+    "ar": "سياسة الاحتفاظ بالنسخ الاحتياطية (Retention Policy)",
+    "en": "Backup Retention Policy",
+    "de": "Backup Retention Policy"
+  },
+  "auto_keep_last_cnt": {
+    "ar": "آخر ${cnt} نسخ",
+    "en": "Keep Last ${cnt}",
+    "de": "Keep Last ${cnt}"
+  },
+  "auto_restore_operation_history": {
+    "ar": "سجل عمليات الاستعادة والصيانة",
+    "en": "Restore Operation History",
+    "de": "Restore Operation History"
+  },
+  "auto_chronological_audit_log_of_all": {
+    "ar": "عرض السجل التاريخي لجميع عمليات استعادة البيانات السابقة",
+    "en": "Chronological audit log of all previous restore operations",
+    "de": "Chronological audit log of all previous restore operations"
+  },
+  "auto_no_restore_history_logged_yet": {
+    "ar": "لا توجد عمليات استعادة مسجلة حالياً.",
+    "en": "No restore history logged yet.",
+    "de": "No restore history logged yet."
+  },
+  "auto_student_smart_card": {
+    "ar": "بطاقة الطالب الذكية",
+    "en": "STUDENT SMART CARD",
+    "de": "SCHÜLER SMART CARD"
+  },
+  "auto_active_19": {
+    "ar": "نشط ✓",
+    "en": "Active ✓",
+    "de": "Aktiv ✓"
+  },
+  "auto_archived": {
+    "ar": "مؤرشف ⚪",
+    "en": "Archived ⚪",
+    "de": "Archiviert ⚪"
+  },
+  "auto_bearbeiten": {
+    "ar": "تعديل",
+    "en": "Bearbeiten",
+    "de": "Bearbeiten"
+  },
+  "auto_l_schen": {
+    "ar": "حذف",
+    "en": "Löschen",
+    "de": "Löschen"
+  },
+  "auto_call_parent": {
+    "ar": "اتصال بالأب",
+    "en": "Call Parent",
+    "de": "Eltern anrufen"
+  },
+  "auto_call_student": {
+    "ar": "اتصال بالطالب",
+    "en": "Call Student",
+    "de": "Schüler anrufen"
+  },
+  "auto_overview": {
+    "ar": "Übersicht",
+    "en": "Overview",
+    "de": "Übersicht"
+  },
+  "auto_attendance_presentcount_l": {
+    "ar": "Anwesenheit (${presentCount + lateCount + absentCount})",
+    "en": "Attendance (${presentCount + lateCount + absentCount})",
+    "de": "Anwesenheit (${presentCount + lateCount + absentCount})"
+  },
+  "auto_grades_homework": {
+    "ar": "Noten & Aufgaben",
+    "en": "Grades & Homework",
+    "de": "Noten & Aufgaben"
+  },
+  "auto_files_student_documents_len": {
+    "ar": "Dateien (${student.documents.length})",
+    "en": "Files (${student.documents.length})",
+    "de": "Dateien (${student.documents.length})"
+  },
+  "auto_allgemeine_informationen": {
+    "ar": "ALLGEMEINE INFORMATIONEN",
+    "en": "ALLGEMEINE INFORMATIONEN",
+    "de": "ALLGEMEINE INFORMATIONEN"
+  },
+  "auto_import_group_students": {
+    "ar": "استيراد مجموعة + طلاب",
+    "en": "Import Group + Students",
+    "de": "Import Group + Students"
+  },
+  "auto_no_students_yet": {
+    "ar": "لا يوجد طلاب حتى الآن",
+    "en": "No students yet.",
+    "de": "Noch keine Schüler vorhanden"
+  },
+  "auto_add_your_first_student_to_trac": {
+    "ar": "أضف طالبك الأول للبدء في تتبع الحضور، الدروس والمدفوعات.",
+    "en": "Add your first student to track attendance, lessons, and payments.",
+    "de": "Füge deinen ersten Schüler hinzu, um Anwesenheit, Lektionen und Zahlungen zu verwalten."
+  },
+  "auto_parent": {
+    "ar": "ولي الأمر",
+    "en": "Parent",
+    "de": "Eltern"
+  },
+  "auto_student_20": {
+    "ar": "الطالب",
+    "en": "Student",
+    "de": "Schüler"
+  },
+  "auto_options": {
+    "ar": "خيارات المجموعة",
+    "en": "Options",
+    "de": "Optionen"
+  },
+  "auto_view_profile": {
+    "ar": "الملف الشخصي",
+    "en": "View Profile",
+    "de": "Profil ansehen"
+  },
+  "auto_check_attendance": {
+    "ar": "تتبع الحضور",
+    "en": "Check Attendance",
+    "de": "Anwesenheit prüfen"
+  },
+  "auto_scores_homework": {
+    "ar": "الدرجات والواجبات",
+    "en": "Scores & Homework",
+    "de": "Noten & Aufgaben"
+  },
+  "auto_payment_history": {
+    "ar": "السجلات المالية",
+    "en": "Payment History",
+    "de": "Zahlungsverlauf"
+  },
+  "auto_send_whatsapp": {
+    "ar": "إرسال واتساب",
+    "en": "Send WhatsApp",
+    "de": "WhatsApp senden"
+  },
+  "auto_call_phone": {
+    "ar": "اتصال هاتفياً",
+    "en": "Call (Phone)",
+    "de": "Anrufen (Telefon)"
+  },
+  "auto_delete_archive": {
+    "ar": "حذف أو أرشفة",
+    "en": "Delete / Archive",
+    "de": "Löschen / Archiv"
+  },
+  "auto_no_groups_yet": {
+    "ar": "لا توجد مجموعات حتى الآن",
+    "en": "No groups yet.",
+    "de": "Keine Gruppen vorhanden"
+  },
+  "auto_create_your_first_group_to_sta": {
+    "ar": "أنشئ مجموعتك الأولى للبدء في تنظيم الطلاب والدروس.",
+    "en": "Create your first group to start organizing students and lessons.",
+    "de": "Erstelle deine erste Gruppe, um Schüler und Lektionen zu organisieren."
+  },
+  "auto_view_details": {
+    "ar": "عرض تفاصيل المجموعة",
+    "en": "View Details",
+    "de": "Details anzeigen"
+  },
+  "auto_online": {
+    "ar": "أونلاين",
+    "en": "Online",
+    "de": "Online"
+  },
+  "auto_center": {
+    "ar": "سنتر",
+    "en": "Center",
+    "de": "Zentrum"
+  },
+  "auto_home": {
+    "ar": "منزل",
+    "en": "Home",
+    "de": "Zuhause"
+  },
+  "auto_private": {
+    "ar": "خاص",
+    "en": "Private",
+    "de": "Privat"
+  },
+  "auto_in_person": {
+    "ar": "حضوري",
+    "en": "In Person",
+    "de": "Vor Ort"
+  },
+  "auto_lesson": {
+    "ar": "حصة",
+    "en": "Lesson",
+    "de": "Lesson"
+  }
+}

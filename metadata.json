@@ -1,0 +1,10 @@
+{
+  "name": "Remix Gluck - German Teacher Manager",
+  "description": "Mobile-first management app for private German language teachers to track lessons, students, groups, attendance, payments, reports, and schedule.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

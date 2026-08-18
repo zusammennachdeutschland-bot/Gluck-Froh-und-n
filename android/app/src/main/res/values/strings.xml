@@ -1,0 +1,27 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Glück fröhlich und froh</string>
+    <string name="title_activity_main">Glück fröhlich und froh</string>
+    <string name="package_name">com.glueck.teacher</string>
+    <string name="custom_url_scheme">com.glueck.teacher</string>
+
+    <!-- Widget Labels -->
+    <string name="widget_name_teacher_overview">Teacher Business Overview</string>
+    <string name="widget_name_today_lessons">Today\'s Lessons</string>
+    <string name="widget_name_upcoming_lessons">Upcoming Lessons</string>
+    <string name="widget_name_revenue_tracker">Revenue Tracker</string>
+    <string name="widget_name_payment_tracker">Payment Tracker</string>
+    <string name="widget_name_quick_actions">Quick Attendance</string>
+    <string name="widget_name_current_lesson">Current Active Lesson</string>
+    <string name="widget_name_todo_tasks">To-Do Tasks</string>
+
+    <!-- Widget Descriptions -->
+    <string name="widget_desc_teacher_overview">Summary of daily lessons, total students, attendance rate, monthly revenue, and overdue payments.</string>
+    <string name="widget_desc_today_lessons">View scheduled lessons for today with real-time status updates.</string>
+    <string name="widget_desc_upcoming_lessons">View the next upcoming lessons and student counts.</string>
+    <string name="widget_desc_revenue_tracker">Track daily, weekly, and monthly revenue against your target goal.</string>
+    <string name="widget_desc_payment_tracker">Monitor overdue student payments and total outstanding balances.</string>
+    <string name="widget_desc_quick_actions">Quick shortcuts to start lessons, add students, collect payments, and send messages.</string>
+    <string name="widget_desc_current_lesson">Live stopwatch timer, group name, and attendance for the active lesson.</string>
+    <string name="widget_desc_todo_tasks">Quick access to open teacher tasks and to-do items.</string>
+</resources>

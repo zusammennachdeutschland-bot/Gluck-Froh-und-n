@@ -1,0 +1,653 @@
+@import "tailwindcss";
+
+:root {
+  --sat: env(safe-area-inset-top, 24px);
+  --sab: env(safe-area-inset-bottom, 16px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+.pt-safe-top {
+  padding-top: max(24px, env(safe-area-inset-top, 24px));
+}
+
+.pb-safe-bottom {
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 16px));
+}
+
+.modal-safe-top {
+  padding-top: max(24px, env(safe-area-inset-top, 24px));
+}
+
+@variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  body {
+    overscroll-behavior-y: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input, textarea, p, h1, h2, h3, h4, h5, h6, span {
+    user-select: auto;
+  }
+  
+  /* Touch-friendly target utilities */
+  button, a {
+    touch-action: manipulation;
+  }
+}
+
+@layer utilities {
+  @keyframes wave {
+    0%, 100% { transform: rotate(0deg); }
+    20%, 60% { transform: rotate(14deg); }
+    40%, 80% { transform: rotate(-8deg); }
+  }
+
+  @keyframes scaleUp {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .animate-wave {
+    animation: wave 2s infinite ease-in-out;
+    transform-origin: 70% 70%;
+  }
+
+  .animate-scale-up {
+    animation: scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.6);
+}
+
+/* AMOLED Dark Mode Theme Overrides - Strictly applied to dark mode only to keep Light Mode untouched */
+
+:root.accent-pink {
+  --primary: var(--color-pink-500);
+  --primary-hover: var(--color-pink-600);
+  --primary-soft: color-mix(in srgb, var(--color-pink-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-pink-500) 20%, transparent);
+  --primary-glow: var(--color-pink-500);
+}
+.dark.accent-pink {
+  --primary: var(--color-pink-500);
+  --primary-hover: var(--color-pink-400);
+  --primary-soft: color-mix(in srgb, var(--color-pink-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-pink-500) 30%, transparent);
+  --primary-glow: var(--color-pink-500);
+}
+:root.accent-lime {
+  --primary: var(--color-lime-500);
+  --primary-hover: var(--color-lime-600);
+  --primary-soft: color-mix(in srgb, var(--color-lime-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-lime-500) 20%, transparent);
+  --primary-glow: var(--color-lime-500);
+}
+.dark.accent-lime {
+  --primary: var(--color-lime-500);
+  --primary-hover: var(--color-lime-400);
+  --primary-soft: color-mix(in srgb, var(--color-lime-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-lime-500) 30%, transparent);
+  --primary-glow: var(--color-lime-500);
+}
+
+
+:root.accent-darkblue {
+  --primary: var(--color-blue-800);
+  --primary-hover: var(--color-blue-900);
+  --primary-soft: color-mix(in srgb, var(--color-blue-800) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-blue-800) 20%, transparent);
+  --primary-glow: var(--color-blue-800);
+}
+.dark.accent-darkblue {
+  --primary: var(--color-blue-600);
+  --primary-hover: var(--color-blue-500);
+  --primary-soft: color-mix(in srgb, var(--color-blue-600) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-blue-600) 30%, transparent);
+  --primary-glow: var(--color-blue-600);
+}
+
+@theme {
+  --color-slate-950: #000000;
+  --color-slate-900: #050507;
+  --color-slate-850: #0c0d12;
+  --color-slate-800: #12131a;
+  --color-slate-750: #161821;
+  --color-slate-700: #1e293b;
+}
+
+/* Custom premium scrollbar overrides for dark mode */
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(51, 65, 85, 0.6);
+}
+
+/* Ensure inputs and lists have high readability and contrast in dark mode */
+.dark input, 
+.dark select, 
+.dark textarea {
+  color-scheme: dark;
+}
+
+/* AMOLED Pitch Black background and pristine high-contrast borders */
+.dark .bg-slate-900,
+.dark .bg-slate-950,
+.dark .bg-white,
+.dark .bg-black {
+  background-color: #000000 !important;
+}
+
+.dark .bg-slate-50,
+.dark .bg-slate-100,
+.dark .dark\:bg-slate-800,
+.dark .dark\:bg-slate-850,
+.dark .bg-slate-800 {
+  background-color: #0a0c10 !important; /* Deepest onyx slate */
+}
+
+/* Ensure precise, crisp readable text colors */
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-slate-700 {
+  color: #f8fafc !important;
+}
+
+.dark .text-slate-600 {
+  color: #e2e8f0 !important;
+}
+
+.dark .text-slate-500,
+.dark .text-slate-400 {
+  color: #cbd5e1 !important;
+}
+
+/* Force modern high-contrast borders */
+.dark .border,
+.dark .border-t,
+.dark .border-b,
+.dark .border-l,
+.dark .border-r,
+.dark .border-x,
+.dark .border-y,
+.dark .border-slate-100,
+.dark .border-slate-200,
+.dark .border-slate-300,
+.dark .dark\:border-slate-800,
+.dark .dark\:border-slate-900 {
+  border-color: #1a1e26 !important;
+}
+
+
+
+/* Design Token System v2 */
+
+:root.accent-pink {
+  --primary: var(--color-pink-500);
+  --primary-hover: var(--color-pink-600);
+  --primary-soft: color-mix(in srgb, var(--color-pink-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-pink-500) 20%, transparent);
+  --primary-glow: var(--color-pink-500);
+}
+.dark.accent-pink {
+  --primary: var(--color-pink-500);
+  --primary-hover: var(--color-pink-400);
+  --primary-soft: color-mix(in srgb, var(--color-pink-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-pink-500) 30%, transparent);
+  --primary-glow: var(--color-pink-500);
+}
+:root.accent-lime {
+  --primary: var(--color-lime-500);
+  --primary-hover: var(--color-lime-600);
+  --primary-soft: color-mix(in srgb, var(--color-lime-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-lime-500) 20%, transparent);
+  --primary-glow: var(--color-lime-500);
+}
+.dark.accent-lime {
+  --primary: var(--color-lime-500);
+  --primary-hover: var(--color-lime-400);
+  --primary-soft: color-mix(in srgb, var(--color-lime-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-lime-500) 30%, transparent);
+  --primary-glow: var(--color-lime-500);
+}
+
+
+:root.accent-darkblue {
+  --primary: var(--color-blue-800);
+  --primary-hover: var(--color-blue-900);
+  --primary-soft: color-mix(in srgb, var(--color-blue-800) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-blue-800) 20%, transparent);
+  --primary-glow: var(--color-blue-800);
+}
+.dark.accent-darkblue {
+  --primary: var(--color-blue-600);
+  --primary-hover: var(--color-blue-500);
+  --primary-soft: color-mix(in srgb, var(--color-blue-600) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-blue-600) 30%, transparent);
+  --primary-glow: var(--color-blue-600);
+}
+
+@theme {
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-border: var(--primary-border);
+  --color-primary-glow: var(--primary-glow);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-border: var(--surface-border);
+  --color-surface-border-soft: var(--surface-border-soft);
+  --color-background: var(--background);
+  --color-text-main: var(--text-main);
+  --color-text-muted: var(--text-muted);
+}
+
+:root, :root.accent-blue {
+  --primary: var(--color-blue-500);
+  --primary-hover: var(--color-blue-600);
+  --primary-soft: color-mix(in srgb, var(--color-blue-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-blue-500) 20%, transparent);
+  --primary-glow: var(--color-blue-500);
+  
+  --surface: #ffffff;
+  --surface-hover: #f8fafc;
+  --surface-border: #e2e8f0;
+  --surface-border-soft: #f1f5f9;
+  --background: #f8fafc;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+}
+.dark, .dark.accent-blue {
+  --primary: var(--color-blue-500);
+  --primary-hover: var(--color-blue-400);
+  --primary-soft: color-mix(in srgb, var(--color-blue-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-blue-500) 30%, transparent);
+  --primary-glow: var(--color-blue-500);
+  
+  --surface: color-mix(in srgb, var(--color-blue-500) 4%, #0a0c10);
+  --surface-hover: color-mix(in srgb, var(--color-blue-500) 8%, #12131a);
+  --surface-border: color-mix(in srgb, var(--color-blue-500) 15%, #1e293b);
+  --surface-border-soft: color-mix(in srgb, var(--color-blue-500) 8%, #161821);
+  --background: #000000;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+}
+
+:root.accent-green {
+  --primary: var(--color-green-500);
+  --primary-hover: var(--color-green-600);
+  --primary-soft: color-mix(in srgb, var(--color-green-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-green-500) 20%, transparent);
+  --primary-glow: var(--color-green-500);
+  
+  --surface: #ffffff;
+  --surface-hover: #f8fafc;
+  --surface-border: #e2e8f0;
+  --surface-border-soft: #f1f5f9;
+  --background: #f8fafc;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+}
+.dark.dark.accent-green {
+  --primary: var(--color-green-500);
+  --primary-hover: var(--color-green-400);
+  --primary-soft: color-mix(in srgb, var(--color-green-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-green-500) 30%, transparent);
+  --primary-glow: var(--color-green-500);
+  
+  --surface: color-mix(in srgb, var(--color-green-500) 4%, #0a0c10);
+  --surface-hover: color-mix(in srgb, var(--color-green-500) 8%, #12131a);
+  --surface-border: color-mix(in srgb, var(--color-green-500) 15%, #1e293b);
+  --surface-border-soft: color-mix(in srgb, var(--color-green-500) 8%, #161821);
+  --background: #000000;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+}
+
+:root.accent-purple {
+  --primary: var(--color-purple-500);
+  --primary-hover: var(--color-purple-600);
+  --primary-soft: color-mix(in srgb, var(--color-purple-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-purple-500) 20%, transparent);
+  --primary-glow: var(--color-purple-500);
+  
+  --surface: #ffffff;
+  --surface-hover: #f8fafc;
+  --surface-border: #e2e8f0;
+  --surface-border-soft: #f1f5f9;
+  --background: #f8fafc;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+}
+.dark.dark.accent-purple {
+  --primary: var(--color-purple-500);
+  --primary-hover: var(--color-purple-400);
+  --primary-soft: color-mix(in srgb, var(--color-purple-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-purple-500) 30%, transparent);
+  --primary-glow: var(--color-purple-500);
+  
+  --surface: color-mix(in srgb, var(--color-purple-500) 4%, #0a0c10);
+  --surface-hover: color-mix(in srgb, var(--color-purple-500) 8%, #12131a);
+  --surface-border: color-mix(in srgb, var(--color-purple-500) 15%, #1e293b);
+  --surface-border-soft: color-mix(in srgb, var(--color-purple-500) 8%, #161821);
+  --background: #000000;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+}
+
+:root.accent-orange {
+  --primary: var(--color-orange-500);
+  --primary-hover: var(--color-orange-600);
+  --primary-soft: color-mix(in srgb, var(--color-orange-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-orange-500) 20%, transparent);
+  --primary-glow: var(--color-orange-500);
+  
+  --surface: #ffffff;
+  --surface-hover: #f8fafc;
+  --surface-border: #e2e8f0;
+  --surface-border-soft: #f1f5f9;
+  --background: #f8fafc;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+}
+.dark.dark.accent-orange {
+  --primary: var(--color-orange-500);
+  --primary-hover: var(--color-orange-400);
+  --primary-soft: color-mix(in srgb, var(--color-orange-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-orange-500) 30%, transparent);
+  --primary-glow: var(--color-orange-500);
+  
+  --surface: color-mix(in srgb, var(--color-orange-500) 4%, #0a0c10);
+  --surface-hover: color-mix(in srgb, var(--color-orange-500) 8%, #12131a);
+  --surface-border: color-mix(in srgb, var(--color-orange-500) 15%, #1e293b);
+  --surface-border-soft: color-mix(in srgb, var(--color-orange-500) 8%, #161821);
+  --background: #000000;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+}
+
+:root.accent-red {
+  --primary: var(--color-red-500);
+  --primary-hover: var(--color-red-600);
+  --primary-soft: color-mix(in srgb, var(--color-red-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-red-500) 20%, transparent);
+  --primary-glow: var(--color-red-500);
+  
+  --surface: #ffffff;
+  --surface-hover: #f8fafc;
+  --surface-border: #e2e8f0;
+  --surface-border-soft: #f1f5f9;
+  --background: #f8fafc;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+}
+.dark.dark.accent-red {
+  --primary: var(--color-red-500);
+  --primary-hover: var(--color-red-400);
+  --primary-soft: color-mix(in srgb, var(--color-red-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-red-500) 30%, transparent);
+  --primary-glow: var(--color-red-500);
+  
+  --surface: color-mix(in srgb, var(--color-red-500) 4%, #0a0c10);
+  --surface-hover: color-mix(in srgb, var(--color-red-500) 8%, #12131a);
+  --surface-border: color-mix(in srgb, var(--color-red-500) 15%, #1e293b);
+  --surface-border-soft: color-mix(in srgb, var(--color-red-500) 8%, #161821);
+  --background: #000000;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+}
+
+:root.accent-teal {
+  --primary: var(--color-teal-500);
+  --primary-hover: var(--color-teal-600);
+  --primary-soft: color-mix(in srgb, var(--color-teal-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-teal-500) 20%, transparent);
+  --primary-glow: var(--color-teal-500);
+  
+  --surface: #ffffff;
+  --surface-hover: #f8fafc;
+  --surface-border: #e2e8f0;
+  --surface-border-soft: #f1f5f9;
+  --background: #f8fafc;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+}
+.dark.dark.accent-teal {
+  --primary: var(--color-teal-500);
+  --primary-hover: var(--color-teal-400);
+  --primary-soft: color-mix(in srgb, var(--color-teal-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-teal-500) 30%, transparent);
+  --primary-glow: var(--color-teal-500);
+  
+  --surface: color-mix(in srgb, var(--color-teal-500) 4%, #0a0c10);
+  --surface-hover: color-mix(in srgb, var(--color-teal-500) 8%, #12131a);
+  --surface-border: color-mix(in srgb, var(--color-teal-500) 15%, #1e293b);
+  --surface-border-soft: color-mix(in srgb, var(--color-teal-500) 8%, #161821);
+  --background: #000000;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+}
+
+:root.accent-indigo {
+  --primary: var(--color-indigo-500);
+  --primary-hover: var(--color-indigo-600);
+  --primary-soft: color-mix(in srgb, var(--color-indigo-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-indigo-500) 20%, transparent);
+  --primary-glow: var(--color-indigo-500);
+  
+  --surface: #ffffff;
+  --surface-hover: #f8fafc;
+  --surface-border: #e2e8f0;
+  --surface-border-soft: #f1f5f9;
+  --background: #f8fafc;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+}
+.dark.dark.accent-indigo {
+  --primary: var(--color-indigo-500);
+  --primary-hover: var(--color-indigo-400);
+  --primary-soft: color-mix(in srgb, var(--color-indigo-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-indigo-500) 30%, transparent);
+  --primary-glow: var(--color-indigo-500);
+  
+  --surface: color-mix(in srgb, var(--color-indigo-500) 4%, #0a0c10);
+  --surface-hover: color-mix(in srgb, var(--color-indigo-500) 8%, #12131a);
+  --surface-border: color-mix(in srgb, var(--color-indigo-500) 15%, #1e293b);
+  --surface-border-soft: color-mix(in srgb, var(--color-indigo-500) 8%, #161821);
+  --background: #000000;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+}
+
+:root.accent-rose {
+  --primary: var(--color-rose-500);
+  --primary-hover: var(--color-rose-600);
+  --primary-soft: color-mix(in srgb, var(--color-rose-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-rose-500) 20%, transparent);
+  --primary-glow: var(--color-rose-500);
+}
+.dark.accent-rose {
+  --primary: var(--color-rose-500);
+  --primary-hover: var(--color-rose-400);
+  --primary-soft: color-mix(in srgb, var(--color-rose-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-rose-500) 30%, transparent);
+  --primary-glow: var(--color-rose-500);
+}
+:root.accent-amber {
+  --primary: var(--color-amber-500);
+  --primary-hover: var(--color-amber-600);
+  --primary-soft: color-mix(in srgb, var(--color-amber-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-amber-500) 20%, transparent);
+  --primary-glow: var(--color-amber-500);
+}
+.dark.accent-amber {
+  --primary: var(--color-amber-500);
+  --primary-hover: var(--color-amber-400);
+  --primary-soft: color-mix(in srgb, var(--color-amber-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-amber-500) 30%, transparent);
+  --primary-glow: var(--color-amber-500);
+}
+:root.accent-emerald {
+  --primary: var(--color-emerald-500);
+  --primary-hover: var(--color-emerald-600);
+  --primary-soft: color-mix(in srgb, var(--color-emerald-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-emerald-500) 20%, transparent);
+  --primary-glow: var(--color-emerald-500);
+}
+.dark.accent-emerald {
+  --primary: var(--color-emerald-500);
+  --primary-hover: var(--color-emerald-400);
+  --primary-soft: color-mix(in srgb, var(--color-emerald-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-emerald-500) 30%, transparent);
+  --primary-glow: var(--color-emerald-500);
+}
+:root.accent-fuchsia {
+  --primary: var(--color-fuchsia-500);
+  --primary-hover: var(--color-fuchsia-600);
+  --primary-soft: color-mix(in srgb, var(--color-fuchsia-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-fuchsia-500) 20%, transparent);
+  --primary-glow: var(--color-fuchsia-500);
+}
+.dark.accent-fuchsia {
+  --primary: var(--color-fuchsia-500);
+  --primary-hover: var(--color-fuchsia-400);
+  --primary-soft: color-mix(in srgb, var(--color-fuchsia-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-fuchsia-500) 30%, transparent);
+  --primary-glow: var(--color-fuchsia-500);
+}
+:root.accent-cyan {
+  --primary: var(--color-cyan-500);
+  --primary-hover: var(--color-cyan-600);
+  --primary-soft: color-mix(in srgb, var(--color-cyan-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-cyan-500) 20%, transparent);
+  --primary-glow: var(--color-cyan-500);
+}
+.dark.accent-cyan {
+  --primary: var(--color-cyan-500);
+  --primary-hover: var(--color-cyan-400);
+  --primary-soft: color-mix(in srgb, var(--color-cyan-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-cyan-500) 30%, transparent);
+  --primary-glow: var(--color-cyan-500);
+}
+:root.accent-violet {
+  --primary: var(--color-violet-500);
+  --primary-hover: var(--color-violet-600);
+  --primary-soft: color-mix(in srgb, var(--color-violet-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-violet-500) 20%, transparent);
+  --primary-glow: var(--color-violet-500);
+}
+.dark.accent-violet {
+  --primary: var(--color-violet-500);
+  --primary-hover: var(--color-violet-400);
+  --primary-soft: color-mix(in srgb, var(--color-violet-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-violet-500) 30%, transparent);
+  --primary-glow: var(--color-violet-500);
+}
+:root.accent-slate {
+  --primary: var(--color-slate-500);
+  --primary-hover: var(--color-slate-600);
+  --primary-soft: color-mix(in srgb, var(--color-slate-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-slate-500) 20%, transparent);
+  --primary-glow: var(--color-slate-500);
+}
+.dark.accent-slate {
+  --primary: var(--color-slate-500);
+  --primary-hover: var(--color-slate-400);
+  --primary-soft: color-mix(in srgb, var(--color-slate-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-slate-500) 30%, transparent);
+  --primary-glow: var(--color-slate-500);
+}
+
+
+:root.accent-pink {
+  --primary: var(--color-pink-500);
+  --primary-hover: var(--color-pink-600);
+  --primary-soft: color-mix(in srgb, var(--color-pink-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-pink-500) 20%, transparent);
+  --primary-glow: var(--color-pink-500);
+}
+.dark.accent-pink {
+  --primary: var(--color-pink-500);
+  --primary-hover: var(--color-pink-400);
+  --primary-soft: color-mix(in srgb, var(--color-pink-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-pink-500) 30%, transparent);
+  --primary-glow: var(--color-pink-500);
+}
+:root.accent-lime {
+  --primary: var(--color-lime-500);
+  --primary-hover: var(--color-lime-600);
+  --primary-soft: color-mix(in srgb, var(--color-lime-500) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-lime-500) 20%, transparent);
+  --primary-glow: var(--color-lime-500);
+}
+.dark.accent-lime {
+  --primary: var(--color-lime-500);
+  --primary-hover: var(--color-lime-400);
+  --primary-soft: color-mix(in srgb, var(--color-lime-500) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-lime-500) 30%, transparent);
+  --primary-glow: var(--color-lime-500);
+}
+
+
+:root.accent-darkblue {
+  --primary: var(--color-blue-800);
+  --primary-hover: var(--color-blue-900);
+  --primary-soft: color-mix(in srgb, var(--color-blue-800) 10%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-blue-800) 20%, transparent);
+  --primary-glow: var(--color-blue-800);
+}
+.dark.accent-darkblue {
+  --primary: var(--color-blue-600);
+  --primary-hover: var(--color-blue-500);
+  --primary-soft: color-mix(in srgb, var(--color-blue-600) 15%, transparent);
+  --primary-border: color-mix(in srgb, var(--color-blue-600) 30%, transparent);
+  --primary-glow: var(--color-blue-600);
+}
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', 'Alexandria', system-ui, sans-serif;
+}
+
+@layer base {
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold tracking-tight;
+  }
+  
+  body {
+    @apply antialiased text-slate-800 dark:text-slate-200 leading-relaxed;
+  }
+
+  p {
+    @apply leading-relaxed;
+  }
+  
+  .font-arabic {
+    font-family: 'Alexandria', sans-serif;
+  }
+}

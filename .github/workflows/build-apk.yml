@@ -1,0 +1,170 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Diagnostic LFS/CRLF Check
+        run: ls -la public/logo.png && file public/logo.png && head -c 50 public/logo.png | xxd
+
+      - name: Verify Android Configuration
+        run: |
+          echo "Verifying Application ID..."
+          grep -q "applicationId \"com.glueck.teacher\"" android/app/build.gradle || (echo "ERROR: Missing/Incorrect applicationId" && exit 1)
+          
+          echo "Verifying Version Code Auto-Increment..."
+          grep -q "GITHUB_RUN_NUMBER" android/app/build.gradle || (echo "ERROR: Missing GITHUB_RUN_NUMBER for versionCode" && exit 1)
+
+          echo "Verifying Release Signing Configuration..."
+          grep -q "storeFile file('release.keystore')" android/app/build.gradle || (echo "ERROR: Missing release keystore configuration" && exit 1)
+          echo "All verifications passed."
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Restore & Verify Release Keystore
+        run: |
+          if [ -f "android/app/release.keystore.b64" ]; then
+            echo "Decoding release.keystore.b64..."
+            base64 -d android/app/release.keystore.b64 > android/app/release.keystore
+          else
+            echo "ERROR: Base64 keystore missing at android/app/release.keystore.b64"
+            exit 1
+          fi
+          
+          if [ ! -f "android/app/release.keystore" ]; then
+            echo "ERROR: Release keystore missing after decode!"
+            exit 1
+          fi
+          
+          echo "Verifying keystore integrity with keytool..."
+          keytool -list -v -keystore android/app/release.keystore -storepass glueck2026 || (echo "ERROR: Keystore integrity check failed!" && exit 1)
+          echo "Release keystore verified."
+
+      - name: Force Clean Stale Build Artifacts
+        run: |
+          echo "Removing stale dist/ and android web assets..."
+          rm -rf dist android/app/src/main/assets/public
+
+      - name: Install Dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Restore Pristine Binaries (Failsafe)
+        run: node scripts/restore_binaries.cjs
+
+      - name: Build Web Application
+        run: CI=true npm run build
+
+      - name: Verify Web Build Output
+        run: |
+          if [ ! -f "dist/index.html" ]; then
+            echo "ERROR: Web build failed - dist/index.html missing!"
+            exit 1
+          fi
+          echo "Web build successfully verified in dist/."
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Verify Android Asset Sync
+        run: |
+          if [ ! -f "android/app/src/main/assets/public/index.html" ]; then
+            echo "ERROR: Capacitor sync failed - android assets missing!"
+            exit 1
+          fi
+          echo "Android public assets verified."
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+          validate-wrappers: false
+
+      - name: Ensure Valid Gradle Wrapper
+        run: |
+          cd android
+          mkdir -p gradle/wrapper
+          
+          if command -v gradle >/dev/null 2>&1; then
+            echo "Generating clean Gradle wrapper via system Gradle..."
+            gradle wrapper --gradle-version 8.9 --distribution-type bin
+          fi
+
+          echo "Ensuring gradle-wrapper.properties..."
+          cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-bin.zip
+          networkTimeout=10000
+          validateDistributionUrl=true
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+
+      - name: Build Debug & Release APKs
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew clean assembleDebug assembleRelease --stacktrace
+
+      - name: Verify APKs Generated
+        run: |
+          if [ ! -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+            echo "ERROR: Debug APK build failed - output file missing!"
+            exit 1
+          fi
+          if [ ! -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
+            echo "ERROR: Release APK build failed - output file missing!"
+            exit 1
+          fi
+          echo "Both APKs successfully generated."
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glueck-Debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glueck-Release-APK
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Produce Build Summary
+        run: |
+          VERSION_CODE=$((200 + ${GITHUB_RUN_NUMBER:-1}))
+          echo "### 🚀 Android Build Success" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application ID:** com.glueck.teacher" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version Name:** 2.0" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version Code:** ${VERSION_CODE}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Signing Status:** Permanent Release Keystore Confirmed" >> $GITHUB_STEP_SUMMARY
+          echo "#### 📦 Generated Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- 🛠️ **Debug APK:** \`android/app/build/outputs/apk/debug/app-debug.apk\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📱 **Release APK:** \`android/app/build/outputs/apk/release/app-release.apk\`" >> $GITHUB_STEP_SUMMARY

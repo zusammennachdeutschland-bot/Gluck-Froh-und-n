@@ -1,0 +1,31 @@
+import { CapacitorConfig } from '@capacitor/cli';
+
+const config: CapacitorConfig = {
+  appId: 'com.glueck.teacher',
+  appName: 'Glück',
+  webDir: 'dist',
+  server: {
+    androidScheme: 'https'
+  },
+  plugins: {
+    StatusBar: {
+      overlaysWebView: true,
+      style: 'DARK',
+      backgroundColor: '#00000000'
+    },
+    LocalNotifications: {
+      smallIcon: 'ic_launcher_monochrome',
+      iconColor: '#2563EB',
+      sound: 'beep.wav'
+    },
+    SplashScreen: {
+      launchShowDuration: 1500,
+      launchAutoHide: true,
+      backgroundColor: "#ffffff",
+      androidSplashResourceName: "splash",
+      showSpinner: false
+    }
+  }
+};
+
+export default config;
