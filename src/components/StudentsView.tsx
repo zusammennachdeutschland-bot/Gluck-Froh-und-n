@@ -334,7 +334,7 @@ export const StudentsView: React.FC = () => {
 
       {/* STUDENTS LIST SEGMENT */}
       {activeSegment === 'students' && (
-        <div className="space-y-2.5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {sortedStudents.length === 0 ? (
             <div className="bg-surface border border-surface-border rounded-lg p-5 text-center space-y-2">
               <p className="text-sm font-bold text-text-main">
@@ -532,7 +532,7 @@ export const StudentsView: React.FC = () => {
 
       {/* GROUPS LIST SEGMENT */}
       {activeSegment === 'groups' && (
-        <div className="space-y-2.5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {filteredGroups.length === 0 ? (
             <div className="bg-surface border border-surface-border rounded-lg p-5 text-center space-y-2">
               <p className="text-sm font-bold text-text-main">

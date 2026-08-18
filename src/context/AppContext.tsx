@@ -3,7 +3,8 @@ import {
   TeacherProfile, Group, Student, Lesson, PaymentRecord, NotificationItem, 
   LessonReport, StudentDocument, PaymentStatus, LessonStatus, AttendanceStatus, HomeworkStatus, SyncStatus, BackupData, BackupIntegrityReport, StudentPaymentDetail, AppLanguage, AccentColor, RecentlyDeletedData, ActiveLessonSession,
   InspirationSettings, InspirationMessage, InspirationFrequency, InspirationDisplayMethod, InspirationSource,
-  NotificationSettings, ScheduledNotificationItem, TeacherSettingsRecord, SyncCycleReport, PendingOutboxSummary, SyncHistoryEntry
+  NotificationSettings, ScheduledNotificationItem, TeacherSettingsRecord, SyncCycleReport, PendingOutboxSummary, SyncHistoryEntry,
+  CertificateRecord
 } from '../types';
 import { 
   clearActiveLessonNotification, getPendingScheduledNotifications, 
@@ -56,8 +57,18 @@ interface AppContextType {
   setAccentColor: (color: AccentColor) => void;
   t: (key: TranslationKey) => string;
   _t: (ar: string, en: string, de?: string) => string;
-  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime';
-  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime') => void;
+  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates';
+  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates') => void;
+
+  // Certificates
+  certificates: CertificateRecord[];
+  addCertificate: (cert: Omit<CertificateRecord, 'id' | 'createdAt'> & { id?: string }) => CertificateRecord;
+  addCertificatesBulk: (certs: (Omit<CertificateRecord, 'id' | 'createdAt'> & { id?: string })[]) => CertificateRecord[];
+  updateCertificate: (id: string, updates: Partial<CertificateRecord>) => void;
+  deleteCertificate: (id: string) => void;
+  setCertificates: React.Dispatch<React.SetStateAction<CertificateRecord[]>>;
+  updateStudentCertificateName: (studentId: string, certName: string) => void;
+  updateStudentCertificateNamesBulk: (updates: { studentId: string; certificateName: string }[]) => void;
 
   // Global Search & Recently Deleted Modals
   isGlobalSearchOpen: boolean;
@@ -395,7 +406,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('dl_quick_todos', todos);
   }, [todos]);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates'>('home');
 
   const [profile, setProfile] = useState<TeacherProfile>(() => {
     const saved = initialData['dl_profile'];
@@ -545,6 +556,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     const saved = initialData['dl_notifications'];
     const raw: NotificationItem[] = saved !== null && saved !== undefined ? saved : INITIAL_NOTIFICATIONS;
+    const seen = new Set<string>();
+    return raw.map((item, idx) => {
+      if (seen.has(item.id)) {
+        const newId = `${item.id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+        return { ...item, id: newId };
+      }
+      seen.add(item.id);
+      return item;
+    });
+  });
+
+  const [certificates, setCertificates] = useState<CertificateRecord[]>(() => {
+    const saved = initialData['dl_certificates'];
+    const raw: CertificateRecord[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       if (seen.has(item.id)) {
@@ -793,6 +818,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!isInitializedRef.current) return;
     storage.setItem('dl_inspiration_messages', inspirationMessages);
   }, [inspirationMessages]);
+
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('dl_certificates', certificates);
+  }, [certificates]);
 
   // Inspiration Handlers
   const updateInspirationSettings = (updates: Partial<InspirationSettings>) => {
@@ -1343,6 +1373,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       ...s,
       documents: s.documents.filter(d => d.id !== docId)
     } : s));
+  };
+
+  const updateStudentCertificateName = (studentId: string, certName: string) => {
+    setStudents(prev => prev.map(s => (s.id === studentId ? wrapMutation({ ...s, certificateName: certName } as Student) : s)));
+  };
+
+  const updateStudentCertificateNamesBulk = (updates: { studentId: string; certificateName: string }[]) => {
+    const updateMap = new Map(updates.map(u => [u.studentId, u.certificateName]));
+    setStudents(prev => {
+      const nextList = (prev || []).map(st => {
+        if (updateMap.has(st.id)) {
+          return wrapMutation({ ...st, certificateName: updateMap.get(st.id)! } as Student);
+        }
+        return st;
+      });
+      return nextList;
+    });
+  };
+
+  const addCertificate = (cert: Omit<CertificateRecord, 'id' | 'createdAt'> & { id?: string }): CertificateRecord => {
+    const newCert: CertificateRecord = {
+      ...cert,
+      id: cert.id || `cert_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: Date.now(),
+      originDeviceId: syncStateRef.current?.localDeviceId || 'local',
+      originRevision: syncRevisionRef.current + 1,
+      deleted: false,
+    };
+    const tracked = wrapMutation(newCert);
+    setCertificates(prev => [tracked, ...(prev || [])]);
+    return tracked;
+  };
+
+  const addCertificatesBulk = (certsList: (Omit<CertificateRecord, 'id' | 'createdAt'> & { id?: string })[]): CertificateRecord[] => {
+    const createdList: CertificateRecord[] = certsList.map(c => {
+      const newCert: CertificateRecord = {
+        ...c,
+        id: c.id || `cert_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        createdAt: Date.now(),
+        originDeviceId: syncStateRef.current?.localDeviceId || 'local',
+        originRevision: syncRevisionRef.current + 1,
+        deleted: false,
+      };
+      return wrapMutation(newCert);
+    });
+
+    setCertificates(prev => [...createdList, ...(prev || [])]);
+    return createdList;
+  };
+
+  const updateCertificate = (id: string, updates: Partial<CertificateRecord>) => {
+    setCertificates(prev => (prev || []).map(c => (c.id === id ? wrapMutation({ ...c, ...updates, updatedAt: Date.now() } as CertificateRecord) : c)));
+  };
+
+  const deleteCertificate = (id: string) => {
+    setCertificates(prev => (prev || []).map(c => (c.id === id ? wrapDeletion(c) : c)));
   };
 
   // Recently Deleted (Soft Delete Recovery)
@@ -2208,6 +2294,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setLessons([]);
     setPayments([]);
     setNotifications([]);
+    setCertificates([]);
     setRecentlyDeleted({ students: [], groups: [], lessons: [] });
     setDismissedDashboardLessonIds([]);
     setProfile(INITIAL_TEACHER_PROFILE);
@@ -2344,6 +2431,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       lessons,
       payments,
       notifications,
+      certificates,
       inspirationSettings,
       inspirationMessages,
       syncQueue: []
@@ -2375,6 +2463,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (data.lessons) setLessons(data.lessons);
       if (data.payments) setPayments(data.payments);
       if (data.notifications) setNotifications(data.notifications);
+      if (data.certificates) setCertificates(data.certificates);
       if (data.inspirationSettings) setInspirationSettings(data.inspirationSettings);
       if (data.inspirationMessages) setInspirationMessages(data.inspirationMessages);
 
@@ -2419,6 +2508,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       lessons,
       payments,
       notifications,
+      certificates,
       inspirationSettings,
       inspirationMessages,
       syncQueue: [],
@@ -2840,6 +2930,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         toggleStudentPaymentStatus,
         updateStudentPaymentPlan,
         updateLessonPaymentStatus,
+        certificates: getActiveRecords(certificates || []),
+        addCertificate,
+        addCertificatesBulk,
+        updateCertificate,
+        deleteCertificate,
+        setCertificates,
+        updateStudentCertificateName,
+        updateStudentCertificateNamesBulk,
         notifications: getActiveRecords(notifications),
         markNotificationRead,
         markAllNotificationsRead,

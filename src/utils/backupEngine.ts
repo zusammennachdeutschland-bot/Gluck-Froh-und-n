@@ -1,6 +1,7 @@
 import { 
   Student, Group, Lesson, PaymentRecord, NotificationItem, 
-  TeacherProfile, NotificationSettings, InspirationSettings, InspirationMessage, TodoItem 
+  TeacherProfile, NotificationSettings, InspirationSettings, InspirationMessage, TodoItem,
+  CertificateRecord
 } from '../types';
 import { formatLocalDate } from './timeUtils';
 
@@ -18,7 +19,8 @@ export type BackupCategory =
   | 'meeting_links'
   | 'reports'
   | 'dashboard'
-  | 'notifications';
+  | 'notifications'
+  | 'certificates';
 
 export const ALL_BACKUP_CATEGORIES: { id: BackupCategory; labelKey: string; labelEn: string; labelAr: string; icon: string; descriptionEn: string; descriptionAr: string }[] = [
   { id: 'students', labelKey: 'students', labelEn: 'Students', labelAr: 'الطلاب', icon: 'User', descriptionEn: 'All student profiles, parents, & notes', descriptionAr: 'جميع ملفات الطلاب وأولياء الأمور والملاحظات' },
@@ -28,6 +30,7 @@ export const ALL_BACKUP_CATEGORIES: { id: BackupCategory; labelKey: string; labe
   { id: 'exams', labelKey: 'exams', labelEn: 'Exams & Quiz Scores', labelAr: 'الدرجات والاختبارات', icon: 'Award', descriptionEn: 'Quiz, exam, and participation scores', descriptionAr: 'درجات الاختبارات القصيرة والامتحانات والتفاعل' },
   { id: 'financial', labelKey: 'financial', labelEn: 'Financial Records & Payments', labelAr: 'المدفوعات والسجلات المالية', icon: 'DollarSign', descriptionEn: 'Payment transactions, dues, & balances', descriptionAr: 'سجلات الدفع والرسوم المستحقة والمتحصلات' },
   { id: 'schedule', labelKey: 'schedule', labelEn: 'Schedule & Lessons', labelAr: 'الجدول والحصص', icon: 'Calendar', descriptionEn: 'Scheduled, completed, & past lessons', descriptionAr: 'جميع الحصص المجدولة والمكتملة والتاريخية' },
+  { id: 'certificates', labelKey: 'certificates', labelEn: 'Certificates & Honors', labelAr: 'الشهادات والتكريمات', icon: 'Trophy', descriptionEn: 'All issued certificates & student honors', descriptionAr: 'سجلات وتواريخ وتفاصيل جميع الشهادات والتكريمات' },
   { id: 'availability', labelKey: 'availability', labelEn: 'Teacher Working Hours', labelAr: 'ساعات العمل والإتاحة', icon: 'Clock', descriptionEn: 'Weekly working hours & availability rules', descriptionAr: 'ساعات العمل الأسبوعية وأيام العطلات' },
   { id: 'settings', labelKey: 'settings', labelEn: 'App Settings', labelAr: 'إعدادات التطبيق', icon: 'Settings', descriptionEn: 'Theme, language, currency, & profile details', descriptionAr: 'اللغة والمظهر والعملة وملف المعلم' },
   { id: 'templates', labelKey: 'templates', labelEn: 'WhatsApp Message Templates', labelAr: 'قوالب واتساب', icon: 'MessageSquare', descriptionEn: 'Custom messaging templates for parents', descriptionAr: 'قوالب الرسائل المخصصة لأولياء الأمور' },
@@ -54,7 +57,8 @@ export interface SmartBackupPayload {
     payments: number;
     notifications: number;
     todos: number;
-    [key: string]: number;
+    certificates?: number;
+    [key: string]: number | undefined;
   };
   metadata?: {
     teacherName?: string;
@@ -73,6 +77,7 @@ export interface SmartBackupPayload {
     inspirationSettings?: InspirationSettings;
     inspirationMessages?: InspirationMessage[];
     todos?: TodoItem[];
+    certificates?: CertificateRecord[];
     workingHours?: any;
     parentMessageTemplates?: Record<string, string>;
     meetingLinks?: { defaultZoomLink?: string; defaultMeetLink?: string };
@@ -353,6 +358,7 @@ export interface ValidationResult {
     inspirationSettings?: InspirationSettings;
     inspirationMessages?: InspirationMessage[];
     todos?: TodoItem[];
+    certificates?: CertificateRecord[];
     [key: string]: any;
   };
 }
@@ -389,7 +395,8 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     { key: 'payments', label: 'payments' },
     { key: 'notifications', label: 'notifications' },
     { key: 'todos', label: 'todos' },
-    { key: 'inspirationMessages', label: 'inspirationMessages' }
+    { key: 'inspirationMessages', label: 'inspirationMessages' },
+    { key: 'certificates', label: 'certificates' }
   ];
 
   for (const col of collectionsToCheck) {
@@ -567,6 +574,30 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     });
   }
 
+  // Sanitize Certificates
+  const rawCertificates: any[] = Array.isArray(data.certificates) ? data.certificates : [];
+  const sanitizedCertificates: CertificateRecord[] = [];
+  for (let i = 0; i < rawCertificates.length; i++) {
+    const c = rawCertificates[i];
+    if (!c || typeof c !== 'object' || Array.isArray(c)) continue;
+
+    const id = typeof c.id === 'string' && c.id.trim() ? c.id.trim() : `cert_imp_${Date.now()}_${i}`;
+    sanitizedCertificates.push({
+      ...c,
+      id,
+      studentId: typeof c.studentId === 'string' ? c.studentId : '',
+      studentName: typeof c.studentName === 'string' ? c.studentName : 'Student',
+      recipientName: typeof c.recipientName === 'string' ? c.recipientName : (c.studentName || 'Student'),
+      certificateType: c.certificateType || 'achievement',
+      language: c.language || 'en',
+      template: c.template || 'classic',
+      title: typeof c.title === 'string' ? c.title : 'Certificate of Achievement',
+      description: typeof c.description === 'string' ? c.description : '',
+      issueDate: typeof c.issueDate === 'string' ? c.issueDate : new Date().toISOString().split('T')[0],
+      createdAt: typeof c.createdAt === 'number' ? c.createdAt : Date.now()
+    });
+  }
+
   return {
     isValid: true,
     version,
@@ -577,6 +608,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       lessons: sanitizedLessons,
       payments: sanitizedPayments,
       notifications: sanitizedNotifications,
+      certificates: sanitizedCertificates,
       profile: data.profile && typeof data.profile === 'object' ? data.profile : undefined,
       notificationSettings: data.notificationSettings && typeof data.notificationSettings === 'object' ? data.notificationSettings : undefined,
       inspirationSettings: data.inspirationSettings && typeof data.inspirationSettings === 'object' ? data.inspirationSettings : undefined,

@@ -19,6 +19,12 @@ import { ReportsView } from './components/ReportsView';
 import { SessionHistoryView } from './components/SessionHistoryView';
 import { SettingsView } from './components/SettingsView';
 import { FreeTimeSlotsView } from './components/FreeTimeSlotsView';
+import { CertificateCenter } from './components/certificates/CertificateCenter';
+
+import { DesktopSidebar } from './components/desktop/DesktopSidebar';
+import { DesktopTopBar } from './components/desktop/DesktopTopBar';
+import { DesktopDashboard } from './components/desktop/DesktopDashboard';
+import { useDesktopShortcuts } from './hooks/useDesktopShortcuts';
 
 import { AnimatePresence, motion } from 'motion/react';
 import { BottomNav } from './components/BottomNav';
@@ -39,6 +45,7 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 
 function MainApp() {
   useLessonReminders();
+  useDesktopShortcuts();
 
   const { 
     activeTab, setActiveTab, 
@@ -295,7 +302,8 @@ function MainApp() {
 
   return (
     <div className="min-h-[100dvh] bg-background text-text-main font-sans antialiased overflow-hidden">
-      <div className="max-w-lg mx-auto bg-background h-[100dvh] shadow-2xl relative flex flex-col border-x border-surface-border/80 dark:border-surface-border">
+      {/* ================= MOBILE EXPERIENCE (Preserved 100%) ================= */}
+      <div className="md:hidden max-w-lg mx-auto bg-background h-[100dvh] shadow-2xl relative flex flex-col border-x border-surface-border/80 dark:border-surface-border">
         <Header />
 
         {/* Tab View Content Area */}
@@ -307,7 +315,7 @@ function MainApp() {
         >
           <AnimatePresence mode="wait">
             <motion.div
-              key={activeTab}
+              key={`mobile-${activeTab}`}
               initial={{ opacity: 0, y: 8, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.98 }}
@@ -315,67 +323,97 @@ function MainApp() {
               className="space-y-3"
             >
               {activeTab === 'home' && (
+                <>
+                  {/* Daily Inspiration & Gratitude Card */}
+                  <InspirationCardWidget />
 
-            <>
-              {/* Daily Inspiration & Gratitude Card */}
-              <InspirationCardWidget />
+                  {/* Today's Progress Timeline */}
+                  <TodaysProgressTimeline />
 
-              {/* Today's Progress Timeline */}
-              <TodaysProgressTimeline />
+                  {/* Compact Collapsible To-Do Widget */}
+                  <QuickTodoWidget />
 
-              {/* Compact Collapsible To-Do Widget */}
-              <QuickTodoWidget />
+                  <HomeworkFollowUpWidget />
 
-              <HomeworkFollowUpWidget />
+                  {/* Tomorrow's Lessons Compact Widget */}
+                  <TomorrowsLessonsWidget />
+                  <AvailableTodayWidget />
 
-              {/* Tomorrow's Lessons Compact Widget */}
-              <TomorrowsLessonsWidget />
-              <AvailableTodayWidget />
+                  {/* Weekly & Monthly Statistics */}
+                  <DailyStats />
 
+                  {/* Payment Alerts */}
+                  <PaymentAlertsCard />
 
-              {/* Weekly & Monthly Statistics */}
-              <DailyStats />
+                  {/* Smart Daily Summary Widget at bottom of Dashboard */}
+                  <SmartDailySummaryWidget />
+                </>
+              )}
 
-              {/* Payment Alerts */}
-              <PaymentAlertsCard />
-
-              {/* Smart Daily Summary Widget at bottom of Dashboard */}
-              <SmartDailySummaryWidget />
-            </>
-          )}
-
-          {activeTab === 'schedule' && <ScheduleView />}
-
-          {activeTab === 'students' && <StudentsView />}
-
-          {activeTab === 'history' && <SessionHistoryView />}
-
-          {activeTab === 'payments' && <PaymentsView />}
-
-          {activeTab === 'reports' && <ReportsView />}
-
+              {activeTab === 'schedule' && <ScheduleView />}
+              {activeTab === 'students' && <StudentsView />}
+              {activeTab === 'history' && <SessionHistoryView />}
+              {activeTab === 'payments' && <PaymentsView />}
+              {activeTab === 'reports' && <ReportsView />}
               {activeTab === 'settings' && <SettingsView />}
               {activeTab === 'freeTime' && <FreeTimeSlotsView />}
-
+              {activeTab === 'certificates' && <CertificateCenter />}
             </motion.div>
           </AnimatePresence>
         </main>
 
         {/* Bottom Navigation */}
         <BottomNav />
-
-        {/* Global Modals */}
-        {isControlModalOpen && <LessonControlModal />}
-        {isAddLessonModalOpen && <AddLessonModal onClose={() => setIsAddLessonModalOpen(false)} />}
-        {isAddQuickLessonModalOpen && <AddQuickLessonModal onClose={() => setIsAddQuickLessonModalOpen(false)} />}
-        {isStartLessonNowModalOpen && <StartLessonNowModal onClose={() => setIsStartLessonNowModalOpen(false)} />}
-        {isAddStudentModalOpen && <AddStudentModal onClose={() => setIsAddStudentModalOpen(false)} />}
-        {isAddGroupModalOpen && <AddGroupModal onClose={() => setIsAddGroupModalOpen(false)} />}
-        {isBackupModalOpen && <BackupModal onClose={() => setIsBackupModalOpen(false)} />}
-        <GlobalSearchModal />
-        <RecentlyDeletedModal />
-        <SetupWizard />
       </div>
+
+      {/* ================= DESKTOP WORKSPACE (Professional & Full Space) ================= */}
+      <div className="hidden md:flex h-[100dvh] w-full bg-background overflow-hidden">
+        {/* Desktop Sidebar (Left in LTR, Right in RTL) */}
+        <DesktopSidebar />
+
+        {/* Main Content Pane */}
+        <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden bg-background">
+          {/* Top Bar with Search, Actions & Profile */}
+          <DesktopTopBar />
+
+          {/* Desktop Content Canvas */}
+          <main className="flex-1 p-6 md:p-8 overflow-y-auto overflow-x-hidden bg-slate-50/40 dark:bg-background">
+            <div className="max-w-7xl mx-auto w-full">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={`desktop-${activeTab}`}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.15 }}
+                >
+                  {activeTab === 'home' && <DesktopDashboard />}
+                  {activeTab === 'schedule' && <ScheduleView />}
+                  {activeTab === 'students' && <StudentsView />}
+                  {activeTab === 'history' && <SessionHistoryView />}
+                  {activeTab === 'payments' && <PaymentsView />}
+                  {activeTab === 'reports' && <ReportsView />}
+                  {activeTab === 'settings' && <SettingsView />}
+                  {activeTab === 'freeTime' && <FreeTimeSlotsView />}
+                  {activeTab === 'certificates' && <CertificateCenter />}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </main>
+        </div>
+      </div>
+
+      {/* ================= SHARED GLOBAL MODALS & DIALOGS ================= */}
+      {isControlModalOpen && <LessonControlModal />}
+      {isAddLessonModalOpen && <AddLessonModal onClose={() => setIsAddLessonModalOpen(false)} />}
+      {isAddQuickLessonModalOpen && <AddQuickLessonModal onClose={() => setIsAddQuickLessonModalOpen(false)} />}
+      {isStartLessonNowModalOpen && <StartLessonNowModal onClose={() => setIsStartLessonNowModalOpen(false)} />}
+      {isAddStudentModalOpen && <AddStudentModal onClose={() => setIsAddStudentModalOpen(false)} />}
+      {isAddGroupModalOpen && <AddGroupModal onClose={() => setIsAddGroupModalOpen(false)} />}
+      {isBackupModalOpen && <BackupModal onClose={() => setIsBackupModalOpen(false)} />}
+      <GlobalSearchModal />
+      <RecentlyDeletedModal />
+      <SetupWizard />
     </div>
   );
 }
@@ -395,7 +433,7 @@ export default function App() {
         await migrateFromLocalStorageToIndexedDB();
         const keys = [
           'dl_theme', 'dl_accent_color', 'dl_quick_todos', 'dl_language', 'dl_profile',
-          'dl_groups', 'dl_students', 'dl_lessons', 'dl_payments',
+          'dl_groups', 'dl_students', 'dl_lessons', 'dl_payments', 'dl_certificates',
           'dl_notifications', 'dl_notification_settings', 'dl_inspiration_settings', 'dl_inspiration_messages',
           'dl_last_backup_time', 'dl_dismissed_dashboard_lessons', 'dl_recently_deleted',
           'dl_active_lesson_session', 'dl_notified_lesson_alerts', 'dl_local_backup_data'

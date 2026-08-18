@@ -315,7 +315,7 @@ ${datesFormatted}
   };
 
   return (
-    <div className="space-y-3  font-sans max-w-4xl mx-auto">
+    <div className="space-y-4 font-sans w-full">
       {/* FINANCIAL DASHBOARD */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-1">
         <div className="bg-surface hover:bg-surface-hover transition-colors p-3.5 rounded-2xl border border-surface-border flex flex-col justify-center relative overflow-hidden shadow-sm">
@@ -464,104 +464,106 @@ ${datesFormatted}
               </div>
             </div>
           ) : (
-            filteredDueCycles.map((item, idx) => (
-              <div
-                key={`${item.id}_${idx}`}
-                className="bg-surface p-4 sm:p-5 rounded-xl border border-primary-border dark:border-primary-border shadow-xs space-y-3.5 relative overflow-hidden"
-              >
-                {/* TOP ROW: STUDENT INFO & AMOUNT DUE */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-surface-border pb-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-base font-black text-text-main">
-                        {item.studentName}
-                      </h3>
-                      <span className="px-2.5 py-0.5 rounded-full bg-surface-hover text-text-main text-xs font-bold">
-                        {item.groupName}
-                      </span>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {filteredDueCycles.map((item, idx) => (
+                <div
+                  key={`${item.id}_${idx}`}
+                  className="bg-surface p-4 sm:p-5 rounded-xl border border-primary-border dark:border-primary-border shadow-xs space-y-3.5 relative overflow-hidden flex flex-col justify-between"
+                >
+                  {/* TOP ROW: STUDENT INFO & AMOUNT DUE */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-surface-border pb-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-black text-text-main">
+                          {item.studentName}
+                        </h3>
+                        <span className="px-2.5 py-0.5 rounded-full bg-surface-hover text-text-main text-xs font-bold">
+                          {item.groupName}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="px-2 py-0.5 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary text-[11px] font-black">
+                          {t('payments_completed_cycle')}: {item.cycleLength} / {item.cycleLength} {t('payment_plan_lessons')}
+                        </span>
+                        {item.status === 'not_yet' && (
+                          <span className="text-[11px] font-bold text-text-muted/70">
+                            ({t('payments_pending_tag')} ⏳)
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="px-2 py-0.5 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary text-[11px] font-black">
-                        {t('payments_completed_cycle')}: {item.cycleLength} / {item.cycleLength} {t('payment_plan_lessons')}
-                      </span>
-                      {item.status === 'not_yet' && (
-                        <span className="text-[11px] font-bold text-text-muted/70">
-                          ({t('payments_pending_tag')} ⏳)
+                    <div className="text-right shrink-0">
+                      <span className="text-[10px] font-extrabold text-text-muted/70 uppercase tracking-wider block">{t('payments_amount_due')}</span>
+                      <div className="text-xl font-black text-primary dark:text-primary font-mono">
+                        {item.amountDue} <span className="text-xs font-normal text-text-muted/70">{currency}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* LESSON DATES INCLUDED IN THIS CYCLE */}
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-bold text-text-muted flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-text-muted/70" />
+                      <span>{t('payments_completed_dates')}:</span>
+                    </span>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {item.lessonDates.length > 0 ? (
+                        item.lessonDates.map((d, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2.5 py-1 bg-surface-hover text-slate-800 dark:text-slate-200 rounded-lg text-xs font-mono font-bold border border-surface-border dark:border-surface-border-soft"
+                          >
+                            🗓️ {d}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-text-muted/70 italic">
+                          {item.cycleLength} {t('payment_plan_lessons')}
                         </span>
                       )}
                     </div>
                   </div>
 
-                  <div className="text-right shrink-0">
-                    <span className="text-[10px] font-extrabold text-text-muted/70 uppercase tracking-wider block">{t('payments_amount_due')}</span>
-                    <div className="text-xl font-black text-primary dark:text-primary font-mono">
-                      {item.amountDue} <span className="text-xs font-normal text-text-muted/70">{currency}</span>
+                  {/* BOTTOM ACTION BUTTONS */}
+                  <div className="pt-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      {/* PAID BUTTON */}
+                      <button
+                        type="button"
+                        onClick={() => handleMarkPaid(item)}
+                        className="px-4 py-2 bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-black rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Check className="w-4 h-4 stroke-[3]" />
+                        <span>{t('payments_paid_btn')} (Paid)</span>
+                      </button>
+
+                      {/* NOT YET BUTTON */}
+                      <button
+                        type="button"
+                        onClick={() => handleMarkNotYet(item)}
+                        className="px-3.5 py-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Clock className="w-3.5 h-3.5 text-text-muted/70" />
+                        <span>{t('payments_not_yet_btn')} (Not Yet)</span>
+                      </button>
                     </div>
-                  </div>
-                </div>
 
-                {/* LESSON DATES INCLUDED IN THIS CYCLE */}
-                <div className="space-y-1.5">
-                  <span className="text-[11px] font-bold text-text-muted flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-text-muted/70" />
-                    <span>{t('payments_completed_dates')}:</span>
-                  </span>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {item.lessonDates.length > 0 ? (
-                      item.lessonDates.map((d, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2.5 py-1 bg-surface-hover text-slate-800 dark:text-slate-200 rounded-lg text-xs font-mono font-bold border border-surface-border dark:border-surface-border-soft"
-                        >
-                          🗓️ {d}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-xs text-text-muted/70 italic">
-                        {item.cycleLength} {t('payment_plan_lessons')}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* BOTTOM ACTION BUTTONS */}
-                <div className="pt-2 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {/* PAID BUTTON */}
+                    {/* WHATSAPP MESSAGE BUTTON */}
                     <button
                       type="button"
-                      onClick={() => handleMarkPaid(item)}
-                      className="px-4 py-2 bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-black rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                      onClick={() => setSelectedCycleForWhatsApp(item)}
+                      className="px-3 py-2 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft text-primary dark:text-primary text-xs font-bold rounded-xl transition-all border border-primary-border dark:border-primary-border cursor-pointer flex items-center gap-1.5"
                     >
-                      <Check className="w-4 h-4 stroke-[3]" />
-                      <span>{t('payments_paid_btn')} (Paid)</span>
-                    </button>
-
-                    {/* NOT YET BUTTON */}
-                    <button
-                      type="button"
-                      onClick={() => handleMarkNotYet(item)}
-                      className="px-3.5 py-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
-                    >
-                      <Clock className="w-3.5 h-3.5 text-text-muted/70" />
-                      <span>{t('payments_not_yet_btn')} (Not Yet)</span>
+                      <Send className="w-3.5 h-3.5 text-primary" />
+                      <span>{t('payments_parent_notice')} (WhatsApp)</span>
                     </button>
                   </div>
-
-                  {/* WHATSAPP MESSAGE BUTTON */}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCycleForWhatsApp(item)}
-                    className="px-3 py-2 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft text-primary dark:text-primary text-xs font-bold rounded-xl transition-all border border-primary-border dark:border-primary-border cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Send className="w-3.5 h-3.5 text-primary" />
-                    <span>{t('payments_parent_notice')} (WhatsApp)</span>
-                  </button>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
 
           {/* Section: Flexible & Prorated Billing */}
@@ -632,47 +634,49 @@ ${datesFormatted}
 
       {/* TAB 2: ZAHLUNGSHISTORIE (PAID HISTORY) */}
       {activeTab === 'history' && (
-        <div className="space-y-3">
+        <div>
           {paidHistory.length === 0 ? (
             <div className="bg-surface p-5 rounded-xl border border-surface-border text-center space-y-1">
               <p className="text-sm font-bold text-text-main">{t('payments_no_history')}</p>
               <p className="text-xs text-text-muted/70">{t('payments_history_sub')}</p>
             </div>
           ) : (
-            paidHistory.map(p => (
-              <div
-                key={p.id}
-                className="bg-surface p-4 rounded-lg border border-surface-border flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-sm font-black text-text-main">{p.studentName}</h4>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-surface-hover text-slate-600 dark:text-slate-300">
-                      {p.groupName}
-                    </span>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {paidHistory.map(p => (
+                <div
+                  key={p.id}
+                  className="bg-surface p-4 rounded-xl border border-surface-border flex flex-col justify-between gap-3 shadow-2xs hover:shadow-xs transition-shadow"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-sm font-black text-text-main truncate">{p.studentName}</h4>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-surface-hover text-slate-600 dark:text-slate-300 shrink-0">
+                        {p.groupName}
+                      </span>
+                    </div>
+
+                    {p.lessonDates && p.lessonDates.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 pt-1">
+                        {p.lessonDates.map((d, i) => (
+                          <span key={i} className="text-[10px] font-mono bg-surface-hover/60 px-2 py-0.5 rounded border border-surface-border/60 dark:border-surface-border-soft text-slate-600 dark:text-slate-300">
+                            {d}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                  {p.lessonDates && p.lessonDates.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1 pt-1">
-                      {p.lessonDates.map((d, i) => (
-                        <span key={i} className="text-[10px] font-mono bg-surface-hover/60 px-2 py-0.5 rounded border border-surface-border/60 dark:border-surface-border-soft text-slate-600 dark:text-slate-300">
-                          {d}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  <div className="flex items-center justify-between pt-2 border-t border-surface-border/50">
+                    <span className="text-[10px] text-text-muted/70">
+                      {t('payments_paid_on')}: {p.paidDate || p.dueDate}
+                    </span>
+                    <span className="text-xs font-black text-primary dark:text-primary font-mono">
+                      ✓ {p.amountPaid} {currency}
+                    </span>
+                  </div>
                 </div>
-
-                <div className="text-right shrink-0">
-                  <span className="text-xs font-black text-primary dark:text-primary font-mono">
-                    ✓ {p.amountPaid} {currency}
-                  </span>
-                  <span className="text-[10px] text-text-muted/70 block">
-                    {t('payments_paid_on')}: {p.paidDate || p.dueDate}
-                  </span>
-                </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       )}

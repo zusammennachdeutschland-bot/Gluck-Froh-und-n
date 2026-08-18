@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Home, Calendar, Users, MoreHorizontal, Wallet, BarChart2, Settings, Zap, History, Play, Clock } from 'lucide-react';
+import { Home, Calendar, Users, MoreHorizontal, Wallet, BarChart2, Settings, Zap, History, Play, Clock, Award } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export const BottomNav: React.FC = () => {
@@ -22,7 +22,8 @@ export const BottomNav: React.FC = () => {
   const isHistoryActive = activeTab === 'history';
   const isReportsActive = activeTab === 'reports';
   const isSettingsActive = activeTab === 'settings';
-  const isMoreTabActive = isHistoryActive || isReportsActive || isSettingsActive;
+  const isCertificatesActive = activeTab === 'certificates';
+  const isMoreTabActive = isHistoryActive || isReportsActive || isSettingsActive || isCertificatesActive || activeTab === 'freeTime';
 
   // Define primary tabs
   const leftTabs = [
@@ -37,6 +38,7 @@ export const BottomNav: React.FC = () => {
 
   // Dynamic more tab metadata
   const getMoreTabMetadata = () => {
+    if (isCertificatesActive) return { label: t('nav_certificates') || 'Zertifikate', icon: Award, colorClass: 'text-primary' };
     if (isHistoryActive) return { label: t('nav_history') || 'Sitzungen', icon: History, colorClass: 'text-primary' };
     if (isReportsActive) return { label: t('nav_reports') || 'Berichte', icon: BarChart2, colorClass: 'text-primary' };
     if (isSettingsActive) return { label: t('nav_settings') || 'Einstellungen', icon: Settings, colorClass: 'text-primary' };
@@ -288,6 +290,17 @@ export const BottomNav: React.FC = () => {
                     transition={{ type: 'spring', stiffness: 450, damping: 25 }}
                     className={`absolute bottom-14 ${isRtl ? 'left-0 origin-bottom-left' : 'right-0 origin-bottom-right'} w-48 sm:w-52 bg-surface/95 dark:bg-background/95 backdrop-blur-xl border border-surface-border/40 dark:border-surface-border/60 rounded-[20px] shadow-xl p-1.5 space-y-1.5 z-50`}
                   >
+                    <button
+                      onClick={() => handleTabClick('certificates')}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start ${
+                        activeTab === 'certificates'
+                          ? 'bg-primary-soft text-primary dark:bg-primary-soft dark:text-primary'
+                          : 'hover:bg-background dark:hover:bg-slate-900 text-text-main'
+                      }`}
+                    >
+                      <Award className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span>{t('nav_certificates') || (language === 'ar' ? 'الشهادات والتكريم' : 'Zertifikate')}</span>
+                    </button>
                     <button
                       onClick={() => handleTabClick('freeTime')}
                       className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start ${

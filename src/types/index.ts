@@ -116,6 +116,7 @@ export interface SyncDeltaPayload {
     notifications?: NotificationItem[];
     todos?: TodoItem[];
     settings?: TeacherSettingsRecord[];
+    certificates?: CertificateRecord[];
   };
   metadata?: {
     totalEntitiesCount?: number;
@@ -319,6 +320,7 @@ export type PaymentPlanType = 'per_lesson' | '4_lessons' | '8_lessons' | '12_les
 
 export interface Student extends SyncableRecord {
   name: string;
+  certificateName?: string; // Transliterated/custom name used on certificates (e.g. "Rital Tarek" for "ريتال طارق")
   groupId: string;
   grade: GradeLevel;
   parentName: string;
@@ -487,6 +489,7 @@ export interface BackupData {
   lessons: Lesson[];
   payments: PaymentRecord[];
   notifications: NotificationItem[];
+  certificates?: CertificateRecord[];
   notificationSettings?: NotificationSettings;
   inspirationSettings?: InspirationSettings;
   inspirationMessages?: InspirationMessage[];
@@ -566,3 +569,66 @@ export interface TodoItem extends SyncableRecord {
   text: string;
   createdAt: number;
 }
+
+// ==========================================
+// CERTIFICATE CENTER MODELS
+// ==========================================
+export type CertificateLanguage = 'en' | 'de' | 'ar';
+
+export type CertificateTypeKey =
+  | 'achievement'
+  | 'great_progress'
+  | 'outstanding_performance'
+  | 'german_achievement'
+  | 'homework_excellence'
+  | 'perfect_attendance'
+  | 'student_of_month'
+  | 'appreciation'
+  | 'exam_result'
+  | 'custom';
+
+export type CertificateTemplateId =
+  | 'neutral'
+  | 'boys'
+  | 'girls'
+  | 'classic'
+  | 'elegant'
+  | 'kids'
+  | 'german_themed'
+  | 'boys_champion'
+  | 'girls_princess';
+
+export interface CertificateRecord extends SyncableRecord {
+  studentId: string;
+  studentName: string; // original student name
+  recipientName: string; // certificate-specific name used on the certificate (e.g. English/German name)
+  studentCertificateName?: string;
+  groupId?: string;
+  groupName?: string;
+  certificateType: CertificateTypeKey;
+  type?: CertificateTypeKey;
+  language: CertificateLanguage;
+  template: CertificateTemplateId;
+  templateId?: CertificateTemplateId;
+  title: string;
+  subtitle?: string;
+  description: string;
+  issueDate: string; // YYYY-MM-DD
+  teacherName?: string;
+  instructorName?: string;
+  courseOrLevelTitle?: string;
+  centerOrSchoolName?: string;
+  score?: string; // Optional score or note (e.g., "100%", "Sehr Gut", "98/100")
+  gradeOrScore?: string;
+  customBadgeText?: string; // Optional custom badge text
+  createdAt: number; // timestamp
+}
+
+export interface StudentHonoredSummary {
+  student: Student;
+  certificateCount: number;
+  lastCertificate?: CertificateRecord;
+  lastCertificateDate?: string;
+  isHonoredInPeriod: boolean;
+}
+

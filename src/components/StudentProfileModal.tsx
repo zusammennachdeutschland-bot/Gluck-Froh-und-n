@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Student, GradeLevel } from '../types';
+import { Student, GradeLevel, CertificateRecord } from '../types';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
 import { CARTOON_AVATARS, DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
@@ -8,23 +8,30 @@ import { AvatarImage } from './AvatarImage';
 import { 
   X, Phone, Send, FileText, Upload, Trash2, Calendar, Award, DollarSign, 
   BookOpen, CheckCircle2, AlertCircle, Download, FileCheck, User, Camera, Edit3, Save, Check, Sparkles,
-  RefreshCw, Shield, Lock, MoreHorizontal, MessageSquare, Info, Star, GraduationCap, Users
+  RefreshCw, Shield, Lock, MoreHorizontal, MessageSquare, Info, Star, GraduationCap, Users, Plus, Eye, Share2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
+import { CreateCertificateModal } from './certificates/CreateCertificateModal';
+import { CertificatePreviewModal } from './certificates/CertificatePreviewModal';
+import { downloadCertificatePDF, shareCertificateWhatsApp } from '../utils/certificateExportUtils';
 
 interface StudentProfileModalProps {
   student: Student;
   onClose: () => void;
-  initialTab?: 'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'edit';
+  initialTab?: 'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'edit';
 }
 
 export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ student, onClose, initialTab = 'overview' }) => {
-  const { groups, lessons, payments, profile, uploadStudentDocument, deleteStudentDocument, updateStudent, deleteStudent, t, _t } = useApp();
+  const { groups, lessons, payments, certificates, profile, uploadStudentDocument, deleteStudentDocument, updateStudent, updateStudentCertificateName, deleteStudent, t, _t } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'edit'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'edit'>(initialTab);
   const [selectedCategory, setSelectedCategory] = useState<'homework' | 'exam' | 'doc'>('homework');
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isIssueCertModalOpen, setIsIssueCertModalOpen] = useState(false);
+  const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
+  const [latinNameInput, setLatinNameInput] = useState(student.certificateName || '');
+  const [isLatinSaved, setIsLatinSaved] = useState(false);
 
   // Editable Student Fields
   const [editName, setEditName] = useState(student.name);
@@ -37,14 +44,15 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   const [editStatus, setEditStatus] = useState<'active' | 'archived'>(student.status || 'active');
   const [saveSuccessToast, setSaveSuccessToast] = useState(false);
 
-  const assignedGroup = groups.find(g => g.id === (activeTab === 'edit' ? editGroupId : student.groupId));
-  const studentLessons = lessons.filter(l => {
+  const assignedGroup = (groups || []).find(g => g.id === (activeTab === 'edit' ? editGroupId : student.groupId));
+  const studentCertificates = (certificates || []).filter(c => c.studentId === student.id && !c.deleted);
+  const studentLessons = (lessons || []).filter(l => {
     if (l.status === 'cancelled') return false;
     const matchesGroup = student.groupId ? l.groupId === student.groupId : false;
     const matchesStudent = l.studentId === student.id || l.studentName === student.name;
     return matchesGroup || matchesStudent;
   });
-  const studentPayments = payments.filter(p => p.studentId === student.id || p.studentName === student.name);
+  const studentPayments = (payments || []).filter(p => p.studentId === student.id || p.studentName === student.name);
 
   // Dynamic cycle pricing & package progress calculation
   const { cycleLength, amountDue, pricePerSession } = getStudentCyclePricing(student, assignedGroup);
@@ -325,6 +333,17 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
               }`}
             >
               {_t(`Dateien (${student.documents.length})`, `Files (${student.documents.length})`, `Dateien (${student.documents.length})`)}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('certificates')}
+              className={`px-3 sm:px-4 py-2 sm:py-2.5 transition-all whitespace-nowrap border-b-2 font-black ${
+                activeTab === 'certificates' 
+                  ? 'border-primary text-primary' 
+                  : 'border-transparent text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              {_t(`الشهادات (${studentCertificates.length})`, `Certificates (${studentCertificates.length})`, `Zertifikate (${studentCertificates.length})`)}
             </button>
           </div>
 
@@ -620,6 +639,140 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
               </div>
             )}
 
+            {/* CERTIFICATES TAB */}
+            {activeTab === 'certificates' && (
+              <div className="space-y-4">
+                {/* Header with quick action */}
+                <div className="flex items-center justify-between p-3.5 bg-amber-500/10 dark:bg-amber-500/10 border border-amber-500/20 rounded-2xl">
+                  <div className="flex items-center gap-2.5">
+                    <Award className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <div>
+                      <h4 className="font-black text-xs text-text-main">
+                        {_t('سجل شهادات وتكريم الطالب', 'Student Certificates & Honors', 'Zertifikate & Ehrungen')}
+                      </h4>
+                      <p className="text-[10px] text-text-muted">
+                        {studentCertificates.length} {_t('شهادات تم إصدارها', 'certificates issued', 'Zertifikate ausgestellt')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsIssueCertModalOpen(true)}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-xs flex items-center gap-1 shadow-xs transition-all cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{_t('إصدار شهادة', 'Issue Certificate', 'Zertifikat ausstellen')}</span>
+                  </button>
+                </div>
+
+                {/* Latin Name on Certificate Setting */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-black text-slate-700 dark:text-slate-300">
+                      {_t('الاسم بالإنجليزية / اللاتينية للشهادات:', 'Name on Certificate (Latin):', 'Name auf dem Zertifikat (Latein):')}
+                    </label>
+                    {isLatinSaved && (
+                      <span className="text-[10px] font-bold text-emerald-500 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> {_t('تم الحفظ', 'Saved', 'Gespeichert')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={latinNameInput}
+                      onChange={e => setLatinNameInput(e.target.value)}
+                      placeholder="e.g. Ahmed Ali"
+                      className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateStudentCertificateName(student.id, latinNameInput);
+                        setIsLatinSaved(true);
+                        setTimeout(() => setIsLatinSaved(false), 2000);
+                      }}
+                      className="px-3 py-1.5 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary-hover transition-colors cursor-pointer"
+                    >
+                      {_t('حفظ', 'Save', 'Speichern')}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Certificates List */}
+                <div className="space-y-2">
+                  {studentCertificates.length === 0 ? (
+                    <div className="p-6 text-center bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+                      <Award className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400">
+                        {_t('لم يتم إصدار شهادات لهذا الطالب حتى الآن', 'No certificates issued for this student yet', 'Noch keine Zertifikate ausgestellt')}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setIsIssueCertModalOpen(true)}
+                        className="text-xs font-black text-primary hover:underline cursor-pointer"
+                      >
+                        {_t('انقر هنا لإصدار أول شهادة تقدير 🏆', 'Click here to issue first certificate 🏆', 'Erstes Zertifikat jetzt ausstellen 🏆')}
+                      </button>
+                    </div>
+                  ) : (
+                    studentCertificates.map(cert => (
+                      <div
+                        key={cert.id}
+                        className="p-3 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl flex items-center justify-between gap-2 shadow-2xs hover:border-slate-200 transition-all"
+                      >
+                        <div
+                          onClick={() => setPreviewCert(cert)}
+                          className="min-w-0 cursor-pointer flex-1"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-black text-xs text-slate-800 dark:text-white truncate">
+                              {cert.courseOrLevelTitle}
+                            </span>
+                            <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                              {cert.language}
+                            </span>
+                          </div>
+                          <span className="block text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                            {cert.issueDate} • {cert.instructorName}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewCert(cert)}
+                            className="p-1.5 text-slate-400 hover:text-primary transition-colors cursor-pointer"
+                            title="View"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => downloadCertificatePDF(cert)}
+                            className="p-1.5 text-slate-400 hover:text-primary transition-colors cursor-pointer"
+                            title="Download PDF"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => shareCertificateWhatsApp(cert, student.parentPhone || student.studentPhone)}
+                            className="p-1.5 text-slate-400 hover:text-emerald-500 transition-colors cursor-pointer"
+                            title="Share WhatsApp"
+                          >
+                            <Share2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* EDIT STUDENT DATA TAB */}
             {activeTab === 'edit' && (
               <form onSubmit={handleSaveStudent} className="space-y-3.5 pt-1">
@@ -787,6 +940,21 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
         }}
         onClose={() => setIsConfirmingDelete(false)}
       />
+
+      {/* Certificate Modals */}
+      {isIssueCertModalOpen && (
+        <CreateCertificateModal
+          initialStudentId={student.id}
+          onClose={() => setIsIssueCertModalOpen(false)}
+        />
+      )}
+
+      {previewCert && (
+        <CertificatePreviewModal
+          certificate={previewCert}
+          onClose={() => setPreviewCert(null)}
+        />
+      )}
     </div>
   );
 };

@@ -8,6 +8,7 @@ export type TranslationKey =
   | 'nav_payments'
   | 'nav_reports'
   | 'nav_settings'
+  | 'nav_certificates'
   | 'nav_quickLesson'
   | 'nav_more'
   | 'nav_widgets'
@@ -866,6 +867,7 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     nav_payments: 'المدفوعات',
     nav_reports: 'التقارير',
     nav_settings: 'الإعدادات',
+    nav_certificates: 'مركز الشهادات',
     nav_quickLesson: 'حصة سريعة',
     nav_more: 'المزيد',
     nav_widgets: 'ويدجت أندرويد',
@@ -1722,6 +1724,7 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     nav_payments: 'Payments',
     nav_reports: 'Reports',
     nav_settings: 'Settings',
+    nav_certificates: 'Certificate Center',
     nav_quickLesson: 'Quick Lesson',
     nav_more: 'More',
     nav_widgets: 'Android Widgets',
@@ -2578,6 +2581,7 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     nav_payments: 'Zahlungen',
     nav_reports: 'Berichte',
     nav_settings: 'Einstellungen',
+    nav_certificates: 'Zertifikate-Center',
     nav_quickLesson: 'Schnellstunde',
     nav_more: 'Mehr',
     nav_widgets: 'Android Widgets',
