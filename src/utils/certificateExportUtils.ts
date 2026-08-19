@@ -255,6 +255,27 @@ export function sanitizeModernCssColors(cssValue: string): string {
 }
 
 /**
+ * Converts a base64 data URL into a binary Blob efficiently without high RAM pressure.
+ */
+export function dataUrlToBlob(dataUrl: string): Blob {
+  try {
+    const arr = dataUrl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+    const bstr = atob(arr[1] || '');
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+  } catch (err) {
+    console.error('Error converting dataUrl to Blob:', err);
+    return new Blob([], { type: 'application/octet-stream' });
+  }
+}
+
+/**
  * Sanitizes the cloned DOM document before html2canvas rendering.
  * Strips any dark mode classes from the clone to prevent theme inversion,
  * ensures all fonts and CSS variables are correctly injected,
@@ -268,13 +289,11 @@ function sanitizeClonedDocument(clonedDoc: Document, targetEl?: HTMLElement | nu
     clonedDoc.body.style.backgroundColor = '#ffffff';
   }
 
-  // Inject critical Google Fonts & Arabic shaping CSS directly into clonedDoc head
+  // Inject critical Arabic shaping CSS directly into clonedDoc head (relying on preloaded host document fonts)
   if (clonedDoc.head) {
     const styleElem = clonedDoc.createElement('style');
     styleElem.id = 'cloned-cert-fonts-and-shaping';
     styleElem.textContent = `
-      @import url('https://fonts.googleapis.com/css2?family=Alex+Brush&family=Alexandria:wght@400;600;700;800;900&family=Amiri:ital,wght@0,400;0,700;1,400;1,700&family=Aref+Ruqaa:wght@400;700&family=Cairo:wght@400;600;700;800;900&family=Caveat:wght@400;700&family=Cinzel:wght@600;700;800;900&family=Dancing+Script:wght@400;600;700&family=Great+Vibes&family=Pinyon+Script&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600;1,700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap');
-      
       .font-arabic-serif {
         font-family: 'Amiri', 'Traditional Arabic', 'Scheherazade New', 'Cairo', serif !important;
         font-feature-settings: "liga" 1, "calt" 1, "dlig" 1 !important;
@@ -304,7 +323,7 @@ function sanitizeClonedDocument(clonedDoc: Document, targetEl?: HTMLElement | nu
     `;
     clonedDoc.head.appendChild(styleElem);
 
-    // Copy any stylesheet link elements from origin if missing
+    // Copy stylesheet link elements from host document if missing
     if (typeof document !== 'undefined' && document.head) {
       const links = document.head.querySelectorAll('link[rel="stylesheet"]');
       links.forEach(link => {
@@ -366,15 +385,22 @@ function sanitizeClonedDocument(clonedDoc: Document, targetEl?: HTMLElement | nu
 /**
  * Robust helper to render any certificate to an HTMLCanvasElement.
  * Automatically mounts an offscreen DOM container if the target element is hidden or not present.
- * Includes a timeout safeguard to guarantee the browser never freezes.
+ * Includes a timeout safeguard and thread yielding to guarantee the browser never freezes.
  */
 export async function renderCertificateToCanvas(
   target: HTMLElement | string | Partial<CertificateRecord>,
-  scale = 2.5
+  scale?: number
 ): Promise<HTMLCanvasElement> {
+  // Yield thread immediately so React UI updates spinner state before CPU work starts
+  await new Promise(resolve => setTimeout(resolve, 60));
+
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error('Certificate rendering timed out after 12 seconds')), 12000);
   });
+
+  const isNative = Capacitor.isNativePlatform();
+  const isMobile = isNative || (typeof window !== 'undefined' && window.innerWidth < 768);
+  const chosenScale = scale ? scale : (isMobile ? 1.8 : 2.2);
 
   const renderPromise = (async () => {
     let elementToCapture: HTMLElement | null = null;
@@ -460,9 +486,10 @@ export async function renderCertificateToCanvas(
       const captureHeight = elementToCapture.offsetHeight || 792;
 
       const canvas = await html2canvas(elementToCapture, {
-        scale: Math.max(scale, 2),
+        scale: chosenScale,
         useCORS: true,
-        allowTaint: true,
+        allowTaint: false,
+        imageTimeout: 6000,
         logging: false,
         backgroundColor: '#ffffff',
         width: captureWidth,
@@ -503,36 +530,47 @@ export async function exportCertificateAsImage(
   format: 'png' | 'jpeg' = 'png'
 ): Promise<boolean> {
   try {
-    const canvas = await renderCertificateToCanvas(target, 2.5);
+    const canvas = await renderCertificateToCanvas(target);
     const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
     const dataUrl = canvas.toDataURL(mimeType, 0.98);
-
     const safeFilename = `${filename.replace(/[/\\?%*:|"<>]/g, '_')}.${format === 'jpeg' ? 'jpg' : 'png'}`;
 
     if (Capacitor.isNativePlatform()) {
       try {
         const base64Data = dataUrl.split(',')[1];
-        await Filesystem.writeFile({
-          path: `Certificates/${safeFilename}`,
+        const savedFile = await Filesystem.writeFile({
+          path: safeFilename,
           data: base64Data,
-          directory: Directory.Documents,
-          recursive: true
+          directory: Directory.Cache
         });
+
+        await Share.share({
+          title: safeFilename,
+          url: savedFile.uri,
+          dialogTitle: 'Save / Share Certificate Image'
+        });
+        return true;
       } catch (nativeErr) {
         console.warn('Capacitor native image save warning:', nativeErr);
       }
     }
 
+    // Web Fallback using Blob URL
+    const blob = dataUrlToBlob(dataUrl);
+    const objectUrl = URL.createObjectURL(blob);
+
     const link = document.createElement('a');
-    link.href = dataUrl;
+    link.href = objectUrl;
     link.download = safeFilename;
     document.body.appendChild(link);
     link.click();
+
     setTimeout(() => {
       if (document.body.contains(link)) {
         document.body.removeChild(link);
       }
-    }, 200);
+      URL.revokeObjectURL(objectUrl);
+    }, 1000);
 
     return true;
   } catch (error) {
@@ -549,7 +587,7 @@ export async function exportCertificateAsPdf(
   filename = 'Certificate'
 ): Promise<boolean> {
   try {
-    const canvas = await renderCertificateToCanvas(target, 2.5);
+    const canvas = await renderCertificateToCanvas(target);
     const imgData = canvas.toDataURL('image/jpeg', 0.98);
 
     // Landscape A4 dimensions in mm: 297 x 210
@@ -570,18 +608,40 @@ export async function exportCertificateAsPdf(
     if (Capacitor.isNativePlatform()) {
       try {
         const pdfBase64 = pdf.output('datauristring').split(',')[1];
-        await Filesystem.writeFile({
-          path: `Certificates/${safeFilename}`,
+        const savedFile = await Filesystem.writeFile({
+          path: safeFilename,
           data: pdfBase64,
-          directory: Directory.Documents,
-          recursive: true
+          directory: Directory.Cache
         });
+
+        await Share.share({
+          title: safeFilename,
+          url: savedFile.uri,
+          dialogTitle: 'Save / Share Certificate PDF'
+        });
+        return true;
       } catch (nativeErr) {
         console.warn('Capacitor native PDF write notice:', nativeErr);
       }
     }
 
-    pdf.save(safeFilename);
+    // Web fallback using Blob URL
+    const pdfBlob = pdf.output('blob');
+    const objectUrl = URL.createObjectURL(pdfBlob);
+
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = safeFilename;
+    document.body.appendChild(link);
+    link.click();
+
+    setTimeout(() => {
+      if (document.body.contains(link)) {
+        document.body.removeChild(link);
+      }
+      URL.revokeObjectURL(objectUrl);
+    }, 1000);
+
     return true;
   } catch (error) {
     console.error('Error exporting certificate as PDF:', error);

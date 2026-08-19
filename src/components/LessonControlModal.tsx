@@ -679,7 +679,11 @@ export const LessonControlModal: React.FC = () => {
                        t('auto_scheduled')}
                     </span>
                     <span className="text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700">
-                      {t('auto_duration_selectedlesson_dur')}
+                      {_t(
+                        `المدة: ${selectedLesson.durationMinutes || 60} دقيقة`,
+                        `Duration: ${selectedLesson.durationMinutes || 60} min`,
+                        `Dauer: ${selectedLesson.durationMinutes || 60} Min`
+                      )}
                     </span>
                   </div>
                 </div>
@@ -928,7 +932,11 @@ export const LessonControlModal: React.FC = () => {
                                   </span>
                                   {lastSessionHwStatus && (
                                     <span className="text-[10px] text-text-muted mt-1 bg-slate-50 dark:bg-slate-800/50 px-2 py-0.5 rounded-md border border-slate-100 dark:border-slate-800/30 inline-block font-extrabold">
-                                      {t('auto_previous_homework_lastse')}
+                                      {_t(
+                                        `🎒 واجب الحصة السابقة: ${lastSessionHwStatus === 'yes' ? 'تم الحل بالكامل 👍' : 'لم يتم الحل 👎'}`,
+                                        `🎒 Previous Homework: ${lastSessionHwStatus === 'yes' ? 'Completed 👍' : 'Not Done 👎'}`,
+                                        `🎒 Letzte Hausaufgabe: ${lastSessionHwStatus === 'yes' ? 'Erledigt 👍' : 'Nicht erledigt 👎'}`
+                                      )}
                                     </span>
                                   )}
                                 </div>

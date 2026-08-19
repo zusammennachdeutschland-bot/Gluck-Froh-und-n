@@ -11,7 +11,7 @@ interface AddStudentModalProps {
 }
 
 export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => {
-  const { groups, students, addStudent, t, language } = useApp();
+  const { groups, students, addStudent, t, _t, language } = useApp();
 
   // Helper for inline translations
   
@@ -153,7 +153,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
                 <p className="text-[11px] text-primary dark:text-primary mt-0.5">
                   {t('auto_package')}
                   <span className="font-mono font-bold">{selectedGroup.monthlyPackagePrice} EGP</span> / {selectedGroup.sessionCount} {t('auto_sessions')}.
-                  {t('auto_inherited_automatically_from')}
+                  {_t(` يتم التوريث تلقائياً من ${selectedGroup.name}.`, ` Inherited automatically from ${selectedGroup.name}.`, ` Preis wird automatisch von ${selectedGroup.name} übernommen.`)}
                 </p>
               </div>
             </div>
