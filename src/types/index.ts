@@ -255,6 +255,8 @@ export interface TeacherProfile {
   enableLessonAlerts?: boolean; // In-app alerts for upcoming lessons (within 30 mins)
   enableBrowserPush?: boolean; // Browser push notifications
   parentMessageTemplates?: Record<string, string>;
+  weeklyIncomeGoal?: number;
+  monthlyIncomeGoal?: number;
 }
 
 
@@ -575,28 +577,82 @@ export interface TodoItem extends SyncableRecord {
 // ==========================================
 export type CertificateLanguage = 'en' | 'de' | 'ar';
 
-export type CertificateTypeKey =
+export type CertificateCategoryKey =
   | 'achievement'
-  | 'great_progress'
-  | 'outstanding_performance'
-  | 'german_achievement'
-  | 'homework_excellence'
-  | 'perfect_attendance'
-  | 'student_of_month'
-  | 'appreciation'
-  | 'exam_result'
+  | 'progress'
+  | 'german'
+  | 'learning'
+  | 'commitment'
+  | 'recognition'
   | 'custom';
+
+export type CertificateTypeKey =
+  // Achievement
+  | 'achievement'
+  | 'outstanding_achievement'
+  | 'outstanding_performance'
+  | 'excellent_performance'
+  // Progress
+  | 'great_progress'
+  | 'most_improved'
+  | 'excellent_progress'
+  | 'outstanding_improvement'
+  // German
+  | 'german_achievement'
+  | 'german_speaking'
+  | 'german_vocabulary'
+  | 'german_pronunciation'
+  | 'german_excellence'
+  // Learning
+  | 'homework_excellence'
+  | 'excellent_participation'
+  | 'exam_result'
+  | 'outstanding_learning'
+  | 'excellent_effort'
+  // Behavior / Commitment
+  | 'perfect_attendance'
+  | 'excellent_attendance'
+  | 'outstanding_commitment'
+  | 'exemplary_discipline'
+  // Recognition
+  | 'student_of_month'
+  | 'star_student'
+  | 'student_of_week'
+  | 'appreciation'
+  | 'special_recognition'
+  // Custom
+  | 'custom'
+  // Compatibility aliases
+  | 'course_completion'
+  | 'participation';
 
 export type CertificateTemplateId =
   | 'neutral'
-  | 'boys'
-  | 'girls'
   | 'classic'
   | 'elegant'
   | 'kids'
   | 'german_themed'
+  | 'modern'
   | 'boys_champion'
-  | 'girls_princess';
+  | 'girls_princess'
+  | 'boys'
+  | 'girls'
+  | 'custom_ai_bg'
+  | `ai_bg_${string}`;
+
+export interface AICertificateBackground {
+  id: string;
+  name: string;
+  imageUrl: string;
+  width: number;
+  height: number;
+  aspectRatio: number;
+  textColorMode: 'dark' | 'light' | 'gold_on_dark';
+  themeColor?: string;
+  createdAt: number;
+  promptUsed?: string;
+  fileSizeKB?: number;
+}
 
 export interface CertificateRecord extends SyncableRecord {
   studentId: string;
@@ -621,6 +677,9 @@ export interface CertificateRecord extends SyncableRecord {
   score?: string; // Optional score or note (e.g., "100%", "Sehr Gut", "98/100")
   gradeOrScore?: string;
   customBadgeText?: string; // Optional custom badge text
+  customBackgroundId?: string;
+  customBackgroundUrl?: string;
+  customBackgroundTextColor?: 'dark' | 'light' | 'gold_on_dark';
   createdAt: number; // timestamp
 }
 

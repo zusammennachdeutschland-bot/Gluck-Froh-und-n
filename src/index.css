@@ -42,6 +42,32 @@
 }
 
 @layer utilities {
+  .font-arabic-serif {
+    font-family: 'Amiri', 'Alexandria', 'Scheherazade New', 'Times New Roman', serif;
+  }
+  .font-arabic-sans {
+    font-family: 'Alexandria', 'Cairo', 'Noto Sans Arabic', system-ui, sans-serif;
+  }
+  .font-cert-serif {
+    font-family: 'Cinzel', 'Playfair Display', 'Georgia', 'Times New Roman', serif;
+  }
+  .font-cert-sans {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+  .font-signature, .font-handwriting {
+    font-family: 'Dancing Script', 'Great Vibes', 'Alex Brush', 'Caveat', 'Pinyon Script', cursive, 'Brush Script MT', italic;
+  }
+  .font-arabic-signature {
+    font-family: 'Aref Ruqaa', 'Amiri', 'Alexandria', serif;
+  }
+
+  /* Ensure Arabic shaping is preserved and never broken by letter-spacing */
+  [dir="rtl"], .rtl-text, .arabic-text {
+    font-feature-settings: "liga" 1, "calt" 1, "kern" 1;
+    text-rendering: geometricPrecision;
+    letter-spacing: normal !important;
+  }
+
   @keyframes wave {
     0%, 100% { transform: rotate(0deg); }
     20%, 60% { transform: rotate(14deg); }

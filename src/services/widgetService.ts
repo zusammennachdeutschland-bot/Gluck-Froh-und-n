@@ -1,6 +1,6 @@
 import { Preferences } from '@capacitor/preferences';
 import { registerPlugin } from '@capacitor/core';
-import { Lesson, Student, PaymentRecord, TodoItem, Group } from '../types';
+import { Lesson, Student, PaymentRecord, TodoItem, Group, TeacherProfile } from '../types';
 import { formatLocalDate } from '../utils/timeUtils';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
 import { calculateOverallAttendance } from '../utils/lessonUtils';
@@ -186,7 +186,7 @@ export const syncTodosToWidget = async (todos: TodoItem[]) => {
 /**
  * 6. Sync Revenue & Monthly Goal ('widget_revenue')
  */
-export const syncRevenueToWidget = async (payments: PaymentRecord[]) => {
+export const syncRevenueToWidget = async (payments: PaymentRecord[], profile?: TeacherProfile) => {
   try {
     const todayRevenue = getTodayRevenue(payments);
     const weeklyRevenue = getWeeklyRevenue(payments);
@@ -198,7 +198,8 @@ export const syncRevenueToWidget = async (payments: PaymentRecord[]) => {
         today: todayRevenue,
         week: weeklyRevenue,
         month: monthlyRevenue,
-        goal: 8000
+        goal: profile?.monthlyIncomeGoal || 0,
+        weeklyGoal: profile?.weeklyIncomeGoal || 0
       })
     });
   } catch (e) {
@@ -268,10 +269,11 @@ export const syncAllWidgetsToNative = async (data: {
   payments: PaymentRecord[];
   todos: TodoItem[];
   groups?: Group[];
+  profile?: TeacherProfile;
   activeSession?: { id: string; groupName: string; startTime: number; attendanceCount: number } | null;
 }) => {
   try {
-    const { lessons, students, payments, todos, groups = [], activeSession } = data;
+    const { lessons, students, payments, todos, groups = [], profile, activeSession } = data;
     const todayStr = formatLocalDate();
     const todayLessons = lessons.filter(l => l.date === todayStr);
 
@@ -285,7 +287,7 @@ export const syncAllWidgetsToNative = async (data: {
       syncActiveSessionToWidget(activeSession || null),
       syncPaymentsDueToWidget(students, groups, lessons, payments),
       syncTodosToWidget(todos),
-      syncRevenueToWidget(payments),
+      syncRevenueToWidget(payments, profile),
       syncMiniDashboardToWidget(todayLessons.length, students.length, attendanceRate, monthlyRev, overdueCount),
       syncUpcomingLessonsToWidget(lessons, students)
     ]);

@@ -1,14 +1,10 @@
 import React, { useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
-
-import { TrendingUp, CheckCircle2, XCircle, Clock, Wallet, AlertCircle, DollarSign } from 'lucide-react';
+import { TrendingUp, CheckCircle2, XCircle, Clock, Wallet, AlertCircle, DollarSign, Target } from 'lucide-react';
 
 export const MonthlyOverviewWidget: React.FC = () => {
   const { lessons, students, groups, payments, profile, language, t } = useApp();
-
-  // Helper for inline translations
-  
 
   const now = new Date();
   const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -47,6 +43,11 @@ export const MonthlyOverviewWidget: React.FC = () => {
   }, [lessons, students, groups, payments, currentMonthPrefix]);
 
   const currency = profile.currency || (t('auto_egp'));
+
+  const monthlyGoal = profile.monthlyIncomeGoal && profile.monthlyIncomeGoal > 0 ? profile.monthlyIncomeGoal : null;
+  const hasMonthlyGoal = monthlyGoal !== null;
+  const monthlyPercent = hasMonthlyGoal ? Math.round((monthStats.collected / monthlyGoal) * 100) : 0;
+  const remainingToGoal = hasMonthlyGoal ? Math.max(0, monthlyGoal - monthStats.collected) : 0;
 
   return (
     <div className="bg-surface border border-surface-border rounded-2xl p-4 shadow-2xs transition-all">
@@ -129,6 +130,56 @@ export const MonthlyOverviewWidget: React.FC = () => {
             {monthStats.totalExpected.toLocaleString()} <span className="text-[9px] text-text-muted font-sans">{currency}</span>
           </span>
         </div>
+      </div>
+
+      {/* Financial Goal Section */}
+      <div className="mt-3 pt-3 border-t border-surface-border/80 dark:border-surface-border">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5 text-xs font-black text-text-main">
+            <Target className="w-3.5 h-3.5 text-primary" />
+            <span>{t('goal_monthly_short')}</span>
+          </div>
+          <span className="text-[10px] font-bold text-text-muted">
+            {t('this_month')}
+          </span>
+        </div>
+
+        {hasMonthlyGoal ? (
+          <div className="space-y-2 bg-background dark:bg-background/60 p-3 rounded-xl border border-surface-border/80 dark:border-surface-border">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-text-muted font-bold text-[11px]">{t('goal_collected')}:</span>
+              <span className="font-mono font-black text-text-main">
+                {monthStats.collected.toLocaleString()} <span className="text-[10px] text-text-muted font-sans">{currency}</span>
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-text-muted font-bold text-[11px]">{t('goal_target')}:</span>
+              <span className="font-mono font-black text-text-main">
+                {monthlyGoal.toLocaleString()} <span className="text-[10px] text-text-muted font-sans">{currency}</span>
+              </span>
+            </div>
+
+            {/* Progress bar and percentage */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="text-text-muted">{t('goal_remaining')}: <span className="font-mono text-text-main">{remainingToGoal.toLocaleString()} {currency}</span></span>
+                <span className="font-mono text-primary font-black">{monthlyPercent}%</span>
+              </div>
+              <div className="w-full bg-surface-border dark:bg-surface-border/60 h-2 rounded-full overflow-hidden">
+                <div 
+                  className="bg-primary h-full rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, monthlyPercent)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-background dark:bg-background/60 py-2.5 px-3 rounded-xl border border-surface-border/80 dark:border-surface-border flex items-center justify-between text-xs">
+            <span className="text-text-muted text-[11px] font-bold">{t('no_goal_set')}</span>
+            <span className="text-[10px] font-mono text-text-muted">—</span>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -2760,6 +2760,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         payments,
         todos,
         groups,
+        profile,
         activeSession: activeLessonSession ? {
           id: activeLessonSession.lessonId,
           groupName: activeLessonSession.groupName,
@@ -2769,7 +2770,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }).catch(err => console.warn('Master widget sync error:', err));
     }, 1000);
     return () => clearTimeout(timer);
-  }, [lessons, students, payments, todos, groups, activeLessonSession]);
+  }, [lessons, students, payments, todos, groups, profile, activeLessonSession]);
 
   const teacherSettingsRecord: TeacherSettingsRecord = useMemo(() => ({
     id: 'singleton_teacher_settings',

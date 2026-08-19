@@ -643,6 +643,18 @@ export type TranslationKey =
   | 'auto_accent_color'
   | 'auto_select_your_preferred_accent_c'
   | 'auto_teacher_profile'
+  | 'financial_goals'
+  | 'financial_goals_desc'
+  | 'weekly_income_goal'
+  | 'monthly_income_goal'
+  | 'goal_weekly_short'
+  | 'goal_monthly_short'
+  | 'no_goal_set'
+  | 'goal_remaining'
+  | 'goal_collected'
+  | 'goal_target'
+  | 'this_week'
+  | 'this_month'
   | 'auto_manage_personal_details_worki'
   | 'auto_edit_profile'
   | 'auto_weekly_working_hours'
@@ -1501,6 +1513,18 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     auto_accent_color: "لون الواجهة (Accent Color)",
     auto_select_your_preferred_accent_c: "اختر لون التمييز المفضل لجميع الأزرار والأيقونات والتبويبات النشطة وعناصر الواجهة التفاعلية.",
     auto_teacher_profile: "الملف الشخصي للمعلم",
+    financial_goals: "الأهداف المالية",
+    financial_goals_desc: "تحديد الأهداف الأسبوعية والشهرية للدخل",
+    weekly_income_goal: "الهدف الأسبوعي للدخل",
+    monthly_income_goal: "الهدف الشهري للدخل",
+    goal_weekly_short: "الهدف الأسبوعي",
+    goal_monthly_short: "الهدف الشهري",
+    no_goal_set: "لم يتم تحديد هدف",
+    goal_remaining: "المتبقي",
+    goal_collected: "المحصّل",
+    goal_target: "الهدف",
+    this_week: "هذا الأسبوع",
+    this_month: "هذا الشهر",
     auto_manage_personal_details_worki: "إدارة البيانات الشخصية وساعات العمل والعملة",
     auto_edit_profile: "تعديل البيانات",
     auto_weekly_working_hours: "ساعات العمل الأسبوعية",
@@ -2358,6 +2382,18 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     auto_accent_color: "Accent Color",
     auto_select_your_preferred_accent_c: "Select your preferred accent color for all buttons, icons, active tabs, and interactive controls.",
     auto_teacher_profile: "Teacher Profile",
+    financial_goals: "Financial Goals",
+    financial_goals_desc: "Set weekly and monthly income targets",
+    weekly_income_goal: "Weekly Income Goal",
+    monthly_income_goal: "Monthly Income Goal",
+    goal_weekly_short: "Weekly Goal",
+    goal_monthly_short: "Monthly Goal",
+    no_goal_set: "No goal set",
+    goal_remaining: "Remaining",
+    goal_collected: "Collected",
+    goal_target: "Goal",
+    this_week: "This Week",
+    this_month: "This Month",
     auto_manage_personal_details_worki: "Manage personal details, working hours & currency",
     auto_edit_profile: "Edit Profile",
     auto_weekly_working_hours: "Weekly Working Hours",
@@ -3215,6 +3251,18 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     auto_accent_color: "Akzentfarbe",
     auto_select_your_preferred_accent_c: "Wählen Sie die bevorzugte Akzentfarbe für alle Schaltflächen, Symbole, Tabs und Steuerelemente.",
     auto_teacher_profile: "Teacher Profile",
+    financial_goals: "Finanzielle Ziele",
+    financial_goals_desc: "Wöchentliche und monatliche Einkommensziele festlegen",
+    weekly_income_goal: "Wöchentliches Einkommensziel",
+    monthly_income_goal: "Monatliches Einkommensziel",
+    goal_weekly_short: "Wochenziel",
+    goal_monthly_short: "Monatsziel",
+    no_goal_set: "Kein Ziel festgelegt",
+    goal_remaining: "Verbleibend",
+    goal_collected: "Eingenommen",
+    goal_target: "Ziel",
+    this_week: "Diese Woche",
+    this_month: "Diesen Monat",
     auto_manage_personal_details_worki: "Manage personal details, working hours & currency",
     auto_edit_profile: "Edit Profile",
     auto_weekly_working_hours: "Weekly Working Hours",

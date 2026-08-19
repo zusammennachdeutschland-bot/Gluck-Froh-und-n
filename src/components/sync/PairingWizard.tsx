@@ -287,7 +287,7 @@ export const PairingWizard: React.FC<PairingWizardProps> = ({
   const currentDeviceName = localDevice?.name || 'Local Teacher Device';
   const pairingPayloadString = createPairingPayload(currentDeviceId, currentDeviceName, localPin || '000000', 2);
   const realQrSvg = generateQrSvg(pairingPayloadString, 200);
-  const qrSvgUrl = `data:image/svg+xml;utf8,${encodeURIComponent(realQrSvg)}`;
+  const qrSvgUrl = realQrSvg ? `data:image/svg+xml;utf8,${encodeURIComponent(realQrSvg)}` : null;
 
   return (
     <div id={id} className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 sm:p-6 shadow-sm">
@@ -352,12 +352,18 @@ export const PairingWizard: React.FC<PairingWizardProps> = ({
           <div className="flex flex-col items-center justify-center p-6 rounded-2xl bg-gradient-to-b from-gray-50 to-gray-100/60 dark:from-gray-800/40 dark:to-gray-800/80 border border-gray-200 dark:border-gray-700/60 text-center">
             <div className="space-y-4">
               <div className="relative inline-block p-3 bg-white rounded-2xl shadow-md border border-gray-100 dark:border-gray-700">
-                <img 
-                  src={qrSvgUrl} 
-                  alt="Pairing QR Code" 
-                  className="w-40 h-40 sm:w-44 sm:h-44 mx-auto rounded-lg"
-                  referrerPolicy="no-referrer"
-                />
+                {qrSvgUrl ? (
+                  <img 
+                    src={qrSvgUrl} 
+                    alt="Pairing QR Code" 
+                    className="w-40 h-40 sm:w-44 sm:h-44 mx-auto rounded-lg"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-40 h-40 sm:w-44 sm:h-44 mx-auto rounded-lg bg-gray-100 flex items-center justify-center">
+                    <QrCode className="w-12 h-12 text-gray-400" />
+                  </div>
+                )}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="bg-emerald-600 text-white p-2 rounded-xl shadow-lg border-2 border-white">
                     <ShieldCheck className="w-5 h-5" />

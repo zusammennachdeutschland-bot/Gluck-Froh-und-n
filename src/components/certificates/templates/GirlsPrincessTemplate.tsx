@@ -1,6 +1,9 @@
 import React from 'react';
 import { CertificateRecord } from '../../../types';
 import { Sparkles, Crown, Heart, CheckCircle2 } from 'lucide-react';
+import { CertificateStudentName } from './CertificateStudentName';
+import { CertificateTeacherSignature } from './CertificateTeacherSignature';
+import { formatLocalDate } from '../../../utils/timeUtils';
 
 interface TemplateProps {
   certificate: Partial<CertificateRecord>;
@@ -8,12 +11,15 @@ interface TemplateProps {
 
 export const GirlsPrincessTemplate: React.FC<TemplateProps> = ({ certificate }) => {
   const isRtl = certificate.language === 'ar';
-  const issueDateFormatted = certificate.issueDate || new Date().toISOString().split('T')[0];
+  const issueDateFormatted = certificate.issueDate || formatLocalDate();
+  const recipientName = certificate.recipientName || certificate.studentName || 'Shining Star';
+  const teacherName = certificate.teacherName || certificate.instructorName || (isRtl ? 'المعلم' : certificate.language === 'de' ? 'Lehrkraft' : 'Teacher');
 
   return (
     <div
       dir={isRtl ? 'rtl' : 'ltr'}
-      className="relative w-full aspect-[1.414/1] p-6 sm:p-10 flex flex-col justify-between select-none overflow-hidden font-sans rounded-3xl shadow-2xl"
+      lang={isRtl ? 'ar' : 'de'}
+      className={`relative w-full aspect-[1.414/1] p-6 sm:p-10 flex flex-col justify-between select-none overflow-hidden rounded-3xl shadow-2xl ${isRtl ? 'font-arabic-sans' : 'font-cert-sans'}`}
       style={{
         boxSizing: 'border-box',
         backgroundColor: '#fff1f2',
@@ -49,7 +55,7 @@ export const GirlsPrincessTemplate: React.FC<TemplateProps> = ({ certificate }) 
       {/* Header Section */}
       <div className="text-center relative z-10 pt-2">
         <div
-          className="inline-flex items-center gap-2 px-4 py-1 rounded-full text-white text-xs sm:text-sm font-black shadow-md uppercase tracking-wider mb-2"
+          className={`inline-flex items-center gap-2 px-4 py-1 rounded-full text-white text-xs sm:text-sm font-black shadow-md uppercase ${isRtl ? 'tracking-normal' : 'tracking-wider'} mb-2`}
           style={{
             background: 'linear-gradient(90deg, #ec4899, #f43f5e, #9333ea)',
             border: '1px solid #fbcfe8'
@@ -57,12 +63,12 @@ export const GirlsPrincessTemplate: React.FC<TemplateProps> = ({ certificate }) 
         >
           <Crown className="w-4 h-4" style={{ color: '#fef08a', fill: '#fef08a' }} />
           <span>
-            {certificate.language === 'ar' ? 'وسام أميرة التفوق والنجوم ✨' : certificate.language === 'de' ? 'PRINZESSIN STERNENURKUNDE ✨' : 'SHINING PRINCESS AWARD ✨'}
+            {certificate.customBadgeText || (certificate.language === 'ar' ? 'وسام أميرة التفوق والنجوم ✨' : certificate.language === 'de' ? 'PRINZESSIN STERNENURKUNDE ✨' : 'SHINING PRINCESS AWARD ✨')}
           </span>
           <Sparkles className="w-4 h-4" style={{ color: '#fef08a' }} />
         </div>
 
-        <h1 className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tight drop-shadow-xs" style={{ color: '#3b0764' }}>
+        <h1 className={`text-2xl sm:text-4xl md:text-5xl font-black ${isRtl ? 'tracking-normal font-arabic-sans' : 'tracking-tight font-cert-sans'} drop-shadow-xs`} style={{ color: '#3b0764' }}>
           {certificate.title || (certificate.language === 'ar' ? 'شهادة التميز والتفوق الباهر' : certificate.language === 'de' ? 'Urkunde für herausragende Leistungen' : 'Shining Star of Excellence')}
         </h1>
 
@@ -73,31 +79,28 @@ export const GirlsPrincessTemplate: React.FC<TemplateProps> = ({ certificate }) 
         )}
       </div>
 
-      {/* Recipient Center Area */}
-      <div className="text-center my-auto py-2 relative z-10">
-        <p className="text-xs sm:text-sm font-extrabold uppercase tracking-widest" style={{ color: '#7e22ce' }}>
+      {/* Recipient Center Area with Auto-Fit */}
+      <div className="text-center my-auto py-2 relative z-10 w-full max-w-3xl mx-auto">
+        <p className={`text-xs sm:text-sm font-extrabold uppercase ${isRtl ? 'tracking-normal' : 'tracking-widest'} mb-1`} style={{ color: '#7e22ce' }}>
           {certificate.language === 'ar' ? 'تُهدى هذه الشهادة الملكية بتقدير عظيم للأميرة المتميزة' : certificate.language === 'de' ? 'Diese glanzvolle Urkunde geht an den Star' : 'Lovingly and proudly awarded to the star'}
         </p>
 
-        <div className="my-2 sm:my-3">
-          <div
-            className="inline-block rounded-2xl px-8 sm:px-16 py-2.5"
-            style={{
-              backgroundColor: '#ffffff',
-              border: '3px solid #f472b6',
-              boxShadow: '0 0 25px rgba(244, 114, 182, 0.45)'
-            }}
-          >
-            <span
-              className="text-3xl sm:text-5xl md:text-6xl font-black font-serif tracking-wide drop-shadow-xs"
-              style={{ color: '#be185d' }}
-            >
-              {certificate.recipientName || certificate.studentName || 'Shining Star'}
-            </span>
-          </div>
+        {/* Clean recipient name without strange boxes */}
+        <div className="my-2 sm:my-3 w-full px-4 sm:px-12">
+          <CertificateStudentName
+            name={recipientName}
+            isRtl={isRtl}
+            maxFontSizePx={52}
+            minFontSizePx={22}
+            fontStyle="serif"
+            className="font-bold drop-shadow-xs"
+            style={{ color: '#be185d' }}
+          />
+          {/* Ornate Rose/Gold underline */}
+          <div className="w-48 sm:w-80 h-[2.5px] bg-gradient-to-r from-transparent via-[#f472b6] to-transparent mx-auto mt-3 sm:mt-4 mb-1" />
         </div>
 
-        <p className="text-xs sm:text-base max-w-2xl mx-auto font-medium px-4 leading-relaxed" style={{ color: '#334155' }}>
+        <p className="text-xs sm:text-base max-w-2xl mx-auto font-medium px-4 leading-relaxed mt-1" style={{ color: '#334155' }}>
           {certificate.description || (certificate.language === 'ar' ? 'تقديرًا لإبداعكِ وتفوقكِ الدائم وابتسامتكِ المشرقة وإنجازكِ الرائع في دروس اللغة الألمانية.' : 'in Anerkennung deines fleißigen Lernens, deiner Begeisterung und deines strahlenden Erfolgs.')}
         </p>
 
@@ -117,54 +120,40 @@ export const GirlsPrincessTemplate: React.FC<TemplateProps> = ({ certificate }) 
       </div>
 
       {/* Footer */}
-      <div className="flex items-end justify-between px-4 sm:px-12 pb-2 relative z-10 font-sans">
-        <div
-          className="text-center min-w-[100px] sm:min-w-[140px] p-2.5 rounded-xl shadow-xs"
-          style={{
-            backgroundColor: '#ffffff',
-            border: '1px solid #fbcfe8'
-          }}
-        >
-          <div
-            className="pb-1 mb-1 text-[11px] sm:text-sm font-bold"
-            style={{ borderBottom: '1px solid #f472b6', color: '#3b0764' }}
-          >
+      <div className="flex items-end justify-between px-4 sm:px-12 pb-2 sm:pb-3 relative z-10 font-sans">
+        <div className="flex flex-col items-center text-center min-w-[110px] sm:min-w-[150px]">
+          <div className="h-7 sm:h-9 flex items-end justify-center px-2 pb-1 text-xs sm:text-sm font-bold select-text" style={{ color: '#3b0764' }}>
             {issueDateFormatted}
           </div>
-          <span className="text-[9px] sm:text-[11px] uppercase tracking-wider font-semibold" style={{ color: '#db2777' }}>
+          <div className="w-28 sm:w-40 h-[1.5px] bg-[#f472b6]/70 my-1" />
+          <span className={`text-[9px] sm:text-xs uppercase ${isRtl ? 'tracking-normal font-semibold' : 'tracking-wider font-semibold'}`} style={{ color: '#db2777' }}>
             {certificate.language === 'ar' ? 'تاريخ التكريم' : certificate.language === 'de' ? 'Ausstellungsdatum' : 'Date Issued'}
           </span>
         </div>
 
         <div className="hidden sm:flex flex-col items-center">
           <div
-            className="w-14 h-14 rounded-full border-2 border-white shadow-md flex items-center justify-center text-white"
+            className="w-14 h-14 rounded-full flex items-center justify-center text-slate-900 shadow-md"
             style={{
-              background: 'linear-gradient(135deg, #f472b6, #f43f5e)'
+              background: 'linear-gradient(135deg, #fbcfe8 0%, #f472b6 100%)',
+              border: '2px solid #ffffff'
             }}
           >
-            <Crown className="w-7 h-7" style={{ color: '#fef08a', fill: '#fef08a' }} />
+            <Crown className="w-8 h-8 text-white fill-amber-300" />
           </div>
         </div>
 
-        <div
-          className="text-center min-w-[100px] sm:min-w-[140px] p-2.5 rounded-xl shadow-xs"
-          style={{
-            backgroundColor: '#ffffff',
-            border: '1px solid #fbcfe8'
-          }}
-        >
-          <div
-            className="pb-1 mb-1 text-[11px] sm:text-sm font-bold italic font-serif"
-            style={{ borderBottom: '1px solid #f472b6', color: '#3b0764' }}
-          >
-            {certificate.teacherName || certificate.instructorName || 'Lehrer/in'}
+        <div className="flex flex-col items-center text-center min-w-[110px] sm:min-w-[150px]">
+          <div className="h-7 sm:h-9 flex items-end justify-center px-2 pb-0.5 text-[#be185d]">
+            <CertificateTeacherSignature name={teacherName} isRtl={isRtl} />
           </div>
-          <span className="text-[9px] sm:text-[11px] uppercase tracking-wider font-semibold" style={{ color: '#db2777' }}>
-            {certificate.language === 'ar' ? 'توقيع المعلمة / المعلم' : certificate.language === 'de' ? 'Unterschrift Lehrkraft' : 'Instructor Signature'}
+          <div className="w-28 sm:w-40 h-[1.5px] bg-[#f472b6]/70 my-1" />
+          <span className={`text-[9px] sm:text-xs uppercase ${isRtl ? 'tracking-normal font-semibold' : 'tracking-wider font-semibold'}`} style={{ color: '#db2777' }}>
+            {certificate.language === 'ar' ? 'المعلم' : certificate.language === 'de' ? 'Lehrkraft' : 'Teacher'}
           </span>
         </div>
       </div>
     </div>
   );
 };
+

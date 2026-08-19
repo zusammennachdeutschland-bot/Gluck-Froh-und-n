@@ -1,9 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { CertificateRecord, CertificateTypeKey, CertificateTemplateId, CertificateLanguage } from '../../types';
-import { CERTIFICATE_TYPES, PRIMARY_CERTIFICATE_TEMPLATES, getCertificateDefaultText } from '../../data/certificateTypes';
+import { CertificateRecord, CertificateTypeKey, CertificateTemplateId, CertificateLanguage, AICertificateBackground } from '../../types';
+import {
+  CERTIFICATE_CATEGORIES_CONFIG,
+  CERTIFICATE_TYPES_CONFIG,
+  PRIMARY_CERTIFICATE_TEMPLATES,
+  getCertificateDefaultText
+} from '../../data/certificateTypes';
 import { formatLocalDate } from '../../utils/timeUtils';
-import { X, Award, Users, Check, Sparkles, AlertCircle, CheckCircle2, Layers } from 'lucide-react';
+import { resolveCertificateRecipientName } from '../../utils/certificateUtils';
+import { getSavedAIBackgrounds } from '../../utils/aiBackgroundUtils';
+import { X, Check, Sparkles, CheckCircle2, Layers, AlertTriangle, Image as ImageIcon } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface BulkCertificateModalProps {
@@ -30,20 +37,30 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
   });
 
   const [language, setLanguage] = useState<CertificateLanguage>('de');
-  const [type, setType] = useState<CertificateTypeKey>('course_completion');
-  const [templateId, setTemplateId] = useState<CertificateTemplateId>('neutral');
-  const [courseOrLevelTitle, setCourseOrLevelTitle] = useState<string>('Deutschkurs A1');
+  const [type, setType] = useState<CertificateTypeKey>('achievement');
+  const [templateTab, setTemplateTab] = useState<'standard' | 'ai_custom'>('standard');
+  const [templateId, setTemplateId] = useState<CertificateTemplateId>('classic');
+  const [savedAIBackgrounds, setSavedAIBackgrounds] = useState<AICertificateBackground[]>([]);
+  const [selectedCustomBg, setSelectedCustomBg] = useState<AICertificateBackground | null>(null);
+
+  useEffect(() => {
+    getSavedAIBackgrounds().then(setSavedAIBackgrounds);
+  }, []);
+
+  const [courseOrLevelTitle, setCourseOrLevelTitle] = useState<string>('Certificate of Achievement');
 
   const [description, setDescription] = useState<string>(() => {
     const defaults = getCertificateDefaultText(type, language);
     return defaults.description;
   });
 
+  const currentTeacherName = profile?.displayName || (profile as any)?.name || '';
   const [issueDate, setIssueDate] = useState<string>(formatLocalDate());
-  const [instructorName, setInstructorName] = useState<string>(profile.name || 'Lehrer/in');
+  const [instructorName, setInstructorName] = useState<string>(currentTeacherName || 'Lehrer/in');
   const [centerOrSchoolName, setCenterOrSchoolName] = useState<string>('');
 
   const [latinNamesEdits, setLatinNamesEdits] = useState<Record<string, string>>({});
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [issuedCount, setIssuedCount] = useState<number | null>(null);
 
   const groupStudents = students.filter(s => {
@@ -56,6 +73,7 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
     setSelectedGroupId(newGid);
     const filtered = students.filter(s => s.status !== 'archived' && (newGid === 'all' || s.groupId === newGid));
     setSelectedStudentIds(new Set(filtered.map(s => s.id)));
+    setValidationError(null);
   };
 
   const toggleStudent = (id: string) => {
@@ -68,6 +86,7 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
       }
       return next;
     });
+    setValidationError(null);
   };
 
   const toggleSelectAll = () => {
@@ -76,50 +95,96 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
     } else {
       setSelectedStudentIds(new Set(groupStudents.map(s => s.id)));
     }
+    setValidationError(null);
   };
 
   const handleTypeChange = (newType: CertificateTypeKey) => {
     setType(newType);
     const defaults = getCertificateDefaultText(newType, language);
     setDescription(defaults.description);
+    setCourseOrLevelTitle(defaults.title);
   };
 
   const handleLanguageChange = (newLang: CertificateLanguage) => {
     setLanguage(newLang);
     const defaults = getCertificateDefaultText(type, newLang);
     setDescription(defaults.description);
+    setCourseOrLevelTitle(defaults.title);
+    setValidationError(null);
   };
 
   const handleGenerateBulk = () => {
+    setValidationError(null);
     const targetStudents = groupStudents.filter(s => selectedStudentIds.has(s.id));
     if (targetStudents.length === 0) return;
 
-    // Apply any inline edited latin names
-    const namesToUpdate = Object.entries(latinNamesEdits).map(([studentId, certificateName]) => ({
-      studentId,
-      certificateName
-    }));
+    // Check if any students lack Latin names when language is English or German
+    if (language === 'en' || language === 'de') {
+      const missingStudents = targetStudents.filter(student => {
+        const customName = latinNamesEdits[student.id];
+        const effectiveName = customName !== undefined ? customName.trim() : (student.certificateName || '').trim();
+        return !effectiveName;
+      });
+
+      if (missingStudents.length > 0) {
+        setValidationError(
+          _t(
+            `⚠️ يرجى كتابة اسم الشهادة باللاتينية للطلاب الآتي أسماؤهم قبل الإصدار: ${missingStudents.map(s => s.name).join('، ')}`,
+            `⚠️ Please provide Latin certificate names for: ${missingStudents.map(s => s.name).join(', ')}`,
+            `⚠️ Bitte geben Sie lateinische Namen für folgende Schüler an: ${missingStudents.map(s => s.name).join(', ')}`
+          )
+        );
+        return;
+      }
+    }
+
+    // Apply and persist any edited recipient names to the students
+    const namesToUpdate = Object.entries(latinNamesEdits)
+      .filter(([_, certName]) => typeof certName === 'string' && certName.trim().length > 0)
+      .map(([studentId, certificateName]) => ({
+        studentId,
+        certificateName: (certificateName as string).trim()
+      }));
+    
     if (namesToUpdate.length > 0) {
       updateStudentCertificateNamesBulk(namesToUpdate);
     }
 
+    const isCustomBg = templateTab === 'ai_custom' && selectedCustomBg;
+    const finalTemplateId = isCustomBg ? 'custom_ai_bg' : templateId;
+
     const payloadList = targetStudents.map(student => {
-      const latinName = (latinNamesEdits[student.id] || student.certificateName || student.name).trim();
+      const customVal = latinNamesEdits[student.id];
+      const resolved = resolveCertificateRecipientName(
+        language,
+        student,
+        customVal !== undefined ? customVal : (language === 'ar' ? student.name : student.certificateName)
+      );
+
+      const recipientName = resolved.name || (language === 'ar' ? student.name : 'Certificate Recipient');
       const grp = groups.find(g => g.id === student.groupId);
 
       return {
         studentId: student.id,
         studentName: student.name,
-        studentCertificateName: latinName,
+        recipientName: recipientName,
+        studentCertificateName: (customVal || student.certificateName || recipientName).trim(),
         groupId: student.groupId,
         groupName: grp?.name,
         type,
-        templateId,
+        certificateType: type,
+        templateId: finalTemplateId,
+        template: finalTemplateId,
+        customBackgroundId: isCustomBg ? selectedCustomBg.id : undefined,
+        customBackgroundUrl: isCustomBg ? selectedCustomBg.imageUrl : undefined,
+        customBackgroundTextColor: isCustomBg ? selectedCustomBg.textColorMode : undefined,
         language,
-        courseOrLevelTitle: courseOrLevelTitle.trim() || 'Deutschkurs',
+        title: courseOrLevelTitle.trim() || 'Certificate',
+        courseOrLevelTitle: courseOrLevelTitle.trim() || 'Certificate',
         description: description.trim(),
         issueDate,
-        instructorName: instructorName.trim() || profile.name,
+        instructorName: instructorName.trim() || currentTeacherName || 'Lehrer/in',
+        teacherName: instructorName.trim() || currentTeacherName || 'Lehrer/in',
         centerOrSchoolName: centerOrSchoolName.trim() || undefined
       };
     });
@@ -167,7 +232,7 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
               </h3>
               <p className="text-xs text-text-muted max-w-md mx-auto">
                 {_t(
-                  'تم حفظ جميع الشهادات بنجاح في أرشيف مركز الشهادات وملفات الطلاب.',
+                  'تم حفظ جميع الشهادات بنجاح في أرشيف مركز الشهادات وملفات الطلاب بدون أي أخطاء.',
                   'All certificates have been successfully saved to the Certificate Center archive.',
                   'Alle Zertifikate wurden erfolgreich im Zertifikate-Center gespeichert.'
                 )}
@@ -188,6 +253,14 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
           /* Form Content */
           <div className="p-5 overflow-y-auto space-y-4 text-xs sm:text-sm">
             
+            {/* Validation Alert */}
+            {validationError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center gap-2.5 text-red-600 dark:text-red-400 text-xs font-bold animate-shake">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{validationError}</span>
+              </div>
+            )}
+
             {/* Group Selection */}
             <div className="space-y-1.5">
               <label className="block text-xs font-black text-text-main">
@@ -220,7 +293,7 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
                 </button>
               </div>
 
-              <div className="max-h-40 overflow-y-auto space-y-1.5 p-2 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-surface-border dark:border-slate-800">
+              <div className="max-h-48 overflow-y-auto space-y-1.5 p-2 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-surface-border dark:border-slate-800">
                 {groupStudents.length === 0 ? (
                   <div className="text-center py-4 text-xs text-text-muted">
                     {_t('لا يوجد طلاب في هذه المجموعة', 'No students in this group', 'Keine Schüler in dieser Gruppe')}
@@ -228,7 +301,12 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
                 ) : (
                   groupStudents.map(student => {
                     const isSelected = selectedStudentIds.has(student.id);
-                    const currentLatin = latinNamesEdits[student.id] !== undefined ? latinNamesEdits[student.id] : (student.certificateName || '');
+                    const isLatinLang = language === 'en' || language === 'de';
+                    const customName = latinNamesEdits[student.id];
+                    const currentRecipient = customName !== undefined 
+                      ? customName 
+                      : (isLatinLang ? (student.certificateName || '') : student.name);
+                    const isMissingLatin = isLatinLang && !currentRecipient.trim();
 
                     return (
                       <div
@@ -251,15 +329,26 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
                           <span className="font-bold text-xs text-text-main truncate">{student.name}</span>
                         </div>
 
-                        {/* Inline Latin Name */}
-                        <div className="shrink-0 flex items-center gap-1">
+                        {/* Inline Recipient Name with warning if Latin name missing */}
+                        <div className="shrink-0 flex items-center gap-1.5">
+                          {isMissingLatin && isSelected && (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold hidden sm:inline">
+                              {_t('⚠️ مطلوب', '⚠️ Required', '⚠️ Erforderlich')}
+                            </span>
+                          )}
                           <input
                             type="text"
-                            dir="ltr"
-                            placeholder="Latin Name"
-                            value={currentLatin}
-                            onChange={e => setLatinNamesEdits(prev => ({ ...prev, [student.id]: e.target.value }))}
-                            className="w-28 sm:w-36 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-surface-border dark:border-slate-700 rounded-lg text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary"
+                            placeholder={isLatinLang ? 'Latin Name (e.g. Ali)' : 'الاسم بالعربية'}
+                            value={currentRecipient}
+                            onChange={e => {
+                              setLatinNamesEdits(prev => ({ ...prev, [student.id]: e.target.value }));
+                              setValidationError(null);
+                            }}
+                            className={`w-36 sm:w-44 px-2 py-1 bg-slate-50 dark:bg-slate-800 border rounded-lg text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary ${
+                              isMissingLatin && isSelected
+                                ? 'border-amber-400 dark:border-amber-500/70 bg-amber-50/20'
+                                : 'border-surface-border dark:border-slate-700'
+                            }`}
                           />
                         </div>
                       </div>
@@ -273,18 +362,30 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5">
                 <label className="block text-xs font-black text-text-main">
-                  {_t('نوع الشهادة', 'Certificate Type', 'Zertifikatstyp')}
+                  {_t('نوع الشهادة (مُقسّمة حسب الفئات)', 'Certificate Category & Type', 'Zertifikatstyp')}
                 </label>
                 <select
                   value={type}
                   onChange={e => handleTypeChange(e.target.value as CertificateTypeKey)}
                   className="w-full bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary"
                 >
-                  {CERTIFICATE_TYPES.map(t => (
-                    <option key={t.key} value={t.key}>
-                      {t.badgeEmoji} {t.titles[language] || t.titles.de}
-                    </option>
-                  ))}
+                  {Object.values(CERTIFICATE_CATEGORIES_CONFIG).map(cat => {
+                    const catTitle = cat.names[language] || cat.names.de;
+                    return (
+                      <optgroup key={cat.key} label={`${cat.emoji} ${catTitle}`}>
+                        {cat.typeKeys.map(tKey => {
+                          const tConfig = CERTIFICATE_TYPES_CONFIG[tKey];
+                          if (!tConfig) return null;
+                          const tTitle = tConfig.titles[language] || tConfig.titles.de;
+                          return (
+                            <option key={tKey} value={tKey}>
+                              {tConfig.badgeEmoji} {tTitle}
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    );
+                  })}
                 </select>
               </div>
 
@@ -315,34 +416,120 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
               </div>
             </div>
 
-            {/* Template Selection */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-black text-text-main">
-                {_t('قالب الشهادة', 'Template', 'Vorlage')}
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {PRIMARY_CERTIFICATE_TEMPLATES.map(tmpl => (
-                  <button
-                    key={tmpl.id}
-                    type="button"
-                    onClick={() => setTemplateId(tmpl.id)}
-                    className={`p-2 rounded-xl border text-start transition-all cursor-pointer ${
-                      templateId === tmpl.id
-                        ? 'bg-primary/10 border-primary ring-1 ring-primary'
-                        : 'bg-surface dark:bg-slate-900 border-surface-border dark:border-slate-700'
-                    }`}
-                  >
-                    <span className="block font-black text-xs text-text-main">{tmpl.name[language] || tmpl.name.de}</span>
-                  </button>
-                ))}
+            {/* Template & AI Background Selection */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-black text-text-main">
+                  {_t('قالب وتصميم الشهادة', 'Template Design', 'Vorlage')}
+                </label>
+
+                {savedAIBackgrounds.length > 0 && (
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg text-[10px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setTemplateTab('standard')}
+                      className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                        templateTab === 'standard'
+                          ? 'bg-surface dark:bg-slate-700 text-text-main shadow-xs'
+                          : 'text-text-muted hover:text-text-main'
+                      }`}
+                    >
+                      {_t('القوالب الجاهزة', 'Standard', 'Vorlagen')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTemplateTab('ai_custom')}
+                      className={`px-2 py-0.5 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                        templateTab === 'ai_custom'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-indigo-600 dark:text-indigo-400'
+                      }`}
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-400" />
+                      <span>{_t(`خلفيات AI (${savedAIBackgrounds.length})`, `AI (${savedAIBackgrounds.length})`, `KI (${savedAIBackgrounds.length})`)}</span>
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {templateTab === 'standard' ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {PRIMARY_CERTIFICATE_TEMPLATES.map(tmpl => {
+                    const isSelected = templateId === tmpl.id;
+                    return (
+                      <button
+                        key={tmpl.id}
+                        type="button"
+                        onClick={() => {
+                          setTemplateId(tmpl.id);
+                          setSelectedCustomBg(null);
+                        }}
+                        className={`p-2 rounded-xl border text-start transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-primary/10 border-primary ring-1 ring-primary'
+                            : 'bg-surface dark:bg-slate-900 border-surface-border dark:border-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <div
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: tmpl.previewColor || '#4f46e5' }}
+                          />
+                          <span className="block font-black text-xs text-text-main truncate">
+                            {tmpl.name[language] || tmpl.name.de}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {savedAIBackgrounds.map(bg => {
+                    const isSelected = selectedCustomBg?.id === bg.id;
+                    return (
+                      <button
+                        key={bg.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedCustomBg(bg);
+                          setTemplateId('custom_ai_bg');
+                        }}
+                        className={`p-1.5 rounded-xl border text-start transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
+                          isSelected
+                            ? 'border-indigo-600 ring-2 ring-indigo-500/20 bg-indigo-500/5 shadow-xs'
+                            : 'bg-surface dark:bg-slate-900 border-surface-border dark:border-slate-800'
+                        }`}
+                      >
+                        <div className="relative aspect-[1.414/1] w-full rounded-lg overflow-hidden mb-1 bg-slate-950">
+                          <img
+                            src={bg.imageUrl}
+                            alt={bg.name}
+                            className="w-full h-full object-cover object-center"
+                          />
+                          {isSelected && (
+                            <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
+                              <div className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-md">
+                                <Check className="w-3 h-3" />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <span className="block font-bold text-[10px] text-text-main truncate">
+                          {bg.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Course Title & Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1">
                 <label className="block text-xs font-bold text-text-muted">
-                  {_t('عنوان الدورة / الكورس', 'Course Title', 'Kurstitel')}
+                  {_t('عنوان الشهادة / التكريم', 'Certificate Title', 'Kurstitel')}
                 </label>
                 <input
                   type="text"

@@ -5,7 +5,8 @@ import {
   Settings, Search, User, Globe, Moon, Sun, Clock, DollarSign, Check, Camera, CheckCircle2,
   HardDrive, Download, Upload, Trash2, AlertTriangle, MessageSquare, ChevronRight,
   ArrowLeft, ArrowRight, Calendar, ShieldAlert, ShieldCheck, Info, Copy, Save, Phone, ExternalLink,
-  BookOpen, FileText, Bell, CheckSquare, XCircle, Award, Sparkles, Star, Plus, Pencil, RotateCcw, Heart
+  BookOpen, FileText, Bell, CheckSquare, XCircle, Award, Sparkles, Star, Plus, Pencil, RotateCcw, Heart,
+  Target
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
@@ -79,6 +80,18 @@ export const SettingsView: React.FC = () => {
   const [bankAccount, setBankAccount] = useState(profile.bankAccount || '');
   const [paymentLink, setPaymentLink] = useState(profile.paymentLink || '');
   const [whatsappNumber, setWhatsappNumber] = useState(profile.whatsappNumber || '');
+
+  // Financial Goals States
+  const [weeklyIncomeGoal, setWeeklyIncomeGoal] = useState<string>(
+    profile.weeklyIncomeGoal !== undefined && profile.weeklyIncomeGoal !== null && profile.weeklyIncomeGoal > 0
+      ? String(profile.weeklyIncomeGoal)
+      : ''
+  );
+  const [monthlyIncomeGoal, setMonthlyIncomeGoal] = useState<string>(
+    profile.monthlyIncomeGoal !== undefined && profile.monthlyIncomeGoal !== null && profile.monthlyIncomeGoal > 0
+      ? String(profile.monthlyIncomeGoal)
+      : ''
+  );
 
   // Reminder Settings
   const [enableLessonAlerts, setEnableLessonAlerts] = useState(profile.enableLessonAlerts ?? true);
@@ -181,6 +194,20 @@ export const SettingsView: React.FC = () => {
       weeklyWorkingHours,
       enableLessonAlerts,
       enableBrowserPush
+    });
+    triggerSaveToast();
+  };
+
+  const handleSaveFinancialGoals = (e: React.FormEvent) => {
+    e.preventDefault();
+    const rawWeekly = weeklyIncomeGoal.trim();
+    const rawMonthly = monthlyIncomeGoal.trim();
+    const parsedWeekly = rawWeekly ? Math.max(0, parseFloat(rawWeekly)) : undefined;
+    const parsedMonthly = rawMonthly ? Math.max(0, parseFloat(rawMonthly)) : undefined;
+
+    updateProfile({
+      weeklyIncomeGoal: parsedWeekly && !isNaN(parsedWeekly) && parsedWeekly > 0 ? parsedWeekly : undefined,
+      monthlyIncomeGoal: parsedMonthly && !isNaN(parsedMonthly) && parsedMonthly > 0 ? parsedMonthly : undefined
     });
     triggerSaveToast();
   };
@@ -703,6 +730,99 @@ export const SettingsView: React.FC = () => {
                 {isEditingProfile && <span>{t('save')}</span>}
               </button>
               </fieldset>
+            </form>
+          </div>
+
+          {/* 🎯 Financial Goals Section */}
+          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-5 shadow-2xs space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  <Target className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black text-text-main uppercase tracking-wider flex items-center gap-1.5">
+                    <span>{t('financial_goals')}</span>
+                  </h3>
+                  <p className="text-[11px] text-text-muted font-medium mt-0.5">
+                    {t('financial_goals_desc')}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveFinancialGoals} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {/* Weekly Income Goal */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-text-main flex items-center justify-between">
+                    <span>{t('weekly_income_goal')}</span>
+                    <span className="text-[10px] text-text-muted font-mono font-bold px-1.5 py-0.5 rounded bg-surface-hover border border-surface-border">
+                      {currency}
+                    </span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={weeklyIncomeGoal}
+                      onChange={(e) => setWeeklyIncomeGoal(e.target.value)}
+                      placeholder={t('no_goal_set')}
+                      className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:ring-2 focus:ring-primary outline-none font-mono"
+                    />
+                    {weeklyIncomeGoal ? (
+                      <button
+                        type="button"
+                        onClick={() => setWeeklyIncomeGoal('')}
+                        className="absolute end-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-main text-[11px] font-bold px-1.5 py-0.5 rounded bg-surface border border-surface-border/50"
+                        title="Clear"
+                      >
+                        ✕
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Monthly Income Goal */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-text-main flex items-center justify-between">
+                    <span>{t('monthly_income_goal')}</span>
+                    <span className="text-[10px] text-text-muted font-mono font-bold px-1.5 py-0.5 rounded bg-surface-hover border border-surface-border">
+                      {currency}
+                    </span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={monthlyIncomeGoal}
+                      onChange={(e) => setMonthlyIncomeGoal(e.target.value)}
+                      placeholder={t('no_goal_set')}
+                      className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:ring-2 focus:ring-primary outline-none font-mono"
+                    />
+                    {monthlyIncomeGoal ? (
+                      <button
+                        type="button"
+                        onClick={() => setMonthlyIncomeGoal('')}
+                        className="absolute end-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-main text-[11px] font-bold px-1.5 py-0.5 rounded bg-surface border border-surface-border/50"
+                        title="Clear"
+                      >
+                        ✕
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-primary hover:bg-primary-hover active:scale-[0.99] text-white font-black text-xs py-3 rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 hover:shadow-lg hover:shadow-primary/30"
+              >
+                <Save className="w-4 h-4" />
+                <span>{t('save')}</span>
+              </button>
             </form>
           </div>
 

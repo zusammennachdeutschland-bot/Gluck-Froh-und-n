@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { CertificateRecord } from '../../types';
 import { CertificateRenderer } from './templates/CertificateRenderer';
 import { downloadCertificatePDF, downloadCertificateImage, shareCertificateWhatsApp } from '../../utils/certificateExportUtils';
-import { X, Download, Share2, FileText, Trash2, Edit3, CheckCircle2, User } from 'lucide-react';
+import { X, Download, Share2, FileText, Trash2, Edit3, User, Loader2, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface CertificatePreviewModalProps {
@@ -21,24 +21,38 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
 }) => {
   const { students, deleteCertificate, _t } = useApp();
   const [isExporting, setIsExporting] = useState(false);
+  const [exportMessage, setExportMessage] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState<'fit' | 'large'>('fit');
 
   const student = students.find(s => s.id === certificate.studentId);
   const phone = student?.parentPhone || student?.studentPhone;
 
   const handleDownloadPDF = async () => {
+    if (isExporting) return;
     setIsExporting(true);
+    setExportMessage(_t('جاري إنشاء وتحميل PDF...', 'Generating PDF...', 'PDF wird generiert...'));
     try {
       await downloadCertificatePDF(certificate);
+      setExportMessage('');
+    } catch (err) {
+      console.error('Download PDF error:', err);
+      setExportMessage(_t('خطأ أثناء التصدير', 'Export error', 'Fehler beim Export'));
     } finally {
       setIsExporting(false);
     }
   };
 
   const handleDownloadPNG = async () => {
+    if (isExporting) return;
     setIsExporting(true);
+    setExportMessage(_t('جاري إنشاء وتحميل الصورة...', 'Generating Image...', 'Bild wird generiert...'));
     try {
-      await downloadCertificateImage(certificate);
+      await downloadCertificateImage(certificate, 'png');
+      setExportMessage('');
+    } catch (err) {
+      console.error('Download PNG error:', err);
+      setExportMessage(_t('خطأ أثناء التصدير', 'Export error', 'Fehler beim Export'));
     } finally {
       setIsExporting(false);
     }
@@ -55,26 +69,35 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
   };
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-5 overflow-y-auto">
-      <div onClick={e => e.stopPropagation()} className="bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden animate-scale-up flex flex-col my-auto max-h-[94vh]">
+    <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto">
+      <div onClick={e => e.stopPropagation()} className="bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-800 rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden animate-scale-up flex flex-col my-auto max-h-[96vh]">
         
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-surface-border dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 border-b border-surface-border dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0">
               <User className="w-4 h-4" />
             </div>
-            <div>
-              <h3 className="font-black text-sm text-text-main truncate max-w-xs sm:max-w-md">
-                {certificate.studentName} — {certificate.courseOrLevelTitle}
+            <div className="min-w-0">
+              <h3 className="font-black text-xs sm:text-sm text-text-main truncate">
+                {certificate.recipientName || certificate.studentName} — {certificate.courseOrLevelTitle || certificate.title}
               </h3>
-              <span className="text-[11px] text-text-muted">
-                {certificate.issueDate} • {certificate.instructorName}
+              <span className="text-[10px] sm:text-[11px] text-text-muted truncate block">
+                {certificate.issueDate} • {certificate.teacherName || certificate.instructorName}
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* View Size / Zoom toggle */}
+            <button
+              onClick={() => setZoomLevel(prev => prev === 'fit' ? 'large' : 'fit')}
+              className="p-2 text-text-muted hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              title={zoomLevel === 'fit' ? _t('تكبير العرض', 'Zoom In', 'Vergrößern') : _t('ملاءمة الشاشة', 'Fit Screen', 'An Bildschirm anpassen')}
+            >
+              {zoomLevel === 'fit' ? <Maximize2 className="w-4 h-4" /> : <ZoomOut className="w-4 h-4" />}
+            </button>
+
             {onEdit && (
               <button
                 onClick={() => {
@@ -102,23 +125,27 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
           </div>
         </div>
 
-        {/* Certificate Display Area */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6 flex items-center justify-center bg-slate-100/70 dark:bg-slate-950/80">
-          <div className="w-full max-w-2xl shadow-xl rounded-2xl overflow-hidden">
+        {/* Certificate Display Area - Accurate across mobile & desktop */}
+        <div className="flex-1 overflow-auto p-2 sm:p-4 md:p-6 flex items-center justify-center bg-slate-100/90 dark:bg-slate-950/90">
+          <div
+            className={`w-full transition-all duration-200 shadow-2xl rounded-2xl overflow-hidden ${
+              zoomLevel === 'large' ? 'max-w-4xl min-w-[700px]' : 'max-w-3xl'
+            }`}
+          >
             <CertificateRenderer certificate={certificate} elementId={`cert-node-${certificate.id}`} />
           </div>
         </div>
 
         {/* Action Controls Bar */}
-        <div className="px-5 py-3.5 border-t border-surface-border dark:border-slate-800 bg-surface dark:bg-slate-900 shrink-0 flex flex-wrap items-center justify-between gap-2.5">
+        <div className="px-4 sm:px-6 py-3.5 border-t border-surface-border dark:border-slate-800 bg-surface dark:bg-slate-900 shrink-0 flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleDownloadPDF}
               disabled={isExporting}
-              className="px-4 py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-black text-xs flex items-center gap-2 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+              className="px-3.5 sm:px-4 py-2 sm:py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-black text-xs flex items-center gap-2 transition-all shadow-sm cursor-pointer disabled:opacity-50"
             >
-              <Download className="w-4 h-4" />
+              {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
               <span>{_t('تحميل PDF', 'Download PDF', 'PDF herunterladen')}</span>
             </button>
 
@@ -126,18 +153,22 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
               type="button"
               onClick={handleDownloadPNG}
               disabled={isExporting}
-              className="px-4 py-2.5 bg-surface dark:bg-slate-800 border border-surface-border dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-text-main rounded-xl font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+              className="px-3.5 sm:px-4 py-2 sm:py-2.5 bg-surface dark:bg-slate-800 border border-surface-border dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-text-main rounded-xl font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
             >
-              <FileText className="w-4 h-4" />
+              {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
               <span>{_t('صورة PNG', 'PNG Image', 'PNG-Bild')}</span>
             </button>
           </div>
 
           <div className="flex items-center gap-2">
+            {exportMessage && (
+              <span className="text-xs text-primary font-bold animate-pulse">{exportMessage}</span>
+            )}
             <button
               type="button"
               onClick={handleWhatsAppShare}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center gap-2 transition-all shadow-sm cursor-pointer"
+              disabled={isExporting}
+              className="px-3.5 sm:px-4 py-2 sm:py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center gap-2 transition-all shadow-sm cursor-pointer disabled:opacity-50"
             >
               <Share2 className="w-4 h-4" />
               <span>{_t('مشاركة عبر واتساب', 'Share WhatsApp', 'Per WhatsApp teilen')}</span>
@@ -185,3 +216,5 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
     </div>
   );
 };
+
+

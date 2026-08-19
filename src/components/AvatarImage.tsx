@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { User } from 'lucide-react';
 
-interface AvatarImageProps extends React.HTMLAttributes<HTMLDivElement> {
+export interface AvatarImageProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'src'> {
   name?: string;
   avatarUrl?: string;
+  src?: string;
   fallback?: string;
   alt?: string;
   className?: string;
@@ -23,13 +24,30 @@ export const AvatarImage: React.FC<AvatarImageProps> = ({
   alt = '', 
   className = 'w-10 h-10 rounded-full', 
   avatarUrl,
+  src,
   fallback,
   ...props 
 }) => {
+  const [hasError, setHasError] = useState(false);
+  const rawImage = (avatarUrl || src || fallback)?.trim();
+  // Ensure we only use non-empty valid strings (prevent empty string "")
+  const validImageUrl = rawImage && rawImage.length > 0 ? rawImage : null;
+
   const displayName = (typeof name === 'string' ? name : typeof alt === 'string' ? alt : '').trim();
   const initial = displayName ? displayName.charAt(0).toUpperCase() : '';
   const colorIndex = displayName ? (displayName.charCodeAt(0) + displayName.length) % BG_COLORS.length : 0;
   const colorClass = BG_COLORS[colorIndex];
+
+  if (validImageUrl && !hasError) {
+    return (
+      <img
+        src={validImageUrl}
+        alt={alt || displayName || 'Avatar'}
+        className={`object-cover select-none shrink-0 ${className}`}
+        onError={() => setHasError(true)}
+      />
+    );
+  }
 
   return (
     <div 

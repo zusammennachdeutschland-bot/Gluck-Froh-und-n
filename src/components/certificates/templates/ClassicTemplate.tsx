@@ -1,115 +1,136 @@
 import React from 'react';
 import { CertificateRecord } from '../../../types';
 import { Award, Star } from 'lucide-react';
+import { CertificateStudentName } from './CertificateStudentName';
+import { CertificateTeacherSignature } from './CertificateTeacherSignature';
+import { formatLocalDate } from '../../../utils/timeUtils';
 
 interface TemplateProps {
   certificate: Partial<CertificateRecord>;
-  scale?: number;
-  previewOnly?: boolean;
 }
 
 export const ClassicTemplate: React.FC<TemplateProps> = ({ certificate }) => {
   const isRtl = certificate.language === 'ar';
-  const issueDateFormatted = certificate.issueDate || new Date().toISOString().split('T')[0];
+  const issueDateFormatted = certificate.issueDate || formatLocalDate();
+  const recipientName = certificate.recipientName || certificate.studentName || 'Student Name';
+  const teacherName = certificate.teacherName || certificate.instructorName || (isRtl ? 'المعلم' : certificate.language === 'de' ? 'Lehrkraft' : 'Instructor');
 
   return (
     <div
       dir={isRtl ? 'rtl' : 'ltr'}
-      className="relative w-full aspect-[1.414/1] bg-[#fbf9f5] text-[#1e293b] p-6 sm:p-10 flex flex-col justify-between select-none overflow-hidden font-serif border-[12px] border-[#0f172a] shadow-xl"
+      lang={isRtl ? 'ar' : 'de'}
+      className={`relative w-full aspect-[1.414/1] bg-[#faf8f5] text-[#0f172a] p-8 sm:p-12 flex flex-col justify-between select-none overflow-hidden border-[12px] border-[#0f172a] shadow-2xl rounded-2xl ${isRtl ? 'font-arabic-serif' : 'font-cert-serif'}`}
       style={{
         boxSizing: 'border-box',
-        backgroundImage: 'radial-gradient(#e2d9c8 1px, transparent 1px)',
-        backgroundSize: '24px 24px'
+        backgroundColor: '#faf8f5',
+        color: '#0f172a'
       }}
     >
-      {/* Decorative Gold Inset Border */}
-      <div className="absolute inset-2 sm:inset-3 border-2 border-[#d4af37] pointer-events-none" />
-      <div className="absolute inset-3 sm:inset-4 border border-[#d4af37]/40 pointer-events-none" />
+      {/* Decorative Gold Inset Borders */}
+      <div className="absolute inset-2 sm:inset-3 border-2 border-[#d4af37] pointer-events-none rounded-xl" />
+      <div className="absolute inset-4 sm:inset-5 border border-[#d4af37]/40 pointer-events-none rounded-lg" />
 
-      {/* Corner Ornaments */}
-      <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-[#d4af37]" />
-      <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-[#d4af37]" />
-      <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-[#d4af37]" />
-      <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-[#d4af37]" />
+      {/* Traditional Corner Filigree Ornaments */}
+      <div className="absolute top-5 left-5 w-7 h-7 border-t-2 border-l-2 border-[#d4af37]" />
+      <div className="absolute top-5 right-5 w-7 h-7 border-t-2 border-r-2 border-[#d4af37]" />
+      <div className="absolute bottom-5 left-5 w-7 h-7 border-b-2 border-l-2 border-[#d4af37]" />
+      <div className="absolute bottom-5 right-5 w-7 h-7 border-b-2 border-r-2 border-[#d4af37]" />
 
-      {/* Header section with emblem & title */}
+      {/* Top Header Section */}
       <div className="text-center relative z-10 pt-2 sm:pt-4">
-        <div className="inline-flex items-center justify-center gap-2 mb-2 sm:mb-3">
-          <div className="w-8 sm:w-16 h-[2px] bg-gradient-to-r from-transparent via-[#d4af37] to-transparent" />
-          <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-[#d4af37] via-[#b8860b] to-[#996515] flex items-center justify-center text-white shadow-md">
+        {/* Emblem & Ribbon */}
+        <div className="inline-flex items-center justify-center gap-3 mb-2">
+          <div className="w-10 sm:w-20 h-[1.5px] bg-gradient-to-r from-transparent via-[#d4af37] to-[#d4af37]" />
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-tr from-[#996515] via-[#d4af37] to-[#f7e49a] flex items-center justify-center text-white shadow-md">
             <Award className="w-5 h-5 sm:w-7 sm:h-7 drop-shadow" />
           </div>
-          <div className="w-8 sm:w-16 h-[2px] bg-gradient-to-r from-transparent via-[#d4af37] to-transparent" />
+          <div className="w-10 sm:w-20 h-[1.5px] bg-gradient-to-l from-transparent via-[#d4af37] to-[#d4af37]" />
         </div>
 
-        <h1 className="text-xl sm:text-3xl md:text-4xl font-extrabold uppercase tracking-widest text-[#0f172a] drop-shadow-xs font-serif">
-          {certificate.title || 'Certificate of Achievement'}
+        {/* School / Center Name */}
+        {certificate.centerOrSchoolName && (
+          <p className={`text-[11px] sm:text-xs font-sans uppercase ${isRtl ? 'tracking-normal' : 'tracking-widest'} text-[#854d0e] font-bold mb-1`}>
+            {certificate.centerOrSchoolName}
+          </p>
+        )}
+
+        {/* Certificate Title */}
+        <h1 className={`text-2xl sm:text-4xl md:text-5xl font-black uppercase ${isRtl ? 'tracking-normal font-arabic-serif' : 'tracking-wider font-cert-serif'} text-[#0f172a] drop-shadow-xs`}>
+          {certificate.title || (certificate.language === 'ar' ? 'شهادة إنجاز وتفوق' : certificate.language === 'de' ? 'Anerkennungsurkunde' : 'Certificate of Achievement')}
         </h1>
 
         {certificate.subtitle && (
-          <p className="text-[11px] sm:text-sm text-[#78350f] font-semibold mt-1 max-w-xl mx-auto italic">
+          <p className="text-[11px] sm:text-sm text-[#78350f] font-semibold mt-1 max-w-xl mx-auto italic font-sans">
             {certificate.subtitle}
           </p>
         )}
       </div>
 
-      {/* Center Body: Student Name & Achievement */}
-      <div className="text-center my-auto py-2 sm:py-4 relative z-10">
-        <p className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-widest font-sans font-bold">
-          {certificate.language === 'ar' ? 'تُمنح هذه الشهادة بكل فخر إلى' : certificate.language === 'de' ? 'Diese Urkunde wird mit Stolz verliehen an' : 'This Certificate is Proudly Presented To'}
+      {/* Center Body: Student Name is the Absolute Focal Hero */}
+      <div className="text-center my-auto py-2 sm:py-4 relative z-10 w-full max-w-3xl mx-auto">
+        <p className={`text-[11px] sm:text-xs text-[#64748b] uppercase ${isRtl ? 'tracking-normal font-bold' : 'tracking-widest font-bold'} font-sans mb-2`}>
+          {certificate.language === 'ar' ? 'تُمنح هذه الشهادة بكل فخر واعتزاز إلى' : certificate.language === 'de' ? 'Diese Urkunde wird mit Stolz verliehen an' : 'This Certificate is Proudly Presented To'}
         </p>
 
-        {/* Student Recipient Name */}
-        <div className="my-2 sm:my-3">
-          <div className="inline-block border-b-3 border-[#d4af37] px-6 sm:px-14 pb-1.5">
-            <span className="text-3xl sm:text-5xl md:text-6xl font-black text-[#0f172a] tracking-tight font-serif drop-shadow-xs">
-              {certificate.recipientName || certificate.studentName || 'Student Name'}
-            </span>
-          </div>
+        {/* Recipient Name with Auto-Fit on Pristine Underline */}
+        <div className="my-2 sm:my-3 w-full px-4 sm:px-12">
+          <CertificateStudentName
+            name={recipientName}
+            isRtl={isRtl}
+            maxFontSizePx={50}
+            minFontSizePx={22}
+            fontStyle="serif"
+            className="text-[#0f172a] drop-shadow-xs font-bold"
+          />
+          {/* Ornate Gold Underline Divider */}
+          <div className="w-48 sm:w-80 h-[2px] bg-gradient-to-r from-transparent via-[#d4af37] to-transparent mx-auto mt-3 sm:mt-4 mb-1" />
         </div>
 
         {/* Description / Achievement text */}
-        <p className="text-xs sm:text-base text-slate-700 max-w-2xl mx-auto leading-relaxed font-sans font-medium px-4">
-          {certificate.description || 'In recognition of outstanding dedication, excellence, and exemplary accomplishments.'}
+        <p className="text-xs sm:text-base text-[#334155] max-w-2xl mx-auto leading-relaxed font-sans font-medium px-4 mt-2">
+          {certificate.description || (certificate.language === 'ar' ? 'تقديرًا للإخلاص في التعلم والتفوق الأكاديمي والتميز المستمر.' : 'In recognition of outstanding dedication, excellence, and exemplary accomplishments.')}
         </p>
 
         {/* Score or Custom badge if available */}
         {certificate.score && (
-          <div className="mt-2 inline-flex items-center gap-1.5 bg-[#d4af37]/15 border border-[#d4af37]/50 text-[#854d0e] px-3 py-1 rounded-full text-[10px] sm:text-xs font-sans font-bold">
-            <Star className="w-3.5 h-3.5 fill-[#d4af37] text-[#d4af37]" />
+          <div className="mt-3 inline-flex items-center gap-1.5 bg-[#fef9c3] border border-[#facc15] text-[#854d0e] px-3.5 py-1 rounded-full text-xs font-sans font-bold shadow-xs">
+            <Star className="w-3.5 h-3.5 fill-[#eab308] text-[#ca8a04]" />
             <span>{certificate.score}</span>
           </div>
         )}
       </div>
 
-      {/* Footer: Date & Signatures */}
-      <div className="flex items-end justify-between px-4 sm:px-10 pb-2 relative z-10 font-sans">
+      {/* Footer: Date, Seal, Signatures */}
+      <div className="flex items-end justify-between px-4 sm:px-12 pb-2 sm:pb-3 relative z-10 font-sans">
         {/* Date block */}
-        <div className="text-center min-w-[100px] sm:min-w-[140px]">
-          <div className="border-b border-slate-400 pb-1 mb-1 text-[11px] sm:text-sm font-bold text-slate-800">
+        <div className="flex flex-col items-center text-center min-w-[110px] sm:min-w-[150px]">
+          <div className="h-7 sm:h-9 flex items-end justify-center px-2 pb-1 text-xs sm:text-sm font-bold text-[#0f172a] select-text">
             {issueDateFormatted}
           </div>
-          <span className="text-[9px] sm:text-[11px] text-slate-500 uppercase tracking-wider font-semibold">
+          <div className="w-28 sm:w-40 h-[1.5px] bg-[#0f172a]/60 my-1" />
+          <span className={`text-[9px] sm:text-xs text-[#64748b] uppercase ${isRtl ? 'tracking-normal font-semibold' : 'tracking-wider font-semibold'}`}>
             {certificate.language === 'ar' ? 'التاريخ' : certificate.language === 'de' ? 'Datum' : 'Issue Date'}
           </span>
         </div>
 
-        {/* Seal Badge in Center */}
+        {/* Official Gold Seal Medallion in Center */}
         <div className="hidden sm:flex flex-col items-center">
-          <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full border-2 border-dashed border-[#d4af37] flex items-center justify-center p-1 bg-white/60 shadow-inner">
-            <div className="w-full h-full rounded-full bg-gradient-to-tr from-[#b8860b] to-[#d4af37] flex flex-col items-center justify-center text-white text-[7px] font-black uppercase text-center leading-tight">
-              <span>OFFICIAL</span>
-              <span>SEAL</span>
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full border-2 border-dashed border-[#d4af37] flex items-center justify-center p-1 bg-[#fffbeb] shadow-sm">
+            <div className="w-full h-full rounded-full bg-gradient-to-tr from-[#b8860b] via-[#d4af37] to-[#fef08a] flex flex-col items-center justify-center text-[#451a03] text-[7px] font-black uppercase text-center leading-tight shadow-xs">
+              <span className="tracking-widest">OFFICIAL</span>
+              <span className="font-extrabold text-[8px]">★ SEAL ★</span>
+              <span className="tracking-widest">EXCELLENCE</span>
             </div>
           </div>
         </div>
 
         {/* Teacher Signature block */}
-        <div className="text-center min-w-[100px] sm:min-w-[140px]">
-          <div className="border-b border-slate-400 pb-1 mb-1 text-[11px] sm:text-sm font-bold text-slate-800 font-serif italic">
-            {certificate.teacherName || 'Instructor'}
+        <div className="flex flex-col items-center text-center min-w-[110px] sm:min-w-[150px]">
+          <div className="h-7 sm:h-9 flex items-end justify-center px-2 pb-0.5 text-[#0f172a]">
+            <CertificateTeacherSignature name={teacherName} isRtl={isRtl} />
           </div>
-          <span className="text-[9px] sm:text-[11px] text-slate-500 uppercase tracking-wider font-semibold">
+          <div className="w-28 sm:w-40 h-[1.5px] bg-[#0f172a]/60 my-1" />
+          <span className={`text-[9px] sm:text-xs text-[#64748b] uppercase ${isRtl ? 'tracking-normal font-semibold' : 'tracking-wider font-semibold'}`}>
             {certificate.language === 'ar' ? 'توقيع المعلم' : certificate.language === 'de' ? 'Lehrkraft' : 'Teacher Signature'}
           </span>
         </div>
@@ -117,3 +138,4 @@ export const ClassicTemplate: React.FC<TemplateProps> = ({ certificate }) => {
     </div>
   );
 };
+

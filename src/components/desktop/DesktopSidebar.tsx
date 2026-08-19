@@ -201,7 +201,8 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
           <div className="mt-3 p-2.5 rounded-xl bg-surface-hover/60 dark:bg-surface-border/30 border border-surface-border/50 flex items-center gap-2.5">
             <div className="relative shrink-0">
               <AvatarImage
-                src={profile.avatarUrl || DEFAULT_OFFLINE_AVATAR}
+                name={profile.displayName}
+                avatarUrl={profile.avatarUrl || undefined}
                 alt={profile.displayName}
                 className="w-9 h-9 rounded-full object-cover ring-1 ring-surface-border"
               />

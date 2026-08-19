@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { CertificateRecord, CertificateTypeKey, CertificateLanguage } from '../../types';
+import { CertificateRecord, CertificateTypeKey, CertificateLanguage, AICertificateBackground } from '../../types';
 import { CERTIFICATE_TYPES } from '../../data/certificateTypes';
 import { CreateCertificateModal } from './CreateCertificateModal';
 import { BulkCertificateModal } from './BulkCertificateModal';
 import { CertificatePreviewModal } from './CertificatePreviewModal';
 import { AINameTransliterationModal } from './AINameTransliterationModal';
+import { AIBackgroundDesignerModal } from './AIBackgroundDesignerModal';
 import { downloadCertificatePDF, shareCertificateWhatsApp } from '../../utils/certificateExportUtils';
 import { 
   Award, Plus, Sparkles, Layers, Search, Filter, Eye, Download, Share2, 
-  Users, CheckCircle2, Star, Calendar, ArrowRight, UserCheck, ShieldCheck 
+  Users, CheckCircle2, Star, Calendar, ArrowRight, UserCheck, ShieldCheck,
+  Palette, Image as ImageIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -26,6 +28,8 @@ export const CertificateCenter: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [isAIDesignerOpen, setIsAIDesignerOpen] = useState(false);
+  const [selectedCustomBgForHonor, setSelectedCustomBgForHonor] = useState<AICertificateBackground | undefined>(undefined);
   const [selectedStudentForHonor, setSelectedStudentForHonor] = useState<string | undefined>(undefined);
   const [selectedCertForPreview, setSelectedCertForPreview] = useState<CertificateRecord | null>(null);
   const [editingCertificate, setEditingCertificate] = useState<CertificateRecord | undefined>(undefined);
@@ -118,6 +122,15 @@ export const CertificateCenter: React.FC = () => {
           {/* Top Quick Actions */}
           <div className="flex items-center gap-2 flex-wrap">
             <button
+              onClick={() => setIsAIDesignerOpen(true)}
+              className="px-3 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+              title="AI Certificate Background Designer"
+            >
+              <Palette className="w-4 h-4 text-amber-300" />
+              <span>{_t('مصمم خلفيات AI', 'AI Backgrounds', 'KI-Hintergründe')}</span>
+            </button>
+
+            <button
               onClick={() => setIsAiModalOpen(true)}
               className="px-3 py-2 bg-surface dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-text-main border border-surface-border dark:border-slate-700 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
               title="AI Name Transliteration"
@@ -137,6 +150,7 @@ export const CertificateCenter: React.FC = () => {
             <button
               onClick={() => {
                 setSelectedStudentForHonor(undefined);
+                setSelectedCustomBgForHonor(undefined);
                 setEditingCertificate(undefined);
                 setIsCreateModalOpen(true);
               }}
@@ -513,10 +527,16 @@ export const CertificateCenter: React.FC = () => {
         <CreateCertificateModal
           initialStudentId={selectedStudentForHonor}
           initialCertificate={editingCertificate}
+          initialCustomBackground={selectedCustomBgForHonor}
+          onOpenAIDesigner={() => {
+            setIsCreateModalOpen(false);
+            setIsAIDesignerOpen(true);
+          }}
           onClose={() => {
             setIsCreateModalOpen(false);
             setEditingCertificate(undefined);
             setSelectedStudentForHonor(undefined);
+            setSelectedCustomBgForHonor(undefined);
           }}
         />
       )}
@@ -530,6 +550,17 @@ export const CertificateCenter: React.FC = () => {
       {isAiModalOpen && (
         <AINameTransliterationModal
           onClose={() => setIsAiModalOpen(false)}
+        />
+      )}
+
+      {isAIDesignerOpen && (
+        <AIBackgroundDesignerModal
+          onClose={() => setIsAIDesignerOpen(false)}
+          onSelectBackgroundForIssue={(bg) => {
+            setSelectedCustomBgForHonor(bg);
+            setIsAIDesignerOpen(false);
+            setIsCreateModalOpen(true);
+          }}
         />
       )}
 

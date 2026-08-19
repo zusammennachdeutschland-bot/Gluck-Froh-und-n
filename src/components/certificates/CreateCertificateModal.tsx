@@ -1,17 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { CertificateRecord, CertificateTypeKey, CertificateTemplateId, CertificateLanguage } from '../../types';
-import { CERTIFICATE_TYPES, PRIMARY_CERTIFICATE_TEMPLATES, getCertificateDefaultText } from '../../data/certificateTypes';
+import { CertificateRecord, CertificateTypeKey, CertificateTemplateId, CertificateLanguage, AICertificateBackground } from '../../types';
+import {
+  CERTIFICATE_CATEGORIES_CONFIG,
+  CERTIFICATE_TYPES_CONFIG,
+  PRIMARY_CERTIFICATE_TEMPLATES,
+  getCertificateDefaultText
+} from '../../data/certificateTypes';
 import { CertificateRenderer } from './templates/CertificateRenderer';
 import { downloadCertificatePDF, downloadCertificateImage, shareCertificateWhatsApp } from '../../utils/certificateExportUtils';
+import { resolveCertificateRecipientName } from '../../utils/certificateUtils';
 import { formatLocalDate } from '../../utils/timeUtils';
-import { X, Award, Eye, Download, Share2, Sparkles, Check, ChevronRight, FileText, CheckCircle2 } from 'lucide-react';
+import { getSavedAIBackgrounds } from '../../utils/aiBackgroundUtils';
+import {
+  X,
+  Award,
+  Eye,
+  Download,
+  Share2,
+  Sparkles,
+  Check,
+  FileText,
+  CheckCircle2,
+  Loader2,
+  AlertTriangle,
+  Layers,
+  Image as ImageIcon
+} from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface CreateCertificateModalProps {
   onClose: () => void;
   initialStudentId?: string;
   initialCertificate?: CertificateRecord;
+  initialCustomBackground?: AICertificateBackground;
+  onOpenAIDesigner?: () => void;
   onCertificateSaved?: (cert: CertificateRecord) => void;
 }
 
@@ -19,6 +42,8 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
   onClose,
   initialStudentId,
   initialCertificate,
+  initialCustomBackground,
+  onOpenAIDesigner,
   onCertificateSaved
 }) => {
   const { students, groups, profile, addCertificate, updateCertificate, updateStudentCertificateName, _t } = useApp();
@@ -35,19 +60,57 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
   );
 
   const [type, setType] = useState<CertificateTypeKey>(
-    initialCertificate?.type || 'course_completion'
+    initialCertificate?.type || initialCertificate?.certificateType || 'achievement'
+  );
+
+  const [templateTab, setTemplateTab] = useState<'standard' | 'ai_custom'>(
+    initialCustomBackground || initialCertificate?.customBackgroundUrl ? 'ai_custom' : 'standard'
   );
 
   const [templateId, setTemplateId] = useState<CertificateTemplateId>(
-    initialCertificate?.templateId || initialCertificate?.template || 'neutral'
+    initialCustomBackground ? 'custom_ai_bg' : (initialCertificate?.templateId || initialCertificate?.template || 'classic')
   );
 
-  const [studentCertificateName, setStudentCertificateName] = useState<string>(
-    initialCertificate?.studentCertificateName || selectedStudent?.certificateName || ''
+  const [savedAIBackgrounds, setSavedAIBackgrounds] = useState<AICertificateBackground[]>([]);
+  const [selectedCustomBg, setSelectedCustomBg] = useState<AICertificateBackground | null>(
+    initialCustomBackground || null
   );
+
+  useEffect(() => {
+    getSavedAIBackgrounds().then(list => {
+      setSavedAIBackgrounds(list);
+      if (initialCustomBackground) {
+        setSelectedCustomBg(initialCustomBackground);
+      } else if (initialCertificate?.customBackgroundId) {
+        const found = list.find(b => b.id === initialCertificate.customBackgroundId);
+        if (found) setSelectedCustomBg(found);
+      } else if (initialCertificate?.customBackgroundUrl) {
+        setSelectedCustomBg({
+          id: 'existing_bg',
+          name: 'Custom AI Background',
+          imageUrl: initialCertificate.customBackgroundUrl,
+          width: 2480,
+          height: 1754,
+          aspectRatio: 1.414,
+          textColorMode: initialCertificate.customBackgroundTextColor || 'dark',
+          createdAt: Date.now()
+        });
+      }
+    });
+  }, [initialCertificate, initialCustomBackground]);
+
+  const [studentCertificateName, setStudentCertificateName] = useState<string>(() => {
+    if (initialCertificate?.studentCertificateName || initialCertificate?.recipientName) {
+      return initialCertificate.studentCertificateName || initialCertificate.recipientName || '';
+    }
+    if (selectedStudent) {
+      return (initialCertificate?.language || 'de') === 'ar' ? selectedStudent.name : (selectedStudent.certificateName || '');
+    }
+    return '';
+  });
 
   const [courseOrLevelTitle, setCourseOrLevelTitle] = useState<string>(
-    initialCertificate?.courseOrLevelTitle || 'Deutschkurs A1'
+    initialCertificate?.courseOrLevelTitle || initialCertificate?.title || 'Deutschkurs A1'
   );
 
   const [description, setDescription] = useState<string>(() => {
@@ -57,71 +120,97 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
   });
 
   const [gradeOrScore, setGradeOrScore] = useState<string>(
-    initialCertificate?.gradeOrScore || ''
+    initialCertificate?.gradeOrScore || initialCertificate?.score || ''
   );
 
   const [issueDate, setIssueDate] = useState<string>(
     initialCertificate?.issueDate || formatLocalDate()
   );
 
+  const currentTeacherName = profile?.displayName || (profile as any)?.name || '';
+
   const [instructorName, setInstructorName] = useState<string>(
-    initialCertificate?.instructorName || profile.name || 'Lehrer/in'
+    initialCertificate?.instructorName || initialCertificate?.teacherName || currentTeacherName || 'Lehrer/in'
   );
 
   const [centerOrSchoolName, setCenterOrSchoolName] = useState<string>(
     initialCertificate?.centerOrSchoolName || ''
   );
 
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
   const [createdRecord, setCreatedRecord] = useState<CertificateRecord | null>(null);
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportMessage, setExportMessage] = useState<string>('');
 
-  // When student changes, update student certificate name default
+  // When student changes, update student certificate name default according to language
   useEffect(() => {
     if (selectedStudent && !initialCertificate) {
-      if (selectedStudent.certificateName) {
-        setStudentCertificateName(selectedStudent.certificateName);
-      } else {
-        // Simple fallback
+      if (language === 'ar') {
         setStudentCertificateName(selectedStudent.name);
+      } else {
+        setStudentCertificateName(selectedStudent.certificateName || '');
       }
+      setValidationError(null);
     }
   }, [studentId]);
 
-  // When type or language changes, update default description if not custom edited
+  // When type or language changes, update default title & description
   const handleTypeChange = (newType: CertificateTypeKey) => {
     setType(newType);
     const defaults = getCertificateDefaultText(newType, language);
     setDescription(defaults.description);
+    if (!initialCertificate) {
+      setCourseOrLevelTitle(defaults.title);
+    }
   };
 
   const handleLanguageChange = (newLang: CertificateLanguage) => {
     setLanguage(newLang);
     const defaults = getCertificateDefaultText(type, newLang);
     setDescription(defaults.description);
+    if (!initialCertificate) {
+      setCourseOrLevelTitle(defaults.title);
+    }
+    // Update recipient name input when switching between Arabic and Latin languages
+    if (selectedStudent && !initialCertificate) {
+      if (newLang === 'ar') {
+        setStudentCertificateName(selectedStudent.name);
+      } else {
+        setStudentCertificateName(selectedStudent.certificateName || '');
+      }
+    }
+    setValidationError(null);
   };
+
+  const resolvedRecipient = resolveCertificateRecipientName(language, selectedStudent, studentCertificateName);
+
+  const isCustomBg = templateTab === 'ai_custom' && selectedCustomBg;
 
   const currentCertificateData: CertificateRecord = {
     id: initialCertificate?.id || 'temp_preview',
     studentId,
     studentName: selectedStudent?.name || 'Student Name',
-    recipientName: studentCertificateName.trim() || selectedStudent?.name || 'Student Name',
-    studentCertificateName: studentCertificateName.trim() || selectedStudent?.name || 'Student Name',
+    recipientName: resolvedRecipient.name || (language === 'ar' ? selectedStudent?.name || 'اسم الطالب' : '⚠️ Certificate Name Required'),
+    studentCertificateName: studentCertificateName.trim() || undefined,
     groupId: selectedStudent?.groupId,
     groupName: selectedGroup?.name,
     certificateType: type,
     type,
-    template: templateId,
-    templateId,
+    template: isCustomBg ? 'custom_ai_bg' : templateId,
+    templateId: isCustomBg ? 'custom_ai_bg' : templateId,
+    customBackgroundId: isCustomBg ? selectedCustomBg.id : undefined,
+    customBackgroundUrl: isCustomBg ? selectedCustomBg.imageUrl : undefined,
+    customBackgroundTextColor: isCustomBg ? selectedCustomBg.textColorMode : undefined,
     language,
-    title: courseOrLevelTitle.trim() || 'Deutschkurs',
-    courseOrLevelTitle: courseOrLevelTitle.trim() || 'Deutschkurs',
+    title: courseOrLevelTitle.trim() || 'Certificate of Excellence',
+    courseOrLevelTitle: courseOrLevelTitle.trim() || 'Certificate of Excellence',
     description: description.trim(),
     score: gradeOrScore.trim() || undefined,
     gradeOrScore: gradeOrScore.trim() || undefined,
     issueDate,
-    teacherName: instructorName.trim() || profile.name,
-    instructorName: instructorName.trim() || profile.name,
+    teacherName: instructorName.trim() || profile.displayName || profile.name,
+    instructorName: instructorName.trim() || profile.displayName || profile.name,
     centerOrSchoolName: centerOrSchoolName.trim() || undefined,
     createdAt: initialCertificate?.createdAt || Date.now(),
     updatedAt: Date.now()
@@ -129,28 +218,59 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudent) return;
+    setValidationError(null);
+
+    if (!selectedStudent) {
+      setValidationError(_t('يرجى اختيار طالب أولاً', 'Please select a student', 'Bitte wählen Sie einen Schüler aus'));
+      return;
+    }
+
+    const trimmedCertName = studentCertificateName.trim();
+
+    // Validation: English / German certificates require non-empty Latin certificate name
+    if ((language === 'en' || language === 'de') && !trimmedCertName) {
+      setValidationError(
+        _t(
+          '⚠️ اسم الشهادة باللاتينية مطلوب للشهادات باللغة الألمانية أو الإنجليزية.',
+          '⚠️ Latin Certificate Name is required for English & German certificates.',
+          '⚠️ Lateinischer Zertifikatsname ist für deutsche/englische Zertifikate erforderlich.'
+        )
+      );
+      return;
+    }
 
     // Also update student's certificateName on student entity if changed
-    if (studentCertificateName.trim() && studentCertificateName.trim() !== selectedStudent.certificateName) {
-      updateStudentCertificateName(selectedStudent.id, studentCertificateName.trim());
+    if (trimmedCertName && trimmedCertName !== selectedStudent.certificateName) {
+      updateStudentCertificateName(selectedStudent.id, trimmedCertName);
     }
+
+    const finalRecipient = language === 'ar' ? (trimmedCertName || selectedStudent.name) : trimmedCertName;
+    const finalTemplateId = isCustomBg ? 'custom_ai_bg' : templateId;
 
     if (initialCertificate) {
       updateCertificate(initialCertificate.id, {
         studentId,
         studentName: selectedStudent.name,
-        studentCertificateName: studentCertificateName.trim() || selectedStudent.name,
+        recipientName: finalRecipient,
+        studentCertificateName: trimmedCertName || undefined,
         groupId: selectedStudent.groupId,
         groupName: selectedGroup?.name,
         type,
-        templateId,
+        certificateType: type,
+        templateId: finalTemplateId,
+        template: finalTemplateId,
+        customBackgroundId: isCustomBg ? selectedCustomBg.id : undefined,
+        customBackgroundUrl: isCustomBg ? selectedCustomBg.imageUrl : undefined,
+        customBackgroundTextColor: isCustomBg ? selectedCustomBg.textColorMode : undefined,
         language,
         courseOrLevelTitle: courseOrLevelTitle.trim(),
+        title: courseOrLevelTitle.trim(),
         description: description.trim(),
         gradeOrScore: gradeOrScore.trim() || undefined,
+        score: gradeOrScore.trim() || undefined,
         issueDate,
         instructorName: instructorName.trim(),
+        teacherName: instructorName.trim(),
         centerOrSchoolName: centerOrSchoolName.trim() || undefined
       });
       confetti({ particleCount: 60, spread: 50 });
@@ -160,17 +280,26 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
       const newRecord = addCertificate({
         studentId,
         studentName: selectedStudent.name,
-        studentCertificateName: studentCertificateName.trim() || selectedStudent.name,
+        recipientName: finalRecipient,
+        studentCertificateName: trimmedCertName || undefined,
         groupId: selectedStudent.groupId,
         groupName: selectedGroup?.name,
         type,
-        templateId,
+        certificateType: type,
+        templateId: finalTemplateId,
+        template: finalTemplateId,
+        customBackgroundId: isCustomBg ? selectedCustomBg.id : undefined,
+        customBackgroundUrl: isCustomBg ? selectedCustomBg.imageUrl : undefined,
+        customBackgroundTextColor: isCustomBg ? selectedCustomBg.textColorMode : undefined,
         language,
         courseOrLevelTitle: courseOrLevelTitle.trim(),
+        title: courseOrLevelTitle.trim(),
         description: description.trim(),
         gradeOrScore: gradeOrScore.trim() || undefined,
+        score: gradeOrScore.trim() || undefined,
         issueDate,
         instructorName: instructorName.trim(),
+        teacherName: instructorName.trim(),
         centerOrSchoolName: centerOrSchoolName.trim() || undefined
       });
 
@@ -181,20 +310,32 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
   };
 
   const handleExportPDF = async () => {
-    if (!createdRecord) return;
+    if (!createdRecord || isExporting) return;
     setIsExporting(true);
+    setExportMessage(_t('جاري إنشاء وتحميل ملف PDF بجودة عالية...', 'Generating high-quality PDF...', 'PDF wird generiert...'));
     try {
       await downloadCertificatePDF(createdRecord);
+      setExportMessage(_t('تم تحميل ملف PDF بنجاح!', 'PDF downloaded successfully!', 'PDF erfolgreich heruntergeladen!'));
+      setTimeout(() => setExportMessage(''), 3000);
+    } catch (err) {
+      console.error('PDF Export error:', err);
+      setExportMessage(_t('حدث خطأ أثناء تصدير PDF. يرجى المحاولة مرة أخرى.', 'Error exporting PDF. Please try again.', 'Fehler beim PDF-Export.'));
     } finally {
       setIsExporting(false);
     }
   };
 
   const handleExportPNG = async () => {
-    if (!createdRecord) return;
+    if (!createdRecord || isExporting) return;
     setIsExporting(true);
+    setExportMessage(_t('جاري إنشاء وتحميل صورة الشهادة بدقة عالية...', 'Generating high-resolution image...', 'Bild wird generiert...'));
     try {
-      await downloadCertificateImage(createdRecord);
+      await downloadCertificateImage(createdRecord, 'png');
+      setExportMessage(_t('تم تحميل صورة الشهادة بنجاح!', 'Image downloaded successfully!', 'Bild erfolgreich heruntergeladen!'));
+      setTimeout(() => setExportMessage(''), 3000);
+    } catch (err) {
+      console.error('Image Export error:', err);
+      setExportMessage(_t('حدث خطأ أثناء تصدير الصورة. يرجى المحاولة مرة أخرى.', 'Error exporting image.', 'Fehler beim Bild-Export.'));
     } finally {
       setIsExporting(false);
     }
@@ -222,7 +363,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                   : _t('إصدار شهادة تقدير جديدة', 'Issue New Certificate', 'Neues Zertifikat ausstellen')}
               </h2>
               <p className="text-xs text-text-muted">
-                {_t('تكريم الطالب وتوثيق إنجازه بشهادة احترافية قابلة للتحميل والمشاركة', 'Honor the student with a professional downloadable certificate', 'Schüler mit einem Zertifikat ehren')}
+                {_t('تكريم الطالب وتوثيق إنجازه بشهادة احترافية بدون بيانات المجموعة أو الصف', 'Honor student with a high-fidelity certificate without group references', 'Schüler mit einem Zertifikat ehren')}
               </p>
             </div>
           </div>
@@ -244,11 +385,16 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
               </h3>
               <p className="text-xs text-text-muted max-w-md mx-auto">
                 {_t(
-                  `تم حفظ وتوثيق شهادة الطالب ${createdRecord.studentName} في الأرشيف ومركز الشهادات.`,
-                  `Certificate for ${createdRecord.studentName} has been saved to the archive.`,
-                  `Das Zertifikat für ${createdRecord.studentName} wurde gespeichert.`
+                  `تم حفظ وتوثيق شهادة الطالب ${createdRecord.recipientName || createdRecord.studentName} في الأرشيف ومركز الشهادات.`,
+                  `Certificate for ${createdRecord.recipientName || createdRecord.studentName} has been saved to the archive.`,
+                  `Das Zertifikat für ${createdRecord.recipientName || createdRecord.studentName} wurde gespeichert.`
                 )}
               </p>
+              {exportMessage && (
+                <p className="text-xs font-bold text-primary animate-pulse pt-1">
+                  {exportMessage}
+                </p>
+              )}
             </div>
 
             {/* Hidden Renderer for export DOM rendering */}
@@ -264,7 +410,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                 disabled={isExporting}
                 className="py-3 px-4 bg-primary hover:bg-primary-hover text-white rounded-2xl font-black flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer disabled:opacity-50 text-xs"
               >
-                <Download className="w-4 h-4" />
+                {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                 <span>{_t('تحميل PDF', 'Download PDF', 'PDF herunterladen')}</span>
               </button>
 
@@ -274,14 +420,15 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                 disabled={isExporting}
                 className="py-3 px-4 bg-surface dark:bg-slate-800 border border-surface-border dark:border-slate-700 text-text-main hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl font-black flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 text-xs"
               >
-                <FileText className="w-4 h-4" />
+                {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
                 <span>{_t('تحميل صورة PNG', 'Download PNG', 'PNG herunterladen')}</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleShareWhatsApp}
-                className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer text-xs"
+                disabled={isExporting}
+                className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer disabled:opacity-50 text-xs"
               >
                 <Share2 className="w-4 h-4" />
                 <span>{_t('مشاركة عبر واتساب', 'Share WhatsApp', 'Per WhatsApp teilen')}</span>
@@ -300,7 +447,15 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
           /* Main Create Form */
           <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-5 space-y-4 text-xs sm:text-sm">
             
-            {/* Student Picker & Latin Name */}
+            {/* Validation Error Banner if any */}
+            {validationError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center gap-2.5 text-red-600 dark:text-red-400 text-xs font-bold animate-shake">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{validationError}</span>
+              </div>
+            )}
+
+            {/* Student Picker & Recipient Name */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5">
                 <label className="block text-xs font-black text-text-main">
@@ -324,16 +479,36 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-xs font-black text-text-main">
-                  {_t('اسم الطالب باللاتينية / الإنجليزية (للطباعة على الشهادة) *', 'Certificate Student Name (Latin) *', 'Name auf dem Zertifikat *')}
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-black text-text-main">
+                    {language === 'ar'
+                      ? _t('الاسم بالعربية على الشهادة *', 'Name on Certificate (Arabic) *', 'Name auf dem Zertifikat *')
+                      : _t('الاسم باللاتينية على الشهادة *', 'Name on Certificate (Latin/English) *', 'Name auf dem Zertifikat (Lateinisch) *')}
+                  </label>
+                  {(language === 'en' || language === 'de') && !studentCertificateName.trim() && (
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-black flex items-center gap-0.5">
+                      <AlertTriangle className="w-3 h-3" />
+                      {_t('مطلوب', 'Required', 'Erforderlich')}
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
-                  dir="ltr"
                   value={studentCertificateName}
-                  onChange={e => setStudentCertificateName(e.target.value)}
-                  placeholder="e.g. Ahmed Ali"
-                  className="w-full bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary"
+                  onChange={e => {
+                    setStudentCertificateName(e.target.value);
+                    setValidationError(null);
+                  }}
+                  placeholder={
+                    language === 'ar'
+                      ? (selectedStudent?.name || 'اسم الطالب بالعربية')
+                      : (selectedStudent?.certificateName || 'e.g. Abdelrahman Mohamed')
+                  }
+                  className={`w-full bg-surface dark:bg-slate-900 border rounded-xl px-3 py-2.5 text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary ${
+                    (language === 'en' || language === 'de') && !studentCertificateName.trim()
+                      ? 'border-amber-400 dark:border-amber-500/60 bg-amber-50/20'
+                      : 'border-surface-border dark:border-slate-700'
+                  }`}
                   required
                 />
               </div>
@@ -343,18 +518,30 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5">
                 <label className="block text-xs font-black text-text-main">
-                  {_t('نوع الشهادة والتكريم', 'Certificate Type', 'Zertifikatstyp')}
+                  {_t('نوع الشهادة والتكريم (مُقسّمة حسب الفئات)', 'Certificate Category & Type', 'Zertifikatskategorie')}
                 </label>
                 <select
                   value={type}
                   onChange={e => handleTypeChange(e.target.value as CertificateTypeKey)}
                   className="w-full bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary"
                 >
-                  {CERTIFICATE_TYPES.map(t => (
-                    <option key={t.key} value={t.key}>
-                      {t.badgeEmoji} {t.titles[language] || t.titles.de}
-                    </option>
-                  ))}
+                  {Object.values(CERTIFICATE_CATEGORIES_CONFIG).map(cat => {
+                    const catTitle = cat.names[language] || cat.names.de;
+                    return (
+                      <optgroup key={cat.key} label={`${cat.emoji} ${catTitle}`}>
+                        {cat.typeKeys.map(tKey => {
+                          const tConfig = CERTIFICATE_TYPES_CONFIG[tKey];
+                          if (!tConfig) return null;
+                          const tTitle = tConfig.titles[language] || tConfig.titles.de;
+                          return (
+                            <option key={tKey} value={tKey}>
+                              {tConfig.badgeEmoji} {tTitle}
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    );
+                  })}
                 </select>
               </div>
 
@@ -385,55 +572,186 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
               </div>
             </div>
 
-            {/* Template Selector Cards */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-black text-text-main">
-                {_t('اختر قالب وتصميم الشهادة', 'Certificate Design Template', 'Designvorlage')}
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {PRIMARY_CERTIFICATE_TEMPLATES.map(tmpl => (
+            {/* Template & AI Background Selector */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-black text-text-main">
+                  {_t('اختر قالب وتصميم الشهادة', 'Certificate Design Template', 'Designvorlage')}
+                </label>
+
+                {/* Template Mode Tabs */}
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl text-[11px] font-bold">
                   <button
-                    key={tmpl.id}
                     type="button"
-                    onClick={() => setTemplateId(tmpl.id)}
-                    className={`p-2.5 rounded-2xl border text-start transition-all cursor-pointer relative flex flex-col justify-between ${
-                      templateId === tmpl.id
-                        ? 'bg-primary/5 dark:bg-primary-soft border-primary ring-2 ring-primary/20'
-                        : 'bg-surface dark:bg-slate-900 border-surface-border dark:border-slate-700 hover:border-slate-300'
+                    onClick={() => setTemplateTab('standard')}
+                    className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                      templateTab === 'standard'
+                        ? 'bg-surface dark:bg-slate-700 text-text-main shadow-xs'
+                        : 'text-text-muted hover:text-text-main'
                     }`}
                   >
-                    <div>
-                      <span className="block font-black text-xs text-text-main">{tmpl.name[language] || tmpl.name.de}</span>
-                      <span className="block text-[10px] text-text-muted leading-tight mt-0.5">{tmpl.description[language] || tmpl.description.de}</span>
-                    </div>
-                    {templateId === tmpl.id && (
-                      <div className="mt-2 self-end">
-                        <Check className="w-4 h-4 text-primary" />
-                      </div>
-                    )}
+                    {_t('القوالب الجاهزة', 'Standard Templates', 'Vorlagen')}
                   </button>
-                ))}
+
+                  <button
+                    type="button"
+                    onClick={() => setTemplateTab('ai_custom')}
+                    className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                      templateTab === 'ai_custom'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-indigo-600 dark:text-indigo-400 hover:text-indigo-700'
+                    }`}
+                  >
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    <span>{_t(`خلفيات AI المصممة (${savedAIBackgrounds.length})`, `AI Backgrounds (${savedAIBackgrounds.length})`, `KI-Hintergründe (${savedAIBackgrounds.length})`)}</span>
+                  </button>
+                </div>
               </div>
+
+              {/* Standard Templates Grid */}
+              {templateTab === 'standard' ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {PRIMARY_CERTIFICATE_TEMPLATES.map(tmpl => {
+                    const isSelected = templateId === tmpl.id;
+                    return (
+                      <button
+                        key={tmpl.id}
+                        type="button"
+                        onClick={() => {
+                          setTemplateId(tmpl.id);
+                          setSelectedCustomBg(null);
+                        }}
+                        className={`p-2.5 rounded-2xl border text-start transition-all cursor-pointer relative flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-primary/5 dark:bg-primary-soft border-primary ring-2 ring-primary/20 shadow-xs'
+                            : 'bg-surface dark:bg-slate-900 border-surface-border dark:border-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <div
+                              className="w-3 h-3 rounded-full shrink-0"
+                              style={{ backgroundColor: tmpl.previewColor || '#4f46e5' }}
+                            />
+                            <span className="font-black text-xs text-text-main truncate">
+                              {tmpl.name[language] || tmpl.name.de}
+                            </span>
+                          </div>
+                          <span className="block text-[10px] text-text-muted leading-tight line-clamp-2">
+                            {tmpl.description[language] || tmpl.description.de}
+                          </span>
+                        </div>
+                        {isSelected && (
+                          <div className="mt-2 self-end">
+                            <Check className="w-3.5 h-3.5 text-primary" />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                /* AI Custom Backgrounds Grid */
+                <div className="space-y-2.5">
+                  {savedAIBackgrounds.length === 0 ? (
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-surface-border dark:border-slate-700 text-center space-y-2">
+                      <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
+                        <Sparkles className="w-4 h-4" />
+                      </div>
+                      <p className="text-xs text-text-muted">
+                        {_t('لا توجد خلفيات AI محفوظة في مكتبتك حالياً.', 'No saved AI backgrounds in your library yet.', 'Noch keine KI-Hintergründe gespeichert.')}
+                      </p>
+                      {onOpenAIDesigner && (
+                        <button
+                          type="button"
+                          onClick={onOpenAIDesigner}
+                          className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>{_t('فتح مصمم خلفيات AI الآن', 'Open AI Background Designer', 'KI-Designer öffnen')}</span>
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      {savedAIBackgrounds.map(bg => {
+                        const isSelected = selectedCustomBg?.id === bg.id;
+                        return (
+                          <button
+                            key={bg.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCustomBg(bg);
+                              setTemplateId('custom_ai_bg');
+                            }}
+                            className={`p-2 rounded-2xl border text-start transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between group ${
+                              isSelected
+                                ? 'border-indigo-600 ring-2 ring-indigo-500/20 bg-indigo-500/5 shadow-xs'
+                                : 'bg-surface dark:bg-slate-900 border-surface-border dark:border-slate-800 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="relative aspect-[1.414/1] w-full rounded-xl overflow-hidden mb-1.5 bg-slate-950">
+                              <img
+                                src={bg.imageUrl}
+                                alt={bg.name}
+                                className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-200"
+                              />
+                              {isSelected && (
+                                <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
+                                  <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-md">
+                                    <Check className="w-3.5 h-3.5" />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <div className="px-0.5">
+                              <span className="block font-black text-[11px] text-text-main truncate">
+                                {bg.name}
+                              </span>
+                              <span className="block text-[9px] text-text-muted">
+                                {bg.textColorMode === 'gold_on_dark' ? '👑 Gold' : bg.textColorMode === 'light' ? '⚪ Light' : '⚫ Dark'} text
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {onOpenAIDesigner && savedAIBackgrounds.length > 0 && (
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={onOpenAIDesigner}
+                        className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>{_t('+ تصميم أو استيراد خلفية AI جديدة', '+ Design or Import New AI Background', '+ Neuer KI-Hintergrund')}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Course Title & Distinction */}
+            {/* Course Title & Grade */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5">
                 <label className="block text-xs font-black text-text-main">
-                  {_t('عنوان الدورة / المستوى', 'Course / Level Title', 'Kurs- / Niveau-Titel')}
+                  {_t('عنوان الشهادة / التكريم', 'Certificate Title', 'Zertifikatstitel')}
                 </label>
                 <input
                   type="text"
                   value={courseOrLevelTitle}
                   onChange={e => setCourseOrLevelTitle(e.target.value)}
-                  placeholder="e.g. Deutschkurs Niveau A1"
+                  placeholder="e.g. Certificate of Achievement"
                   className="w-full bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
 
               <div className="space-y-1.5">
                 <label className="block text-xs font-black text-text-main">
-                  {_t('التقدير / الدرجة (اختياري)', 'Grade / Distinction (Optional)', 'Note / Prädikat (Optional)')}
+                  {_t('الدرجة / التقدير أو الوسام (اختياري)', 'Grade / Distinction (Optional)', 'Note / Prädikat (Optional)')}
                 </label>
                 <input
                   type="text"
@@ -448,7 +766,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
             {/* Description / Honor Statement */}
             <div className="space-y-1.5">
               <label className="block text-xs font-black text-text-main">
-                {_t('نص التقدير وسبب التكريم', 'Certificate Description / Honor Statement', 'Würdigungstext')}
+                {_t('نص التقدير وسبب التكريم', 'Certificate Description / Statement', 'Würdigungstext')}
               </label>
               <textarea
                 value={description}
