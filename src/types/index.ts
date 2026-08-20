@@ -231,6 +231,10 @@ export type HomeworkStatus = 'assigned' | 'completed' | 'not_completed';
 export interface TeacherProfile {
   id: string;
   displayName: string;
+  displayNameEn?: string; // English / German name for Certificates & Diplomas (e.g. "Herr Omar Hassan")
+  displayNameAr?: string; // Arabic name for Reports, WhatsApp & Parent summaries (e.g. "أ. عمر حسن")
+  nameEn?: string; // Compatibility alias
+  nameAr?: string; // Compatibility alias
   email: string;
   avatarUrl: string;
   currency: string;

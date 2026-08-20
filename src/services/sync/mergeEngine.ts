@@ -155,6 +155,8 @@ export function mergeTeacherSettings(
   const mergedProfile = {
     ...fallbackRecord?.profile,
     ...baseRecord?.profile,
+    displayNameEn: baseRecord?.profile?.displayNameEn ?? fallbackRecord?.profile?.displayNameEn,
+    displayNameAr: baseRecord?.profile?.displayNameAr ?? fallbackRecord?.profile?.displayNameAr,
     workingHours: {
       ...fallbackRecord?.profile?.workingHours,
       ...baseRecord?.profile?.workingHours

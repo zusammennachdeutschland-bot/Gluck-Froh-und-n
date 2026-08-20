@@ -8,6 +8,7 @@ import {
   getCertificateDefaultText
 } from '../../data/certificateTypes';
 import { formatLocalDate } from '../../utils/timeUtils';
+import { getTeacherEnglishName } from '../../utils/teacherUtils';
 import { resolveCertificateRecipientName } from '../../utils/certificateUtils';
 import { getSavedAIBackgrounds } from '../../utils/aiBackgroundUtils';
 import { X, Check, Sparkles, CheckCircle2, Layers, AlertTriangle, Image as ImageIcon } from 'lucide-react';
@@ -54,7 +55,7 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
     return defaults.description;
   });
 
-  const currentTeacherName = profile?.displayName || (profile as any)?.name || '';
+  const currentTeacherName = getTeacherEnglishName(profile, 'Teacher');
   const [issueDate, setIssueDate] = useState<string>(formatLocalDate());
   const [instructorName, setInstructorName] = useState<string>(currentTeacherName || 'Lehrer/in');
   const [centerOrSchoolName, setCenterOrSchoolName] = useState<string>('');

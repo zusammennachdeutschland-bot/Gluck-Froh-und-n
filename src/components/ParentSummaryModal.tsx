@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import { X, Copy, Check, MessageSquare, Phone, Send, Share2, Sparkles, Home } from 'lucide-react';
 import { ArabicParentReportModal } from './ArabicParentReportModal';
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
+import { getTeacherEnglishName } from '../utils/teacherUtils';
 import confetti from 'canvas-confetti';
 
 interface ParentSummaryModalProps {
@@ -55,7 +56,7 @@ Hier ist der Unterrichtsbericht für ${lesson.studentName || lesson.title} vom $
 "${report?.teacherNotes || 'Sehr gute Leistung und aktive Teilnahme im Unterricht.'}"
 
 Mit freundlichen Grüßen,
-${profile.displayName}
+${getTeacherEnglishName(profile, 'Lehrer/in')}
 Glück fröhlich und froh 🇩🇪`;
   };
 

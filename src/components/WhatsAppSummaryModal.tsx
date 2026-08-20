@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Student, Lesson } from '../types';
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
+import { getTeacherArabicName } from '../utils/teacherUtils';
 import { X, Send, Copy, Check, MessageSquare, ExternalLink, Calendar, DollarSign } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -66,7 +67,8 @@ ${lessonDatesStr || 'لا توجد حصص مسجلة حتى الآن'}
 📱 فودافون كاش: ${profile.vodafoneCashNumber || profile.phone || '01012345678'}
 💳 InstaPay: ${profile.instaPayId || 'instapay'}
 
-شكراً لحضراتكم.`;
+شكراً لحضراتكم.
+أ. ${getTeacherArabicName(profile, 'المعلم')}`;
 
   const [copied, setCopied] = useState(false);
   const [customPhone, setCustomPhone] = useState(student.parentPhone || student.studentPhone || '');

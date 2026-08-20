@@ -64,6 +64,8 @@ export const SettingsView: React.FC = () => {
 
   // Profile Form States
   const [displayName, setDisplayName] = useState(profile.displayName);
+  const [displayNameEn, setDisplayNameEn] = useState(profile.displayNameEn || profile.nameEn || '');
+  const [displayNameAr, setDisplayNameAr] = useState(profile.displayNameAr || profile.nameAr || '');
   const [email, setEmail] = useState(profile.email || '');
   const [currency, setCurrency] = useState(profile.currency || 'EGP');
   const [weeklyWorkingHours, setWeeklyWorkingHours] = useState(profile.weeklyWorkingHours || {
@@ -125,7 +127,8 @@ export const SettingsView: React.FC = () => {
   const ForwardIcon = isRtl ? ArrowLeft : ChevronRight;
 
   const handleSharePaymentInfo = () => {
-    const text = `السلام عليكم ورحمة الله وبركاته\n\nبيانات التحويل والدفع:\n\n📱 رقم الهاتف:\n${phone || 'غير محدد'}\n\n💳 InstaPay:\n${instaPayId || 'غير محدد'}\n${vodafoneCashNumber ? `\n💸 فودافون كاش:\n${vodafoneCashNumber}\n` : ''}${bankAccount ? `\n🏦 الحساب البنكي:\n${bankAccount}\n` : ''}${paymentLink ? `\n🔗 رابط الدفع:\n${paymentLink}\n` : ''}${whatsappNumber ? `\n💬 واتساب:\n${whatsappNumber}\n` : ''}\nشكراً لحضراتكم.\n\nمع تحيات\n${displayName || 'المعلم'}`;
+    const arabicSignature = displayNameAr?.trim() || displayName || 'المعلم';
+    const text = `السلام عليكم ورحمة الله وبركاته\n\nبيانات التحويل والدفع:\n\n📱 رقم الهاتف:\n${phone || 'غير محدد'}\n\n💳 InstaPay:\n${instaPayId || 'غير محدد'}\n${vodafoneCashNumber ? `\n💸 فودافون كاش:\n${vodafoneCashNumber}\n` : ''}${bankAccount ? `\n🏦 الحساب البنكي:\n${bankAccount}\n` : ''}${paymentLink ? `\n🔗 رابط الدفع:\n${paymentLink}\n` : ''}${whatsappNumber ? `\n💬 واتساب:\n${whatsappNumber}\n` : ''}\nشكراً لحضراتكم.\n\nمع تحيات\nأ. ${arabicSignature}`;
     
     navigator.clipboard.writeText(text);
     setCopiedPaymentDetails(true);
@@ -163,7 +166,11 @@ export const SettingsView: React.FC = () => {
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
     updateProfile({ 
-      displayName, 
+      displayName: displayName.trim() || 'Teacher', 
+      displayNameEn: displayNameEn.trim(),
+      displayNameAr: displayNameAr.trim(),
+      nameEn: displayNameEn.trim(),
+      nameAr: displayNameAr.trim(),
       email, 
       currency,
       weeklyWorkingHours
@@ -669,9 +676,60 @@ export const SettingsView: React.FC = () => {
             {/* Profile Form */}
             <form onSubmit={(e) => { handleSaveProfile(e); setIsEditingProfile(false); }} className="space-y-3">
               <fieldset disabled={!isEditingProfile} className={!isEditingProfile ? 'opacity-70 pointer-events-none' : ''}>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              
+              {/* Dual Names Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-surface-hover/50 border border-surface-border/60 rounded-xl">
+                {/* English / Latin Name */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-black text-text-main flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                      <span>{isRtl ? 'اسم المعلم بالإنجليزية / الألمانية' : 'Teacher English / German Name'}</span>
+                    </label>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                      {isRtl ? '📜 للشهادات' : '📜 For Certificates'}
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={displayNameEn}
+                    onChange={(e) => setDisplayNameEn(e.target.value)}
+                    placeholder={isRtl ? 'مثال: Herr Omar Hassan أو Omar Hassan' : 'e.g. Herr Omar Hassan or Omar Hassan'}
+                    className="w-full px-3 py-1.5 bg-surface border border-surface-border dark:border-surface-border-soft rounded-lg text-xs font-semibold focus:ring-1 focus:ring-primary outline-none"
+                  />
+                  <p className="text-[10px] text-text-muted">
+                    {isRtl ? 'يظهر هذا الاسم تلقائياً في الشهادات والتكريمات الرسمية' : 'This name is automatically used in student certificates and diplomas'}
+                  </p>
+                </div>
+
+                {/* Arabic Name */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-black text-text-main flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      <span>{isRtl ? 'اسم المعلم بالعربية' : 'Teacher Arabic Name'}</span>
+                    </label>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                      {isRtl ? '📊 للتقارير والواتساب' : '📊 For Reports & WhatsApp'}
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={displayNameAr}
+                    onChange={(e) => setDisplayNameAr(e.target.value)}
+                    placeholder={isRtl ? 'مثال: أ. عمر حسن أو عمر حسن' : 'e.g. أ. عمر حسن'}
+                    className="w-full px-3 py-1.5 bg-surface border border-surface-border dark:border-surface-border-soft rounded-lg text-xs font-semibold focus:ring-1 focus:ring-primary outline-none"
+                    dir="rtl"
+                  />
+                  <p className="text-[10px] text-text-muted">
+                    {isRtl ? 'يظهر هذا الاسم في تقارير الحصص لأولياء الأمور ورسائل السداد' : 'Used in parent reports, WhatsApp summaries, and payment reminders'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-2">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-text-main">{t('settings_name')} *</label>
+                  <label className="text-xs font-bold text-text-main">{isRtl ? 'اسم العرض العام' : t('settings_name')} *</label>
                   <input
                     type="text"
                     value={displayName}
@@ -690,9 +748,7 @@ export const SettingsView: React.FC = () => {
                     className="w-full px-3 py-1.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-lg text-xs font-semibold focus:ring-1 focus:ring-primary outline-none"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-2">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-text-main">{t('settings_currency')}</label>
                   <select
@@ -1546,57 +1602,25 @@ export const SettingsView: React.FC = () => {
           {/* Dedicated Smart Backup Center */}
           <SmartBackupCenter onBack={() => setActiveCategory(null)} />
 
-          {/* Smart Data Validation Audit & Health Report Button */}
-          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 space-y-2.5 shadow-2xs">
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 bg-primary-soft text-primary rounded-lg shrink-0">
-                <ShieldCheck className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-text-main">
-                  {t('auto_smart_data_validation_health')}
-                </h3>
-                <p className="text-[11px] text-text-muted mt-0.5 leading-relaxed">
-                  {t('auto_inspect_record_consistency_de')}
-                </p>
-              </div>
-            </div>
+          {/* Smart Data Validation Button */}
+          <button
+            type="button"
+            onClick={() => setShowDataHealthCenterModal(true)}
+            className="w-full bg-surface hover:bg-surface-hover text-text-main border border-surface-border font-bold text-xs py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+          >
+            <ShieldCheck className="w-4 h-4 text-primary" />
+            <span>{t('auto_smart_data_validation_health')}</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setShowDataHealthCenterModal(true)}
-              className="w-full bg-surface-hover hover:bg-surface-border/50 text-text-main border border-surface-border font-bold text-xs py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-              <span>{t('auto_open_data_audit_health_repor')}</span>
-            </button>
-          </div>
-
-          {/* Danger Zone Section */}
-          <div className="bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/20 dark:border-rose-500/30 rounded-xl p-3.5 space-y-2.5 shadow-2xs">
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 bg-rose-500 text-white rounded-lg shrink-0 shadow-2xs">
-                <AlertTriangle className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
-                  {t('auto_danger_zone_data_reset')}
-                </h3>
-                <p className="text-[11px] text-rose-600/80 dark:text-rose-400/80 mt-0.5 leading-relaxed">
-                  {t('auto_sensitive_actions_resetting_d')}
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShowClearConfirm(true)}
-              className="w-full bg-rose-600 hover:bg-rose-700 active:scale-[0.99] text-white font-bold text-xs py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>{t('settings_clear_data')}</span>
-            </button>
-          </div>
+          {/* Danger Zone Button */}
+          <button
+            type="button"
+            onClick={() => setShowClearConfirm(true)}
+            className="w-full bg-rose-600 hover:bg-rose-700 active:scale-[0.99] text-white font-bold text-xs py-3 px-4 rounded-xl shadow-2xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <Trash2 className="w-4 h-4 text-white" />
+            <span>{t('auto_danger_zone_data_reset')}</span>
+          </button>
         </div>
       )}
 

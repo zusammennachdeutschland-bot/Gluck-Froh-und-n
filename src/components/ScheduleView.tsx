@@ -377,11 +377,11 @@ export const ScheduleView: React.FC = () => {
           {/* Export Monthly Calendar (.ics) */}
           <button
             onClick={() => setIsExportMonthlyModalOpen(true)}
-            title="Export Monthly Calendar (.ics)"
+            title={_t('تصدير تقويم الشهر (.ics)', 'Export Monthly Calendar (.ics)', 'Monatskalender exportieren (.ics)')}
             className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-bold text-xs px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
           >
             <CalendarIcon className="w-3.5 h-3.5" />
-            <span>Export Monthly (.ics)</span>
+            <span>{_t('تقويم شهري (.ics)', 'Monthly (.ics)', 'Monatskalender (.ics)')}</span>
           </button>
 
           {/* Quick Lesson */}

@@ -13,6 +13,7 @@ import { LessonReminderModal } from './LessonReminderModal';
 import { HomeworkFollowUpModal } from './HomeworkFollowUpModal';
 import { getPendingHomeworkFollowUps } from '../utils/homeworkFollowUpUtils';
 import { buildWhatsAppUrl, formatWhatsAppPhone } from '../utils/phoneUtils';
+import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUtils';
 import confetti from 'canvas-confetti';
 
 export const LessonControlModal: React.FC = () => {
@@ -239,7 +240,9 @@ export const LessonControlModal: React.FC = () => {
   }, [selectedLesson?.id, attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription, quizScore, examScore, participationScore, teacherNotes, lessonWhatWasTaught, lessonNextHomework, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes]);
 
   const handleSendPaymentReminder = () => {
-    const text = `السلام عليكم ورحمة الله وبركاته.\nتم الانتهاء من عدد الحصص المتفق عليها. برجاء تحويل الرسوم المستحقة.\n\nبيانات التحويل:\n📱 رقم الهاتف: ${profile.phone || '01012345678'}\n💳 InstaPay: ${profile.instaPayId || 'abdulrahman@instapay'}\n\nمع الشكر والتقدير\n${profile.displayName}`;
+    const teacherAr = getTeacherArabicName(profile, 'المعلم');
+    const teacherSig = teacherAr.startsWith('أ.') || teacherAr.startsWith('الأستاذ') ? teacherAr : `أ. ${teacherAr}`;
+    const text = `السلام عليكم ورحمة الله وبركاته.\nتم الانتهاء من عدد الحصص المتفق عليها. برجاء تحويل الرسوم المستحقة.\n\nبيانات التحويل:\n📱 رقم الهاتف: ${profile.phone || '01012345678'}\n💳 InstaPay: ${profile.instaPayId || 'abdulrahman@instapay'}\n\nمع الشكر والتقدير\n${teacherSig}`;
     navigator.clipboard.writeText(text);
     setReminderCopied(true);
     confetti({ particleCount: 40, spread: 50 });
@@ -381,25 +384,33 @@ export const LessonControlModal: React.FC = () => {
 
   // Communication Handlers with Recipient Validation & Teacher Name
   const handleSendConfirmationMessage = () => {
-    const text = `Hallo! Erinnerung an die Deutschstunde (${selectedLesson.title}) heute um ${selectedLesson.time} Uhr.\nMit freundlichen Grüßen,\nHerr ${profile.displayName}`;
+    const teacherEn = getTeacherEnglishName(profile, 'Lehrkraft');
+    const teacherSig = teacherEn.startsWith('Herr ') || teacherEn.startsWith('Frau ') ? teacherEn : `Herr ${teacherEn}`;
+    const text = `Hallo! Erinnerung an die Deutschstunde (${selectedLesson.title}) heute um ${selectedLesson.time} Uhr.\nMit freundlichen Grüßen,\n${teacherSig}`;
     const url = buildWhatsAppUrl(recipientPhone, text);
     window.open(url, '_blank');
   };
 
   const handleSendOfflineLessonStartMessage = () => {
-    const text = `السلام عليكم ورحمة الله وبركاته\n\nتم بدء الحصة الآن.\n\nنحيطكم علماً بأن الطالب بدأ الحصة في موعدها المحدد.\n\nمع تحيات\nأ. ${profile.displayName}`;
+    const teacherAr = getTeacherArabicName(profile, 'المعلم');
+    const teacherSig = teacherAr.startsWith('أ.') || teacherAr.startsWith('الأستاذ') ? teacherAr : `أ. ${teacherAr}`;
+    const text = `السلام عليكم ورحمة الله وبركاته\n\nتم بدء الحصة الآن.\n\nنحيطكم علماً بأن الطالب بدأ الحصة في موعدها المحدد.\n\nمع تحيات\n${teacherSig}`;
     const url = buildWhatsAppUrl(recipientPhone, text);
     window.open(url, '_blank');
   };
 
   const handleSendPaymentRequestMessage = () => {
-    const text = `السلام عليكم ورحمة الله وبركاته\n\nتم الانتهاء من عدد الحصص المتفق عليها.\nبرجاء تحويل الرسوم المستحقة.\n\nمع تحيات\nأ. ${profile.displayName}`;
+    const teacherAr = getTeacherArabicName(profile, 'المعلم');
+    const teacherSig = teacherAr.startsWith('أ.') || teacherAr.startsWith('الأستاذ') ? teacherAr : `أ. ${teacherAr}`;
+    const text = `السلام عليكم ورحمة الله وبركاته\n\nتم الانتهاء من عدد الحصص المتفق عليها.\nبرجاء تحويل الرسوم المستحقة.\n\nمع تحيات\n${teacherSig}`;
     const url = buildWhatsAppUrl(recipientPhone, text);
     window.open(url, '_blank');
   };
 
   const handleStartTrip = () => {
-    const text = `السلام عليكم ورحمة الله وبركاته\n\nأ. ${profile.displayName} في الطريق الآن للحصة (${selectedLesson.title}). الوصول المتوقع خلال 20-30 دقيقة إن شاء الله. 🚗`;
+    const teacherAr = getTeacherArabicName(profile, 'المعلم');
+    const teacherSig = teacherAr.startsWith('أ.') || teacherAr.startsWith('الأستاذ') ? teacherAr : `أ. ${teacherAr}`;
+    const text = `السلام عليكم ورحمة الله وبركاته\n\n${teacherSig} في الطريق الآن للحصة (${selectedLesson.title}). الوصول المتوقع خلال 20-30 دقيقة إن شاء الله. 🚗`;
     const url = buildWhatsAppUrl(recipientPhone, text);
     window.open(url, '_blank');
   };

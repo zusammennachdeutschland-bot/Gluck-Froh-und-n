@@ -7,6 +7,9 @@ import { motion } from 'motion/react';
 export const SetupWizard: React.FC = () => {
   const { profile, updateProfile, setLanguage, t, _t } = useApp();
   const [displayName, setDisplayName] = useState('');
+  const [displayNameEn, setDisplayNameEn] = useState('');
+  const [displayNameAr, setDisplayNameAr] = useState('');
+  const [showAdvancedNames, setShowAdvancedNames] = useState(false);
   const [language, setLocalLanguage] = useState<AppLanguage>('de');
   const [currency, setCurrency] = useState('EGP');
 
@@ -15,8 +18,16 @@ export const SetupWizard: React.FC = () => {
   }
 
   const handleComplete = () => {
+    const finalDisplayName = displayName.trim() || 'Teacher';
+    const finalEn = displayNameEn.trim() || (!/[\u0600-\u06FF]/.test(finalDisplayName) ? finalDisplayName : '');
+    const finalAr = displayNameAr.trim() || (/[\u0600-\u06FF]/.test(finalDisplayName) ? finalDisplayName : '');
+
     updateProfile({
-      displayName: displayName.trim() || 'Teacher',
+      displayName: finalDisplayName,
+      displayNameEn: finalEn || finalDisplayName,
+      displayNameAr: finalAr || finalDisplayName,
+      nameEn: finalEn || finalDisplayName,
+      nameAr: finalAr || finalDisplayName,
       language,
       currency
     });
@@ -146,10 +157,20 @@ export const SetupWizard: React.FC = () => {
           <div className="bg-white/30 dark:bg-slate-900/30 backdrop-blur-3xl border border-white/50 dark:border-slate-700/50 p-5 sm:p-8 rounded-[32px] sm:rounded-[40px] shadow-[0_12px_40px_rgba(0,0,0,0.1)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.4)] relative z-10">
             <div className="space-y-6">
               
-              <div className="group">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-widest ml-1">
-                  Teacher Name
-                </label>
+              <div className="group space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest ml-1">
+                    Teacher Name / اسم المعلم
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedNames(!showAdvancedNames)}
+                    className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+                  >
+                    {showAdvancedNames ? 'Simple' : 'English & Arabic Names'}
+                  </button>
+                </div>
+
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 dark:text-slate-400 group-focus-within:text-primary transition-colors">
                     <User className="w-5 h-5" />
@@ -158,11 +179,41 @@ export const SetupWizard: React.FC = () => {
                     type="text"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder="e.g. Herr Schmidt"
+                    placeholder="e.g. Herr Omar Hassan"
                     className="w-full pl-12 pr-4 py-3.5 sm:py-4 bg-white/40 dark:bg-slate-950/40 backdrop-blur-md border border-white/60 dark:border-slate-700/60 rounded-2xl sm:rounded-[20px] focus:ring-2 focus:ring-primary focus:bg-white/60 dark:focus:bg-slate-900/60 font-bold text-slate-900 dark:text-white text-base outline-none transition-all placeholder:text-slate-500/70 dark:placeholder:text-slate-500/70 shadow-inner"
                     autoFocus
                   />
                 </div>
+
+                {showAdvancedNames && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 animate-scale-up">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        📜 English Name (Certificates)
+                      </span>
+                      <input
+                        type="text"
+                        value={displayNameEn}
+                        onChange={(e) => setDisplayNameEn(e.target.value)}
+                        placeholder="e.g. Herr Omar Hassan"
+                        className="w-full px-3 py-2 bg-white/50 dark:bg-slate-950/50 border border-white/60 dark:border-slate-700/60 rounded-xl font-semibold text-xs outline-none focus:ring-1 focus:ring-primary text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        📊 Arabic Name (Reports)
+                      </span>
+                      <input
+                        type="text"
+                        value={displayNameAr}
+                        onChange={(e) => setDisplayNameAr(e.target.value)}
+                        placeholder="مثال: أ. عمر حسن"
+                        dir="rtl"
+                        className="w-full px-3 py-2 bg-white/50 dark:bg-slate-950/50 border border-white/60 dark:border-slate-700/60 rounded-xl font-semibold text-xs outline-none focus:ring-1 focus:ring-primary text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

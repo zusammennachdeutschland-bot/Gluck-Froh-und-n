@@ -11,6 +11,7 @@ import { CertificateRenderer } from './templates/CertificateRenderer';
 import { downloadCertificatePDF, downloadCertificateImage, shareCertificateWhatsApp } from '../../utils/certificateExportUtils';
 import { resolveCertificateRecipientName } from '../../utils/certificateUtils';
 import { formatLocalDate } from '../../utils/timeUtils';
+import { getTeacherEnglishName } from '../../utils/teacherUtils';
 import { getSavedAIBackgrounds } from '../../utils/aiBackgroundUtils';
 import {
   X,
@@ -127,7 +128,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
     initialCertificate?.issueDate || formatLocalDate()
   );
 
-  const currentTeacherName = profile?.displayName || (profile as any)?.name || '';
+  const currentTeacherName = getTeacherEnglishName(profile, 'Teacher');
 
   const [instructorName, setInstructorName] = useState<string>(
     initialCertificate?.instructorName || initialCertificate?.teacherName || currentTeacherName || 'Lehrer/in'

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Lesson, Student, TeacherProfile } from '../types';
 import { useApp } from '../context/AppContext';
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
+import { getTeacherArabicName } from '../utils/teacherUtils';
 import { 
   X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home
 } from 'lucide-react';
@@ -106,7 +107,9 @@ ${nextHomework}
 ----------------------------------`;
     });
 
-    text += `\n\nشكراً لكم،\nأ. ${profile.displayName} - معلم اللغة الألمانية 🇩🇪`;
+    const teacherArName = getTeacherArabicName(profile, 'المعلم');
+    const teacherSig = teacherArName.startsWith('أ.') || teacherArName.startsWith('الأستاذ') ? teacherArName : `أ. ${teacherArName}`;
+    text += `\n\nشكراً لكم،\n${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
     return text;
   };
 
@@ -148,6 +151,9 @@ ${nextHomework}
     const nextHomework = lesson.report?.homeworkDescription || 'لا يوجد واجب';
     const notesCombined = studentNote.trim() || 'مستوى الطالب ممتاز ومتفاعل خلال الحصة.';
 
+    const teacherArName = getTeacherArabicName(profile, 'المعلم');
+    const teacherSig = teacherArName.startsWith('أ.') || teacherArName.startsWith('الأستاذ') ? teacherArName : `أ. ${teacherArName}`;
+
     const generated = `السلام عليكم ورحمة الله وبركاته 👋
 
 تم اليوم شرح:
@@ -172,7 +178,7 @@ ${examScore}
 • ${notesCombined}
 
 شكراً لكم،
-أ. ${profile.displayName} - معلم اللغة الألمانية 🇩🇪`;
+${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
 
     setFinalGeneratedText(generated);
   }, [
@@ -181,7 +187,9 @@ ${examScore}
     activeStudent,
     isManualEdited,
     activeTab,
-    profile.displayName
+    profile.displayName,
+    profile.displayNameAr,
+    profile.nameAr
   ]);
 
   const handleCopyText = () => {

@@ -222,6 +222,13 @@ export const PaymentsView: React.FC = () => {
     }, 0);
   }, [filteredDueCycles, payments]);
 
+  // Total Overdue Calculation (cycles marked as 'not_yet' or overdue)
+  const overdueTotal = useMemo(() => {
+    return filteredDueCycles
+      .filter(item => item.status === 'not_yet')
+      .reduce((sum, item) => sum + item.amountDue, 0);
+  }, [filteredDueCycles]);
+
   // --------------------------------------------------------------------------
   // ACTIONS
   // --------------------------------------------------------------------------
@@ -335,20 +342,20 @@ ${datesFormatted}
           <span className="text-base font-black text-amber-500 font-mono">{totalAmountDue} <span className="text-[10px] text-amber-500/70">{currency}</span></span>
         </div>
         <div className="bg-surface hover:bg-surface-hover transition-colors p-2.5 sm:p-3 rounded-xl border border-surface-border flex flex-col justify-center relative overflow-hidden shadow-2xs">
-          <div className="absolute -right-2 -top-2 w-10 h-10 bg-red-500/5 rounded-full blur-lg pointer-events-none" />
+          <div className="absolute -right-2 -top-2 w-10 h-10 bg-primary-soft rounded-full blur-lg pointer-events-none" />
           <span className="text-[9px] font-black text-text-muted uppercase tracking-wider mb-0.5 flex items-center gap-1">
-            <AlertCircle className="w-3 h-3 text-red-500" />
+            <AlertCircle className="w-3 h-3 text-primary" />
             {t('payments_overdue')}
           </span>
-          <span className="text-base font-black text-red-500 font-mono">0 <span className="text-[10px] text-red-500/70">{currency}</span></span>
+          <span className="text-base font-black text-text-main font-mono">{overdueTotal} <span className="text-[10px] text-text-muted/70">{currency}</span></span>
         </div>
         <div className="bg-surface hover:bg-surface-hover transition-colors p-2.5 sm:p-3 rounded-xl border border-surface-border flex flex-col justify-center relative overflow-hidden shadow-2xs">
-          <div className="absolute -right-2 -top-2 w-10 h-10 bg-indigo-500/5 rounded-full blur-lg pointer-events-none" />
+          <div className="absolute -right-2 -top-2 w-10 h-10 bg-primary/5 rounded-full blur-lg pointer-events-none" />
           <span className="text-[9px] font-black text-text-muted uppercase tracking-wider mb-0.5 flex items-center gap-1">
-            <DollarSign className="w-3 h-3 text-indigo-500" />
+            <DollarSign className="w-3 h-3 text-primary" />
             {t('payments_expected')}
           </span>
-          <span className="text-base font-black text-indigo-500 font-mono">{totalAmountDue + monthlyTotal} <span className="text-[10px] text-indigo-500/70">{currency}</span></span>
+          <span className="text-base font-black text-text-main font-mono">{totalAmountDue + monthlyTotal} <span className="text-[10px] text-text-muted/70">{currency}</span></span>
         </div>
       </div>
 
@@ -533,7 +540,7 @@ ${datesFormatted}
                         className="px-3 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-black rounded-lg transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
                       >
                         <Check className="w-3.5 h-3.5 stroke-[3]" />
-                        <span>{t('payments_paid_btn')} (Paid)</span>
+                        <span>{t('payments_paid_btn')}</span>
                       </button>
 
                       {/* NOT YET BUTTON */}
@@ -543,7 +550,7 @@ ${datesFormatted}
                         className="px-2.5 py-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1"
                       >
                         <Clock className="w-3 h-3 text-text-muted/70" />
-                        <span>{t('payments_not_yet_btn')} (Not Yet)</span>
+                        <span>{t('payments_not_yet_btn')}</span>
                       </button>
                     </div>
 
@@ -551,10 +558,10 @@ ${datesFormatted}
                     <button
                       type="button"
                       onClick={() => setSelectedCycleForWhatsApp(item)}
-                      className="px-3 py-2 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft text-primary dark:text-primary text-xs font-bold rounded-xl transition-all border border-primary-border dark:border-primary-border cursor-pointer flex items-center gap-1.5"
+                      className="px-3 py-1.5 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft/80 text-primary dark:text-primary text-xs font-bold rounded-lg transition-all border border-primary-border dark:border-primary-border cursor-pointer flex items-center gap-1.5"
                     >
                       <Send className="w-3.5 h-3.5 text-primary" />
-                      <span>{t('payments_parent_notice')} (WhatsApp)</span>
+                      <span>{t('payments_parent_notice')}</span>
                     </button>
                   </div>
                 </div>

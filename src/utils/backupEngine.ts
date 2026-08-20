@@ -610,7 +610,14 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       payments: sanitizedPayments,
       notifications: sanitizedNotifications,
       certificates: sanitizedCertificates,
-      profile: data.profile && typeof data.profile === 'object' ? data.profile : undefined,
+      profile: data.profile && typeof data.profile === 'object' ? {
+        ...data.profile,
+        displayName: typeof data.profile.displayName === 'string' ? data.profile.displayName : 'Teacher',
+        displayNameEn: typeof data.profile.displayNameEn === 'string' ? data.profile.displayNameEn : (typeof data.profile.nameEn === 'string' ? data.profile.nameEn : undefined),
+        displayNameAr: typeof data.profile.displayNameAr === 'string' ? data.profile.displayNameAr : (typeof data.profile.nameAr === 'string' ? data.profile.nameAr : undefined),
+        nameEn: typeof data.profile.nameEn === 'string' ? data.profile.nameEn : (typeof data.profile.displayNameEn === 'string' ? data.profile.displayNameEn : undefined),
+        nameAr: typeof data.profile.nameAr === 'string' ? data.profile.nameAr : (typeof data.profile.displayNameAr === 'string' ? data.profile.displayNameAr : undefined)
+      } : undefined,
       notificationSettings: data.notificationSettings && typeof data.notificationSettings === 'object' ? data.notificationSettings : undefined,
       inspirationSettings: data.inspirationSettings && typeof data.inspirationSettings === 'object' ? data.inspirationSettings : undefined,
       inspirationMessages: Array.isArray(data.inspirationMessages) ? data.inspirationMessages : undefined,

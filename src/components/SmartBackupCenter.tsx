@@ -952,97 +952,54 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             </div>
           )}
 
+          <input
+            type="file"
+            accept=".json"
+            ref={simpleFileInputRef}
+            onChange={handleSimpleRestoreUpload}
+            className="hidden"
+          />
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* Quick Backup Section */}
-            <div className="bg-surface border border-surface-border/90 dark:border-surface-border p-3.5 rounded-xl shadow-2xs flex flex-col justify-between space-y-3">
-              <div className="space-y-1.5">
-                <div className="p-2 bg-primary-soft text-primary border border-primary-border/40 rounded-lg w-fit">
+            {/* Backup Button */}
+            <button
+              type="button"
+              onClick={handleSimpleBackup}
+              disabled={isSimpleExporting}
+              className="py-3 px-4 rounded-xl bg-primary text-white hover:bg-primary-hover disabled:bg-slate-300 dark:disabled:bg-slate-800 text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs active:scale-98"
+            >
+              {isSimpleExporting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>{t('auto_saving_and_sharing')}</span>
+                </>
+              ) : (
+                <>
                   <Save className="w-4 h-4" />
-                </div>
-                <h3 className="text-xs font-bold text-text-main">
-                  {t('auto_instant_1_click_backup')}
-                </h3>
-                <p className="text-[11px] text-text-muted leading-relaxed">
-                  {t('auto_export_and_save_a_complete_bac')}
-                </p>
-              </div>
+                  <span>{_t('حفظ نسخة احتياطية', 'Backup Data', 'Datensicherung')}</span>
+                </>
+              )}
+            </button>
 
-              <div className="pt-1">
-                <button
-                  type="button"
-                  onClick={handleSimpleBackup}
-                  disabled={isSimpleExporting}
-                  className="w-full py-2 px-3 rounded-lg bg-primary text-white hover:bg-primary-hover disabled:bg-slate-300 dark:disabled:bg-slate-800 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs active:scale-98"
-                >
-                  {isSimpleExporting ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>{t('auto_saving_and_sharing')}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-3.5 h-3.5" />
-                      <span>{t('auto_tap_to_backup_save_everythin')}</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Restore Section */}
-            <div className="bg-surface border border-surface-border/90 dark:border-surface-border p-3.5 rounded-xl shadow-2xs flex flex-col justify-between space-y-3">
-              <div className="space-y-1.5">
-                <div className="p-2 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-lg w-fit">
-                  <Upload className="w-4 h-4" />
-                </div>
-                <h3 className="text-xs font-bold text-text-main">
-                  {t('auto_instant_1_click_restore')}
-                </h3>
-                <p className="text-[11px] text-text-muted leading-relaxed">
-                  {t('auto_select_a_backup_json_file_you')}
-                </p>
-              </div>
-
-              <div className="pt-1">
-                <input
-                  type="file"
-                  accept=".json"
-                  ref={simpleFileInputRef}
-                  onChange={handleSimpleRestoreUpload}
-                  className="hidden"
-                />
-                
-                <button
-                  type="button"
-                  onClick={() => simpleFileInputRef.current?.click()}
-                  disabled={isSimpleRestoring}
-                  className="w-full py-2 px-3 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-white disabled:bg-slate-300 dark:disabled:bg-slate-800 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs active:scale-98"
-                >
-                  {isSimpleRestoring ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>{t('auto_restoring_all_data')}</span>
-                    </>
-                  ) : (
-                    <>
-                      <FileCode className="w-3.5 h-3.5" />
-                      <span>{t('auto_choose_file_restore_all')}</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Prompt/Info box on safety */}
-          <div className="p-3 bg-surface-hover rounded-xl border border-surface-border text-[11px] leading-relaxed text-text-muted flex items-start gap-2">
-            <ShieldCheck className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-            <div className="space-y-0.5">
-              <span className="font-bold text-text-main block">{t('auto_automatic_data_protection')}</span>
-              <span>
-                {t('auto_before_performing_any_restore')}
-              </span>
-            </div>
+            {/* Restore Button */}
+            <button
+              type="button"
+              onClick={() => simpleFileInputRef.current?.click()}
+              disabled={isSimpleRestoring}
+              className="py-3 px-4 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main disabled:opacity-50 text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs active:scale-98"
+            >
+              {isSimpleRestoring ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>{t('auto_restoring_all_data')}</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 text-primary" />
+                  <span>{_t('استعادة نسخة احتياطية', 'Restore Data', 'Wiederherstellen')}</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
       )}
@@ -1126,9 +1083,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
                         className="w-3.5 h-3.5 rounded text-primary focus:ring-primary cursor-pointer shrink-0"
                       />
                     </div>
-                    <p className="text-[10px] text-text-muted mt-0.5 leading-snug line-clamp-2">
-                      {_t(category.descriptionAr, category.descriptionEn)}
-                    </p>
                   </div>
                 </div>
               );
@@ -1146,9 +1100,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
                   <h3 className="text-xs font-bold text-text-main">
                     {isFullBackup ? t('auto_full_backup_preview') : t('auto_partial_backup_preview')}
                   </h3>
-                  <p className="text-[10px] text-text-muted">
-                    {t('auto_payload_details_and_estimated')}
-                  </p>
                 </div>
               </div>
 
@@ -1276,7 +1227,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       {activeTab === 'restore' && (
         <div className="space-y-3 animate-fade-in">
           {/* Upload Drop Zone */}
-          <div className="bg-surface border-2 border-dashed border-primary/40 hover:border-primary p-4 rounded-xl text-center space-y-2 transition-all">
+          <div className="bg-surface border-2 border-dashed border-primary/40 hover:border-primary p-4 rounded-xl text-center space-y-2.5 transition-all">
             <div className="p-2 bg-primary-soft rounded-xl w-10 h-10 mx-auto flex items-center justify-center text-primary">
               <Upload className="w-5 h-5" />
             </div>
@@ -1284,9 +1235,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
               <h3 className="text-xs font-bold text-text-main">
                 {t('auto_select_or_drop_backup_file_js')}
               </h3>
-              <p className="text-[11px] text-text-muted mt-0.5">
-                {t('auto_supports_standard_and_password')}
-              </p>
             </div>
 
             <input
@@ -1376,64 +1324,49 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
                   {/* Smart Restore Mode */}
                   <div
                     onClick={() => setRestoreMode('smart')}
-                    className={`p-2.5 rounded-lg border transition-all cursor-pointer select-none space-y-0.5 ${
+                    className={`p-2.5 rounded-lg border transition-all cursor-pointer select-none flex items-center justify-between ${
                       restoreMode === 'smart'
                         ? 'bg-primary-soft/60 border-primary text-text-main shadow-2xs'
                         : 'bg-surface hover:bg-surface-hover border-surface-border opacity-80'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-primary flex items-center gap-1">
-                        <Sparkles className="w-3 h-3" />
-                        {t('auto_smart_restore_default')}
-                      </span>
-                      {restoreMode === 'smart' && <Check className="w-3.5 h-3.5 text-primary" />}
-                    </div>
-                    <p className="text-[10px] text-text-muted leading-tight">
-                      {t('auto_detect_duplicates_update_exis')}
-                    </p>
+                    <span className="text-xs font-bold text-primary flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      {t('auto_smart_restore_default')}
+                    </span>
+                    {restoreMode === 'smart' && <Check className="w-3.5 h-3.5 text-primary" />}
                   </div>
 
                   {/* Merge Mode */}
                   <div
                     onClick={() => setRestoreMode('merge')}
-                    className={`p-2.5 rounded-lg border transition-all cursor-pointer select-none space-y-0.5 ${
+                    className={`p-2.5 rounded-lg border transition-all cursor-pointer select-none flex items-center justify-between ${
                       restoreMode === 'merge'
                         ? 'bg-primary-soft/60 border-primary text-text-main shadow-2xs'
                         : 'bg-surface hover:bg-surface-hover border-surface-border opacity-80'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-text-main flex items-center gap-1">
-                        <Users className="w-3 h-3 text-primary" />
-                        {t('auto_merge_mode')}
-                      </span>
-                      {restoreMode === 'merge' && <Check className="w-3.5 h-3.5 text-primary" />}
-                    </div>
-                    <p className="text-[10px] text-text-muted leading-tight">
-                      {t('auto_keep_current_data_add_importe')}
-                    </p>
+                    <span className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-primary" />
+                      {t('auto_merge_mode')}
+                    </span>
+                    {restoreMode === 'merge' && <Check className="w-3.5 h-3.5 text-primary" />}
                   </div>
 
                   {/* Replace Mode */}
                   <div
                     onClick={() => setRestoreMode('replace')}
-                    className={`p-2.5 rounded-lg border transition-all cursor-pointer select-none space-y-0.5 ${
+                    className={`p-2.5 rounded-lg border transition-all cursor-pointer select-none flex items-center justify-between ${
                       restoreMode === 'replace'
                         ? 'bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400 shadow-2xs'
                         : 'bg-surface hover:bg-surface-hover border-surface-border opacity-80'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" />
-                        {t('auto_replace_mode')}
-                      </span>
-                      {restoreMode === 'replace' && <Check className="w-3.5 h-3.5 text-rose-500" />}
-                    </div>
-                    <p className="text-[10px] text-text-muted leading-tight">
-                      {t('auto_replace_current_data_with_impo')}
-                    </p>
+                    <span className="text-xs font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      {t('auto_replace_mode')}
+                    </span>
+                    {restoreMode === 'replace' && <Check className="w-3.5 h-3.5 text-rose-500" />}
                   </div>
                 </div>
               </div>
@@ -1587,23 +1520,15 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             <div className="p-1.5 rounded-lg bg-primary-soft text-primary">
               <Clock className="w-4 h-4" />
             </div>
-            <div>
-              <h3 className="text-xs font-bold text-text-main">
-                {t('auto_automatic_backup_retention_s')}
-              </h3>
-              <p className="text-[10px] text-text-muted mt-0.5">
-                {t('auto_schedule_periodic_background_s')}
-              </p>
-            </div>
+            <h3 className="text-xs font-bold text-text-main">
+              {t('auto_automatic_backup_retention_s')}
+            </h3>
           </div>
 
           <div className="space-y-2">
             {/* Daily */}
             <div className="flex items-center justify-between p-2.5 bg-surface-hover rounded-lg border border-surface-border">
-              <div>
-                <h4 className="text-xs font-bold text-text-main">{t('auto_daily_automatic_backup')}</h4>
-                <p className="text-[10px] text-text-muted mt-0.5">{t('auto_capture_a_daily_data_snapshot')}</p>
-              </div>
+              <h4 className="text-xs font-bold text-text-main">{t('auto_daily_automatic_backup')}</h4>
               <input
                 type="checkbox"
                 checked={autoDaily}
@@ -1614,10 +1539,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
 
             {/* Weekly */}
             <div className="flex items-center justify-between p-2.5 bg-surface-hover rounded-lg border border-surface-border">
-              <div>
-                <h4 className="text-xs font-bold text-text-main">{t('auto_weekly_automatic_backup')}</h4>
-                <p className="text-[10px] text-text-muted mt-0.5">{t('auto_capture_a_weekly_snapshot_auto')}</p>
-              </div>
+              <h4 className="text-xs font-bold text-text-main">{t('auto_weekly_automatic_backup')}</h4>
               <input
                 type="checkbox"
                 checked={autoWeekly}
@@ -1628,10 +1550,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
 
             {/* Monthly */}
             <div className="flex items-center justify-between p-2.5 bg-surface-hover rounded-lg border border-surface-border">
-              <div>
-                <h4 className="text-xs font-bold text-text-main">{t('auto_monthly_automatic_backup')}</h4>
-                <p className="text-[10px] text-text-muted mt-0.5">{t('auto_capture_a_monthly_snapshot_for')}</p>
-              </div>
+              <h4 className="text-xs font-bold text-text-main">{t('auto_monthly_automatic_backup')}</h4>
               <input
                 type="checkbox"
                 checked={autoMonthly}
@@ -1676,14 +1595,9 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
               <div className="p-1.5 rounded-lg bg-primary-soft text-primary">
                 <History className="w-4 h-4" />
               </div>
-              <div>
-                <h3 className="text-xs font-bold text-text-main">
-                  {t('auto_restore_operation_history')}
-                </h3>
-                <p className="text-[10px] text-text-muted">
-                  {t('auto_chronological_audit_log_of_all')}
-                </p>
-              </div>
+              <h3 className="text-xs font-bold text-text-main">
+                {t('auto_restore_operation_history')}
+              </h3>
             </div>
           </div>
 
