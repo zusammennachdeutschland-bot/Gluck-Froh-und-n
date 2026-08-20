@@ -12,6 +12,7 @@ import { AvailableTodayWidget } from './components/AvailableTodayWidget';
 import { SmartDailySummaryWidget } from './components/SmartDailySummaryWidget';
 import { QuickTodoWidget } from './components/QuickTodoWidget';
 import { InspirationCardWidget } from './components/InspirationCardWidget';
+import { SchoolTodayCard } from './components/SchoolTodayCard';
 import { ScheduleView } from './components/ScheduleView';
 import { StudentsView } from './components/StudentsView';
 import { PaymentsView } from './components/PaymentsView';
@@ -20,6 +21,7 @@ import { SessionHistoryView } from './components/SessionHistoryView';
 import { SettingsView } from './components/SettingsView';
 import { FreeTimeSlotsView } from './components/FreeTimeSlotsView';
 import { CertificateCenter } from './components/certificates/CertificateCenter';
+import { SchoolScheduleView } from './components/SchoolScheduleView';
 
 import { DesktopSidebar } from './components/desktop/DesktopSidebar';
 import { DesktopTopBar } from './components/desktop/DesktopTopBar';
@@ -308,7 +310,7 @@ function MainApp() {
 
         {/* Tab View Content Area */}
         <main 
-          className="flex-1 p-4 overflow-y-auto pb-[calc(6rem+env(safe-area-inset-bottom,0px))] overflow-x-hidden relative"
+          className="flex-1 px-2.5 py-2.5 sm:p-3 md:p-4 overflow-y-auto pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] overflow-x-hidden relative"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -316,16 +318,19 @@ function MainApp() {
           <AnimatePresence mode="wait">
             <motion.div
               key={`mobile-${activeTab}`}
-              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              initial={{ opacity: 0, y: 6, scale: 0.99 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.98 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 26 }}
-              className="space-y-3"
+              exit={{ opacity: 0, y: -6, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+              className="space-y-2.5 sm:space-y-3"
             >
               {activeTab === 'home' && (
                 <>
                   {/* Daily Inspiration & Gratitude Card */}
                   <InspirationCardWidget />
+
+                  {/* School Today Card */}
+                  <SchoolTodayCard />
 
                   {/* Today's Progress Timeline */}
                   <TodaysProgressTimeline />
@@ -358,6 +363,7 @@ function MainApp() {
               {activeTab === 'settings' && <SettingsView />}
               {activeTab === 'freeTime' && <FreeTimeSlotsView />}
               {activeTab === 'certificates' && <CertificateCenter />}
+              {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
             </motion.div>
           </AnimatePresence>
         </main>
@@ -377,7 +383,7 @@ function MainApp() {
           <DesktopTopBar />
 
           {/* Desktop Content Canvas */}
-          <main className="flex-1 p-6 md:p-8 overflow-y-auto overflow-x-hidden bg-slate-50/40 dark:bg-background">
+          <main className="flex-1 p-4 md:p-6 overflow-y-auto overflow-x-hidden bg-slate-50/40 dark:bg-background">
             <div className="max-w-7xl mx-auto w-full">
               <AnimatePresence mode="wait">
                 <motion.div
@@ -396,6 +402,7 @@ function MainApp() {
                   {activeTab === 'settings' && <SettingsView />}
                   {activeTab === 'freeTime' && <FreeTimeSlotsView />}
                   {activeTab === 'certificates' && <CertificateCenter />}
+                  {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
                 </motion.div>
               </AnimatePresence>
             </div>

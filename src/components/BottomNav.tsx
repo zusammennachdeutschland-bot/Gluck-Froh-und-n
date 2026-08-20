@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Home, Calendar, Users, MoreHorizontal, Wallet, BarChart2, Settings, Zap, History, Play, Clock, Award } from 'lucide-react';
+import { Home, Calendar, Users, MoreHorizontal, Wallet, BarChart2, Settings, Zap, History, Play, Clock, Award, BookOpen } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export const BottomNav: React.FC = () => {
@@ -10,7 +10,8 @@ export const BottomNav: React.FC = () => {
     setIsAddQuickLessonModalOpen, 
     setIsStartLessonNowModalOpen, 
     t,
-    language
+    language,
+    _t
   } = useApp();
   
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -23,7 +24,8 @@ export const BottomNav: React.FC = () => {
   const isReportsActive = activeTab === 'reports';
   const isSettingsActive = activeTab === 'settings';
   const isCertificatesActive = activeTab === 'certificates';
-  const isMoreTabActive = isHistoryActive || isReportsActive || isSettingsActive || isCertificatesActive || activeTab === 'freeTime';
+  const isFreeTimeActive = activeTab === 'freeTime';
+  const isMoreTabActive = isHistoryActive || isReportsActive || isSettingsActive || isCertificatesActive || isFreeTimeActive;
 
   // Define primary tabs
   const leftTabs = [
@@ -34,6 +36,7 @@ export const BottomNav: React.FC = () => {
 
   const rightTabs = [
     { id: 'payments', label: t('nav_payments') || 'Zahlungen', icon: Wallet },
+    { id: 'schoolSchedule', label: _t('المدرسة', 'School', 'Schule'), icon: BookOpen },
   ];
 
   // Dynamic more tab metadata
@@ -41,6 +44,7 @@ export const BottomNav: React.FC = () => {
     if (isCertificatesActive) return { label: t('nav_certificates') || 'Zertifikate', icon: Award, colorClass: 'text-primary' };
     if (isHistoryActive) return { label: t('nav_history') || 'Sitzungen', icon: History, colorClass: 'text-primary' };
     if (isReportsActive) return { label: t('nav_reports') || 'Berichte', icon: BarChart2, colorClass: 'text-primary' };
+    if (isFreeTimeActive) return { label: t('nav_free_time') || 'Freie Termine', icon: Clock, colorClass: 'text-primary' };
     if (isSettingsActive) return { label: t('nav_settings') || 'Einstellungen', icon: Settings, colorClass: 'text-primary' };
     return { label: t('nav_more') || 'Mehr', icon: MoreHorizontal, colorClass: 'text-text-muted/70' };
   };
@@ -54,13 +58,13 @@ export const BottomNav: React.FC = () => {
   };
 
   return (
-    <div className="absolute bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))] left-4 right-4 z-40 max-w-lg mx-auto select-none pointer-events-none">
+    <div className="absolute bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))] left-2 sm:left-4 right-2 sm:right-4 z-40 max-w-lg mx-auto select-none pointer-events-none">
       <div className="relative w-full flex justify-center">
         {/* Floating Dock glassmorphism container */}
-        <div className="w-full bg-surface/80 dark:bg-background/85 backdrop-blur-xl border border-surface-border/40 dark:border-surface-border/60 rounded-[24px] shadow-[0_12px_40px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.45)] px-3 py-2 flex items-center justify-between pointer-events-auto relative">
+        <div className="w-full bg-surface/85 dark:bg-background/90 backdrop-blur-xl border border-surface-border/40 dark:border-surface-border/60 rounded-[24px] shadow-[0_12px_40px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.45)] px-2 sm:px-3 py-1.5 sm:py-2 flex items-center justify-between pointer-events-auto relative">
           
           {/* LEFT TABS */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 sm:gap-1">
             {leftTabs.map((tab) => {
               const IconComponent = tab.icon;
               const isActive = activeTab === tab.id;
@@ -69,8 +73,9 @@ export const BottomNav: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => handleTabClick(tab.id)}
-                  className="relative flex items-center justify-center py-2 px-3 rounded-full cursor-pointer transition-all focus:outline-none shrink-0"
+                  className="relative flex items-center justify-center py-1.5 sm:py-2 px-2 sm:px-2.5 rounded-full cursor-pointer transition-all focus:outline-none shrink-0"
                   style={{ WebkitTapHighlightColor: 'transparent' }}
+                  title={tab.label}
                 >
                   {/* Gliding Active background Pill using framer-motion */}
                   {isActive && (
@@ -125,12 +130,12 @@ export const BottomNav: React.FC = () => {
                 setShowQuickMenu(prev => !prev);
                 setShowMoreMenu(false);
               }}
-              className="w-12 h-12 rounded-full bg-linear-to-tr from-primary to-primary-hover hover:from-primary hover:to-primary-hover text-white flex items-center justify-center shadow-lg shadow-primary/50 dark:shadow-primary/30 ring-[5px] ring-white dark:ring-black relative z-10 cursor-pointer focus:outline-none"
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-linear-to-tr from-primary to-primary-hover hover:from-primary hover:to-primary-hover text-white flex items-center justify-center shadow-lg shadow-primary/50 dark:shadow-primary/30 ring-[4px] sm:ring-[5px] ring-white dark:ring-black relative z-10 cursor-pointer focus:outline-none"
               style={{ WebkitTapHighlightColor: 'transparent' }}
               aria-label="Schnell-Eintrag"
               title="Aktionen anzeigen"
             >
-              <Zap className="w-5.5 h-5.5 fill-white" />
+              <Zap className="w-5 h-5 sm:w-5.5 sm:h-5.5 fill-white" />
             </motion.button>
 
             {/* Quick Action Popover Menu */}
@@ -168,7 +173,7 @@ export const BottomNav: React.FC = () => {
                     }}
                     className="w-full text-start flex items-start gap-2.5 px-3 py-2.5 rounded-xl hover:bg-background dark:hover:bg-slate-900 transition-colors cursor-pointer"
                   >
-                    <Play className="w-4 h-4 text-violet-500 mt-0.5 shrink-0 fill-violet-500/15" />
+                    <Play className="w-4 h-4 text-primary mt-0.5 shrink-0 fill-primary/15" />
                     <div className="min-w-0">
                       <span className="block text-xs font-black text-slate-900 dark:text-slate-100">
                         {t('sofort_title') || 'Start Lesson Now (Anytime)'}
@@ -184,7 +189,7 @@ export const BottomNav: React.FC = () => {
           </div>
 
           {/* RIGHT TABS */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 sm:gap-1">
             {rightTabs.map((tab) => {
               const IconComponent = tab.icon;
               const isActive = activeTab === tab.id;
@@ -193,8 +198,9 @@ export const BottomNav: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => handleTabClick(tab.id)}
-                  className="relative flex items-center justify-center py-2 px-3 rounded-full cursor-pointer transition-all focus:outline-none shrink-0"
+                  className="relative flex items-center justify-center py-1.5 sm:py-2 px-2 sm:px-2.5 rounded-full cursor-pointer transition-all focus:outline-none shrink-0"
                   style={{ WebkitTapHighlightColor: 'transparent' }}
+                  title={tab.label}
                 >
                   {isActive && (
                     <motion.div
@@ -241,8 +247,9 @@ export const BottomNav: React.FC = () => {
                   setShowMoreMenu(prev => !prev);
                   setShowQuickMenu(false);
                 }}
-                className="relative flex items-center justify-center py-2 px-3 rounded-full cursor-pointer transition-all focus:outline-none shrink-0"
+                className="relative flex items-center justify-center py-1.5 sm:py-2 px-2 sm:px-2.5 rounded-full cursor-pointer transition-all focus:outline-none shrink-0"
                 style={{ WebkitTapHighlightColor: 'transparent' }}
+                title={moreTab.label}
               >
                 {isMoreTabActive && (
                   <motion.div
@@ -298,7 +305,7 @@ export const BottomNav: React.FC = () => {
                           : 'hover:bg-background dark:hover:bg-slate-900 text-text-main'
                       }`}
                     >
-                      <Award className="w-4 h-4 text-amber-500 shrink-0" />
+                      <Award className="w-4 h-4 text-primary shrink-0" />
                       <span>{t('nav_certificates') || (language === 'ar' ? 'الشهادات والتكريم' : 'Zertifikate')}</span>
                     </button>
                     <button

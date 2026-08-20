@@ -70,7 +70,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
   };
 
   const handleCategoryChange = async (
-    categoryKey: keyof Pick<NotificationSettings, 'lessonReminder' | 'lessonStart' | 'paymentDue' | 'dailySummary' | 'attendanceReminder'>,
+    categoryKey: keyof Pick<NotificationSettings, 'lessonReminder' | 'lessonStart' | 'paymentDue' | 'dailySummary' | 'attendanceReminder' | 'schoolLessonReminder'>,
     updates: Partial<CategoryNotificationConfig>
   ) => {
     const currentCatConfig = notificationSettings[categoryKey];
@@ -498,6 +498,18 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
               soundOptions={soundOptions}
               priorityOptions={priorityOptions}
             />
+
+            {/* Category 5: School Lesson Reminder */}
+            <CategoryCard
+              title={_t('تذكير حصص المدرسة (قبل 5 دقائق)', 'School Lesson Reminder (5 mins before)', 'Schulstunden-Erinnerung (5 Min. vorher)')}
+              description={_t('تذكير تلقائي مجدول قبل كل حصة بـ 5 دقائق من جدول المدرسة.', 'Automatic reminder 5 minutes before each school lesson starts.', 'Automatische Erinnerung 5 Minuten vor Beginn jeder Schulstunde.')}
+              icon={Clock}
+              iconColor="text-primary bg-primary/10"
+              config={notificationSettings.schoolLessonReminder || { enabled: true, sound: 'beep', priority: 'high' }}
+              onChange={updates => handleCategoryChange('schoolLessonReminder', updates)}
+              soundOptions={soundOptions}
+              priorityOptions={priorityOptions}
+            />
           </div>
         </div>
 
@@ -506,7 +518,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
-                <FileText className="w-4 h-4 text-cyan-500" />
+                <FileText className="w-4 h-4 text-primary" />
                 قائمة الإشعارات المجدولة الحالية ({pendingScheduledNotifications.length})
               </h3>
               <p className="text-xs text-text-muted mt-0.5">

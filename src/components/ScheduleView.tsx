@@ -6,22 +6,25 @@ import { parseLocalDate, formatLocalDate } from '../utils/timeUtils';
 import { 
   Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, 
   Video, MapPin, CheckCircle2, AlertTriangle, Trash2, ArrowLeftRight, 
-  Download, X, Check, Zap, RefreshCw, Play, Send 
+  Download, X, Check, Zap, RefreshCw, Play, Send, BookOpen, Plus
 } from 'lucide-react';
 import { StartLessonNowModal } from './StartLessonNowModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { ExportMonthlyCalendarModal } from './ExportMonthlyCalendarModal';
+import { getSchoolSettings, calculatePeriodsTimings } from '../utils/schoolUtils';
+import { DAY_KEY_TO_RRULE_BYDAY, getUpcomingDateForDayKey, formatIcsEventBlock, SchoolIcsEventItem } from '../utils/schoolScheduleIcsUtils';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
 export const ScheduleView: React.FC = () => {
-  const { lessons, profile, openLessonControl, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, updateLesson, deleteLesson, refreshCalendarAndDashboard,  t } = useApp();
+  const { lessons, groups, students, profile, openLessonControl, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, updateLesson, deleteLesson, refreshCalendarAndDashboard, t, language, _t } = useApp();
 
   const todayStr = formatLocalDate(new Date());
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [calendarView, setCalendarView] = useState<'day' | 'week' | 'month'>('day');
   const [showRefreshToast, setShowRefreshToast] = useState(false);
+  const [exportToastMessage, setExportToastMessage] = useState<string | null>(null);
   const [showStartLessonNowModal, setShowStartLessonNowModal] = useState(false);
   const [isExportMonthlyModalOpen, setIsExportMonthlyModalOpen] = useState(false);
   const [reminderLesson, setReminderLesson] = useState<Lesson | null>(null);
@@ -180,35 +183,130 @@ export const ScheduleView: React.FC = () => {
     }, 1200);
   };
 
-  // GOOGLE CALENDAR ICS EXPORT
+  // GOOGLE CALENDAR ICS EXPORT (TUTORING LESSONS + SCHOOL SCHEDULE)
   const handleExportICS = async () => {
+    const schoolSettings = getSchoolSettings(profile);
+    const periodsTimings = calculatePeriodsTimings(schoolSettings.periodSettings);
+    const timingMap = new Map();
+    periodsTimings.forEach(p => timingMap.set(p.periodNumber, p));
+
     let icsContent = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//Glück//Calendar App',
+      'PRODID:-//Glück//Teacher Assistant Complete Calendar//EN',
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
+      'X-WR-CALNAME:Glück Schedule & School Calendar'
     ];
 
+    // 1. Export Private / Group Tutoring Lessons
+    let tutoringLessonsCount = 0;
     lessons.forEach((l) => {
+      tutoringLessonsCount++;
       const cleanDate = l.date.replace(/-/g, '');
-      const cleanTime = l.time.replace(':', '') + '00';
+      const cleanTime = (l.time || '17:00').replace(':', '') + '00';
       const startDT = `${cleanDate}T${cleanTime}`;
+      const duration = l.durationMinutes || 60;
+
+      const endDateObj = new Date(`${l.date}T${l.time || '17:00'}:00`);
+      endDateObj.setMinutes(endDateObj.getMinutes() + duration);
+      const endY = endDateObj.getFullYear();
+      const endMo = String(endDateObj.getMonth() + 1).padStart(2, '0');
+      const endDa = String(endDateObj.getDate()).padStart(2, '0');
+      const endHStr = String(endDateObj.getHours()).padStart(2, '0');
+      const endMStr = String(endDateObj.getMinutes()).padStart(2, '0');
+      const endDT = `${endY}${endMo}${endDa}T${endHStr}${endMStr}00`;
+
+      const targetGroup = groups.find(g => g.id === l.groupId);
+      const groupName = l.groupName || targetGroup?.name || 'Group';
+      const grade = l.grade || targetGroup?.grade || 'General';
+      const location = l.meetingLink || l.locationAddress || targetGroup?.zoomLink || targetGroup?.address || '';
 
       icsContent.push('BEGIN:VEVENT');
-      icsContent.push(`SUMMARY:${l.title} (${l.grade})`);
-      icsContent.push(`DESCRIPTION:Lesson ${l.sessionNumber}/${l.totalSessionsInPackage} - Type: ${(l.type || '').toUpperCase()}`);
+      icsContent.push(`UID:lesson_${l.id}_${cleanDate}@teacherassistant`);
+      icsContent.push(`DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`);
+      icsContent.push(`SUMMARY:🇩🇪 German - ${groupName} (${grade})`);
+      icsContent.push(`DESCRIPTION:Lesson ${l.sessionNumber || 1}/${l.totalSessionsInPackage || 8} - Type: ${(l.type || '').toUpperCase()}`);
       icsContent.push(`DTSTART:${startDT}`);
-      icsContent.push(`DURATION:PT${l.durationMinutes || 60}M`);
-      if (l.meetingLink) icsContent.push(`LOCATION:${l.meetingLink}`);
-      else if (l.locationAddress) icsContent.push(`LOCATION:${l.locationAddress}`);
+      icsContent.push(`DTEND:${endDT}`);
+      if (location) icsContent.push(`LOCATION:${location}`);
+      
+      // Alarms
+      icsContent.push('BEGIN:VALARM');
+      icsContent.push('TRIGGER:-PT30M');
+      icsContent.push('ACTION:DISPLAY');
+      icsContent.push(`DESCRIPTION:Reminder: German Lesson with ${groupName} in 30 minutes`);
+      icsContent.push('END:VALARM');
+
+      icsContent.push('BEGIN:VALARM');
+      icsContent.push('TRIGGER:-PT10M');
+      icsContent.push('ACTION:DISPLAY');
+      icsContent.push(`DESCRIPTION:Reminder: German Lesson with ${groupName} in 10 minutes`);
+      icsContent.push('END:VALARM');
+
       icsContent.push('END:VEVENT');
+    });
+
+    // 2. Export Recurring Weekly School Schedule Periods
+    let weeklySchoolClassesCount = 0;
+    const now = new Date();
+
+    Object.entries(schoolSettings.presence).forEach(([dayKey, presence]) => {
+      if (!presence.active) return;
+      const byDay = DAY_KEY_TO_RRULE_BYDAY[dayKey] || 'MO';
+      const firstOccurDate = getUpcomingDateForDayKey(dayKey, now);
+      const cleanDate = firstOccurDate.replace(/-/g, '');
+
+      const daySchedule = schoolSettings.schedule[dayKey] || [];
+      daySchedule.forEach((record) => {
+        if (!record.subjectName && !record.className) return;
+        const timing = timingMap.get(record.periodNumber);
+        if (!timing) return;
+
+        weeklySchoolClassesCount++;
+        const cleanStartTime = timing.startTime.replace(':', '') + '00';
+        const cleanEndTime = timing.endTime.replace(':', '') + '00';
+        const startDT = `${cleanDate}T${cleanStartTime}`;
+        const endDT = `${cleanDate}T${cleanEndTime}`;
+
+        const subject = record.subjectName || (language === 'ar' ? 'حصة مدرسية' : 'School Lesson');
+        const cls = record.className ? `(${record.className})` : '';
+        const summary = `🏫 ${subject} ${cls}`.trim();
+
+        const descLines = [
+          `School Period: ${record.periodNumber} (${timing.startTime} - ${timing.endTime})`,
+          record.className ? `Class / Stage: ${record.className}` : '',
+          record.subjectName ? `Subject: ${record.subjectName}` : '',
+          record.notes ? `Notes / Room: ${record.notes}` : ''
+        ].filter(Boolean);
+
+        const periodEvt: SchoolIcsEventItem = {
+          uid: `school_period_rrule_d${dayKey}_p${record.periodNumber}@teacherassistant`,
+          summary,
+          description: descLines.join('\n'),
+          location: record.notes ? `School - ${record.notes}` : 'School',
+          startDT,
+          endDT,
+          rrule: `FREQ=WEEKLY;BYDAY=${byDay}`,
+          type: 'period',
+          periodNumber: record.periodNumber,
+          dayKey
+        };
+
+        icsContent.push(...formatIcsEventBlock(periodEvt, 15));
+      });
     });
 
     icsContent.push('END:VCALENDAR');
 
     const icsContentStr = icsContent.join('\r\n');
     const filename = `Schedule_${formatLocalDate(new Date())}.ics`;
+
+    const summaryToast = language === 'ar'
+      ? `تم تصدير ${tutoringLessonsCount} درس خصوصي و ${weeklySchoolClassesCount} حصة مدرسية أسبوعية إلى ملف التقويم`
+      : `Exported ${tutoringLessonsCount} lessons & ${weeklySchoolClassesCount} weekly school classes to calendar`;
+    setExportToastMessage(summaryToast);
+    setTimeout(() => setExportToastMessage(null), 4000);
 
     if (Capacitor.isNativePlatform()) {
       try {
@@ -220,7 +318,7 @@ export const ScheduleView: React.FC = () => {
         });
         await Share.share({
           title: 'Schedule Export',
-          text: `Glück fröhlich und froh Schedule Export - ${filename}`,
+          text: `Glück Schedule Export - ${filename}`,
           url: savedFile.uri,
           dialogTitle: 'Save Schedule Calendar File'
         });
@@ -244,23 +342,23 @@ export const ScheduleView: React.FC = () => {
   return (
     <div className="space-y-4  font-sans">
       {/* TOP HEADER */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div>
-          <h2 className="text-lg font-black text-text-main flex items-center gap-2">
-            <CalendarIcon className="w-5 h-5 text-primary" />
+          <h2 className="text-base sm:text-lg font-black text-text-main flex items-center gap-2">
+            <CalendarIcon className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
             <span>{t('schedule_title')}</span>
           </h2>
-          <p className="text-xs font-semibold text-text-muted">
+          <p className="text-[11px] font-semibold text-text-muted">
             {t('schedule_working_hours')}: {workingStart} - {workingEnd}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-start sm:justify-end">
+        <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-start sm:justify-end">
           {/* Refresh Calendar Data */}
           <button
             onClick={handleRefreshCalendar}
             title={t('schedule_refresh')}
-            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-xs px-2.5 py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-xs px-2 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span className="hidden md:inline">{t('schedule_refresh')}</span>
@@ -270,7 +368,7 @@ export const ScheduleView: React.FC = () => {
           <button
             onClick={handleExportICS}
             title={t('schedule_ical')}
-            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-xs px-2.5 py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-xs px-2 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
           >
             <Download className="w-3.5 h-3.5" />
             <span className="hidden md:inline">{t('schedule_ical')}</span>
@@ -280,17 +378,17 @@ export const ScheduleView: React.FC = () => {
           <button
             onClick={() => setIsExportMonthlyModalOpen(true)}
             title="Export Monthly Calendar (.ics)"
-            className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-bold text-xs px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+            className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-bold text-xs px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
           >
             <CalendarIcon className="w-3.5 h-3.5" />
-            <span>Export Monthly Calendar (.ics)</span>
+            <span>Export Monthly (.ics)</span>
           </button>
 
           {/* Quick Lesson */}
           <button
             type="button"
             onClick={() => setIsAddQuickLessonModalOpen(true)}
-            className="bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border hover:bg-primary-soft/80 active:scale-95 font-bold text-xs px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
+            className="bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border hover:bg-primary-soft/80 active:scale-95 font-bold text-xs px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
           >
             <Zap className="w-3.5 h-3.5 fill-primary text-primary" />
             <span>{t('nav_quickLesson')}</span>
@@ -299,7 +397,7 @@ export const ScheduleView: React.FC = () => {
           {/* START LESSON NOW */}
           <button
             onClick={() => setShowStartLessonNowModal(true)}
-            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs px-3.5 py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-md hover:shadow-primary/30 shrink-0"
+            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-primary/30 shrink-0"
           >
             <Play className="w-3.5 h-3.5 fill-white text-white" />
             <span>{t('schedule_start_now')}</span>
@@ -309,17 +407,25 @@ export const ScheduleView: React.FC = () => {
 
       {/* REFRESH TOAST BANNER */}
       {showRefreshToast && (
-        <div className="bg-primary text-white text-xs font-bold p-3 rounded-lg flex items-center justify-center gap-2 shadow-md animate-scale-up">
+        <div className="bg-primary text-white text-xs font-bold p-2.5 rounded-lg flex items-center justify-center gap-2 shadow-md animate-scale-up">
           <CheckCircle2 className="w-4 h-4" />
           <span>✓ {t('dataRefreshed')}</span>
         </div>
       )}
 
+      {/* EXPORT TOAST BANNER */}
+      {exportToastMessage && (
+        <div className="bg-emerald-600 text-white text-xs font-bold p-2.5 rounded-lg flex items-center justify-center gap-2 shadow-md animate-scale-up">
+          <CheckCircle2 className="w-4 h-4" />
+          <span>{exportToastMessage}</span>
+        </div>
+      )}
+
       {/* CONFLICT ALERT BANNER */}
       {dayConflicts.length > 0 && calendarView === 'day' && (
-        <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-lg p-3 flex items-center justify-between gap-2 animate-pulse">
+        <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-lg p-2.5 flex items-center justify-between gap-2 animate-pulse">
           <div className="flex items-center gap-2 text-primary dark:text-primary text-xs font-bold">
-            <AlertTriangle className="w-4 h-4 shrink-0 text-primary dark:text-primary" />
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-primary dark:text-primary" />
             <span>
               {t('schedule_conflict_alert')}: {selectedDate}
             </span>
@@ -328,31 +434,31 @@ export const ScheduleView: React.FC = () => {
       )}
 
       {/* VIEW SWITCHER TABS & DATE NAVIGATION BANNER */}
-      <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-3 shadow-2xs space-y-3">
+      <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-2.5 shadow-2xs space-y-2">
         
         {/* Row 1: View Switcher Tabs */}
-        <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-surface-border pb-2.5">
-          <div className="flex items-center bg-surface-hover p-1 rounded-xl text-xs font-bold gap-1">
+        <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-surface-border pb-2">
+          <div className="flex items-center bg-surface-hover p-0.5 rounded-lg text-xs font-bold gap-0.5">
             <button
               onClick={() => setCalendarView('day')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                calendarView === 'day' ? 'bg-primary text-white shadow-xs' : 'text-text-muted hover:text-slate-900'
+              className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                calendarView === 'day' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-slate-900'
               }`}
             >
               {t('schedule_day_view')}
             </button>
             <button
               onClick={() => setCalendarView('week')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                calendarView === 'week' ? 'bg-primary text-white shadow-xs' : 'text-text-muted hover:text-slate-900'
+              className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                calendarView === 'week' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-slate-900'
               }`}
             >
               {t('schedule_week_view')}
             </button>
             <button
               onClick={() => setCalendarView('month')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                calendarView === 'month' ? 'bg-primary text-white shadow-xs' : 'text-text-muted hover:text-slate-900'
+              className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                calendarView === 'month' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-slate-900'
               }`}
             >
               {t('schedule_month_view')}
@@ -361,7 +467,7 @@ export const ScheduleView: React.FC = () => {
 
           <button
             onClick={() => setSelectedDate(todayStr)}
-            className="text-xs font-bold text-primary dark:text-primary hover:underline cursor-pointer bg-primary-soft dark:bg-primary-soft/80 px-2.5 py-1 rounded-lg border border-primary-border dark:border-primary-border"
+            className="text-xs font-bold text-primary dark:text-primary hover:underline cursor-pointer bg-primary-soft dark:bg-primary-soft/80 px-2 py-0.5 rounded-md border border-primary-border dark:border-primary-border"
           >
             {t('schedule_today')}
           </button>
@@ -377,7 +483,7 @@ export const ScheduleView: React.FC = () => {
               else current.setMonth(current.getMonth() - 1);
               setSelectedDate(formatLocalDate(current));
             }}
-            className="p-2 hover:bg-surface-hover rounded-xl cursor-pointer transition-all"
+            className="p-1.5 hover:bg-surface-hover rounded-lg cursor-pointer transition-all"
           >
             <ChevronLeft className="w-4 h-4 text-text-muted" />
           </button>
@@ -389,7 +495,7 @@ export const ScheduleView: React.FC = () => {
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  className="text-sm font-extrabold text-text-main bg-transparent border-none focus:outline-none cursor-pointer font-mono text-center"
+                  className="text-xs sm:text-sm font-extrabold text-text-main bg-transparent border-none focus:outline-none cursor-pointer font-mono text-center"
                 />
                 <span className="block text-[10px] text-primary dark:text-primary font-extrabold uppercase">
                   {selectedDate === todayStr ? t('schedule_today') : parseLocalDate(selectedDate).toLocaleDateString(undefined, { weekday: 'long', day: '2-digit', month: 'long' })}
@@ -404,7 +510,7 @@ export const ScheduleView: React.FC = () => {
             )}
 
             {calendarView === 'month' && (
-              <span className="text-sm font-extrabold text-text-main">
+              <span className="text-xs sm:text-sm font-extrabold text-text-main">
                 {monthData.monthName}
               </span>
             )}
@@ -418,7 +524,7 @@ export const ScheduleView: React.FC = () => {
               else current.setMonth(current.getMonth() + 1);
               setSelectedDate(formatLocalDate(current));
             }}
-            className="p-2 hover:bg-surface-hover rounded-xl cursor-pointer transition-all"
+            className="p-1.5 hover:bg-surface-hover rounded-lg cursor-pointer transition-all"
           >
             <ChevronRight className="w-4 h-4 text-text-muted" />
           </button>
@@ -427,19 +533,103 @@ export const ScheduleView: React.FC = () => {
 
       {/* 1. DAY VIEW */}
       {calendarView === 'day' && (
-        <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-4 shadow-2xs space-y-3">
-          <div className="flex items-center justify-between text-xs font-bold border-b border-slate-100 dark:border-surface-border pb-2">
-            <span className="text-slate-500 uppercase">({dayLessons.length}) {t('schedule_title')}</span>
+        <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-3 shadow-2xs space-y-2.5">
+          <div className="flex items-center justify-between text-xs font-bold border-b border-slate-100 dark:border-surface-border pb-1.5">
+            <span className="text-slate-500 uppercase text-[11px]">({dayLessons.length}) {t('schedule_title')}</span>
             {dayConflicts.length === 0 ? (
-              <span className="text-primary dark:text-primary flex items-center gap-1 text-[11px]">
-                <CheckCircle2 className="w-3.5 h-3.5" /> {t('schedule_no_conflicts')}
+              <span className="text-primary dark:text-primary flex items-center gap-1 text-[10px]">
+                <CheckCircle2 className="w-3 h-3" /> {t('schedule_no_conflicts')}
               </span>
             ) : (
-              <span className="text-primary dark:text-primary flex items-center gap-1 text-[11px] font-bold">
-                <AlertTriangle className="w-3.5 h-3.5" /> {t('schedule_conflict')}
+              <span className="text-primary dark:text-primary flex items-center gap-1 text-[10px] font-bold">
+                <AlertTriangle className="w-3 h-3" /> {t('schedule_conflict')}
               </span>
             )}
           </div>
+
+          {/* School Presence Block in Day View */}
+          {(() => {
+            const currentDayNum = parseLocalDate(selectedDate).getDay();
+            const schoolSettings = getSchoolSettings(profile);
+            const dayKey = String(currentDayNum);
+            const presence = schoolSettings.presence[dayKey];
+            
+            if (!presence || !presence.active) return null;
+            
+            const periods = calculatePeriodsTimings(schoolSettings.periodSettings);
+            const schedule = schoolSettings.schedule[dayKey] || [];
+            const scheduledPeriods = periods
+              .map(p => {
+                const rec = schedule.find(s => s.periodNumber === p.periodNumber);
+                const hasContent = Boolean(rec && (rec.subjectName || rec.className));
+                return { period: p, record: rec, hasContent };
+              })
+              .filter(item => item.hasContent);
+
+            return (
+              <div className="p-4 rounded-xl bg-indigo-50/20 dark:bg-indigo-950/10 border border-indigo-100/40 dark:border-indigo-900/20 space-y-3 shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-indigo-600 text-white rounded-lg">
+                      <BookOpen className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-850 dark:text-white">
+                        {_t('فترة التواجد بالمدرسة', 'School Presence Block', 'Schulpräsenzzeit')}
+                      </h4>
+                      <p className="text-[10px] text-slate-500 font-mono">
+                        {presence.arrivalTime} ← {presence.departureTime}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/5 px-2 py-0.5 rounded-md">
+                    {_t('يوم عمل مدرسة', 'School Day', 'Schultag')}
+                  </span>
+                </div>
+
+                {scheduledPeriods.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-indigo-100/20 dark:border-indigo-900/20">
+                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      {_t('الحصص والنشاط المدرسي اليوم', 'Periods & School Activities Today', 'Tägliche Schulstunden')}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {scheduledPeriods.map(({ period: p, record: rec }) => (
+                        <div 
+                          key={p.periodNumber}
+                          className="p-2 rounded-lg border flex items-center justify-between gap-2 text-[11px] bg-primary-soft/30 dark:bg-primary-soft/15 border-primary-border/40"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-4 h-4 rounded bg-primary-soft text-primary flex items-center justify-center font-black text-[9px]">
+                              {p.periodNumber}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-700 dark:text-slate-300 font-mono tracking-wider">
+                                {p.startTime}-{p.endTime}
+                              </div>
+                              <div className="font-semibold text-slate-500 dark:text-slate-400 truncate text-[10px]">
+                                {rec?.className ? (
+                                  <span>
+                                    <strong className="font-black text-slate-850 dark:text-white text-[11px]">{rec.className}</strong>
+                                    {rec.subjectName && (
+                                      <span className="text-[9px] font-bold text-primary ms-1 uppercase">
+                                        ({rec.subjectName})
+                                      </span>
+                                    )}
+                                  </span>
+                                ) : (
+                                  rec?.subjectName
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {dayLessons.length === 0 ? (
             <div className="text-center py-10 space-y-2">
@@ -453,9 +643,7 @@ export const ScheduleView: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="space-y-3 relative">
-              <div className="absolute left-[54px] top-3 bottom-3 w-0.5 bg-slate-200 dark:bg-slate-800 -z-0"></div>
-
+            <div className="space-y-2.5">
               {dayLessons.map((lesson) => {
                 const isCompleted = lesson.status === 'completed';
                 const isCancelled = lesson.status === 'cancelled';
@@ -464,119 +652,160 @@ export const ScheduleView: React.FC = () => {
                 return (
                   <div
                     key={lesson.id}
-                    className="flex items-start gap-3 relative z-10 group"
+                    className="flex items-start gap-2 sm:gap-3 relative group"
                   >
-                    <div className={`w-12 text-right text-xs font-extrabold font-mono shrink-0 pt-3 ${
-                      isCompleted ? 'text-text-muted/70 dark:text-slate-500 line-through' : 'text-slate-800 dark:text-slate-200'
+                    {/* Time Column on Timeline */}
+                    <div className={`w-11 sm:w-12 text-end text-xs font-bold font-mono shrink-0 pt-2 ${
+                      isCompleted ? 'text-text-muted/70 dark:text-slate-500 line-through' : 'text-text-main'
                     }`}>
                       {lesson.time}
                     </div>
 
-                    <div className={`w-3.5 h-3.5 rounded-full border-2 border-white dark:border-slate-900 shrink-0 mt-3.5 ${
-                      conflict
-                        ? 'bg-primary ring-4 ring-primary dark:ring-primary animate-bounce'
-                        : isCompleted
-                        ? 'bg-slate-400 dark:bg-slate-500 ring-2 ring-slate-200 dark:ring-slate-800'
-                        : isCancelled
-                        ? 'bg-primary ring-2 ring-primary dark:ring-primary'
-                        : 'bg-primary ring-2 ring-primary dark:ring-primary'
-                    }`} />
+                    {/* Timeline Rail: Dot + Connecting Line */}
+                    <div className="flex flex-col items-center shrink-0 self-stretch relative">
+                      <div className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 z-10 mt-2 transition-all ${
+                        conflict
+                          ? 'border-amber-500 bg-amber-100 ring-2 ring-amber-400/40 animate-bounce'
+                          : isCompleted
+                          ? 'border-slate-400 bg-slate-200 ring-2 ring-slate-200 dark:ring-slate-800'
+                          : isCancelled
+                          ? 'border-rose-400 bg-rose-100 ring-2 ring-rose-300'
+                          : 'border-primary bg-primary/20 ring-2 ring-primary/20'
+                      }`} />
+                      <div className="w-0.5 bg-slate-200/80 dark:bg-slate-800 flex-1 -mt-0.5 min-h-[46px] group-last:hidden" />
+                    </div>
 
-                    <div className={`flex-1 min-w-0 border rounded-lg p-3 transition-all ${
+                    {/* Compact Session Card (72-80px Height) */}
+                    <div className={`flex-1 min-w-0 border rounded-xl p-3 sm:p-3.5 transition-all shadow-2xs ${
                       conflict
-                        ? 'border-primary-border dark:border-primary-border bg-primary-soft dark:bg-primary-soft'
+                        ? 'border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10'
                         : isCompleted
-                        ? 'bg-slate-100/90 dark:bg-slate-800/40 border-surface-border/80 opacity-80'
+                        ? 'bg-slate-100/70 dark:bg-slate-800/30 border-surface-border/80 opacity-80'
                         : isCancelled
-                        ? 'bg-primary-soft dark:bg-primary-soft border-primary-border dark:border-primary-border opacity-75'
-                        : 'bg-surface-hover/80 hover:bg-primary-soft dark:hover:bg-primary-soft border-surface-border/80 dark:border-surface-border-soft/80 group-hover:border-primary'
+                        ? 'bg-rose-500/5 dark:bg-rose-500/10 border-rose-500/20 opacity-75'
+                        : 'bg-surface hover:bg-surface-hover/60 border-surface-border/90 dark:border-surface-border hover:border-primary/40'
                     }`}>
-                      <div className="flex items-start justify-between gap-2">
-                        <div onClick={() => openLessonControl(lesson)} className="cursor-pointer flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className={`text-xs sm:text-sm font-bold transition-colors ${
+                      <div className="space-y-1">
+                        {/* Row 1: Student/Group Name + Badge + Actions */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div
+                            onClick={() => openLessonControl(lesson)}
+                            className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
+                          >
+                            <h4 className={`text-sm sm:text-[15px] font-bold truncate transition-colors ${
                               isCompleted
                                 ? 'line-through text-text-muted/70 dark:text-slate-500'
                                 : isCancelled
-                                ? 'line-through text-primary dark:text-primary'
+                                ? 'line-through text-rose-500'
                                 : 'text-text-main group-hover:text-primary'
                             }`}>
-                              {lesson.title}
+                              {lesson.studentName || lesson.groupName || lesson.title}
                             </h4>
 
+                            {/* Location Badge */}
+                            {lesson.type === 'online' ? (
+                              <span className="text-[10px] sm:text-[11px] font-medium text-primary bg-primary-soft dark:bg-primary-soft/80 border border-primary-border/60 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
+                                <Video className="w-3 h-3" />
+                                <span>{t('next_action_online')}</span>
+                              </span>
+                            ) : (
+                              <span className="text-[10px] sm:text-[11px] font-medium text-primary bg-primary-soft dark:bg-primary-soft/80 border border-primary-border/60 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
+                                <MapPin className="w-3 h-3" />
+                                <span>{t('next_action_offline')}</span>
+                              </span>
+                            )}
+
                             {isCompleted && (
-                              <span className="text-[9px] font-black uppercase bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                              <span className="text-[9px] font-bold uppercase bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 shrink-0">
                                 <CheckCircle2 className="w-2.5 h-2.5 text-slate-500" />
                                 {t('status_completed')}
                               </span>
                             )}
 
                             {isCancelled && (
-                              <span className="text-[9px] font-black uppercase bg-primary-soft text-primary dark:bg-primary-soft dark:text-primary px-1.5 py-0.5 rounded-md">
+                              <span className="text-[9px] font-bold uppercase bg-rose-500/10 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded-md shrink-0">
                                 {t('status_cancelled')}
                               </span>
                             )}
 
                             {conflict && (
-                              <span className="text-[9px] font-black uppercase bg-primary text-white px-1.5 py-0.5 rounded-md">
+                              <span className="text-[9px] font-bold uppercase bg-amber-500 text-white px-1.5 py-0.5 rounded-md shrink-0">
                                 {t('schedule_conflict')}
                               </span>
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2 text-[10px] text-text-muted mt-1 flex-wrap">
-                            <span className="font-semibold">{lesson.grade}</span>
-                            <span>•</span>
-                            <span className="font-bold text-primary dark:text-primary">
-                              Session {lesson.sessionNumber}/{lesson.totalSessionsInPackage}
-                            </span>
-                            
-                            <span>•</span>
-                            <span className="font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.5 rounded-md border border-primary-border dark:border-primary-border">
-                              {t('schedule_weekly')}
-                            </span>
+                          {/* Action Buttons (Quiet Calm Colors) */}
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setReminderLesson(lesson)}
+                              title="إرسال تذكير الحصة"
+                              className="p-1.5 text-emerald-600/80 hover:text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition-all cursor-pointer"
+                            >
+                              <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => openReschedule(lesson)}
+                              title="إعادة جدولة الحصة"
+                              className="p-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                            >
+                              <ArrowLeftRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => deleteLesson(lesson.id)}
+                              title="حذف الحصة"
+                              className="p-1.5 text-rose-400 hover:text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-all cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            </button>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1 shrink-0">
-                          {lesson.type === 'online' ? (
-                            <span className="text-[10px] font-bold text-primary bg-primary-soft dark:bg-primary-soft px-2 py-0.5 rounded-md flex items-center gap-1">
-                              <Video className="w-3 h-3" /> {t('next_action_online')}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold text-primary bg-primary-soft dark:bg-primary-soft px-2 py-0.5 rounded-md flex items-center gap-1">
-                              <MapPin className="w-3 h-3" /> {t('next_action_offline')}
-                            </span>
-                          )}
+                        {/* Row 2: Subject / Lesson Topic */}
+                        <div
+                          onClick={() => openLessonControl(lesson)}
+                          className="cursor-pointer text-xs text-text-muted dark:text-slate-400 font-normal leading-tight"
+                        >
+                          {lesson.notes || (lesson.groupName && lesson.groupName !== lesson.title ? lesson.groupName : null) || _t('حصة تعليمية', 'Lesson', 'Lektion')}
+                        </div>
 
-                          <button
-                            type="button"
-                            onClick={() => setReminderLesson(lesson)}
-                            title="إرسال تذكير الحصة"
-                            className="p-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 rounded-lg text-emerald-600 dark:text-emerald-400 transition-all cursor-pointer"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            onClick={() => openReschedule(lesson)}
-                            className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-all cursor-pointer"
-                          >
-                            <ArrowLeftRight className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            onClick={() => deleteLesson(lesson.id)}
-                            className="p-1.5 hover:bg-primary-soft dark:hover:bg-primary-soft rounded-lg text-primary dark:text-primary transition-all cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                        {/* Row 3: Metadata in One Neat Horizontal Row */}
+                        <div
+                          onClick={() => openLessonControl(lesson)}
+                          className="flex items-center gap-2 text-xs text-text-muted font-medium cursor-pointer whitespace-nowrap overflow-x-auto no-scrollbar pt-0.5"
+                        >
+                          <span>{lesson.grade}</span>
+                          <span className="text-text-muted/40 text-[10px]">•</span>
+                          <span className="font-semibold text-primary">
+                            Session {lesson.sessionNumber}/{lesson.totalSessionsInPackage}
+                          </span>
+                          <span className="text-text-muted/40 text-[10px]">•</span>
+                          <span className="font-semibold text-primary">
+                            {t('schedule_weekly')}
+                          </span>
                         </div>
                       </div>
                     </div>
                   </div>
                 );
               })}
+
+              {/* Add Lesson Button at Bottom of Day List */}
+              <div className="pt-2 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setIsAddLessonModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-hover hover:bg-primary-soft/60 px-4 py-2 rounded-xl transition-all cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{t('schedule_add_lesson_for')}</span>
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -609,6 +838,35 @@ export const ScheduleView: React.FC = () => {
                     {day.lessons.length}
                   </span>
                 </div>
+
+                {/* School Presence Block inside weekly cell */}
+                {(() => {
+                  const dayNum = parseLocalDate(day.dateStr).getDay();
+                  const schoolSettings = getSchoolSettings(profile);
+                  const dayKey = String(dayNum);
+                  const presence = schoolSettings.presence[dayKey];
+                  if (!presence || !presence.active) return null;
+                  
+                  const schedule = schoolSettings.schedule[dayKey] || [];
+                  const activePeriodsCount = schedule.filter(s => s.subjectName || s.className).length;
+
+                  return (
+                    <div className="p-1.5 rounded-lg bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100/20 dark:border-indigo-900/10 text-[10px] space-y-1">
+                      <div className="flex items-center justify-between font-black text-indigo-600 dark:text-indigo-400">
+                        <span className="flex items-center gap-1 font-bold">
+                          <BookOpen className="w-3 h-3 shrink-0" />
+                          <span>{_t('مدرسة', 'School', 'Schule')}</span>
+                        </span>
+                        <span className="text-[9px] font-mono shrink-0">{presence.arrivalTime}-{presence.departureTime}</span>
+                      </div>
+                      {activePeriodsCount > 0 && (
+                        <div className="text-[9px] text-slate-500 dark:text-slate-400 font-bold">
+                          🏫 {activePeriodsCount} {_t('حصص', 'periods', 'Stunden')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })() || null}
 
                 <div className="space-y-1.5 min-h-[90px]">
                   {day.lessons.length === 0 ? (

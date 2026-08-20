@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
   History, Award, Clock, Plus, Zap, UserPlus, Layers,
-  Search, Moon, Sun
+  Search, Moon, Sun, BookOpen
 } from 'lucide-react';
 import { AvatarImage } from '../AvatarImage';
 import { DEFAULT_OFFLINE_AVATAR } from '../../data/avatarPresets';
@@ -46,7 +46,9 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
     students,
     groups,
     lessons,
-    t
+    t,
+    language,
+    _t
   } = useApp();
 
   const [internalSyncOpen, setInternalSyncOpen] = useState(false);
@@ -172,6 +174,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
     { id: 'reports', label: t('nav_reports') || 'Berichte & Analysen', icon: BarChart2, badge: null },
     { id: 'certificates', label: t('nav_certificates') || 'Zertifikate-Studio', icon: Award, badge: null },
     { id: 'freeTime', label: t('nav_free_time') || 'Freie Termine', icon: Clock, badge: null },
+    { id: 'schoolSchedule', label: _t('جدول المدرسة', 'School Schedule', 'Stundenplan'), icon: BookOpen, badge: null },
     { id: 'settings', label: t('nav_settings') || 'Einstellungen', icon: Settings, badge: null },
   ];
 
@@ -239,7 +242,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
                 }`}
               >
                 <div className="flex items-center gap-2.5 min-w-0 truncate">
-                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-text-muted'}`} />
+                  <Icon className={`w-4 h-4 shrink-0 transition-colors ${isActive ? 'text-white' : 'text-primary'}`} />
                   <span className="truncate">{item.label}</span>
                 </div>
 
@@ -265,9 +268,9 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
           <div className="space-y-1">
             <button
               onClick={() => setIsStartLessonNowModalOpen(true)}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/20 transition-all cursor-pointer"
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-primary-soft text-primary border border-primary-border/60 hover:bg-primary-soft/80 transition-all cursor-pointer"
             >
-              <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
               <span className="truncate">{t('start_lesson_now') || 'Blitz-Start'}</span>
             </button>
 
@@ -283,7 +286,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
               onClick={() => setIsAddStudentModalOpen(true)}
               className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-text-main hover:bg-surface-hover/80 dark:hover:bg-surface-border/40 transition-all cursor-pointer"
             >
-              <UserPlus className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+              <UserPlus className="w-3.5 h-3.5 text-primary shrink-0" />
               <span className="truncate">{t('students_add_student') || 'Schüler anlegen'}</span>
             </button>
 
@@ -291,7 +294,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
               onClick={() => setIsAddGroupModalOpen(true)}
               className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-text-main hover:bg-surface-hover/80 dark:hover:bg-surface-border/40 transition-all cursor-pointer"
             >
-              <Layers className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+              <Layers className="w-3.5 h-3.5 text-primary shrink-0" />
               <span className="truncate">{t('students_add_group') || 'Gruppe anlegen'}</span>
             </button>
           </div>

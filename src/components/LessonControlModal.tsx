@@ -417,56 +417,56 @@ export const LessonControlModal: React.FC = () => {
     >
       <div 
         onClick={(e) => e.stopPropagation()} 
-        className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-xl shadow-2xl overflow-hidden animate-scale-up"
+        className="bg-surface border border-surface-border rounded-t-[20px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-xl shadow-xl overflow-hidden animate-scale-up"
       >
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+        <div className="w-10 h-1 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2 mb-1 sm:hidden shrink-0" />
         {/* Top Header */}
-        <div className="bg-slate-900 text-white p-5 flex items-center justify-between relative">
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-lg ${
+        <div className="bg-slate-900 text-white p-3.5 flex items-center justify-between relative">
+          <div className="flex items-center gap-2.5">
+            <div className={`p-2 rounded-lg ${
               selectedLesson.type === 'online' ? 'bg-primary' : 'bg-primary'
             }`}>
-              {selectedLesson.type === 'online' ? <Video className="w-5 h-5 text-white" /> : <MapPin className="w-5 h-5 text-white" />}
+              {selectedLesson.type === 'online' ? <Video className="w-4 h-4 text-white" /> : <MapPin className="w-4 h-4 text-white" />}
             </div>
 
             <div>
-              <div className="flex items-center gap-2">
-                <span className="bg-primary/20 text-primary/70 font-mono text-[10px] font-bold px-2 py-0.5 rounded border border-primary/30">
+              <div className="flex items-center gap-1.5">
+                <span className="bg-primary/20 text-primary/70 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border border-primary/30">
                   {(selectedLesson.type || '').toUpperCase()}
                 </span>
-                <span className="text-xs text-text-muted/70 font-medium">{selectedLesson.grade}</span>
+                <span className="text-[11px] text-text-muted/70 font-medium">{selectedLesson.grade}</span>
               </div>
-              <h2 className="text-lg font-black tracking-tight">{selectedLesson.title}</h2>
+              <h2 className="text-base font-black tracking-tight">{selectedLesson.title}</h2>
             </div>
           </div>
 
           <button
             onClick={closeLessonControl}
-            className="p-2 hover:bg-surface/10 rounded-full transition-colors cursor-pointer text-slate-300 hover:text-white"
+            className="p-1.5 hover:bg-surface/10 rounded-full transition-colors cursor-pointer text-slate-300 hover:text-white"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-5 space-y-3 max-h-[78vh] overflow-y-auto font-sans">
+        <div className="p-3.5 space-y-2.5 max-h-[78vh] overflow-y-auto font-sans">
           {/* Homework Follow-Up Pending Banner */}
           {groupPendingFollowUp && !dismissFollowUpBanner && (
-            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 rounded-xl flex items-center justify-between gap-3 mb-2">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-amber-500" />
-                <span className="text-sm font-bold text-amber-800 dark:text-amber-400">Homework Follow-Up Pending</span>
+            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-2.5 rounded-lg flex items-center justify-between gap-2.5 mb-1.5">
+              <div className="flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                <span className="text-xs font-bold text-amber-800 dark:text-amber-400">Homework Follow-Up Pending</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => setShowFollowUpModal(true)}
-                  className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
+                  className="bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
                 >
                   Send Now
                 </button>
                 <button
                   onClick={() => setDismissFollowUpBanner(true)}
-                  className="bg-amber-100 dark:bg-amber-900/40 hover:bg-amber-200 dark:hover:bg-amber-800 text-amber-700 dark:text-amber-300 text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
+                  className="bg-amber-100 dark:bg-amber-900/40 hover:bg-amber-200 dark:hover:bg-amber-800 text-amber-700 dark:text-amber-300 text-[11px] font-bold px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
                 >
                   Dismiss
                 </button>
@@ -476,14 +476,14 @@ export const LessonControlModal: React.FC = () => {
 
           {/* Quick Lesson Banner & Convert Action */}
           {selectedLesson.isQuickLesson && (
-            <div className="p-3 bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-lg flex items-center justify-between gap-3">
+            <div className="p-2.5 bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-lg flex items-center justify-between gap-2.5">
               <div className="space-y-0.5">
-                <span className="text-xs font-black text-primary dark:text-primary flex items-center gap-1.5">
-                  <Zap className="w-4 h-4 text-primary fill-primary" />
-                  <span>⚡ Quick Lesson (Einmal-Lektion ohne Profil)</span>
+                <span className="text-xs font-black text-primary dark:text-primary flex items-center gap-1">
+                  <Zap className="w-3.5 h-3.5 text-primary fill-primary" />
+                  <span>⚡ Quick Lesson</span>
                 </span>
-                <p className="text-[11px] text-primary dark:text-primary">
-                  Schüler: {selectedLesson.studentName} {selectedLesson.quickStudentPhone && `• Tel: ${selectedLesson.quickStudentPhone}`}
+                <p className="text-[10px] text-primary dark:text-primary">
+                  {selectedLesson.studentName} {selectedLesson.quickStudentPhone && `• Tel: ${selectedLesson.quickStudentPhone}`}
                 </p>
               </div>
 
@@ -495,9 +495,9 @@ export const LessonControlModal: React.FC = () => {
                     closeLessonControl();
                   }
                 }}
-                className="bg-primary hover:bg-primary-hover text-white font-black text-xs px-3 py-2 rounded-xl shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95 hover:shadow-lg hover:shadow-primary/30"
+                className="bg-primary hover:bg-primary-hover text-white font-black text-[11px] px-2.5 py-1.5 rounded-lg shadow-2xs transition-all flex items-center gap-1 shrink-0 cursor-pointer active:scale-95"
               >
-                <UserPlus className="w-4 h-4" />
+                <UserPlus className="w-3.5 h-3.5" />
                 <span>Convert to Student</span>
               </button>
             </div>
@@ -506,23 +506,23 @@ export const LessonControlModal: React.FC = () => {
           {/* SAVED REPORT QUICK REVIEW OR ACTIVE FORM */}
           {selectedLesson.report && !isEditingReport ? (
             /* QUICK REVIEW SUMMARY CARD */
-            <div className="bg-surface-hover/80 border border-surface-border dark:border-surface-border-soft/80 rounded-lg p-4 space-y-3 shadow-xs">
-              <div className="flex items-center justify-between pb-2 border-b border-surface-border/80 dark:border-surface-border-soft/80">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-primary dark:text-primary" />
+            <div className="bg-surface-hover/80 border border-surface-border dark:border-surface-border-soft/80 rounded-lg p-3 space-y-2.5 shadow-2xs">
+              <div className="flex items-center justify-between pb-1.5 border-b border-surface-border/80 dark:border-surface-border-soft/80">
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-primary dark:text-primary" />
                   <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
                     {t('auto_quick_review')}
                   </span>
                 </div>
-                <span className="text-[10px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-2.5 py-1 rounded-full border border-primary-border dark:border-primary-border">
+                <span className="text-[10px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-2 py-0.5 rounded-md border border-primary-border dark:border-primary-border">
                   {t('auto_report_saved')}
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 {/* Attendance Summary */}
-                <div className="p-3 bg-surface rounded-xl border border-surface-border/80 dark:border-surface-border space-y-1">
-                  <span className="block text-[10px] font-black uppercase text-text-muted/70">{t('auto_1_attendance')}</span>
+                <div className="p-2.5 bg-surface rounded-lg border border-surface-border/80 dark:border-surface-border space-y-0.5">
+                  <span className="block text-[9.5px] font-black uppercase text-text-muted/70">{t('auto_1_attendance')}</span>
                   <span className={`font-black flex items-center gap-1 ${
                     selectedLesson.report.attendanceStatus === 'present' ? 'text-primary dark:text-primary' :
                     selectedLesson.report.attendanceStatus === 'late' ? 'text-primary dark:text-primary' :
@@ -535,8 +535,8 @@ export const LessonControlModal: React.FC = () => {
                 </div>
 
                 {/* Homework Summary */}
-                <div className="p-3 bg-surface rounded-xl border border-surface-border/80 dark:border-surface-border space-y-1">
-                  <span className="block text-[10px] font-black uppercase text-text-muted/70">{t('auto_2_homework')}</span>
+                <div className="p-2.5 bg-surface rounded-lg border border-surface-border/80 dark:border-surface-border space-y-0.5">
+                  <span className="block text-[9.5px] font-black uppercase text-text-muted/70">{t('auto_2_homework')}</span>
                   <div className="space-y-0.5">
                     <span className={`font-black text-xs ${
                       selectedLesson.report.homeworkStatus === 'completed' ? 'text-primary dark:text-primary' :
@@ -548,7 +548,7 @@ export const LessonControlModal: React.FC = () => {
                       {selectedLesson.report.homeworkStatus === 'not_completed' && t('auto_not_completed')}
                     </span>
                     {selectedLesson.report.homeworkTitle && (
-                      <p className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                      <p className="text-[10px] font-medium text-slate-600 dark:text-slate-300 truncate">
                         {selectedLesson.report.homeworkTitle}
                       </p>
                     )}
@@ -558,16 +558,16 @@ export const LessonControlModal: React.FC = () => {
 
               {/* Teacher Notes Summary */}
               {selectedLesson.report.teacherNotes && (
-                <div className="p-3 bg-surface rounded-xl border border-surface-border/80 dark:border-surface-border space-y-1 text-xs">
-                  <span className="block text-[10px] font-black uppercase text-text-muted/70">{t('auto_3_teacher_notes')}</span>
-                  <p className="text-xs font-medium text-text-main italic">
+                <div className="p-2.5 bg-surface rounded-lg border border-surface-border/80 dark:border-surface-border space-y-0.5 text-xs">
+                  <span className="block text-[9.5px] font-black uppercase text-text-muted/70">{t('auto_3_teacher_notes')}</span>
+                  <p className="text-[11px] font-medium text-text-main italic">
                     "{selectedLesson.report.teacherNotes}"
                   </p>
                 </div>
               )}
 
               {/* Edit Report Toggle */}
-              <div className="flex justify-end pt-1">
+              <div className="flex justify-end pt-0.5">
                 <button
                   type="button"
                   onClick={() => setIsEditingReport(true)}
@@ -580,20 +580,20 @@ export const LessonControlModal: React.FC = () => {
           ) : (
             <>
               {/* BEFORE STARTING SECTION */}
-              <div className="space-y-2 border-b border-slate-100 dark:border-surface-border pb-4">
-                <p className="text-xs font-bold uppercase tracking-wider text-text-muted flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-primary" />
+              <div className="space-y-1.5 border-b border-slate-100 dark:border-surface-border pb-2.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-primary" />
                   <span>{t('auto_before_starting')}</span>
                 </p>
 
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {/* Main Send Lesson Reminder Button */}
                   <button
                     type="button"
                     onClick={() => setShowLessonReminderModal(true)}
-                    className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-600/20"
+                    className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
                   >
-                    <Send className="w-4 h-4 fill-white" />
+                    <Send className="w-3.5 h-3.5 fill-white" />
                     <span>{t('auto_send_lesson_reminder')}</span>
                   </button>
 
@@ -603,7 +603,7 @@ export const LessonControlModal: React.FC = () => {
                         href={selectedLesson.meetingLink || targetGroup?.zoomLink || profile.defaultZoomLink}
                         target="_blank"
                         rel="noreferrer"
-                        className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3.5 py-2.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs active:scale-95"
+                        className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-2xs active:scale-95"
                       >
                         <Video className="w-3.5 h-3.5" />
                         <span>{t('auto_open_zoom_link')}</span>
@@ -615,7 +615,7 @@ export const LessonControlModal: React.FC = () => {
                           href={profile.defaultMeetLink}
                           target="_blank"
                           rel="noreferrer"
-                          className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3.5 py-2.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs"
+                          className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-2xs"
                         >
                           <Video className="w-3.5 h-3.5" />
                           <span>{t('auto_open_google_meet')}</span>
@@ -628,7 +628,7 @@ export const LessonControlModal: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleSendOfflineLessonStartMessage}
-                        className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3.5 py-2.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
                       >
                         <Send className="w-3.5 h-3.5" />
                         <span>{t('auto_send_lesson_started_notice')}</span>
@@ -637,7 +637,7 @@ export const LessonControlModal: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleSendPaymentRequestMessage}
-                        className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3.5 py-2.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
                       >
                         <DollarSign className="w-3.5 h-3.5" />
                         <span>{t('auto_send_payment_request')}</span>
@@ -646,7 +646,7 @@ export const LessonControlModal: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleOpenMaps}
-                        className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
                       >
                         <MapPin className="w-3.5 h-3.5 text-primary" />
                         <span>{t('auto_open_google_maps_navigation')}</span>
@@ -658,27 +658,27 @@ export const LessonControlModal: React.FC = () => {
               </div>
 
               {/* SECTION 2 – SESSION TIMER */}
-              <div className="bg-surface border border-surface-border rounded-2xl p-5 shadow-sm space-y-6 text-center relative overflow-hidden">
+              <div className="bg-surface border border-surface-border rounded-xl p-3.5 shadow-2xs space-y-3 text-center relative overflow-hidden">
                 {/* Background ambient glow when timer is running */}
                 {isTimerRunning && (
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-primary/20 rounded-full blur-[60px] pointer-events-none animate-pulse" />
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-primary/20 rounded-full blur-[40px] pointer-events-none animate-pulse" />
                 )}
                 
                 <div className="flex items-center justify-between relative z-10">
-                  <span className="text-[11px] font-black uppercase tracking-widest text-text-muted flex items-center gap-1.5">
-                    <Clock className={`w-4 h-4 ${isTimerRunning ? 'text-primary animate-pulse' : 'text-text-muted/70'}`} />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-text-muted flex items-center gap-1">
+                    <Clock className={`w-3.5 h-3.5 ${isTimerRunning ? 'text-primary animate-pulse' : 'text-text-muted/70'}`} />
                     <span>{t('auto_live_lesson_timer')}</span>
                   </span>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-2 py-1 rounded-md border border-primary-border/30">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.5 rounded border border-primary-border/30">
                       {selectedLesson.status === 'completed' ? t('auto_completed_9') :
                        selectedLesson.status === 'cancelled' ? t('auto_cancelled') :
                        isTimerRunning ? t('auto_in_progress') :
                        timerSeconds > 0 ? t('auto_paused') :
                        t('auto_scheduled')}
                     </span>
-                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
                       {_t(
                         `المدة: ${selectedLesson.durationMinutes || 60} دقيقة`,
                         `Duration: ${selectedLesson.durationMinutes || 60} min`,
@@ -689,14 +689,14 @@ export const LessonControlModal: React.FC = () => {
                 </div>
 
                 {/* Stopwatch Display */}
-                <div className="py-6 relative z-10">
+                <div className="py-2 relative z-10">
                   <div className="flex justify-center">
                     <div className="relative flex flex-col items-center">
-                      <span className={`text-6xl sm:text-7xl font-black font-mono tracking-tight transition-all duration-300 ${isTimerRunning ? 'text-primary drop-shadow-[0_0_15px_rgba(var(--color-primary-rgb),0.4)]' : 'text-slate-700 dark:text-slate-300'}`}>
+                      <span className={`text-4xl sm:text-5xl font-black font-mono tracking-tight transition-all duration-300 ${isTimerRunning ? 'text-primary drop-shadow-[0_0_15px_rgba(var(--color-primary-rgb),0.4)]' : 'text-slate-700 dark:text-slate-300'}`}>
                         {formatTimer(timerSeconds)}
                       </span>
                       {timerSeconds > 0 && (
-                        <span className="text-[10px] text-text-muted mt-1.5 font-bold">
+                        <span className="text-[9.5px] text-text-muted mt-0.5 font-bold">
                           {t('auto_elapsed_time')}
                         </span>
                       )}
@@ -705,27 +705,27 @@ export const LessonControlModal: React.FC = () => {
                 </div>
 
                 {/* Timer & Main Action Buttons */}
-                <div className="flex flex-col gap-2.5 relative z-10">
+                <div className="flex flex-col gap-2 relative z-10">
                   {selectedLesson.status !== 'completed' && selectedLesson.status !== 'cancelled' && (
-                    <div className="grid grid-cols-2 gap-2.5">
+                    <div className="grid grid-cols-2 gap-2">
                       {/* If lesson has NOT started yet */}
                       {selectedLesson.status === 'scheduled' && timerSeconds === 0 ? (
                         <>
                           <button
                             type="button"
                             onClick={handleStartLesson}
-                            className="col-span-2 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-sm px-5 py-4 rounded-xl shadow-md shadow-primary/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                            className="col-span-2 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                           >
-                            <Play className="w-4.5 h-4.5 fill-white animate-pulse" />
+                            <Play className="w-4 h-4 fill-white animate-pulse" />
                             <span>{t('auto_start_session')}</span>
                           </button>
 
                           <button
                             type="button"
                             onClick={() => setShowCancelPrompt(true)}
-                            className="col-span-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-bold text-xs px-4 py-3 rounded-xl border border-red-200 dark:border-red-900/50 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                            className="col-span-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-bold text-xs px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/50 transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-95"
                           >
-                            <Ban className="w-4 h-4 text-red-500" />
+                            <Ban className="w-3.5 h-3.5 text-red-500" />
                             <span>{t('auto_cancel_session')}</span>
                           </button>
                         </>
@@ -736,18 +736,18 @@ export const LessonControlModal: React.FC = () => {
                             <button
                               type="button"
                               onClick={handleStartLesson}
-                              className="col-span-2 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-sm px-5 py-4 rounded-xl shadow-md shadow-primary/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                              className="col-span-2 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                             >
-                              <Play className="w-4 h-4 fill-white" />
+                              <Play className="w-3.5 h-3.5 fill-white" />
                               <span>{t('auto_resume_session')}</span>
                             </button>
                           ) : (
                             <button
                               type="button"
                               onClick={handlePauseLesson}
-                              className="col-span-2 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-black text-sm px-5 py-4 rounded-xl shadow-md shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                              className="col-span-2 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                             >
-                              <Pause className="w-4 h-4 fill-white" />
+                              <Pause className="w-3.5 h-3.5 fill-white" />
                               <span>{t('auto_pause')}</span>
                             </button>
                           )}
@@ -755,9 +755,9 @@ export const LessonControlModal: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setShowCancelPrompt(true)}
-                            className="col-span-2 bg-red-50/50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-bold text-xs px-4 py-3 rounded-xl border border-red-200 dark:border-red-900/50 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                            className="col-span-2 bg-red-50/50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-bold text-xs px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/50 transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-95"
                           >
-                            <Ban className="w-4 h-4 text-red-500" />
+                            <Ban className="w-3.5 h-3.5 text-red-500" />
                             <span>{t('auto_cancel_session')}</span>
                           </button>
                         </>
@@ -769,10 +769,10 @@ export const LessonControlModal: React.FC = () => {
 
               {/* CANCELLATION PROMPT BOX */}
                 {showCancelPrompt && (
-                  <div className="mt-4 p-4 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-2xl space-y-3 animate-fade-in">
+                  <div className="mt-2.5 p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-xl space-y-2 animate-fade-in">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-black uppercase text-red-600 dark:text-red-400 flex items-center gap-1.5">
-                        <AlertCircle className="w-4 h-4" />
+                      <span className="text-xs font-black uppercase text-red-600 dark:text-red-400 flex items-center gap-1">
+                        <AlertCircle className="w-3.5 h-3.5" />
                         <span>{t('auto_confirm_lesson_cancellation')}</span>
                       </span>
                       <button
@@ -780,11 +780,11 @@ export const LessonControlModal: React.FC = () => {
                         onClick={() => setShowCancelPrompt(false)}
                         className="text-red-600/70 hover:text-red-600 dark:text-red-400/70 dark:hover:text-red-400 p-1 cursor-pointer"
                       >
-                        <X className="w-4 h-4" />
+                        <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
-                    <p className="text-xs text-red-800 dark:text-red-300">
+                    <p className="text-[11px] text-red-800 dark:text-red-300">
                       {t('auto_are_you_sure_you_want_to_cance')}
                     </p>
 
@@ -793,14 +793,14 @@ export const LessonControlModal: React.FC = () => {
                       value={cancelReasonNote}
                       onChange={(e) => setCancelReasonNote(e.target.value)}
                       placeholder={t('auto_enter_cancellation_reason_opt')}
-                      className="w-full p-2.5 bg-white dark:bg-slate-900 border border-red-200 dark:border-red-900/50 rounded-xl text-xs text-text-main placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-red-500/20"
+                      className="w-full p-2 bg-white dark:bg-slate-900 border border-red-200 dark:border-red-900/50 rounded-lg text-xs text-text-main placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-red-500/20"
                     />
 
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex items-center justify-end gap-1.5">
                       <button
                         type="button"
                         onClick={() => setShowCancelPrompt(false)}
-                        className="px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer"
+                        className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer"
                       >
                         {t('auto_back')}
                       </button>
@@ -813,9 +813,9 @@ export const LessonControlModal: React.FC = () => {
                           cancelLesson(selectedLesson.id, cancelReasonNote);
                           setShowCancelPrompt(false);
                         }}
-                        className="px-4 py-2 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-xs rounded-xl shadow-md cursor-pointer flex items-center gap-1.5 transition-all"
+                        className="px-3 py-1.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-xs rounded-lg shadow-2xs cursor-pointer flex items-center gap-1 transition-all"
                       >
-                        <XCircle className="w-4 h-4" />
+                        <XCircle className="w-3.5 h-3.5" />
                         <span>{t('auto_yes_cancel_lesson')}</span>
                       </button>
                     </div>
@@ -841,10 +841,10 @@ export const LessonControlModal: React.FC = () => {
                 })();
 
                 return (
-                  <form onSubmit={(e) => { e.preventDefault(); if (isReportFormValid) handleSaveReport(); }} className="space-y-5 pt-3 border-t border-surface-border">
-                    <div className="flex items-center justify-between bg-primary-soft/50 p-2.5 rounded-xl border border-primary-border/40">
+                  <form onSubmit={(e) => { e.preventDefault(); if (isReportFormValid) handleSaveReport(); }} className="space-y-3 pt-2.5 border-t border-surface-border">
+                    <div className="flex items-center justify-between bg-primary-soft/50 p-2 rounded-lg border border-primary-border/40">
                       <h3 className="text-xs font-black text-primary flex items-center gap-1.5 font-mono">
-                        <FileText className="w-4 h-4 text-primary" />
+                        <FileText className="w-3.5 h-3.5 text-primary" />
                         <span>{t('auto_unified_session_report')}</span>
                       </h3>
                       {selectedLesson.status !== 'in_progress' && (
@@ -852,7 +852,7 @@ export const LessonControlModal: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setShowReportForm(false)}
-                            className="text-[11px] text-text-muted hover:text-text-main font-bold hover:underline cursor-pointer"
+                            className="text-[10px] text-text-muted hover:text-text-main font-bold hover:underline cursor-pointer"
                           >
                             {t('auto_hide_report')}
                           </button>
@@ -861,42 +861,42 @@ export const LessonControlModal: React.FC = () => {
                     </div>
 
                     {/* Subject Taught */}
-                    <div className="space-y-1.5">
+                    <div className="space-y-1">
                       <label className="text-xs font-black text-text-main flex items-center gap-1">
                         <span className="text-primary">*</span>
                         <span>{t('auto_subject_taught_content_less')}</span>
                       </label>
                       <textarea
-                        rows={3}
+                        rows={2}
                         value={lessonWhatWasTaught}
                         onChange={(e) => setLessonWhatWasTaught(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60"
+                        className="w-full px-3 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60"
                         placeholder={t('auto_enter_topics_taught_new_gramm')}
                       />
                     </div>
 
                     {/* Next Homework Description */}
-                    <div className="space-y-1.5">
+                    <div className="space-y-1">
                       <label className="text-xs font-black text-text-main flex items-center gap-1">
                         <span className="text-primary">*</span>
                         <span>{t('auto_next_homework_assigned_to_stud')}</span>
                       </label>
                       <textarea
-                        rows={3}
+                        rows={2}
                         value={lessonNextHomework}
                         onChange={(e) => setLessonNextHomework(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60"
+                        className="w-full px-3 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60"
                         placeholder={t('auto_enter_details_of_homework_pag')}
                       />
                     </div>
 
                     {/* Individual Students Performance and Scores */}
-                    <div className="space-y-3">
-                      <h4 className="text-xs font-black text-slate-500 uppercase flex items-center gap-1.5">
+                    <div className="space-y-2">
+                      <h4 className="text-[11px] font-black text-slate-500 uppercase flex items-center gap-1">
                         {t('auto_status_performance_of_eac')}
                       </h4>
 
-                      <div className="space-y-4">
+                      <div className="space-y-2.5">
                         {activeLessonStudents.map(st => {
                           const stAtt = studentAttendance[st.id] || 'present';
                           const stHw = studentHomeworkDone[st.id];
@@ -917,25 +917,25 @@ export const LessonControlModal: React.FC = () => {
                           return (
                             <div 
                               key={st.id} 
-                              className={`p-4 rounded-2xl border transition-all ${
+                              className={`p-2.5 rounded-xl border transition-all ${
                                 stAtt === 'absent' 
                                   ? 'bg-red-50/10 border-red-200/50 dark:border-red-950/30' 
-                                  : 'bg-surface border-surface-border hover:shadow-sm'
+                                  : 'bg-surface border-surface-border hover:shadow-2xs'
                               }`}
                             >
                               {/* Student Header */}
-                              <div className="flex items-center justify-between pb-3 border-b border-surface-border/60">
+                              <div className="flex items-center justify-between pb-2 border-b border-surface-border/60">
                                 <div className="flex flex-col gap-0.5">
-                                  <span className="font-extrabold text-xs text-text-main flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                                  <span className="font-extrabold text-xs text-text-main flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
                                     <span>{st.name}</span>
                                   </span>
                                   {lastSessionHwStatus && (
-                                    <span className="text-[10px] text-text-muted mt-1 bg-slate-50 dark:bg-slate-800/50 px-2 py-0.5 rounded-md border border-slate-100 dark:border-slate-800/30 inline-block font-extrabold">
+                                    <span className="text-[9.5px] text-text-muted mt-0.5 bg-slate-50 dark:bg-slate-800/50 px-1.5 py-0.5 rounded border border-slate-100 dark:border-slate-800/30 inline-block font-extrabold">
                                       {_t(
-                                        `🎒 واجب الحصة السابقة: ${lastSessionHwStatus === 'yes' ? 'تم الحل بالكامل 👍' : 'لم يتم الحل 👎'}`,
-                                        `🎒 Previous Homework: ${lastSessionHwStatus === 'yes' ? 'Completed 👍' : 'Not Done 👎'}`,
-                                        `🎒 Letzte Hausaufgabe: ${lastSessionHwStatus === 'yes' ? 'Erledigt 👍' : 'Nicht erledigt 👎'}`
+                                        `🎒 واجب سابق: ${lastSessionHwStatus === 'yes' ? 'تم الحل 👍' : 'لم يتم 👎'}`,
+                                        `🎒 Prev HW: ${lastSessionHwStatus === 'yes' ? 'Done 👍' : 'Not Done 👎'}`,
+                                        `🎒 Letzte HA: ${lastSessionHwStatus === 'yes' ? 'Erledigt 👍' : 'Nicht erledigt 👎'}`
                                       )}
                                     </span>
                                   )}
@@ -948,9 +948,9 @@ export const LessonControlModal: React.FC = () => {
                                     onClick={() => {
                                       setStudentAttendance(prev => ({ ...prev, [st.id]: 'present' }));
                                     }}
-                                    className={`px-3 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                                    className={`px-2.5 py-0.5 rounded-md text-[10px] font-black cursor-pointer transition-all ${
                                       stAtt === 'present'
-                                        ? 'bg-primary text-white border border-primary shadow-xs'
+                                        ? 'bg-primary text-white border border-primary shadow-2xs'
                                         : 'bg-surface-hover text-text-muted border border-surface-border'
                                     }`}
                                   >
@@ -961,9 +961,9 @@ export const LessonControlModal: React.FC = () => {
                                     onClick={() => {
                                       setStudentAttendance(prev => ({ ...prev, [st.id]: 'absent' }));
                                     }}
-                                    className={`px-3 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                                    className={`px-2.5 py-0.5 rounded-md text-[10px] font-black cursor-pointer transition-all ${
                                       stAtt === 'absent'
-                                        ? 'bg-red-600 text-white border border-red-700 shadow-xs'
+                                        ? 'bg-red-600 text-white border border-red-700 shadow-2xs'
                                         : 'bg-surface-hover text-text-muted border border-surface-border'
                                     }`}
                                   >
@@ -973,20 +973,20 @@ export const LessonControlModal: React.FC = () => {
                               </div>
 
                               {stAtt !== 'absent' ? (
-                                <div className="mt-3 space-y-3.5 animate-fade-in">
+                                <div className="mt-2 space-y-2.5 animate-fade-in">
                                   {/* Homework completed toggle */}
-                                  <div className="space-y-1.5">
-                                    <span className="text-[11px] font-black text-text-main block">{t('auto_previous_homework_performance')} <span className="text-primary">*</span></span>
-                                    <div className="flex gap-2">
+                                  <div className="space-y-1">
+                                    <span className="text-[10.5px] font-black text-text-main block">{t('auto_previous_homework_performance')} <span className="text-primary">*</span></span>
+                                    <div className="flex gap-1.5">
                                       <button
                                         key={`hw-yes-${st.id}`}
                                         type="button"
                                         onClick={() => {
                                           setStudentHomeworkDone(prev => ({ ...prev, [st.id]: 'yes' }));
                                         }}
-                                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-black cursor-pointer transition-all border ${
+                                        className={`flex-1 py-1 rounded-md text-[10px] font-black cursor-pointer transition-all border ${
                                           stHw === 'yes'
-                                            ? 'bg-primary-soft text-primary border-primary-border shadow-xs'
+                                            ? 'bg-primary-soft text-primary border-primary-border shadow-2xs'
                                             : 'bg-surface-hover text-text-muted border-surface-border'
                                         }`}
                                       >
@@ -998,9 +998,9 @@ export const LessonControlModal: React.FC = () => {
                                         onClick={() => {
                                           setStudentHomeworkDone(prev => ({ ...prev, [st.id]: 'no' }));
                                         }}
-                                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-black cursor-pointer transition-all border ${
+                                        className={`flex-1 py-1 rounded-md text-[10px] font-black cursor-pointer transition-all border ${
                                           stHw === 'no'
-                                            ? 'bg-red-50 text-red-600 border-red-100 shadow-xs dark:bg-red-950/20 dark:border-red-900/50'
+                                            ? 'bg-red-50 text-red-600 border-red-100 shadow-2xs dark:bg-red-950/20 dark:border-red-900/50'
                                             : 'bg-surface-hover text-text-muted border-surface-border'
                                         }`}
                                       >
@@ -1010,8 +1010,8 @@ export const LessonControlModal: React.FC = () => {
                                   </div>
 
                                   {/* Dictation Score (0 to 10 pills) */}
-                                  <div className="space-y-1.5">
-                                    <span className="text-[11px] font-black text-text-main block">{t('auto_dictation_grade_out_of_10')} <span className="text-primary">*</span></span>
+                                  <div className="space-y-1">
+                                    <span className="text-[10.5px] font-black text-text-main block">{t('auto_dictation_grade_out_of_10')} <span className="text-primary">*</span></span>
                                     <div className="flex flex-wrap gap-1">
                                       {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(score => (
                                         <button
@@ -1020,9 +1020,9 @@ export const LessonControlModal: React.FC = () => {
                                           onClick={() => {
                                             setStudentDictationGrade(prev => ({ ...prev, [st.id]: score }));
                                           }}
-                                          className={`w-7 h-7 rounded-full text-[10px] font-black flex items-center justify-center border transition-all ${
+                                          className={`w-6 h-6 rounded-md text-[10px] font-black flex items-center justify-center border transition-all ${
                                             stDict === score
-                                              ? 'bg-primary text-white border-primary shadow-xs scale-110'
+                                              ? 'bg-primary text-white border-primary shadow-2xs scale-105'
                                               : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200'
                                           }`}
                                         >
@@ -1033,8 +1033,8 @@ export const LessonControlModal: React.FC = () => {
                                   </div>
 
                                   {/* Exam Score (0 to 10 pills) */}
-                                  <div className="space-y-1.5">
-                                    <span className="text-[11px] font-black text-text-main block">{t('auto_exam_quiz_grade_out_of_10')} <span className="text-primary">*</span></span>
+                                  <div className="space-y-1">
+                                    <span className="text-[10.5px] font-black text-text-main block">{t('auto_exam_quiz_grade_out_of_10')} <span className="text-primary">*</span></span>
                                     <div className="flex flex-wrap gap-1">
                                       {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(score => (
                                         <button
@@ -1043,9 +1043,9 @@ export const LessonControlModal: React.FC = () => {
                                           onClick={() => {
                                             setStudentExamGrade(prev => ({ ...prev, [st.id]: score }));
                                           }}
-                                          className={`w-7 h-7 rounded-full text-[10px] font-black flex items-center justify-center border transition-all ${
+                                          className={`w-6 h-6 rounded-md text-[10px] font-black flex items-center justify-center border transition-all ${
                                             stExam === score
-                                              ? 'bg-primary text-white border-primary shadow-xs scale-110'
+                                              ? 'bg-primary text-white border-primary shadow-2xs scale-105'
                                               : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200'
                                           }`}
                                         >
@@ -1056,21 +1056,21 @@ export const LessonControlModal: React.FC = () => {
                                   </div>
 
                                   {/* Student-Specific Notes */}
-                                  <div className="space-y-1.5">
-                                    <span className="text-[11px] font-black text-text-main block">{t('auto_parent_student_notes_option')}</span>
+                                  <div className="space-y-1">
+                                    <span className="text-[10.5px] font-black text-text-main block">{t('auto_parent_student_notes_option')}</span>
                                     <input
                                       type="text"
                                       value={studentNotes[st.id] || ''}
                                       onChange={(e) => {
                                         setStudentNotes(prev => ({ ...prev, [st.id]: e.target.value }));
                                       }}
-                                      className="w-full px-3 py-2 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all placeholder:text-text-muted/50"
+                                      className="w-full px-2.5 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all placeholder:text-text-muted/50"
                                       placeholder={t('auto_e_g_excellent_listening_skill')}
                                     />
                                   </div>
                                 </div>
                               ) : (
-                                <div className="mt-3 py-2 px-3 bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40 rounded-xl text-center animate-fade-in">
+                                <div className="mt-2 py-1.5 px-2 bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40 rounded-lg text-center animate-fade-in">
                                   <span className="text-[10px] font-black text-red-600 dark:text-red-400">
                                     {t('auto_absent_exempt_from_grades')}
                                   </span>
@@ -1084,12 +1084,12 @@ export const LessonControlModal: React.FC = () => {
 
                     {/* Validation Alerts */}
                     {!isReportFormValid && (
-                      <div className="p-3.5 bg-amber-50 dark:bg-amber-950/20 border-2 border-dashed border-amber-300 dark:border-amber-900/50 rounded-2xl space-y-1.5 text-xs text-amber-800 dark:text-amber-300 animate-pulse">
-                        <div className="flex items-center gap-1.5 font-extrabold text-amber-950 dark:text-amber-200">
-                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <div className="p-2.5 bg-amber-50 dark:bg-amber-950/20 border border-dashed border-amber-300 dark:border-amber-900/50 rounded-xl space-y-1 text-xs text-amber-800 dark:text-amber-300">
+                        <div className="flex items-center gap-1 font-extrabold text-amber-950 dark:text-amber-200">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                           <span>{t('auto_please_complete_the_following')}</span>
                         </div>
-                        <ul className="list-disc list-inside space-y-1 text-[11px] font-black pr-1">
+                        <ul className="list-disc list-inside space-y-0.5 text-[10px] font-black pr-1">
                           {!lessonWhatWasTaught.trim() && <li>{t('auto_subject_taught_field')}</li>}
                           {!lessonNextHomework.trim() && <li>{t('auto_next_homework_field')}</li>}
                           {activeLessonStudents.map(st => {
@@ -1119,13 +1119,13 @@ export const LessonControlModal: React.FC = () => {
                       type="button"
                       disabled={!isReportFormValid}
                       onClick={() => handleSaveReport()}
-                      className={`w-full font-black text-sm py-3.5 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      className={`w-full font-black text-xs py-2.5 rounded-xl shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                         isReportFormValid
-                          ? 'bg-primary hover:bg-primary-hover active:scale-95 text-white hover:shadow-lg hover:shadow-primary/30'
+                          ? 'bg-primary hover:bg-primary-hover active:scale-95 text-white'
                           : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed border border-slate-300/30'
                       }`}
                     >
-                      <CheckCircle2 className="w-5 h-5" />
+                      <CheckCircle2 className="w-4 h-4" />
                       <span>{t('auto_end_session_save_report')}</span>
                     </button>
                   </form>
@@ -1135,12 +1135,12 @@ export const LessonControlModal: React.FC = () => {
           )}
 
           {/* PARENT COMMUNICATION QUICK BUTTONS */}
-          <div className="pt-3 border-t border-slate-100 dark:border-surface-border space-y-2">
+          <div className="pt-2 border-t border-slate-100 dark:border-surface-border space-y-1.5">
             <p className="text-xs font-bold text-text-main">
               {t('auto_parent_communication')}
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
               <button
                 type="button"
                 disabled={selectedLesson.status !== 'completed'}
@@ -1151,14 +1151,14 @@ export const LessonControlModal: React.FC = () => {
                   }
                   setShowArabicParentReportModal(true);
                 }}
-                className={`font-black text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm ${
+                className={`font-black text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-2xs ${
                   selectedLesson.status === 'completed'
                     ? 'bg-primary hover:bg-primary-hover active:scale-95 text-white cursor-pointer'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed border border-slate-200/50'
                 }`}
               >
-                <Send className="w-4 h-4" />
-                <span>تقرير ولي الأمر / Elternbericht</span>
+                <Send className="w-3.5 h-3.5" />
+                <span>تقرير ولي الأمر</span>
               </button>
 
               <a
@@ -1169,19 +1169,19 @@ export const LessonControlModal: React.FC = () => {
                     alert(t('alert_no_parent_phone'));
                   }
                 }}
-                className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer"
+                className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center cursor-pointer"
               >
-                <Phone className="w-3.5 h-3.5 text-primary" />
-                <span>Anruf Eltern / Call Parent</span>
+                <Phone className="w-3 h-3 text-primary" />
+                <span>Anruf Eltern</span>
               </a>
 
               {targetStudent?.phone && (
                 <a
                   href={`tel:${targetStudent.phone}`}
-                  className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 text-center"
+                  className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center"
                 >
-                  <Phone className="w-3.5 h-3.5 text-primary" />
-                  <span>Anruf Schüler / Call Student</span>
+                  <Phone className="w-3 h-3 text-primary" />
+                  <span>Anruf Schüler</span>
                 </a>
               )}
             </div>

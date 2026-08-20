@@ -127,28 +127,28 @@ export const SessionHistoryView: React.FC = () => {
         </div>
 
         {/* Quick Stats Grid - elegant solid styling with high contrast */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-slate-100 dark:border-surface-border/80 text-center">
-          <div className="bg-surface-hover p-2.5 rounded-lg border border-surface-border dark:border-surface-border-soft/80">
-            <span className="block text-[10px] text-text-muted font-bold uppercase truncate">{t('history_total_lessons')}</span>
-            <span className="text-sm font-black text-text-main mt-1 block">{totalCount}</span>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-2 border-t border-slate-100 dark:border-surface-border/80 text-center">
+          <div className="bg-surface-hover p-2 rounded-lg border border-surface-border dark:border-surface-border-soft/80">
+            <span className="block text-[9.5px] text-text-muted font-bold uppercase truncate">{t('history_total_lessons')}</span>
+            <span className="text-xs font-black text-text-main mt-0.5 block">{totalCount}</span>
           </div>
-          <div className="bg-primary-soft dark:bg-primary-soft p-2.5 rounded-lg border border-primary-border dark:border-primary-border">
-            <span className="block text-[10px] text-primary dark:text-primary font-bold uppercase truncate">{t('history_completed')}</span>
-            <span className="text-sm font-black text-primary dark:text-primary mt-1 block">{completedCount}</span>
+          <div className="bg-primary-soft dark:bg-primary-soft p-2 rounded-lg border border-primary-border dark:border-primary-border">
+            <span className="block text-[9.5px] text-primary dark:text-primary font-bold uppercase truncate">{t('history_completed')}</span>
+            <span className="text-xs font-black text-primary dark:text-primary mt-0.5 block">{completedCount}</span>
           </div>
-          <div className="bg-primary-soft dark:bg-primary-soft p-2.5 rounded-lg border border-primary-border dark:border-primary-border">
-            <span className="block text-[10px] text-primary dark:text-primary font-bold uppercase truncate">{t('status_cancelled')}</span>
-            <span className="text-sm font-black text-primary dark:text-primary mt-1 block">{cancelledCount}</span>
+          <div className="bg-primary-soft dark:bg-primary-soft p-2 rounded-lg border border-primary-border dark:border-primary-border">
+            <span className="block text-[9.5px] text-primary dark:text-primary font-bold uppercase truncate">{t('status_cancelled')}</span>
+            <span className="text-xs font-black text-primary dark:text-primary mt-0.5 block">{cancelledCount}</span>
           </div>
-          <div className="bg-primary-soft dark:bg-primary-soft/30 p-2.5 rounded-lg border border-primary-border dark:border-primary-border/40">
-            <span className="block text-[10px] text-primary dark:text-primary font-bold uppercase truncate">{t('history_total_hours')}</span>
-            <span className="text-sm font-black text-primary dark:text-primary/70 mt-1 block">{totalHours} hrs</span>
+          <div className="bg-primary-soft dark:bg-primary-soft/30 p-2 rounded-lg border border-primary-border dark:border-primary-border/40">
+            <span className="block text-[9.5px] text-primary dark:text-primary font-bold uppercase truncate">{t('history_total_hours')}</span>
+            <span className="text-xs font-black text-primary dark:text-primary/70 mt-0.5 block">{totalHours} hrs</span>
           </div>
         </div>
       </div>
 
       {/* Filter and Search Section */}
-      <div className="bg-surface border border-surface-border rounded-xl p-3.5 space-y-3.5 shadow-2xs">
+      <div className="bg-surface border border-surface-border rounded-lg p-2.5 space-y-2.5 shadow-2xs">
         {/* Search Bar */}
         <div className="relative">
           <Search className="w-3.5 h-3.5 text-text-muted/70 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -157,15 +157,15 @@ export const SessionHistoryView: React.FC = () => {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder={t('history_search_placeholder')}
-            className="w-full pl-9 pr-3 py-1.5 bg-surface-hover/80 border border-surface-border dark:border-surface-border-soft rounded-lg text-xs font-bold focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full pl-8 pr-3 py-1.5 bg-surface-hover/80 border border-surface-border dark:border-surface-border-soft rounded-md text-xs font-bold focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
 
         {/* Filter Row 1: Status Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[11px] font-bold no-scrollbar">
+        <div className="flex items-center gap-1 overflow-x-auto pb-0.5 text-[11px] font-bold no-scrollbar">
           <button
             onClick={() => setStatusFilter('all')}
-            className={`px-2.5 py-1.5 rounded transition-all cursor-pointer whitespace-nowrap ${
+            className={`px-2 py-1 rounded transition-all cursor-pointer whitespace-nowrap ${
               statusFilter === 'all'
                 ? 'bg-primary text-white border border-transparent shadow-2xs'
                 : 'bg-surface-hover/60 text-text-muted border border-surface-border/60 dark:border-surface-border-soft/60'
@@ -175,7 +175,7 @@ export const SessionHistoryView: React.FC = () => {
           </button>
           <button
             onClick={() => setStatusFilter('completed')}
-            className={`px-2.5 py-1.5 rounded transition-all cursor-pointer whitespace-nowrap ${
+            className={`px-2 py-1 rounded transition-all cursor-pointer whitespace-nowrap ${
               statusFilter === 'completed'
                 ? 'bg-primary text-white border border-transparent shadow-2xs'
                 : 'bg-surface-hover/60 text-text-muted border border-surface-border/60 dark:border-surface-border-soft/60'
@@ -185,7 +185,7 @@ export const SessionHistoryView: React.FC = () => {
           </button>
           <button
             onClick={() => setStatusFilter('cancelled')}
-            className={`px-2.5 py-1.5 rounded transition-all cursor-pointer whitespace-nowrap ${
+            className={`px-2 py-1 rounded transition-all cursor-pointer whitespace-nowrap ${
               statusFilter === 'cancelled'
                 ? 'bg-primary text-white border border-transparent shadow-2xs'
                 : 'bg-surface-hover/60 text-text-muted border border-surface-border/60 dark:border-surface-border-soft/60'
@@ -195,7 +195,7 @@ export const SessionHistoryView: React.FC = () => {
           </button>
           <button
             onClick={() => setStatusFilter('pending')}
-            className={`px-2.5 py-1.5 rounded transition-all cursor-pointer whitespace-nowrap ${
+            className={`px-2 py-1 rounded transition-all cursor-pointer whitespace-nowrap ${
               statusFilter === 'pending'
                 ? 'bg-primary text-white border border-transparent shadow-2xs'
                 : 'bg-surface-hover/60 text-text-muted border border-surface-border/60 dark:border-surface-border-soft/60'
@@ -206,13 +206,13 @@ export const SessionHistoryView: React.FC = () => {
         </div>
 
         {/* Filter Row 2: Entity & Period Dropdowns */}
-        <div className="grid grid-cols-2 gap-3 text-xs">
+        <div className="grid grid-cols-2 gap-2 text-xs">
           <div>
-            <label className="block text-[10px] font-bold text-text-muted/70 mb-1 uppercase tracking-wider">{t('history_filter_entity_label')}</label>
+            <label className="block text-[9.5px] font-bold text-text-muted/70 mb-0.5 uppercase tracking-wider">{t('history_filter_entity_label')}</label>
             <select
               value={entityFilter}
               onChange={(e) => setEntityFilter(e.target.value)}
-              className="w-full bg-surface-hover border border-surface-border dark:border-surface-border-soft font-bold px-2.5 py-1.5 rounded-lg focus:outline-none cursor-pointer text-xs"
+              className="w-full bg-surface-hover border border-surface-border dark:border-surface-border-soft font-bold px-2 py-1 rounded-md focus:outline-none cursor-pointer text-xs"
             >
               <option value="all">{t('history_all_entities')}</option>
               <optgroup label={t('history_groups_category')}>
@@ -229,11 +229,11 @@ export const SessionHistoryView: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold text-text-muted/70 mb-1 uppercase tracking-wider">{t('history_filter_period_label')}</label>
+            <label className="block text-[9.5px] font-bold text-text-muted/70 mb-0.5 uppercase tracking-wider">{t('history_filter_period_label')}</label>
             <select
               value={periodFilter}
               onChange={(e) => setPeriodFilter(e.target.value as any)}
-              className="w-full bg-surface-hover border border-surface-border dark:border-surface-border-soft font-bold px-2.5 py-1.5 rounded-lg focus:outline-none cursor-pointer text-xs"
+              className="w-full bg-surface-hover border border-surface-border dark:border-surface-border-soft font-bold px-2 py-1 rounded-md focus:outline-none cursor-pointer text-xs"
             >
               <option value="all">{t('history_period_all')}</option>
               <option value="today">{t('history_period_today')}</option>
@@ -245,7 +245,7 @@ export const SessionHistoryView: React.FC = () => {
       </div>
 
       {/* Session List */}
-      <div className="space-y-3">
+      <div className="space-y-2">
         <div className="flex items-center justify-between text-[11px] font-bold px-1 text-slate-500">
           <span>
             {t('history_results_count').replace('{count}', filteredLessons.length.toString())}
@@ -266,9 +266,9 @@ export const SessionHistoryView: React.FC = () => {
         </div>
 
         {filteredLessons.length === 0 ? (
-          <div className="bg-surface border border-surface-border rounded-xl p-5 text-center space-y-2">
-            <div className="w-10 h-10 rounded-lg bg-background dark:bg-slate-850 flex items-center justify-center mx-auto text-text-muted/70 border border-slate-100 dark:border-surface-border">
-              <History className="w-5 h-5" />
+          <div className="bg-surface border border-surface-border rounded-lg p-4 text-center space-y-1.5">
+            <div className="w-8 h-8 rounded-lg bg-background dark:bg-slate-850 flex items-center justify-center mx-auto text-text-muted/70 border border-slate-100 dark:border-surface-border">
+              <History className="w-4 h-4" />
             </div>
             <div>
               <p className="font-bold text-text-main text-xs">{t('next_action_no_lessons')}</p>
@@ -297,22 +297,22 @@ export const SessionHistoryView: React.FC = () => {
             return (
               <div
                 key={lesson.id}
-                className="bg-surface border border-surface-border rounded-xl p-4 space-y-3 hover:bg-background/20 active:scale-[0.99] active:bg-surface-hover transition-all"
+                className="bg-surface border border-surface-border rounded-lg p-3 space-y-2 hover:bg-background/20 active:scale-[0.99] active:bg-surface-hover transition-all"
               >
                 {/* Top Status & Date Line */}
-                <div className="flex items-center justify-between text-[11px] font-bold border-b border-slate-100 dark:border-slate-850 pb-2.5">
+                <div className="flex items-center justify-between text-[11px] font-bold border-b border-slate-100 dark:border-slate-850 pb-1.5">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-slate-600 dark:text-slate-300 flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5 text-primary" />
+                      <Calendar className="w-3 h-3 text-primary" />
                       <span>{formattedDate}</span>
                     </span>
                     <span className="font-mono text-text-muted/70 flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-text-muted/70" />
+                      <Clock className="w-3 h-3 text-text-muted/70" />
                       <span>{lesson.time}</span>
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1">
                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${attBadgeClass}`}>
                       {attText}
                     </span>
@@ -324,7 +324,7 @@ export const SessionHistoryView: React.FC = () => {
 
                 {/* Main Lesson Info */}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-1 min-w-0">
+                  <div className="space-y-0.5 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-bold text-slate-900 dark:text-slate-100 text-xs truncate max-w-xs">
                         {lesson.title || lesson.groupName || lesson.studentName}
@@ -351,7 +351,7 @@ export const SessionHistoryView: React.FC = () => {
                     </div>
 
                     {lesson.notes && (
-                      <p className="text-[11px] text-slate-500 bg-surface-hover/30 p-2 rounded-lg border border-slate-100 dark:border-surface-border mt-1 line-clamp-2 leading-relaxed">
+                      <p className="text-[10px] text-slate-500 bg-surface-hover/30 p-1.5 rounded-md border border-slate-100 dark:border-surface-border mt-0.5 line-clamp-2 leading-relaxed">
                         💬 {lesson.notes}
                       </p>
                     )}
@@ -360,7 +360,7 @@ export const SessionHistoryView: React.FC = () => {
 
                 {/* Quick Reports & Scores if generated */}
                 {lesson.report?.arabicPerformance && (
-                  <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border p-2.5 rounded-lg text-[11px] flex items-center justify-between text-primary dark:text-primary">
+                  <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border p-2 rounded-md text-[11px] flex items-center justify-between text-primary dark:text-primary">
                     <span className="font-bold flex items-center gap-1">
                       <Award className="w-3.5 h-3.5 text-primary" />
                       <span>{t('reports_title')}: {lesson.report.arabicPerformance}</span>
@@ -372,10 +372,10 @@ export const SessionHistoryView: React.FC = () => {
                 )}
 
                 {/* Action Controls */}
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-850">
+                <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-850">
                   <button
                     onClick={() => setReportModalLesson(lesson)}
-                    className="px-2.5 py-1.5 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft text-primary dark:text-primary font-bold rounded text-xs border border-primary-border dark:border-primary-border flex items-center gap-1 cursor-pointer transition-all"
+                    className="px-2 py-1 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft text-primary dark:text-primary font-bold rounded text-xs border border-primary-border dark:border-primary-border flex items-center gap-1 cursor-pointer transition-all"
                   >
                     <FileText className="w-3 h-3 text-primary dark:text-primary" />
                     <span>{t('lesson_parent_report_btn')}</span>

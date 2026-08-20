@@ -127,39 +127,39 @@ export const SmartDailySummaryWidget: React.FC = () => {
   }, [lessons, students, groups, payments, profile, todayStr, language, t]);
 
   return (
-    <div className="relative overflow-hidden bg-surface border border-primary-border dark:border-primary-border rounded-2xl p-4 shadow-2xs transition-all">
+    <div className="relative overflow-hidden bg-surface border border-primary-border dark:border-primary-border rounded-xl p-2.5 sm:p-3 shadow-2xs transition-all">
       {/* Subtle Background Glow Accent */}
       <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 dark:bg-primary/10 rounded-full blur-2xl pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-32 h-32 bg-primary/5 dark:bg-primary/10 rounded-full blur-2xl pointer-events-none" />
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-3 relative z-10">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-primary-soft text-primary border border-primary-border active:scale-95 transition-all hover:bg-primary/20">
-            <Sparkles className="w-4 h-4 text-primary dark:text-primary animate-pulse" />
+      <div className="flex items-center justify-between mb-2 relative z-10">
+        <div className="flex items-center gap-1.5">
+          <div className="p-1 rounded-md bg-primary-soft text-primary border border-primary-border">
+            <Sparkles className="w-3.5 h-3.5 text-primary dark:text-primary animate-pulse" />
           </div>
           <h3 className="text-xs font-black uppercase tracking-wider text-text-main">
             {t('smart_summary_title')}
           </h3>
         </div>
-        <span className="text-[10px] font-extrabold bg-primary-50 dark:bg-primary-950/60 text-primary-700 dark:text-primary-300 px-2.5 py-0.5 rounded-full border border-primary-border dark:border-primary-800/80">
+        <span className="text-[9px] font-extrabold bg-primary-50 dark:bg-primary-950/60 text-primary-700 dark:text-primary-300 px-2 py-0.2 rounded-full border border-primary-border dark:border-primary-800/80">
           {t('smart_summary_badge')}
         </span>
       </div>
 
       {/* Narrative Card */}
-      <div className="relative z-10 bg-primary-soft/40 dark:bg-background/70 border border-primary-border rounded-xl p-3.5 mb-3 transition-all">
-        <p className="text-xs sm:text-sm leading-relaxed text-text-main font-medium">
+      <div className="relative z-10 bg-primary-soft/40 dark:bg-background/70 border border-primary-border rounded-lg p-2 sm:p-2.5 mb-2 transition-all">
+        <p className="text-xs leading-relaxed text-text-main font-medium">
           {summary.text}
         </p>
       </div>
 
       {/* Metrics Row */}
-      <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
         {/* Lessons count */}
-        <div className="flex items-center gap-2 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-2.5 rounded-xl transition-all">
-          <div className="p-1.5 rounded-lg bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0 active:scale-95 transition-all hover:bg-primary/20">
-            <BookOpen className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-1.5 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+          <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+            <BookOpen className="w-3 h-3" />
           </div>
           <div className="min-w-0">
             <p className="text-[9px] text-text-muted font-bold truncate">
@@ -172,9 +172,9 @@ export const SmartDailySummaryWidget: React.FC = () => {
         </div>
 
         {/* Students count */}
-        <div className="flex items-center gap-2 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-2.5 rounded-xl transition-all">
-          <div className="p-1.5 rounded-lg bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
-            <Users className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-1.5 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+          <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+            <Users className="w-3 h-3" />
           </div>
           <div className="min-w-0">
             <p className="text-[9px] text-text-muted font-bold truncate">
@@ -187,9 +187,9 @@ export const SmartDailySummaryWidget: React.FC = () => {
         </div>
 
         {/* Expected Income */}
-        <div className="flex items-center gap-2 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-2.5 rounded-xl transition-all">
-          <div className="p-1.5 rounded-lg bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
-            <Wallet className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-1.5 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+          <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+            <Wallet className="w-3 h-3" />
           </div>
           <div className="min-w-0">
             <p className="text-[9px] text-text-muted font-bold truncate">
@@ -202,11 +202,11 @@ export const SmartDailySummaryWidget: React.FC = () => {
         </div>
 
         {/* First Lesson / Overdue Alert */}
-        <div className="flex items-center gap-2 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-2.5 rounded-xl transition-all">
+        <div className="flex items-center gap-1.5 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
           {summary.firstLessonTime ? (
             <>
-              <div className="p-1.5 rounded-lg bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
-                <Clock className="w-3.5 h-3.5" />
+              <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+                <Clock className="w-3 h-3" />
               </div>
               <div className="min-w-0">
                 <p className="text-[9px] text-text-muted font-bold truncate">
@@ -219,8 +219,8 @@ export const SmartDailySummaryWidget: React.FC = () => {
             </>
           ) : (
             <>
-              <div className="p-1.5 rounded-lg bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
-                <AlertCircle className="w-3.5 h-3.5" />
+              <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+                <AlertCircle className="w-3 h-3" />
               </div>
               <div className="min-w-0">
                 <p className="text-[9px] text-text-muted font-bold truncate">

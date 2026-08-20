@@ -163,7 +163,27 @@ export function mergeTeacherSettings(
     parentMessageTemplates: {
       ...fallbackRecord?.profile?.parentMessageTemplates,
       ...baseRecord?.profile?.parentMessageTemplates
-    }
+    },
+    schoolSettings: baseRecord?.profile?.schoolSettings || fallbackRecord?.profile?.schoolSettings ? {
+      ...fallbackRecord?.profile?.schoolSettings,
+      ...baseRecord?.profile?.schoolSettings,
+      presence: {
+        ...fallbackRecord?.profile?.schoolSettings?.presence,
+        ...baseRecord?.profile?.schoolSettings?.presence
+      },
+      periodSettings: {
+        ...fallbackRecord?.profile?.schoolSettings?.periodSettings,
+        ...baseRecord?.profile?.schoolSettings?.periodSettings,
+        customDurations: {
+          ...fallbackRecord?.profile?.schoolSettings?.periodSettings?.customDurations,
+          ...baseRecord?.profile?.schoolSettings?.periodSettings?.customDurations
+        }
+      },
+      schedule: {
+        ...fallbackRecord?.profile?.schoolSettings?.schedule,
+        ...baseRecord?.profile?.schoolSettings?.schedule
+      }
+    } : undefined
   };
 
   return {

@@ -57,8 +57,8 @@ interface AppContextType {
   setAccentColor: (color: AccentColor) => void;
   t: (key: TranslationKey) => string;
   _t: (ar: string, en: string, de?: string) => string;
-  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates';
-  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates') => void;
+  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule';
+  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule') => void;
 
   // Certificates
   certificates: CertificateRecord[];
@@ -406,7 +406,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('dl_quick_todos', todos);
   }, [todos]);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule'>('home');
 
   const [profile, setProfile] = useState<TeacherProfile>(() => {
     const saved = initialData['dl_profile'];
@@ -609,7 +609,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('dl_notification_settings', newSettings);
 
     // Rebuild schedule with updated settings
-    await rebuildAllNotificationSchedules(newSettings, lessons, groups, students, payments);
+    await rebuildAllNotificationSchedules(newSettings, lessons, groups, students, payments, profile, language);
     await refreshPendingScheduledNotifications();
   };
 
@@ -624,19 +624,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const rebuildNotificationSchedules = async () => {
-    const res = await rebuildAllNotificationSchedules(notificationSettings, lessons, groups, students, payments);
+    const res = await rebuildAllNotificationSchedules(notificationSettings, lessons, groups, students, payments, profile, language);
     await refreshPendingScheduledNotifications();
     return res;
   };
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      rebuildAllNotificationSchedules(notificationSettings, lessons, groups, students, payments)
+      rebuildAllNotificationSchedules(notificationSettings, lessons, groups, students, payments, profile, language)
         .then(() => getPendingScheduledNotifications().then(setPendingScheduledNotifications))
         .catch(err => console.warn('Auto notification schedule rebuild error:', err));
     }, 1500);
     return () => clearTimeout(timer);
-  }, [lessons, students.length, groups.length]);
+  }, [lessons, students.length, groups.length, profile, language]);
 
   // Inspiration & Gratitude Reminders State
   const [inspirationSettings, setInspirationSettings] = useState<InspirationSettings>(() => {
@@ -2531,6 +2531,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setSyncState(reconciledState);
         syncStateRef.current = reconciledState;
         syncRevisionRef.current = reconciledState.localRevisionCounter;
+      }
+
+      // Rebuild notification schedules immediately using restored data to prevent duplicates or orphaned timers
+      try {
+        await rebuildAllNotificationSchedules(
+          data.notificationSettings || notificationSettings,
+          data.lessons || data.lessons || [],
+          data.groups || data.groups || [],
+          data.students || data.students || [],
+          data.payments || data.payments || [],
+          data.profile || data.profile || profile,
+          language
+        );
+      } catch (err) {
+        console.error('Failed to rebuild notification schedules after restore:', err);
       }
 
       confetti({ particleCount: 80, spread: 70 });

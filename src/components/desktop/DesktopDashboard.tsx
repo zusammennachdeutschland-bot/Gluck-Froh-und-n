@@ -8,6 +8,7 @@ import { AvailableTodayWidget } from '../AvailableTodayWidget';
 import { DailyStats } from '../DailyStats';
 import { PaymentAlertsCard } from '../PaymentAlertsCard';
 import { QuickTodoWidget } from '../QuickTodoWidget';
+import { SchoolTodayCard } from '../SchoolTodayCard';
 
 export const DesktopDashboard: React.FC = () => {
   return (
@@ -30,8 +31,11 @@ export const DesktopDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Secondary Column: Stats, Financial Alerts, To-Dos, and Free Slots (5 cols) */}
+      {/* Secondary Column: School Card, Stats, Financial Alerts, To-Dos, and Free Slots (5 cols) */}
       <div className="lg:col-span-5 space-y-6">
+        {/* School Today Card */}
+        <SchoolTodayCard />
+
         {/* Quick Todo Scratchpad */}
         <QuickTodoWidget />
 

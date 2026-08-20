@@ -50,12 +50,12 @@ export const MonthlyOverviewWidget: React.FC = () => {
   const remainingToGoal = hasMonthlyGoal ? Math.max(0, monthlyGoal - monthStats.collected) : 0;
 
   return (
-    <div className="bg-surface border border-surface-border rounded-2xl p-4 shadow-2xs transition-all">
+    <div className="bg-surface border border-surface-border rounded-xl p-3 shadow-2xs transition-all">
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border">
-            <TrendingUp className="w-4 h-4" />
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-lg bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border">
+            <TrendingUp className="w-3.5 h-3.5" />
           </div>
           <h3 className="text-xs font-black text-text-main uppercase tracking-wider">
             {t('daily_stats_monthly_overview')}
@@ -64,9 +64,9 @@ export const MonthlyOverviewWidget: React.FC = () => {
       </div>
 
       {/* Grid: 3 columns x 2 rows (Compact Card) */}
-      <div className="grid grid-cols-3 gap-2 text-center">
+      <div className="grid grid-cols-3 gap-1.5 sm:gap-2 text-center">
         {/* Completed */}
-        <div className="bg-background dark:bg-background/60 p-2.5 rounded-xl border border-surface-border/80 dark:border-surface-border transition-all">
+        <div className="bg-background dark:bg-background/60 p-1.5 sm:p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[9px] sm:text-[10px] font-bold text-primary dark:text-primary mb-0.5 truncate">
             <CheckCircle2 className="w-3 h-3 shrink-0" />
             <span className="truncate">{t('daily_stats_completed_short')}</span>
@@ -77,7 +77,7 @@ export const MonthlyOverviewWidget: React.FC = () => {
         </div>
 
         {/* Cancelled */}
-        <div className="bg-background dark:bg-background/60 p-2.5 rounded-xl border border-surface-border/80 dark:border-surface-border transition-all">
+        <div className="bg-background dark:bg-background/60 p-1.5 sm:p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[9px] sm:text-[10px] font-bold text-primary dark:text-primary mb-0.5 truncate">
             <XCircle className="w-3 h-3 shrink-0" />
             <span className="truncate">{t('stat_cancelled')}</span>
@@ -88,7 +88,7 @@ export const MonthlyOverviewWidget: React.FC = () => {
         </div>
 
         {/* Remaining */}
-        <div className="bg-background dark:bg-background/60 p-2.5 rounded-xl border border-surface-border/80 dark:border-surface-border transition-all">
+        <div className="bg-background dark:bg-background/60 p-1.5 sm:p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[9px] sm:text-[10px] font-bold text-primary dark:text-primary mb-0.5 truncate">
             <Clock className="w-3 h-3 shrink-0" />
             <span className="truncate">{t('stat_remaining')}</span>
@@ -99,7 +99,7 @@ export const MonthlyOverviewWidget: React.FC = () => {
         </div>
 
         {/* Revenue Collected */}
-        <div className="bg-background dark:bg-background/60 p-2.5 rounded-xl border border-surface-border/80 dark:border-surface-border transition-all">
+        <div className="bg-background dark:bg-background/60 p-1.5 sm:p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[9px] sm:text-[10px] font-bold text-primary dark:text-primary mb-0.5 truncate">
             <Wallet className="w-3 h-3 shrink-0" />
             <span className="truncate">{t('daily_stats_revenue')}</span>
@@ -110,7 +110,7 @@ export const MonthlyOverviewWidget: React.FC = () => {
         </div>
 
         {/* Revenue Uncollected */}
-        <div className="bg-background dark:bg-background/60 p-2.5 rounded-xl border border-surface-border/80 dark:border-surface-border transition-all">
+        <div className="bg-background dark:bg-background/60 p-1.5 sm:p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[9px] sm:text-[10px] font-bold text-primary dark:text-primary mb-0.5 truncate">
             <AlertCircle className="w-3 h-3 shrink-0" />
             <span className="truncate">{t('stat_uncollected')}</span>
@@ -121,7 +121,7 @@ export const MonthlyOverviewWidget: React.FC = () => {
         </div>
 
         {/* Total Expected Revenue */}
-        <div className="bg-background dark:bg-background/60 p-2.5 rounded-xl border border-surface-border/80 dark:border-surface-border transition-all">
+        <div className="bg-background dark:bg-background/60 p-1.5 sm:p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[9px] sm:text-[10px] font-bold text-primary dark:text-primary mb-0.5 truncate">
             <DollarSign className="w-3 h-3 shrink-0" />
             <span className="truncate">{t('stat_total_expected')}</span>
@@ -133,8 +133,8 @@ export const MonthlyOverviewWidget: React.FC = () => {
       </div>
 
       {/* Financial Goal Section */}
-      <div className="mt-3 pt-3 border-t border-surface-border/80 dark:border-surface-border">
-        <div className="flex items-center justify-between mb-2">
+      <div className="mt-2.5 pt-2 border-t border-surface-border/80 dark:border-surface-border">
+        <div className="flex items-center justify-between mb-1.5">
           <div className="flex items-center gap-1.5 text-xs font-black text-text-main">
             <Target className="w-3.5 h-3.5 text-primary" />
             <span>{t('goal_monthly_short')}</span>
@@ -145,28 +145,28 @@ export const MonthlyOverviewWidget: React.FC = () => {
         </div>
 
         {hasMonthlyGoal ? (
-          <div className="space-y-2 bg-background dark:bg-background/60 p-3 rounded-xl border border-surface-border/80 dark:border-surface-border">
+          <div className="space-y-1.5 bg-background dark:bg-background/60 p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-text-muted font-bold text-[11px]">{t('goal_collected')}:</span>
-              <span className="font-mono font-black text-text-main">
-                {monthStats.collected.toLocaleString()} <span className="text-[10px] text-text-muted font-sans">{currency}</span>
+              <span className="text-text-muted font-bold text-[10px]">{t('goal_collected')}:</span>
+              <span className="font-mono font-black text-text-main text-[11px]">
+                {monthStats.collected.toLocaleString()} <span className="text-[9px] text-text-muted font-sans">{currency}</span>
               </span>
             </div>
 
             <div className="flex items-center justify-between text-xs">
-              <span className="text-text-muted font-bold text-[11px]">{t('goal_target')}:</span>
-              <span className="font-mono font-black text-text-main">
-                {monthlyGoal.toLocaleString()} <span className="text-[10px] text-text-muted font-sans">{currency}</span>
+              <span className="text-text-muted font-bold text-[10px]">{t('goal_target')}:</span>
+              <span className="font-mono font-black text-text-main text-[11px]">
+                {monthlyGoal.toLocaleString()} <span className="text-[9px] text-text-muted font-sans">{currency}</span>
               </span>
             </div>
 
             {/* Progress bar and percentage */}
-            <div className="space-y-1.5 pt-1">
-              <div className="flex items-center justify-between text-[11px] font-bold">
+            <div className="space-y-1 pt-0.5">
+              <div className="flex items-center justify-between text-[10px] font-bold">
                 <span className="text-text-muted">{t('goal_remaining')}: <span className="font-mono text-text-main">{remainingToGoal.toLocaleString()} {currency}</span></span>
                 <span className="font-mono text-primary font-black">{monthlyPercent}%</span>
               </div>
-              <div className="w-full bg-surface-border dark:bg-surface-border/60 h-2 rounded-full overflow-hidden">
+              <div className="w-full bg-surface-border dark:bg-surface-border/60 h-1.5 rounded-full overflow-hidden">
                 <div 
                   className="bg-primary h-full rounded-full transition-all duration-500"
                   style={{ width: `${Math.min(100, monthlyPercent)}%` }}
@@ -175,8 +175,8 @@ export const MonthlyOverviewWidget: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="bg-background dark:bg-background/60 py-2.5 px-3 rounded-xl border border-surface-border/80 dark:border-surface-border flex items-center justify-between text-xs">
-            <span className="text-text-muted text-[11px] font-bold">{t('no_goal_set')}</span>
+          <div className="bg-background dark:bg-background/60 py-1.5 px-2.5 rounded-lg border border-surface-border/80 dark:border-surface-border flex items-center justify-between text-xs">
+            <span className="text-text-muted text-[10px] font-bold">{t('no_goal_set')}</span>
             <span className="text-[10px] font-mono text-text-muted">—</span>
           </div>
         )}

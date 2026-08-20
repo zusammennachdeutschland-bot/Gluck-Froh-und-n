@@ -257,6 +257,35 @@ export interface TeacherProfile {
   parentMessageTemplates?: Record<string, string>;
   weeklyIncomeGoal?: number;
   monthlyIncomeGoal?: number;
+  schoolSettings?: SchoolSettings;
+}
+
+export interface SchoolDayPresence {
+  active: boolean;
+  arrivalTime: string; // HH:MM
+  departureTime: string; // HH:MM
+}
+
+export interface SchoolPeriodSettings {
+  periodsCount: number;
+  firstPeriodStart: string; // HH:MM
+  defaultDuration: number; // minutes
+  customDurations?: Record<number, number>; // periodNumber (1-indexed) -> minutes
+}
+
+export interface SchoolPeriodRecord {
+  id?: string; // Stable ID
+  source?: string; // e.g. "school_schedule"
+  periodNumber: number; // 1-indexed
+  subjectName?: string;
+  className?: string;
+  notes?: string;
+}
+
+export interface SchoolSettings {
+  presence: Record<string, SchoolDayPresence>; // "0" to "6"
+  periodSettings: SchoolPeriodSettings;
+  schedule: Record<string, SchoolPeriodRecord[]>; // "0" to "6"
 }
 
 
@@ -462,6 +491,7 @@ export interface NotificationSettings {
   paymentDue: CategoryNotificationConfig;
   dailySummary: CategoryNotificationConfig;
   attendanceReminder: CategoryNotificationConfig;
+  schoolLessonReminder?: CategoryNotificationConfig;
 
   // Reminder timing controls
   lessonReminderMinutesBefore: number; // 5, 10, 15, 30, 60 or custom
@@ -478,7 +508,7 @@ export interface ScheduledNotificationItem {
   title: string;
   body: string;
   scheduledAt: string; // ISO date string or formatted date
-  category: 'lessonReminder' | 'lessonStart' | 'paymentDue' | 'dailySummary' | 'attendanceReminder' | 'general';
+  category: 'lessonReminder' | 'lessonStart' | 'paymentDue' | 'dailySummary' | 'attendanceReminder' | 'schoolLessonReminder' | 'general';
   extra?: Record<string, any>;
 }
 

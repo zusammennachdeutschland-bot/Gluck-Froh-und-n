@@ -7,6 +7,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   paymentDue: { enabled: true, sound: 'default', priority: 'normal' },
   dailySummary: { enabled: true, sound: 'gentle', priority: 'normal' },
   attendanceReminder: { enabled: true, sound: 'chime', priority: 'normal' },
+  schoolLessonReminder: { enabled: true, sound: 'beep', priority: 'high' },
 
   lessonReminderMinutesBefore: 15,
 
@@ -91,7 +92,33 @@ export const INITIAL_TEACHER_PROFILE: TeacherProfile = {
   defaultZoomLink: '',
   defaultMeetLink: '',
   enableLessonAlerts: true,
-  enableBrowserPush: false
+  enableBrowserPush: false,
+  schoolSettings: {
+    presence: {
+      '0': { active: true, arrivalTime: '07:30', departureTime: '14:30' },
+      '1': { active: true, arrivalTime: '07:30', departureTime: '14:30' },
+      '2': { active: true, arrivalTime: '07:30', departureTime: '14:30' },
+      '3': { active: true, arrivalTime: '07:30', departureTime: '14:30' },
+      '4': { active: true, arrivalTime: '07:30', departureTime: '14:30' },
+      '5': { active: false, arrivalTime: '07:30', departureTime: '14:30' },
+      '6': { active: false, arrivalTime: '07:30', departureTime: '14:30' }
+    },
+    periodSettings: {
+      periodsCount: 7,
+      firstPeriodStart: '08:00',
+      defaultDuration: 45,
+      customDurations: {}
+    },
+    schedule: {
+      '0': [],
+      '1': [],
+      '2': [],
+      '3': [],
+      '4': [],
+      '5': [],
+      '6': []
+    }
+  }
 };
 
 export const INITIAL_GROUPS: Group[] = [];

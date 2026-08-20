@@ -43,7 +43,7 @@ export const FreeTimeSlotsView: React.FC = () => {
     if (!profile.weeklyWorkingHours) return [];
     
     return datesToAnalyze.map(dateStr => {
-      const freePeriods = getFreePeriodsForDate(dateStr, lessons, groups, profile.weeklyWorkingHours!);
+      const freePeriods = getFreePeriodsForDate(dateStr, lessons, groups, profile.weeklyWorkingHours!, profile);
       
       const slotsToDisplay = displayMode === 'periods' 
         ? freePeriods 
@@ -55,7 +55,7 @@ export const FreeTimeSlotsView: React.FC = () => {
         totalPeriods: freePeriods.length
       };
     }).filter(r => filterType === 'this_week' ? r.slots.length > 0 : true);
-  }, [datesToAnalyze, lessons, groups, profile.weeklyWorkingHours, displayMode, slotDuration]);
+  }, [datesToAnalyze, lessons, groups, profile.weeklyWorkingHours, profile, displayMode, slotDuration]);
 
   if (!profile.weeklyWorkingHours) {
     return (
@@ -68,22 +68,22 @@ export const FreeTimeSlotsView: React.FC = () => {
   }
 
   return (
-    <div className="space-y-4 max-w-4xl mx-auto font-sans pb-24">
+    <div className="space-y-3 max-w-4xl mx-auto font-sans pb-16">
       {/* HEADER */}
-      <div className="bg-surface p-4 sm:p-5 rounded-2xl border border-surface-border shadow-sm">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-10 h-10 rounded-xl bg-primary-soft text-primary flex items-center justify-center">
-            <CheckCircle2 className="w-5 h-5" />
+      <div className="bg-surface p-3 sm:p-3.5 rounded-xl border border-surface-border shadow-2xs">
+        <div className="flex items-center gap-2.5 mb-3">
+          <div className="w-8 h-8 rounded-lg bg-primary-soft text-primary flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-4 h-4" />
           </div>
           <div>
-            <h2 className="text-lg font-black text-text-main">{language === 'ar' ? 'البحث الذكي عن الأوقات الفارغة' : language === 'de' ? 'Smarte Freizeitsuche' : 'Smart Free Time Finder'}</h2>
-            <p className="text-xs text-text-muted">{language === 'ar' ? 'يبحث تلقائياً عن الفترات المتاحة.' : language === 'de' ? 'Findet automatisch verfügbare Zeiten.' : 'Automatically finds available slots based on your schedule.'}</p>
+            <h2 className="text-base font-black text-text-main">{language === 'ar' ? 'البحث الذكي عن الأوقات الفارغة' : language === 'de' ? 'Smarte Freizeitsuche' : 'Smart Free Time Finder'}</h2>
+            <p className="text-[11px] text-text-muted">{language === 'ar' ? 'يبحث تلقائياً عن الفترات المتاحة.' : language === 'de' ? 'Findet automatisch verfügbare Zeiten.' : 'Automatically finds available slots based on your schedule.'}</p>
           </div>
         </div>
 
         {/* FILTERS */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {[
               { id: 'today', label: language === 'ar' ? 'اليوم' : language === 'de' ? 'Heute' : 'Today' },
               { id: 'tomorrow', label: language === 'ar' ? 'غداً' : language === 'de' ? 'Morgen' : 'Tomorrow' },
@@ -93,9 +93,9 @@ export const FreeTimeSlotsView: React.FC = () => {
               <button
                 key={f.id}
                 onClick={() => setFilterType(f.id as FilterType)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
                   filterType === f.id
-                    ? 'bg-primary text-white shadow-sm'
+                    ? 'bg-primary text-white shadow-2xs'
                     : 'bg-surface-hover text-text-muted hover:text-text-main border border-surface-border'
                 }`}
               >
@@ -108,7 +108,7 @@ export const FreeTimeSlotsView: React.FC = () => {
                 type="date"
                 value={specificDate}
                 onChange={e => setSpecificDate(e.target.value)}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-surface border border-primary text-primary focus:outline-none"
+                className="px-2.5 py-1 rounded-lg text-xs font-bold bg-surface border border-primary text-primary focus:outline-none font-mono"
               />
             )}
           </div>
@@ -116,20 +116,20 @@ export const FreeTimeSlotsView: React.FC = () => {
       </div>
 
       {/* DISPLAY MODES & DURATION */}
-      <div className="bg-surface p-4 rounded-2xl border border-surface-border shadow-sm flex flex-col sm:flex-row items-start sm:items-center gap-4 justify-between">
-        <div className="flex items-center p-1 bg-surface-hover rounded-xl border border-surface-border w-full sm:w-auto">
+      <div className="bg-surface p-2.5 rounded-xl border border-surface-border shadow-2xs flex flex-col sm:flex-row items-start sm:items-center gap-2.5 justify-between">
+        <div className="flex items-center p-0.5 bg-surface-hover rounded-lg border border-surface-border w-full sm:w-auto">
           <button
             onClick={() => setDisplayMode('periods')}
-            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-              displayMode === 'periods' ? 'bg-surface shadow-sm text-text-main' : 'text-text-muted hover:text-text-main'
+            className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+              displayMode === 'periods' ? 'bg-surface shadow-2xs text-text-main' : 'text-text-muted hover:text-text-main'
             }`}
           >
             {language === 'ar' ? 'فترات متصلة' : language === 'de' ? 'Zusammenhängende Zeit' : 'Continuous Periods'}
           </button>
           <button
             onClick={() => setDisplayMode('slots')}
-            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-              displayMode === 'slots' ? 'bg-surface shadow-sm text-text-main' : 'text-text-muted hover:text-text-main'
+            className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+              displayMode === 'slots' ? 'bg-surface shadow-2xs text-text-main' : 'text-text-muted hover:text-text-main'
             }`}
           >
             {language === 'ar' ? 'أوقات قابلة للحجز' : language === 'de' ? 'Buchbare Slots' : 'Bookable Slots'}
@@ -137,13 +137,13 @@ export const FreeTimeSlotsView: React.FC = () => {
         </div>
 
         {displayMode === 'slots' && (
-          <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0 hide-scrollbar">
+          <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0 hide-scrollbar">
             <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider whitespace-nowrap">{language === 'ar' ? 'المدة:' : language === 'de' ? 'Dauer:' : 'Duration:'}</span>
             {[30, 60, 90, 120].map(dur => (
               <button
                 key={dur}
                 onClick={() => setSlotDuration(dur as SlotDuration)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all whitespace-nowrap ${
                   slotDuration === dur
                     ? 'bg-primary-soft text-primary'
                     : 'bg-surface-hover text-text-muted hover:text-text-main border border-surface-border'
@@ -157,9 +157,9 @@ export const FreeTimeSlotsView: React.FC = () => {
       </div>
 
       {/* RESULTS */}
-      <div className="space-y-4">
+      <div className="space-y-2.5">
         {results.length === 0 ? (
-          <div className="py-12 text-center text-text-muted text-sm font-bold bg-surface rounded-2xl border border-surface-border border-dashed">
+          <div className="py-8 text-center text-text-muted text-xs font-bold bg-surface rounded-xl border border-surface-border border-dashed">
             {language === 'ar' ? 'لا يوجد أوقات فارغة' : language === 'de' ? 'Keine freie Zeit gefunden.' : 'No free time found for the selected period.'}
           </div>
         ) : (
@@ -169,29 +169,29 @@ export const FreeTimeSlotsView: React.FC = () => {
             const title = isToday ? 'Today' : dateObj.toLocaleDateString(language, { weekday: 'long', month: 'short', day: 'numeric' });
             
             return (
-              <div key={idx} className="bg-surface rounded-2xl border border-surface-border overflow-hidden shadow-sm">
-                <div className="bg-surface-hover px-4 py-3 border-b border-surface-border flex items-center justify-between">
-                  <h3 className="text-sm font-black text-text-main">{title}</h3>
-                  <span className="text-[10px] font-bold text-text-muted bg-surface px-2 py-1 rounded-md border border-surface-border">
+              <div key={idx} className="bg-surface rounded-xl border border-surface-border overflow-hidden shadow-2xs">
+                <div className="bg-surface-hover px-3 py-2 border-b border-surface-border flex items-center justify-between">
+                  <h3 className="text-xs font-black text-text-main">{title}</h3>
+                  <span className="text-[10px] font-bold text-text-muted bg-surface px-2 py-0.5 rounded-md border border-surface-border">
                     {result.slots.length} {displayMode === 'periods' ? (language === 'ar' ? 'فترات' : 'Periods') : (language === 'ar' ? 'مواعيد' : 'Slots')}
                   </span>
                 </div>
                 
-                <div className="p-4">
+                <div className="p-2.5">
                   {result.slots.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-text-muted font-bold">{language === 'ar' ? 'محجوز بالكامل أو يوم عطلة.' : language === 'de' ? 'Ausgebucht oder freier Tag.' : 'Fully booked or off day.'}</div>
+                    <div className="text-center py-4 text-xs text-text-muted font-bold">{language === 'ar' ? 'محجوز بالكامل أو يوم عطلة.' : language === 'de' ? 'Ausgebucht oder freier Tag.' : 'Fully booked or off day.'}</div>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                       {result.slots.map((slot, sIdx) => (
-                        <div key={sIdx} className="flex items-center justify-between p-3 rounded-xl border border-primary-border/30 bg-primary-soft/20 hover:bg-primary-soft/40 transition-colors">
-                          <div className="flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-primary" />
-                            <span className="text-sm font-bold text-text-main font-mono">
+                        <div key={sIdx} className="flex items-center justify-between p-2 rounded-lg border border-primary-border/30 bg-primary-soft/20 hover:bg-primary-soft/40 transition-colors">
+                          <div className="flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-primary" />
+                            <span className="text-xs font-bold text-text-main font-mono">
                               {formatTimeDisplay(slot.start, language)}
                             </span>
                           </div>
                           <span className="text-text-muted text-xs">→</span>
-                          <span className="text-sm font-bold text-text-main font-mono">
+                          <span className="text-xs font-bold text-text-main font-mono">
                             {formatTimeDisplay(slot.end, language)}
                           </span>
                         </div>

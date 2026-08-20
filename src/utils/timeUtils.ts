@@ -1,4 +1,5 @@
-import { WeeklyWorkingHours, Lesson, Group } from '../types';
+import { WeeklyWorkingHours, Lesson, Group, TeacherProfile } from '../types';
+import { getSchoolSettings, calculatePeriodsTimings, parseTimeToMinutes } from './schoolUtils';
 
 export const parseTime = (time: string): number => {
   const [h, m] = time.split(':').map(Number);
@@ -84,15 +85,77 @@ export const getBookedSlotsForDate = (dateStr: string, lessons: Lesson[], groups
   }
   
   return merged;
-}
+};
 
-export const getFreePeriodsForDate = (dateStr: string, lessons: Lesson[], groups: Group[], weeklyWorkingHours: WeeklyWorkingHours): TimeSlot[] => {
+/**
+ * Computes the school day end time for a given day (in minutes from midnight).
+ * Returns 0 if school is not active on this day.
+ */
+export const getEffectiveSchoolEndForDay = (
+  dayIndex: number | string,
+  profile?: TeacherProfile | null
+): number => {
+  if (!profile) return 0;
+  const schoolSettings = getSchoolSettings(profile);
+  const dayKey = String(dayIndex);
+  const presence = schoolSettings.presence[dayKey];
+
+  if (!presence || !presence.active) {
+    return 0;
+  }
+
+  // Check presence departure time
+  const departureMinutes = presence.departureTime ? parseTimeToMinutes(presence.departureTime) : 0;
+
+  // Check last period or scheduled period end time
+  const daySchedule = schoolSettings.schedule[dayKey] || [];
+  const calculatedPeriods = calculatePeriodsTimings(schoolSettings.periodSettings);
+  
+  let lastLessonEndMinutes = 0;
+  const filledPeriods = daySchedule.filter(r => (r.className || r.subjectName));
+  
+  if (filledPeriods.length > 0) {
+    filledPeriods.forEach(r => {
+      const timing = calculatedPeriods.find(p => p.periodNumber === r.periodNumber);
+      if (timing) {
+        lastLessonEndMinutes = Math.max(lastLessonEndMinutes, parseTimeToMinutes(timing.endTime));
+      }
+    });
+  }
+
+  return Math.max(departureMinutes, lastLessonEndMinutes);
+};
+
+/**
+ * Calculates free continuous periods for a specific date.
+ * If the user has an active school schedule on that day, the free time start automatically starts
+ * right after the school day ends (effective departure/last period).
+ */
+export const getFreePeriodsForDate = (
+  dateStr: string,
+  lessons: Lesson[],
+  groups: Group[],
+  weeklyWorkingHours: WeeklyWorkingHours,
+  profile?: TeacherProfile | null
+): TimeSlot[] => {
   const dayIndex = getDayOfWeekIndex(dateStr) as keyof WeeklyWorkingHours;
   const hours = weeklyWorkingHours[dayIndex];
   if (!hours || hours.isOff) return [];
   
-  const workStartMin = parseTime(hours.startTime);
+  let workStartMin = parseTime(hours.startTime);
   const workEndMin = parseTime(hours.endTime);
+
+  // If school is active on this day, automatically start free time right after school ends
+  if (profile) {
+    const schoolEndMin = getEffectiveSchoolEndForDay(dayIndex, profile);
+    if (schoolEndMin > 0) {
+      workStartMin = schoolEndMin;
+    }
+  }
+  
+  if (workStartMin >= workEndMin) {
+    return [];
+  }
   
   const booked = getBookedSlotsForDate(dateStr, lessons, groups);
   
@@ -111,7 +174,7 @@ export const getFreePeriodsForDate = (dateStr: string, lessons: Lesson[], groups
   }
   
   return free;
-}
+};
 
 export const getBookableSlots = (freePeriods: TimeSlot[], slotDurationMinutes: number): TimeSlot[] => {
   const bookable: TimeSlot[] = [];

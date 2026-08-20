@@ -55,10 +55,10 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
   // SUGGEST AVAILABLE SLOTS based on Working Hours & existing schedule
   const availableSlots = React.useMemo(() => {
     if (!profile.weeklyWorkingHours) return [];
-    const freePeriods = getFreePeriodsForDate(date, lessons, groups, profile.weeklyWorkingHours);
+    const freePeriods = getFreePeriodsForDate(date, lessons, groups, profile.weeklyWorkingHours, profile);
     const bookable = getBookableSlots(freePeriods, durationMinutes);
     return bookable.map(b => b.start);
-  }, [date, lessons, groups, profile.weeklyWorkingHours, durationMinutes]);
+  }, [date, lessons, groups, profile.weeklyWorkingHours, profile, durationMinutes]);
 
   // Load draft on mount
   useEffect(() => {
@@ -119,29 +119,29 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
     >
       <div 
         onClick={(e) => e.stopPropagation()} 
-        className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-md shadow-2xl overflow-hidden animate-scale-up font-sans"
+        className="bg-surface border border-surface-border rounded-t-[20px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-md shadow-xl overflow-hidden animate-scale-up font-sans"
       >
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+        <div className="w-10 h-1 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2 mb-1 sm:hidden shrink-0" />
         {/* Header */}
-        <div className="bg-gradient-to-r from-primary to-primary-hover p-5 text-white flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-surface/20 rounded-xl">
-              <Calendar className="w-5 h-5 text-white" />
+        <div className="bg-gradient-to-r from-primary to-primary-hover p-3.5 text-white flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-surface/20 rounded-lg">
+              <Calendar className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h2 className="text-base font-bold">{t('schedule_lesson_title')}</h2>
-              <p className="text-xs text-primary-soft">Weekly Recurring & Google Calendar Sync</p>
+              <h2 className="text-sm font-bold">{t('schedule_lesson_title')}</h2>
+              <p className="text-[10px] text-primary-soft">Weekly Recurring & Google Calendar Sync</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-surface/20 rounded-full transition-colors cursor-pointer">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 hover:bg-surface/20 rounded-lg transition-colors cursor-pointer">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-3.5 space-y-2.5 max-h-[75vh] overflow-y-auto">
           {/* Select Group */}
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <label className="text-xs font-bold text-text-main">
               Gruppe / Kurs *
             </label>
@@ -156,7 +156,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
                   if (g.lessonDurationMinutes) setDurationMinutes(g.lessonDurationMinutes);
                 }
               }}
-              className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none"
+              className="w-full px-3 py-1.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-lg text-xs font-semibold focus:outline-none"
             >
               {groups.map(g => (
                 <option key={g.id} value={g.id}>
@@ -167,14 +167,14 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
           </div>
 
           {/* Individual Student (Optional if group lesson) */}
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <label className="text-xs font-bold text-text-main">
               Einzelner Schüler (Optional)
             </label>
             <select
               value={studentId}
               onChange={(e) => setStudentId(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none"
+              className="w-full px-3 py-1.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-lg text-xs font-semibold focus:outline-none"
             >
               <option value="">-- Gesamte Gruppe ({selectedGroup?.name}) --</option>
               {groupStudents.map(s => (
@@ -185,71 +185,71 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
 
           {/* Date & Time */}
           <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-text-main">Startdatum (Start Date)</label>
+            <div className="space-y-0.5">
+              <label className="text-xs font-bold text-text-main">Startdatum</label>
               <input
                 type="date"
                 required
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="w-full px-3 py-2 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-mono font-bold"
+                className="w-full px-2.5 py-1.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-lg text-xs font-mono font-bold"
               />
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-text-main">Uhrzeit (Time)</label>
+            <div className="space-y-0.5">
+              <label className="text-xs font-bold text-text-main">Uhrzeit</label>
               <input
                 type="time"
                 required
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
-                className="w-full px-3 py-2 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-mono font-bold"
+                className="w-full px-2.5 py-1.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-lg text-xs font-mono font-bold"
               />
             </div>
           </div>
 
           {/* WEEKLY RECURRING PANEL */}
-          <div className="p-3 bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-lg space-y-2.5">
+          <div className="p-2.5 bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-lg space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-primary dark:text-primary flex items-center gap-1.5">
-                <Repeat className="w-4 h-4 text-primary dark:text-primary" />
-                <span>Wöchentlich Wiederholen (Weekly Recurring)</span>
+                <Repeat className="w-3.5 h-3.5 text-primary dark:text-primary" />
+                <span>Wöchentlich Wiederholen</span>
               </span>
 
-              <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-primary dark:text-primary">
+              <label className="flex items-center gap-1 cursor-pointer text-xs font-bold text-primary dark:text-primary">
                 <input
                   type="checkbox"
                   checked={isWeeklyRecurring}
                   onChange={(e) => setIsWeeklyRecurring(e.target.checked)}
-                  className="rounded text-primary focus:ring-primary w-4 h-4"
+                  className="rounded text-primary focus:ring-primary w-3.5 h-3.5"
                 />
                 <span>Aktiv</span>
               </label>
             </div>
 
             {isWeeklyRecurring && (
-              <div className="space-y-1.5 pt-1">
-                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">
-                  Anzahl der Wochen (Weeks Duration):
+              <div className="space-y-1 pt-0.5">
+                <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 block">
+                  Anzahl der Wochen:
                 </label>
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-3 gap-1">
                   {[4, 8, 12].map((num) => (
                     <button
                       key={num}
                       type="button"
                       onClick={() => setRepeatWeeks(num)}
-                      className={`py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                      className={`py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
                         repeatWeeks === num
                           ? 'bg-primary text-white shadow-2xs'
                           : 'bg-surface dark:bg-slate-800 text-text-main border border-surface-border dark:border-surface-border-soft'
                       }`}
                     >
-                      {num} Wochen ({num} Termine)
+                      {num} W ({num}x)
                     </button>
                   ))}
                 </div>
-                <p className="text-[10px] text-primary dark:text-primary font-semibold italic mt-1">
-                  ✓ Lektionen werden jeden {new Date(date).toLocaleDateString('de-DE', { weekday: 'long' })} um {time} Uhr automatisch eingetragen.
+                <p className="text-[9.5px] text-primary dark:text-primary font-semibold italic mt-0.5">
+                  ✓ Jeden {new Date(date).toLocaleDateString('de-DE', { weekday: 'short' })} um {time} Uhr.
                 </p>
               </div>
             )}
@@ -257,32 +257,32 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
 
           {/* CONFLICT DETECTION WARNING */}
           {hasConflict && (
-            <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg p-3 flex items-start gap-2 text-xs text-red-800 dark:text-red-300">
-              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+            <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg p-2.5 flex items-start gap-1.5 text-xs text-red-800 dark:text-red-300">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
               <div>
-                <p className="font-bold">Terminkonflikt erkannt! (Schedule Conflict)</p>
-                <p className="text-[11px] text-red-700 dark:text-red-400 mt-0.5">
-                  Es gibt bereits eine andere Lektion um {time} Uhr an diesem Tag. Bitte wählen Sie eine freie Zeit aus.
+                <p className="font-bold">Terminkonflikt erkannt!</p>
+                <p className="text-[10px] text-red-700 dark:text-red-400 mt-0.5">
+                  Es gibt bereits eine andere Lektion um {time} Uhr an diesem Tag.
                 </p>
               </div>
             </div>
           )}
 
           {/* SUGGESTED TIME SLOTS */}
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <label className="text-xs font-bold text-text-main flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5 text-primary" />
-              <span>Freie Zeitfenster (Suggested Available Slots):</span>
+              <Sparkles className="w-3 h-3 text-primary" />
+              <span>Freie Zeitfenster:</span>
             </label>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1">
               {availableSlots.map(slot => (
                 <button
                   key={slot}
                   type="button"
                   onClick={() => setTime(slot)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border transition-all cursor-pointer ${
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border transition-all cursor-pointer ${
                     time === slot
-                      ? 'bg-primary text-white border-primary shadow-sm'
+                      ? 'bg-primary text-white border-primary shadow-2xs'
                       : 'bg-surface-hover text-text-main hover:bg-surface border-surface-border'
                   }`}
                 >
@@ -295,11 +295,11 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
           {/* Type selector */}
           <div className="space-y-1">
             <label className="text-xs font-bold text-text-main">Lesson Type</label>
-            <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="grid grid-cols-2 gap-1.5 text-xs">
               <button
                 type="button"
                 onClick={() => setType('online')}
-                className={`py-2 rounded-xl font-bold border ${
+                className={`py-1.5 rounded-lg font-bold border ${
                   type === 'online' ? 'bg-primary text-white' : 'bg-background text-slate-700'
                 }`}
               >
@@ -308,7 +308,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
               <button
                 type="button"
                 onClick={() => setType('offline')}
-                className={`py-2 rounded-xl font-bold border ${
+                className={`py-1.5 rounded-lg font-bold border ${
                   type === 'offline' ? 'bg-primary text-white' : 'bg-background text-slate-700'
                 }`}
               >
@@ -321,7 +321,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
           <button
             type="submit"
             disabled={hasConflict}
-            className={`w-full font-bold text-xs py-3 rounded-lg shadow-md transition-all cursor-pointer ${
+            className={`w-full font-bold text-xs py-2.5 rounded-lg shadow-2xs transition-all cursor-pointer ${
               hasConflict
                 ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
                 : 'bg-primary hover:bg-primary-hover text-white'

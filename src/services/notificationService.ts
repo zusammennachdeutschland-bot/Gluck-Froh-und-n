@@ -5,6 +5,43 @@ import {
   ScheduledNotificationItem, NotificationPriority, NotificationSound 
 } from '../types';
 import { formatLocalDate } from '../utils/timeUtils';
+import { getSchoolSettings, calculatePeriodsTimings } from '../utils/schoolUtils';
+
+// Helper to construct Date object for Africa/Cairo wall clock times
+export function getCairoDateWithTime(dateStr: string, timeStr: string): Date {
+  const localDateStr = `${dateStr}T${timeStr.padStart(5, '0')}:00`;
+  const targetDate = new Date(localDateStr);
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Africa/Cairo',
+      year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', second: 'numeric',
+      hour12: false
+    });
+    const parts = formatter.formatToParts(targetDate);
+    const cairoParts: Record<string, number> = {};
+    parts.forEach(p => {
+      if (p.type !== 'literal') {
+        cairoParts[p.type] = parseInt(p.value, 10);
+      }
+    });
+    const cairoDate = new Date(
+      cairoParts.year,
+      cairoParts.month - 1,
+      cairoParts.day,
+      cairoParts.hour === 24 ? 0 : cairoParts.hour,
+      cairoParts.minute,
+      cairoParts.second || 0
+    );
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const [hrs, mins] = timeStr.split(':').map(Number);
+    const desiredDate = new Date(y, m - 1, d, hrs, mins, 0);
+    const diffMs = desiredDate.getTime() - cairoDate.getTime();
+    return new Date(targetDate.getTime() + diffMs);
+  } catch (err) {
+    return targetDate;
+  }
+}
 
 export interface NotificationActionHandler {
   onEndLesson?: () => void;
@@ -516,7 +553,9 @@ export const rebuildAllNotificationSchedules = async (
   lessons: Lesson[],
   groups: Group[],
   students: Student[],
-  payments: PaymentRecord[]
+  payments: PaymentRecord[],
+  profile?: any,
+  language?: string
 ): Promise<{ count: number; nextScheduledTime: string | null }> => {
   // 1. First, clear all existing non-timer pending notifications
   await cancelAllScheduledNotifications();
@@ -541,7 +580,7 @@ export const rebuildAllNotificationSchedules = async (
     body: string,
     scheduleDate: Date,
     channelId: string,
-    category: 'lessonReminder' | 'lessonStart' | 'paymentDue' | 'dailySummary' | 'attendanceReminder',
+    category: 'lessonReminder' | 'lessonStart' | 'paymentDue' | 'dailySummary' | 'attendanceReminder' | 'schoolLessonReminder',
     extraData: Record<string, any> = {}
   ) => {
     const atEpoch = scheduleDate.getTime();
@@ -707,6 +746,57 @@ export const rebuildAllNotificationSchedules = async (
       'daily_summary',
       'dailySummary'
     );
+  }
+
+  // -------------------------------------------------------------
+  // D. SCHOOL LESSON REMINDERS (5 MINUTES BEFORE)
+  // -------------------------------------------------------------
+  const schoolConfig = settings.schoolLessonReminder || { enabled: true, sound: 'beep', priority: 'high' };
+  if (schoolConfig.enabled && profile) {
+    const schoolSettings = getSchoolSettings(profile);
+    const periods = calculatePeriodsTimings(schoolSettings.periodSettings);
+    
+    for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+      const futureDate = new Date(now + dayOffset * 24 * 60 * 60 * 1000);
+      const dayKey = String(futureDate.getDay());
+      const isDayActive = schoolSettings.presence[dayKey]?.active;
+      const todayRecords = schoolSettings.schedule[dayKey] || [];
+      const scheduledRecords = todayRecords.filter(r => r.subjectName || r.className);
+      
+      if (isDayActive && scheduledRecords.length > 0) {
+        const dateStr = formatLocalDate(futureDate); // YYYY-MM-DD
+        
+        for (const record of scheduledRecords) {
+          const period = periods.find(p => p.periodNumber === record.periodNumber);
+          if (!period) continue;
+          
+          const startTime = period.startTime; // "HH:MM"
+          const lessonStartDate = getCairoDateWithTime(dateStr, startTime);
+          
+          // Reminder should be 5 minutes before start
+          const reminderDate = new Date(lessonStartDate.getTime() - 5 * 60 * 1000);
+          
+          if (reminderDate.getTime() > now) {
+            const labelSubject = record.subjectName || '';
+            const labelClass = record.className || '';
+            const displayTitle = language === 'ar' 
+              ? `🏫 الحصة القادمة بعد 5 دقائق` 
+              : (language === 'de' ? `🏫 Nächste Stunde in 5 Min.` : `🏫 Next Lesson in 5 mins`);
+            const displayBody = `${labelClass}${labelSubject ? ` · ${labelSubject}` : ''}\n${period.startTime} - ${period.endTime}`;
+            
+            addNotification(
+              generateDeterministicId(`school_rem_${dayKey}_${record.periodNumber}_${dateStr}`, 40000),
+              displayTitle,
+              displayBody,
+              reminderDate,
+              'lessons_reminders',
+              'schoolLessonReminder',
+              { className: labelClass, subjectName: labelSubject }
+            );
+          }
+        }
+      }
+    }
   }
 
   // -------------------------------------------------------------

@@ -210,10 +210,10 @@ export const StudentsView: React.FC = () => {
       </div>
 
       {/* Segment Switcher Tabs */}
-      <div className="grid grid-cols-3 gap-1.5 bg-surface-hover p-1 rounded-lg text-xs font-bold">
+      <div className="grid grid-cols-3 gap-1 bg-surface-hover p-1 rounded-lg text-xs font-bold">
         <button
           onClick={() => setActiveSegment('students')}
-          className={`py-2 rounded-xl transition-all cursor-pointer ${
+          className={`py-1.5 rounded-lg transition-all cursor-pointer ${
             activeSegment === 'students'
               ? 'bg-surface text-primary dark:text-primary shadow-xs'
               : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
@@ -224,7 +224,7 @@ export const StudentsView: React.FC = () => {
 
         <button
           onClick={() => setActiveSegment('groups')}
-          className={`py-2 rounded-xl transition-all cursor-pointer ${
+          className={`py-1.5 rounded-lg transition-all cursor-pointer ${
             activeSegment === 'groups'
               ? 'bg-surface text-primary dark:text-primary shadow-xs'
               : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
@@ -235,7 +235,7 @@ export const StudentsView: React.FC = () => {
 
         <button
           onClick={() => setActiveSegment('archive')}
-          className={`py-2 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer ${
+          className={`py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
             activeSegment === 'archive'
               ? 'bg-surface text-primary dark:text-primary shadow-xs'
               : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
@@ -247,31 +247,31 @@ export const StudentsView: React.FC = () => {
       </div>
 
       {/* Search & Grade Filter Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
         <div className="relative flex-1 w-full">
-          <Search className="w-4 h-4 absolute left-3 top-3 text-text-muted/70" />
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-text-muted/70" />
           <input
             type="text"
             placeholder={activeSegment === 'students' ? t('students_search_placeholder') : t('students_search_group_placeholder')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-8 py-2 bg-surface border border-surface-border rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full pl-8 pr-7 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary"
           />
           {searchTerm && (
             <button
               onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-2.5 text-text-muted/70 hover:text-slate-600 dark:hover:text-primary cursor-pointer"
+              className="absolute right-2 top-2 text-text-muted/70 hover:text-slate-600 dark:hover:text-primary cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center gap-1.5 w-full sm:w-auto">
           <select
             value={selectedGrade}
             onChange={(e) => setSelectedGrade(e.target.value)}
-            className="flex-1 sm:flex-initial px-3 py-2 bg-surface border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+            className="flex-1 sm:flex-initial px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
           >
             <option value="all">{t('students_all_grades')}</option>
             {Array.from({ length: 12 }, (_, i) => `Grade ${i + 1}`).map(g => (
@@ -283,7 +283,7 @@ export const StudentsView: React.FC = () => {
             <select
               value={studentSortBy}
               onChange={(e) => setStudentSortBy(e.target.value as any)}
-              className="flex-1 sm:flex-initial px-3 py-2 bg-surface border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+              className="flex-1 sm:flex-initial px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
             >
               <option value="name">ترتيب: أبجدي (Name)</option>
               <option value="attendance">ترتيب: نسبة الحضور (Attendance)</option>
@@ -301,7 +301,7 @@ export const StudentsView: React.FC = () => {
                 setSelectedGroupDay('all');
                 setStudentSortBy('name');
               }}
-              className="px-2.5 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0"
+              className="px-2 py-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-text-main rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
               title={t('students_reset_filters')}
             >
               {t('students_reset_filters')}
@@ -316,7 +316,7 @@ export const StudentsView: React.FC = () => {
           <select
             value={selectedGroupDay}
             onChange={(e) => setSelectedGroupDay(e.target.value)}
-            className="w-full bg-surface border border-surface-border text-text-main text-xs font-bold rounded-xl px-4 py-2.5 appearance-none focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-2xs cursor-pointer"
+            className="w-full bg-surface border border-surface-border text-text-main text-xs font-bold rounded-lg px-3 py-1.5 appearance-none focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-2xs cursor-pointer"
           >
             <option value="all">{t('students_all_days') || 'All Days'}</option>
             <option value="today">{t('students_today') || 'Today'} ({GERMAN_WEEKDAYS.find(w => w.dayNum === new Date().getDay())?.short})</option>
@@ -327,28 +327,28 @@ export const StudentsView: React.FC = () => {
             ))}
           </select>
           <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-            <ChevronDown className="w-4 h-4 text-text-muted" />
+            <ChevronDown className="w-3.5 h-3.5 text-text-muted" />
           </div>
         </div>
       )}
 
       {/* STUDENTS LIST SEGMENT */}
       {activeSegment === 'students' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 sm:gap-2.5">
           {sortedStudents.length === 0 ? (
-            <div className="bg-surface border border-surface-border rounded-lg p-5 text-center space-y-2">
-              <p className="text-sm font-bold text-text-main">
+            <div className="bg-surface border border-surface-border rounded-lg p-4 text-center space-y-2">
+              <p className="text-xs font-bold text-text-main">
                 {t('auto_no_students_yet')}
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="text-[11px] text-slate-500">
                 {t('auto_add_your_first_student_to_trac')}
               </p>
               <button
                 type="button"
                 onClick={() => setIsAddStudentModalOpen(true)}
-                className="mt-3 px-4 py-2 bg-primary hover:bg-primary-hover text-white font-bold text-xs rounded-xl shadow-xs transition-all inline-flex items-center gap-1.5 cursor-pointer active:scale-95 hover:shadow-lg hover:shadow-primary/30"
+                className="mt-2 px-3 py-1.5 bg-primary hover:bg-primary-hover text-white font-bold text-xs rounded-lg shadow-xs transition-all inline-flex items-center gap-1.5 cursor-pointer active:scale-95 hover:shadow-lg hover:shadow-primary/30"
               >
-                <UserPlus className="w-4 h-4" />
+                <UserPlus className="w-3.5 h-3.5" />
                 <span>{t('students_add_student')}</span>
               </button>
             </div>
@@ -360,44 +360,44 @@ export const StudentsView: React.FC = () => {
               return (
                 <div
                   key={`${student.id}_${idx}`}
-                  className="bg-surface border border-surface-border/60 dark:border-surface-border rounded-xl p-4 shadow-2xs hover:shadow-xs active:scale-[0.99] active:bg-surface-hover transition-all flex items-center justify-between gap-3 cursor-pointer group relative"
+                  className="bg-surface border border-surface-border/60 dark:border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs hover:shadow-xs active:scale-[0.99] active:bg-surface-hover transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative"
                   onClick={() => {
                     setSelectedStudent(student);
                     setSelectedStudentTab('overview');
                   }}
                 >
-                  <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
                     <AvatarImage
                       name={student.name}
-                      className="w-11 h-11 rounded-xl text-sm font-black border border-slate-100 dark:border-surface-border shrink-0"
+                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg text-xs font-black border border-slate-100 dark:border-surface-border shrink-0"
                     />
 
                     <div className="min-w-0 space-y-0.5">
                       {/* PROMINENT STUDENT NAME */}
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <h3 className="text-sm font-black text-text-main group-hover:text-primary transition-colors tracking-tight truncate">
+                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                        <h3 className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors tracking-tight truncate">
                           {student.name}
                         </h3>
                         {student.certificateName && (
-                          <span className="text-[11px] font-bold text-text-muted/80 font-mono tracking-wide bg-slate-50 dark:bg-slate-800/60 px-1.5 py-0.5 rounded border border-surface-border-soft dark:border-slate-800 shrink-0" title={_t('الاسم بالإنجليزية للشهادات', 'English Name for Certificates', 'Englischer Name für Zertifikate')}>
+                          <span className="text-[10px] font-bold text-text-muted/80 font-mono tracking-wide bg-slate-50 dark:bg-slate-800/60 px-1 py-0.2 rounded border border-surface-border-soft dark:border-slate-800 shrink-0" title={_t('الاسم بالإنجليزية للشهادات', 'English Name for Certificates', 'Englischer Name für Zertifikate')}>
                             {student.certificateName}
                           </span>
                         )}
-                        <span className="text-[10px] font-black text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft/40 border border-primary-border/50 dark:border-primary-border/30 px-1.5 py-0.5 rounded-md shrink-0">
+                        <span className="text-[9px] font-black text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft/40 border border-primary-border/50 dark:border-primary-border/30 px-1.5 py-0.2 rounded shrink-0">
                           {student.grade}
                         </span>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-text-muted">
-                        <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1.5 py-0.5 rounded text-[10px]">
+                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-text-muted">
+                        <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1 py-0.2 rounded text-[9px]">
                           {studentGroup?.name || 'Gruppe A1'}
                         </span>
-                        <span className="text-[11px] text-text-muted/70">
-                          • {t('auto_parent')}: <span className="font-semibold text-slate-600 dark:text-slate-300">{student.parentPhone}</span>
+                        <span className="text-[10px] text-text-muted/70">
+                          • <span className="font-semibold text-slate-600 dark:text-slate-300">{student.parentPhone}</span>
                         </span>
                         {student.studentPhone && (
-                          <span className="text-[11px] text-text-muted/70">
-                            • {t('auto_student_20')}: <span className="font-semibold text-slate-600 dark:text-slate-300">{student.studentPhone}</span>
+                          <span className="text-[10px] text-text-muted/70">
+                            • <span className="font-semibold text-slate-600 dark:text-slate-300">{student.studentPhone}</span>
                           </span>
                         )}
                       </div>
@@ -563,49 +563,39 @@ export const StudentsView: React.FC = () => {
               <div
                 key={`${group.id}_${idx}`}
                 onClick={() => setSelectedGroup(group)}
-                className="bg-surface border border-surface-border/60 dark:border-surface-border rounded-xl p-4 shadow-2xs hover:shadow-xs active:scale-[0.99] active:bg-surface-hover transition-all flex items-center justify-between gap-3 cursor-pointer group"
+                className="bg-surface border border-surface-border/60 dark:border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs hover:shadow-xs active:scale-[0.99] active:bg-surface-hover transition-all flex items-center justify-between gap-2.5 cursor-pointer group"
               >
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className={`w-11 h-11 rounded-lg flex items-center justify-center shrink-0 border transition-all ${
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center shrink-0 border transition-all ${
                     group.type === 'online' 
                       ? 'bg-primary-soft border-primary-border dark:bg-primary-soft dark:border-primary-border text-primary dark:text-primary' 
                       : 'bg-primary-soft border-primary-border dark:bg-primary-soft dark:border-primary-border text-primary dark:text-primary'
                   }`}>
-                    {group.type === 'online' ? <Video className="w-5 h-5" /> : <MapPin className="w-5 h-5" />}
+                    {group.type === 'online' ? <Video className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
                   </div>
 
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <h3 className="text-sm sm:text-base font-black text-text-main group-hover:text-primary transition-colors break-words leading-snug">
+                  <div className="flex-1 min-w-0 space-y-0.5">
+                    <h3 className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors break-words leading-snug">
                       {group.name}
                     </h3>
 
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted">
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-text-muted">
                       {group.grade && (
-                        <span className="text-[10px] font-black text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft border border-primary-border/50 dark:border-primary-border px-1.5 py-0.5 rounded-md shrink-0">
+                        <span className="text-[9px] font-black text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft border border-primary-border/50 dark:border-primary-border px-1.5 py-0.2 rounded shrink-0">
                           {group.grade}
                         </span>
                       )}
-                      <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1.5 py-0.5 rounded text-[10px]">
+                      <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1 py-0.2 rounded text-[9px]">
                         {count} {t('daily_stats_students')}
                       </span>
-                      <span className="font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft border border-primary-border/30 dark:border-primary-border px-1.5 py-0.5 rounded text-[10px] font-mono">
+                      <span className="font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft border border-primary-border/30 dark:border-primary-border px-1 py-0.2 rounded text-[9px] font-mono">
                         {group.paymentModel === 'per_session'
                           ? `${group.pricePerSession || Math.round(group.monthlyPackagePrice / (group.sessionCount || 8))} ${profile.currency} / Sitzung`
                           : `${group.monthlyPackagePrice} ${profile.currency} / ${group.sessionCount} Sessions`}
                       </span>
-                      <span className="text-text-muted/70 text-[11px] truncate max-w-[150px] sm:max-w-[240px]" title={formatGroupScheduleDisplay(group, language)}>
+                      <span className="text-text-muted/70 text-[10px] truncate max-w-[130px] sm:max-w-[200px]" title={formatGroupScheduleDisplay(group, language)}>
                         • {formatGroupScheduleDisplay(group, language)}
                       </span>
-                      {group.type === 'online' && group.zoomLink && (
-                        <span className="text-[10px] font-mono text-primary truncate max-w-[160px]" title={group.zoomLink}>
-                          • Zoom: {group.zoomLink}
-                        </span>
-                      )}
-                      {group.type === 'offline' && group.address && (
-                        <span className="text-[10px] text-text-muted/80 truncate max-w-[160px]" title={group.address}>
-                          • {group.address}
-                        </span>
-                      )}
                     </div>
                   </div>
                 </div>
