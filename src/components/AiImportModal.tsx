@@ -105,6 +105,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
     students.forEach((st) => {
       addStudent({
         name: st.name,
+        certificateName: st.certificateName || '',
         studentPhone: st.studentPhone || '',
         parentPhone: st.parentPhone,
         parentName: '',

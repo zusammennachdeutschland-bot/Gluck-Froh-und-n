@@ -11,12 +11,12 @@ import { downloadCertificatePDF, shareCertificateWhatsApp } from '../../utils/ce
 import { 
   Award, Plus, Sparkles, Layers, Search, Filter, Eye, Download, Share2, 
   Users, CheckCircle2, Star, Calendar, ArrowRight, UserCheck, ShieldCheck,
-  Palette, Image as ImageIcon
+  Palette, Image as ImageIcon, Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export const CertificateCenter: React.FC = () => {
-  const { students, groups, certificates, _t, language } = useApp();
+  const { students, groups, certificates, deleteCertificate, _t, language } = useApp();
 
   const [activeSubTab, setActiveSubTab] = useState<'to_honor' | 'honored' | 'archive'>('to_honor');
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,6 +33,7 @@ export const CertificateCenter: React.FC = () => {
   const [selectedStudentForHonor, setSelectedStudentForHonor] = useState<string | undefined>(undefined);
   const [selectedCertForPreview, setSelectedCertForPreview] = useState<CertificateRecord | null>(null);
   const [editingCertificate, setEditingCertificate] = useState<CertificateRecord | undefined>(undefined);
+  const [certToDelete, setCertToDelete] = useState<CertificateRecord | null>(null);
 
   // Active certificates (excluding deleted ones if any)
   const safeCertificates = certificates || [];
@@ -45,9 +46,10 @@ export const CertificateCenter: React.FC = () => {
   const honoredStudentIds = new Set(activeCertificates.map(c => c.studentId));
   const totalHonoredStudents = safeStudents.filter(s => honoredStudentIds.has(s.id)).length;
 
-  // Filtered Students to Honor
+  // Filtered Students to Honor (Only those who DO NOT have any certificates yet)
   const studentsToHonor = safeStudents.filter(s => {
     if (s.status === 'archived') return false;
+    if (honoredStudentIds.has(s.id)) return false; // Hide students who already have a certificate
     if (selectedGroupFilter !== 'all' && s.groupId !== selectedGroupFilter) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -429,6 +431,17 @@ export const CertificateCenter: React.FC = () => {
                           >
                             <Share2 className="w-3.5 h-3.5" />
                           </button>
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              setCertToDelete(cert);
+                            }}
+                            className="p-1.5 text-text-muted hover:text-rose-500 transition-colors cursor-pointer"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -512,6 +525,13 @@ export const CertificateCenter: React.FC = () => {
                         >
                           <Share2 className="w-3.5 h-3.5" />
                         </button>
+                        <button
+                          onClick={() => setCertToDelete(cert)}
+                          className="p-2 bg-rose-500/10 text-rose-600 hover:bg-rose-600 hover:text-white rounded-xl transition-colors cursor-pointer"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -570,6 +590,47 @@ export const CertificateCenter: React.FC = () => {
           onClose={() => setSelectedCertForPreview(null)}
           onEdit={handleEditCertificate}
         />
+      )}
+
+      {certToDelete && (
+        <div onClick={() => setCertToDelete(null)} className="fixed inset-0 z-55 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div onClick={e => e.stopPropagation()} className="bg-surface dark:bg-slate-900 rounded-3xl p-5 max-w-sm w-full border border-surface-border dark:border-slate-800 shadow-2xl space-y-4 animate-scale-up">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6 animate-pulse" />
+            </div>
+
+            <div className="text-center space-y-1">
+              <h4 className="font-black text-base text-text-main">
+                {_t('حذف الشهادة؟', 'Delete Certificate?', 'Zertifikat löschen?')}
+              </h4>
+              <p className="text-xs text-text-muted">
+                {_t(
+                  `هل أنت متأكد من حذف شهادة الطالب "${certToDelete.studentName}"؟`,
+                  `Are you sure you want to delete the certificate for "${certToDelete.studentName}"?`,
+                  `Sind Sie sicher, dass Sie das Zertifikat für "${certToDelete.studentName}" löschen möchten?`
+                )}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                onClick={() => setCertToDelete(null)}
+                className="py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main rounded-xl font-bold text-xs transition-colors cursor-pointer text-center"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                onClick={() => {
+                  deleteCertificate(certToDelete.id);
+                  setCertToDelete(null);
+                }}
+                className="py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black text-xs transition-colors cursor-pointer text-center"
+              >
+                {_t('حذف', 'Delete', 'Löschen')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

@@ -455,6 +455,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       id,
       name,
       groupId,
+      certificateName: typeof s.certificateName === 'string' && s.certificateName.trim() ? s.certificateName.trim() : (!/[\u0600-\u06FF]/.test(name) ? name : ''),
       parentPhone: typeof s.parentPhone === 'string' ? s.parentPhone : '',
       studentPhone: typeof s.studentPhone === 'string' ? s.studentPhone : '',
       notes: typeof s.notes === 'string' ? s.notes : '',

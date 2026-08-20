@@ -35,6 +35,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
   // Editable Student Fields
   const [editName, setEditName] = useState(student.name);
+  const [editCertificateName, setEditCertificateName] = useState(student.certificateName || '');
   const [editGroupId, setEditGroupId] = useState(student.groupId);
   const [editGrade, setEditGrade] = useState<GradeLevel>(student.grade);
   const [editParentName, setEditParentName] = useState(student.parentName);
@@ -85,6 +86,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
     e.preventDefault();
     updateStudent(student.id, {
       name: editName,
+      certificateName: editCertificateName,
       groupId: editGroupId,
       grade: editGrade,
       parentName: editParentName,
@@ -115,9 +117,9 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   
 
   // Romanized student name representation or standard fallback
-  const studentEnglishFallback = student.notes?.split('\n')?.[0]?.length && student.notes.split('\n')[0].length < 30
+  const studentEnglishFallback = student.certificateName || (student.notes?.split('\n')?.[0]?.length && student.notes.split('\n')[0].length < 30
     ? student.notes.split('\n')[0]
-    : (student.name || '').split(' ').map(n => n ? n.charAt(0).toUpperCase() + n.slice(1) : '').join(' ');
+    : (student.name || '').split(' ').map(n => n ? n.charAt(0).toUpperCase() + n.slice(1) : '').join(' '));
 
   return (
     <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
@@ -776,18 +778,33 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
             {/* EDIT STUDENT DATA TAB */}
             {activeTab === 'edit' && (
               <form onSubmit={handleSaveStudent} className="space-y-3.5 pt-1">
-                {/* Student Name */}
-                <div className="space-y-1">
-                  <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                    Schüler Name (Student Name) *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
-                  />
+                {/* Student Name & English Name grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-black text-slate-700 dark:text-slate-300">
+                      {_t('اسم الطالب (Student Name) *', 'Student Name *', 'Schüler Name *')}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-black text-slate-700 dark:text-slate-300">
+                      {_t('الاسم بالإنجليزية للشهادات (English Name)', 'English Name for Certificates', 'Englischer Name für Zertifikate')}
+                    </label>
+                    <input
+                      type="text"
+                      value={editCertificateName}
+                      onChange={(e) => setEditCertificateName(e.target.value)}
+                      placeholder="e.g. Ahmed Ali"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white font-mono tracking-wide"
+                    />
+                  </div>
                 </div>
 
                 {/* Group & Grade */}

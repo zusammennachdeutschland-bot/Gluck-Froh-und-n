@@ -16,6 +16,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
   // Helper for inline translations
   
   const [name, setName] = useState('');
+  const [certificateName, setCertificateName] = useState('');
   const [groupId, setGroupId] = useState(groups[0]?.id || '');
   const [grade, setGrade] = useState<GradeLevel>('Grade 7');
   const [parentName, setParentName] = useState('');
@@ -31,6 +32,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
       const draft = await storage.getItem<any>('dl_draft_add_student');
       if (draft) {
         if (draft.name) setName(draft.name);
+        if (draft.certificateName) setCertificateName(draft.certificateName);
         if (draft.groupId) setGroupId(draft.groupId);
         if (draft.grade) setGrade(draft.grade);
         if (draft.parentName) setParentName(draft.parentName);
@@ -44,16 +46,20 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
 
   // Save draft on state changes
   useEffect(() => {
-    if (name || parentName || parentPhone || studentPhone || notes) {
+    if (name || certificateName || parentName || parentPhone || studentPhone || notes) {
       storage.setItem('dl_draft_add_student', {
-        name, groupId, grade, parentName, parentPhone, studentPhone, notes
+        name, certificateName, groupId, grade, parentName, parentPhone, studentPhone, notes
       });
     }
-  }, [name, groupId, grade, parentName, parentPhone, studentPhone, notes]);
+  }, [name, certificateName, groupId, grade, parentName, parentPhone, studentPhone, notes]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !groupId) return;
+    if (!certificateName.trim()) {
+      alert(_t('اسم الطالب بالإنجليزية مطلوب للشهادات!', 'Student English name is required for certificates!', 'Der englische Name des Schülers ist für Zertifikate erforderlich!'));
+      return;
+    }
     if (!parentPhone.trim()) {
       alert(t('auto_parent_phone_number_is_require_1'));
       return;
@@ -65,6 +71,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
 
     addStudent({
       name,
+      certificateName: certificateName.trim(),
       groupId,
       grade: selectedGroup?.grade || grade,
       parentName,
@@ -110,7 +117,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
           {/* Student Name */}
           <div className="space-y-1">
             <label className="text-xs font-bold text-text-main">
-              {t('auto_student_name')}
+              {t('auto_student_name')} <span className="text-rose-500">*</span>
             </label>
             <input
               type="text"
@@ -119,6 +126,22 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+
+          {/* English/Latin Name for Certificates */}
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-text-main flex items-center justify-between">
+              <span>{_t('اسم الطالب بالإنجليزية للشهادات', 'Student English Name (for Certificates)', 'Englischer Name des Schülers')}</span>
+              <span className="text-rose-500 text-[10px] font-black font-mono">* REQUIRED</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder={_t('مثال: Ahmed Ali', 'e.g. Ahmed Ali', 'z.B. Ahmed Ali')}
+              value={certificateName}
+              onChange={(e) => setCertificateName(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary font-mono tracking-wide"
             />
           </div>
 

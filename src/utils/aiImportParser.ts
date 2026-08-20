@@ -23,6 +23,7 @@ export interface ParsedGroupData {
 
 export interface ParsedStudentData {
   name: string;
+  certificateName: string;
   parentPhone: string;
   studentPhone?: string;
 }
@@ -48,8 +49,8 @@ zoom_link=https://zoom.us/j/123456789
 Thursday|20:00
 
 [STUDENTS]
-كندا|201200005170|201100000000
-جودي|201200005170|`;
+كندا|Kinda|201200005170|201100000000
+جودي|Judy|201200005170|`;
 
 const SAMPLE_MULTI_SCHEDULE_TEMPLATE = `[GROUP]
 name=Grade 10 Physics
@@ -65,8 +66,8 @@ Saturday|15:00
 Wednesday|19:00
 
 [STUDENTS]
-Omar Farouk|01098765432|01011112222
-Nour El Din|01123456789|`;
+عمر فاروق|Omar Farouk|01098765432|01011112222
+نور الدين|Nour El Din|01123456789|`;
 
 export const AI_PROMPT_TEMPLATE_AR = `أنت مساعد إدخال بيانات متخصص لنظام إدارة المجموعات والدروس التعليمية (Educational Management System Data-Entry Assistant).
 
@@ -102,14 +103,15 @@ export const AI_PROMPT_TEMPLATE_AR = `أنت مساعد إدخال بيانات 
 
 3. قائمة الطلاب [STUDENTS]:
 - طالب واحد على الأقل.
-- اسم الطالب (مطلوب).
+- اسم الطالب بالعربية (مطلوب).
+- اسم الطالب بالإنجليزية للشهادات (مطلوب - يرجى نقحرة وترجمة الاسم العربي بدقة واحترافية وبشكل أنيق مناسب لشهادات التقدير الأكاديمية بالإنجليزية/الألمانية، مثلاً: "أحمد علي" -> "Ahmed Ali").
 - رقم هاتف ولي الأمر (Parent Phone - مطلوب إجبارياً).
 - رقم هاتف الطالب (Student Phone - اختياري، يخزن عند توفره).
 - تنسيق سطر الطالب:
-  اسم الطالب|رقم ولي الأمر|رقم الطالب(اختياري)
+  الاسم بالعربية|الاسم بالإنجليزية للشهادات|رقم ولي الأمر|رقم الطالب(اختياري)
   مثال:
-  كندا|201200005170|201100000000
-  جودي|201200005170|
+  كندا|Kinda|201200005170|201100000000
+  جودي|Judy|201200005170|
 
 ==================== التعامل مع البيانات المفقودة ====================
 - إذا كانت هناك بيانات مطلوبة مفقودة، **لا تولد كود الاستيراد [GROUP]**.
@@ -136,14 +138,14 @@ zoom_link=https://zoom.us/example
 Thursday|20:00
 
 [STUDENTS]
-كندا|201200005170|201100000000
-جودي|201200005170|
+كندا|Kinda|201200005170|201100000000
+جودي|Judy|201200005170|
 \`\`\`
 
 قواعد التنسيق الشديدة:
 1. [GROUP] في سطر مستقل وكل حقل في سطر مستقل.
 2. [SCHEDULE] في سطر مستقل وكل موعد (اليوم|التوقيت) في سطر مستقل.
-3. [STUDENTS] في سطر مستقل وكل طالب (الاسم|رقم ولي الأمر|رقم الطالب_اختياري) في سطر مستقل.
+3. [STUDENTS] في سطر مستقل وكل طالب (الاسم بالعربية|الاسم بالإنجليزية للشهادات|رقم ولي الأمر|رقم الطالب_اختياري) في سطر مستقل.
 4. لا تضف أي نص أو شرح أو تعليقات داخل أو بعد مربع كود الاستيراد النهائي.`;
 
 export const AI_PROMPT_TEMPLATE_EN = `You are a strict Educational Management System Data-Entry Assistant.
@@ -180,14 +182,15 @@ LOCATION / VIRTUAL LINK RULES:
 
 3. STUDENTS LIST [STUDENTS]:
 - At least one student record.
-- Student Name (Required)
+- Student Name in Arabic or Native language (Required)
+- Student English/Latin Name for Certificates (Required - precise and prestigious transliteration of the native/Arabic name, e.g. "أحمد محمد" -> "Ahmed Mohamed")
 - Parent Phone Number (Required)
 - Student Phone Number (Optional - store if provided)
 - Student Line Format:
-  StudentName|ParentPhone|StudentPhone(Optional)
+  NativeName|EnglishName|ParentPhone|StudentPhone(Optional)
   Examples:
-  Kinda|201200005170|201100000000
-  Judy|201200005170|
+  كندا|Kinda|201200005170|201100000000
+  جودي|Judy|201200005170|
 
 ==================== MISSING INFORMATION BEHAVIOR ====================
 - If any required field is missing (e.g., missing Zoom link for online group, missing address for offline group, or missing parent phone for a student), DO NOT generate the [GROUP] import block.
@@ -214,8 +217,8 @@ zoom_link=https://zoom.us/example
 Thursday|20:00
 
 [STUDENTS]
-Kinda|201200005170|201100000000
-Judy|201200005170|
+كندا|Kinda|201200005170|201100000000
+جودي|Judy|201200005170|
 \`\`\``;
 
 export { SAMPLE_IMPORT_TEMPLATE, SAMPLE_MULTI_SCHEDULE_TEMPLATE };
@@ -591,34 +594,75 @@ export function parseAiImportText(text: string): AiImportResult {
     studentLineCount++;
 
     let studentName = '';
+    let certificateName = '';
     let parentPhone = '';
     let studentPhone = '';
 
     if (trimmedLine.includes('|')) {
       const parts = trimmedLine.split('|');
-      studentName = parts[0].trim();
-      parentPhone = parts[1] ? parts[1].trim() : '';
-      studentPhone = parts[2] ? parts[2].trim() : '';
+      studentName = parts[0] ? parts[0].trim() : '';
+      if (parts.length >= 4) {
+        certificateName = parts[1] ? parts[1].trim() : '';
+        parentPhone = parts[2] ? parts[2].trim() : '';
+        studentPhone = parts[3] ? parts[3].trim() : '';
+      } else {
+        const isLatin = !/[\u0600-\u06FF]/.test(studentName);
+        certificateName = isLatin ? studentName : '';
+        parentPhone = parts[1] ? parts[1].trim() : '';
+        studentPhone = parts[2] ? parts[2].trim() : '';
+      }
     } else if (trimmedLine.includes('-')) {
       const parts = trimmedLine.split('-');
       studentName = parts[0].trim();
-      parentPhone = parts[1] ? parts[1].trim() : '';
-      studentPhone = parts.slice(2).join('-').trim();
+      if (parts.length >= 4) {
+        certificateName = parts[1].trim();
+        parentPhone = parts[2].trim();
+        studentPhone = parts.slice(3).join('-').trim();
+      } else {
+        const isLatin = !/[\u0600-\u06FF]/.test(studentName);
+        certificateName = isLatin ? studentName : '';
+        parentPhone = parts[1] ? parts[1].trim() : '';
+        studentPhone = parts.slice(2).join('-').trim();
+      }
     } else if (trimmedLine.includes(':')) {
       const parts = trimmedLine.split(':');
       studentName = parts[0].trim();
-      parentPhone = parts[1] ? parts[1].trim() : '';
-      studentPhone = parts.slice(2).join(':').trim();
+      if (parts.length >= 4) {
+        certificateName = parts[1].trim();
+        parentPhone = parts[2].trim();
+        studentPhone = parts.slice(3).join(':').trim();
+      } else {
+        const isLatin = !/[\u0600-\u06FF]/.test(studentName);
+        certificateName = isLatin ? studentName : '';
+        parentPhone = parts[1] ? parts[1].trim() : '';
+        studentPhone = parts.slice(2).join(':').trim();
+      }
     } else if (trimmedLine.includes(',')) {
       const parts = trimmedLine.split(',');
       studentName = parts[0].trim();
-      parentPhone = parts[1] ? parts[1].trim() : '';
-      studentPhone = parts.slice(2).join(',').trim();
+      if (parts.length >= 4) {
+        certificateName = parts[1].trim();
+        parentPhone = parts[2].trim();
+        studentPhone = parts.slice(3).join(',').trim();
+      } else {
+        const isLatin = !/[\u0600-\u06FF]/.test(studentName);
+        certificateName = isLatin ? studentName : '';
+        parentPhone = parts[1] ? parts[1].trim() : '';
+        studentPhone = parts.slice(2).join(',').trim();
+      }
     } else if (trimmedLine.includes('\t')) {
       const parts = trimmedLine.split('\t');
       studentName = parts[0].trim();
-      parentPhone = parts[1] ? parts[1].trim() : '';
-      studentPhone = parts.slice(2).join('\t').trim();
+      if (parts.length >= 4) {
+        certificateName = parts[1].trim();
+        parentPhone = parts[2].trim();
+        studentPhone = parts.slice(3).join('\t').trim();
+      } else {
+        const isLatin = !/[\u0600-\u06FF]/.test(studentName);
+        certificateName = isLatin ? studentName : '';
+        parentPhone = parts[1] ? parts[1].trim() : '';
+        studentPhone = parts.slice(2).join('\t').trim();
+      }
     } else {
       // Try regex match for trailing phone number
       const phoneMatch = trimmedLine.match(/(.*?)\s+([+0-9\s-]{7,15})$/);
@@ -629,10 +673,16 @@ export function parseAiImportText(text: string): AiImportResult {
         studentName = trimmedLine;
         parentPhone = '';
       }
+      const isLatin = !/[\u0600-\u06FF]/.test(studentName);
+      certificateName = isLatin ? studentName : '';
     }
 
     if (!studentName) {
       errors.push(`Student name is empty on student line ${studentLineCount}.`);
+    }
+
+    if (!certificateName) {
+      errors.push(`English/Latin Certificate Name is required for student "${studentName || `Line ${studentLineCount}`}". Format: ArabicName|EnglishName|ParentPhone`);
     }
 
     if (!parentPhone) {
@@ -676,6 +726,7 @@ export function parseAiImportText(text: string): AiImportResult {
 
       parsedStudents.push({
         name: studentName,
+        certificateName: certificateName,
         parentPhone: parentPhone,
         studentPhone: studentPhone || undefined,
       });

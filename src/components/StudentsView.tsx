@@ -374,10 +374,15 @@ export const StudentsView: React.FC = () => {
 
                     <div className="min-w-0 space-y-0.5">
                       {/* PROMINENT STUDENT NAME */}
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <h3 className="text-sm font-black text-text-main group-hover:text-primary transition-colors tracking-tight truncate">
                           {student.name}
                         </h3>
+                        {student.certificateName && (
+                          <span className="text-[11px] font-bold text-text-muted/80 font-mono tracking-wide bg-slate-50 dark:bg-slate-800/60 px-1.5 py-0.5 rounded border border-surface-border-soft dark:border-slate-800 shrink-0" title={_t('الاسم بالإنجليزية للشهادات', 'English Name for Certificates', 'Englischer Name für Zertifikate')}>
+                            {student.certificateName}
+                          </span>
+                        )}
                         <span className="text-[10px] font-black text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft/40 border border-primary-border/50 dark:border-primary-border/30 px-1.5 py-0.5 rounded-md shrink-0">
                           {student.grade}
                         </span>

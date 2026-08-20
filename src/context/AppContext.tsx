@@ -572,12 +572,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const raw: CertificateRecord[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
-      if (seen.has(item.id)) {
-        const newId = `${item.id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
-        return { ...item, id: newId };
-      }
-      seen.add(item.id);
-      return item;
+      const id = item.id || `cert_${Date.now()}_${idx}`;
+      const migratedItem: CertificateRecord = {
+        ...item,
+        id: seen.has(id) ? `${id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}` : id,
+        updatedAt: item.updatedAt || Date.now(),
+        updatedByDeviceId: item.updatedByDeviceId || 'local',
+        originDeviceId: item.originDeviceId || 'local',
+        originRevision: item.originRevision || 1,
+        deleted: !!item.deleted
+      };
+      seen.add(migratedItem.id);
+      return migratedItem;
     });
   });
 
@@ -1337,7 +1343,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const updateStudent = (id: string, updates: Partial<Student>) => {
+    const existingStudent = students.find(s => s.id === id);
+    const oldName = existingStudent?.name;
+
     setStudents(prev => prev.map(s => (s.id === id ? wrapMutation({ ...s, ...updates } as Student) : s)));
+
+    // Propagate student name changes to other synced database collections (lessons and payments)
+    if (updates.name && oldName && updates.name !== oldName) {
+      const newName = updates.name;
+      
+      setLessons(prev => prev.map(l => {
+        const matchesId = l.studentId === id;
+        const matchesName = l.studentName === oldName;
+        if (matchesId || matchesName) {
+          let updatedTitle = l.title;
+          if (l.title && l.title.includes(oldName)) {
+            updatedTitle = l.title.replace(oldName, newName);
+          }
+          return wrapMutation({
+            ...l,
+            studentName: newName,
+            title: updatedTitle
+          } as Lesson);
+        }
+        return l;
+      }));
+
+      setPayments(prev => prev.map(p => {
+        const matchesId = p.studentId === id;
+        const matchesName = p.studentName === oldName;
+        if (matchesId || matchesName) {
+          let updatedTitle = p.title;
+          if (p.title && p.title.includes(oldName)) {
+            updatedTitle = p.title.replace(oldName, newName);
+          }
+          return wrapMutation({
+            ...p,
+            studentName: newName,
+            title: updatedTitle
+          } as PaymentRecord);
+        }
+        return p;
+      }));
+    }
   };
 
   const deleteStudent = (id: string) => {
@@ -2786,10 +2834,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     deleted: false
   }), [profile, syncState?.localDeviceId]);
 
-  const localDataRef = React.useRef({ groups, students, lessons, payments, notifications, todos, settings: [teacherSettingsRecord] });
+  const localDataRef = React.useRef({ groups, students, lessons, payments, notifications, todos, certificates, settings: [teacherSettingsRecord] });
   useEffect(() => {
-    localDataRef.current = { groups, students, lessons, payments, notifications, todos, settings: [teacherSettingsRecord] };
-  }, [groups, students, lessons, payments, notifications, todos, teacherSettingsRecord]);
+    localDataRef.current = { groups, students, lessons, payments, notifications, todos, certificates, settings: [teacherSettingsRecord] };
+  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord]);
 
   const syncDataSource: SyncDataSource = {
     getLocalData: () => localDataRef.current,
@@ -2802,6 +2850,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         case 'payments': setPayments(data); break;
         case 'notifications': setNotifications(data); break;
         case 'todos': setTodos(data); break;
+        case 'certificates': setCertificates(data); break;
         case 'settings': {
           if (Array.isArray(data) && data.length > 0 && data[0]?.profile) {
             const incomingProfile = data[0].profile;

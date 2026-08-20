@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Sparkles, Copy, Check, X, AlertCircle, FileSpreadsheet, CheckCircle2, Edit3, ArrowRight } from 'lucide-react';
+import { Sparkles, Copy, Check, X, AlertCircle, FileSpreadsheet, CheckCircle2, Edit3, ArrowRight, Search } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface AINameTransliterationModalProps {
@@ -10,9 +10,11 @@ interface AINameTransliterationModalProps {
 
 export const AINameTransliterationModal: React.FC<AINameTransliterationModalProps> = ({ onClose, groupId }) => {
   const { students, groups, updateStudentCertificateNamesBulk, updateStudentCertificateName, _t, language } = useApp();
+  const isRtl = language === 'ar';
 
   const [selectedGroupId, setSelectedGroupId] = useState<string>(groupId || 'all');
   const [filterMode, setFilterMode] = useState<'missing_only' | 'all'>('missing_only');
+  const [searchQuery, setSearchQuery] = useState('');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [aiResponseText, setAiResponseText] = useState('');
   const [parsedResults, setParsedResults] = useState<{ id: string; originalName: string; certificateName: string; matched: boolean }[] | null>(null);
@@ -24,6 +26,11 @@ export const AINameTransliterationModal: React.FC<AINameTransliterationModalProp
     if (s.status === 'archived') return false;
     if (selectedGroupId !== 'all' && s.groupId !== selectedGroupId) return false;
     if (filterMode === 'missing_only' && s.certificateName && s.certificateName.trim().length > 0) return false;
+    if (searchQuery.trim().length > 0) {
+      const q = searchQuery.toLowerCase();
+      const nameMatch = s.name.toLowerCase().includes(q) || (s.certificateName && s.certificateName.toLowerCase().includes(q));
+      if (!nameMatch) return false;
+    }
     return true;
   });
 
@@ -199,6 +206,18 @@ ${JSON.stringify(listToTransliterate, null, 2)}`;
         {/* Content */}
         <div className="p-5 overflow-y-auto space-y-5 text-xs sm:text-sm">
           
+          {/* Search Input */}
+          <div className="relative">
+            <Search className={`absolute ${isRtl ? 'right-3.5' : 'left-3.5'} top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted`} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder={_t('ابحث عن طالب بالاسم العربي أو الإنجليزي...', 'Search student by Arabic or English name...', 'Suche Schüler nach arabischem oder englischem Namen...')}
+              className={`w-full ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-2.5 bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-700 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary`}
+            />
+          </div>
+
           {/* Filters Bar */}
           <div className="flex flex-wrap items-center justify-between gap-2.5 p-3 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-surface-border dark:border-slate-800">
             <div className="flex items-center gap-2">

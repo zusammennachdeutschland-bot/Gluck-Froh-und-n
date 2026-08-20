@@ -247,6 +247,7 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
   // Existing profile consistency checks (missing parent phone, missing group details)
   const healthData = useMemo(() => {
     const studentsWithoutParentPhone: Student[] = [];
+    const studentsWithoutEnglishName: Student[] = [];
     const groupsWithoutSchedule: Group[] = [];
     const groupsWithoutPrice: Group[] = [];
     const groupsWithoutZoomLink: Group[] = [];
@@ -255,6 +256,9 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
     students.forEach(st => {
       if (!st.parentPhone || st.parentPhone.trim() === '') {
         studentsWithoutParentPhone.push(st);
+      }
+      if (!st.certificateName || st.certificateName.trim() === '') {
+        studentsWithoutEnglishName.push(st);
       }
     });
 
@@ -274,11 +278,12 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
       }
     });
 
-    const completeStudentsCount = students.length - studentsWithoutParentPhone.length;
+    const completeStudentsCount = Math.max(0, students.length - studentsWithoutParentPhone.length - studentsWithoutEnglishName.length);
 
     return {
       completeStudentsCount,
       studentsWithoutParentPhone,
+      studentsWithoutEnglishName,
       groupsWithoutSchedule,
       groupsWithoutPrice,
       groupsWithoutZoomLink,
@@ -737,6 +742,29 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
                 </div>
                 <div className="space-y-1 pl-6 rtl:pl-0 rtl:pr-6">
                   {healthData.studentsWithoutParentPhone.map(st => (
+                    <div key={st.id} className="flex items-center justify-between p-2 bg-surface-hover/50 rounded-lg text-xs">
+                      <span className="font-medium text-text-main">{st.name}</span>
+                      <button 
+                        onClick={() => setSelectedStudent(st)}
+                        className="px-3 py-1 bg-amber-500 text-white rounded-md font-bold hover:bg-amber-600 transition-colors cursor-pointer"
+                      >
+                        {_t('إصلاح', 'Fix Now')}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Missing English/Latin Certificate Name (Students) */}
+            {healthData.studentsWithoutEnglishName.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-bold text-xs">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>{healthData.studentsWithoutEnglishName.length} {_t('طلاب بدون اسم إنجليزي للشهادات', 'Students missing English name for certificates', 'Schülern fehlt der englische Name für Zertifikate')}</span>
+                </div>
+                <div className="space-y-1 pl-6 rtl:pl-0 rtl:pr-6">
+                  {healthData.studentsWithoutEnglishName.map(st => (
                     <div key={st.id} className="flex items-center justify-between p-2 bg-surface-hover/50 rounded-lg text-xs">
                       <span className="font-medium text-text-main">{st.name}</span>
                       <button 
