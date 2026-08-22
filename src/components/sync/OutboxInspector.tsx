@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { 
   Users, BookOpen, Calendar, CreditCard, Settings, 
   CheckSquare, ChevronDown, ChevronUp, RefreshCw, Send, 
-  Database, ArrowUpRight 
+  Database, ArrowUpRight, GraduationCap, AlertCircle, 
+  FileCheck, ClipboardList, Award 
 } from 'lucide-react';
 import { PendingOutboxSummary, PendingEntityItem } from '../../types';
+import { useApp } from '../../context/AppContext';
 
 interface OutboxInspectorProps {
   outbox: PendingOutboxSummary;
@@ -19,6 +21,7 @@ export const OutboxInspector: React.FC<OutboxInspectorProps> = ({
   isSyncing,
   id
 }) => {
+  const { _t } = useApp();
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
 
   const toggleSection = (section: string) => {
@@ -26,12 +29,17 @@ export const OutboxInspector: React.FC<OutboxInspectorProps> = ({
   };
 
   const categories = [
-    { key: 'students', label: 'Students', icon: Users },
-    { key: 'groups', label: 'Classes & Groups', icon: BookOpen },
-    { key: 'lessons', label: 'Lessons', icon: Calendar },
-    { key: 'payments', label: 'Payments', icon: CreditCard },
-    { key: 'settings', label: 'Teacher Settings', icon: Settings },
-    { key: 'todos', label: 'Todos & Tasks', icon: CheckSquare }
+    { key: 'students', label: _t('الطلاب والدروس الخاصة', 'Private Students & Pupils', 'Schüler'), icon: Users },
+    { key: 'groups', label: _t('المجموعات والفصول', 'Classes & Groups', 'Klassen & Gruppen'), icon: BookOpen },
+    { key: 'lessons', label: _t('الحصص والجدول', 'Lessons & Schedule', 'Stunden & Termine'), icon: Calendar },
+    { key: 'payments', label: _t('المدفوعات والفواتير', 'Payments & Invoices', 'Zahlungen'), icon: CreditCard },
+    { key: 'settings', label: _t('بيانات المعلم والإعدادات', 'Teacher Settings & Profile', 'Lehrer-Einstellungen'), icon: Settings },
+    { key: 'todos', label: _t('المهام وقائمة الأعمال', 'Todos & Tasks', 'Aufgaben'), icon: CheckSquare },
+    { key: 'certificates', label: _t('الشهادات والتكريمات', 'Certificates & Honors', 'Zertifikate'), icon: Award },
+    { key: 'hodStudents', label: _t('طلاب القسم الألماني (HOD)', 'HOD German Department Students', 'HOD Schüler'), icon: GraduationCap },
+    { key: 'hodComplaints', label: _t('شكاوى وملاحظات القسم (HOD)', 'HOD Complaints & Feedback', 'HOD Beschwerden'), icon: AlertCircle },
+    { key: 'hodActionPlans', label: _t('خطط تحسين الطلاب (HOD)', 'HOD Student Action Plans', 'HOD Förderpläne'), icon: FileCheck },
+    { key: 'hodVisits', label: _t('زيارات وتقييم المعلمين (HOD)', 'HOD Teacher Observation Visits', 'HOD Unterrichtsbesuche'), icon: ClipboardList }
   ];
 
   const totalPending = outbox?.totalCount ?? 0;

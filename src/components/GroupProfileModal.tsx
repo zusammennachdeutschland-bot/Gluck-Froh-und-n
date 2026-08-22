@@ -57,12 +57,6 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
 
     updateGroup(group.id, updatedGroupData);
 
-    // If new schedules were added, we might need to regenerate, but generating without a date might duplicate.
-    // For now, keep the existing logic that was generating here.
-    if (data.scheduleDays.length > 0) {
-      generateGroupScheduleLessons(group.id, data.scheduleDays, data.scheduleTime, 4, data.dayTimes, updatedGroupData);
-    }
-
     confetti({ particleCount: 50, spread: 40 });
     onClose();
   };

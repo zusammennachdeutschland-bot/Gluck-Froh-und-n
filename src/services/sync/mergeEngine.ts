@@ -138,6 +138,24 @@ export function mergeEntities<T extends SyncableRecord>(
   };
 }
 
+function mergeArrayById<T extends { id?: string }>(base: T[] = [], fallback: T[] = []): T[] {
+  const map = new Map<string, T>();
+  if (Array.isArray(fallback)) {
+    for (const item of fallback) {
+      if (item && item.id) map.set(item.id, item);
+    }
+  }
+  if (Array.isArray(base)) {
+    for (const item of base) {
+      if (item && item.id) {
+        const existing = map.get(item.id);
+        map.set(item.id, existing ? { ...existing, ...item } : item);
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
 /**
  * Merges teacher settings with field-level fallbacks so partial remote edits do not wipe local fields.
  */
@@ -184,7 +202,22 @@ export function mergeTeacherSettings(
       schedule: {
         ...fallbackRecord?.profile?.schoolSettings?.schedule,
         ...baseRecord?.profile?.schoolSettings?.schedule
-      }
+      },
+      teacherSchedules: {
+        ...fallbackRecord?.profile?.schoolSettings?.teacherSchedules,
+        ...baseRecord?.profile?.schoolSettings?.teacherSchedules
+      },
+      stageManagers: mergeArrayById(baseRecord?.profile?.schoolSettings?.stageManagers, fallbackRecord?.profile?.schoolSettings?.stageManagers),
+      stageSecretaries: mergeArrayById(baseRecord?.profile?.schoolSettings?.stageSecretaries, fallbackRecord?.profile?.schoolSettings?.stageSecretaries),
+      visitRecords: mergeArrayById(baseRecord?.profile?.schoolSettings?.visitRecords, fallbackRecord?.profile?.schoolSettings?.visitRecords),
+      bookletObservations: mergeArrayById(baseRecord?.profile?.schoolSettings?.bookletObservations, fallbackRecord?.profile?.schoolSettings?.bookletObservations),
+      weeklyPlanStatuses: mergeArrayById(baseRecord?.profile?.schoolSettings?.weeklyPlanStatuses, fallbackRecord?.profile?.schoolSettings?.weeklyPlanStatuses),
+      stageReports: mergeArrayById(baseRecord?.profile?.schoolSettings?.stageReports, fallbackRecord?.profile?.schoolSettings?.stageReports),
+      stageFollowUps: mergeArrayById(baseRecord?.profile?.schoolSettings?.stageFollowUps, fallbackRecord?.profile?.schoolSettings?.stageFollowUps),
+      teachers: mergeArrayById(baseRecord?.profile?.schoolSettings?.teachers, fallbackRecord?.profile?.schoolSettings?.teachers),
+      complaints: mergeArrayById(baseRecord?.profile?.schoolSettings?.complaints, fallbackRecord?.profile?.schoolSettings?.complaints),
+      actionPlans: mergeArrayById(baseRecord?.profile?.schoolSettings?.actionPlans, fallbackRecord?.profile?.schoolSettings?.actionPlans),
+      parentComplaints: mergeArrayById(baseRecord?.profile?.schoolSettings?.parentComplaints, fallbackRecord?.profile?.schoolSettings?.parentComplaints)
     } : undefined
   };
 

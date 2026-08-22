@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Home, Calendar, Users, MoreHorizontal, Wallet, BarChart2, Settings, Zap, History, Play, Clock, Award, BookOpen } from 'lucide-react';
+import { Home, Calendar, Users, MoreHorizontal, Wallet, BarChart2, Settings, Zap, History, Play, Clock, Award, BookOpen, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export const BottomNav: React.FC = () => {
@@ -37,6 +37,7 @@ export const BottomNav: React.FC = () => {
   const rightTabs = [
     { id: 'payments', label: t('nav_payments') || 'Zahlungen', icon: Wallet },
     { id: 'schoolSchedule', label: _t('المدرسة', 'School', 'Schule'), icon: BookOpen },
+    { id: 'hod', label: _t('القسم', 'HOD', 'Fachleiter'), icon: Layers },
   ];
 
   // Dynamic more tab metadata

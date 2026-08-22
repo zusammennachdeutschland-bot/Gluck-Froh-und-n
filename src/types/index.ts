@@ -103,6 +103,33 @@ export interface TeacherSettingsRecord extends SyncableRecord {
   syncedAt?: number;
 }
 
+export type SchoolNoteType = 'class' | 'student' | 'lesson';
+
+export interface SchoolNote extends SyncableRecord {
+  id: string;
+  type: SchoolNoteType;
+  text: string;
+  createdAt: string;
+  updatedAt: number;
+  updatedByDeviceId?: string;
+  originDeviceId?: string;
+  originRevision?: number;
+  deleted?: boolean;
+  version?: number;
+  tags?: string[];
+  pinned?: boolean;
+  
+  // Contextual linkages
+  classId?: string;
+  className?: string;
+  studentId?: string;
+  studentName?: string;
+  lessonId?: string;
+  subjectName?: string;
+  date?: string; // YYYY-MM-DD
+  periodNumber?: number;
+}
+
 export interface SyncDeltaPayload {
   header?: ProtocolHeader;
   senderDeviceId: string;
@@ -117,6 +144,11 @@ export interface SyncDeltaPayload {
     todos?: TodoItem[];
     settings?: TeacherSettingsRecord[];
     certificates?: CertificateRecord[];
+    hodStudents?: HodGermanStudent[];
+    hodComplaints?: Complaint[];
+    hodActionPlans?: StudentActionPlan[];
+    hodVisits?: VisitRecord[];
+    schoolNotes?: SchoolNote[];
   };
   metadata?: {
     totalEntitiesCount?: number;
@@ -286,10 +318,222 @@ export interface SchoolPeriodRecord {
   notes?: string;
 }
 
+export interface StageManager {
+  id: string;
+  name: string;
+  phone?: string;
+  gradeBand: string; // e.g. "Grades 1–3", "Grades 4–6", "Grades 7–9", "Grades 10–12"
+  assignedGradeGroups: string[]; // underlying grades
+}
+
+export interface StageSecretary {
+  id: string;
+  name: string;
+  phone?: string;
+  stageManagerId: string; // Linked Stage Manager ID
+  stageManagerName?: string;
+}
+
+export type ObservationRating = 1 | 2 | 3 | 4 | 5 | 0;
+
+export interface VisitRecord extends SyncableRecord {
+  id: string;
+  teacherId: string;
+  teacherName: string;
+  className: string;
+  term: string;
+  visitedDate: string;
+  periodNumber?: string;
+  lessonTopic?: string;
+  
+  cm_organization?: ObservationRating;
+  cm_control?: ObservationRating;
+  cm_time?: ObservationRating;
+  cm_respect?: ObservationRating;
+  
+  ts_objectives?: ObservationRating;
+  ts_aids?: ObservationRating;
+  ts_participation?: ObservationRating;
+  ts_questions?: ObservationRating;
+  ts_clarity?: ObservationRating;
+  
+  se_participation?: ObservationRating;
+  se_interaction?: ObservationRating;
+  se_rules?: ObservationRating;
+  
+  bc_regularity?: ObservationRating;
+  bc_quality?: ObservationRating;
+  bc_compliance?: ObservationRating;
+  
+  overallScore?: number;
+  overallCategory?: string;
+  
+  consolidatedNotes?: string;
+}
+
+export interface BookletObservation {
+  id: string;
+  className: string;
+  status: 'completed' | 'partially_completed' | 'not_completed' | 'na';
+  updatedAt: number;
+}
+
+export interface GradeWeeklyPlanContent {
+  gradeName: string;
+  ka?: string; // Klassenarbeit / K.A
+  s1?: string; // Stunde 1 / S.1
+  s2?: string; // Stunde 2 / S.2
+  ha?: string; // Hausaufgabe / H.A
+  quiz?: string; // Quiz / Kurztest
+  hinweis?: string; // Hinweis / Note
+}
+
+export interface WeeklyPlanStatusRecord {
+  id: string;
+  gradeBand: string; // e.g. "Grades 1–3", "Grades 4–6", "Grades 7–9", "Grades 10–12"
+  status: 'not_sent' | 'sent';
+  sentAt?: string;
+  secretaryName?: string;
+  secretaryPhone?: string;
+  weekNumber?: number;
+  gradesContent?: GradeWeeklyPlanContent[];
+  customNotes?: string;
+}
+
+export interface StageReportRecord {
+  id: string;
+  weekTitle: string;
+  stageManagerId: string;
+  stageManagerName: string;
+  contentAr: string;
+  status: 'draft' | 'sent';
+  timestamp: number;
+}
+
+export interface TeacherStageEvaluationItem {
+  teacherId: string;
+  teacherName: string;
+  assignedClasses: string[];
+  totalSessions: number;
+  visitsCount: number;
+  visitsAvgScore: number | string;
+  complaintsCount: number;
+  curriculumAdherence?: string;
+  bookletChecking?: string;
+  classroomManagement?: string;
+  punctuality?: string;
+  complaintsStatus?: string;
+  customNotes?: string;
+}
+
+export interface StageFollowUpRecord {
+  id: string;
+  stageManagerId: string;
+  stageManagerName: string;
+  gradeBand: string;
+  periodType: 'weekly' | 'monthly' | 'termly';
+  weekNumber?: number | string;
+  date: string;
+  timestamp: number;
+  teachersData: TeacherStageEvaluationItem[];
+  overallStageNotes?: string;
+  includeComplaints?: boolean;
+  selectedComplaintIds?: string[];
+  includedComplaints?: Complaint[];
+  includeActionPlans?: boolean;
+  selectedActionPlanIds?: string[];
+  includedActionPlans?: StudentActionPlan[];
+}
+
 export interface SchoolSettings {
   presence: Record<string, SchoolDayPresence>; // "0" to "6"
   periodSettings: SchoolPeriodSettings;
   schedule: Record<string, SchoolPeriodRecord[]>; // "0" to "6"
+  schoolName?: string;
+  departmentName?: string;
+  academicYear?: string;
+  currentTerm?: string;
+  hodName?: string; // default "Abdul-rahman Ghareeb"
+  schoolLogoUrl?: string;
+  stageManagers?: StageManager[];
+  stageSecretaries?: StageSecretary[];
+  visitRecords?: VisitRecord[];
+  bookletObservations?: BookletObservation[];
+  weeklyPlanStatuses?: WeeklyPlanStatusRecord[];
+  stageReports?: StageReportRecord[];
+  stageFollowUps?: StageFollowUpRecord[];
+  teachers?: Teacher[];
+  teacherSchedules?: Record<string, Record<string, SchoolPeriodRecord[]>>;
+  parentComplaints?: ParentComplaint[];
+  complaints?: Complaint[];
+  actionPlans?: StudentActionPlan[];
+}
+
+export interface WeeklyPlanLog {
+  weekNumber: number;
+  logDate: string;
+  progress: 'لم يتحسن' | 'تحسن تدريجي بسيط' | 'تحسن ملحوظ (تم الإغلاق)';
+  notes?: string;
+}
+
+export interface StudentActionPlan extends SyncableRecord {
+  id: string;
+  studentId: string;
+  studentNameAr: string;
+  studentNameEn: string;
+  gradeClass: string;
+  teacherId: string;
+  teacherName: string;
+  weaknessAreas: string[]; // Arabic selections
+  actionSteps: string[]; // Arabic selections
+  startDate: string;
+  term: string; // e.g., "الفصل الدراسي الأول"
+  status: 'ACTIVE' | 'RESOLVED'; // Default: 'ACTIVE' (قيد المتابعة)
+  weeklyLogs: WeeklyPlanLog[];
+  reportedAsResolved?: boolean; // Default: false (flagged true after dispatching in report)
+}
+
+export interface Complaint extends SyncableRecord {
+  id: string;
+  direction: 'TEACHER_TO_STUDENT' | 'STUDENT_TO_TEACHER';
+  teacherId: string;
+  teacherName: string;
+  studentId: string;
+  studentNameAr: string;
+  studentNameEn: string;
+  gradeClass: string;
+  reason: string;
+  actionTaken: string;
+  notes?: string;
+  timestamp: string;
+  term: string; // e.g., "Term 1"
+  month: string; // e.g., "October"
+  weeklyReportSent: boolean; // Default: false
+  weeklyReportDate?: string | null;
+}
+
+export interface ParentComplaint {
+  id: string;
+  teacherId: string;
+  studentName: string;
+  className: string;
+  description: string;
+  date: string;
+  status: 'new' | 'in_progress' | 'resolved';
+}
+
+export interface Teacher {
+  id: string;
+  name: string;
+  phone?: string;
+  isActive: boolean;
+  isHod?: boolean;
+}
+
+export interface TeacherWorkload {
+  totalSessions: number;
+  assignedClasses: string[];
+  gradeBands: string[];
 }
 
 
@@ -520,17 +764,26 @@ export interface BackupData {
   timestamp: string;
   version: string;
   profile: TeacherProfile;
+  schoolSettings?: SchoolSettings;
   groups: Group[];
   students: Student[];
   lessons: Lesson[];
   payments: PaymentRecord[];
   notifications: NotificationItem[];
   certificates?: CertificateRecord[];
+  customAiBackgrounds?: AICertificateBackground[];
   notificationSettings?: NotificationSettings;
   inspirationSettings?: InspirationSettings;
   inspirationMessages?: InspirationMessage[];
   syncQueue: any[];
   todos?: TodoItem[];
+  theme?: 'light' | 'dark';
+  accentColor?: AccentColor;
+  hodStudents?: HodGermanStudent[];
+  hodComplaints?: Complaint[];
+  hodActionPlans?: StudentActionPlan[];
+  hodVisits?: VisitRecord[];
+  schoolNotes?: SchoolNote[];
 }
 
 export type InspirationFrequency = 'disabled' | 'daily' | 'before_first_lesson' | 'random_daily';
@@ -723,5 +976,17 @@ export interface StudentHonoredSummary {
   lastCertificate?: CertificateRecord;
   lastCertificateDate?: string;
   isHonoredInPeriod: boolean;
+}
+
+export interface HodGermanStudent extends SyncableRecord {
+  id: string;
+  nameAr: string;
+  nameEn: string;
+  gradeClass: string;
+  gender: 'Boy' | 'Girl';
+  secondLanguage: 'German';
+  busLine: string;
+  name?: string;
+  createdAt?: string;
 }
 

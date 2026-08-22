@@ -122,31 +122,31 @@ export const CertificateCenter: React.FC = () => {
           </div>
 
           {/* Top Quick Actions */}
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 w-full sm:w-auto sm:flex sm:items-center">
             <button
               onClick={() => setIsAIDesignerOpen(true)}
-              className="px-2.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+              className="px-2 sm:px-2.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
               title="AI Certificate Background Designer"
             >
-              <Palette className="w-3.5 h-3.5 text-amber-300" />
-              <span>{_t('مصمم خلفيات AI', 'AI Backgrounds', 'KI-Hintergründe')}</span>
+              <Palette className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+              <span className="truncate">{_t('مصمم خلفيات AI', 'AI Backgrounds', 'KI-Hintergründe')}</span>
             </button>
 
             <button
               onClick={() => setIsAiModalOpen(true)}
-              className="px-2.5 py-1.5 bg-surface dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-text-main border border-surface-border dark:border-slate-700 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-2 sm:px-2.5 py-1.5 bg-surface dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-text-main border border-surface-border dark:border-slate-700 rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
               title="AI Name Transliteration"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>{_t('أسماء الطلاب AI', 'AI Names', 'KI-Namen')}</span>
+              <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span className="truncate">{_t('أسماء الطلاب AI', 'AI Names', 'KI-Namen')}</span>
             </button>
 
             <button
               onClick={() => setIsBulkModalOpen(true)}
-              className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              className="px-2 sm:px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
             >
-              <Layers className="w-3.5 h-3.5" />
-              <span>{_t('تكريم جماعي', 'Bulk Issue', 'Gruppe ehren')}</span>
+              <Layers className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{_t('تكريم جماعي', 'Bulk Issue', 'Gruppe ehren')}</span>
             </button>
 
             <button
@@ -156,10 +156,10 @@ export const CertificateCenter: React.FC = () => {
                 setEditingCertificate(undefined);
                 setIsCreateModalOpen(true);
               }}
-              className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-lg font-black text-xs flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+              className="px-2.5 sm:px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-black text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
             >
-              <Plus className="w-3.5 h-3.5 stroke-[3]" />
-              <span>{_t('إصدار شهادة', 'New Certificate', 'Neues Zertifikat')}</span>
+              <Plus className="w-3.5 h-3.5 stroke-[3] shrink-0" />
+              <span className="truncate">{_t('إصدار شهادة', 'New Certificate', 'Neues Zertifikat')}</span>
             </button>
           </div>
         </div>

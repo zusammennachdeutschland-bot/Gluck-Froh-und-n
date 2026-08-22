@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { getSchoolSettings, calculatePeriodsTimings, parseTimeToMinutes } from '../utils/schoolUtils';
-import { Clock, ChevronRight, CheckCircle2, Calendar, BookOpen, AlertCircle } from 'lucide-react';
+import { Clock, ChevronRight, CheckCircle2, Calendar, BookOpen, AlertCircle, MessageSquare, Plus, Edit3 } from 'lucide-react';
+import { SchoolLessonNotesModal } from './SchoolLessonNotesModal';
 
 export const SchoolTodayCard: React.FC = () => {
-  const { profile, setActiveTab, _t, language } = useApp();
+  const { profile, setActiveTab, schoolNotes, _t, language } = useApp();
 
   // 1. Get Cairo Local Time helper
   const getCairoNow = () => {
@@ -30,6 +31,14 @@ export const SchoolTodayCard: React.FC = () => {
   };
 
   const [cairoNow, setCairoNow] = useState(getCairoNow());
+  const [selectedPeriodForNotes, setSelectedPeriodForNotes] = useState<{
+    periodNumber: number;
+    startTime: string;
+    endTime: string;
+    className?: string;
+    subjectName?: string;
+    dateStr: string;
+  } | null>(null);
 
   // 2. Real-time timer: Updates every 15 seconds to ensure seamless transition of periods
   useEffect(() => {
@@ -163,6 +172,29 @@ export const SchoolTodayCard: React.FC = () => {
     };
   }, [profile, cairoNow]);
 
+  // Map notes count per period/class for today
+  const notesCountMap = useMemo(() => {
+    const map = new Map<number, number>();
+    const dateStr = cairoNow.dateStr;
+
+    (schoolNotes || []).forEach(n => {
+      if (n.deleted) return;
+      if (n.type === 'lesson' && n.date === dateStr && n.periodNumber !== undefined) {
+        map.set(n.periodNumber, (map.get(n.periodNumber) || 0) + 1);
+      }
+      if (n.type === 'class' && n.className) {
+        // Also associate with any period that has this class today
+        filledTimeline.forEach(item => {
+          if (item.record?.className && item.record.className.trim().toLowerCase() === n.className?.trim().toLowerCase()) {
+            map.set(item.period.periodNumber, (map.get(item.period.periodNumber) || 0) + 1);
+          }
+        });
+      }
+    });
+
+    return map;
+  }, [schoolNotes, cairoNow.dateStr, filledTimeline]);
+
   // If no classes are scheduled or school is not active today, return null to keep dashboard clean
   if (!showCard) {
     return null;
@@ -170,86 +202,155 @@ export const SchoolTodayCard: React.FC = () => {
 
   const isRtl = language === 'ar';
 
+  const handleOpenNotes = (e: React.MouseEvent, item: (typeof filledTimeline)[0]) => {
+    e.stopPropagation();
+    setSelectedPeriodForNotes({
+      periodNumber: item.period.periodNumber,
+      startTime: item.period.startTime,
+      endTime: item.period.endTime,
+      className: item.record?.className,
+      subjectName: item.record?.subjectName,
+      dateStr: cairoNow.dateStr
+    });
+  };
+
   return (
-    <div
-      onClick={() => setActiveTab('schoolSchedule')}
-      className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs space-y-2 hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-all cursor-pointer text-start"
-      id="school-today-card"
-    >
-      {/* 1. Header Block */}
-      <div className="flex items-center justify-between pb-1.5 border-b border-surface-border/60">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs">🏫</span>
-          <h3 className="text-xs font-black text-text-main tracking-wider uppercase">
-            {_t('مدرستي اليوم', 'My School Today', 'Meine Schule heute')}
-          </h3>
-          <span className="text-[9px] text-text-muted font-bold px-1.5 py-0.5 rounded bg-surface-hover">
-            {_t(
-              `${totalClassesToday} فصول • ${totalLessonsToday} حصص`,
-              `${totalClassesToday} Classes • ${totalLessonsToday} Lessons`,
-              `${totalClassesToday} Klassen • ${totalLessonsToday} Std.`
+    <>
+      <div
+        onClick={() => setActiveTab('schoolSchedule')}
+        className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs space-y-2 hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-all cursor-pointer text-start"
+        id="school-today-card"
+      >
+        {/* 1. Header Block */}
+        <div className="flex items-center justify-between pb-1.5 border-b border-surface-border/60">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">🏫</span>
+            <h3 className="text-xs font-black text-text-main tracking-wider uppercase">
+              {_t('مدرستي اليوم', 'My School Today', 'Meine Schule heute')}
+            </h3>
+            <span className="text-[9px] text-text-muted font-bold px-1.5 py-0.5 rounded bg-surface-hover">
+              {_t(
+                `${totalClassesToday} فصول • ${totalLessonsToday} حصص`,
+                `${totalClassesToday} Classes • ${totalLessonsToday} Lessons`,
+                `${totalClassesToday} Klassen • ${totalLessonsToday} Std.`
+              )}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {currentLesson && (
+              <button
+                type="button"
+                onClick={(e) => handleOpenNotes(e, currentLesson)}
+                className="flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all"
+                title={_t('إضافة ملاحظة للحصة الحالية', 'Add note to current lesson', 'Notiz zur aktuellen Stunde hinzufügen')}
+              >
+                <Plus className="w-2.5 h-2.5" />
+                <span>{_t('ملاحظة', 'Note', 'Notiz')}</span>
+              </button>
             )}
-          </span>
+            <ChevronRight className={`w-3.5 h-3.5 text-text-muted transition-transform group-hover:translate-x-0.5 ${isRtl ? 'rotate-180' : ''}`} />
+          </div>
         </div>
-        <ChevronRight className={`w-3.5 h-3.5 text-text-muted transition-transform group-hover:translate-x-0.5 ${isRtl ? 'rotate-180' : ''}`} />
-      </div>
 
-      {/* 2. Compact Rows Block */}
-      <div className="space-y-1">
-        {filledTimeline.map((item, idx) => {
-          const isCurrent = currentLesson?.period.periodNumber === item.period.periodNumber;
-          const isUpcoming = upcomingLessons.some(u => u.period.periodNumber === item.period.periodNumber);
-          
-          let statusDot = <span className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-700 shrink-0" />;
-          let rowBg = "bg-transparent";
-          let textStyle = "text-text-muted font-medium";
-          
-          if (isCurrent) {
-            statusDot = <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />;
-            rowBg = "bg-emerald-500/10 dark:bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20";
-            textStyle = "text-text-main font-black";
-          } else if (isUpcoming) {
-            statusDot = <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />;
-            textStyle = "text-text-main font-semibold";
-          }
+        {/* 2. Compact Rows Block */}
+        <div className="space-y-1">
+          {filledTimeline.map((item, idx) => {
+            const isCurrent = currentLesson?.period.periodNumber === item.period.periodNumber;
+            const isUpcoming = upcomingLessons.some(u => u.period.periodNumber === item.period.periodNumber);
+            const notesCount = notesCountMap.get(item.period.periodNumber) || 0;
+            
+            let statusDot = <span className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-700 shrink-0" />;
+            let rowBg = "bg-transparent hover:bg-surface-hover/50";
+            let textStyle = "text-text-muted font-medium";
+            
+            if (isCurrent) {
+              statusDot = <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />;
+              rowBg = "bg-emerald-500/10 dark:bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20";
+              textStyle = "text-text-main font-black";
+            } else if (isUpcoming) {
+              statusDot = <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />;
+              textStyle = "text-text-main font-semibold";
+            }
 
-          return (
-            <div key={idx} className={`flex items-center justify-between gap-2 py-1 px-1.5 rounded-md transition-all ${rowBg}`}>
-              <div className="flex items-center gap-1.5 min-w-0">
-                {statusDot}
-                <div className="text-[10px] font-black text-primary font-mono">
-                  {_t(`ح${item.period.periodNumber}`, `P${item.period.periodNumber}`, `S${item.period.periodNumber}`)}
-                </div>
-                <div className={`text-xs truncate ${textStyle}`}>
-                  {item.record?.className ? (
-                    <span className="inline-flex items-center gap-1">
-                      <span className="text-xs font-black text-text-main">
-                        {item.record.className}
-                      </span>
-                      {item.record.subjectName && (
-                        <span className="text-[9px] text-primary font-bold bg-primary-soft border border-primary-border/50 px-1 py-0.2 rounded uppercase">
-                          {item.record.subjectName}
+            return (
+              <div 
+                key={idx} 
+                onClick={(e) => handleOpenNotes(e, item)}
+                className={`group flex items-center justify-between gap-2 py-1 px-1.5 rounded-md transition-all cursor-pointer ${rowBg}`}
+                title={_t('اضغط لإضافة أو استعراض ملاحظات الحصة والفصل', 'Click to add or view lesson & class notes', 'Klicken, um Notizen anzuzeigen/hinzuzufügen')}
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {statusDot}
+                  <div className="text-[10px] font-black text-primary font-mono">
+                    {_t(`ح${item.period.periodNumber}`, `P${item.period.periodNumber}`, `S${item.period.periodNumber}`)}
+                  </div>
+                  <div className={`text-xs truncate ${textStyle}`}>
+                    {item.record?.className ? (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="text-xs font-black text-text-main">
+                          {item.record.className}
                         </span>
-                      )}
+                        {item.record.subjectName && (
+                          <span className="text-[9px] text-primary font-bold bg-primary-soft border border-primary-border/50 px-1 py-0.2 rounded uppercase">
+                            {item.record.subjectName}
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      item.record?.subjectName
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Notes badge / indicator */}
+                  {notesCount > 0 ? (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-primary/10 text-primary border border-primary/20">
+                      <MessageSquare className="w-2.5 h-2.5" />
+                      <span>{notesCount}</span>
                     </span>
                   ) : (
-                    item.record?.subjectName
+                    <span className="opacity-0 group-hover:opacity-100 text-[9px] text-text-muted hover:text-primary transition-opacity flex items-center gap-0.5">
+                      <Plus className="w-2.5 h-2.5" />
+                      <span>{_t('ملاحظة', 'Note', 'Notiz')}</span>
+                    </span>
                   )}
+
+                  <div className="text-[10px] font-mono font-bold text-text-muted">
+                    {item.period.startTime} - {item.period.endTime}
+                  </div>
                 </div>
               </div>
-              <div className="text-[10px] font-mono font-bold text-text-muted shrink-0">
-                {item.period.startTime} - {item.period.endTime}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+
+        {/* 3. Footer Navigation CTA */}
+        <div 
+          onClick={(e) => {
+            e.stopPropagation();
+            setActiveTab('schoolSchedule');
+          }}
+          className="pt-1.5 border-t border-surface-border/40 flex items-center justify-center text-[10px] font-black text-primary hover:text-primary-hover transition-colors gap-1"
+        >
+          <span>{_t('عرض الجدول بالكامل', 'View Full Schedule', 'Vollständigen Plan anzeigen')}</span>
+          <ChevronRight className={`w-3 h-3 ${isRtl ? 'rotate-180' : ''}`} />
+        </div>
       </div>
 
-      {/* 3. Footer Navigation CTA */}
-      <div className="pt-1.5 border-t border-surface-border/40 flex items-center justify-center text-[10px] font-black text-primary hover:text-primary-hover transition-colors gap-1">
-        <span>{_t('عرض الجدول بالكامل', 'View Full Schedule', 'Vollständigen Plan anzeigen')}</span>
-        <ChevronRight className={`w-3 h-3 ${isRtl ? 'rotate-180' : ''}`} />
-      </div>
-    </div>
+      {/* 4. Interactive Notes Modal */}
+      {selectedPeriodForNotes && (
+        <SchoolLessonNotesModal
+          isOpen={!!selectedPeriodForNotes}
+          onClose={() => setSelectedPeriodForNotes(null)}
+          periodNumber={selectedPeriodForNotes.periodNumber}
+          startTime={selectedPeriodForNotes.startTime}
+          endTime={selectedPeriodForNotes.endTime}
+          className={selectedPeriodForNotes.className}
+          subjectName={selectedPeriodForNotes.subjectName}
+          dateStr={selectedPeriodForNotes.dateStr}
+        />
+      )}
+    </>
   );
 };

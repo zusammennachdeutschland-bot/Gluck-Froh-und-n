@@ -175,6 +175,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
     { id: 'certificates', label: t('nav_certificates') || 'Zertifikate-Studio', icon: Award, badge: null },
     { id: 'freeTime', label: t('nav_free_time') || 'Freie Termine', icon: Clock, badge: null },
     { id: 'schoolSchedule', label: _t('جدول المدرسة', 'School Schedule', 'Stundenplan'), icon: BookOpen, badge: null },
+    { id: 'hod', label: _t('إدارة القسم (HOD Hub)', 'HOD Hub', 'Fachleiter Hub'), icon: Layers, badge: null },
     { id: 'settings', label: t('nav_settings') || 'Einstellungen', icon: Settings, badge: null },
   ];
 

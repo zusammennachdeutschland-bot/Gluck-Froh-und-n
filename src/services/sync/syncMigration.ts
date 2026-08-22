@@ -7,7 +7,12 @@ const MIGRATION_KEYS = [
   'dl_lessons',
   'dl_payments',
   'dl_notifications',
-  'dl_quick_todos'
+  'dl_quick_todos',
+  'dl_certificates',
+  'hod_german_students',
+  'hod_complaints',
+  'hod_student_action_plans',
+  'hod_visit_records'
 ];
 
 /**

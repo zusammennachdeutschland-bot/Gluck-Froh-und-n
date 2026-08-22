@@ -192,3 +192,19 @@ export const getBookableSlots = (freePeriods: TimeSlot[], slotDurationMinutes: n
   }
   return bookable;
 };
+
+/**
+ * Computes the nearest rounded hour string "HH:00" from the given date/time (default: current local time).
+ * For example: 14:15 -> "14:00", 14:35 -> "15:00", 23:45 -> "00:00".
+ */
+export const getNearestHourTime = (date: Date = new Date()): string => {
+  const d = new Date(date);
+  const minutes = d.getMinutes();
+  if (minutes >= 30) {
+    d.setHours(d.getHours() + 1);
+  }
+  d.setMinutes(0, 0, 0);
+  const hours = String(d.getHours()).padStart(2, '0');
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  return `${hours}:${mins}`;
+};

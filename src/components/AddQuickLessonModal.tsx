@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { checkOverlap } from '../utils/lessonUtils';
 import { useApp } from '../context/AppContext';
-import { formatLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, getNearestHourTime } from '../utils/timeUtils';
 import { PREDEFINED_GRADES } from '../data/initialData';
 import { GradeLevel, LessonType, PaymentStatus } from '../types';
 import { X, Calendar, Clock, Zap, Video, MapPin, DollarSign, User, Phone, FileText, AlertTriangle } from 'lucide-react';
@@ -19,7 +19,7 @@ export const AddQuickLessonModal: React.FC<AddQuickLessonModalProps> = ({ onClos
   const [quickStudentPhone, setQuickStudentPhone] = useState('');
   const [quickParentPhone, setQuickParentPhone] = useState('');
   const [date, setDate] = useState(todayStr);
-  const [time, setTime] = useState('16:00');
+  const [time, setTime] = useState(() => getNearestHourTime());
   const [type, setType] = useState<LessonType>('online');
   const [amountDue, setAmountDue] = useState(250);
   const [amountPaid, setAmountPaid] = useState(0);

@@ -49,6 +49,7 @@ export function getSchoolSettings(profile: TeacherProfile | null | undefined): S
 
   // Merge to ensure no missing keys
   return {
+    ...profile.schoolSettings,
     presence: { ...DEFAULT_SCHOOL_SETTINGS.presence, ...profile.schoolSettings.presence },
     periodSettings: { 
       ...DEFAULT_SCHOOL_SETTINGS.periodSettings, 

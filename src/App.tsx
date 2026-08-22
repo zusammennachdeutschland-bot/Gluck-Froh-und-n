@@ -22,6 +22,7 @@ import { SettingsView } from './components/SettingsView';
 import { FreeTimeSlotsView } from './components/FreeTimeSlotsView';
 import { CertificateCenter } from './components/certificates/CertificateCenter';
 import { SchoolScheduleView } from './components/SchoolScheduleView';
+import { HodHubView } from './components/HodHubView';
 
 import { DesktopSidebar } from './components/desktop/DesktopSidebar';
 import { DesktopTopBar } from './components/desktop/DesktopTopBar';
@@ -40,6 +41,7 @@ import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { RecentlyDeletedModal } from './components/RecentlyDeletedModal';
 import { SetupWizard } from './components/SetupWizard';
 import { BackupModal } from './components/BackupModal';
+import { FloatingNetworkMonitor } from './components/FloatingNetworkMonitor';
 
 import { useLessonReminders } from './hooks/useLessonReminders';
 import { Capacitor } from '@capacitor/core';
@@ -364,6 +366,7 @@ function MainApp() {
               {activeTab === 'freeTime' && <FreeTimeSlotsView />}
               {activeTab === 'certificates' && <CertificateCenter />}
               {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
+              {activeTab === 'hod' && <HodHubView />}
             </motion.div>
           </AnimatePresence>
         </main>
@@ -403,6 +406,7 @@ function MainApp() {
                   {activeTab === 'freeTime' && <FreeTimeSlotsView />}
                   {activeTab === 'certificates' && <CertificateCenter />}
                   {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
+                  {activeTab === 'hod' && <HodHubView />}
                 </motion.div>
               </AnimatePresence>
             </div>
@@ -411,6 +415,7 @@ function MainApp() {
       </div>
 
       {/* ================= SHARED GLOBAL MODALS & DIALOGS ================= */}
+      <FloatingNetworkMonitor />
       {isControlModalOpen && <LessonControlModal />}
       {isAddLessonModalOpen && <AddLessonModal onClose={() => setIsAddLessonModalOpen(false)} />}
       {isAddQuickLessonModalOpen && <AddQuickLessonModal onClose={() => setIsAddQuickLessonModalOpen(false)} />}
@@ -443,7 +448,8 @@ export default function App() {
           'dl_groups', 'dl_students', 'dl_lessons', 'dl_payments', 'dl_certificates',
           'dl_notifications', 'dl_notification_settings', 'dl_inspiration_settings', 'dl_inspiration_messages',
           'dl_last_backup_time', 'dl_dismissed_dashboard_lessons', 'dl_recently_deleted',
-          'dl_active_lesson_session', 'dl_notified_lesson_alerts', 'dl_local_backup_data'
+          'dl_active_lesson_session', 'dl_notified_lesson_alerts', 'dl_local_backup_data',
+          'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records'
         ];
         
         const values = await Promise.all(keys.map(k => storage.getItem(k)));

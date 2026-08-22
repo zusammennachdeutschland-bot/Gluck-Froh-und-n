@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
-import { Lesson, AttendanceStatus, HomeworkStatus, PaymentStatus, LessonReport } from '../types';
+import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, LessonReport } from '../types';
 import { 
   X, Play, Pause, Square, Video, MapPin, Send, Phone, CheckCircle2, 
   Clock, AlertCircle, Sparkles, FileText, Award, DollarSign, ExternalLink, Navigation,
@@ -166,7 +166,13 @@ export const LessonControlModal: React.FC = () => {
       setStudentExamGrade({});
       setStudentNotes({});
 
-      if (selectedLesson.groupId) {
+      if (isQuick) {
+        const qId = targetStudent?.id || selectedLesson.studentId || selectedLesson.id || 'quick_student';
+        setStudentAttendance({ [qId]: 'present' });
+        setStudentHomeworkDone({ [qId]: 'yes' });
+        setStudentDictationGrade({ [qId]: 100 });
+        setStudentExamGrade({ [qId]: 100 });
+      } else if (selectedLesson.groupId) {
         const initialAtt: Record<string, AttendanceStatus> = {};
         const groupSts = students.filter(s => s.groupId === selectedLesson.groupId);
         groupSts.forEach(st => {
@@ -301,14 +307,31 @@ export const LessonControlModal: React.FC = () => {
 
   if (!selectedLesson) return null;
 
+  const isQuick = Boolean(selectedLesson.isQuickLesson || selectedLesson.groupId === 'quick_group');
+
   const targetStudent = students.find(s => 
     (selectedLesson.studentId && s.id === selectedLesson.studentId) || 
     (selectedLesson.studentName && s.name.trim().toLowerCase() === selectedLesson.studentName.trim().toLowerCase())
-  ) || (selectedLesson.groupId ? students.find(s => s.groupId === selectedLesson.groupId) : undefined);
+  ) || (!isQuick && selectedLesson.groupId ? students.find(s => s.groupId === selectedLesson.groupId) : undefined);
   
-  const activeLessonStudents = selectedLesson.groupId 
-    ? students.filter(s => s.groupId === selectedLesson.groupId)
-    : (targetStudent ? [targetStudent] : []);
+  const quickStudentSynthetic: Student = {
+    id: selectedLesson.studentId || selectedLesson.id || 'quick_student',
+    name: selectedLesson.studentName || 'طالب تجريبي (Quick Lesson)',
+    parentName: selectedLesson.quickParentName || selectedLesson.studentName || 'ولي الأمر',
+    groupId: 'quick_group',
+    studentPhone: selectedLesson.quickStudentPhone || '',
+    parentPhone: selectedLesson.quickParentPhone || '',
+    grade: selectedLesson.grade || 'Grade 9',
+    notes: selectedLesson.quickNotes || '',
+    documents: [],
+    joinedDate: selectedLesson.date || new Date().toISOString()
+  };
+
+  const activeLessonStudents = isQuick
+    ? [targetStudent || quickStudentSynthetic]
+    : (selectedLesson.groupId 
+        ? students.filter(s => s.groupId === selectedLesson.groupId)
+        : (targetStudent ? [targetStudent] : []));
   
   const targetGroup = groups.find(g => g.id === selectedLesson.groupId);
 
@@ -361,25 +384,33 @@ export const LessonControlModal: React.FC = () => {
 
   const handleSaveReport = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    const qId = targetStudent?.id || quickStudentSynthetic.id;
+    const defaultTaught = lessonWhatWasTaught.trim() || (isQuick ? `حصة تجريبية / سريعة: ${selectedLesson.studentName || selectedLesson.title}` : 'تم شرح درس اليوم ومراجعته');
+    const defaultHw = lessonNextHomework.trim() || (isQuick ? 'متابعة ما تم شرحه والتطبيقات' : 'مراجعة وحل التدريبات');
+
     const reportData: LessonReport = {
-      attendanceStatus: attendance,
-      studentAttendance,
+      attendanceStatus: attendance || 'present',
+      studentAttendance: isQuick ? (Object.keys(studentAttendance).length > 0 ? studentAttendance : { [qId]: 'present' }) : studentAttendance,
       homeworkStatus: 'assigned',
-      homeworkTitle: lessonNextHomework,
-      homeworkDescription: lessonNextHomework,
-      teacherNotes: lessonWhatWasTaught,
-      studentHomeworkDone,
-      studentDictationGrade,
-      studentExamGrade,
-      studentNotes,
+      homeworkTitle: defaultHw,
+      homeworkDescription: defaultHw,
+      teacherNotes: defaultTaught,
+      studentHomeworkDone: isQuick ? (Object.keys(studentHomeworkDone).length > 0 ? studentHomeworkDone : { [qId]: 'yes' }) : studentHomeworkDone,
+      studentDictationGrade: isQuick ? (Object.keys(studentDictationGrade).length > 0 ? studentDictationGrade : { [qId]: 10 }) : studentDictationGrade,
+      studentExamGrade: isQuick ? (Object.keys(studentExamGrade).length > 0 ? studentExamGrade : { [qId]: 10 }) : studentExamGrade,
+      studentNotes: isQuick ? (Object.keys(studentNotes).length > 0 ? studentNotes : { [qId]: selectedLesson.quickNotes || '' }) : studentNotes,
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
     saveLessonReport(selectedLesson.id, reportData, packageChoice);
+    updateLesson(selectedLesson.id, { status: 'completed' });
     endActiveLessonTimer();
     storage.removeItem(`dl_draft_report_${selectedLesson.id}`);
     setIsEditingReport(false);
     setShowArabicParentReportModal(true); // Automatically open Arabic parent report to make sharing incredibly easy!
+    try {
+      confetti({ particleCount: 50, spread: 60 });
+    } catch {}
   };
 
   // Communication Handlers with Recipient Validation & Teacher Name
@@ -725,10 +756,19 @@ export const LessonControlModal: React.FC = () => {
                           <button
                             type="button"
                             onClick={handleStartLesson}
-                            className="col-span-2 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                           >
                             <Play className="w-4 h-4 fill-white animate-pulse" />
                             <span>{t('auto_start_session')}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSaveReport()}
+                            className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>{t('auto_end_session')}</span>
                           </button>
 
                           <button
@@ -747,7 +787,7 @@ export const LessonControlModal: React.FC = () => {
                             <button
                               type="button"
                               onClick={handleStartLesson}
-                              className="col-span-2 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                             >
                               <Play className="w-3.5 h-3.5 fill-white" />
                               <span>{t('auto_resume_session')}</span>
@@ -756,12 +796,21 @@ export const LessonControlModal: React.FC = () => {
                             <button
                               type="button"
                               onClick={handlePauseLesson}
-                              className="col-span-2 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                             >
                               <Pause className="w-3.5 h-3.5 fill-white" />
                               <span>{t('auto_pause')}</span>
                             </button>
                           )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleSaveReport()}
+                            className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>{t('auto_end_session')}</span>
+                          </button>
 
                           <button
                             type="button"
@@ -836,6 +885,7 @@ export const LessonControlModal: React.FC = () => {
               {/* SECTION 3 – MANDATORY SESSION REPORT */}
               {(showReportForm || timerSeconds > 0 || selectedLesson.status === 'in_progress' || selectedLesson.status === 'completed') && (() => {
                 const isReportFormValid = (() => {
+                  if (isQuick) return true; // Quick lesson can always be completed with instant defaults
                   if (!lessonWhatWasTaught.trim()) return false;
                   if (!lessonNextHomework.trim()) return false;
                   
@@ -1249,7 +1299,7 @@ export const LessonControlModal: React.FC = () => {
               teacherNotes,
             }
           }}
-          student={targetStudent}
+          student={targetStudent || (isQuick ? quickStudentSynthetic : undefined)}
           profile={profile}
           onClose={() => setShowArabicParentReportModal(false)}
           onGoToHomeScreen={closeLessonControl}

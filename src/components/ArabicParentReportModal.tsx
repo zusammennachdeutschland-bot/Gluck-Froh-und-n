@@ -47,7 +47,20 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
   const initialResolvedStudent = student || 
     students.find(s => (lesson.studentId && s.id === lesson.studentId) || (lesson.studentName && s.name.trim().toLowerCase() === lesson.studentName.trim().toLowerCase())) || 
-    (groupStudents.length > 0 ? groupStudents[0] : undefined);
+    (groupStudents.length > 0 ? groupStudents[0] : (lesson.studentName ? ({
+      id: lesson.studentId || lesson.id || 'quick_student',
+      name: lesson.studentName,
+      groupId: 'quick_group',
+      parentName: lesson.quickParentName,
+      parentPhone: lesson.quickParentPhone,
+      studentPhone: lesson.quickStudentPhone,
+      grade: lesson.grade || 'Grade 9',
+      currency: profile.currency,
+      notes: lesson.quickNotes || '',
+      createdAt: lesson.date || new Date().toISOString(),
+      documents: [],
+      joinedDate: lesson.date || new Date().toISOString()
+    } as unknown as Student) : undefined));
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>(
     initialResolvedStudent?.id || ''
@@ -55,7 +68,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
   const activeStudent = students.find(s => s.id === selectedStudentId) || initialResolvedStudent;
 
-  const parentName = activeStudent?.parentName || lesson.quickParentName || 'ولي الأمر المحترم';
+  const parentName = activeStudent?.parentName || lesson.quickParentName || activeStudent?.name || lesson.studentName || 'ولي الأمر المحترم';
   const rawParentPhone = activeStudent?.parentPhone || lesson.quickParentPhone || activeStudent?.studentPhone || lesson.quickStudentPhone || '';
   const parentPhone = rawParentPhone.trim();
 

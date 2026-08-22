@@ -127,6 +127,20 @@ export function calculatePendingOutbox(
         let title = (record as any).name || (record as any).title || (record as any).id || 'Record';
         if (entityType === 'settings') {
           title = 'Teacher Profile & Settings';
+        } else if (entityType === 'hodStudents') {
+          title = (record as any).nameAr || (record as any).nameEn || (record as any).name || 'HOD German Student';
+        } else if (entityType === 'hodComplaints') {
+          title = (record as any).reason ? `${(record as any).studentNameAr || (record as any).teacherName || 'Complaint'}: ${(record as any).reason}` : 'HOD Complaint';
+        } else if (entityType === 'hodActionPlans') {
+          title = (record as any).studentNameAr ? `Action Plan: ${(record as any).studentNameAr}` : 'HOD Student Action Plan';
+        } else if (entityType === 'hodVisits') {
+          title = (record as any).teacherName ? `Visit: ${(record as any).teacherName} (${(record as any).className || ''})` : 'HOD Teacher Observation';
+        } else if (entityType === 'certificates') {
+          title = (record as any).studentName ? `Certificate: ${(record as any).studentName}` : 'Certificate';
+        } else if (entityType === 'schoolNotes') {
+          const noteType = (record as any).type || 'note';
+          const target = (record as any).studentName || (record as any).className || 'Lesson';
+          title = `Note (${noteType} - ${target}): ${((record as any).text || '').substring(0, 25)}`;
         }
 
         pendingItems.push({

@@ -15,6 +15,7 @@ import {
   buildSchoolScheduleExportModel
 } from '../services/schoolScheduleExportService';
 import { getSchoolSettings } from '../utils/schoolUtils';
+import { exportMasterSchedule } from '../services/masterScheduleExportService';
 
 interface SchoolScheduleExportModalProps {
   onClose: () => void;
@@ -31,14 +32,35 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [errorFeedback, setErrorFeedback] = useState<string | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [exportScope, setExportScope] = useState<string>('my_schedule');
 
   // Quick export model preview stats
   const previewModel = React.useMemo(() => {
-    return buildSchoolScheduleExportModel(schoolSettings, profile, {
+    let settingsToUse = schoolSettings;
+    let tName = profile?.displayName || '';
+    if (exportScope !== 'my_schedule' && exportScope !== 'master') {
+       const teacher = schoolSettings?.teachers?.find(t => t.id === exportScope);
+       if (teacher) {
+          settingsToUse = { ...schoolSettings, schedule: schoolSettings.teacherSchedules?.[exportScope] || {} };
+          tName = teacher.name;
+       }
+    }
+    
+    // For master, we just show a generic preview
+    if (exportScope === 'master') {
+      return {
+        ...buildSchoolScheduleExportModel(schoolSettings, profile, { language: language as any, theme: selectedTheme }),
+        title: _t('الجدول الموحد للقسم', 'Unified Department Master Schedule', 'Abteilungsplan'),
+        stats: { summaryLine: _t('كافة المعلمين', 'All Teachers', 'Alle Lehrer') },
+        teacherName: ''
+      };
+    }
+
+    return buildSchoolScheduleExportModel(settingsToUse, { ...profile, displayName: tName } as any, {
       language: language as any,
       theme: selectedTheme
     });
-  }, [schoolSettings, profile, language, selectedTheme]);
+  }, [schoolSettings, profile, language, selectedTheme, exportScope, _t]);
 
   const handleExecuteSave = async () => {
     if (isProcessing) return;
@@ -47,6 +69,17 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
     setStatusMessage(_t('جاري إعداد الجدول للتصدير...', 'Preparing schedule for export...', 'Stundenplan wird vorbereitet...'));
 
     try {
+      
+      let settingsToUse = schoolSettings;
+      let tName = profile?.displayName || '';
+      if (exportScope !== 'my_schedule' && exportScope !== 'master') {
+         const teacher = schoolSettings?.teachers?.find(t => t.id === exportScope);
+         if (teacher) {
+            settingsToUse = { ...schoolSettings, schedule: schoolSettings.teacherSchedules?.[exportScope] || {} };
+            tName = teacher.name;
+         }
+      }
+
       const options = {
         format: selectedFormat,
         theme: selectedTheme,
@@ -56,19 +89,19 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
 
       if (selectedFormat === 'ics') {
         setStatusMessage(_t('جاري إنشاء ملف التقويم .ics...', 'Generating calendar .ics file...', 'ICS-Kalenderdatei wird erstellt...'));
-        const result = await exportSchoolScheduleAsIcs(schoolSettings, profile, options);
+        const result = await exportSchoolScheduleAsIcs(settingsToUse, { ...profile, displayName: tName } as any, options);
         if (!result.success) {
           throw new Error(result.error || 'Failed to export ICS');
         }
       } else if (selectedFormat === 'pdf') {
         setStatusMessage(_t('جاري إنشاء مستند PDF عالي الجودة...', 'Generating high quality PDF...', 'Hochwertiges PDF wird erstellt...'));
-        const result = await exportSchoolScheduleAsPdf(schoolSettings, profile, options);
+        const result = exportScope === 'master' ? await exportMasterSchedule(schoolSettings, profile as any, options, 'pdf') : await exportSchoolScheduleAsPdf(settingsToUse, { ...profile, displayName: tName } as any, options);
         if (!result.success) {
           throw new Error(result.error || 'Failed to export PDF');
         }
       } else {
         setStatusMessage(_t('جاري معالجة الصورة بجودة عالية...', 'Rendering high resolution image...', 'Bild wird in hoher Qualität gerendert...'));
-        const result = await exportSchoolScheduleAsImage(schoolSettings, profile, options);
+        const result = exportScope === 'master' ? await exportMasterSchedule(schoolSettings, profile as any, options, 'image') : await exportSchoolScheduleAsImage(settingsToUse, { ...profile, displayName: tName } as any, options);
         if (!result.success) {
           throw new Error(result.error || 'Failed to export image');
         }
@@ -99,6 +132,17 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
     setStatusMessage(_t('جاري تجهيز الملف للمشاركة...', 'Preparing file for sharing...', 'Datei wird für Freigabe vorbereitet...'));
 
     try {
+      
+      let settingsToUse = schoolSettings;
+      let tName = profile?.displayName || '';
+      if (exportScope !== 'my_schedule' && exportScope !== 'master') {
+         const teacher = schoolSettings?.teachers?.find(t => t.id === exportScope);
+         if (teacher) {
+            settingsToUse = { ...schoolSettings, schedule: schoolSettings.teacherSchedules?.[exportScope] || {} };
+            tName = teacher.name;
+         }
+      }
+
       const options = {
         format: selectedFormat,
         theme: selectedTheme,
@@ -106,7 +150,7 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
         includeSchoolTimes: includePresenceInIcs
       };
 
-      const result = await shareSchoolSchedule(schoolSettings, profile, options);
+      const result = exportScope === 'master' ? await exportMasterSchedule(schoolSettings, profile as any, options, selectedFormat === 'pdf' ? 'pdf' : 'image') : await shareSchoolSchedule(settingsToUse, { ...profile, displayName: tName } as any, options);
       if (!result.success) {
         throw new Error(result.error || 'Failed to share schedule');
       }
@@ -180,6 +224,34 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
             </div>
           )}
 
+          
+          {/* TEACHER SELECTION (IF HOD) */}
+          {schoolSettings.teachers && schoolSettings.teachers.length > 0 && (
+            <div className="space-y-2.5">
+              <label className="text-xs font-black text-text-muted uppercase tracking-wider block">
+                {_t('اختر الجدول للتصدير', 'Select Schedule to Export', 'Wählen Sie den zu exportierenden Stundenplan')}
+              </label>
+              <select
+                value={exportScope}
+                onChange={(e) => {
+                  setExportScope(e.target.value);
+                  if (e.target.value === 'master' && selectedFormat === 'ics') {
+                    setSelectedFormat('pdf');
+                  }
+                }}
+                className="w-full p-3 rounded-2xl border border-surface-border bg-surface text-text-main text-xs font-bold shadow-xs focus:ring-primary focus:border-primary outline-none"
+              >
+                <option value="my_schedule">{_t('جدولي الخاص', 'My Own Schedule', 'Mein eigener Stundenplan')}</option>
+                <option value="master">{_t('الجدول الموحد للقسم', 'Master Unified Matrix', 'Gesamter Abteilungsplan')}</option>
+                <optgroup label={_t('جداول المعلمين', 'Teachers', 'Lehrer')}>
+                  {schoolSettings.teachers.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
+          )}
+
           {/* FORMAT SELECTION */}
           <div className="space-y-2.5">
             <label className="text-xs font-black text-text-muted uppercase tracking-wider block">
@@ -190,11 +262,12 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
               <button
                 type="button"
                 onClick={() => setSelectedFormat('ics')}
-                disabled={isProcessing}
+                disabled={isProcessing || exportScope === 'master'}
                 className={`p-3 rounded-2xl border text-start flex flex-col justify-between gap-2 transition-all cursor-pointer ${
-                  selectedFormat === 'ics'
-                    ? 'bg-primary-soft border-primary text-primary shadow-xs'
-                    : 'bg-surface border-surface-border text-text-muted hover:border-surface-border-soft hover:bg-surface-hover'
+                  (selectedFormat === 'ics'
+                    ? 'bg-primary-soft border-primary text-primary shadow-xs '
+                    : 'bg-surface border-surface-border text-text-muted hover:border-surface-border-soft hover:bg-surface-hover ') +
+                  (exportScope === 'master' ? 'opacity-40 cursor-not-allowed grayscale' : '')
                 }`}
               >
                 <div className="flex items-center justify-between">

@@ -1,7 +1,9 @@
 import { 
   Student, Group, Lesson, PaymentRecord, NotificationItem, 
   TeacherProfile, NotificationSettings, InspirationSettings, InspirationMessage, TodoItem,
-  CertificateRecord
+  CertificateRecord, SchoolSettings, StageManager, StageSecretary, VisitRecord, BookletObservation,
+  WeeklyPlanStatusRecord, StageReportRecord, StageFollowUpRecord, Complaint, StudentActionPlan,
+  Teacher, ParentComplaint, HodGermanStudent, AICertificateBackground, SchoolNote
 } from '../types';
 import { formatLocalDate } from './timeUtils';
 
@@ -13,6 +15,7 @@ export type BackupCategory =
   | 'exams'
   | 'financial'
   | 'schedule'
+  | 'school_hod'
   | 'availability'
   | 'settings'
   | 'templates'
@@ -20,7 +23,8 @@ export type BackupCategory =
   | 'reports'
   | 'dashboard'
   | 'notifications'
-  | 'certificates';
+  | 'certificates'
+  | 'school_notes';
 
 export const ALL_BACKUP_CATEGORIES: { id: BackupCategory; labelKey: string; labelEn: string; labelAr: string; icon: string; descriptionEn: string; descriptionAr: string }[] = [
   { id: 'students', labelKey: 'students', labelEn: 'Students', labelAr: 'الطلاب', icon: 'User', descriptionEn: 'All student profiles, parents, & notes', descriptionAr: 'جميع ملفات الطلاب وأولياء الأمور والملاحظات' },
@@ -30,6 +34,8 @@ export const ALL_BACKUP_CATEGORIES: { id: BackupCategory; labelKey: string; labe
   { id: 'exams', labelKey: 'exams', labelEn: 'Exams & Quiz Scores', labelAr: 'الدرجات والاختبارات', icon: 'Award', descriptionEn: 'Quiz, exam, and participation scores', descriptionAr: 'درجات الاختبارات القصيرة والامتحانات والتفاعل' },
   { id: 'financial', labelKey: 'financial', labelEn: 'Financial Records & Payments', labelAr: 'المدفوعات والسجلات المالية', icon: 'DollarSign', descriptionEn: 'Payment transactions, dues, & balances', descriptionAr: 'سجلات الدفع والرسوم المستحقة والمتحصلات' },
   { id: 'schedule', labelKey: 'schedule', labelEn: 'Schedule & Lessons', labelAr: 'الجدول والحصص', icon: 'Calendar', descriptionEn: 'Scheduled, completed, & past lessons', descriptionAr: 'جميع الحصص المجدولة والمكتملة والتاريخية' },
+  { id: 'school_hod', labelKey: 'school_hod', labelEn: 'School & HOD Hub', labelAr: 'إدارة المدرسة ورئيس القسم', icon: 'GraduationCap', descriptionEn: 'School, stage managers, secretaries, visits, reports, follow-ups, complaints, action plans, & weekly plans', descriptionAr: 'بيانات المدرسة، مديري المراحل، السكرتيرات، الزيارات والتوجيه، التقارير والمتابعة، الشكاوى، وخطط علاج الطلاب' },
+  { id: 'school_notes', labelKey: 'school_notes', labelEn: 'School & Lesson Notes', labelAr: 'ملاحظات الحصص والفصول والطلاب', icon: 'FileText', descriptionEn: 'All class, student, and lesson notes', descriptionAr: 'جميع ملاحظات الفصول والطلاب والحصص المدرسية' },
   { id: 'certificates', labelKey: 'certificates', labelEn: 'Certificates & Honors', labelAr: 'الشهادات والتكريمات', icon: 'Trophy', descriptionEn: 'All issued certificates & student honors', descriptionAr: 'سجلات وتواريخ وتفاصيل جميع الشهادات والتكريمات' },
   { id: 'availability', labelKey: 'availability', labelEn: 'Teacher Working Hours', labelAr: 'ساعات العمل والإتاحة', icon: 'Clock', descriptionEn: 'Weekly working hours & availability rules', descriptionAr: 'ساعات العمل الأسبوعية وأيام العطلات' },
   { id: 'settings', labelKey: 'settings', labelEn: 'App Settings', labelAr: 'إعدادات التطبيق', icon: 'Settings', descriptionEn: 'Theme, language, currency, & profile details', descriptionAr: 'اللغة والمظهر والعملة وملف المعلم' },
@@ -58,6 +64,16 @@ export interface SmartBackupPayload {
     notifications: number;
     todos: number;
     certificates?: number;
+    schoolRecords?: number;
+    schoolNotes?: number;
+    stageManagers?: number;
+    stageSecretaries?: number;
+    visitRecords?: number;
+    weeklyPlans?: number;
+    stageReports?: number;
+    stageFollowUps?: number;
+    complaints?: number;
+    actionPlans?: number;
     [key: string]: number | undefined;
   };
   metadata?: {
@@ -68,6 +84,7 @@ export interface SmartBackupPayload {
   encryptedData?: string;
   data?: {
     profile?: TeacherProfile;
+    schoolSettings?: SchoolSettings;
     groups?: Group[];
     students?: Student[];
     lessons?: Lesson[];
@@ -78,6 +95,7 @@ export interface SmartBackupPayload {
     inspirationMessages?: InspirationMessage[];
     todos?: TodoItem[];
     certificates?: CertificateRecord[];
+    schoolNotes?: SchoolNote[];
     workingHours?: any;
     parentMessageTemplates?: Record<string, string>;
     meetingLinks?: { defaultZoomLink?: string; defaultMeetLink?: string };
@@ -272,6 +290,12 @@ export function calculateBackupStats(
     inspirationSettings?: InspirationSettings;
     inspirationMessages?: InspirationMessage[];
     todos?: TodoItem[];
+    certificates?: CertificateRecord[];
+    hodStudents?: HodGermanStudent[];
+    hodComplaints?: Complaint[];
+    hodActionPlans?: StudentActionPlan[];
+    hodVisits?: VisitRecord[];
+    schoolNotes?: SchoolNote[];
   }
 ) {
   let studentCount = 0;
@@ -283,12 +307,17 @@ export function calculateBackupStats(
   let paymentCount = 0;
   let notificationCount = 0;
   let todoCount = 0;
+  let schoolRecordCount = 0;
+  let certificateCount = 0;
+  let schoolNotesCount = 0;
 
   if (selectedCategories.includes('students')) studentCount = appState.students.length;
   if (selectedCategories.includes('groups')) groupCount = appState.groups.length;
   if (selectedCategories.includes('schedule')) lessonCount = appState.lessons.length;
   if (selectedCategories.includes('financial')) paymentCount = appState.payments.length;
   if (selectedCategories.includes('notifications')) notificationCount = appState.notifications.length;
+  if (selectedCategories.includes('certificates') && appState.certificates) certificateCount = appState.certificates.length;
+  if (selectedCategories.includes('school_notes') && appState.schoolNotes) schoolNotesCount = appState.schoolNotes.length;
   
   if (selectedCategories.includes('attendance')) {
     attendanceCount = appState.lessons.filter(l => l.report?.attendanceStatus || l.report?.studentAttendance).length;
@@ -305,12 +334,34 @@ export function calculateBackupStats(
     ).length;
   }
 
-  const totalRecords = studentCount + groupCount + lessonCount + paymentCount + notificationCount;
+  const school = appState.profile?.schoolSettings;
+  const hodSt = appState.hodStudents?.length || 0;
+  const hodCmp = appState.hodComplaints?.length || 0;
+  const hodAct = appState.hodActionPlans?.length || 0;
+  const hodVis = appState.hodVisits?.length || 0;
+
+  if (selectedCategories.includes('school_hod') || selectedCategories.includes('settings')) {
+    const schoolBase = school ? (
+      (school.stageManagers?.length || 0) +
+      (school.stageSecretaries?.length || 0) +
+      (school.visitRecords?.length || 0) +
+      (school.weeklyPlanStatuses?.length || 0) +
+      (school.stageReports?.length || 0) +
+      (school.stageFollowUps?.length || 0) +
+      (school.teachers?.length || 0) +
+      (school.complaints?.length || 0) +
+      (school.actionPlans?.length || 0) +
+      (school.parentComplaints?.length || 0)
+    ) : 0;
+    schoolRecordCount = schoolBase + hodSt + hodCmp + hodAct + hodVis;
+  }
+
+  const totalRecords = studentCount + groupCount + lessonCount + paymentCount + notificationCount + schoolRecordCount + certificateCount + schoolNotesCount;
   
-  // Estimate size KB (~150 bytes per student, 200 per lesson, 180 per payment)
+  // Estimate size KB (~150 bytes per student, 200 per lesson, 180 per payment, 250 per school/HOD record)
   const estimatedSizeBytes = Math.max(
     1024,
-    (studentCount * 180) + (groupCount * 250) + (lessonCount * 320) + (paymentCount * 220) + 1500
+    (studentCount * 180) + (groupCount * 250) + (lessonCount * 320) + (paymentCount * 220) + (schoolRecordCount * 250) + (certificateCount * 300) + 1500
   );
   
   const estimatedSizeKb = Math.round(estimatedSizeBytes / 1024);
@@ -325,6 +376,7 @@ export function calculateBackupStats(
     examCount,
     paymentCount,
     notificationCount,
+    schoolRecordCount,
     totalRecords,
     estimatedSizeKb,
     isFull,
@@ -396,7 +448,13 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     { key: 'notifications', label: 'notifications' },
     { key: 'todos', label: 'todos' },
     { key: 'inspirationMessages', label: 'inspirationMessages' },
-    { key: 'certificates', label: 'certificates' }
+    { key: 'certificates', label: 'certificates' },
+    { key: 'hodStudents', label: 'hodStudents' },
+    { key: 'hodComplaints', label: 'hodComplaints' },
+    { key: 'hodActionPlans', label: 'hodActionPlans' },
+    { key: 'hodVisits', label: 'hodVisits' },
+    { key: 'customAiBackgrounds', label: 'customAiBackgrounds' },
+    { key: 'schoolNotes', label: 'schoolNotes' }
   ];
 
   for (const col of collectionsToCheck) {
@@ -434,6 +492,40 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     return undefined;
   };
 
+  // Sanitize Groups first so we have the full identity map for legacy backup compatibility
+  const rawGroups: any[] = Array.isArray(data.groups) ? data.groups : [];
+  const sanitizedGroups: Group[] = [];
+  const groupNameToIdMap = new Map<string, string>();
+  const validGroupIds = new Set<string>();
+
+  for (let i = 0; i < rawGroups.length; i++) {
+    const g = rawGroups[i];
+    if (!g || typeof g !== 'object' || Array.isArray(g)) continue;
+
+    const id = typeof g.id === 'string' && g.id.trim() ? g.id.trim() : `grp_imp_${Date.now()}_${i}`;
+    const name = typeof g.name === 'string' ? g.name : 'Unnamed Group';
+
+    validGroupIds.add(id);
+    if (name && name.trim()) {
+      groupNameToIdMap.set(name.trim().toLowerCase(), id);
+    }
+
+    sanitizedGroups.push({
+      ...g,
+      id,
+      name,
+      grade: typeof g.grade === 'string' ? g.grade : '',
+      subject: typeof g.subject === 'string' ? g.subject : '',
+      type: (g.type === 'online' || g.type === 'offline') ? g.type : 'offline',
+      sessionCount: sanitizeNumber(g.sessionCount, 0),
+      pricePerSession: sanitizeNumber(g.pricePerSession, 0),
+      monthlyPackagePrice: sanitizeNumber(g.monthlyPackagePrice, 0),
+      startingSessionNumber: sanitizeNumber(g.startingSessionNumber, 1),
+      price: sanitizeNumber(g.price, 0),
+      schedules: Array.isArray(g.schedules) ? g.schedules : []
+    });
+  }
+
   // Sanitize Students
   const rawStudents: any[] = Array.isArray(data.students) ? data.students : [];
   const sanitizedStudents: Student[] = [];
@@ -443,7 +535,15 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
 
     const id = typeof s.id === 'string' && s.id.trim() ? s.id.trim() : `st_imp_${Date.now()}_${i}`;
     const name = typeof s.name === 'string' ? s.name : (s.name ? String(s.name) : 'Unnamed Student');
-    const groupId = typeof s.groupId === 'string' ? s.groupId : '';
+    
+    // Legacy fallback: if groupId is missing but groupName matches an existing group
+    let groupId = typeof s.groupId === 'string' ? s.groupId.trim() : '';
+    if ((!groupId || !validGroupIds.has(groupId)) && typeof s.groupName === 'string' && s.groupName.trim()) {
+      const mappedId = groupNameToIdMap.get(s.groupName.trim().toLowerCase());
+      if (mappedId) {
+        groupId = mappedId;
+      }
+    }
 
     let avatarUrl = s.avatarUrl;
     if (typeof avatarUrl === 'string' && avatarUrl.length > 1000000) {
@@ -469,33 +569,6 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     });
   }
 
-  // Sanitize Groups
-  const rawGroups: any[] = Array.isArray(data.groups) ? data.groups : [];
-  const sanitizedGroups: Group[] = [];
-  for (let i = 0; i < rawGroups.length; i++) {
-    const g = rawGroups[i];
-    if (!g || typeof g !== 'object' || Array.isArray(g)) continue;
-
-    const id = typeof g.id === 'string' && g.id.trim() ? g.id.trim() : `grp_imp_${Date.now()}_${i}`;
-    const name = typeof g.name === 'string' ? g.name : 'Unnamed Group';
-
-    sanitizedGroups.push({
-      ...g,
-      id,
-      name,
-      grade: typeof g.grade === 'string' ? g.grade : '',
-      subject: typeof g.subject === 'string' ? g.subject : '',
-      type: (g.type === 'online' || g.type === 'offline') ? g.type : 'offline',
-      sessionCount: sanitizeNumber(g.sessionCount, 0),
-      pricePerSession: sanitizeNumber(g.pricePerSession, 0),
-      monthlyPackagePrice: sanitizeNumber(g.monthlyPackagePrice, 0),
-      startingSessionNumber: sanitizeNumber(g.startingSessionNumber, 1),
-      price: sanitizeNumber(g.price, 0),
-      studentIds: Array.isArray(g.studentIds) ? g.studentIds.filter((sid: any) => typeof sid === 'string') : [],
-      schedules: Array.isArray(g.schedules) ? g.schedules : []
-    });
-  }
-
   // Sanitize Lessons
   const rawLessons: any[] = Array.isArray(data.lessons) ? data.lessons : [];
   const sanitizedLessons: Lesson[] = [];
@@ -507,6 +580,23 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     const date = typeof l.date === 'string' ? l.date : new Date().toISOString().split('T')[0];
     const validStatuses = ['scheduled', 'completed', 'cancelled', 'moved'];
     const status = validStatuses.includes(l.status) ? l.status : 'scheduled';
+
+    // Legacy fallback: if groupId is missing but groupName matches an existing group
+    let groupId = typeof l.groupId === 'string' ? l.groupId.trim() : '';
+    if ((!groupId || !validGroupIds.has(groupId)) && typeof l.groupName === 'string' && l.groupName.trim()) {
+      const mappedId = groupNameToIdMap.get(l.groupName.trim().toLowerCase());
+      if (mappedId) {
+        groupId = mappedId;
+      }
+    }
+
+    let groupName = typeof l.groupName === 'string' ? l.groupName : '';
+    if (groupId && validGroupIds.has(groupId)) {
+      const targetGroup = sanitizedGroups.find(g => g.id === groupId);
+      if (targetGroup) {
+        groupName = targetGroup.name;
+      }
+    }
 
     let report = l.report;
     if (report && typeof report === 'object') {
@@ -524,7 +614,8 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       id,
       date,
       status,
-      groupId: typeof l.groupId === 'string' ? l.groupId : '',
+      groupId,
+      groupName: groupName || l.groupName,
       studentId: typeof l.studentId === 'string' ? l.studentId : undefined,
       sessionNumber: sanitizeOptionalNumber(l.sessionNumber),
       price: sanitizeOptionalNumber(l.price),
@@ -543,12 +634,26 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     const validStatuses = ['paid', 'pending', 'overdue', 'partially_paid'];
     const status = validStatuses.includes(p.status) ? p.status : 'pending';
 
+    let groupId = typeof p.groupId === 'string' ? p.groupId.trim() : '';
+    if ((!groupId || !validGroupIds.has(groupId)) && typeof p.groupName === 'string' && p.groupName.trim()) {
+      const mappedId = groupNameToIdMap.get(p.groupName.trim().toLowerCase());
+      if (mappedId) {
+        groupId = mappedId;
+      }
+    }
+    if (!groupId && typeof p.studentId === 'string' && p.studentId.trim()) {
+      const student = sanitizedStudents.find(s => s.id === p.studentId);
+      if (student && student.groupId) {
+        groupId = student.groupId;
+      }
+    }
+
     sanitizedPayments.push({
       ...p,
       id,
       status,
       studentId: typeof p.studentId === 'string' ? p.studentId : '',
-      groupId: typeof p.groupId === 'string' ? p.groupId : '',
+      groupId,
       amountDue: Math.max(0, sanitizeNumber(p.amountDue, 0)),
       amountPaid: Math.max(0, sanitizeNumber(p.amountPaid, 0)),
       discountAmount: Math.max(0, sanitizeNumber(p.discountAmount, 0)),
@@ -599,6 +704,150 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     });
   }
 
+  // Sanitize HOD German Students
+  const rawHodStudents: any[] = Array.isArray(data.hodStudents) ? data.hodStudents : [];
+  const sanitizedHodStudents: HodGermanStudent[] = [];
+  for (let i = 0; i < rawHodStudents.length; i++) {
+    const s = rawHodStudents[i];
+    if (!s || typeof s !== 'object' || Array.isArray(s)) continue;
+    const id = typeof s.id === 'string' && s.id.trim() ? s.id.trim() : `hod_st_${Date.now()}_${i}`;
+    sanitizedHodStudents.push({
+      ...s,
+      id,
+      name: typeof s.name === 'string' ? s.name : 'German Student',
+      stage: typeof s.stage === 'string' ? s.stage : 'primary',
+      grade: typeof s.grade === 'string' ? s.grade : 'Grade 1',
+      className: typeof s.className === 'string' ? s.className : '',
+      status: s.status || 'active',
+      updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : Date.now(),
+      deleted: Boolean(s.deleted)
+    });
+  }
+
+  // Sanitize HOD Complaints
+  const rawHodComplaints: any[] = Array.isArray(data.hodComplaints) ? data.hodComplaints : [];
+  const sanitizedHodComplaints: Complaint[] = [];
+  for (let i = 0; i < rawHodComplaints.length; i++) {
+    const c = rawHodComplaints[i];
+    if (!c || typeof c !== 'object' || Array.isArray(c)) continue;
+    const id = typeof c.id === 'string' && c.id.trim() ? c.id.trim() : `hod_cmp_${Date.now()}_${i}`;
+    sanitizedHodComplaints.push({
+      ...c,
+      id,
+      teacherId: typeof c.teacherId === 'string' ? c.teacherId : '',
+      teacherName: typeof c.teacherName === 'string' ? c.teacherName : 'Teacher',
+      studentName: typeof c.studentName === 'string' ? c.studentName : '',
+      className: typeof c.className === 'string' ? c.className : '',
+      description: typeof c.description === 'string' ? c.description : '',
+      date: typeof c.date === 'string' ? c.date : new Date().toISOString().split('T')[0],
+      status: c.status || 'pending',
+      updatedAt: typeof c.updatedAt === 'number' ? c.updatedAt : Date.now(),
+      deleted: Boolean(c.deleted)
+    });
+  }
+
+  // Sanitize HOD Student Action Plans
+  const rawHodActionPlans: any[] = Array.isArray(data.hodActionPlans) ? data.hodActionPlans : [];
+  const sanitizedHodActionPlans: StudentActionPlan[] = [];
+  for (let i = 0; i < rawHodActionPlans.length; i++) {
+    const a = rawHodActionPlans[i];
+    if (!a || typeof a !== 'object' || Array.isArray(a)) continue;
+    const id = typeof a.id === 'string' && a.id.trim() ? a.id.trim() : `hod_plan_${Date.now()}_${i}`;
+    sanitizedHodActionPlans.push({
+      ...a,
+      id,
+      teacherId: typeof a.teacherId === 'string' ? a.teacherId : '',
+      teacherName: typeof a.teacherName === 'string' ? a.teacherName : 'Teacher',
+      studentName: typeof a.studentName === 'string' ? a.studentName : 'Student',
+      className: typeof a.className === 'string' ? a.className : '',
+      weaknessArea: typeof a.weaknessArea === 'string' ? a.weaknessArea : '',
+      actionSteps: typeof a.actionSteps === 'string' ? a.actionSteps : '',
+      startDate: typeof a.startDate === 'string' ? a.startDate : new Date().toISOString().split('T')[0],
+      status: a.status || 'in_progress',
+      updatedAt: typeof a.updatedAt === 'number' ? a.updatedAt : Date.now(),
+      deleted: Boolean(a.deleted)
+    });
+  }
+
+  // Sanitize HOD Visit Records
+  const rawHodVisits: any[] = Array.isArray(data.hodVisits) ? data.hodVisits : [];
+  const sanitizedHodVisits: VisitRecord[] = [];
+  for (let i = 0; i < rawHodVisits.length; i++) {
+    const v = rawHodVisits[i];
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+    const id = typeof v.id === 'string' && v.id.trim() ? v.id.trim() : `hod_vst_${Date.now()}_${i}`;
+    sanitizedHodVisits.push({
+      ...v,
+      id,
+      teacherId: typeof v.teacherId === 'string' ? v.teacherId : '',
+      teacherName: typeof v.teacherName === 'string' ? v.teacherName : 'Teacher',
+      className: typeof v.className === 'string' ? v.className : '',
+      term: v.term === 'term2' || v.term === 'summer' ? v.term : 'term1',
+      visitedDate: typeof v.visitedDate === 'string' ? v.visitedDate : new Date().toISOString().split('T')[0],
+      periodNumber: typeof v.periodNumber === 'number' ? v.periodNumber : 1,
+      lessonTopic: typeof v.lessonTopic === 'string' ? v.lessonTopic : '',
+      updatedAt: typeof v.updatedAt === 'number' ? v.updatedAt : Date.now(),
+      deleted: Boolean(v.deleted)
+    });
+  }
+
+  // Sanitize Custom AI Backgrounds
+  const rawCustomBg: any[] = Array.isArray(data.customAiBackgrounds) ? data.customAiBackgrounds : [];
+  const sanitizedCustomBg: AICertificateBackground[] = [];
+  for (let i = 0; i < rawCustomBg.length; i++) {
+    const bg = rawCustomBg[i];
+    if (!bg || typeof bg !== 'object' || Array.isArray(bg)) continue;
+    const id = typeof bg.id === 'string' && bg.id.trim() ? bg.id.trim() : `ai_bg_${Date.now()}_${i}`;
+    sanitizedCustomBg.push({
+      ...bg,
+      id,
+      name: typeof bg.name === 'string' ? bg.name : 'Custom Background',
+      dataUrl: typeof bg.dataUrl === 'string' ? bg.dataUrl : '',
+      createdAt: typeof bg.createdAt === 'number' ? bg.createdAt : Date.now()
+    });
+  }
+
+  // Sanitize School Notes
+  const rawSchoolNotes: any[] = Array.isArray(data.schoolNotes) ? data.schoolNotes : [];
+  const sanitizedSchoolNotes: SchoolNote[] = [];
+  for (let i = 0; i < rawSchoolNotes.length; i++) {
+    const n = rawSchoolNotes[i];
+    if (!n || typeof n !== 'object' || Array.isArray(n)) continue;
+    const id = typeof n.id === 'string' && n.id.trim() ? n.id.trim() : `note_${Date.now()}_${i}`;
+    sanitizedSchoolNotes.push({
+      ...n,
+      id,
+      type: n.type === 'class' || n.type === 'student' || n.type === 'lesson' ? n.type : 'lesson',
+      text: typeof n.text === 'string' ? n.text : '',
+      createdAt: typeof n.createdAt === 'string' ? n.createdAt : new Date().toISOString(),
+      updatedAt: typeof n.updatedAt === 'number' ? n.updatedAt : Date.now(),
+      deleted: Boolean(n.deleted),
+      version: typeof n.version === 'number' ? n.version : 1,
+      classId: typeof n.classId === 'string' ? n.classId : undefined,
+      className: typeof n.className === 'string' ? n.className : undefined,
+      studentId: typeof n.studentId === 'string' ? n.studentId : undefined,
+      studentName: typeof n.studentName === 'string' ? n.studentName : undefined,
+      lessonId: typeof n.lessonId === 'string' ? n.lessonId : undefined,
+      subjectName: typeof n.subjectName === 'string' ? n.subjectName : undefined,
+      date: typeof n.date === 'string' ? n.date : undefined,
+      periodNumber: typeof n.periodNumber === 'number' ? n.periodNumber : undefined
+    });
+  }
+
+  // Sanitize School & HOD Settings
+  const rawSchool = data.schoolSettings || data.profile?.schoolSettings;
+  const sanitizedSchool = sanitizeSchoolSettings(rawSchool);
+
+  const sanitizedProfile = data.profile && typeof data.profile === 'object' ? {
+    ...data.profile,
+    displayName: typeof data.profile.displayName === 'string' ? data.profile.displayName : 'Teacher',
+    displayNameEn: typeof data.profile.displayNameEn === 'string' ? data.profile.displayNameEn : (typeof data.profile.nameEn === 'string' ? data.profile.nameEn : undefined),
+    displayNameAr: typeof data.profile.displayNameAr === 'string' ? data.profile.displayNameAr : (typeof data.profile.nameAr === 'string' ? data.profile.nameAr : undefined),
+    nameEn: typeof data.profile.nameEn === 'string' ? data.profile.nameEn : (typeof data.profile.displayNameEn === 'string' ? data.profile.displayNameEn : undefined),
+    nameAr: typeof data.profile.nameAr === 'string' ? data.profile.nameAr : (typeof data.profile.displayNameAr === 'string' ? data.profile.displayNameAr : undefined),
+    schoolSettings: sanitizedSchool || data.profile.schoolSettings
+  } : undefined;
+
   return {
     isValid: true,
     version,
@@ -610,19 +859,253 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       payments: sanitizedPayments,
       notifications: sanitizedNotifications,
       certificates: sanitizedCertificates,
-      profile: data.profile && typeof data.profile === 'object' ? {
-        ...data.profile,
-        displayName: typeof data.profile.displayName === 'string' ? data.profile.displayName : 'Teacher',
-        displayNameEn: typeof data.profile.displayNameEn === 'string' ? data.profile.displayNameEn : (typeof data.profile.nameEn === 'string' ? data.profile.nameEn : undefined),
-        displayNameAr: typeof data.profile.displayNameAr === 'string' ? data.profile.displayNameAr : (typeof data.profile.nameAr === 'string' ? data.profile.nameAr : undefined),
-        nameEn: typeof data.profile.nameEn === 'string' ? data.profile.nameEn : (typeof data.profile.displayNameEn === 'string' ? data.profile.displayNameEn : undefined),
-        nameAr: typeof data.profile.nameAr === 'string' ? data.profile.nameAr : (typeof data.profile.displayNameAr === 'string' ? data.profile.displayNameAr : undefined)
-      } : undefined,
+      hodStudents: sanitizedHodStudents,
+      hodComplaints: sanitizedHodComplaints,
+      hodActionPlans: sanitizedHodActionPlans,
+      hodVisits: sanitizedHodVisits,
+      customAiBackgrounds: sanitizedCustomBg,
+      schoolNotes: sanitizedSchoolNotes,
+      schoolSettings: sanitizedSchool,
+      profile: sanitizedProfile,
       notificationSettings: data.notificationSettings && typeof data.notificationSettings === 'object' ? data.notificationSettings : undefined,
       inspirationSettings: data.inspirationSettings && typeof data.inspirationSettings === 'object' ? data.inspirationSettings : undefined,
       inspirationMessages: Array.isArray(data.inspirationMessages) ? data.inspirationMessages : undefined,
       todos: Array.isArray(data.todos) ? data.todos : undefined
     }
+  };
+}
+
+export function sanitizeSchoolSettings(raw: any): SchoolSettings | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+
+  const stageManagers: StageManager[] = [];
+  if (Array.isArray(raw.stageManagers)) {
+    raw.stageManagers.forEach((m: any, idx: number) => {
+      if (m && typeof m === 'object' && !Array.isArray(m)) {
+        stageManagers.push({
+          id: typeof m.id === 'string' && m.id.trim() ? m.id.trim() : `sm_${Date.now()}_${idx}`,
+          name: typeof m.name === 'string' ? m.name : 'Stage Manager',
+          phone: typeof m.phone === 'string' ? m.phone : '',
+          gradeBand: typeof m.gradeBand === 'string' ? m.gradeBand : undefined,
+          assignedGradeGroups: Array.isArray(m.assignedGradeGroups) ? m.assignedGradeGroups.filter((g: any) => typeof g === 'string') : undefined
+        });
+      }
+    });
+  }
+
+  const stageSecretaries: StageSecretary[] = [];
+  if (Array.isArray(raw.stageSecretaries)) {
+    raw.stageSecretaries.forEach((s: any, idx: number) => {
+      if (s && typeof s === 'object' && !Array.isArray(s)) {
+        stageSecretaries.push({
+          id: typeof s.id === 'string' && s.id.trim() ? s.id.trim() : `sec_${Date.now()}_${idx}`,
+          name: typeof s.name === 'string' ? s.name : 'Secretary',
+          phone: typeof s.phone === 'string' ? s.phone : '',
+          stageManagerId: typeof s.stageManagerId === 'string' ? s.stageManagerId : undefined,
+          stageManagerName: typeof s.stageManagerName === 'string' ? s.stageManagerName : undefined
+        });
+      }
+    });
+  }
+
+  const visitRecords: VisitRecord[] = [];
+  if (Array.isArray(raw.visitRecords)) {
+    raw.visitRecords.forEach((v: any, idx: number) => {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        visitRecords.push({
+          ...v,
+          id: typeof v.id === 'string' && v.id.trim() ? v.id.trim() : `vis_${Date.now()}_${idx}`,
+          teacherId: typeof v.teacherId === 'string' ? v.teacherId : '',
+          teacherName: typeof v.teacherName === 'string' ? v.teacherName : 'Teacher',
+          className: typeof v.className === 'string' ? v.className : '',
+          term: v.term === 'term2' || v.term === 'summer' ? v.term : 'term1',
+          visitedDate: typeof v.visitedDate === 'string' ? v.visitedDate : new Date().toISOString().split('T')[0],
+          periodNumber: typeof v.periodNumber === 'number' ? v.periodNumber : 1,
+          lessonTopic: typeof v.lessonTopic === 'string' ? v.lessonTopic : ''
+        });
+      }
+    });
+  }
+
+  const bookletObservations: BookletObservation[] = [];
+  if (Array.isArray(raw.bookletObservations)) {
+    raw.bookletObservations.forEach((b: any, idx: number) => {
+      if (b && typeof b === 'object' && !Array.isArray(b)) {
+        bookletObservations.push({
+          ...b,
+          id: typeof b.id === 'string' && b.id.trim() ? b.id.trim() : `bk_${Date.now()}_${idx}`,
+          className: typeof b.className === 'string' ? b.className : '',
+          status: b.status || 'needs_follow_up',
+          updatedAt: typeof b.updatedAt === 'string' ? b.updatedAt : new Date().toISOString()
+        });
+      }
+    });
+  }
+
+  const weeklyPlanStatuses: WeeklyPlanStatusRecord[] = [];
+  if (Array.isArray(raw.weeklyPlanStatuses)) {
+    raw.weeklyPlanStatuses.forEach((w: any, idx: number) => {
+      if (w && typeof w === 'object' && !Array.isArray(w)) {
+        weeklyPlanStatuses.push({
+          ...w,
+          id: typeof w.id === 'string' && w.id.trim() ? w.id.trim() : `wp_${Date.now()}_${idx}`,
+          gradeBand: typeof w.gradeBand === 'string' ? w.gradeBand : 'Stage',
+          status: w.status === 'sent' || w.status === 'confirmed' || w.status === 'issue' ? w.status : 'not_sent',
+          sentAt: typeof w.sentAt === 'string' ? w.sentAt : undefined,
+          secretaryName: typeof w.secretaryName === 'string' ? w.secretaryName : undefined,
+          secretaryPhone: typeof w.secretaryPhone === 'string' ? w.secretaryPhone : undefined,
+          weekNumber: typeof w.weekNumber === 'number' ? w.weekNumber : undefined,
+          customNotes: typeof w.customNotes === 'string' ? w.customNotes : undefined,
+          gradesContent: Array.isArray(w.gradesContent) ? w.gradesContent : []
+        });
+      }
+    });
+  }
+
+  const stageReports: StageReportRecord[] = [];
+  if (Array.isArray(raw.stageReports)) {
+    raw.stageReports.forEach((r: any, idx: number) => {
+      if (r && typeof r === 'object' && !Array.isArray(r)) {
+        stageReports.push({
+          ...r,
+          id: typeof r.id === 'string' && r.id.trim() ? r.id.trim() : `rep_${Date.now()}_${idx}`,
+          weekTitle: typeof r.weekTitle === 'string' ? r.weekTitle : 'Report',
+          stageManagerId: typeof r.stageManagerId === 'string' ? r.stageManagerId : '',
+          stageManagerName: typeof r.stageManagerName === 'string' ? r.stageManagerName : '',
+          contentAr: typeof r.contentAr === 'string' ? r.contentAr : '',
+          status: r.status || 'draft',
+          timestamp: typeof r.timestamp === 'number' ? r.timestamp : Date.now()
+        });
+      }
+    });
+  }
+
+  const stageFollowUps: StageFollowUpRecord[] = [];
+  if (Array.isArray(raw.stageFollowUps)) {
+    raw.stageFollowUps.forEach((f: any, idx: number) => {
+      if (f && typeof f === 'object' && !Array.isArray(f)) {
+        stageFollowUps.push({
+          ...f,
+          id: typeof f.id === 'string' && f.id.trim() ? f.id.trim() : `sfu_${Date.now()}_${idx}`,
+          stageManagerId: typeof f.stageManagerId === 'string' ? f.stageManagerId : '',
+          stageManagerName: typeof f.stageManagerName === 'string' ? f.stageManagerName : '',
+          gradeBand: typeof f.gradeBand === 'string' ? f.gradeBand : '',
+          periodType: f.periodType || 'weekly',
+          weekNumber: typeof f.weekNumber === 'number' ? f.weekNumber : 1,
+          date: typeof f.date === 'string' ? f.date : new Date().toISOString().split('T')[0],
+          timestamp: typeof f.timestamp === 'number' ? f.timestamp : Date.now(),
+          teachersData: Array.isArray(f.teachersData) ? f.teachersData : [],
+          overallStageNotes: typeof f.overallStageNotes === 'string' ? f.overallStageNotes : '',
+          includedComplaints: Array.isArray(f.includedComplaints) ? f.includedComplaints : undefined,
+          includedActionPlans: Array.isArray(f.includedActionPlans) ? f.includedActionPlans : undefined
+        });
+      }
+    });
+  }
+
+  const teachers: Teacher[] = [];
+  if (Array.isArray(raw.teachers)) {
+    raw.teachers.forEach((t: any, idx: number) => {
+      if (t && typeof t === 'object' && !Array.isArray(t)) {
+        teachers.push({
+          id: typeof t.id === 'string' && t.id.trim() ? t.id.trim() : `t_${Date.now()}_${idx}`,
+          name: typeof t.name === 'string' ? t.name : 'Teacher',
+          phone: typeof t.phone === 'string' ? t.phone : undefined,
+          isActive: typeof t.isActive === 'boolean' ? t.isActive : true,
+          isHod: typeof t.isHod === 'boolean' ? t.isHod : undefined
+        });
+      }
+    });
+  }
+
+  const complaints: Complaint[] = [];
+  if (Array.isArray(raw.complaints)) {
+    raw.complaints.forEach((c: any, idx: number) => {
+      if (c && typeof c === 'object' && !Array.isArray(c)) {
+        complaints.push({
+          ...c,
+          id: typeof c.id === 'string' && c.id.trim() ? c.id.trim() : `comp_${Date.now()}_${idx}`,
+          direction: c.direction || 'teacher_to_student',
+          teacherId: typeof c.teacherId === 'string' ? c.teacherId : '',
+          teacherName: typeof c.teacherName === 'string' ? c.teacherName : '',
+          studentNameAr: typeof c.studentNameAr === 'string' ? c.studentNameAr : '',
+          studentNameEn: typeof c.studentNameEn === 'string' ? c.studentNameEn : '',
+          gradeClass: typeof c.gradeClass === 'string' ? c.gradeClass : '',
+          reason: typeof c.reason === 'string' ? c.reason : '',
+          actionTaken: typeof c.actionTaken === 'string' ? c.actionTaken : '',
+          notes: typeof c.notes === 'string' ? c.notes : '',
+          timestamp: typeof c.timestamp === 'number' ? c.timestamp : Date.now(),
+          term: c.term || 'term1',
+          month: typeof c.month === 'number' ? c.month : (new Date().getMonth() + 1)
+        });
+      }
+    });
+  }
+
+  const actionPlans: StudentActionPlan[] = [];
+  if (Array.isArray(raw.actionPlans)) {
+    raw.actionPlans.forEach((a: any, idx: number) => {
+      if (a && typeof a === 'object' && !Array.isArray(a)) {
+        actionPlans.push({
+          ...a,
+          id: typeof a.id === 'string' && a.id.trim() ? a.id.trim() : `ap_${Date.now()}_${idx}`,
+          studentNameAr: typeof a.studentNameAr === 'string' ? a.studentNameAr : '',
+          studentNameEn: typeof a.studentNameEn === 'string' ? a.studentNameEn : '',
+          gradeClass: typeof a.gradeClass === 'string' ? a.gradeClass : '',
+          teacherId: typeof a.teacherId === 'string' ? a.teacherId : '',
+          teacherName: typeof a.teacherName === 'string' ? a.teacherName : '',
+          weaknessAreas: Array.isArray(a.weaknessAreas) ? a.weaknessAreas : [],
+          actionSteps: Array.isArray(a.actionSteps) ? a.actionSteps : [],
+          startDate: typeof a.startDate === 'string' ? a.startDate : new Date().toISOString().split('T')[0],
+          term: a.term || 'term1',
+          status: a.status || 'in_progress',
+          weeklyLogs: Array.isArray(a.weeklyLogs) ? a.weeklyLogs : []
+        });
+      }
+    });
+  }
+
+  const parentComplaints: ParentComplaint[] = [];
+  if (Array.isArray(raw.parentComplaints)) {
+    raw.parentComplaints.forEach((p: any, idx: number) => {
+      if (p && typeof p === 'object' && !Array.isArray(p)) {
+        parentComplaints.push({
+          ...p,
+          id: typeof p.id === 'string' && p.id.trim() ? p.id.trim() : `pc_${Date.now()}_${idx}`,
+          teacherId: typeof p.teacherId === 'string' ? p.teacherId : '',
+          studentName: typeof p.studentName === 'string' ? p.studentName : '',
+          className: typeof p.className === 'string' ? p.className : '',
+          description: typeof p.description === 'string' ? p.description : '',
+          date: typeof p.date === 'string' ? p.date : new Date().toISOString().split('T')[0],
+          status: p.status || 'pending'
+        });
+      }
+    });
+  }
+
+  return {
+    ...raw,
+    schoolName: typeof raw.schoolName === 'string' ? raw.schoolName : undefined,
+    departmentName: typeof raw.departmentName === 'string' ? raw.departmentName : undefined,
+    academicYear: typeof raw.academicYear === 'string' ? raw.academicYear : undefined,
+    currentTerm: raw.currentTerm === 'term2' || raw.currentTerm === 'summer' ? raw.currentTerm : 'term1',
+    hodName: typeof raw.hodName === 'string' ? raw.hodName : undefined,
+    schoolLogoUrl: typeof raw.schoolLogoUrl === 'string' ? raw.schoolLogoUrl : undefined,
+    presence: raw.presence && typeof raw.presence === 'object' ? raw.presence : undefined,
+    periodSettings: raw.periodSettings && typeof raw.periodSettings === 'object' ? raw.periodSettings : undefined,
+    schedule: raw.schedule && typeof raw.schedule === 'object' ? raw.schedule : undefined,
+    stageManagers,
+    stageSecretaries,
+    visitRecords,
+    bookletObservations,
+    weeklyPlanStatuses,
+    stageReports,
+    stageFollowUps,
+    teachers,
+    teacherSchedules: raw.teacherSchedules && typeof raw.teacherSchedules === 'object' ? raw.teacherSchedules : undefined,
+    complaints,
+    actionPlans,
+    parentComplaints
   };
 }
 
@@ -699,6 +1182,7 @@ export function analyzeBackupPayload(
     const lessons: Lesson[] = data.lessons || [];
     const payments: PaymentRecord[] = data.payments || [];
     const notifications: NotificationItem[] = data.notifications || [];
+    const schoolSettings = data.schoolSettings || data.profile?.schoolSettings;
 
     // Analyze impact
     const existingStudentIds = new Set(currentAppState.students.map(s => s.id));
@@ -767,6 +1251,19 @@ export function analyzeBackupPayload(
       if (attendanceCount > 0) categories.push('attendance');
       if (homeworkCount > 0) categories.push('homework');
       if (examCount > 0) categories.push('exams');
+      if (schoolSettings && (
+        (schoolSettings.stageManagers && schoolSettings.stageManagers.length > 0) ||
+        (schoolSettings.visitRecords && schoolSettings.visitRecords.length > 0) ||
+        (schoolSettings.weeklyPlanStatuses && schoolSettings.weeklyPlanStatuses.length > 0) ||
+        (schoolSettings.stageReports && schoolSettings.stageReports.length > 0) ||
+        (schoolSettings.stageFollowUps && schoolSettings.stageFollowUps.length > 0) ||
+        (schoolSettings.complaints && schoolSettings.complaints.length > 0) ||
+        (schoolSettings.actionPlans && schoolSettings.actionPlans.length > 0) ||
+        (schoolSettings.teachers && schoolSettings.teachers.length > 0) ||
+        schoolSettings.schoolName || schoolSettings.hodName
+      )) {
+        categories.push('school_hod');
+      }
       if (data.profile) {
         categories.push('settings', 'availability', 'templates', 'meeting_links');
       }

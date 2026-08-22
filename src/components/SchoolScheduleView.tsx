@@ -507,20 +507,20 @@ KEY CONSTRAINTS & RULES:
               {_t('لم تقم بإدخال جدول الحصص الخاص بك حتى الآن. يمكنك استيراده فوراً وصنع جدولك بالذكاء الاصطناعي أو ملؤه يدوياً.', 'You have not added any teaching hours to your schedule yet. You can import your schedule instantly using our AI parser or add classes manually.', 'Sie haben noch keine Unterrichtsstunden eingetragen. Nutzen Sie den KI-Import oder tragen Sie die Stunden manuell ein.')}
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-1">
+          <div className="grid grid-cols-2 gap-2 pt-1 w-full max-w-sm mx-auto sm:flex sm:items-center sm:justify-center">
             <button
               onClick={() => setIsImportModalOpen(true)}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg text-xs font-black shadow-2xs transition-all active:scale-95 cursor-pointer font-bold"
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-[11px] sm:text-xs font-black shadow-2xs transition-all active:scale-95 cursor-pointer whitespace-nowrap"
             >
-              <Sparkles className="w-4 h-4" />
-              <span>{_t('استيراد بالذكاء الاصطناعي', 'Import with AI', 'Mit KI importieren')}</span>
+              <Sparkles className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{_t('استيراد بالذكاء الاصطناعي', 'Import with AI', 'Mit KI importieren')}</span>
             </button>
             <button
               onClick={() => setShowTableEvenIfEmpty(true)}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-black border border-slate-150/40 dark:border-gray-750 transition-all active:scale-95 cursor-pointer font-bold"
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 bg-surface hover:bg-surface-hover text-text-main rounded-xl text-[11px] sm:text-xs font-black border border-surface-border transition-all active:scale-95 cursor-pointer whitespace-nowrap"
             >
-              <Plus className="w-4 h-4" />
-              <span>{_t('إضافة جدول يدويًا', 'Add Manually', 'Manuell hinzufügen')}</span>
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{_t('إضافة يدويًا', 'Add Manually', 'Manuell hinzufügen')}</span>
             </button>
           </div>
         </div>

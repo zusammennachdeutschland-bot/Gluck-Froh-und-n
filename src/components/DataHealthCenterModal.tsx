@@ -41,6 +41,9 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
     lessons, setLessons, 
     payments, setPayments, 
     getHistoricalLessons, getHistoricalPayments,
+    updateFullLessonsStorage,
+    updateFullPaymentsStorage,
+    updateFullStudentsStorage,
     refreshCalendarAndDashboard,
     language, t, _t 
   } = useApp();
@@ -72,11 +75,10 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
   const [cleanupResults, setCleanupResults] = useState<CleanupBreakdown | null>(null);
 
   const isRtl = language === 'ar';
-  
 
-  // Set of active valid group IDs
+  // Set of active valid group IDs (excluding soft-deleted groups)
   const validGroupIds = useMemo(() => {
-    return new Set(groups.map(g => g.id));
+    return new Set(groups.filter(g => !g.deleted).map(g => g.id));
   }, [groups]);
 
   // Main Asynchronous Scanner Function
@@ -86,12 +88,17 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
     await new Promise(r => setTimeout(r, 80));
 
     try {
-      const [allHistoricalLessons, allHistoricalPayments] = await Promise.all([
+      const [rawHistoricalLessons, rawHistoricalPayments] = await Promise.all([
         getHistoricalLessons(),
         getHistoricalPayments()
       ]);
 
-      const currentGroupIds = new Set(groups.map(g => g.id));
+      const activeGroups = groups.filter(g => !g.deleted);
+      const activeStudents = students.filter(s => !s.deleted);
+      const allHistoricalLessons = rawHistoricalLessons.filter(l => !l.deleted);
+      const allHistoricalPayments = rawHistoricalPayments.filter(p => !p.deleted);
+
+      const currentGroupIds = new Set(activeGroups.map(g => g.id));
 
       // Helper: check if a group reference is missing, invalid, or points to deleted group
       const isOrphanedGroupRef = (groupId: string | undefined): boolean => {
@@ -101,7 +108,7 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
       };
 
       // 1. Students Without Group
-      const stOrphans = students.filter(st => isOrphanedGroupRef(st.groupId));
+      const stOrphans = activeStudents.filter(st => isOrphanedGroupRef(st.groupId));
 
       // 2 & 3. Sessions vs Calendar Sessions Without Group
       const sessionOrphans: Lesson[] = [];
@@ -157,17 +164,17 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
       setOrphanedExamLessons(examOrphans);
 
       // Compute healthy count
-      const healthySts = students.length - stOrphans.length;
+      const healthySts = activeStudents.length - stOrphans.length;
       const healthySess = allHistoricalLessons.length - (sessionOrphans.length + calendarOrphans.length);
       const healthyPay = allHistoricalPayments.length - paymentOrphans.length;
-      const totalHealthy = Math.max(0, healthySts + healthySess + healthyPay + groups.length);
+      const totalHealthy = Math.max(0, healthySts + healthySess + healthyPay + activeGroups.length);
       setHealthyRecordsCount(totalHealthy);
 
       // Estimate storage used in MB
       try {
         const snapshotStr = JSON.stringify({
-          students,
-          groups,
+          students: activeStudents,
+          groups: activeGroups,
           lessons: allHistoricalLessons,
           payments: allHistoricalPayments
         });
@@ -302,78 +309,67 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
     let deletedExamsCount = 0;
 
     const initialStorageMb = storageUsedMb;
-
-    // Helper: update storage async
-    const fullLessons = (await storage.getItem<Lesson[]>('dl_lessons')) || lessons;
-    const fullPayments = (await storage.getItem<PaymentRecord[]>('dl_payments')) || payments;
-
-    let nextStudents = [...students];
-    let nextLessons = [...fullLessons];
-    let nextPayments = [...fullPayments];
-
-    const currentGroupIds = new Set(groups.map(g => g.id));
+    const currentGroupIds = new Set(groups.filter(g => !g.deleted).map(g => g.id));
     const isOrphan = (groupId: string | undefined) => !groupId || (groupId !== 'quick_group' && !currentGroupIds.has(groupId));
 
     // Target 1: Students
     if (target === 'students' || target === 'all') {
       if (singleItemId) {
-        nextStudents = nextStudents.filter(s => s.id !== singleItemId);
         deletedStCount = 1;
+        await updateFullStudentsStorage(all => all.filter(s => s.id !== singleItemId));
       } else {
-        const toRemove = nextStudents.filter(s => isOrphan(s.groupId));
+        const toRemove = students.filter(s => isOrphan(s.groupId));
         deletedStCount = toRemove.length;
-        nextStudents = nextStudents.filter(s => !isOrphan(s.groupId));
+        await updateFullStudentsStorage(all => all.filter(s => !isOrphan(s.groupId)));
       }
-      setStudents(nextStudents);
-      await storage.setItem('dl_students', nextStudents);
     }
 
     // Target 2: Sessions (non-scheduled lessons without group)
     if (target === 'sessions' || target === 'all') {
       if (singleItemId) {
-        nextLessons = nextLessons.filter(l => l.id !== singleItemId);
         deletedSessCount = 1;
+        await updateFullLessonsStorage(all => all.filter(l => l.id !== singleItemId));
       } else {
-        const toRemove = nextLessons.filter(l => l.status !== 'scheduled' && isOrphan(l.groupId));
-        deletedSessCount = toRemove.length;
-        nextLessons = nextLessons.filter(l => !(l.status !== 'scheduled' && isOrphan(l.groupId)));
+        await updateFullLessonsStorage(all => {
+          const remaining = all.filter(l => !(l.status !== 'scheduled' && isOrphan(l.groupId)));
+          deletedSessCount = Math.max(0, all.length - remaining.length);
+          return remaining;
+        });
       }
-      setLessons(nextLessons);
-      await storage.setItem('dl_lessons', nextLessons);
     }
 
     // Target 3: Calendar Sessions (scheduled lessons without group)
     if (target === 'calendarSessions' || target === 'all') {
       if (singleItemId) {
-        nextLessons = nextLessons.filter(l => l.id !== singleItemId);
         deletedCalCount = 1;
+        await updateFullLessonsStorage(all => all.filter(l => l.id !== singleItemId));
       } else {
-        const toRemove = nextLessons.filter(l => l.status === 'scheduled' && isOrphan(l.groupId));
-        deletedCalCount = toRemove.length;
-        nextLessons = nextLessons.filter(l => !(l.status === 'scheduled' && isOrphan(l.groupId)));
+        await updateFullLessonsStorage(all => {
+          const remaining = all.filter(l => !(l.status === 'scheduled' && isOrphan(l.groupId)));
+          deletedCalCount = Math.max(0, all.length - remaining.length);
+          return remaining;
+        });
       }
-      setLessons(nextLessons);
-      await storage.setItem('dl_lessons', nextLessons);
     }
 
     // Target 4: Payments
     if (target === 'payments' || target === 'all') {
       if (singleItemId) {
-        nextPayments = nextPayments.filter(p => p.id !== singleItemId);
         deletedPayCount = 1;
+        await updateFullPaymentsStorage(all => all.filter(p => p.id !== singleItemId));
       } else {
-        const toRemove = nextPayments.filter(p => isOrphan(p.groupId));
-        deletedPayCount = toRemove.length;
-        nextPayments = nextPayments.filter(p => !isOrphan(p.groupId));
+        await updateFullPaymentsStorage(all => {
+          const remaining = all.filter(p => !isOrphan(p.groupId));
+          deletedPayCount = Math.max(0, all.length - remaining.length);
+          return remaining;
+        });
       }
-      setPayments(nextPayments);
-      await storage.setItem('dl_payments', nextPayments);
     }
 
     // Target 5: Attendance Records Without Group
     if (target === 'attendance' || target === 'all') {
       let attCount = 0;
-      nextLessons = nextLessons.map(l => {
+      await updateFullLessonsStorage(all => all.map(l => {
         if (isOrphan(l.groupId) && l.report) {
           if (l.report.attendanceStatus || l.report.studentAttendance) {
             attCount++;
@@ -384,16 +380,14 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
           }
         }
         return l;
-      });
+      }));
       deletedAttCount = attCount;
-      setLessons(nextLessons);
-      await storage.setItem('dl_lessons', nextLessons);
     }
 
     // Target 6: Homework Records Without Group
     if (target === 'homework' || target === 'all') {
       let hwCount = 0;
-      nextLessons = nextLessons.map(l => {
+      await updateFullLessonsStorage(all => all.map(l => {
         if (isOrphan(l.groupId) && l.report) {
           if (l.report.homeworkStatus || l.report.homeworkTitle || l.report.studentHomeworkDone) {
             hwCount++;
@@ -408,16 +402,14 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
           }
         }
         return l;
-      });
+      }));
       deletedHwCount = hwCount;
-      setLessons(nextLessons);
-      await storage.setItem('dl_lessons', nextLessons);
     }
 
     // Target 7: Exam Records Without Group
     if (target === 'exams' || target === 'all') {
       let examCount = 0;
-      nextLessons = nextLessons.map(l => {
+      await updateFullLessonsStorage(all => all.map(l => {
         if (isOrphan(l.groupId) && l.report) {
           if (
             l.report.quizScore !== undefined || 
@@ -439,10 +431,8 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
           }
         }
         return l;
-      });
+      }));
       deletedExamsCount = examCount;
-      setLessons(nextLessons);
-      await storage.setItem('dl_lessons', nextLessons);
     }
 
     // Auto Refresh App Context (Dashboard, Calendar, Groups, Students, Payments, Session History)
@@ -451,11 +441,15 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
     // Estimate recovered storage MB
     let endingStorageMb = initialStorageMb;
     try {
+      const activeGroups = groups.filter(g => !g.deleted);
+      const activeStudents = students.filter(s => !s.deleted);
+      const cleanLessons = (await getHistoricalLessons()).filter(l => !l.deleted);
+      const cleanPayments = (await getHistoricalPayments()).filter(p => !p.deleted);
       const snapshotStr = JSON.stringify({
-        students: nextStudents,
-        groups,
-        lessons: nextLessons,
-        payments: nextPayments
+        students: activeStudents,
+        groups: activeGroups,
+        lessons: cleanLessons,
+        payments: cleanPayments
       });
       const bytes = new Blob([snapshotStr]).size;
       endingStorageMb = bytes / (1024 * 1024);

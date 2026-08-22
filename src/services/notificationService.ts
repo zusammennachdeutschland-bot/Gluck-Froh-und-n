@@ -618,7 +618,7 @@ export const rebuildAllNotificationSchedules = async (
   // -------------------------------------------------------------
   // A. LESSON REMINDERS, LESSON START & ATTENDANCE REMINDERS
   // -------------------------------------------------------------
-  const upcomingLessons = lessons.filter(l => l.status === 'scheduled' || l.status === 'in_progress');
+  const upcomingLessons = lessons.filter(l => (l.status === 'scheduled' || l.status === 'in_progress') && !l.deleted);
 
   for (const lesson of upcomingLessons) {
     if (!lesson.date || !lesson.time) continue;
@@ -629,6 +629,8 @@ export const rebuildAllNotificationSchedules = async (
 
     if (isNaN(lessonStartEpoch)) continue;
 
+    const lessonDisplayName = lesson.studentName || (lesson.groupName && lesson.groupName !== 'Quick Lesson' ? lesson.groupName : '') || lesson.title || 'الحصّة';
+
     // 1. Lesson Reminder (X minutes before)
     if (settings.lessonReminder.enabled) {
       const minutesBefore = settings.lessonReminderMinutesBefore || 15;
@@ -636,12 +638,12 @@ export const rebuildAllNotificationSchedules = async (
       if (reminderEpoch > now) {
         addNotification(
           generateDeterministicId(`rem_${lesson.id}`, 10000),
-          `⏰ تذكير بموعد الحصّة: ${lesson.groupName}`,
-          `حصّة ${lesson.groupName} تبدأ بعد ${minutesBefore} دقيقة (الساعة ${lesson.time})`,
+          `⏰ تذكير بموعد الحصّة: ${lessonDisplayName}`,
+          `حصّة ${lessonDisplayName} تبدأ بعد ${minutesBefore} دقيقة (الساعة ${lesson.time})`,
           new Date(reminderEpoch),
           'lessons_reminders',
           'lessonReminder',
-          { lessonId: lesson.id, groupName: lesson.groupName }
+          { lessonId: lesson.id, groupName: lessonDisplayName }
         );
       }
     }
@@ -651,12 +653,12 @@ export const rebuildAllNotificationSchedules = async (
       if (lessonStartEpoch > now) {
         addNotification(
           generateDeterministicId(`start_${lesson.id}`, 20000),
-          `🔔 حان موعد الحصّة الآن: ${lesson.groupName}`,
-          `بدأت الآن حصّة ${lesson.groupName} (${lesson.title || 'مجموعة ' + lesson.groupName})`,
+          `🔔 حان موعد الحصّة الآن: ${lessonDisplayName}`,
+          `بدأت الآن حصّة ${lessonDisplayName} (${lesson.title || lessonDisplayName})`,
           new Date(lessonStartEpoch),
           'lesson_start',
           'lessonStart',
-          { lessonId: lesson.id, groupName: lesson.groupName }
+          { lessonId: lesson.id, groupName: lessonDisplayName }
         );
       }
     }
@@ -668,12 +670,12 @@ export const rebuildAllNotificationSchedules = async (
       if (attendanceRemEpoch > now) {
         addNotification(
           generateDeterministicId(`att_${lesson.id}`, 30000),
-          `📝 تذكير بتسجيل الحضور والغياب: ${lesson.groupName}`,
-          `لا تنسَ تسجيل حضور وغياب الطلاب لحصّة ${lesson.groupName}`,
+          `📝 تذكير بتسجيل الحضور والغياب: ${lessonDisplayName}`,
+          `لا تنسَ تسجيل حضور وغياب الطلاب لحصّة ${lessonDisplayName}`,
           new Date(attendanceRemEpoch),
           'attendance_reminder',
           'attendanceReminder',
-          { lessonId: lesson.id, groupName: lesson.groupName }
+          { lessonId: lesson.id, groupName: lessonDisplayName }
         );
       }
     }

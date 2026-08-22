@@ -180,31 +180,31 @@ export const StudentsView: React.FC = () => {
           <span>{t('students_and_groups_title')}</span>
         </h2>
 
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+        <div className="grid grid-cols-3 gap-1.5 w-full sm:w-auto sm:flex sm:items-center sm:gap-2">
           <button
             onClick={() => setIsAddStudentModalOpen(true)}
-            className="flex-1 sm:flex-initial bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs px-3 py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap hover:shadow-lg hover:shadow-primary/30"
+            className="px-2 sm:px-3 py-2 sm:py-2.5 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-[10.5px] sm:text-xs rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
           >
             <UserPlus className="w-3.5 h-3.5 shrink-0" />
-            <span>{t('students_add_student')}</span>
+            <span className="truncate">{t('students_add_student')}</span>
           </button>
 
           <button
             type="button"
             onClick={() => setIsAddGroupModalOpen(true)}
-            className="flex-1 sm:flex-initial bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs px-3 py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            className="px-2 sm:px-3 py-2 sm:py-2.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 active:scale-95 text-text-main border border-surface-border font-bold text-[10.5px] sm:text-xs rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
           >
-            <Plus className="w-3.5 h-3.5 shrink-0" />
-            <span>{t('students_add_group')}</span>
+            <Plus className="w-3.5 h-3.5 shrink-0 text-primary" />
+            <span className="truncate">{t('students_add_group')}</span>
           </button>
 
           <button
             type="button"
             onClick={() => setIsAiImportModalOpen(true)}
-            className="flex-1 sm:flex-initial bg-gradient-to-r from-primary to-primary-hover hover:from-primary hover:to-primary-hover active:scale-95 text-white font-bold text-xs px-3 py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            className="px-2 sm:px-3 py-2 sm:py-2.5 bg-primary-soft hover:bg-primary-soft/80 active:scale-95 text-primary border border-primary-border font-bold text-[10.5px] sm:text-xs rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
           >
-            <Bot className="w-3.5 h-3.5 shrink-0 text-primary-soft" />
-            <span>{t('auto_import_group_students')}</span>
+            <Bot className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{t('auto_import_group_students')}</span>
           </button>
         </div>
       </div>

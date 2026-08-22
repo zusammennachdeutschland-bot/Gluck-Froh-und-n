@@ -11,6 +11,7 @@ import {
 import { StartLessonNowModal } from './StartLessonNowModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { ExportMonthlyCalendarModal } from './ExportMonthlyCalendarModal';
+import { DeleteSessionConfirmModal } from './DeleteSessionConfirmModal';
 import { getSchoolSettings, calculatePeriodsTimings } from '../utils/schoolUtils';
 import { DAY_KEY_TO_RRULE_BYDAY, getUpcomingDateForDayKey, formatIcsEventBlock, SchoolIcsEventItem } from '../utils/schoolScheduleIcsUtils';
 import { Capacitor } from '@capacitor/core';
@@ -28,6 +29,7 @@ export const ScheduleView: React.FC = () => {
   const [showStartLessonNowModal, setShowStartLessonNowModal] = useState(false);
   const [isExportMonthlyModalOpen, setIsExportMonthlyModalOpen] = useState(false);
   const [reminderLesson, setReminderLesson] = useState<Lesson | null>(null);
+  const [lessonToDelete, setLessonToDelete] = useState<Lesson | null>(null);
 
   const handleRefreshCalendar = () => {
     refreshCalendarAndDashboard();
@@ -757,7 +759,7 @@ export const ScheduleView: React.FC = () => {
 
                             <button
                               type="button"
-                              onClick={() => deleteLesson(lesson.id)}
+                              onClick={() => setLessonToDelete(lesson)}
                               title="حذف الحصة"
                               className="p-1.5 text-rose-400 hover:text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-all cursor-pointer"
                             >
@@ -1083,6 +1085,14 @@ export const ScheduleView: React.FC = () => {
       {/* EXPORT MONTHLY CALENDAR MODAL */}
       {isExportMonthlyModalOpen && (
         <ExportMonthlyCalendarModal onClose={() => setIsExportMonthlyModalOpen(false)} />
+      )}
+
+      {/* DELETE SESSION CONFIRMATION MODAL */}
+      {lessonToDelete && (
+        <DeleteSessionConfirmModal
+          lesson={lessonToDelete}
+          onClose={() => setLessonToDelete(null)}
+        />
       )}
     </div>
   );

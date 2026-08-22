@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Student, Group, Lesson, PaymentRecord } from '../types';
+import { Student, Group, Lesson, PaymentRecord, CertificateRecord, NotificationItem } from '../types';
 import { formatLocalDate } from '../utils/timeUtils';
 import { storage } from '../services/storageService';
 import { Capacitor } from '@capacitor/core';
@@ -17,7 +17,7 @@ import {
   BookOpen, Award, DollarSign, Calendar, Clock, Settings, 
   MessageSquare, Video, FileText, Layout, Bell, AlertTriangle, 
   CheckCircle2, Share2, Save, HardDrive, Sparkles, History, 
-  Eye, Sliders, ArrowRight, ShieldAlert, FileCode, Check
+  Eye, Sliders, ArrowRight, ShieldAlert, FileCode, Check, Building, School
 } from 'lucide-react';
 
 interface SmartBackupCenterProps {
@@ -28,10 +28,12 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
   const { 
     students, groups, lessons, payments, notifications, 
     profile, notificationSettings, inspirationSettings, 
-    inspirationMessages, todos, setStudents, setGroups, 
-    setLessons, setPayments, setNotifications, setProfile, 
+    inspirationMessages, todos, certificates,
+    hodStudents, hodComplaints, hodActionPlans, hodVisits,
+    setStudents, setGroups, setLessons, setPayments, setNotifications, setProfile, 
     setNotificationSettings, setInspirationSettings, setInspirationMessages,
-    setTodos,
+    setTodos, setCertificates,
+    setHodStudents, setHodComplaints, setHodActionPlans, setHodVisits,
     lastBackupTime, performBackup, exportBackupFile, importBackupFile,
     t, _t
   } = useApp();
@@ -128,6 +130,8 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       case 'Calendar': return <Calendar className="w-4 h-4 text-primary" />;
       case 'Clock': return <Clock className="w-4 h-4 text-primary" />;
       case 'Settings': return <Settings className="w-4 h-4 text-primary" />;
+      case 'Building': return <Building className="w-4 h-4 text-primary" />;
+      case 'School': return <School className="w-4 h-4 text-primary" />;
       case 'MessageSquare': return <MessageSquare className="w-4 h-4 text-primary" />;
       case 'Video': return <Video className="w-4 h-4 text-primary" />;
       case 'FileText': return <FileText className="w-4 h-4 text-primary" />;
@@ -156,7 +160,8 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
 
   const stats = calculateBackupStats(selectedCategories, {
     students, groups, lessons, payments, notifications, profile,
-    notificationSettings, inspirationSettings, inspirationMessages, todos
+    notificationSettings, inspirationSettings, inspirationMessages, todos,
+    certificates, hodStudents, hodComplaints, hodActionPlans, hodVisits
   });
 
   const isFullBackup = selectedCategories.length === ALL_BACKUP_CATEGORIES.length;
@@ -182,11 +187,29 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         if (selectedCategories.includes('groups')) payloadData.groups = groups;
         if (selectedCategories.includes('schedule')) payloadData.lessons = lessons;
         if (selectedCategories.includes('financial')) payloadData.payments = payments;
-        if (selectedCategories.includes('notifications')) payloadData.notifications = notifications;
-        if (selectedCategories.includes('settings')) payloadData.profile = profile;
+        if (selectedCategories.includes('notifications')) {
+          payloadData.notifications = notifications;
+          payloadData.notificationSettings = notificationSettings;
+        }
+        if (selectedCategories.includes('certificates')) payloadData.certificates = certificates;
+        if (selectedCategories.includes('settings')) {
+          payloadData.profile = profile;
+          payloadData.schoolSettings = profile.schoolSettings;
+          payloadData.notificationSettings = notificationSettings;
+          payloadData.inspirationSettings = inspirationSettings;
+          payloadData.inspirationMessages = inspirationMessages;
+          payloadData.todos = todos;
+        }
         if (selectedCategories.includes('availability')) payloadData.workingHours = profile.workingHours;
         if (selectedCategories.includes('templates')) payloadData.parentMessageTemplates = profile.parentMessageTemplates;
         if (selectedCategories.includes('meeting_links')) payloadData.meetingLinks = { defaultZoomLink: profile.defaultZoomLink, defaultMeetLink: profile.defaultMeetLink };
+        if (selectedCategories.includes('school_hod')) {
+          payloadData.schoolSettings = profile.schoolSettings;
+          payloadData.hodStudents = hodStudents;
+          payloadData.hodComplaints = hodComplaints;
+          payloadData.hodActionPlans = hodActionPlans;
+          payloadData.hodVisits = hodVisits;
+        }
 
         setExportProgress(70);
 
@@ -215,7 +238,9 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             exams: stats.examCount,
             payments: payloadData.payments?.length || 0,
             notifications: payloadData.notifications?.length || 0,
-            todos: todos?.length || 0
+            certificates: payloadData.certificates?.length || 0,
+            todos: todos?.length || 0,
+            school_hod: stats.schoolRecordCount || 0
           },
           metadata: {
             teacherName: profile.displayName || 'Teacher',
@@ -298,11 +323,20 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           lessons,
           payments,
           notifications,
+          certificates,
           profile,
+          schoolSettings: profile.schoolSettings,
           workingHours: profile.workingHours,
           parentMessageTemplates: profile.parentMessageTemplates,
           meetingLinks: { defaultZoomLink: profile.defaultZoomLink, defaultMeetLink: profile.defaultMeetLink },
-          todos
+          todos,
+          notificationSettings,
+          inspirationSettings,
+          inspirationMessages,
+          hodStudents,
+          hodComplaints,
+          hodActionPlans,
+          hodVisits
         };
 
         const backupPayload = {
@@ -318,11 +352,16 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             lessons: lessons?.length || 0,
             payments: payments?.length || 0,
             notifications: notifications?.length || 0,
-            todos: todos?.length || 0
+            certificates: certificates?.length || 0,
+            todos: todos?.length || 0,
+            hodStudents: hodStudents?.length || 0,
+            hodComplaints: hodComplaints?.length || 0,
+            hodActionPlans: hodActionPlans?.length || 0,
+            hodVisits: hodVisits?.length || 0
           },
           metadata: {
             teacherName: profile.displayName || 'Teacher',
-            totalRecords: (students?.length || 0) + (groups?.length || 0) + (lessons?.length || 0) + (payments?.length || 0),
+            totalRecords: (students?.length || 0) + (groups?.length || 0) + (lessons?.length || 0) + (payments?.length || 0) + (certificates?.length || 0) + (hodStudents?.length || 0),
             estimatedSizeKb: Math.round(JSON.stringify(payloadData).length / 1024)
           },
           data: payloadData
@@ -391,11 +430,16 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         lessons,
         payments,
         notifications,
+        certificates,
         profile,
         notificationSettings,
         inspirationSettings,
         inspirationMessages,
-        todos
+        todos,
+        hodStudents,
+        hodComplaints,
+        hodActionPlans,
+        hodVisits
       };
       localStorage.setItem('dl_restore_point_snapshot', JSON.stringify(currentSnapshot));
       setHasRestorePoint(true);
@@ -417,13 +461,34 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           let finalPayments = payments;
           let finalProfile = profile;
           let finalTodos = todos;
+          let finalCertificates = certificates;
+          let finalNotifications = notifications;
+          let finalNotificationSettings = notificationSettings;
+          let finalInspirationSettings = inspirationSettings;
+          let finalInspirationMessages = inspirationMessages;
+          let finalHodStudents = hodStudents;
+          let finalHodComplaints = hodComplaints;
+          let finalHodActionPlans = hodActionPlans;
+          let finalHodVisits = hodVisits;
 
           if (data.students) finalStudents = data.students;
           if (data.groups) finalGroups = data.groups;
           if (data.lessons) finalLessons = data.lessons;
           if (data.payments) finalPayments = data.payments;
           if (data.profile) finalProfile = { ...profile, ...data.profile };
+          if (data.schoolSettings && finalProfile) {
+            finalProfile = { ...finalProfile, schoolSettings: data.schoolSettings };
+          }
           if (data.todos) finalTodos = data.todos;
+          if (data.certificates) finalCertificates = data.certificates;
+          if (data.notifications) finalNotifications = data.notifications;
+          if (data.notificationSettings) finalNotificationSettings = data.notificationSettings;
+          if (data.inspirationSettings) finalInspirationSettings = data.inspirationSettings;
+          if (data.inspirationMessages) finalInspirationMessages = data.inspirationMessages;
+          if (data.hodStudents) finalHodStudents = data.hodStudents;
+          if (data.hodComplaints) finalHodComplaints = data.hodComplaints;
+          if (data.hodActionPlans) finalHodActionPlans = data.hodActionPlans;
+          if (data.hodVisits) finalHodVisits = data.hodVisits;
 
           // ATOMIC STATE AND STORAGE COMMIT
           setStudents(finalStudents);
@@ -446,10 +511,55 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             await storage.setItem('dl_todos', finalTodos);
           }
 
+          if (data.certificates) {
+            setCertificates(finalCertificates);
+            await storage.setItem('dl_certificates', finalCertificates);
+          }
+
+          if (data.notifications) {
+            setNotifications(finalNotifications);
+            await storage.setItem('dl_notifications', finalNotifications);
+          }
+
+          if (data.notificationSettings) {
+            setNotificationSettings(finalNotificationSettings);
+            await storage.setItem('dl_notification_settings', finalNotificationSettings);
+          }
+
+          if (data.inspirationSettings) {
+            setInspirationSettings(finalInspirationSettings);
+            await storage.setItem('dl_inspiration_settings', finalInspirationSettings);
+          }
+
+          if (data.inspirationMessages) {
+            setInspirationMessages(finalInspirationMessages);
+            await storage.setItem('dl_inspiration_messages', finalInspirationMessages);
+          }
+
+          if (data.hodStudents) {
+            setHodStudents(finalHodStudents);
+            await storage.setItem('dl_hod_students', finalHodStudents);
+          }
+
+          if (data.hodComplaints) {
+            setHodComplaints(finalHodComplaints);
+            await storage.setItem('dl_hod_complaints', finalHodComplaints);
+          }
+
+          if (data.hodActionPlans) {
+            setHodActionPlans(finalHodActionPlans);
+            await storage.setItem('dl_hod_action_plans', finalHodActionPlans);
+          }
+
+          if (data.hodVisits) {
+            setHodVisits(finalHodVisits);
+            await storage.setItem('dl_hod_visits', finalHodVisits);
+          }
+
           setSimpleSuccessMsg(t('auto_all_data_restored_successful'));
           
           // Log to history
-          const totalRecs = (data.students?.length || 0) + (data.groups?.length || 0) + (data.lessons?.length || 0) + (data.payments?.length || 0);
+          const totalRecs = (data.students?.length || 0) + (data.groups?.length || 0) + (data.lessons?.length || 0) + (data.payments?.length || 0) + (data.certificates?.length || 0) + (data.hodStudents?.length || 0);
           const newLog: RestoreHistoryEntry = {
             id: 'hist_' + Date.now(),
             timestamp: new Date().toISOString(),
@@ -558,11 +668,16 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       lessons,
       payments,
       notifications,
+      certificates,
       profile,
       notificationSettings,
       inspirationSettings,
       inspirationMessages,
-      todos
+      todos,
+      hodStudents,
+      hodComplaints,
+      hodActionPlans,
+      hodVisits
     };
 
     localStorage.setItem('dl_restore_point_snapshot', JSON.stringify(currentSnapshot));
@@ -595,6 +710,16 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         let finalLessons = [...lessons];
         let finalPayments = [...payments];
         let finalProfile = profile ? { ...profile } : undefined;
+        let finalCertificates = [...certificates];
+        let finalNotifications = [...notifications];
+        let finalNotificationSettings = notificationSettings ? { ...notificationSettings } : undefined;
+        let finalInspirationSettings = inspirationSettings ? { ...inspirationSettings } : undefined;
+        let finalInspirationMessages = inspirationMessages ? [...inspirationMessages] : undefined;
+        let finalTodos = todos ? [...todos] : undefined;
+        let finalHodStudents = [...hodStudents];
+        let finalHodComplaints = [...hodComplaints];
+        let finalHodActionPlans = [...hodActionPlans];
+        let finalHodVisits = [...hodVisits];
 
         // Process Students
         if (selectedRestoreCategories.includes('students') && data.students) {
@@ -716,9 +841,100 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           }
         }
 
-        // Process Settings (Profile)
-        if (selectedRestoreCategories.includes('settings') && data.profile) {
-          finalProfile = { ...profile, ...data.profile };
+        // Process Certificates
+        if (selectedRestoreCategories.includes('certificates') && data.certificates) {
+          if (restoreMode === 'smart' || restoreMode === 'merge') {
+            const certMap = new Map<string, CertificateRecord>(certificates.map(c => [c.id, c]));
+            data.certificates.forEach((c: CertificateRecord) => {
+              const existing = certMap.get(c.id);
+              certMap.set(c.id, existing ? { ...existing, ...c } : c);
+            });
+            finalCertificates = Array.from(certMap.values());
+          } else if (restoreMode === 'replace') {
+            finalCertificates = data.certificates;
+          }
+        }
+
+        // Process Notifications
+        if (selectedRestoreCategories.includes('notifications')) {
+          if (data.notifications) {
+            if (restoreMode === 'smart' || restoreMode === 'merge') {
+              const notifMap = new Map<string, NotificationItem>(notifications.map(n => [n.id, n]));
+              data.notifications.forEach((n: NotificationItem) => {
+                const existing = notifMap.get(n.id);
+                notifMap.set(n.id, existing ? { ...existing, ...n } : n);
+              });
+              finalNotifications = Array.from(notifMap.values());
+            } else {
+              finalNotifications = data.notifications;
+            }
+          }
+          if (data.notificationSettings) {
+            finalNotificationSettings = data.notificationSettings;
+          }
+        }
+
+        // Process Settings (Profile, working hours, templates, inspiration, todos)
+        if (selectedRestoreCategories.includes('settings')) {
+          if (data.profile) finalProfile = { ...(finalProfile || profile), ...data.profile };
+          if (data.inspirationSettings) finalInspirationSettings = data.inspirationSettings;
+          if (data.inspirationMessages) finalInspirationMessages = data.inspirationMessages;
+          if (data.todos) finalTodos = data.todos;
+          if (data.notificationSettings) finalNotificationSettings = data.notificationSettings;
+        }
+
+        // Process School / HOD Settings & Models
+        if (selectedRestoreCategories.includes('school_hod') || selectedRestoreCategories.includes('settings')) {
+          if (data.schoolSettings || data.profile?.schoolSettings) {
+            const incomingSchool = data.schoolSettings || data.profile?.schoolSettings;
+            finalProfile = { ...(finalProfile || profile), schoolSettings: incomingSchool };
+          }
+        }
+        if (selectedRestoreCategories.includes('school_hod')) {
+          if (data.hodStudents) {
+            if (restoreMode === 'replace') finalHodStudents = data.hodStudents;
+            else {
+              const hMap = new Map<string, any>(hodStudents.map(h => [h.id, h]));
+              data.hodStudents.forEach((h: any) => {
+                const existing = hMap.get(h.id);
+                hMap.set(h.id, existing ? { ...existing, ...h } : h);
+              });
+              finalHodStudents = Array.from(hMap.values());
+            }
+          }
+          if (data.hodComplaints) {
+            if (restoreMode === 'replace') finalHodComplaints = data.hodComplaints;
+            else {
+              const hMap = new Map<string, any>(hodComplaints.map(h => [h.id, h]));
+              data.hodComplaints.forEach((h: any) => {
+                const existing = hMap.get(h.id);
+                hMap.set(h.id, existing ? { ...existing, ...h } : h);
+              });
+              finalHodComplaints = Array.from(hMap.values());
+            }
+          }
+          if (data.hodActionPlans) {
+            if (restoreMode === 'replace') finalHodActionPlans = data.hodActionPlans;
+            else {
+              const hMap = new Map<string, any>(hodActionPlans.map(h => [h.id, h]));
+              data.hodActionPlans.forEach((h: any) => {
+                const existing = hMap.get(h.id);
+                hMap.set(h.id, existing ? { ...existing, ...h } : h);
+              });
+              finalHodActionPlans = Array.from(hMap.values());
+            }
+          }
+          if (data.hodVisits) {
+            if (restoreMode === 'replace') finalHodVisits = data.hodVisits;
+            else {
+              const hMap = new Map<string, any>(hodVisits.map(h => [h.id, h]));
+              data.hodVisits.forEach((h: any) => {
+                const existing = hMap.get(h.id);
+                hMap.set(h.id, existing ? { ...existing, ...h } : h);
+              });
+              finalHodVisits = Array.from(hMap.values());
+            }
+          }
         }
 
         // ATOMIC STATE AND STORAGE COMMIT
@@ -738,7 +954,53 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           setPayments(finalPayments);
           await storage.setItem('dl_payments', finalPayments);
         }
-        if (selectedRestoreCategories.includes('settings') && data.profile && finalProfile) {
+        if (selectedRestoreCategories.includes('certificates') && data.certificates) {
+          setCertificates(finalCertificates);
+          await storage.setItem('dl_certificates', finalCertificates);
+        }
+        if (selectedRestoreCategories.includes('notifications')) {
+          if (data.notifications) {
+            setNotifications(finalNotifications);
+            await storage.setItem('dl_notifications', finalNotifications);
+          }
+          if (finalNotificationSettings) {
+            setNotificationSettings(finalNotificationSettings);
+            await storage.setItem('dl_notification_settings', finalNotificationSettings);
+          }
+        }
+        if (selectedRestoreCategories.includes('settings')) {
+          if (finalInspirationSettings) {
+            setInspirationSettings(finalInspirationSettings);
+            await storage.setItem('dl_inspiration_settings', finalInspirationSettings);
+          }
+          if (finalInspirationMessages) {
+            setInspirationMessages(finalInspirationMessages);
+            await storage.setItem('dl_inspiration_messages', finalInspirationMessages);
+          }
+          if (finalTodos) {
+            setTodos(finalTodos);
+            await storage.setItem('dl_todos', finalTodos);
+          }
+        }
+        if (selectedRestoreCategories.includes('school_hod')) {
+          if (data.hodStudents) {
+            setHodStudents(finalHodStudents);
+            await storage.setItem('dl_hod_students', finalHodStudents);
+          }
+          if (data.hodComplaints) {
+            setHodComplaints(finalHodComplaints);
+            await storage.setItem('dl_hod_complaints', finalHodComplaints);
+          }
+          if (data.hodActionPlans) {
+            setHodActionPlans(finalHodActionPlans);
+            await storage.setItem('dl_hod_action_plans', finalHodActionPlans);
+          }
+          if (data.hodVisits) {
+            setHodVisits(finalHodVisits);
+            await storage.setItem('dl_hod_visits', finalHodVisits);
+          }
+        }
+        if ((selectedRestoreCategories.includes('settings') || selectedRestoreCategories.includes('school_hod')) && finalProfile) {
           setProfile(finalProfile);
           await storage.setItem('dl_profile', finalProfile);
         }
@@ -779,15 +1041,69 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
     if (!rpStr) return;
 
     setIsRollingBack(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         const rp = JSON.parse(rpStr);
-        if (rp.students) setStudents(rp.students);
-        if (rp.groups) setGroups(rp.groups);
-        if (rp.lessons) setLessons(rp.lessons);
-        if (rp.payments) setPayments(rp.payments);
-        if (rp.notifications) setNotifications(rp.notifications);
-        if (rp.profile) setProfile(rp.profile);
+        if (rp.students) {
+          setStudents(rp.students);
+          await storage.setItem('dl_students', rp.students);
+        }
+        if (rp.groups) {
+          setGroups(rp.groups);
+          await storage.setItem('dl_groups', rp.groups);
+        }
+        if (rp.lessons) {
+          setLessons(rp.lessons);
+          await storage.setItem('dl_lessons', rp.lessons);
+        }
+        if (rp.payments) {
+          setPayments(rp.payments);
+          await storage.setItem('dl_payments', rp.payments);
+        }
+        if (rp.notifications) {
+          setNotifications(rp.notifications);
+          await storage.setItem('dl_notifications', rp.notifications);
+        }
+        if (rp.certificates) {
+          setCertificates(rp.certificates);
+          await storage.setItem('dl_certificates', rp.certificates);
+        }
+        if (rp.profile) {
+          setProfile(rp.profile);
+          await storage.setItem('dl_profile', rp.profile);
+        }
+        if (rp.todos) {
+          setTodos(rp.todos);
+          await storage.setItem('dl_todos', rp.todos);
+        }
+        if (rp.notificationSettings) {
+          setNotificationSettings(rp.notificationSettings);
+          await storage.setItem('dl_notification_settings', rp.notificationSettings);
+        }
+        if (rp.inspirationSettings) {
+          setInspirationSettings(rp.inspirationSettings);
+          await storage.setItem('dl_inspiration_settings', rp.inspirationSettings);
+        }
+        if (rp.inspirationMessages) {
+          setInspirationMessages(rp.inspirationMessages);
+          await storage.setItem('dl_inspiration_messages', rp.inspirationMessages);
+        }
+        if (rp.hodStudents) {
+          setHodStudents(rp.hodStudents);
+          await storage.setItem('dl_hod_students', rp.hodStudents);
+        }
+        if (rp.hodComplaints) {
+          setHodComplaints(rp.hodComplaints);
+          await storage.setItem('dl_hod_complaints', rp.hodComplaints);
+        }
+        if (rp.hodActionPlans) {
+          setHodActionPlans(rp.hodActionPlans);
+          await storage.setItem('dl_hod_action_plans', rp.hodActionPlans);
+        }
+        if (rp.hodVisits) {
+          setHodVisits(rp.hodVisits);
+          await storage.setItem('dl_hod_visits', rp.hodVisits);
+        }
 
         setRestoreSuccessMsg(t('auto_rollback_successful_restore'));
 
@@ -821,70 +1137,70 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       {/* Action / Tab Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
         {/* Tab Switcher */}
-        <div className="flex overflow-x-auto p-1 gap-1 bg-surface-hover border border-surface-border/80 rounded-xl no-scrollbar flex-1">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 p-1 gap-1.5 bg-surface-hover border border-surface-border/80 rounded-xl w-full">
           <button
             type="button"
             onClick={() => setActiveTab('simple')}
-            className={`py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`py-2 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer ${
               activeTab === 'simple'
                 ? 'bg-primary text-white shadow-2xs'
                 : 'text-text-muted hover:text-text-main hover:bg-surface'
             }`}
           >
-            <Sparkles className={`w-3.5 h-3.5 ${activeTab === 'simple' ? 'text-amber-300' : 'text-amber-500'}`} />
-            <span>{t('auto_1_tap_backup')}</span>
+            <Sparkles className={`w-3.5 h-3.5 shrink-0 ${activeTab === 'simple' ? 'text-amber-300' : 'text-amber-500'}`} />
+            <span className="truncate">{t('auto_1_tap_backup')}</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('backup')}
-            className={`py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`py-2 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer ${
               activeTab === 'backup'
                 ? 'bg-primary text-white shadow-2xs'
                 : 'text-text-muted hover:text-text-main hover:bg-surface'
             }`}
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>{t('auto_custom_export')}</span>
+            <Download className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{t('auto_custom_export')}</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('restore')}
-            className={`py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`py-2 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer ${
               activeTab === 'restore'
                 ? 'bg-primary text-white shadow-2xs'
                 : 'text-text-muted hover:text-text-main hover:bg-surface'
             }`}
           >
-            <Upload className="w-3.5 h-3.5" />
-            <span>{t('auto_custom_restore')}</span>
+            <Upload className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{t('auto_custom_restore')}</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('auto_settings')}
-            className={`py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`py-2 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer ${
               activeTab === 'auto_settings'
                 ? 'bg-primary text-white shadow-2xs'
                 : 'text-text-muted hover:text-text-main hover:bg-surface'
             }`}
           >
-            <Clock className="w-3.5 h-3.5" />
-            <span>{t('auto_auto_backups')}</span>
+            <Clock className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{t('auto_auto_backups')}</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('history')}
-            className={`py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`col-span-2 sm:col-span-1 py-2 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer ${
               activeTab === 'history'
                 ? 'bg-primary text-white shadow-2xs'
                 : 'text-text-muted hover:text-text-main hover:bg-surface'
             }`}
           >
-            <History className="w-3.5 h-3.5" />
-            <span>{t('auto_restore_history')}</span>
+            <History className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{t('auto_restore_history')}</span>
           </button>
         </div>
 

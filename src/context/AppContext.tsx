@@ -1,10 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   TeacherProfile, Group, Student, Lesson, PaymentRecord, NotificationItem, 
   LessonReport, StudentDocument, PaymentStatus, LessonStatus, AttendanceStatus, HomeworkStatus, SyncStatus, BackupData, BackupIntegrityReport, StudentPaymentDetail, AppLanguage, AccentColor, RecentlyDeletedData, ActiveLessonSession,
   InspirationSettings, InspirationMessage, InspirationFrequency, InspirationDisplayMethod, InspirationSource,
   NotificationSettings, ScheduledNotificationItem, TeacherSettingsRecord, SyncCycleReport, PendingOutboxSummary, SyncHistoryEntry,
-  CertificateRecord
+  CertificateRecord, HodGermanStudent, Complaint, StudentActionPlan, VisitRecord, SchoolNote
 } from '../types';
 import { 
   clearActiveLessonNotification, getPendingScheduledNotifications, 
@@ -57,8 +57,8 @@ interface AppContextType {
   setAccentColor: (color: AccentColor) => void;
   t: (key: TranslationKey) => string;
   _t: (ar: string, en: string, de?: string) => string;
-  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule';
-  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule') => void;
+  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod';
+  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod') => void;
 
   // Certificates
   certificates: CertificateRecord[];
@@ -118,6 +118,8 @@ interface AppContextType {
   convertQuickLessonToStudent: (lessonId: string) => Student | null;
   updateLesson: (id: string, updates: Partial<Lesson>) => void;
   deleteLesson: (id: string) => void;
+  deleteFutureGroupLessons: (groupId: string, fromDate: string, currentLessonId?: string) => void;
+  deleteAllGroupLessons: (groupId: string, onlyScheduled?: boolean) => void;
   saveLessonReport: (lessonId: string, report: LessonReport, packageCount?: number) => void;
   cancelLesson: (lessonId: string, notes?: string) => void;
   generateGroupScheduleLessons: (groupId: string, days: string[], time: string, numWeeks?: number, customDayTimes?: Record<string, string>, groupOverride?: Group) => void;
@@ -243,11 +245,46 @@ interface AppContextType {
   setNotificationSettings: React.Dispatch<React.SetStateAction<NotificationSettings>>;
   setInspirationSettings: React.Dispatch<React.SetStateAction<InspirationSettings>>;
   setInspirationMessages: React.Dispatch<React.SetStateAction<InspirationMessage[]>>;
+  hodStudents: HodGermanStudent[];
+  setHodStudents: React.Dispatch<React.SetStateAction<HodGermanStudent[]>>;
+  hodComplaints: Complaint[];
+  setHodComplaints: React.Dispatch<React.SetStateAction<Complaint[]>>;
+  hodActionPlans: StudentActionPlan[];
+  setHodActionPlans: React.Dispatch<React.SetStateAction<StudentActionPlan[]>>;
+  hodVisits: VisitRecord[];
+  setHodVisits: React.Dispatch<React.SetStateAction<VisitRecord[]>>;
+
+  // School & Lesson Notes
+  schoolNotes: SchoolNote[];
+  setSchoolNotes: React.Dispatch<React.SetStateAction<SchoolNote[]>>;
+  addSchoolNote: (note: Omit<SchoolNote, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted'>) => SchoolNote;
+  updateSchoolNote: (id: string, updates: Partial<SchoolNote>) => void;
+  deleteSchoolNote: (id: string) => void;
+  getNotesForClass: (className?: string, classId?: string) => SchoolNote[];
+  getNotesForStudent: (studentId: string) => SchoolNote[];
+  getNotesForLesson: (params: { date?: string; periodNumber?: number; className?: string; lessonId?: string }) => SchoolNote[];
+
   backupToDrive: () => void | Promise<void>;
   restoreFromDrive: (jsonString: string) => boolean;
   addAppNotification: (title: string, message: string, type: 'system' | 'reminder' | 'payment', extraFields?: any) => void;
   getHistoricalLessons: () => Promise<Lesson[]>;
   getHistoricalPayments: () => Promise<PaymentRecord[]>;
+  updateFullLessonsStorage: (updater: (allLessons: Lesson[]) => Lesson[]) => Promise<Lesson[]>;
+  updateFullPaymentsStorage: (updater: (allPayments: PaymentRecord[]) => PaymentRecord[]) => Promise<PaymentRecord[]>;
+  updateFullStudentsStorage: (updater: (allStudents: Student[]) => Student[]) => Promise<Student[]>;
+  purgeOrphanedRecords: (params: {
+    studentIds?: string[];
+    sessionIds?: string[];
+    calendarSessionIds?: string[];
+    paymentIds?: string[];
+    purgeAttendanceOrphans?: boolean;
+    purgeHomeworkOrphans?: boolean;
+    purgeExamOrphans?: boolean;
+  }) => Promise<{
+    deletedStudents: number;
+    deletedLessons: number;
+    deletedPayments: number;
+  }>;
   syncState: SyncStateMetadata | null;
   isSyncReady: boolean;
   connectionState: SyncConnectionState;
@@ -406,7 +443,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('dl_quick_todos', todos);
   }, [todos]);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod'>('home');
 
   const [profile, setProfile] = useState<TeacherProfile>(() => {
     const saved = initialData['dl_profile'];
@@ -489,7 +526,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
     const cutoffStr = formatLocalDate(sixtyDaysAgo);
 
-    return raw.filter(l => {
+    return (raw || []).filter(l => {
+      if (l.deleted) return false;
       if (!l.date) return true;
       if (l.date >= cutoffStr) return true;
       if (l.status === 'scheduled' || isPendingStatus(l.status)) return true;
@@ -518,7 +556,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
     const cutoffStr = formatLocalDate(sixtyDaysAgo);
 
-    return raw.filter(p => {
+    return (raw || []).filter(p => {
+      if (p.deleted) return false;
       const d = p.paidDate || p.dueDate || p.createdAt || '';
       if (!d) return true;
       if (d.substring(0, 10) >= cutoffStr) return true;
@@ -545,13 +584,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Asynchronous Database Query methods for historical views (SessionHistoryView & ReportsView)
   const getHistoricalLessons = async (): Promise<Lesson[]> => {
     const full = await storage.getItem<Lesson[]>('dl_lessons');
-    return full && full.length > 0 ? full : lessons;
+    const source = full && Array.isArray(full) && full.length > 0 ? full : lessons;
+    return source.filter(l => !l.deleted);
   };
 
   const getHistoricalPayments = async (): Promise<PaymentRecord[]> => {
     const full = await storage.getItem<PaymentRecord[]>('dl_payments');
-    return full && full.length > 0 ? full : payments;
+    const source = full && Array.isArray(full) && full.length > 0 ? full : payments;
+    return source.filter(p => !p.deleted);
   };
+
+  // Safe atomic full-storage manipulation methods to prevent synchronization race conditions or phantom resurrection
+  const updateFullLessonsStorage = useCallback(async (updater: (allLessons: Lesson[]) => Lesson[]): Promise<Lesson[]> => {
+    return new Promise<Lesson[]>((resolve, reject) => {
+      lessonSyncQueue = lessonSyncQueue.then(async () => {
+        try {
+          const full = (await storage.getItem<Lesson[]>('dl_lessons')) || lessons;
+          const updated = updater(full || []);
+          await storage.setItem('dl_lessons', updated);
+          setLessons(filterActiveLessons(updated));
+          resolve(updated);
+        } catch (e) {
+          reject(e);
+        }
+      }).catch(err => {
+        console.error('updateFullLessonsStorage error:', err);
+        reject(err);
+      });
+    });
+  }, [lessons]);
+
+  const updateFullPaymentsStorage = useCallback(async (updater: (allPayments: PaymentRecord[]) => PaymentRecord[]): Promise<PaymentRecord[]> => {
+    return new Promise<PaymentRecord[]>((resolve, reject) => {
+      paymentSyncQueue = paymentSyncQueue.then(async () => {
+        try {
+          const full = (await storage.getItem<PaymentRecord[]>('dl_payments')) || payments;
+          const updated = updater(full || []);
+          await storage.setItem('dl_payments', updated);
+          setPayments(filterActivePayments(updated));
+          resolve(updated);
+        } catch (e) {
+          reject(e);
+        }
+      }).catch(err => {
+        console.error('updateFullPaymentsStorage error:', err);
+        reject(err);
+      });
+    });
+  }, [payments]);
+
+  const updateFullStudentsStorage = useCallback(async (updater: (allStudents: Student[]) => Student[]): Promise<Student[]> => {
+    const updated = updater(students);
+    setStudents(updated);
+    await storage.setItem('dl_students', updated);
+    return updated;
+  }, [students]);
 
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     const saved = initialData['dl_notifications'];
@@ -586,6 +673,135 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return migratedItem;
     });
   });
+
+  // Head of Department (HOD) System States with SyncableRecord schema
+  const [hodStudents, setHodStudents] = useState<HodGermanStudent[]>(() => {
+    const saved = initialData['hod_german_students'];
+    const raw: HodGermanStudent[] = Array.isArray(saved) ? saved : [];
+    const seen = new Set<string>();
+    return raw.map((item, idx) => {
+      const id = item.id || `hod_st_${Date.now()}_${idx}`;
+      const migratedItem: HodGermanStudent = {
+        ...item,
+        id: seen.has(id) ? `${id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}` : id,
+        updatedAt: item.updatedAt || Date.now(),
+        updatedByDeviceId: item.updatedByDeviceId || 'local',
+        originDeviceId: item.originDeviceId || 'local',
+        originRevision: item.originRevision || 1,
+        deleted: !!item.deleted
+      };
+      seen.add(migratedItem.id);
+      return migratedItem;
+    });
+  });
+
+  const [hodComplaints, setHodComplaints] = useState<Complaint[]>(() => {
+    const saved = initialData['hod_complaints'];
+    const raw: Complaint[] = Array.isArray(saved) ? saved : [];
+    const seen = new Set<string>();
+    return raw.map((item, idx) => {
+      const id = item.id || `hod_cmp_${Date.now()}_${idx}`;
+      const migratedItem: Complaint = {
+        ...item,
+        id: seen.has(id) ? `${id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}` : id,
+        updatedAt: item.updatedAt || Date.now(),
+        updatedByDeviceId: item.updatedByDeviceId || 'local',
+        originDeviceId: item.originDeviceId || 'local',
+        originRevision: item.originRevision || 1,
+        deleted: !!item.deleted
+      };
+      seen.add(migratedItem.id);
+      return migratedItem;
+    });
+  });
+
+  const [hodActionPlans, setHodActionPlans] = useState<StudentActionPlan[]>(() => {
+    const saved = initialData['hod_student_action_plans'];
+    const raw: StudentActionPlan[] = Array.isArray(saved) ? saved : [];
+    const seen = new Set<string>();
+    return raw.map((item, idx) => {
+      const id = item.id || `hod_plan_${Date.now()}_${idx}`;
+      const migratedItem: StudentActionPlan = {
+        ...item,
+        id: seen.has(id) ? `${id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}` : id,
+        updatedAt: item.updatedAt || Date.now(),
+        updatedByDeviceId: item.updatedByDeviceId || 'local',
+        originDeviceId: item.originDeviceId || 'local',
+        originRevision: item.originRevision || 1,
+        deleted: !!item.deleted
+      };
+      seen.add(migratedItem.id);
+      return migratedItem;
+    });
+  });
+
+  const [hodVisits, setHodVisits] = useState<VisitRecord[]>(() => {
+    const saved = initialData['hod_visit_records'];
+    const raw: VisitRecord[] = Array.isArray(saved) ? saved : [];
+    const seen = new Set<string>();
+    return raw.map((item, idx) => {
+      const id = item.id || `hod_vst_${Date.now()}_${idx}`;
+      const migratedItem: VisitRecord = {
+        ...item,
+        id: seen.has(id) ? `${id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}` : id,
+        updatedAt: item.updatedAt || Date.now(),
+        updatedByDeviceId: item.updatedByDeviceId || 'local',
+        originDeviceId: item.originDeviceId || 'local',
+        originRevision: item.originRevision || 1,
+        deleted: !!item.deleted
+      };
+      seen.add(migratedItem.id);
+      return migratedItem;
+    });
+  });
+
+  // Ensure persistent saving for HOD states on mutation
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('hod_german_students', hodStudents);
+  }, [hodStudents]);
+
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('hod_complaints', hodComplaints);
+  }, [hodComplaints]);
+
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('hod_student_action_plans', hodActionPlans);
+  }, [hodActionPlans]);
+
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('hod_visit_records', hodVisits);
+  }, [hodVisits]);
+
+  // School & Lesson Notes State with SyncableRecord schema
+  const [schoolNotes, setSchoolNotes] = useState<SchoolNote[]>(() => {
+    const saved = initialData['dl_school_notes'];
+    const raw: SchoolNote[] = Array.isArray(saved) ? saved : [];
+    const seen = new Set<string>();
+    return raw.map((item, idx) => {
+      const id = item.id || `snote_${Date.now()}_${idx}`;
+      const migratedItem: SchoolNote = {
+        ...item,
+        id: seen.has(id) ? `${id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}` : id,
+        updatedAt: item.updatedAt || Date.now(),
+        updatedByDeviceId: item.updatedByDeviceId || 'local',
+        originDeviceId: item.originDeviceId || 'local',
+        originRevision: item.originRevision || 1,
+        deleted: !!item.deleted,
+        version: item.version || 1
+      };
+      seen.add(migratedItem.id);
+      return migratedItem;
+    });
+  });
+
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('dl_school_notes', schoolNotes);
+  }, [schoolNotes]);
 
   // System Notification Settings & Scheduled Notifications Engine
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() => {
@@ -768,15 +984,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             merged.push(activeMap.get(l.id)!);
           } else {
             const isActive = filterActiveLessons([l]).length > 0;
-            if (!isActive) {
-              // Historical lesson, preserve in storage
+            if (!isActive && !l.deleted) {
+              // Historical lesson, preserve in storage only if active/not deleted
               merged.push(l);
             }
           }
         });
 
         currentLessons.forEach(l => {
-          if (!fullIds.has(l.id)) {
+          if (!fullIds.has(l.id) && !l.deleted) {
             merged.push(l);
           }
         });
@@ -970,7 +1186,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // 30-Minute Upcoming Lesson Alert Check Worker
   const [notifiedLessonAlerts, setNotifiedLessonAlerts] = useState<Record<string, boolean>>(() => {
     const saved = initialData['dl_notified_lesson_alerts'];
-    return saved !== null && saved !== undefined ? saved : [];
+    return saved !== null && saved !== undefined && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
   });
 
   useEffect(() => {
@@ -986,7 +1202,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const nowMins = now.getHours() * 60 + now.getMinutes();
 
       lessons.forEach((lesson) => {
-        if (lesson.date !== todayStr || lesson.status !== 'scheduled') return;
+        if (lesson.deleted || lesson.date !== todayStr || lesson.status !== 'scheduled') return;
 
         const timeParts = lesson.time.split(':').map(n => parseInt(n, 10));
         if (timeParts.length < 2 || isNaN(timeParts[0]) || isNaN(timeParts[1])) return;
@@ -998,9 +1214,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         if (diffMins >= 0 && diffMins <= 30 && !notifiedLessonAlerts[alertKey]) {
           setNotifiedLessonAlerts(prev => ({ ...prev, [alertKey]: true }));
 
-          const studentOrGroupName = lesson.title || lesson.groupName || lesson.studentName || 'Lektion';
-          const titleText = `⏰ Lektion in Kürze (${diffMins === 0 ? 'Jetzt' : `${diffMins} Min`})`;
-          const bodyText = `Die Lektion "${studentOrGroupName}" beginnt ${diffMins === 0 ? 'jetzt' : `in ${diffMins} Minuten`} um ${lesson.time} Uhr!`;
+          const studentOrGroupName = lesson.studentName || (lesson.groupName && lesson.groupName !== 'Quick Lesson' ? lesson.groupName : '') || lesson.title || (language === 'ar' ? 'الحصّة' : 'Lektion');
+          const titleText = language === 'ar'
+            ? `⏰ تذكير: حصّة قادمة (${diffMins === 0 ? 'الآن' : `بعد ${diffMins} دقيقة`})`
+            : `⏰ Lektion in Kürze (${diffMins === 0 ? 'Jetzt' : `${diffMins} Min`})`;
+          const bodyText = language === 'ar'
+            ? `حصّة "${studentOrGroupName}" تبدأ ${diffMins === 0 ? 'الآن' : `بعد ${diffMins} دقيقة`} في تمام الساعة ${lesson.time}!`
+            : `Die Lektion "${studentOrGroupName}" beginnt ${diffMins === 0 ? 'jetzt' : `in ${diffMins} Minuten`} um ${lesson.time} Uhr!`;
 
           if (profile.enableLessonAlerts !== false) {
             addAppNotification(titleText, bodyText, 'reminder', { lessonId: lesson.id });
@@ -1024,7 +1244,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     checkUpcomingLessonsAlerts();
     const interval = setInterval(checkUpcomingLessonsAlerts, 20000);
     return () => clearInterval(interval);
-  }, [lessons, profile.enableLessonAlerts, profile.enableBrowserPush, notifiedLessonAlerts]);
+  }, [lessons, profile.enableLessonAlerts, profile.enableBrowserPush, notifiedLessonAlerts, language]);
 
   // Auto-sync recurring group schedules directly into calendar
   useEffect(() => {
@@ -1032,8 +1252,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     const newAutoLessons: Lesson[] = [];
     const today = new Date();
+    const todayStr = formatLocalDate();
 
     groups.forEach(group => {
+      if (group.deleted || group.status === 'archived') return;
       const slots = getGroupScheduleSlots(group);
       if (slots.length === 0) return;
 
@@ -1047,25 +1269,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const dateStr = formatLocalDate(d);
           const sessionTime = matchingSlot.time || '17:00';
 
-          const existsInLessons = lessons.some(l => l.groupId === group.id && l.date === dateStr && l.time === sessionTime);
+          const existsInLessons = lessons.some(l => !l.deleted && l.groupId === group.id && l.date === dateStr && l.time === sessionTime);
           const existsInNew = newAutoLessons.some(l => l.groupId === group.id && l.date === dateStr && l.time === sessionTime);
 
           if (!existsInLessons && !existsInNew) {
-            const perSessionPrice = group.paymentCycle === 'per_lesson' && group.pricePerSession
+            const isPerLesson = group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session';
+            const perSessionPrice = isPerLesson && group.pricePerSession
               ? group.pricePerSession
               : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 8));
 
-            newAutoLessons.push({
-              id: `l_${Date.now()}_auto_${Math.random().toString(36).substring(2, 6)}`,
+            newAutoLessons.push(wrapMutation({
+              id: `l_${Date.now()}_auto_${Math.random().toString(36).substring(2, 6)}_${dayOffset}`,
               groupId: group.id,
               groupName: group.name,
               title: `${group.name} Lektion`,
               date: dateStr,
               time: sessionTime,
-              durationMinutes: 60,
+              durationMinutes: group.lessonDurationMinutes || 60,
               type: group.type,
               grade: group.grade,
-              sessionNumber: ((lessons.filter(l => l.groupId === group.id).length + newAutoLessons.length) % (group.sessionCount || 8)) + 1,
+              sessionNumber: ((lessons.filter(l => l.groupId === group.id && !l.deleted).length + newAutoLessons.length) % (group.sessionCount || 8)) + 1,
               totalSessionsInPackage: group.sessionCount || 8,
               status: 'scheduled',
               paymentStatus: 'pending',
@@ -1073,7 +1296,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               amountPaid: 0,
               meetingLink: group.type === 'online' ? (group.zoomLink || profile.defaultZoomLink) : undefined,
               locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined
-            });
+            } as Lesson));
           }
         }
       }
@@ -1082,7 +1305,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (newAutoLessons.length > 0) {
       setLessons(prev => {
         const deduplicated = newAutoLessons.filter(
-          nl => !prev.some(l => l.groupId === nl.groupId && l.date === nl.date && l.time === nl.time)
+          nl => !prev.some(l => !l.deleted && l.groupId === nl.groupId && l.date === nl.date && l.time === nl.time)
         );
         return deduplicated.length > 0 ? [...prev, ...deduplicated] : prev;
       });
@@ -1111,39 +1334,86 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Sync simulation with Google Cloud
   // Explicit Refresh Calendar & Dashboard function
   const refreshCalendarAndDashboard = () => {
+    // Get current valid group and student IDs & maps
+    const currentGroupsMap = new Map<string, Group>(groups.filter(g => !g.deleted).map(g => [g.id, g]));
+    const currentGroupIds = new Set(currentGroupsMap.keys());
+    const currentStudentIds = new Set(students.filter(s => !s.deleted).map(s => s.id));
+    const currentStudentNames = new Set(students.filter(s => !s.deleted).map(s => s.name.toLowerCase()));
+    const todayStr = formatLocalDate();
 
-    // Get current valid group and student IDs & names
-    const currentGroupIds = new Set(groups.map(g => g.id));
-    const currentStudentIds = new Set(students.map(s => s.id));
-    const currentStudentNames = new Set(students.map(s => s.name.toLowerCase()));
-
-    // Clean up orphaned & duplicate lessons
+    // Clean up orphaned, duplicate, and stale lessons, and synchronize denormalized names
     setLessons(prev => {
       const seenGroupLessons = new Set<string>();
-      return prev.filter(lesson => {
-        // If group lesson and group no longer exists
-        if (lesson.groupId && lesson.groupId !== 'quick_group' && !currentGroupIds.has(lesson.groupId)) {
-          return false;
-        }
-        // If student lesson and student no longer exists
-        if (lesson.studentId && !currentStudentIds.has(lesson.studentId)) {
-          return false;
-        }
-        if (lesson.studentName && !lesson.isQuickLesson && !currentStudentNames.has(lesson.studentName.toLowerCase()) && !lesson.groupId) {
-          return false;
-        }
 
-        // Deduplicate group lessons (same group, same date, same time)
-        if (lesson.groupId && lesson.groupId !== 'quick_group') {
-          const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
-          if (seenGroupLessons.has(key)) {
+      return prev
+        .filter(lesson => {
+          // If group lesson and group no longer exists
+          if (lesson.groupId && lesson.groupId !== 'quick_group' && !currentGroupIds.has(lesson.groupId)) {
             return false;
           }
-          seenGroupLessons.add(key);
-        }
+          // If student lesson and student no longer exists
+          if (lesson.studentId && !currentStudentIds.has(lesson.studentId)) {
+            return false;
+          }
+          if (lesson.studentName && !lesson.isQuickLesson && !currentStudentNames.has(lesson.studentName.toLowerCase()) && !lesson.groupId) {
+            return false;
+          }
 
-        return true;
-      });
+          // Deduplicate group lessons (same group, same date, same time)
+          if (lesson.groupId && lesson.groupId !== 'quick_group' && !lesson.deleted) {
+            const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
+            if (seenGroupLessons.has(key)) {
+              return false;
+            }
+            seenGroupLessons.add(key);
+          }
+
+          // Clean up stale future scheduled lessons that do not match the group's current schedule slots
+          if (
+            lesson.groupId && 
+            lesson.groupId !== 'quick_group' && 
+            !lesson.deleted &&
+            lesson.status === 'scheduled' && 
+            lesson.date >= todayStr && 
+            (!lesson.report || (!lesson.report.attendanceStatus && !lesson.report.teacherNotes && !lesson.report.homeworkTitle && lesson.report.quizScore === undefined)) &&
+            (!lesson.studentPayments || Object.keys(lesson.studentPayments).length === 0) &&
+            (!lesson.amountPaid || lesson.amountPaid === 0)
+          ) {
+            const targetGroup = currentGroupsMap.get(lesson.groupId);
+            if (targetGroup) {
+              const activeSlots = getGroupScheduleSlots(targetGroup);
+              if (activeSlots.length > 0) {
+                const lDate = new Date(lesson.date + 'T00:00:00');
+                const lDayNum = lDate.getDay();
+                const matchesAnySlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === lesson.time);
+                if (!matchesAnySlot) {
+                  return false; // Safely purge stale future session from older schedule
+                }
+              }
+            }
+          }
+
+          return true;
+        })
+        .map(lesson => {
+          // Synchronize group metadata to fix any stale group names on lessons
+          if (lesson.groupId && currentGroupsMap.has(lesson.groupId)) {
+            const grp = currentGroupsMap.get(lesson.groupId)!;
+            const isNameStale = lesson.groupName !== grp.name;
+            const isDefaultTitle = !lesson.title || lesson.title.includes('Lektion') || lesson.title.includes('Lesson') || lesson.title === lesson.groupName;
+
+            if (isNameStale || (isDefaultTitle && !lesson.title.startsWith(grp.name))) {
+              return wrapMutation({
+                ...lesson,
+                groupName: grp.name,
+                title: isDefaultTitle ? `${grp.name} Lektion` : lesson.title,
+                grade: grp.grade || lesson.grade,
+                type: grp.type || lesson.type
+              } as Lesson);
+            }
+          }
+          return lesson;
+        });
     });
 
     // Clean up orphaned payments
@@ -1162,17 +1432,120 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }, 600);
   };
 
+  const purgeOrphanedRecords = useCallback(async (params: {
+    studentIds?: string[];
+    sessionIds?: string[];
+    calendarSessionIds?: string[];
+    paymentIds?: string[];
+    purgeAttendanceOrphans?: boolean;
+    purgeHomeworkOrphans?: boolean;
+    purgeExamOrphans?: boolean;
+  }) => {
+    const activeGroupIds = new Set(groups.filter(g => !g.deleted).map(g => g.id));
+    const isOrphanGroup = (groupId?: string) => !groupId || (groupId !== 'quick_group' && !activeGroupIds.has(groupId));
+
+    let deletedStCount = 0;
+    if (params.studentIds && params.studentIds.length > 0) {
+      const toRemove = new Set(params.studentIds);
+      deletedStCount = toRemove.size;
+      await updateFullStudentsStorage(all => all.filter(s => !toRemove.has(s.id)));
+    }
+
+    let deletedLessonsCount = 0;
+    const lessonIdsToRemove = new Set([
+      ...(params.sessionIds || []),
+      ...(params.calendarSessionIds || [])
+    ]);
+
+    if (
+      lessonIdsToRemove.size > 0 ||
+      params.purgeAttendanceOrphans ||
+      params.purgeHomeworkOrphans ||
+      params.purgeExamOrphans
+    ) {
+      await updateFullLessonsStorage(all => {
+        return all
+          .filter(l => {
+            if (lessonIdsToRemove.has(l.id)) {
+              deletedLessonsCount++;
+              return false;
+            }
+            return true;
+          })
+          .map(l => {
+            if (isOrphanGroup(l.groupId) && l.report) {
+              const updatedReport = { ...l.report };
+              let changed = false;
+
+              if (params.purgeAttendanceOrphans) {
+                delete updatedReport.attendanceStatus;
+                delete updatedReport.studentAttendance;
+                changed = true;
+              }
+              if (params.purgeHomeworkOrphans) {
+                delete updatedReport.homeworkStatus;
+                delete updatedReport.homeworkTitle;
+                delete updatedReport.homeworkDescription;
+                delete updatedReport.studentHomeworkDone;
+                delete updatedReport.arabicHomeworkOption;
+                delete updatedReport.arabicHomeworkRequired;
+                changed = true;
+              }
+              if (params.purgeExamOrphans) {
+                delete updatedReport.quizScore;
+                delete updatedReport.examScore;
+                delete updatedReport.dictationScore;
+                delete updatedReport.arabicExamScore;
+                delete updatedReport.studentDictationGrade;
+                delete updatedReport.studentExamGrade;
+                changed = true;
+              }
+              if (changed) {
+                return { ...l, report: updatedReport };
+              }
+            }
+            return l;
+          });
+      });
+    }
+
+    let deletedPayCount = 0;
+    if (params.paymentIds && params.paymentIds.length > 0) {
+      const toRemove = new Set(params.paymentIds);
+      deletedPayCount = toRemove.size;
+      await updateFullPaymentsStorage(all => all.filter(p => !toRemove.has(p.id)));
+    }
+
+    refreshCalendarAndDashboard();
+
+    return {
+      deletedStudents: deletedStCount,
+      deletedLessons: deletedLessonsCount,
+      deletedPayments: deletedPayCount,
+    };
+  }, [groups, updateFullStudentsStorage, updateFullLessonsStorage, updateFullPaymentsStorage, refreshCalendarAndDashboard]);
+
   // Drive Backup export
   const backupToDrive = async () => {
     const data = {
       profile,
+      schoolSettings: profile.schoolSettings,
       groups,
       students,
       lessons,
       payments,
       notifications,
+      certificates,
+      todos,
+      theme,
+      accentColor,
+      notificationSettings,
       inspirationSettings,
       inspirationMessages,
+      hodStudents,
+      hodComplaints,
+      hodActionPlans,
+      hodVisits,
       exportedAt: new Date().toISOString()
     };
     const jsonStr = JSON.stringify(data, null, 2);
@@ -1221,17 +1594,87 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   // Drive Restore import
-  const restoreFromDrive = (jsonString: string): boolean => {
+  const restoreFromDrive = async (jsonString: string): Promise<boolean> => {
     try {
       const parsed = JSON.parse(jsonString);
-      if (parsed.profile) setProfile(parsed.profile);
-      if (parsed.groups) setGroups(parsed.groups);
-      if (parsed.students) setStudents(parsed.students);
-      if (parsed.lessons) setLessons(parsed.lessons);
-      if (parsed.payments) setPayments(parsed.payments);
-      if (parsed.notifications) setNotifications(parsed.notifications);
-      if (parsed.inspirationSettings) setInspirationSettings(parsed.inspirationSettings);
-      if (parsed.inspirationMessages) setInspirationMessages(parsed.inspirationMessages);
+      const validation = validateAndSanitizeBackupPayload(parsed);
+      const data = validation.isValid ? validation.data : parsed;
+
+      if (data.profile || data.schoolSettings) {
+        const baseProfile = data.profile || profile;
+        const mergedSchool = data.schoolSettings || baseProfile.schoolSettings;
+        const mergedProfile = { ...baseProfile, schoolSettings: mergedSchool };
+        setProfile(mergedProfile);
+        await storage.setItem('dl_profile', mergedProfile);
+      }
+      if (data.groups) {
+        setGroups(data.groups);
+        await storage.setItem('dl_groups', data.groups);
+      }
+      if (data.students) {
+        setStudents(data.students);
+        await storage.setItem('dl_students', data.students);
+      }
+      if (data.lessons) {
+        setLessons(data.lessons);
+        await storage.setItem('dl_lessons', data.lessons);
+      }
+      if (data.payments) {
+        setPayments(data.payments);
+        await storage.setItem('dl_payments', data.payments);
+      }
+      if (data.notifications) {
+        setNotifications(data.notifications);
+        await storage.setItem('dl_notifications', data.notifications);
+      }
+      if (data.certificates) {
+        setCertificates(data.certificates);
+        await storage.setItem('dl_certificates', data.certificates);
+      }
+      if (data.todos) {
+        setTodos(data.todos);
+        await storage.setItem('dl_todos', data.todos);
+      }
+      if (data.theme) {
+        setTheme(data.theme);
+        await storage.setItem('dl_theme', data.theme);
+      }
+      if (data.accentColor) {
+        setAccentColor(data.accentColor);
+      }
+      if (data.notificationSettings) {
+        setNotificationSettings(data.notificationSettings);
+        await storage.setItem('dl_notification_settings', data.notificationSettings);
+      }
+      if (data.inspirationSettings) {
+        setInspirationSettings(data.inspirationSettings);
+        await storage.setItem('dl_inspiration_settings', data.inspirationSettings);
+      }
+      if (data.inspirationMessages) {
+        setInspirationMessages(data.inspirationMessages);
+        await storage.setItem('dl_inspiration_messages', data.inspirationMessages);
+      }
+      if (data.hodStudents) {
+        setHodStudents(data.hodStudents);
+        await storage.setItem('dl_hod_students', data.hodStudents);
+      }
+      if (data.hodComplaints) {
+        setHodComplaints(data.hodComplaints);
+        await storage.setItem('dl_hod_complaints', data.hodComplaints);
+      }
+      if (data.hodActionPlans) {
+        setHodActionPlans(data.hodActionPlans);
+        await storage.setItem('dl_hod_action_plans', data.hodActionPlans);
+      }
+      if (data.hodVisits) {
+        setHodVisits(data.hodVisits);
+        await storage.setItem('dl_hod_visits', data.hodVisits);
+      }
+      if (data.schoolNotes) {
+        setSchoolNotes(data.schoolNotes);
+        await storage.setItem('dl_school_notes', data.schoolNotes);
+      }
+
       const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setProfile(prev => ({ ...prev, lastSyncedAt: timeNow }));
       confetti({ particleCount: 70, spread: 60 });
@@ -1287,10 +1730,140 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const updateGroup = (id: string, updates: Partial<Group>) => {
-    setGroups(prev => prev.map(g => (g.id === id ? wrapMutation({ ...g, ...updates } as Group) : g)));
+    const existingGroup = groups.find(g => g.id === id);
+    if (!existingGroup) return;
+
+    const updatedGroup: Group = wrapMutation({
+      ...existingGroup,
+      ...updates,
+      id // Immutable Group Identity
+    } as Group);
+
+    const oldSlots = getGroupScheduleSlots(existingGroup);
+    const newSlots = getGroupScheduleSlots(updatedGroup);
+
+    // Strict slot comparison by day number and time
+    const normalizeSlotKey = (s: { day: string; time: string }) => `${getDayNumber(s.day)}_${s.time}`;
+    const oldSlotKeys = new Set(oldSlots.map(normalizeSlotKey));
+    const newSlotKeys = new Set(newSlots.map(normalizeSlotKey));
+
+    const scheduleChanged = (
+      oldSlotKeys.size !== newSlotKeys.size ||
+      [...oldSlotKeys].some(k => !newSlotKeys.has(k))
+    );
+
+    const todayStr = formatLocalDate();
+
+    // 1. Update groups state
+    setGroups(prev => prev.map(g => (g.id === id ? updatedGroup : g)));
+
+    // 2. Synchronize lessons state atomically
+    setLessons(prev => {
+      // Step A: Update denormalized group fields on all lessons of this group
+      const updatedLessons = prev.map(l => {
+        if (l.groupId !== id) return l;
+
+        const isDefaultTitle = !l.title || 
+          l.title === `${existingGroup.name} Lektion` || 
+          l.title === `${existingGroup.name} Lesson` || 
+          l.title === existingGroup.name;
+
+        return wrapMutation({
+          ...l,
+          groupName: updatedGroup.name,
+          title: isDefaultTitle ? `${updatedGroup.name} Lektion` : l.title,
+          grade: updatedGroup.grade || l.grade,
+          type: updatedGroup.type || l.type,
+          meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink || l.meetingLink) : undefined,
+          locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || l.locationAddress) : undefined,
+          durationMinutes: updatedGroup.lessonDurationMinutes || l.durationMinutes || 60
+        } as Lesson);
+      });
+
+      // Step B: If schedule slots changed, cleanly reconcile future scheduled sessions
+      if (scheduleChanged) {
+        // Locked / historical / active lessons that MUST NEVER BE MODIFIED OR DELETED:
+        const isHistoricalOrLocked = (l: Lesson) => {
+          if (l.groupId !== id) return true;
+          if (l.deleted) return true;
+          if (l.date < todayStr) return true;
+          if (l.status !== 'scheduled') return true;
+          if (l.report && (l.report.attendanceStatus || l.report.teacherNotes || l.report.homeworkTitle || l.report.quizScore !== undefined)) return true;
+          if (l.studentPayments && Object.keys(l.studentPayments).length > 0) return true;
+          if (l.amountPaid && l.amountPaid > 0) return true;
+          return false;
+        };
+
+        // Filter out future scheduled lessons of this group that don't match the new slots or were generated under old schedule
+        const preservedLessons = updatedLessons.filter(l => l.groupId !== id || isHistoricalOrLocked(l));
+
+        if (newSlots.length === 0) {
+          return preservedLessons;
+        }
+
+        const pastGroupLessonsCount = preservedLessons.filter(l => l.groupId === id && !l.deleted).length;
+        const startingNum = updatedGroup.startingSessionNumber || 1;
+        const sessionCount = updatedGroup.sessionCount || 8;
+
+        const isPerLesson = updatedGroup.paymentCycle === 'per_lesson' || updatedGroup.paymentModel === 'per_session';
+        const perSessionPrice = isPerLesson && updatedGroup.pricePerSession
+          ? updatedGroup.pricePerSession
+          : Math.round((updatedGroup.monthlyPackagePrice || 1200) / sessionCount);
+
+        const today = new Date();
+        const newGeneratedLessons: Lesson[] = [];
+
+        for (let dayOffset = 0; dayOffset < 28; dayOffset++) {
+          const d = new Date();
+          d.setDate(today.getDate() + dayOffset);
+          const dayNum = d.getDay();
+
+          const matchingSlot = newSlots.find(s => getDayNumber(s.day) === dayNum);
+          if (matchingSlot) {
+            const dateStr = formatLocalDate(d);
+            const sessionTime = matchingSlot.time || '17:00';
+
+            const alreadyExists = preservedLessons.some(l => 
+              l.groupId === id && !l.deleted && l.date === dateStr && l.time === sessionTime
+            ) || newGeneratedLessons.some(nl => 
+              nl.groupId === id && nl.date === dateStr && nl.time === sessionTime
+            );
+
+            if (!alreadyExists) {
+              const currentSessionIndex = pastGroupLessonsCount + newGeneratedLessons.length;
+              const sessionNumber = ((startingNum - 1 + currentSessionIndex) % sessionCount) + 1;
+
+              newGeneratedLessons.push(wrapMutation({
+                id: `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}_${dayOffset}`,
+                groupId: updatedGroup.id,
+                groupName: updatedGroup.name,
+                title: `${updatedGroup.name} Lektion`,
+                date: dateStr,
+                time: sessionTime,
+                durationMinutes: updatedGroup.lessonDurationMinutes || 60,
+                type: updatedGroup.type,
+                grade: updatedGroup.grade,
+                sessionNumber,
+                totalSessionsInPackage: sessionCount,
+                status: 'scheduled',
+                paymentStatus: 'pending',
+                amountDue: perSessionPrice,
+                amountPaid: 0,
+                meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink) : undefined,
+                locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || 'Cairo Center') : undefined
+              } as Lesson));
+            }
+          }
+        }
+
+        return [...preservedLessons, ...newGeneratedLessons];
+      }
+
+      return updatedLessons;
+    });
   };
 
-  const deleteGroup = (id: string) => {
+  const deleteGroup = async (id: string) => {
     const targetGroup = groups.find(g => g.id === id);
     if (targetGroup) {
       setRecentlyDeleted(prev => ({
@@ -1303,31 +1876,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     // Remove group association safely for linked students while preserving student records
     setStudents(prev => prev.map(s => s.groupId === id ? wrapMutation({ ...s, groupId: '' } as Student) : s));
 
-    // Cancel / delete future scheduled lessons belonging to the deleted group while preserving completed historical lessons
+    // Cancel / delete future scheduled lessons belonging to the deleted group from both storage and RAM
     const todayStr = formatLocalDate();
-    setLessons(prev => prev.map(l => {
+    await updateFullLessonsStorage(all => all.map(l => {
       if (l.groupId === id && (l.date >= todayStr || l.status === 'scheduled' || l.status === 'in_progress' || l.status === 'pending_action') && l.status !== 'completed') {
         return wrapDeletion(l);
       }
       return l;
     }));
+    refreshCalendarAndDashboard();
   };
 
   const archiveGroup = (id: string) => {
     setGroups(prev => prev.map(g => g.id === id ? wrapMutation({ ...g, status: 'archived' } as Group) : g));
   };
 
-  const cascadeDeleteGroup = (id: string) => {
+  const cascadeDeleteGroup = async (id: string) => {
     const groupStudents = students.filter(s => s.groupId === id);
     const groupStudentIds = new Set(groupStudents.map(s => s.id));
     const groupLessons = lessons.filter(l => l.groupId === id);
     const groupLessonIds = new Set(groupLessons.map(l => l.id));
 
     setGroups(prev => prev.map(g => g.id === id ? wrapDeletion(g) : g));
-    setStudents(prev => prev.map(s => s.groupId === id ? wrapDeletion(s) : s));
-    setLessons(prev => prev.map(l => l.groupId === id ? wrapDeletion(l) : l));
-    setPayments(prev => prev.map(p => (p.groupId === id || groupStudentIds.has(p.studentId)) ? wrapDeletion(p) : p));
+    await updateFullStudentsStorage(all => all.map(s => s.groupId === id ? wrapDeletion(s) : s));
+    await updateFullLessonsStorage(all => all.map(l => l.groupId === id ? wrapDeletion(l) : l));
+    await updateFullPaymentsStorage(all => all.map(p => (p.groupId === id || groupStudentIds.has(p.studentId)) ? wrapDeletion(p) : p));
     setNotifications(prev => prev.map(n => (n.lessonId && groupLessonIds.has(n.lessonId)) ? wrapDeletion(n) : n));
+    refreshCalendarAndDashboard();
   };
 
   // Student operations (Note: Pricing is automatically inherited from assigned group!)
@@ -1479,6 +2054,73 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setCertificates(prev => (prev || []).map(c => (c.id === id ? wrapDeletion(c) : c)));
   };
 
+  // School & Lesson Notes Methods
+  const addSchoolNote = useCallback((noteData: Omit<SchoolNote, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted'>): SchoolNote => {
+    const newNote: SchoolNote = {
+      id: `snote_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: Date.now(),
+      version: 1,
+      ...noteData,
+    };
+    const tracked = wrapMutation(newNote);
+    setSchoolNotes(prev => [tracked, ...(prev || [])]);
+    return tracked;
+  }, []);
+
+  const updateSchoolNote = useCallback((id: string, updates: Partial<SchoolNote>) => {
+    setSchoolNotes(prev => (prev || []).map(note => {
+      if (note.id === id) {
+        const updated: SchoolNote = {
+          ...note,
+          ...updates,
+          updatedAt: Date.now(),
+          version: (note.version || 1) + 1,
+        };
+        return wrapMutation(updated);
+      }
+      return note;
+    }));
+  }, []);
+
+  const deleteSchoolNote = useCallback((id: string) => {
+    setSchoolNotes(prev => (prev || []).map(note => {
+      if (note.id === id) {
+        return wrapDeletion(note);
+      }
+      return note;
+    }));
+  }, []);
+
+  const getNotesForClass = useCallback((className?: string, classId?: string): SchoolNote[] => {
+    const active = getActiveRecords<SchoolNote>(schoolNotes || []);
+    if (!className && !classId) return [];
+    return active.filter(n => {
+      if (classId && n.classId === classId) return true;
+      if (className && n.className && n.className.trim().toLowerCase() === className.trim().toLowerCase()) return true;
+      return false;
+    });
+  }, [schoolNotes]);
+
+  const getNotesForStudent = useCallback((studentId: string): SchoolNote[] => {
+    const active = getActiveRecords<SchoolNote>(schoolNotes || []);
+    if (!studentId) return [];
+    return active.filter(n => n.studentId === studentId);
+  }, [schoolNotes]);
+
+  const getNotesForLesson = useCallback((params: { date?: string; periodNumber?: number; className?: string; lessonId?: string }): SchoolNote[] => {
+    const active = getActiveRecords<SchoolNote>(schoolNotes || []);
+    return active.filter(n => {
+      if (params.lessonId && n.lessonId === params.lessonId) return true;
+      if (params.date && params.periodNumber !== undefined && params.className) {
+        if (n.date === params.date && n.periodNumber === params.periodNumber && n.className?.trim().toLowerCase() === params.className.trim().toLowerCase()) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }, [schoolNotes]);
+
   // Recently Deleted (Soft Delete Recovery)
   const restoreItem = (type: 'student' | 'group' | 'lesson', id: string) => {
     if (type === 'student') {
@@ -1590,6 +2232,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
     setLessons(prev => prev.map(l => l.id === id ? wrapDeletion(l) : l));
     if (selectedLesson?.id === id) {
+      closeLessonControl();
+    }
+  };
+
+  const deleteFutureGroupLessons = (groupId: string, fromDate: string, currentLessonId?: string) => {
+    setLessons(prev => prev.map(l => {
+      if (l.groupId === groupId && !l.deleted) {
+        const isTarget = (currentLessonId && l.id === currentLessonId) || l.date >= fromDate;
+        const isModifiable = l.status === 'scheduled' && (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes));
+        if (isTarget && isModifiable) {
+          return wrapDeletion(l);
+        }
+      }
+      return l;
+    }));
+    if (selectedLesson && selectedLesson.groupId === groupId && (selectedLesson.id === currentLessonId || selectedLesson.date >= fromDate)) {
+      closeLessonControl();
+    }
+  };
+
+  const deleteAllGroupLessons = (groupId: string, onlyScheduled: boolean = false) => {
+    setLessons(prev => prev.map(l => {
+      if (l.groupId === groupId && !l.deleted) {
+        if (onlyScheduled) {
+          if (l.status === 'scheduled' && !l.report) {
+            return wrapDeletion(l);
+          }
+          return l;
+        }
+        return wrapDeletion(l);
+      }
+      return l;
+    }));
+    if (selectedLesson && selectedLesson.groupId === groupId) {
       closeLessonControl();
     }
   };
@@ -1952,7 +2628,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
         // Check if an active non-deleted lesson already exists for this group on this date & time
         const exists = activeLessons.some(l => 
-          (l.groupId === groupId || (targetGroup.name && l.groupName === targetGroup.name)) && 
+          l.groupId === groupId && 
           l.date === dateStr && 
           l.time === sessionTime
         ) || newLessons.some(nl => 
@@ -1969,16 +2645,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
           const dummyLesson = { id: 'dummy', date: dateStr, time: sessionTime, durationMinutes: targetGroup.lessonDurationMinutes || 60 };
           
-          // Conflict check against other groups (not this group and not a recreated instance of this group)
+          // Conflict check against other distinct groups
           const hasConflict = activeLessons.some(l => 
             l.groupId !== groupId && 
-            l.groupName !== targetGroup.name && 
             checkOverlap(dummyLesson, l)
           ) || newLessons.some(l => checkOverlap(dummyLesson, l));
           
           if (!hasConflict) {
             newLessons.push(wrapMutation({
-              id: `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              id: `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}_${dayOffset}`,
               groupId: targetGroup.id,
               groupName: targetGroup.name,
               title: `${targetGroup.name} Lektion`,
@@ -2004,7 +2679,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (newLessons.length > 0) {
       setLessons(prev => {
         const deduplicated = newLessons.filter(
-          nl => !prev.some(l => !l.deleted && (l.groupId === nl.groupId || l.groupName === nl.groupName) && l.date === nl.date && l.time === nl.time)
+          nl => !prev.some(l => !l.deleted && l.groupId === nl.groupId && l.date === nl.date && l.time === nl.time)
         );
         return deduplicated.length > 0 ? [...prev, ...deduplicated] : prev;
       });
@@ -2474,14 +3149,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       timestamp: new Date().toISOString(),
       version: '2.0.0',
       profile,
+      schoolSettings: profile.schoolSettings,
       groups,
       students,
       lessons,
       payments,
       notifications,
       certificates,
+      todos,
+      theme,
+      accentColor,
+      notificationSettings,
       inspirationSettings,
       inspirationMessages,
+      hodStudents,
+      hodComplaints,
+      hodActionPlans,
+      hodVisits,
+      schoolNotes,
       syncQueue: []
     };
 
@@ -2505,15 +3190,80 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
 
       const data = validation.data;
-      if (data.profile) setProfile(data.profile);
-      if (data.groups) setGroups(data.groups);
-      if (data.students) setStudents(data.students);
-      if (data.lessons) setLessons(data.lessons);
-      if (data.payments) setPayments(data.payments);
-      if (data.notifications) setNotifications(data.notifications);
-      if (data.certificates) setCertificates(data.certificates);
-      if (data.inspirationSettings) setInspirationSettings(data.inspirationSettings);
-      if (data.inspirationMessages) setInspirationMessages(data.inspirationMessages);
+      if (data.profile || data.schoolSettings) {
+        const baseProfile = data.profile || profile;
+        const mergedSchoolSettings = data.schoolSettings || baseProfile.schoolSettings;
+        const mergedProfile = { ...baseProfile, schoolSettings: mergedSchoolSettings };
+        setProfile(mergedProfile);
+        await storage.setItem('dl_profile', mergedProfile);
+      }
+      if (data.groups) {
+        setGroups(data.groups);
+        await storage.setItem('dl_groups', data.groups);
+      }
+      if (data.students) {
+        setStudents(data.students);
+        await storage.setItem('dl_students', data.students);
+      }
+      if (data.lessons) {
+        setLessons(data.lessons);
+        await storage.setItem('dl_lessons', data.lessons);
+      }
+      if (data.payments) {
+        setPayments(data.payments);
+        await storage.setItem('dl_payments', data.payments);
+      }
+      if (data.notifications) {
+        setNotifications(data.notifications);
+        await storage.setItem('dl_notifications', data.notifications);
+      }
+      if (data.certificates) {
+        setCertificates(data.certificates);
+        await storage.setItem('dl_certificates', data.certificates);
+      }
+      if (data.todos) {
+        setTodos(data.todos);
+        await storage.setItem('dl_todos', data.todos);
+      }
+      if (data.theme) {
+        setTheme(data.theme);
+        await storage.setItem('dl_theme', data.theme);
+      }
+      if (data.accentColor) {
+        setAccentColor(data.accentColor);
+      }
+      if (data.notificationSettings) {
+        setNotificationSettings(data.notificationSettings);
+        await storage.setItem('dl_notification_settings', data.notificationSettings);
+      }
+      if (data.inspirationSettings) {
+        setInspirationSettings(data.inspirationSettings);
+        await storage.setItem('dl_inspiration_settings', data.inspirationSettings);
+      }
+      if (data.inspirationMessages) {
+        setInspirationMessages(data.inspirationMessages);
+        await storage.setItem('dl_inspiration_messages', data.inspirationMessages);
+      }
+      if (data.hodStudents) {
+        setHodStudents(data.hodStudents);
+        await storage.setItem('dl_hod_students', data.hodStudents);
+      }
+      if (data.hodComplaints) {
+        setHodComplaints(data.hodComplaints);
+        await storage.setItem('dl_hod_complaints', data.hodComplaints);
+      }
+      if (data.hodActionPlans) {
+        setHodActionPlans(data.hodActionPlans);
+        await storage.setItem('dl_hod_action_plans', data.hodActionPlans);
+      }
+      if (data.hodVisits) {
+        setHodVisits(data.hodVisits);
+        await storage.setItem('dl_hod_visits', data.hodVisits);
+      }
+      if (data.schoolNotes) {
+        setSchoolNotes(data.schoolNotes);
+        await storage.setItem('dl_school_notes', data.schoolNotes);
+      }
 
       // Reconcile and safeguard synchronization metadata
       const reconciledState = await applyRestoreSyncSafeguards(
@@ -2522,7 +3272,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           students: data.students || [],
           lessons: data.lessons || [],
           payments: data.payments || [],
-          notifications: data.notifications || []
+          notifications: data.notifications || [],
+          certificates: data.certificates || [],
+          hodStudents: data.hodStudents || [],
+          hodComplaints: data.hodComplaints || [],
+          hodActionPlans: data.hodActionPlans || [],
+          hodVisits: data.hodVisits || [],
+          schoolNotes: data.schoolNotes || []
         },
         syncStateRef.current
       );
@@ -2561,6 +3317,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       timestamp: new Date().toISOString(),
       version: '2.0.0',
       profile,
+      schoolSettings: profile.schoolSettings,
       groups,
       students: students.map(s => {
         if (s.avatarUrl && s.avatarUrl.startsWith('data:image')) {
@@ -2572,10 +3329,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       payments,
       notifications,
       certificates,
+      todos,
+      notificationSettings,
       inspirationSettings,
       inspirationMessages,
+      hodStudents,
+      hodComplaints,
+      hodActionPlans,
+      hodVisits,
       syncQueue: [],
-      todos,
     };
     const jsonStr = JSON.stringify(backupObj, null, 2);
     const fileName = `znd_backup_${formatLocalDate()}.json`;
@@ -2849,10 +3611,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     deleted: false
   }), [profile, syncState?.localDeviceId]);
 
-  const localDataRef = React.useRef({ groups, students, lessons, payments, notifications, todos, certificates, settings: [teacherSettingsRecord] });
+  const localDataRef = React.useRef({ 
+    groups, 
+    students, 
+    lessons, 
+    payments, 
+    notifications, 
+    todos, 
+    certificates, 
+    settings: [teacherSettingsRecord],
+    hodStudents,
+    hodComplaints,
+    hodActionPlans,
+    hodVisits,
+    schoolNotes
+  });
   useEffect(() => {
-    localDataRef.current = { groups, students, lessons, payments, notifications, todos, certificates, settings: [teacherSettingsRecord] };
-  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord]);
+    localDataRef.current = { 
+      groups, 
+      students, 
+      lessons, 
+      payments, 
+      notifications, 
+      todos, 
+      certificates, 
+      settings: [teacherSettingsRecord],
+      hodStudents,
+      hodComplaints,
+      hodActionPlans,
+      hodVisits,
+      schoolNotes
+    };
+  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes]);
 
   const syncDataSource: SyncDataSource = {
     getLocalData: () => localDataRef.current,
@@ -2866,6 +3656,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         case 'notifications': setNotifications(data); break;
         case 'todos': setTodos(data); break;
         case 'certificates': setCertificates(data); break;
+        case 'schoolNotes': {
+          setSchoolNotes(data);
+          await storage.setItem('dl_school_notes', data);
+          break;
+        }
+        case 'hodStudents': {
+          setHodStudents(data);
+          await storage.setItem('hod_german_students', data);
+          break;
+        }
+        case 'hodComplaints': {
+          setHodComplaints(data);
+          await storage.setItem('hod_complaints', data);
+          break;
+        }
+        case 'hodActionPlans': {
+          setHodActionPlans(data);
+          await storage.setItem('hod_student_action_plans', data);
+          break;
+        }
+        case 'hodVisits': {
+          setHodVisits(data);
+          await storage.setItem('hod_visit_records', data);
+          break;
+        }
         case 'settings': {
           if (Array.isArray(data) && data.length > 0 && data[0]?.profile) {
             const incomingProfile = data[0].profile;
@@ -2979,6 +3794,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         convertQuickLessonToStudent,
         updateLesson,
         deleteLesson,
+        deleteFutureGroupLessons,
+        deleteAllGroupLessons,
         saveLessonReport,
         cancelLesson,
         generateGroupScheduleLessons,
@@ -3060,9 +3877,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setNotificationSettings,
         setInspirationSettings,
         setInspirationMessages,
+        hodStudents,
+        setHodStudents,
+        hodComplaints,
+        setHodComplaints,
+        hodActionPlans,
+        setHodActionPlans,
+        hodVisits,
+        setHodVisits,
+        schoolNotes: getActiveRecords(schoolNotes || []),
+        setSchoolNotes,
+        addSchoolNote,
+        updateSchoolNote,
+        deleteSchoolNote,
+        getNotesForClass,
+        getNotesForStudent,
+        getNotesForLesson,
         addAppNotification,
         getHistoricalLessons,
         getHistoricalPayments,
+        updateFullLessonsStorage,
+        updateFullPaymentsStorage,
+        updateFullStudentsStorage,
+        purgeOrphanedRecords,
         syncState,
         isSyncReady,
         connectionState,
