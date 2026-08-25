@@ -585,6 +585,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return filterActiveLessons(sanitized);
   });
 
+  const fullLessonsRef = useRef<Lesson[]>(
+    Array.isArray(initialData['dl_lessons']) && initialData['dl_lessons'].length > 0 
+      ? initialData['dl_lessons'] 
+      : INITIAL_LESSONS
+  );
+
   // Memory Optimization: Filter active payments for global RAM state
   const filterActivePayments = (raw: PaymentRecord[]): PaymentRecord[] => {
     const sixtyDaysAgo = new Date();
@@ -615,6 +621,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     });
     return filterActivePayments(sanitized);
   });
+
+  const fullPaymentsRef = useRef<PaymentRecord[]>(
+    Array.isArray(initialData['dl_payments']) && initialData['dl_payments'].length > 0 
+      ? initialData['dl_payments'] 
+      : INITIAL_PAYMENT_RECORDS
+  );
 
   // Asynchronous Database Query methods for historical views (SessionHistoryView & ReportsView)
   const getHistoricalLessons = async (): Promise<Lesson[]> => {
@@ -1142,7 +1154,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (!lessons) return;
       const currentLessons = lessons;
       lessonSyncQueue = lessonSyncQueue.then(async () => {
-        const full = (await storage.getItem<Lesson[]>('dl_lessons')) || [];
+        const full = (await storage.getItem<Lesson[]>('dl_lessons')) || fullLessonsRef.current || [];
         const activeMap = new Map<string, Lesson>(currentLessons.map(l => [l.id, l]));
         const fullIds = new Set(full.map(l => l.id));
 
@@ -1151,20 +1163,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           if (activeMap.has(l.id)) {
             merged.push(activeMap.get(l.id)!);
           } else {
-            const isActive = filterActiveLessons([l]).length > 0;
-            if (!isActive && !l.deleted) {
-              // Historical lesson, preserve in storage only if active/not deleted
-              merged.push(l);
-            }
-          }
-        });
-
-        currentLessons.forEach(l => {
-          if (!fullIds.has(l.id) && !l.deleted) {
+            // Historical or tombstoned lesson, preserve in storage
             merged.push(l);
           }
         });
 
+        currentLessons.forEach(l => {
+          if (!fullIds.has(l.id)) {
+            merged.push(l);
+          }
+        });
+
+        fullLessonsRef.current = merged;
         await storage.setItem('dl_lessons', merged);
       }).catch(err => console.error('Lesson sync error:', err));
     }
@@ -1177,7 +1187,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (!payments) return;
       const currentPayments = payments;
       paymentSyncQueue = paymentSyncQueue.then(async () => {
-        const full = (await storage.getItem<PaymentRecord[]>('dl_payments')) || [];
+        const full = (await storage.getItem<PaymentRecord[]>('dl_payments')) || fullPaymentsRef.current || [];
         const activeMap = new Map(currentPayments.map(p => [p.id, p]));
         const fullIds = new Set(full.map(p => p.id));
 
@@ -1188,6 +1198,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           }
         });
 
+        fullPaymentsRef.current = merged;
         await storage.setItem('dl_payments', merged);
       }).catch(err => console.error('Payment sync error:', err));
     }
@@ -2187,14 +2198,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       url: URL.createObjectURL(file),
       category
     };
-    setStudents(prev => prev.map(s => s.id === studentId ? { ...s, documents: [newDoc, ...s.documents] } : s));
+    setStudents(prev => prev.map(s => s.id === studentId ? wrapMutation({ ...s, documents: [newDoc, ...(s.documents || [])] } as Student) : s));
   };
 
   const deleteStudentDocument = (studentId: string, docId: string) => {
-    setStudents(prev => prev.map(s => s.id === studentId ? {
+    setStudents(prev => prev.map(s => s.id === studentId ? wrapMutation({
       ...s,
-      documents: s.documents.filter(d => d.id !== docId)
-    } : s));
+      documents: (s.documents || []).filter(d => d.id !== docId)
+    } as Student) : s));
   };
 
   const updateStudentCertificateName = (studentId: string, certName: string) => {
@@ -2709,7 +2720,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             };
           });
         }
-        return {
+        return wrapMutation({
           ...l,
           status: 'completed',
           paymentStatus: report.paymentStatus,
@@ -2717,7 +2728,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           totalSessionsInPackage: updatedTotalSessions,
           studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : l.studentPayments,
           report
-        };
+        } as Lesson);
       }
       return l;
     }));
@@ -2834,7 +2845,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             const curPaid = stPayChoice?.amount !== undefined ? stPayChoice.amount : currentRec.amountPaid;
             const curStatus = stPayChoice?.status || (curPaid >= bundlePrice ? 'paid' : (curPaid > 0 ? 'partial' : 'pending'));
 
-            const updatedRecord: PaymentRecord = {
+            const updatedRecord: PaymentRecord = wrapMutation({
               ...currentRec,
               groupId: st.groupId || targetLesson.groupId || '',
               groupName: grp?.name || targetLesson.groupName || 'Gruppe',
@@ -2847,7 +2858,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               status: curStatus,
               paidDate: curStatus === 'paid' ? today : currentRec.paidDate,
               notes: `Paket (${updatedDates.length}/${currentRec.bundleSize || bundleSize} Lektionen)`
-            };
+            });
 
             nextPayments[openCycleIndex] = updatedRecord;
           } else {
@@ -2882,7 +2893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             const actualCount = initialIds.length;
             const adjustedAmountDue = virtualOffset > 0 ? Math.round(pricePerSession * actualCount) : bundlePrice;
 
-            const newRecord: PaymentRecord = {
+            const newRecord: PaymentRecord = wrapMutation({
               id: `pay_cycle_${st.id}_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
               studentId: st.id,
               studentName: st.name,
@@ -2901,7 +2912,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               
               notes: `Zahlungszyklus (${bundleSize}er Paket)`,
               createdAt: new Date().toISOString()
-            };
+            });
             nextPayments.unshift(newRecord);
           }
 
@@ -2919,10 +2930,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (isGroupMember || isIndividual) {
         const stPayChoice = report.studentPayments?.[s.id];
         const newStatus = stPayChoice?.status || report.paymentStatus;
-        return {
+        return wrapMutation({
           ...s,
           paymentStatus: newStatus
-        };
+        } as Student);
       }
       return s;
     }));
@@ -2956,7 +2967,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           ? (existingNotes ? `${existingNotes} | Absage-Notiz: ${notes}` : `Absage-Notiz: ${notes}`) 
           : existingNotes;
 
-        return {
+        return wrapMutation({
           ...l,
           status: 'cancelled' as LessonStatus,
           report: l.report ? {
@@ -2970,7 +2981,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             teacherNotes: combinedNotes || 'Lektion abgesagt',
             savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
-        };
+        } as Lesson);
       }
       return l;
     }));
@@ -3232,7 +3243,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
     }
 
-    setStudents(prev => prev.map(s => s.id === data.studentId ? { ...s, paymentStatus: 'paid' } : s));
+    setStudents(prev => prev.map(s => s.id === data.studentId ? wrapMutation({ ...s, paymentStatus: 'paid' } as Student) : s));
     confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
   };
 
@@ -3248,7 +3259,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   }) => {
     if (!data.existingPaymentRecordId) {
       const today = formatLocalDate();
-      const newRecord: PaymentRecord = {
+      const newRecord: PaymentRecord = wrapMutation({
         id: `pay_due_${data.studentId}_${Date.now()}`,
         studentId: data.studentId,
         studentName: data.studentName,
@@ -3263,7 +3274,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         lessonIds: data.lessonIds,
         notes: 'Noch offen (In Erwartung)',
         createdAt: new Date().toISOString()
-      };
+      } as PaymentRecord);
       setPayments(prev => [newRecord, ...prev]);
     }
   };
@@ -3285,13 +3296,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           if (existingTx) {
             deleteFinanceTransaction(existingTx.id);
           }
-          return {
+          return wrapMutation({
             ...p,
             amountPaid: 0,
             remainingBalance: p.amountDue,
             status: 'pending',
             paidDate: undefined
-          };
+          } as PaymentRecord);
         } else {
           newStStatus = 'paid';
           if (p.amountDue > 0) {
@@ -3306,21 +3317,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               relatedPaymentId: p.id
             });
           }
-          return {
+          return wrapMutation({
             ...p,
             amountPaid: p.amountDue,
             remainingBalance: 0,
             status: 'paid',
             paidDate: today,
             financeAccountId: p.financeAccountId || targetAccountId
-          };
+          } as PaymentRecord);
         }
       }
       return p;
     }));
 
     if (targetStId) {
-      setStudents(prev => prev.map(s => s.id === targetStId ? { ...s, paymentStatus: newStStatus } : s));
+      setStudents(prev => prev.map(s => s.id === targetStId ? wrapMutation({ ...s, paymentStatus: newStStatus } as Student) : s));
     }
   };
 
@@ -3340,7 +3351,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const targetAccountId = financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
       const newPayId = `pay_st_${studentId}_${Date.now()}`;
 
-      const newRec: PaymentRecord = {
+      const newRec: PaymentRecord = wrapMutation({
         id: newPayId,
         studentId: targetSt.id,
         studentName: targetSt.name,
@@ -3354,10 +3365,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         status: 'paid',
         financeAccountId: targetAccountId,
         notes: 'Schnell-Buchung (1-Klick Status)'
-      };
+      } as PaymentRecord);
 
       setPayments(prev => [newRec, ...prev]);
-      setStudents(prev => prev.map(s => s.id === studentId ? { ...s, paymentStatus: 'paid' } : s));
+      setStudents(prev => prev.map(s => s.id === studentId ? wrapMutation({ ...s, paymentStatus: 'paid' } as Student) : s));
 
       if (fee > 0) {
         addFinanceTransaction({
@@ -3383,13 +3394,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   ) => {
     setStudents(prev => prev.map(s => {
       if (s.id === studentId) {
-        return {
+        return wrapMutation({
           ...s,
           paymentPlan,
           pricePerLesson: pricePerLesson ?? s.pricePerLesson,
           bundleSize: bundleSize ?? s.bundleSize,
           customBundlePrice: customBundlePrice ?? s.customBundlePrice
-        };
+        } as Student);
       }
       return s;
     }));
@@ -3411,7 +3422,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     // Update lesson status and amount
     setLessons(prev => prev.map(l => {
       if (l.id === lessonId) {
-        return {
+        return wrapMutation({
           ...l,
           paymentStatus: status,
           amountPaid: finalPaid,
@@ -3420,14 +3431,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             paymentStatus: status,
             amountPaid: finalPaid
           } : undefined
-        };
+        } as Lesson);
       }
       return l;
     }));
 
     // Update student payment status if individual student
     if (targetLesson.studentId) {
-      setStudents(prev => prev.map(s => s.id === targetLesson.studentId ? { ...s, paymentStatus: status } : s));
+      setStudents(prev => prev.map(s => s.id === targetLesson.studentId ? wrapMutation({ ...s, paymentStatus: status } as Student) : s));
     }
 
     // Sync corresponding payment record in payments list
@@ -3439,19 +3450,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         return prev.map((p, idx) => {
           if (idx === existingIdx) {
             const rem = Math.max(0, p.amountDue - finalPaid - (p.discountAmount || 0));
-            return {
+            return wrapMutation({
               ...p,
               amountPaid: finalPaid,
               remainingBalance: rem,
               status,
               paidDate: status === 'paid' ? today : p.paidDate
-            };
+            } as PaymentRecord);
           }
           return p;
         });
       } else {
         paymentRecordId = `pay_l_${lessonId}_${Date.now()}`;
-        const newRec: PaymentRecord = {
+        const newRec: PaymentRecord = wrapMutation({
           id: paymentRecordId,
           studentId: targetLesson.studentId || '',
           studentName: targetLesson.studentName || targetLesson.groupName || targetLesson.title,
@@ -3466,7 +3477,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           status,
           financeAccountId: targetAccountId,
           notes: `Beendete Lektion (${targetLesson.date}): ${targetLesson.title}`
-        };
+        } as PaymentRecord);
         return [newRec, ...prev];
       }
     });
@@ -3534,7 +3545,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     quickParentPhone?: string;
     quickNotes?: string;
   }): Lesson => {
-    const newLesson: Lesson = {
+    const newLesson: Lesson = wrapMutation({
       ...data,
       id: `ql_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
       groupId: 'quick_group',
@@ -3549,7 +3560,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       quickNotes: data.quickNotes || '',
       meetingLink: data.type === 'online' ? (data.meetingLink || profile.defaultZoomLink) : undefined,
       locationAddress: data.type === 'offline' ? (data.locationAddress || 'Kairo Schulungsraum') : undefined,
-    };
+    } as Lesson);
 
     setLessons(prev => [newLesson, ...prev]);
 
@@ -3557,7 +3568,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const targetAccountId = financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
     const finalStatus = data.paymentStatus || (data.amountPaid >= data.amountDue ? 'paid' : data.amountPaid > 0 ? 'partial' : 'pending');
     const newPayId = `p_ql_${Date.now()}`;
-    const newPayment: PaymentRecord = {
+    const newPayment: PaymentRecord = wrapMutation({
       id: newPayId,
       studentId: `temp_qs_${Date.now()}`,
       studentName: data.studentName,
@@ -3570,7 +3581,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       status: finalStatus,
       financeAccountId: targetAccountId,
       notes: `⚡ Quick Lesson Payment (${data.date}): ${data.quickNotes || ''}`
-    };
+    } as PaymentRecord);
     setPayments(prev => [newPayment, ...prev]);
 
     if ((data.amountPaid || 0) > 0) {
@@ -3605,7 +3616,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
     }
 
-    const newStudent: Student = {
+    const newStudent: Student = wrapMutation({
       id: `s_${Date.now()}`,
       name: targetLesson.studentName,
       groupId: defaultGroup.id,
@@ -3616,21 +3627,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       notes: `Konvertiert aus Quick Lesson vom ${targetLesson.date}. Notizen: ${targetLesson.quickNotes || 'Keine'}`,
       documents: [],
       joinedDate: formatLocalDate()
-    };
+    } as Student);
 
     setStudents(prev => [newStudent, ...prev]);
 
     // Convert all matching quick lessons to permanent student lessons
     setLessons(prev => prev.map(l => {
       if (l.studentName === targetLesson.studentName && (l.isQuickLesson || l.groupId === 'quick_group')) {
-        return {
+        return wrapMutation({
           ...l,
           studentId: newStudent.id,
           groupId: defaultGroup.id,
           groupName: defaultGroup.name,
           title: `${newStudent.name} - Lektion`,
           isQuickLesson: false
-        };
+        } as Lesson);
       }
       return l;
     }));
@@ -3638,12 +3649,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     // Update payment records
     setPayments(prev => prev.map(p => {
       if (p.studentName === targetLesson.studentName) {
-        return {
+        return wrapMutation({
           ...p,
           studentId: newStudent.id,
           groupId: defaultGroup.id,
           groupName: defaultGroup.name
-        };
+        } as PaymentRecord);
       }
       return p;
     }));
@@ -4159,8 +4170,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const localDataRef = React.useRef({ 
     groups, 
     students, 
-    lessons, 
-    payments, 
+    lessons: (fullLessonsRef.current && fullLessonsRef.current.length > 0) ? fullLessonsRef.current : lessons, 
+    payments: (fullPaymentsRef.current && fullPaymentsRef.current.length > 0) ? fullPaymentsRef.current : payments, 
     notifications, 
     todos, 
     certificates, 
@@ -4180,8 +4191,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     localDataRef.current = { 
       groups, 
       students, 
-      lessons, 
-      payments, 
+      lessons: (fullLessonsRef.current && fullLessonsRef.current.length > 0) ? fullLessonsRef.current : lessons, 
+      payments: (fullPaymentsRef.current && fullPaymentsRef.current.length > 0) ? fullPaymentsRef.current : payments, 
       notifications, 
       todos, 
       certificates, 
@@ -4204,13 +4215,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     getSyncState: () => syncStateRef.current as SyncStateMetadata,
     saveMergedData: async (key: string, data: any[]) => {
       switch (key) {
-        case 'groups': setGroups(data); break;
-        case 'students': setStudents(data); break;
-        case 'lessons': setLessons(data); break;
-        case 'payments': setPayments(data); break;
-        case 'notifications': setNotifications(data); break;
-        case 'todos': setTodos(data); break;
-        case 'certificates': setCertificates(data); break;
+        case 'groups': {
+          setGroups(data);
+          await storage.setItem('dl_groups', data);
+          break;
+        }
+        case 'students': {
+          setStudents(data);
+          await storage.setItem('dl_students', data);
+          break;
+        }
+        case 'lessons': {
+          fullLessonsRef.current = data;
+          setLessons(filterActiveLessons(data));
+          await storage.setItem('dl_lessons', data);
+          break;
+        }
+        case 'payments': {
+          fullPaymentsRef.current = data;
+          setPayments(filterActivePayments(data));
+          await storage.setItem('dl_payments', data);
+          break;
+        }
+        case 'notifications': {
+          setNotifications(data);
+          await storage.setItem('dl_notifications', data);
+          break;
+        }
+        case 'todos': {
+          setTodos(data);
+          await storage.setItem('dl_todos', data);
+          break;
+        }
+        case 'certificates': {
+          setCertificates(data);
+          await storage.setItem('dl_certificates', data);
+          break;
+        }
         case 'schoolNotes': {
           setSchoolNotes(data);
           await storage.setItem('dl_school_notes', data);

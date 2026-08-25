@@ -90,7 +90,22 @@ export function mergeEntities<T extends SyncableRecord>(
       }
 
       if (shouldAcceptIncoming) {
-        entityMap.set(incomingItem.id, incomingItem);
+        // If incoming item is not deleted, preserve non-empty local fields like certificateName (Latin name) if incoming is missing them
+        let finalItem = incomingItem;
+        if (!incomingItem.deleted && !localItem.deleted) {
+          finalItem = {
+            ...localItem,
+            ...incomingItem,
+            certificateName: (incomingItem as any).certificateName !== undefined && (incomingItem as any).certificateName !== ''
+              ? (incomingItem as any).certificateName
+              : ((localItem as any).certificateName || (incomingItem as any).certificateName || ''),
+            documents: Array.isArray((incomingItem as any).documents) && (incomingItem as any).documents.length > 0
+              ? (incomingItem as any).documents
+              : ((localItem as any).documents || [])
+          };
+        }
+
+        entityMap.set(incomingItem.id, finalItem);
         if (incomingItem.deleted && !localItem.deleted) {
           deletedCount++;
         } else {
@@ -107,7 +122,19 @@ export function mergeEntities<T extends SyncableRecord>(
           timestamp: Date.now()
         });
       } else {
-        // Local won the conflict
+        // Local won the conflict. If local is missing certificateName but incoming had it, backfill it cleanly.
+        if (!localItem.deleted && !incomingItem.deleted) {
+          const localCertName = (localItem as any).certificateName;
+          const incomingCertName = (incomingItem as any).certificateName;
+          if ((!localCertName || localCertName.trim() === '') && incomingCertName && incomingCertName.trim() !== '') {
+            const backfilled = {
+              ...localItem,
+              certificateName: incomingCertName
+            };
+            entityMap.set(localItem.id, backfilled);
+          }
+        }
+
         if (incomingTime !== localTime || incomingRev !== localRev) {
           conflicts.push({
             entityType: entityTypeName,

@@ -176,6 +176,7 @@ export async function handleInboundExchange(inboundDelta: SyncDeltaPayload, data
       const currentLocalRecords = localData[key] || [];
       const { merged } = mergeEntities(currentLocalRecords, incomingRecords, key);
       await dataSource.saveMergedData(key, merged);
+      localData[key] = merged;
     }
   }
 
