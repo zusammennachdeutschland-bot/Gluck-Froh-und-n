@@ -228,6 +228,17 @@ export { SAMPLE_IMPORT_TEMPLATE, SAMPLE_MULTI_SCHEDULE_TEMPLATE };
  */
 function normalizeGrade(rawGrade: string): GradeLevel {
   const trimmed = rawGrade.trim();
+  const upper = trimmed.toUpperCase();
+  
+  // Check for CEFR language levels (A1, A2, B1, B2, C1, C2)
+  const cefrMatch = upper.match(/\b([ABC][12])\b/);
+  if (cefrMatch) {
+    return cefrMatch[1] as GradeLevel;
+  }
+  if (['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].includes(upper)) {
+    return upper as GradeLevel;
+  }
+
   if (trimmed.startsWith('Grade ')) {
     return trimmed as GradeLevel;
   }

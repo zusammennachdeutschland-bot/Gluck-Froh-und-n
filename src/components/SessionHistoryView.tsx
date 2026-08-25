@@ -68,7 +68,7 @@ export const SessionHistoryView: React.FC = () => {
             if (lesson.groupId !== gId) return false;
           } else if (entityFilter.startsWith('student_')) {
             const sId = entityFilter.replace('student_', '');
-            if (lesson.studentId !== sId && !lesson.title.toLowerCase().includes(sId.toLowerCase())) return false;
+            if (lesson.studentId !== sId && !(lesson.title || '').toLowerCase().includes(sId.toLowerCase())) return false;
           }
         }
 
@@ -83,13 +83,13 @@ export const SessionHistoryView: React.FC = () => {
         }
 
         // Search term
-        if (searchTerm.trim() !== '') {
+        if (searchTerm && searchTerm.trim() !== '') {
           const term = searchTerm.toLowerCase();
-          const matchTitle = lesson.title.toLowerCase().includes(term);
+          const matchTitle = (lesson.title || '').toLowerCase().includes(term);
           const matchStudent = (lesson.studentName || '').toLowerCase().includes(term);
           const matchGroup = (lesson.groupName || '').toLowerCase().includes(term);
           const matchNotes = (lesson.notes || '').toLowerCase().includes(term);
-          const matchDate = lesson.date.includes(term);
+          const matchDate = (lesson.date || '').includes(term);
           if (!matchTitle && !matchStudent && !matchGroup && !matchNotes && !matchDate) {
             return false;
           }

@@ -141,6 +141,16 @@ export function calculatePendingOutbox(
           const noteType = (record as any).type || 'note';
           const target = (record as any).studentName || (record as any).className || 'Lesson';
           title = `Note (${noteType} - ${target}): ${((record as any).text || '').substring(0, 25)}`;
+        } else if (entityType === 'financeAccounts') {
+          title = `Finance Account: ${(record as any).name || (record as any).id}`;
+        } else if (entityType === 'financeCategories') {
+          title = `Finance Category: ${(record as any).name || (record as any).id}`;
+        } else if (entityType === 'financeTransactions') {
+          title = `Transaction: ${(record as any).note || (record as any).type || 'Payment'} (${(record as any).amount || 0})`;
+        } else if (entityType === 'financeRecurring') {
+          title = `Recurring Bill: ${(record as any).name || (record as any).id} (${(record as any).amount || 0})`;
+        } else if (entityType === 'financeInstallments') {
+          title = `Installment: ${(record as any).name || (record as any).id} (${(record as any).amountPerInstallment || 0})`;
         }
 
         pendingItems.push({

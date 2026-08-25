@@ -46,7 +46,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   );
 
   const initialResolvedStudent = student || 
-    students.find(s => (lesson.studentId && s.id === lesson.studentId) || (lesson.studentName && s.name.trim().toLowerCase() === lesson.studentName.trim().toLowerCase())) || 
+    students.find(s => (lesson.studentId && s.id === lesson.studentId) || (lesson.studentName && s.name && s.name.trim().toLowerCase() === lesson.studentName.trim().toLowerCase())) || 
     (groupStudents.length > 0 ? groupStudents[0] : (lesson.studentName ? ({
       id: lesson.studentId || lesson.id || 'quick_student',
       name: lesson.studentName,

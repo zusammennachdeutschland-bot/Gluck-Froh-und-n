@@ -416,8 +416,8 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
       const matchClass = (p.gradeClass || '').toLowerCase().includes(q);
       const matchStatus = (p.status === 'ACTIVE' && ('قيد المتابعة'.includes(q) || 'متابعة'.includes(q) || 'نشط'.includes(q) || 'active'.includes(q))) ||
                           (p.status === 'RESOLVED' && ('تم الإغلاق'.includes(q) || 'مغلق'.includes(q) || 'مكتمل'.includes(q) || 'resolved'.includes(q)));
-      const matchWeakness = p.weaknessAreas.some(w => w.toLowerCase().includes(q));
-      const matchAction = p.actionSteps.some(s => s.toLowerCase().includes(q));
+      const matchWeakness = (p.weaknessAreas || []).some(w => (w || '').toLowerCase().includes(q));
+      const matchAction = (p.actionSteps || []).some(s => (s || '').toLowerCase().includes(q));
       if (!matchName && !matchTeacher && !matchClass && !matchStatus && !matchWeakness && !matchAction) return false;
     }
 

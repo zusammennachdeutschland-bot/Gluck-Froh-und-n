@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Student, Group, Lesson, PaymentRecord, CertificateRecord, NotificationItem } from '../types';
+import { 
+  Student, Group, Lesson, PaymentRecord, CertificateRecord, NotificationItem,
+  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment
+} from '../types';
 import { formatLocalDate } from '../utils/timeUtils';
 import { storage } from '../services/storageService';
 import { Capacitor } from '@capacitor/core';
@@ -30,10 +33,12 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
     profile, notificationSettings, inspirationSettings, 
     inspirationMessages, todos, certificates,
     hodStudents, hodComplaints, hodActionPlans, hodVisits,
+    financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments,
     setStudents, setGroups, setLessons, setPayments, setNotifications, setProfile, 
     setNotificationSettings, setInspirationSettings, setInspirationMessages,
     setTodos, setCertificates,
     setHodStudents, setHodComplaints, setHodActionPlans, setHodVisits,
+    setFinanceAccounts, setFinanceCategories, setFinanceTransactions, setFinanceRecurring, setFinanceInstallments,
     lastBackupTime, performBackup, exportBackupFile, importBackupFile,
     t, _t
   } = useApp();
@@ -161,7 +166,8 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
   const stats = calculateBackupStats(selectedCategories, {
     students, groups, lessons, payments, notifications, profile,
     notificationSettings, inspirationSettings, inspirationMessages, todos,
-    certificates, hodStudents, hodComplaints, hodActionPlans, hodVisits
+    certificates, hodStudents, hodComplaints, hodActionPlans, hodVisits,
+    financeAccounts, financeTransactions
   });
 
   const isFullBackup = selectedCategories.length === ALL_BACKUP_CATEGORIES.length;
@@ -186,7 +192,14 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         if (selectedCategories.includes('students')) payloadData.students = students;
         if (selectedCategories.includes('groups')) payloadData.groups = groups;
         if (selectedCategories.includes('schedule')) payloadData.lessons = lessons;
-        if (selectedCategories.includes('financial')) payloadData.payments = payments;
+        if (selectedCategories.includes('financial')) {
+          payloadData.payments = payments;
+          payloadData.financeAccounts = financeAccounts;
+          payloadData.financeCategories = financeCategories;
+          payloadData.financeTransactions = financeTransactions;
+          payloadData.financeRecurring = financeRecurring;
+          payloadData.financeInstallments = financeInstallments;
+        }
         if (selectedCategories.includes('notifications')) {
           payloadData.notifications = notifications;
           payloadData.notificationSettings = notificationSettings;
@@ -439,7 +452,12 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         hodStudents,
         hodComplaints,
         hodActionPlans,
-        hodVisits
+        hodVisits,
+        financeAccounts,
+        financeCategories,
+        financeTransactions,
+        financeRecurring,
+        financeInstallments
       };
       localStorage.setItem('dl_restore_point_snapshot', JSON.stringify(currentSnapshot));
       setHasRestorePoint(true);
@@ -470,6 +488,11 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           let finalHodComplaints = hodComplaints;
           let finalHodActionPlans = hodActionPlans;
           let finalHodVisits = hodVisits;
+          let finalFinanceAccounts = financeAccounts;
+          let finalFinanceCategories = financeCategories;
+          let finalFinanceTransactions = financeTransactions;
+          let finalFinanceRecurring = financeRecurring;
+          let finalFinanceInstallments = financeInstallments;
 
           if (data.students) finalStudents = data.students;
           if (data.groups) finalGroups = data.groups;
@@ -489,6 +512,11 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           if (data.hodComplaints) finalHodComplaints = data.hodComplaints;
           if (data.hodActionPlans) finalHodActionPlans = data.hodActionPlans;
           if (data.hodVisits) finalHodVisits = data.hodVisits;
+          if (data.financeAccounts) finalFinanceAccounts = data.financeAccounts;
+          if (data.financeCategories) finalFinanceCategories = data.financeCategories;
+          if (data.financeTransactions) finalFinanceTransactions = data.financeTransactions;
+          if (data.financeRecurring) finalFinanceRecurring = data.financeRecurring;
+          if (data.financeInstallments) finalFinanceInstallments = data.financeInstallments;
 
           // ATOMIC STATE AND STORAGE COMMIT
           setStudents(finalStudents);
@@ -554,6 +582,27 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           if (data.hodVisits) {
             setHodVisits(finalHodVisits);
             await storage.setItem('dl_hod_visits', finalHodVisits);
+          }
+
+          if (data.financeAccounts) {
+            setFinanceAccounts(finalFinanceAccounts);
+            await storage.setItem('dl_finance_accounts', finalFinanceAccounts);
+          }
+          if (data.financeCategories) {
+            setFinanceCategories(finalFinanceCategories);
+            await storage.setItem('dl_finance_categories', finalFinanceCategories);
+          }
+          if (data.financeTransactions) {
+            setFinanceTransactions(finalFinanceTransactions);
+            await storage.setItem('dl_finance_transactions', finalFinanceTransactions);
+          }
+          if (data.financeRecurring) {
+            setFinanceRecurring(finalFinanceRecurring);
+            await storage.setItem('dl_finance_recurring', finalFinanceRecurring);
+          }
+          if (data.financeInstallments) {
+            setFinanceInstallments(finalFinanceInstallments);
+            await storage.setItem('dl_finance_installments', finalFinanceInstallments);
           }
 
           setSimpleSuccessMsg(t('auto_all_data_restored_successful'));
@@ -677,7 +726,12 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       hodStudents,
       hodComplaints,
       hodActionPlans,
-      hodVisits
+      hodVisits,
+      financeAccounts,
+      financeCategories,
+      financeTransactions,
+      financeRecurring,
+      financeInstallments
     };
 
     localStorage.setItem('dl_restore_point_snapshot', JSON.stringify(currentSnapshot));
@@ -720,6 +774,11 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         let finalHodComplaints = [...hodComplaints];
         let finalHodActionPlans = [...hodActionPlans];
         let finalHodVisits = [...hodVisits];
+        let finalFinanceAccounts = [...financeAccounts];
+        let finalFinanceCategories = [...financeCategories];
+        let finalFinanceTransactions = [...financeTransactions];
+        let finalFinanceRecurring = [...financeRecurring];
+        let finalFinanceInstallments = [...financeInstallments];
 
         // Process Students
         if (selectedRestoreCategories.includes('students') && data.students) {
@@ -812,32 +871,94 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         }
 
         // Process Financial (Payments)
-        if (selectedRestoreCategories.includes('financial') && data.payments) {
-          if (restoreMode === 'smart') {
-            const existingMap = new Map(payments.map(p => [p.id, p]));
-            const newPaymentsList = [...payments];
-            data.payments.forEach((impP: PaymentRecord) => {
-              if (existingMap.has(impP.id)) {
-                const idx = newPaymentsList.findIndex(p => p.id === impP.id);
-                if (idx !== -1) newPaymentsList[idx] = { ...newPaymentsList[idx], ...impP };
-              } else {
-                newPaymentsList.push(impP);
-              }
-            });
-            finalPayments = newPaymentsList;
-          } else if (restoreMode === 'merge') {
-            const mergedMap = new Map<string, PaymentRecord>();
-            payments.forEach(p => mergedMap.set(p.id, p));
-            data.payments.forEach(p => {
-              if (mergedMap.has(p.id)) {
-                mergedMap.set(p.id, { ...mergedMap.get(p.id)!, ...p });
-              } else {
-                mergedMap.set(p.id, p);
-              }
-            });
-            finalPayments = Array.from(mergedMap.values());
-          } else if (restoreMode === 'replace') {
-            finalPayments = data.payments;
+        if (selectedRestoreCategories.includes('financial')) {
+          if (data.payments) {
+            if (restoreMode === 'smart') {
+              const existingMap = new Map(payments.map(p => [p.id, p]));
+              const newPaymentsList = [...payments];
+              data.payments.forEach((impP: PaymentRecord) => {
+                if (existingMap.has(impP.id)) {
+                  const idx = newPaymentsList.findIndex(p => p.id === impP.id);
+                  if (idx !== -1) newPaymentsList[idx] = { ...newPaymentsList[idx], ...impP };
+                } else {
+                  newPaymentsList.push(impP);
+                }
+              });
+              finalPayments = newPaymentsList;
+            } else if (restoreMode === 'merge') {
+              const mergedMap = new Map<string, PaymentRecord>();
+              payments.forEach(p => mergedMap.set(p.id, p));
+              data.payments.forEach(p => {
+                if (mergedMap.has(p.id)) {
+                  mergedMap.set(p.id, { ...mergedMap.get(p.id)!, ...p });
+                } else {
+                  mergedMap.set(p.id, p);
+                }
+              });
+              finalPayments = Array.from(mergedMap.values());
+            } else if (restoreMode === 'replace') {
+              finalPayments = data.payments;
+            }
+          }
+
+          if (data.financeAccounts) {
+            if (restoreMode === 'replace') finalFinanceAccounts = data.financeAccounts;
+            else {
+              const accMap = new Map<string, FinanceAccount>(financeAccounts.map(a => [a.id, a]));
+              data.financeAccounts.forEach(a => {
+                const existing = accMap.get(a.id);
+                accMap.set(a.id, existing ? { ...existing, ...a } : a);
+              });
+              finalFinanceAccounts = Array.from(accMap.values());
+            }
+          }
+
+          if (data.financeCategories) {
+            if (restoreMode === 'replace') finalFinanceCategories = data.financeCategories;
+            else {
+              const catMap = new Map<string, FinanceCategory>(financeCategories.map(c => [c.id, c]));
+              data.financeCategories.forEach(c => {
+                const existing = catMap.get(c.id);
+                catMap.set(c.id, existing ? { ...existing, ...c } : c);
+              });
+              finalFinanceCategories = Array.from(catMap.values());
+            }
+          }
+
+          if (data.financeTransactions) {
+            if (restoreMode === 'replace') finalFinanceTransactions = data.financeTransactions;
+            else {
+              const txMap = new Map<string, FinanceTransaction>(financeTransactions.map(t => [t.id, t]));
+              data.financeTransactions.forEach(t => {
+                const existing = txMap.get(t.id);
+                txMap.set(t.id, existing ? { ...existing, ...t } : t);
+              });
+              finalFinanceTransactions = Array.from(txMap.values());
+            }
+          }
+
+          if (data.financeRecurring) {
+            if (restoreMode === 'replace') finalFinanceRecurring = data.financeRecurring;
+            else {
+              const rMap = new Map<string, FinanceRecurring>(financeRecurring.map(r => [r.id, r]));
+              data.financeRecurring.forEach(r => {
+                const existing = rMap.get(r.id);
+                rMap.set(r.id, existing ? { ...existing, ...r } : r);
+              });
+              finalFinanceRecurring = Array.from(rMap.values());
+            }
+          }
+
+          if (data.financeInstallments) {
+            if (restoreMode === 'replace') finalFinanceInstallments = data.financeInstallments;
+            else {
+              const iMap = new Map<string, FinanceInstallment>(financeInstallments.map(i => [i.id, i]));
+              data.financeInstallments.forEach(i => {
+                const existing = iMap.get(i.id);
+                iMap.set(i.id, existing ? { ...existing, ...i } : i);
+              });
+              finalFinanceInstallments = Array.from(iMap.values());
+            }
           }
         }
 
@@ -950,9 +1071,31 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           setLessons(finalLessons);
           await storage.setItem('dl_lessons', finalLessons);
         }
-        if (selectedRestoreCategories.includes('financial') && data.payments) {
-          setPayments(finalPayments);
-          await storage.setItem('dl_payments', finalPayments);
+        if (selectedRestoreCategories.includes('financial')) {
+          if (data.payments) {
+            setPayments(finalPayments);
+            await storage.setItem('dl_payments', finalPayments);
+          }
+          if (data.financeAccounts) {
+            setFinanceAccounts(finalFinanceAccounts);
+            await storage.setItem('dl_finance_accounts', finalFinanceAccounts);
+          }
+          if (data.financeCategories) {
+            setFinanceCategories(finalFinanceCategories);
+            await storage.setItem('dl_finance_categories', finalFinanceCategories);
+          }
+          if (data.financeTransactions) {
+            setFinanceTransactions(finalFinanceTransactions);
+            await storage.setItem('dl_finance_transactions', finalFinanceTransactions);
+          }
+          if (data.financeRecurring) {
+            setFinanceRecurring(finalFinanceRecurring);
+            await storage.setItem('dl_finance_recurring', finalFinanceRecurring);
+          }
+          if (data.financeInstallments) {
+            setFinanceInstallments(finalFinanceInstallments);
+            await storage.setItem('dl_finance_installments', finalFinanceInstallments);
+          }
         }
         if (selectedRestoreCategories.includes('certificates') && data.certificates) {
           setCertificates(finalCertificates);
@@ -1103,6 +1246,26 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         if (rp.hodVisits) {
           setHodVisits(rp.hodVisits);
           await storage.setItem('dl_hod_visits', rp.hodVisits);
+        }
+        if (rp.financeAccounts) {
+          setFinanceAccounts(rp.financeAccounts);
+          await storage.setItem('dl_finance_accounts', rp.financeAccounts);
+        }
+        if (rp.financeCategories) {
+          setFinanceCategories(rp.financeCategories);
+          await storage.setItem('dl_finance_categories', rp.financeCategories);
+        }
+        if (rp.financeTransactions) {
+          setFinanceTransactions(rp.financeTransactions);
+          await storage.setItem('dl_finance_transactions', rp.financeTransactions);
+        }
+        if (rp.financeRecurring) {
+          setFinanceRecurring(rp.financeRecurring);
+          await storage.setItem('dl_finance_recurring', rp.financeRecurring);
+        }
+        if (rp.financeInstallments) {
+          setFinanceInstallments(rp.financeInstallments);
+          await storage.setItem('dl_finance_installments', rp.financeInstallments);
         }
 
         setRestoreSuccessMsg(t('auto_rollback_successful_restore'));

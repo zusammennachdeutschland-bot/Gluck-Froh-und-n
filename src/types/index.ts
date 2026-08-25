@@ -1,7 +1,8 @@
 export type GradeLevel = 
   | 'Grade 1' | 'Grade 2' | 'Grade 3' | 'Grade 4' 
   | 'Grade 5' | 'Grade 6' | 'Grade 7' | 'Grade 8' 
-  | 'Grade 9' | 'Grade 10' | 'Grade 11' | 'Grade 12';
+  | 'Grade 9' | 'Grade 10' | 'Grade 11' | 'Grade 12'
+  | 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 
 export type LessonType = 'online' | 'offline';
 
@@ -149,6 +150,11 @@ export interface SyncDeltaPayload {
     hodActionPlans?: StudentActionPlan[];
     hodVisits?: VisitRecord[];
     schoolNotes?: SchoolNote[];
+    financeAccounts?: FinanceAccount[];
+    financeCategories?: FinanceCategory[];
+    financeTransactions?: FinanceTransaction[];
+    financeRecurring?: FinanceRecurring[];
+    financeInstallments?: FinanceInstallment[];
   };
   metadata?: {
     totalEntitiesCount?: number;
@@ -293,6 +299,8 @@ export interface TeacherProfile {
   parentMessageTemplates?: Record<string, string>;
   weeklyIncomeGoal?: number;
   monthlyIncomeGoal?: number;
+  financeStreak?: number;
+  financeLastActivityDate?: string;
   schoolSettings?: SchoolSettings;
 }
 
@@ -568,7 +576,7 @@ export interface Group extends SyncableRecord {
   pricePerSession?: number;
   sessionCount: number; // e.g., 1, 4, 8, 12
   startingSessionNumber?: number; // e.g., 1, 3, 5, 8...
-  paymentMethod?: 'vodafone_cash' | 'cash' | 'bank_transfer' | 'paypal' | 'instapay';
+  defaultFinanceAccountId?: string; // Replaced paymentMethod
   paymentCycle?: PaymentCycle;
   paymentModel?: 'per_session' | 'package';
   scheduleDays?: string[]; // e.g. ['Sunday', 'Wednesday']
@@ -784,6 +792,11 @@ export interface BackupData {
   hodActionPlans?: StudentActionPlan[];
   hodVisits?: VisitRecord[];
   schoolNotes?: SchoolNote[];
+  financeAccounts?: FinanceAccount[];
+  financeCategories?: FinanceCategory[];
+  financeTransactions?: FinanceTransaction[];
+  financeRecurring?: FinanceRecurring[];
+  financeInstallments?: FinanceInstallment[];
 }
 
 export type InspirationFrequency = 'disabled' | 'daily' | 'before_first_lesson' | 'random_daily';
@@ -796,6 +809,59 @@ export interface InspirationMessage {
   isFavorite: boolean;
   isCustom?: boolean;
   createdAt?: string;
+}
+
+export interface FinanceAccount extends SyncableRecord {
+  name: string;
+  type: 'cash' | 'bank' | 'wallet' | 'other';
+  openingBalance: number;
+  currentBalance: number;
+  currency: string;
+  createdAt: string;
+}
+
+export interface FinanceCategory extends SyncableRecord {
+  name: string;
+  type: 'income' | 'expense' | 'transfer';
+  icon?: string;
+  color?: string;
+  createdAt: string;
+}
+
+export interface FinanceTransaction extends SyncableRecord {
+  type: 'income' | 'expense' | 'transfer';
+  amount: number;
+  accountId: string;
+  toAccountId?: string;
+  categoryId?: string;
+  date: string;
+  note?: string;
+  relatedStudentId?: string;
+  relatedPaymentId?: string;
+  createdAt: string;
+}
+
+export interface FinanceRecurring extends SyncableRecord {
+  name: string;
+  amount: number;
+  categoryId: string;
+  accountId: string;
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  dueDayOfMonth?: number;
+  lastPaidDate?: string;
+  createdAt: string;
+}
+
+export interface FinanceInstallment extends SyncableRecord {
+  name: string;
+  amountPerInstallment: number;
+  totalInstallments: number;
+  currentInstallment: number;
+  remainingBalance: number;
+  dueDate: string;
+  accountId: string;
+  providerName?: string;
+  createdAt: string;
 }
 
 export interface InspirationSettings {
@@ -840,7 +906,8 @@ export interface PaymentRecord extends SyncableRecord {
   paidDate?: string;
   status: PaymentStatus;
   paymentType?: 'lesson_fee' | 'package_bundle' | 'advance_payment' | 'refund' | 'adjustment';
-  paymentMethod?: 'cash' | 'vodafone_cash' | 'bank_transfer' | 'instapay' | 'paypal';
+  financeAccountId?: string;
+  paymentMethod?: string; // Kept for legacy
   lessonsIncluded?: string[];
   notes?: string;
   createdAt?: string;

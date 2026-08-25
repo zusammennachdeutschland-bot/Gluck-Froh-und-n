@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Group, GradeLevel, LessonType, PaymentCycle } from '../types';
-import { PREDEFINED_GRADES } from '../data/initialData';
+import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { useApp } from '../context/AppContext';
 import { Video, MapPin, DollarSign, Calendar } from 'lucide-react';
 
@@ -13,7 +13,7 @@ export interface GroupFormData {
   pricePerSession: number;
   sessionCount: number;
   startingSessionNumber: number;
-  paymentMethod: 'vodafone_cash' | 'cash' | 'bank_transfer' | 'paypal' | 'instapay';
+  defaultFinanceAccountId?: string;
   scheduleDays: string[];
   scheduleTime: string;
   dayTimes: Record<string, string>;
@@ -33,7 +33,7 @@ interface GroupFormProps {
 }
 
 export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isEdit, children }) => {
-  const { profile, language, t } = useApp();
+  const { profile, language, t, _t } = useApp();
 
   
   const [name, setName] = useState(initialData?.name || '');
@@ -44,7 +44,8 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
   const [pricePerSession, setPricePerSession] = useState(initialData?.pricePerSession || (initialData?.monthlyPackagePrice ? Math.round(initialData.monthlyPackagePrice / (initialData.sessionCount || 8)) : 150));
   const [sessionCount, setSessionCount] = useState(initialData?.sessionCount || 8);
   const [startingSessionNumber, setStartingSessionNumber] = useState(initialData?.startingSessionNumber || 1);
-  const [paymentMethod, setPaymentMethod] = useState<'vodafone_cash' | 'cash' | 'bank_transfer' | 'paypal' | 'instapay'>(initialData?.paymentMethod || 'vodafone_cash');
+  const { financeAccounts } = useApp();
+  const [defaultFinanceAccountId, setDefaultFinanceAccountId] = useState(initialData?.defaultFinanceAccountId || (financeAccounts?.[0]?.id || ''));
   const [scheduleDays, setScheduleDays] = useState<string[]>(initialData?.scheduleDays || []);
   const [scheduleTime, setScheduleTime] = useState(initialData?.scheduleTime || '17:00');
   const [dayTimes, setDayTimes] = useState<Record<string, string>>(initialData?.scheduleDayTimes || {});
@@ -91,7 +92,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
       pricePerSession: Number(pricePerSession),
       sessionCount: Number(sessionCount),
       startingSessionNumber: Number(startingSessionNumber),
-      paymentMethod,
+      defaultFinanceAccountId,
       scheduleDays,
       scheduleTime,
       dayTimes,
@@ -156,19 +157,28 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
         </div>
       </div>
 
-      {/* Predefined Grade */}
+      {/* Predefined Grade / Course Level */}
       <div className="space-y-1">
         <label className="text-xs font-bold text-text-main">
-          Klassenstufe (Predefined Grade Level)
+          {_t('المستوى / الصف الدراسي', 'Grade / Course Level', 'Klassenstufe / Sprachniveau')}
         </label>
         <select
           value={grade}
           onChange={(e) => setGrade(e.target.value as GradeLevel)}
           className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none"
         >
-          {PREDEFINED_GRADES.map(g => (
-            <option key={g} value={g}>{g}</option>
-          ))}
+          <optgroup label="مستويات الكورسات واللغات (Course Levels)">
+            {COURSE_LEVELS.map(g => (
+              <option key={g} value={g}>
+                {g} - {_t(g === 'A1' ? 'A1 (مبتدئ أول)' : g === 'A2' ? 'A2 (مبتدئ متقدم)' : g === 'B1' ? 'B1 (متوسط أول)' : g === 'B2' ? 'B2 (متوسط متقدم)' : g === 'C1' ? 'C1 (متقدم)' : 'C2 (متقن)', g, g)}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="الصفوف المدرسية (School Grades)">
+            {SCHOOL_GRADES.map(g => (
+              <option key={g} value={g}>{g}</option>
+            ))}
+          </optgroup>
         </select>
       </div>
 
@@ -269,18 +279,17 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
 
           <div className="space-y-1">
             <label className="text-xs font-bold text-text-main">
-              Standard Zahlungsart:
+              Standard Konto (Default Account):
             </label>
             <select
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value as any)}
+              value={defaultFinanceAccountId}
+              onChange={(e) => setDefaultFinanceAccountId(e.target.value)}
               className="w-full px-3 py-1.5 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold"
             >
-              <option value="vodafone_cash">Vodafone Cash</option>
-              <option value="instapay">InstaPay</option>
-              <option value="cash">Bargeld (Cash)</option>
-              <option value="bank_transfer">Banküberweisung</option>
-              <option value="paypal">PayPal</option>
+              <option value="">{t('choose', 'Choose...', 'Wählen...')}</option>
+              {financeAccounts.filter(a => !a.deleted).map(acc => (
+                <option key={acc.id} value={acc.id}>{acc.name}</option>
+              ))}
             </select>
           </div>
         </div>

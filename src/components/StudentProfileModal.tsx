@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Student, GradeLevel, CertificateRecord } from '../types';
+import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
 import { CARTOON_AVATARS, DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
@@ -828,16 +829,25 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
                   <div className="space-y-1">
                     <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                      Klassenstufe / Niveau (Grade)
+                      {_t('المستوى / الصف الدراسي', 'Grade / Course Level', 'Klassenstufe / Niveau')}
                     </label>
                     <select
                       value={editGrade}
                       onChange={(e) => setEditGrade(e.target.value as GradeLevel)}
                       className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
                     >
-                      {Array.from({ length: 12 }, (_, i) => `Grade ${i + 1}`).map(g => (
-                        <option key={g} value={g}>{g}</option>
-                      ))}
+                      <optgroup label={_t('مستويات الكورسات واللغات (Courses)', 'Course Levels (Language)', 'Sprachniveaus')}>
+                        {COURSE_LEVELS.map(g => (
+                          <option key={g} value={g}>
+                            {g} - {_t(g === 'A1' ? 'A1 (مبتدئ أول)' : g === 'A2' ? 'A2 (مبتدئ متقدم)' : g === 'B1' ? 'B1 (متوسط أول)' : g === 'B2' ? 'B2 (متوسط متقدم)' : g === 'C1' ? 'C1 (متقدم)' : 'C2 (متقن)', g, g)}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label={_t('الصفوف المدرسية (School Grades)', 'School Grades', 'Schulklassen')}>
+                        {SCHOOL_GRADES.map(g => (
+                          <option key={g} value={g}>{g}</option>
+                        ))}
+                      </optgroup>
                     </select>
                   </div>
                 </div>

@@ -1,24 +1,54 @@
 import React, { useState, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
-import { PaymentRecord, Student, Group } from '../types';
-import { getStudentCyclePricing, calculateDuePaymentCycles, DuePaymentCycle } from '../utils/paymentUtils';
-import { formatLocalDate } from '../utils/timeUtils';
-import { buildWhatsAppUrl } from '../utils/phoneUtils';
+import { useApp } from '../../context/AppContext';
+import { PaymentRecord, Student, Group, Lesson } from '../../types';
+import { getStudentCyclePricing, calculateDuePaymentCycles, DuePaymentCycle } from '../../utils/paymentUtils';
+import { formatLocalDate } from '../../utils/timeUtils';
+import { buildWhatsAppUrl } from '../../utils/phoneUtils';
 import { 
   DollarSign, CheckCircle2, Clock, Send, Search, 
-  Check, X, Sparkles, History, Calendar, AlertCircle, TrendingUp, ChevronRight
+  Check, X, Sparkles, History, Calendar, AlertCircle, TrendingUp, ChevronRight,
+  Landmark, Wallet, CreditCard, Layers, BookOpen, ChevronDown
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
-export const PaymentsView: React.FC = () => {
+export const FinanceStudentPayments: React.FC = () => {
   const { 
     students, groups, lessons, payments, profile, 
-    markCyclePaymentPaid, markCyclePaymentNotYet, t, _t 
+    markCyclePaymentPaid, markCyclePaymentNotYet, updateLessonPaymentStatus,
+    t, _t, financeAccounts
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'due' | 'history'>('due');
+  const [dueSubTab, setDueSubTab] = useState<'cycles' | 'single_lessons'>('cycles');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [historyAccountId, setHistoryAccountId] = useState<string>('all');
+
+  // Per-card selected receiving account mapping
+  const [cardAccountMap, setCardAccountMap] = useState<Record<string, string>>({});
+
+  // Set default account ID
+  React.useEffect(() => {
+    if (financeAccounts.length > 0 && !selectedAccountId) {
+      const defaultAcc = financeAccounts.find(a => !a.deleted);
+      if (defaultAcc) {
+        setSelectedAccountId(defaultAcc.id);
+      }
+    }
+  }, [financeAccounts, selectedAccountId]);
+
+  // Helper to determine the target account for a cycle or lesson card
+  const getCardAccountId = (itemId: string, groupId?: string) => {
+    if (cardAccountMap[itemId]) return cardAccountMap[itemId];
+    if (groupId) {
+      const grp = groups.find(g => g.id === groupId);
+      if (grp?.defaultFinanceAccountId && financeAccounts.some(a => a.id === grp.defaultFinanceAccountId && !a.deleted)) {
+        return grp.defaultFinanceAccountId;
+      }
+    }
+    return selectedAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+  };
 
   // Gains Summary Modal State
   const [selectedGainPeriod, setSelectedGainPeriod] = useState<'daily' | 'weekly' | 'monthly' | null>(null);
@@ -30,6 +60,7 @@ export const PaymentsView: React.FC = () => {
   // Flexible Prorate Modal State
   const [prorateModalItem, setProrateModalItem] = useState<DuePaymentCycle | null>(null);
   const [customProrateAmount, setCustomProrateAmount] = useState<number>(0);
+  const [prorateAccountId, setProrateAccountId] = useState<string>('');
 
   const currency = profile.currency || 'EGP';
   const todayStr = formatLocalDate();
@@ -93,8 +124,10 @@ export const PaymentsView: React.FC = () => {
   // Filtered Due Cycles based on search & group filter
   const filteredDueCycles = useMemo(() => {
     return dueCycles.filter(item => {
-      const matchesSearch = item.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                            item.groupName.toLowerCase().includes(searchTerm.toLowerCase());
+      const sTerm = (searchTerm || '').toLowerCase();
+      const matchesSearch = !sTerm ||
+                            (item.studentName || '').toLowerCase().includes(sTerm) ||
+                            (item.groupName || '').toLowerCase().includes(sTerm);
       const matchesGroup = selectedGroupId === 'all' || item.groupId === selectedGroupId;
       return matchesSearch && matchesGroup;
     });
@@ -192,8 +225,10 @@ export const PaymentsView: React.FC = () => {
 
   const filteredInProgressCycles = useMemo(() => {
     return inProgressCycles.filter(item => {
-      const matchesSearch = item.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                            item.groupName.toLowerCase().includes(searchTerm.toLowerCase());
+      const sTerm = (searchTerm || '').toLowerCase();
+      const matchesSearch = !sTerm ||
+                            (item.studentName || '').toLowerCase().includes(sTerm) ||
+                            (item.groupName || '').toLowerCase().includes(sTerm);
       const matchesGroup = selectedGroupId === 'all' || item.groupId === selectedGroupId;
       return matchesSearch && matchesGroup;
     });
@@ -204,8 +239,10 @@ export const PaymentsView: React.FC = () => {
     return payments
       .filter(p => p.status === 'paid')
       .filter(p => {
-        const matchesSearch = p.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                              p.groupName.toLowerCase().includes(searchTerm.toLowerCase());
+        const sTerm = (searchTerm || '').toLowerCase();
+        const matchesSearch = !sTerm ||
+                              (p.studentName || '').toLowerCase().includes(sTerm) ||
+                              (p.groupName || '').toLowerCase().includes(sTerm);
         const matchesGroup = selectedGroupId === 'all' || p.groupId === selectedGroupId;
         return matchesSearch && matchesGroup;
       })
@@ -229,10 +266,35 @@ export const PaymentsView: React.FC = () => {
       .reduce((sum, item) => sum + item.amountDue, 0);
   }, [filteredDueCycles]);
 
+  // Unpaid Individual Lessons calculation
+  const unpaidSingleLessons = useMemo(() => {
+    return lessons.filter(l => {
+      if (l.deleted) return false;
+      const isUnpaid = l.paymentStatus === 'pending' || l.paymentStatus === 'not_paid' || l.paymentStatus === 'partial';
+      const due = l.amountDue || 200;
+      const paid = l.amountPaid || 0;
+      const hasRemaining = (due - paid) > 0;
+      const matchesSearch = !searchTerm || 
+        (l.studentName || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+        (l.groupName || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+        (l.title || '').toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesGroup = selectedGroupId === 'all' || l.groupId === selectedGroupId;
+      return hasRemaining && (l.status === 'completed' || isUnpaid) && matchesSearch && matchesGroup;
+    }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [lessons, searchTerm, selectedGroupId]);
+
+  const filteredPaidHistory = useMemo(() => {
+    return paidHistory.filter(p => {
+      const matchesAcc = historyAccountId === 'all' || p.financeAccountId === historyAccountId;
+      return matchesAcc;
+    });
+  }, [paidHistory, historyAccountId]);
+
   // --------------------------------------------------------------------------
   // ACTIONS
   // --------------------------------------------------------------------------
   const handleMarkPaid = (item: DuePaymentCycle) => {
+    const targetAccountId = getCardAccountId(item.id, item.groupId);
     markCyclePaymentPaid({
       studentId: item.studentId,
       studentName: item.studentName,
@@ -243,8 +305,17 @@ export const PaymentsView: React.FC = () => {
       lessonDates: item.lessonDates,
       lessonIds: item.lessonIds,
       existingPaymentRecordId: item.existingPaymentRecordId,
-      notes: `Bezahlt (${item.cycleLength}/${item.cycleLength} Lektionen)`
+      notes: `سداد اشتراك (${item.cycleLength}/${item.cycleLength} حصص)`,
+      accountId: targetAccountId
     });
+    confetti({ particleCount: 50, spread: 60 });
+  };
+
+  const handleMarkSingleLessonPaid = (lesson: Lesson) => {
+    const targetAccId = getCardAccountId(`lesson_${lesson.id}`, lesson.groupId);
+    const due = lesson.amountDue || 200;
+    updateLessonPaymentStatus(lesson.id, 'paid', due, targetAccId);
+    confetti({ particleCount: 50, spread: 60 });
   };
 
   const handleMarkNotYet = (item: DuePaymentCycle) => {
@@ -431,141 +502,342 @@ ${datesFormatted}
           </button>
         </div>
 
-        {/* GROUP FILTER */}
-        {groups.length > 0 && (
-          <select
-            value={selectedGroupId}
-            onChange={e => setSelectedGroupId(e.target.value)}
-            className="px-2.5 py-1 bg-surface border border-surface-border rounded-lg text-xs font-bold focus:outline-none"
-          >
-            <option value="all">{t('students_all_groups')}</option>
-            {groups.map(g => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
-          </select>
-        )}
+        {/* GROUP & ACCOUNT FILTERS */}
+        <div className="flex items-center gap-2">
+          {financeAccounts.length > 0 && (
+            <select
+              value={selectedAccountId}
+              onChange={e => setSelectedAccountId(e.target.value)}
+              className="px-2.5 py-1 bg-surface border border-surface-border rounded-lg text-xs font-bold focus:outline-none max-w-[120px]"
+            >
+              {financeAccounts.map(a => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          )}
+
+          {groups.length > 0 && (
+            <select
+              value={selectedGroupId}
+              onChange={e => setSelectedGroupId(e.target.value)}
+              className="px-2.5 py-1 bg-surface border border-surface-border rounded-lg text-xs font-bold focus:outline-none max-w-[120px]"
+            >
+              <option value="all">{t('students_all_groups')}</option>
+              {groups.map(g => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* TAB 1: OFFENE ZAHLUNGEN (DUE NOW) */}
       {activeTab === 'due' && (
-        <div className="space-y-2.5">
-          {filteredDueCycles.length === 0 ? (
-            <div className="py-8 sm:py-14 text-center flex flex-col items-center justify-center space-y-3">
-              <div className="relative mb-1">
-                <div className="absolute inset-0 bg-primary/20 rounded-full blur-xl pointer-events-none" />
-                <div className="w-14 h-14 bg-primary-soft dark:bg-primary-soft text-primary rounded-2xl flex items-center justify-center mx-auto relative z-10 shadow-2xs border border-primary-border/30 rotate-2">
-                  <CheckCircle2 className="w-7 h-7 -rotate-2" />
+        <div className="space-y-3.5">
+          {/* Sub-tab navigation: Cycles vs Single Lessons */}
+          <div className="flex items-center gap-1.5 p-1 bg-surface-hover/70 dark:bg-surface-hover/40 rounded-xl border border-surface-border w-fit max-w-full overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setDueSubTab('cycles')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                dueSubTab === 'cycles'
+                  ? 'bg-surface text-primary shadow-xs border border-surface-border/80'
+                  : 'text-text-muted hover:text-text-main'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>{_t('دورات الاشتراكات المكتملة', 'Completed Cycles', 'Abgeschlossene Zyklen')}</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${dueSubTab === 'cycles' ? 'bg-primary text-white' : 'bg-surface-hover text-text-muted'}`}>
+                {filteredDueCycles.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDueSubTab('single_lessons')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                dueSubTab === 'single_lessons'
+                  ? 'bg-surface text-primary shadow-xs border border-surface-border/80'
+                  : 'text-text-muted hover:text-text-main'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>{_t('الحصص الفردية والمستحقة', 'Individual Due Lessons', 'Fällige Einzellektionen')}</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${dueSubTab === 'single_lessons' ? 'bg-primary text-white' : 'bg-surface-hover text-text-muted'}`}>
+                {unpaidSingleLessons.length}
+              </span>
+            </button>
+          </div>
+
+          {/* SUB-VIEW 1: DUE CYCLES */}
+          {dueSubTab === 'cycles' && (
+            <div className="space-y-3">
+              {filteredDueCycles.length === 0 ? (
+                <div className="py-8 sm:py-14 text-center flex flex-col items-center justify-center space-y-3">
+                  <div className="relative mb-1">
+                    <div className="absolute inset-0 bg-primary/20 rounded-full blur-xl pointer-events-none" />
+                    <div className="w-14 h-14 bg-primary-soft dark:bg-primary-soft text-primary rounded-2xl flex items-center justify-center mx-auto relative z-10 shadow-2xs border border-primary-border/30 rotate-2">
+                      <CheckCircle2 className="w-7 h-7 -rotate-2" />
+                    </div>
+                  </div>
+                  <div className="space-y-1 relative z-10">
+                    <h3 className="text-sm sm:text-base font-black text-text-main tracking-tight">
+                      {t('payments_no_due_title') || t('payments_no_due')}
+                    </h3>
+                    <p className="text-xs text-text-muted max-w-md mx-auto leading-relaxed">
+                      {t('payments_no_due_desc') || t('payments_no_due_sub')}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-1 relative z-10">
-                <h3 className="text-sm sm:text-base font-black text-text-main tracking-tight">
-                  {t('payments_no_due_title') || t('payments_no_due')}
-                </h3>
-                <p className="text-xs text-text-muted max-w-md mx-auto leading-relaxed">
-                  {t('payments_no_due_desc') || t('payments_no_due_sub')}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-              {filteredDueCycles.map((item, idx) => (
-                <div
-                  key={`${item.id}_${idx}`}
-                  className="bg-surface p-3 sm:p-3.5 rounded-lg border border-primary-border dark:border-primary-border shadow-2xs space-y-2.5 relative overflow-hidden flex flex-col justify-between"
-                >
-                  {/* TOP ROW: STUDENT INFO & AMOUNT DUE */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-surface-border pb-2">
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <h3 className="text-sm font-black text-text-main">
-                          {item.studentName}
-                        </h3>
-                        <span className="px-2 py-0.2 rounded-full bg-surface-hover text-text-main text-[10px] font-bold">
-                          {item.groupName}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="px-1.5 py-0.2 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary text-[10px] font-black">
-                          {t('payments_completed_cycle')}: {item.cycleLength} / {item.cycleLength} {t('payment_plan_lessons')}
-                        </span>
-                        {item.status === 'not_yet' && (
-                          <span className="text-[10px] font-bold text-text-muted/70">
-                            ({t('payments_pending_tag')} ⏳)
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <span className="text-[9px] font-extrabold text-text-muted/70 uppercase tracking-wider block">{t('payments_amount_due')}</span>
-                      <div className="text-base font-black text-primary dark:text-primary font-mono">
-                        {item.amountDue} <span className="text-[10px] font-normal text-text-muted/70">{currency}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* LESSON DATES INCLUDED IN THIS CYCLE */}
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold text-text-muted flex items-center gap-1">
-                      <Calendar className="w-3 h-3 text-text-muted/70" />
-                      <span>{t('payments_completed_dates')}:</span>
-                    </span>
-
-                    <div className="flex flex-wrap items-center gap-1">
-                      {item.lessonDates.length > 0 ? (
-                        item.lessonDates.map((d, idx) => (
-                          <span
-                            key={idx}
-                            className="px-1.5 py-0.5 bg-surface-hover text-slate-800 dark:text-slate-200 rounded text-[10px] font-mono font-bold border border-surface-border dark:border-surface-border-soft"
-                          >
-                            🗓️ {d}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-[10px] text-text-muted/70 italic">
-                          {item.cycleLength} {t('payment_plan_lessons')}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* BOTTOM ACTION BUTTONS */}
-                  <div className="pt-1 flex flex-wrap items-center justify-between gap-1.5">
-                    <div className="flex items-center gap-1.5">
-                      {/* PAID BUTTON */}
-                      <button
-                        type="button"
-                        onClick={() => handleMarkPaid(item)}
-                        className="px-3 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-black rounded-lg transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
-                      >
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
-                        <span>{t('payments_paid_btn')}</span>
-                      </button>
-
-                      {/* NOT YET BUTTON */}
-                      <button
-                        type="button"
-                        onClick={() => handleMarkNotYet(item)}
-                        className="px-2.5 py-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1"
-                      >
-                        <Clock className="w-3 h-3 text-text-muted/70" />
-                        <span>{t('payments_not_yet_btn')}</span>
-                      </button>
-                    </div>
-
-                    {/* WHATSAPP MESSAGE BUTTON */}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCycleForWhatsApp(item)}
-                      className="px-3 py-1.5 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft/80 text-primary dark:text-primary text-xs font-bold rounded-lg transition-all border border-primary-border dark:border-primary-border cursor-pointer flex items-center gap-1.5"
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+                  {filteredDueCycles.map((item, idx) => (
+                    <div
+                      key={`${item.id}_${idx}`}
+                      className="bg-surface p-3.5 sm:p-4 rounded-xl border border-primary-border/70 dark:border-primary-border/50 shadow-2xs space-y-3 relative overflow-hidden flex flex-col justify-between"
                     >
-                      <Send className="w-3.5 h-3.5 text-primary" />
-                      <span>{t('payments_parent_notice')}</span>
-                    </button>
+                      {/* TOP ROW: STUDENT INFO & AMOUNT DUE */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-surface-border pb-2.5">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <h3 className="text-sm font-black text-text-main">
+                              {item.studentName}
+                            </h3>
+                            <span className="px-2 py-0.2 rounded-full bg-surface-hover text-text-main text-[10px] font-bold">
+                              {item.groupName}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="px-1.5 py-0.2 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary text-[10px] font-black">
+                              {t('payments_completed_cycle')}: {item.cycleLength} / {item.cycleLength} {t('payment_plan_lessons')}
+                            </span>
+                            {item.status === 'not_yet' && (
+                              <span className="text-[10px] font-bold text-text-muted/70">
+                                ({t('payments_pending_tag')} ⏳)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <span className="text-[9px] font-extrabold text-text-muted/70 uppercase tracking-wider block">{t('payments_amount_due')}</span>
+                          <div className="text-base font-black text-primary dark:text-primary font-mono">
+                            {item.amountDue} <span className="text-[10px] font-normal text-text-muted/70">{currency}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* LESSON DATES INCLUDED IN THIS CYCLE */}
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold text-text-muted flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-text-muted/70" />
+                          <span>{t('payments_completed_dates')}:</span>
+                        </span>
+
+                        <div className="flex flex-wrap items-center gap-1">
+                          {item.lessonDates.length > 0 ? (
+                            item.lessonDates.map((d, idx) => (
+                              <span
+                                key={idx}
+                                className="px-1.5 py-0.5 bg-surface-hover text-slate-800 dark:text-slate-200 rounded text-[10px] font-mono font-bold border border-surface-border dark:border-surface-border-soft"
+                              >
+                                🗓️ {d}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[10px] text-text-muted/70 italic">
+                              {item.cycleLength} {t('payment_plan_lessons')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* RECEIVING ACCOUNT SELECTOR */}
+                      {financeAccounts.length > 0 && (
+                        <div className="bg-surface-hover/70 dark:bg-surface-hover/30 px-2.5 py-1.5 rounded-lg border border-surface-border flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-xs text-text-muted shrink-0">
+                            <Landmark className="w-3.5 h-3.5 text-primary shrink-0" />
+                            <span className="font-bold text-[11px] text-text-main">
+                              {_t('حساب الإيداع:', 'Deposit Account:', 'Einzahlen auf:')}
+                            </span>
+                          </div>
+                          <select
+                            value={getCardAccountId(item.id, item.groupId)}
+                            onChange={(e) => setCardAccountMap(prev => ({ ...prev, [item.id]: e.target.value }))}
+                            className="px-2 py-1 bg-surface border border-surface-border rounded-md text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary flex-1 max-w-[200px] cursor-pointer"
+                          >
+                            {financeAccounts.filter(a => !a.deleted).map(acc => (
+                              <option key={acc.id} value={acc.id}>
+                                {acc.type === 'cash' ? '💵 ' : acc.type === 'wallet' ? '📱 ' : acc.type === 'bank' ? '🏦 ' : '💳 '}
+                                {acc.name} ({acc.currentBalance.toLocaleString()} {acc.currency || currency})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* BOTTOM ACTION BUTTONS */}
+                      <div className="pt-1 flex flex-wrap items-center justify-between gap-1.5">
+                        <div className="flex items-center gap-1.5">
+                          {/* PAID BUTTON */}
+                          <button
+                            type="button"
+                            onClick={() => handleMarkPaid(item)}
+                            className="px-3.5 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-black rounded-lg transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                            <span>{t('payments_paid_btn')}</span>
+                          </button>
+
+                          {/* NOT YET BUTTON */}
+                          <button
+                            type="button"
+                            onClick={() => handleMarkNotYet(item)}
+                            className="px-2.5 py-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1"
+                          >
+                            <Clock className="w-3 h-3 text-text-muted/70" />
+                            <span>{t('payments_not_yet_btn')}</span>
+                          </button>
+                        </div>
+
+                        {/* WHATSAPP MESSAGE BUTTON */}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCycleForWhatsApp(item)}
+                          className="px-3 py-1.5 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft/80 text-primary dark:text-primary text-xs font-bold rounded-lg transition-all border border-primary-border dark:border-primary-border cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Send className="w-3.5 h-3.5 text-primary" />
+                          <span>{t('payments_parent_notice')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SUB-VIEW 2: INDIVIDUAL DUE LESSONS */}
+          {dueSubTab === 'single_lessons' && (
+            <div className="space-y-3">
+              {unpaidSingleLessons.length === 0 ? (
+                <div className="py-8 sm:py-14 text-center flex flex-col items-center justify-center space-y-3 bg-surface border border-surface-border rounded-xl">
+                  <div className="w-12 h-12 bg-primary-soft text-primary rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-sm sm:text-base font-black text-text-main">
+                      {_t('لا توجد حصص فردية مستحقة السداد', 'No individual lessons due for payment', 'Keine fälligen Einzellektionen')}
+                    </h3>
+                    <p className="text-xs text-text-muted max-w-md mx-auto">
+                      {_t('جميع الحصص الفردية مسددة بالكامل أو مضافة للدورات.', 'All individual lessons are fully settled or tracked in cycles.', 'Alle Einzellektionen sind bezahlt.')}
+                    </p>
                   </div>
                 </div>
-              ))}
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+                  {unpaidSingleLessons.map((lesson) => {
+                    const due = lesson.amountDue || 200;
+                    const paid = lesson.amountPaid || 0;
+                    const remaining = Math.max(0, due - paid);
+                    const cardKey = `lesson_${lesson.id}`;
+
+                    return (
+                      <div
+                        key={lesson.id}
+                        className="bg-surface p-3.5 sm:p-4 rounded-xl border border-surface-border shadow-2xs space-y-3 relative overflow-hidden flex flex-col justify-between"
+                      >
+                        {/* TOP ROW: LESSON INFO & DUE AMOUNT */}
+                        <div className="flex items-start justify-between gap-2 border-b border-surface-border pb-2.5">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className="text-sm font-black text-text-main">
+                                {lesson.studentName || lesson.groupName || lesson.title}
+                              </h4>
+                              {lesson.isQuickLesson && (
+                                <span className="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[9.5px] font-black">
+                                  ⚡ {_t('حصة سريعة', 'Quick Lesson', 'Schnelle Lektion')}
+                                </span>
+                              )}
+                              {lesson.groupName && (
+                                <span className="px-2 py-0.2 rounded-full bg-surface-hover text-text-main text-[10px] font-bold">
+                                  {lesson.groupName}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 text-[11px] text-text-muted font-medium">
+                              <span className="flex items-center gap-1">
+                                <Calendar className="w-3 h-3 text-primary" />
+                                {formatDateDisplay(lesson.date)}
+                              </span>
+                              {lesson.time && (
+                                <span className="flex items-center gap-1 font-mono">
+                                  <Clock className="w-3 h-3 text-primary" />
+                                  {lesson.time}
+                                </span>
+                              )}
+                              <span className="px-1.5 py-0.2 rounded bg-surface-hover text-[10px] font-bold">
+                                {lesson.type === 'online' ? '🌐 أونلاين' : '📍 حضوري'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span className="text-[9px] font-extrabold text-text-muted/70 uppercase tracking-wider block">
+                              {_t('المتبقي للسداد', 'Remaining Due', 'Restbetrag')}
+                            </span>
+                            <div className="text-base font-black text-primary font-mono">
+                              {remaining} <span className="text-[10px] font-normal text-text-muted/70">{currency}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* RECEIVING ACCOUNT SELECTOR */}
+                        {financeAccounts.length > 0 && (
+                          <div className="bg-surface-hover/70 dark:bg-surface-hover/30 px-2.5 py-1.5 rounded-lg border border-surface-border flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 text-xs text-text-muted shrink-0">
+                              <Landmark className="w-3.5 h-3.5 text-primary shrink-0" />
+                              <span className="font-bold text-[11px] text-text-main">
+                                {_t('حساب الإيداع:', 'Deposit Account:', 'Einzahlen auf:')}
+                              </span>
+                            </div>
+                            <select
+                              value={getCardAccountId(cardKey, lesson.groupId)}
+                              onChange={(e) => setCardAccountMap(prev => ({ ...prev, [cardKey]: e.target.value }))}
+                              className="px-2 py-1 bg-surface border border-surface-border rounded-md text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary flex-1 max-w-[200px] cursor-pointer"
+                            >
+                              {financeAccounts.filter(a => !a.deleted).map(acc => (
+                                <option key={acc.id} value={acc.id}>
+                                  {acc.type === 'cash' ? '💵 ' : acc.type === 'wallet' ? '📱 ' : acc.type === 'bank' ? '🏦 ' : '💳 '}
+                                  {acc.name} ({acc.currentBalance.toLocaleString()} {acc.currency || currency})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* ACTION BUTTON */}
+                        <div className="pt-1 flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-text-muted font-medium">
+                            {_t('إجمالي الحصة:', 'Lesson Total:', 'Gesamt:')} {due} {currency}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => handleMarkSingleLessonPaid(lesson)}
+                            className="px-3.5 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-black rounded-lg transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                            <span>{_t('سداد الحصة في الحساب المختار', 'Mark Lesson as Paid', 'Als bezahlt markieren')}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -621,6 +893,7 @@ ${datesFormatted}
                       onClick={() => {
                         setProrateModalItem(item);
                         setCustomProrateAmount(item.amountDue);
+                        setProrateAccountId(getCardAccountId(item.id, item.groupId));
                       }}
                       className="w-full py-1.5 bg-primary-soft dark:bg-primary-soft/40 text-primary dark:text-primary hover:bg-primary-soft dark:hover:bg-primary-soft active:scale-95 transition-all text-xs font-black rounded-xl border border-primary-border/50 dark:border-primary-border flex items-center justify-center gap-1.5 cursor-pointer"
                     >
@@ -637,48 +910,84 @@ ${datesFormatted}
 
       {/* TAB 2: ZAHLUNGSHISTORIE (PAID HISTORY) */}
       {activeTab === 'history' && (
-        <div>
-          {paidHistory.length === 0 ? (
+        <div className="space-y-3">
+          {/* History Account Filter */}
+          <div className="flex items-center justify-between gap-2 p-2 bg-surface rounded-xl border border-surface-border">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-text-main">
+              <Landmark className="w-3.5 h-3.5 text-primary" />
+              <span>{_t('تصفية حسب الخزينة / الحساب:', 'Filter by Account:', 'Nach Konto filtern:')}</span>
+            </div>
+            <select
+              value={historyAccountId}
+              onChange={(e) => setHistoryAccountId(e.target.value)}
+              className="px-2.5 py-1 bg-surface-hover border border-surface-border rounded-lg text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="all">{_t('جميع الحسابات والتحصيلات', 'All Accounts', 'Alle Konten')}</option>
+              {financeAccounts.filter(a => !a.deleted).map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.type === 'cash' ? '💵 ' : acc.type === 'wallet' ? '📱 ' : acc.type === 'bank' ? '🏦 ' : '💳 '}
+                  {acc.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {filteredPaidHistory.length === 0 ? (
             <div className="bg-surface p-5 rounded-xl border border-surface-border text-center space-y-1">
               <p className="text-sm font-bold text-text-main">{t('payments_no_history')}</p>
               <p className="text-xs text-text-muted/70">{t('payments_history_sub')}</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {paidHistory.map(p => (
-                <div
-                  key={p.id}
-                  className="bg-surface p-4 rounded-xl border border-surface-border flex flex-col justify-between gap-3 shadow-2xs hover:shadow-xs transition-shadow"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <h4 className="text-sm font-black text-text-main truncate">{p.studentName}</h4>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-surface-hover text-slate-600 dark:text-slate-300 shrink-0">
-                        {p.groupName}
-                      </span>
+              {filteredPaidHistory.map(p => {
+                const targetAcc = financeAccounts.find(a => a.id === p.financeAccountId);
+
+                return (
+                  <div
+                    key={p.id}
+                    className="bg-surface p-4 rounded-xl border border-surface-border flex flex-col justify-between gap-3 shadow-2xs hover:shadow-xs transition-shadow"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="text-sm font-black text-text-main truncate">{p.studentName}</h4>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-surface-hover text-slate-600 dark:text-slate-300 shrink-0">
+                          {p.groupName}
+                        </span>
+                      </div>
+
+                      {p.lessonDates && p.lessonDates.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                          {p.lessonDates.map((d, i) => (
+                            <span key={i} className="text-[10px] font-mono bg-surface-hover/60 px-2 py-0.5 rounded border border-surface-border/60 dark:border-surface-border-soft text-slate-600 dark:text-slate-300">
+                              {d}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Account Paid Into Badge */}
+                      <div className="flex items-center gap-1.5 text-[11px] text-text-muted pt-1">
+                        <Landmark className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <span className="font-bold text-text-main">
+                          {_t('أودع في:', 'Deposited into:', 'Eingezahlt in:')}
+                        </span>
+                        <span className="px-1.5 py-0.2 rounded bg-primary-soft dark:bg-primary-soft text-primary font-bold text-[10.5px]">
+                          {targetAcc?.name || _t('الخزينة الرئيسية (كاش)', 'Main Cash', 'Hauptkasse')}
+                        </span>
+                      </div>
                     </div>
 
-                    {p.lessonDates && p.lessonDates.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1 pt-1">
-                        {p.lessonDates.map((d, i) => (
-                          <span key={i} className="text-[10px] font-mono bg-surface-hover/60 px-2 py-0.5 rounded border border-surface-border/60 dark:border-surface-border-soft text-slate-600 dark:text-slate-300">
-                            {d}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    <div className="flex items-center justify-between pt-2 border-t border-surface-border/50">
+                      <span className="text-[10px] text-text-muted/70">
+                        {t('payments_paid_on')}: {p.paidDate || p.dueDate}
+                      </span>
+                      <span className="text-xs font-black text-primary dark:text-primary font-mono">
+                        ✓ {p.amountPaid} {currency}
+                      </span>
+                    </div>
                   </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-surface-border/50">
-                    <span className="text-[10px] text-text-muted/70">
-                      {t('payments_paid_on')}: {p.paidDate || p.dueDate}
-                    </span>
-                    <span className="text-xs font-black text-primary dark:text-primary font-mono">
-                      ✓ {p.amountPaid} {currency}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -862,6 +1171,28 @@ ${datesFormatted}
                 </div>
               </div>
 
+              {/* Account selection in Prorate Modal */}
+              {financeAccounts.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-black text-text-main flex items-center gap-1.5">
+                    <Landmark className="w-3.5 h-3.5 text-primary" />
+                    <span>{_t('حساب الإيداع والتحصيل:', 'Deposit Account:', 'Einzahlungskonto:')}</span>
+                  </label>
+                  <select
+                    value={prorateAccountId || selectedAccountId}
+                    onChange={(e) => setProrateAccountId(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-background border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+                  >
+                    {financeAccounts.filter(a => !a.deleted).map(acc => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.type === 'cash' ? '💵 ' : acc.type === 'wallet' ? '📱 ' : acc.type === 'bank' ? '🏦 ' : '💳 '}
+                        {acc.name} ({acc.currentBalance.toLocaleString()} {acc.currency || currency})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Amount editor */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-black text-text-main">
@@ -909,6 +1240,7 @@ ${datesFormatted}
               <button
                 type="button"
                 onClick={() => {
+                  const targetAcc = prorateAccountId || getCardAccountId(prorateModalItem.id, prorateModalItem.groupId);
                   markCyclePaymentPaid({
                     studentId: prorateModalItem.studentId,
                     studentName: prorateModalItem.studentName,
@@ -918,7 +1250,8 @@ ${datesFormatted}
                     amountPaid: customProrateAmount,
                     lessonDates: prorateModalItem.lessonDates,
                     lessonIds: prorateModalItem.lessonIds,
-                    notes: t('auto_flexible_prorated_payment_p')
+                    notes: t('auto_flexible_prorated_payment_p'),
+                    accountId: targetAcc
                   });
                   setProrateModalItem(null);
                   confetti({ particleCount: 50, spread: 50 });

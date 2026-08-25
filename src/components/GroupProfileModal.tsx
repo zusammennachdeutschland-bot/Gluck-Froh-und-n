@@ -42,7 +42,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       pricePerSession: data.paymentCycle === 'per_lesson' ? Number(data.pricePerSession) : undefined,
       sessionCount: data.paymentCycle === 'monthly' ? Number(data.sessionCount) : 8,
       startingSessionNumber: Number(data.startingSessionNumber),
-      paymentMethod: data.paymentMethod,
+      defaultFinanceAccountId: data.defaultFinanceAccountId,
       scheduleDays: data.scheduleDays,
       scheduleTime: data.scheduleTime,
       scheduleDayTimes: data.dayTimes,

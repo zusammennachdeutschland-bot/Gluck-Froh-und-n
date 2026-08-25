@@ -15,7 +15,7 @@ import { InspirationCardWidget } from './components/InspirationCardWidget';
 import { SchoolTodayCard } from './components/SchoolTodayCard';
 import { ScheduleView } from './components/ScheduleView';
 import { StudentsView } from './components/StudentsView';
-import { PaymentsView } from './components/PaymentsView';
+import { FinanceView } from './components/finance/FinanceView';
 import { ReportsView } from './components/ReportsView';
 import { SessionHistoryView } from './components/SessionHistoryView';
 import { SettingsView } from './components/SettingsView';
@@ -360,7 +360,7 @@ function MainApp() {
               {activeTab === 'schedule' && <ScheduleView />}
               {activeTab === 'students' && <StudentsView />}
               {activeTab === 'history' && <SessionHistoryView />}
-              {activeTab === 'payments' && <PaymentsView />}
+              {activeTab === 'payments' && <FinanceView />}
               {activeTab === 'reports' && <ReportsView />}
               {activeTab === 'settings' && <SettingsView />}
               {activeTab === 'freeTime' && <FreeTimeSlotsView />}
@@ -400,7 +400,7 @@ function MainApp() {
                   {activeTab === 'schedule' && <ScheduleView />}
                   {activeTab === 'students' && <StudentsView />}
                   {activeTab === 'history' && <SessionHistoryView />}
-                  {activeTab === 'payments' && <PaymentsView />}
+                  {activeTab === 'payments' && <FinanceView />}
                   {activeTab === 'reports' && <ReportsView />}
                   {activeTab === 'settings' && <SettingsView />}
                   {activeTab === 'freeTime' && <FreeTimeSlotsView />}

@@ -18,30 +18,30 @@ export const GlobalSearchModal: React.FC = () => {
 
   if (!isGlobalSearchOpen) return null;
 
-  const q = query.toLowerCase().trim();
+  const q = (query || '').toLowerCase().trim();
 
   const matchedStudents = q ? students.filter(s => 
-    s.name.toLowerCase().includes(q) || 
-    s.parentName?.toLowerCase().includes(q) || 
-    s.studentPhone?.includes(q) || 
-    s.parentPhone?.includes(q)
+    (s.name || '').toLowerCase().includes(q) || 
+    (s.parentName || '').toLowerCase().includes(q) || 
+    (s.studentPhone || '').includes(q) || 
+    (s.parentPhone || '').includes(q)
   ).slice(0, 5) : [];
 
   const matchedGroups = q ? groups.filter(g => 
-    g.name.toLowerCase().includes(q) || 
-    g.grade?.toLowerCase().includes(q)
+    (g.name || '').toLowerCase().includes(q) || 
+    (g.grade || '').toLowerCase().includes(q)
   ).slice(0, 5) : [];
 
   const matchedLessons = q ? lessons.filter(l => 
-    l.title.toLowerCase().includes(q) || 
-    l.groupName.toLowerCase().includes(q) || 
-    l.date.includes(q)
+    (l.title || '').toLowerCase().includes(q) || 
+    (l.groupName || '').toLowerCase().includes(q) || 
+    (l.date || '').includes(q)
   ).slice(0, 5) : [];
 
   const matchedPayments = q ? payments.filter(p => 
-    p.studentName?.toLowerCase().includes(q) || 
-    p.groupName?.toLowerCase().includes(q) || 
-    p.notes?.toLowerCase().includes(q)
+    (p.studentName || '').toLowerCase().includes(q) || 
+    (p.groupName || '').toLowerCase().includes(q) || 
+    (p.notes || '').toLowerCase().includes(q)
   ).slice(0, 5) : [];
 
   const totalResults = matchedStudents.length + matchedGroups.length + matchedLessons.length + matchedPayments.length;

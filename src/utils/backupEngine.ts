@@ -3,7 +3,8 @@ import {
   TeacherProfile, NotificationSettings, InspirationSettings, InspirationMessage, TodoItem,
   CertificateRecord, SchoolSettings, StageManager, StageSecretary, VisitRecord, BookletObservation,
   WeeklyPlanStatusRecord, StageReportRecord, StageFollowUpRecord, Complaint, StudentActionPlan,
-  Teacher, ParentComplaint, HodGermanStudent, AICertificateBackground, SchoolNote
+  Teacher, ParentComplaint, HodGermanStudent, AICertificateBackground, SchoolNote,
+  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment
 } from '../types';
 import { formatLocalDate } from './timeUtils';
 
@@ -74,6 +75,8 @@ export interface SmartBackupPayload {
     stageFollowUps?: number;
     complaints?: number;
     actionPlans?: number;
+    financeAccounts?: number;
+    financeTransactions?: number;
     [key: string]: number | undefined;
   };
   metadata?: {
@@ -96,6 +99,11 @@ export interface SmartBackupPayload {
     todos?: TodoItem[];
     certificates?: CertificateRecord[];
     schoolNotes?: SchoolNote[];
+    financeAccounts?: FinanceAccount[];
+    financeCategories?: FinanceCategory[];
+    financeTransactions?: FinanceTransaction[];
+    financeRecurring?: FinanceRecurring[];
+    financeInstallments?: FinanceInstallment[];
     workingHours?: any;
     parentMessageTemplates?: Record<string, string>;
     meetingLinks?: { defaultZoomLink?: string; defaultMeetLink?: string };
@@ -296,6 +304,8 @@ export function calculateBackupStats(
     hodActionPlans?: StudentActionPlan[];
     hodVisits?: VisitRecord[];
     schoolNotes?: SchoolNote[];
+    financeAccounts?: FinanceAccount[];
+    financeTransactions?: FinanceTransaction[];
   }
 ) {
   let studentCount = 0;
@@ -310,11 +320,15 @@ export function calculateBackupStats(
   let schoolRecordCount = 0;
   let certificateCount = 0;
   let schoolNotesCount = 0;
+  let financeCount = 0;
 
   if (selectedCategories.includes('students')) studentCount = appState.students.length;
   if (selectedCategories.includes('groups')) groupCount = appState.groups.length;
   if (selectedCategories.includes('schedule')) lessonCount = appState.lessons.length;
-  if (selectedCategories.includes('financial')) paymentCount = appState.payments.length;
+  if (selectedCategories.includes('financial')) {
+    paymentCount = appState.payments.length;
+    financeCount = (appState.financeAccounts?.length || 0) + (appState.financeTransactions?.length || 0);
+  }
   if (selectedCategories.includes('notifications')) notificationCount = appState.notifications.length;
   if (selectedCategories.includes('certificates') && appState.certificates) certificateCount = appState.certificates.length;
   if (selectedCategories.includes('school_notes') && appState.schoolNotes) schoolNotesCount = appState.schoolNotes.length;
@@ -454,7 +468,12 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     { key: 'hodActionPlans', label: 'hodActionPlans' },
     { key: 'hodVisits', label: 'hodVisits' },
     { key: 'customAiBackgrounds', label: 'customAiBackgrounds' },
-    { key: 'schoolNotes', label: 'schoolNotes' }
+    { key: 'schoolNotes', label: 'schoolNotes' },
+    { key: 'financeAccounts', label: 'financeAccounts' },
+    { key: 'financeCategories', label: 'financeCategories' },
+    { key: 'financeTransactions', label: 'financeTransactions' },
+    { key: 'financeRecurring', label: 'financeRecurring' },
+    { key: 'financeInstallments', label: 'financeInstallments' }
   ];
 
   for (const col of collectionsToCheck) {
@@ -834,6 +853,122 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     });
   }
 
+  // Sanitize Finance Accounts
+  const rawFinanceAccounts: any[] = Array.isArray(data.financeAccounts) ? data.financeAccounts : [];
+  const sanitizedFinanceAccounts: FinanceAccount[] = [];
+  for (let i = 0; i < rawFinanceAccounts.length; i++) {
+    const acc = rawFinanceAccounts[i];
+    if (!acc || typeof acc !== 'object' || Array.isArray(acc)) continue;
+    const id = typeof acc.id === 'string' && acc.id.trim() ? acc.id.trim() : `facc_imp_${Date.now()}_${i}`;
+    sanitizedFinanceAccounts.push({
+      ...acc,
+      id,
+      name: typeof acc.name === 'string' ? acc.name : 'Account',
+      type: (acc.type === 'cash' || acc.type === 'bank' || acc.type === 'wallet' || acc.type === 'other') ? acc.type : 'cash',
+      openingBalance: sanitizeNumber(acc.openingBalance, 0),
+      currentBalance: sanitizeNumber(acc.currentBalance, 0),
+      currency: typeof acc.currency === 'string' ? acc.currency : 'EGP',
+      createdAt: typeof acc.createdAt === 'string' ? acc.createdAt : new Date().toISOString(),
+      updatedAt: typeof acc.updatedAt === 'number' ? acc.updatedAt : Date.now(),
+      deleted: Boolean(acc.deleted),
+      version: typeof acc.version === 'number' ? acc.version : 1
+    });
+  }
+
+  // Sanitize Finance Categories
+  const rawFinanceCategories: any[] = Array.isArray(data.financeCategories) ? data.financeCategories : [];
+  const sanitizedFinanceCategories: FinanceCategory[] = [];
+  for (let i = 0; i < rawFinanceCategories.length; i++) {
+    const cat = rawFinanceCategories[i];
+    if (!cat || typeof cat !== 'object' || Array.isArray(cat)) continue;
+    const id = typeof cat.id === 'string' && cat.id.trim() ? cat.id.trim() : `fcat_imp_${Date.now()}_${i}`;
+    sanitizedFinanceCategories.push({
+      ...cat,
+      id,
+      name: typeof cat.name === 'string' ? cat.name : 'Category',
+      type: (cat.type === 'income' || cat.type === 'expense' || cat.type === 'transfer') ? cat.type : 'income',
+      createdAt: typeof cat.createdAt === 'string' ? cat.createdAt : new Date().toISOString(),
+      updatedAt: typeof cat.updatedAt === 'number' ? cat.updatedAt : Date.now(),
+      deleted: Boolean(cat.deleted),
+      version: typeof cat.version === 'number' ? cat.version : 1
+    });
+  }
+
+  // Sanitize Finance Transactions
+  const rawFinanceTransactions: any[] = Array.isArray(data.financeTransactions) ? data.financeTransactions : [];
+  const sanitizedFinanceTransactions: FinanceTransaction[] = [];
+  for (let i = 0; i < rawFinanceTransactions.length; i++) {
+    const tx = rawFinanceTransactions[i];
+    if (!tx || typeof tx !== 'object' || Array.isArray(tx)) continue;
+    const id = typeof tx.id === 'string' && tx.id.trim() ? tx.id.trim() : `ftx_imp_${Date.now()}_${i}`;
+    sanitizedFinanceTransactions.push({
+      ...tx,
+      id,
+      type: (tx.type === 'income' || tx.type === 'expense' || tx.type === 'transfer') ? tx.type : 'income',
+      amount: Math.max(0, sanitizeNumber(tx.amount, 0)),
+      accountId: typeof tx.accountId === 'string' ? tx.accountId : 'acc_main_cash',
+      toAccountId: typeof tx.toAccountId === 'string' ? tx.toAccountId : undefined,
+      categoryId: typeof tx.categoryId === 'string' ? tx.categoryId : undefined,
+      date: typeof tx.date === 'string' ? tx.date : new Date().toISOString().split('T')[0],
+      note: typeof tx.note === 'string' ? tx.note : '',
+      relatedStudentId: typeof tx.relatedStudentId === 'string' ? tx.relatedStudentId : undefined,
+      relatedPaymentId: typeof tx.relatedPaymentId === 'string' ? tx.relatedPaymentId : undefined,
+      createdAt: typeof tx.createdAt === 'string' ? tx.createdAt : new Date().toISOString(),
+      updatedAt: typeof tx.updatedAt === 'number' ? tx.updatedAt : Date.now(),
+      deleted: Boolean(tx.deleted),
+      version: typeof tx.version === 'number' ? tx.version : 1
+    });
+  }
+
+  // Sanitize Finance Recurring
+  const rawFinanceRecurring: any[] = Array.isArray(data.financeRecurring) ? data.financeRecurring : [];
+  const sanitizedFinanceRecurring: FinanceRecurring[] = [];
+  for (let i = 0; i < rawFinanceRecurring.length; i++) {
+    const rec = rawFinanceRecurring[i];
+    if (!rec || typeof rec !== 'object' || Array.isArray(rec)) continue;
+    const id = typeof rec.id === 'string' && rec.id.trim() ? rec.id.trim() : `frec_imp_${Date.now()}_${i}`;
+    sanitizedFinanceRecurring.push({
+      ...rec,
+      id,
+      name: typeof rec.name === 'string' ? rec.name : 'Recurring',
+      amount: Math.max(0, sanitizeNumber(rec.amount, 0)),
+      categoryId: typeof rec.categoryId === 'string' ? rec.categoryId : '',
+      accountId: typeof rec.accountId === 'string' ? rec.accountId : 'acc_main_cash',
+      frequency: (rec.frequency === 'daily' || rec.frequency === 'weekly' || rec.frequency === 'monthly' || rec.frequency === 'yearly') ? rec.frequency : 'monthly',
+      dueDayOfMonth: sanitizeOptionalNumber(rec.dueDayOfMonth),
+      lastPaidDate: typeof rec.lastPaidDate === 'string' ? rec.lastPaidDate : undefined,
+      createdAt: typeof rec.createdAt === 'string' ? rec.createdAt : new Date().toISOString(),
+      updatedAt: typeof rec.updatedAt === 'number' ? rec.updatedAt : Date.now(),
+      deleted: Boolean(rec.deleted),
+      version: typeof rec.version === 'number' ? rec.version : 1
+    });
+  }
+
+  // Sanitize Finance Installments
+  const rawFinanceInstallments: any[] = Array.isArray(data.financeInstallments) ? data.financeInstallments : [];
+  const sanitizedFinanceInstallments: FinanceInstallment[] = [];
+  for (let i = 0; i < rawFinanceInstallments.length; i++) {
+    const inst = rawFinanceInstallments[i];
+    if (!inst || typeof inst !== 'object' || Array.isArray(inst)) continue;
+    const id = typeof inst.id === 'string' && inst.id.trim() ? inst.id.trim() : `finst_imp_${Date.now()}_${i}`;
+    sanitizedFinanceInstallments.push({
+      ...inst,
+      id,
+      name: typeof inst.name === 'string' ? inst.name : 'Installment',
+      amountPerInstallment: Math.max(0, sanitizeNumber(inst.amountPerInstallment, 0)),
+      totalInstallments: sanitizeNumber(inst.totalInstallments, 1),
+      currentInstallment: sanitizeNumber(inst.currentInstallment, 1),
+      remainingBalance: sanitizeNumber(inst.remainingBalance, 0),
+      dueDate: typeof inst.dueDate === 'string' ? inst.dueDate : new Date().toISOString().split('T')[0],
+      accountId: typeof inst.accountId === 'string' ? inst.accountId : 'acc_main_cash',
+      providerName: typeof inst.providerName === 'string' ? inst.providerName : undefined,
+      createdAt: typeof inst.createdAt === 'string' ? inst.createdAt : new Date().toISOString(),
+      updatedAt: typeof inst.updatedAt === 'number' ? inst.updatedAt : Date.now(),
+      deleted: Boolean(inst.deleted),
+      version: typeof inst.version === 'number' ? inst.version : 1
+    });
+  }
+
   // Sanitize School & HOD Settings
   const rawSchool = data.schoolSettings || data.profile?.schoolSettings;
   const sanitizedSchool = sanitizeSchoolSettings(rawSchool);
@@ -865,6 +1000,11 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       hodVisits: sanitizedHodVisits,
       customAiBackgrounds: sanitizedCustomBg,
       schoolNotes: sanitizedSchoolNotes,
+      financeAccounts: sanitizedFinanceAccounts,
+      financeCategories: sanitizedFinanceCategories,
+      financeTransactions: sanitizedFinanceTransactions,
+      financeRecurring: sanitizedFinanceRecurring,
+      financeInstallments: sanitizedFinanceInstallments,
       schoolSettings: sanitizedSchool,
       profile: sanitizedProfile,
       notificationSettings: data.notificationSettings && typeof data.notificationSettings === 'object' ? data.notificationSettings : undefined,
@@ -935,8 +1075,8 @@ export function sanitizeSchoolSettings(raw: any): SchoolSettings | undefined {
           ...b,
           id: typeof b.id === 'string' && b.id.trim() ? b.id.trim() : `bk_${Date.now()}_${idx}`,
           className: typeof b.className === 'string' ? b.className : '',
-          status: b.status || 'needs_follow_up',
-          updatedAt: typeof b.updatedAt === 'string' ? b.updatedAt : new Date().toISOString()
+          status: (b.status === 'completed' || b.status === 'partially_completed' || b.status === 'not_completed' || b.status === 'na') ? b.status : 'not_completed',
+          updatedAt: typeof b.updatedAt === 'number' ? b.updatedAt : Date.now()
         });
       }
     });
@@ -1186,12 +1326,12 @@ export function analyzeBackupPayload(
 
     // Analyze impact
     const existingStudentIds = new Set(currentAppState.students.map(s => s.id));
-    const existingStudentKeys = new Set(currentAppState.students.map(s => `${s.name.trim().toLowerCase()}_${s.parentPhone || ''}`));
+    const existingStudentKeys = new Set(currentAppState.students.map(s => `${(s.name || '').trim().toLowerCase()}_${s.parentPhone || ''}`));
     let addStudents = 0;
     let updateStudents = 0;
 
     students.forEach(s => {
-      const key = `${s.name.trim().toLowerCase()}_${s.parentPhone || ''}`;
+      const key = `${(s.name || '').trim().toLowerCase()}_${s.parentPhone || ''}`;
       if (existingStudentIds.has(s.id) || existingStudentKeys.has(key)) {
         updateStudents++;
       } else {
@@ -1200,12 +1340,12 @@ export function analyzeBackupPayload(
     });
 
     const existingGroupIds = new Set(currentAppState.groups.map(g => g.id));
-    const existingGroupNames = new Set(currentAppState.groups.map(g => g.name.trim().toLowerCase()));
+    const existingGroupNames = new Set(currentAppState.groups.map(g => (g.name || '').trim().toLowerCase()));
     let addGroups = 0;
     let updateGroups = 0;
 
     groups.forEach(g => {
-      if (existingGroupIds.has(g.id) || existingGroupNames.has(g.name.trim().toLowerCase())) {
+      if (existingGroupIds.has(g.id) || existingGroupNames.has((g.name || '').trim().toLowerCase())) {
         updateGroups++;
       } else {
         addGroups++;

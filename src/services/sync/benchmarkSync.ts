@@ -93,7 +93,7 @@ export function runSyncStressBenchmark(): BenchmarkMetrics {
       amountPaid: i % 2 === 0 ? 240 : 120,
       remainingBalance: i % 2 === 0 ? 0 : 120,
       status: i % 2 === 0 ? 'paid' : 'partial',
-      paymentMethod: 'cash',
+      defaultFinanceAccountId: 'acc_1',
       paidDate: '2026-08-16',
       originDeviceId: `device_${i % numDevices}`,
       originRevision: (i % 15) + 1,

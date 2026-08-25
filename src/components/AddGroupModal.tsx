@@ -5,7 +5,7 @@ import { Users, Bot, Sparkles } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { AiImportModal } from './AiImportModal';
 import { GroupForm, GroupFormData } from './GroupForm';
-import { PREDEFINED_GRADES } from '../data/initialData';
+import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 
 interface AddGroupModalProps {
   onClose: () => void;
@@ -55,7 +55,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       pricePerSession: data.paymentCycle === 'per_lesson' ? Number(data.pricePerSession) : undefined,
       sessionCount: Number(data.sessionCount),
       startingSessionNumber: Number(data.startingSessionNumber),
-      paymentMethod: data.paymentMethod,
+      defaultFinanceAccountId: data.defaultFinanceAccountId,
       scheduleDays: data.scheduleDays,
       scheduleTime: data.scheduleTime,
       scheduleDayTimes: data.dayTimes,
@@ -215,9 +215,16 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
                       onChange={(e) => setStudentGrade(e.target.value as GradeLevel)}
                       className="w-full px-3 py-2 bg-surface border border-surface-border rounded-xl text-xs font-bold"
                     >
-                      {PREDEFINED_GRADES.map(g => (
-                        <option key={g} value={g}>{g}</option>
-                      ))}
+                      <optgroup label="مستويات الكورسات (Course Levels)">
+                        {COURSE_LEVELS.map(g => (
+                          <option key={g} value={g}>{g}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="الصفوف المدرسية (School Grades)">
+                        {SCHOOL_GRADES.map(g => (
+                          <option key={g} value={g}>{g}</option>
+                        ))}
+                      </optgroup>
                     </select>
                   </div>
                 </div>

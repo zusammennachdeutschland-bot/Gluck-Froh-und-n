@@ -52,8 +52,8 @@ export const CertificateCenter: React.FC = () => {
     if (honoredStudentIds.has(s.id)) return false; // Hide students who already have a certificate
     if (selectedGroupFilter !== 'all' && s.groupId !== selectedGroupFilter) return false;
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const nameMatch = s.name.toLowerCase().includes(q) || (s.certificateName && s.certificateName.toLowerCase().includes(q));
+      const q = (searchQuery || '').toLowerCase();
+      const nameMatch = (s.name || '').toLowerCase().includes(q) || (s.certificateName && s.certificateName.toLowerCase().includes(q));
       if (!nameMatch) return false;
     }
     return true;
@@ -64,8 +64,8 @@ export const CertificateCenter: React.FC = () => {
     if (!honoredStudentIds.has(s.id)) return false;
     if (selectedGroupFilter !== 'all' && s.groupId !== selectedGroupFilter) return false;
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const nameMatch = s.name.toLowerCase().includes(q) || (s.certificateName && s.certificateName.toLowerCase().includes(q));
+      const q = (searchQuery || '').toLowerCase();
+      const nameMatch = (s.name || '').toLowerCase().includes(q) || (s.certificateName && s.certificateName.toLowerCase().includes(q));
       if (!nameMatch) return false;
     }
     return true;
@@ -77,10 +77,10 @@ export const CertificateCenter: React.FC = () => {
     if (selectedTypeFilter !== 'all' && c.type !== selectedTypeFilter) return false;
     if (selectedLanguageFilter !== 'all' && c.language !== selectedLanguageFilter) return false;
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const match = c.studentName.toLowerCase().includes(q) ||
+      const q = (searchQuery || '').toLowerCase();
+      const match = (c.studentName || '').toLowerCase().includes(q) ||
                     (c.studentCertificateName && c.studentCertificateName.toLowerCase().includes(q)) ||
-                    c.courseOrLevelTitle.toLowerCase().includes(q);
+                    (c.courseOrLevelTitle || '').toLowerCase().includes(q);
       if (!match) return false;
     }
     return true;

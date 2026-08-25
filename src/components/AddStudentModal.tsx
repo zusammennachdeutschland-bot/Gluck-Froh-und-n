@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
-import { PREDEFINED_GRADES } from '../data/initialData';
+import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { GradeLevel } from '../types';
 import { X, UserPlus, Info } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -64,7 +64,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
       alert(t('auto_parent_phone_number_is_require_1'));
       return;
     }
-    const isDuplicate = students.some(s => s.name.toLowerCase() === name.toLowerCase() && s.groupId === groupId);
+    const isDuplicate = students.some(s => (s.name || '').toLowerCase() === (name || '').toLowerCase() && s.groupId === groupId);
     if (isDuplicate) {
       if (!window.confirm(t('duplicate_student_warning') || 'طالب بنفس الاسم موجود بالفعل. هل تريد المتابعة؟ / A student with the same name already exists in this group. Do you want to continue?')) return;
     }
@@ -73,7 +73,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
       name,
       certificateName: certificateName.trim(),
       groupId,
-      grade: selectedGroup?.grade || grade,
+      grade: grade || selectedGroup?.grade || 'Grade 7',
       parentName,
       parentPhone,
       studentPhone,
@@ -182,19 +182,28 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
             </div>
           )}
 
-          {/* Predefined Grade Level */}
+          {/* Predefined Grade / Course Level */}
           <div className="space-y-1">
             <label className="text-xs font-bold text-text-main">
-              {t('auto_grade_level')}
+              {_t('المستوى / الصف الدراسي (Grade / Level)', 'Grade / Course Level', 'Klassenstufe / Sprachniveau')}
             </label>
             <select
               value={grade}
               onChange={(e) => setGrade(e.target.value as GradeLevel)}
               className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
             >
-              {PREDEFINED_GRADES.map(g => (
-                <option key={g} value={g}>{g}</option>
-              ))}
+              <optgroup label={_t('مستويات الكورسات واللغات (Courses)', 'Language Course Levels (CEFR)', 'Sprachniveaus')}>
+                {COURSE_LEVELS.map(g => (
+                  <option key={g} value={g}>
+                    {g} - {_t(g === 'A1' ? 'A1 (مبتدئ أول)' : g === 'A2' ? 'A2 (مبتدئ متقدم)' : g === 'B1' ? 'B1 (متوسط أول)' : g === 'B2' ? 'B2 (متوسط متقدم)' : g === 'C1' ? 'C1 (متقدم)' : 'C2 (متقن)', g, g)}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label={_t('الصفوف المدرسية (School Grades)', 'School Grades', 'Schulklassen')}>
+                {SCHOOL_GRADES.map(g => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </optgroup>
             </select>
           </div>
 

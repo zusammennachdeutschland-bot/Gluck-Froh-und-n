@@ -17,10 +17,19 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   dailySummaryIncludePendingPayments: true,
 };
 
-export const PREDEFINED_GRADES: GradeLevel[] = [
+export const COURSE_LEVELS: GradeLevel[] = [
+  'A1', 'A2', 'B1', 'B2', 'C1', 'C2'
+];
+
+export const SCHOOL_GRADES: GradeLevel[] = [
   'Grade 1', 'Grade 2', 'Grade 3', 'Grade 4',
   'Grade 5', 'Grade 6', 'Grade 7', 'Grade 8',
   'Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'
+];
+
+export const PREDEFINED_GRADES: GradeLevel[] = [
+  ...COURSE_LEVELS,
+  ...SCHOOL_GRADES
 ];
 
 export const INITIAL_INSPIRATION_SETTINGS: InspirationSettings = {

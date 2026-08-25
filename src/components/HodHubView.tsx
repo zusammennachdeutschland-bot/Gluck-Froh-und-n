@@ -2301,7 +2301,7 @@ export const HodHubView: React.FC = () => {
       {/* TAB 5: STAFF MANAGEMENT */}
       {activeTab === 'staff' && (() => {
         const staffGroups: Record<string, any[]> = {};
-        teachers.filter(t => t.name.toLowerCase().includes(teacherSearch.toLowerCase())).forEach(teacher => {
+        teachers.filter(t => (t.name || '').toLowerCase().includes((teacherSearch || '').toLowerCase())).forEach(teacher => {
           const workload = getWorkload(teacher.id);
           const managerName = teacher.isHod ? _t('رئيس القسم', 'Head of Department', 'Fachleitung') : (workload.matchedManager?.name || _t('غير محدد', 'Unassigned', 'Nicht zugewiesen'));
           if (!staffGroups[managerName]) staffGroups[managerName] = [];

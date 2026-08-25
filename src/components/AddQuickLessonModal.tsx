@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { checkOverlap } from '../utils/lessonUtils';
 import { useApp } from '../context/AppContext';
 import { formatLocalDate, getNearestHourTime } from '../utils/timeUtils';
-import { PREDEFINED_GRADES } from '../data/initialData';
+import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { GradeLevel, LessonType, PaymentStatus } from '../types';
 import { X, Calendar, Clock, Zap, Video, MapPin, DollarSign, User, Phone, FileText, AlertTriangle } from 'lucide-react';
 
@@ -249,7 +249,7 @@ export const AddQuickLessonModal: React.FC<AddQuickLessonModalProps> = ({ onClos
             </div>
           </div>
 
-          {/* Grade Level (Optional) */}
+          {/* Grade / Course Level (Optional) */}
           <div className="space-y-1">
             <label className="text-xs font-bold text-text-main">{t('students_grade')}</label>
             <select
@@ -257,9 +257,16 @@ export const AddQuickLessonModal: React.FC<AddQuickLessonModalProps> = ({ onClos
               onChange={(e) => setGrade(e.target.value as GradeLevel)}
               className="w-full bg-surface-hover text-text-main text-xs font-bold p-2 rounded-lg border border-surface-border/80 dark:border-surface-border-soft/80 focus:bg-surface dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary-border transition-colors cursor-pointer"
             >
-              {PREDEFINED_GRADES.map(g => (
-                <option key={g} value={g}>{g}</option>
-              ))}
+              <optgroup label="مستويات الكورسات واللغات (Course Levels)">
+                {COURSE_LEVELS.map(g => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </optgroup>
+              <optgroup label="الصفوف المدرسية (School Grades)">
+                {SCHOOL_GRADES.map(g => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </optgroup>
             </select>
           </div>
 

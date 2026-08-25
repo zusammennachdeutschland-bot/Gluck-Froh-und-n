@@ -221,6 +221,7 @@ export const StageCommunicationView: React.FC = () => {
         }
         // Fallback string check
         for (const cls of allClasses) {
+          if (!cls) continue;
           const clsLower = cls.toLowerCase();
           for (const gradeNum of currentManagerGrades) {
             if (clsLower.includes(gradeNum.toString()) || clsLower.includes(`g${gradeNum}`) || clsLower.includes(`grade ${gradeNum}`)) {

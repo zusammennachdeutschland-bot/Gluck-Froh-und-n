@@ -348,8 +348,8 @@ export const SettingsView: React.FC = () => {
   };
 
   const filteredCategories = categoryCards.filter(cat => 
-    cat.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    cat.description.toLowerCase().includes(searchQuery.toLowerCase())
+    (cat.title || '').toLowerCase().includes((searchQuery || '').toLowerCase()) || 
+    (cat.description || '').toLowerCase().includes((searchQuery || '').toLowerCase())
   );
 
   return (
@@ -1686,6 +1686,16 @@ export const SettingsView: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            {/* Rerun Welcome Setup Wizard */}
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('open-setup-wizard'))}
+              className="w-full py-2.5 px-4 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/25 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+            >
+              <Sparkles className="w-4 h-4 text-primary" />
+              <span>{_t('تشغيل معالج الإعداد الترحيبي مجدداً', 'Rerun Welcome Setup Wizard', 'Setup-Assistenten erneut ausführen')}</span>
+            </button>
 
             {/* Developer Contact Section */}
             <div className="p-3 bg-gradient-to-r from-slate-900 to-primary-hover text-white rounded-lg space-y-2 shadow-2xs">

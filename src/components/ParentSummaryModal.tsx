@@ -27,7 +27,7 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
   const [showArabicModal, setShowArabicModal] = useState(false);
 
   const activeStudent = student || 
-    students.find(s => (lesson.studentId && s.id === lesson.studentId) || (lesson.studentName && s.name.trim().toLowerCase() === lesson.studentName.trim().toLowerCase())) || 
+    students.find(s => (lesson.studentId && s.id === lesson.studentId) || (lesson.studentName && s.name && s.name.trim().toLowerCase() === lesson.studentName.trim().toLowerCase())) || 
     (lesson.groupId ? students.find(s => s.groupId === lesson.groupId) : undefined);
 
   const report = lesson.report;

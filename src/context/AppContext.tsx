@@ -1,10 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   TeacherProfile, Group, Student, Lesson, PaymentRecord, NotificationItem, 
   LessonReport, StudentDocument, PaymentStatus, LessonStatus, AttendanceStatus, HomeworkStatus, SyncStatus, BackupData, BackupIntegrityReport, StudentPaymentDetail, AppLanguage, AccentColor, RecentlyDeletedData, ActiveLessonSession,
   InspirationSettings, InspirationMessage, InspirationFrequency, InspirationDisplayMethod, InspirationSource,
   NotificationSettings, ScheduledNotificationItem, TeacherSettingsRecord, SyncCycleReport, PendingOutboxSummary, SyncHistoryEntry,
-  CertificateRecord, HodGermanStudent, Complaint, StudentActionPlan, VisitRecord, SchoolNote
+  CertificateRecord, HodGermanStudent, Complaint, StudentActionPlan, VisitRecord, SchoolNote,
+  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment
 } from '../types';
 import { 
   clearActiveLessonNotification, getPendingScheduledNotifications, 
@@ -57,8 +58,8 @@ interface AppContextType {
   setAccentColor: (color: AccentColor) => void;
   t: (key: TranslationKey) => string;
   _t: (ar: string, en: string, de?: string) => string;
-  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod';
-  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod') => void;
+  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod';
+  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod') => void;
 
   // Certificates
   certificates: CertificateRecord[];
@@ -79,6 +80,7 @@ interface AppContextType {
   // Teacher Profile
   profile: TeacherProfile;
   updateProfile: (updates: Partial<TeacherProfile>) => void;
+  registerFinanceActivity: () => void;
   refreshCalendarAndDashboard: () => void;
 
   // Backup System
@@ -139,7 +141,8 @@ interface AppContextType {
     notes?: string,
     discountAmount?: number,
     advanceAmount?: number,
-    refundAmount?: number
+    refundAmount?: number,
+    accountId?: string
   ) => void;
   addPaymentRecord: (record: Omit<PaymentRecord, 'id'>) => void;
   markCyclePaymentPaid: (data: {
@@ -153,6 +156,7 @@ interface AppContextType {
     lessonIds: string[];
     existingPaymentRecordId?: string;
     notes?: string;
+    accountId?: string;
   }) => void;
   markCyclePaymentNotYet: (data: {
     studentId: string;
@@ -173,7 +177,7 @@ interface AppContextType {
     bundleSize?: number,
     customBundlePrice?: number
   ) => void;
-  updateLessonPaymentStatus: (lessonId: string, status: PaymentStatus, customAmountPaid?: number) => void;
+  updateLessonPaymentStatus: (lessonId: string, status: PaymentStatus, customAmountPaid?: number, accountId?: string) => void;
 
   // Notifications
   notifications: NotificationItem[];
@@ -263,6 +267,37 @@ interface AppContextType {
   getNotesForClass: (className?: string, classId?: string) => SchoolNote[];
   getNotesForStudent: (studentId: string) => SchoolNote[];
   getNotesForLesson: (params: { date?: string; periodNumber?: number; className?: string; lessonId?: string }) => SchoolNote[];
+
+  // Finance Methods
+  financeAccounts: FinanceAccount[];
+  setFinanceAccounts: React.Dispatch<React.SetStateAction<FinanceAccount[]>>;
+  addFinanceAccount: (account: Omit<FinanceAccount, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>) => FinanceAccount;
+  updateFinanceAccount: (id: string, updates: Partial<FinanceAccount>) => void;
+  deleteFinanceAccount: (id: string) => void;
+
+  financeCategories: FinanceCategory[];
+  setFinanceCategories: React.Dispatch<React.SetStateAction<FinanceCategory[]>>;
+  addFinanceCategory: (category: Omit<FinanceCategory, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>) => FinanceCategory;
+  updateFinanceCategory: (id: string, updates: Partial<FinanceCategory>) => void;
+  deleteFinanceCategory: (id: string) => void;
+
+  financeTransactions: FinanceTransaction[];
+  setFinanceTransactions: React.Dispatch<React.SetStateAction<FinanceTransaction[]>>;
+  addFinanceTransaction: (transaction: Omit<FinanceTransaction, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>) => FinanceTransaction;
+  updateFinanceTransaction: (id: string, updates: Partial<FinanceTransaction>) => void;
+  deleteFinanceTransaction: (id: string) => void;
+
+  financeRecurring: FinanceRecurring[];
+  setFinanceRecurring: React.Dispatch<React.SetStateAction<FinanceRecurring[]>>;
+  addFinanceRecurring: (recurring: Omit<FinanceRecurring, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>) => FinanceRecurring;
+  updateFinanceRecurring: (id: string, updates: Partial<FinanceRecurring>) => void;
+  deleteFinanceRecurring: (id: string) => void;
+
+  financeInstallments: FinanceInstallment[];
+  setFinanceInstallments: React.Dispatch<React.SetStateAction<FinanceInstallment[]>>;
+  addFinanceInstallment: (installment: Omit<FinanceInstallment, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>) => FinanceInstallment;
+  updateFinanceInstallment: (id: string, updates: Partial<FinanceInstallment>) => void;
+  deleteFinanceInstallment: (id: string) => void;
 
   backupToDrive: () => void | Promise<void>;
   restoreFromDrive: (jsonString: string) => boolean;
@@ -803,6 +838,139 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('dl_school_notes', schoolNotes);
   }, [schoolNotes]);
 
+  // Finance Constants & Defaults
+  const DEFAULT_FINANCE_ACCOUNT: FinanceAccount = {
+    id: 'acc_main_cash',
+    name: 'الخزينة الرئيسية (كاش)',
+    type: 'cash',
+    openingBalance: 0,
+    currentBalance: 0,
+    currency: 'EGP',
+    createdAt: new Date().toISOString(),
+    updatedAt: Date.now(),
+    version: 1
+  };
+
+  const DEFAULT_FINANCE_CATEGORIES: FinanceCategory[] = [
+    { id: 'cat_student_fees', name: 'مصاريف واشتراكات الطلاب', type: 'income', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
+    { id: 'cat_private_lessons', name: 'حصص خاصة وفردية', type: 'income', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
+    { id: 'cat_rent', name: 'إيجار القاعات والسنتر', type: 'expense', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
+    { id: 'cat_salary', name: 'رواتب المساعدين والموظفين', type: 'expense', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
+    { id: 'cat_materials', name: 'طباعة وتصوير مذكرات', type: 'expense', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
+    { id: 'cat_general_expense', name: 'مصروفات عامة ونثريات', type: 'expense', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
+  ];
+
+  // Finance States
+  const [financeAccounts, setFinanceAccounts] = useState<FinanceAccount[]>(() => {
+    const raw = initialData['dl_finance_accounts'];
+    if (Array.isArray(raw) && raw.length > 0) return raw;
+    return [DEFAULT_FINANCE_ACCOUNT];
+  });
+  const [financeCategories, setFinanceCategories] = useState<FinanceCategory[]>(() => {
+    const raw = initialData['dl_finance_categories'];
+    if (Array.isArray(raw) && raw.length > 0) return raw;
+    return DEFAULT_FINANCE_CATEGORIES;
+  });
+  const [financeTransactions, setFinanceTransactions] = useState<FinanceTransaction[]>(() => {
+    return Array.isArray(initialData['dl_finance_transactions']) ? initialData['dl_finance_transactions'] : [];
+  });
+  const [financeRecurring, setFinanceRecurring] = useState<FinanceRecurring[]>(() => {
+    return Array.isArray(initialData['dl_finance_recurring']) ? initialData['dl_finance_recurring'] : [];
+  });
+  const [financeInstallments, setFinanceInstallments] = useState<FinanceInstallment[]>(() => {
+    return Array.isArray(initialData['dl_finance_installments']) ? initialData['dl_finance_installments'] : [];
+  });
+
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('dl_finance_accounts', financeAccounts);
+  }, [financeAccounts]);
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('dl_finance_categories', financeCategories);
+  }, [financeCategories]);
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('dl_finance_transactions', financeTransactions);
+  }, [financeTransactions]);
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('dl_finance_recurring', financeRecurring);
+  }, [financeRecurring]);
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('dl_finance_installments', financeInstallments);
+  }, [financeInstallments]);
+
+  // Reconciliation: Ensure paid payments have transactions and default account exists
+  const hasReconciledRef = useRef(false);
+  useEffect(() => {
+    if (hasReconciledRef.current || !isInitializedRef.current) return;
+    hasReconciledRef.current = true;
+
+    // Check if default account needs to be added
+    if (financeAccounts.filter(a => !a.deleted).length === 0) {
+      setFinanceAccounts([DEFAULT_FINANCE_ACCOUNT]);
+    }
+    if (financeCategories.filter(c => !c.deleted).length === 0) {
+      setFinanceCategories(DEFAULT_FINANCE_CATEGORIES);
+    }
+
+    const defaultAccId = financeAccounts.find(a => !a.deleted)?.id || DEFAULT_FINANCE_ACCOUNT.id;
+
+    // Reconcile paid payments with missing finance transactions
+    const existingTxPaymentIds = new Set(
+      financeTransactions.filter(tx => !tx.deleted && tx.relatedPaymentId).map(tx => tx.relatedPaymentId)
+    );
+
+    const missingPaidPayments = payments.filter(p => 
+      !p.deleted && 
+      p.status === 'paid' && 
+      ((p.amountPaid || 0) > 0 || (p.amountDue || 0) > 0) &&
+      !existingTxPaymentIds.has(p.id)
+    );
+
+    if (missingPaidPayments.length > 0) {
+      let totalRecoveredAmount = 0;
+      const newTransactions: FinanceTransaction[] = missingPaidPayments.map(p => {
+        const amount = (p.amountPaid || p.amountDue || 0);
+        totalRecoveredAmount += amount;
+        return wrapMutation({
+          id: `ftx_reconcile_${p.id}`,
+          type: 'income' as const,
+          amount,
+          accountId: p.financeAccountId || defaultAccId,
+          categoryId: 'cat_student_fees',
+          date: (p.paidDate || p.dueDate || new Date().toISOString()).split('T')[0],
+          note: `سداد اشتراك: ${p.studentName} (${p.groupName || 'مجموعة'})`,
+          relatedStudentId: p.studentId,
+          relatedPaymentId: p.id,
+          createdAt: p.createdAt || new Date().toISOString(),
+          updatedAt: Date.now(),
+          version: 1
+        });
+      });
+
+      setFinanceTransactions(prev => [...newTransactions, ...(prev || [])]);
+
+      // Update the account balance for the reconciled transactions
+      setFinanceAccounts(prev => {
+        const accounts = prev && prev.length > 0 ? prev : [DEFAULT_FINANCE_ACCOUNT];
+        return accounts.map(acc => {
+          if (acc.id === defaultAccId) {
+            return wrapMutation({
+              ...acc,
+              currentBalance: (acc.currentBalance || 0) + totalRecoveredAmount,
+              updatedAt: Date.now(),
+              version: (acc.version || 1) + 1
+            });
+          }
+          return acc;
+        });
+      });
+    }
+  }, [payments, financeTransactions, financeAccounts, financeCategories]);
+
   // System Notification Settings & Scheduled Notifications Engine
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() => {
     const saved = initialData['dl_notification_settings'];
@@ -1331,6 +1499,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
   };
 
+  const registerFinanceActivity = useCallback(() => {
+    setProfile(prev => {
+      const today = new Date().toISOString().split('T')[0];
+      if (prev.financeLastActivityDate === today) return prev; // Already registered today
+      
+      let newStreak = (prev.financeStreak || 0) + 1;
+      if (prev.financeLastActivityDate) {
+        const lastActivity = new Date(prev.financeLastActivityDate);
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        const lastActivityStr = lastActivity.toISOString().split('T')[0];
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        
+        if (lastActivityStr !== yesterdayStr && lastActivityStr !== today) {
+          newStreak = 1; // Streak broken
+        }
+      }
+      
+      const updated = { ...prev, financeStreak: newStreak, financeLastActivityDate: today };
+      storage.setItem('dl_profile', updated);
+      return updated;
+    });
+  }, []);
+
   // Sync simulation with Google Cloud
   // Explicit Refresh Calendar & Dashboard function
   const refreshCalendarAndDashboard = () => {
@@ -1338,7 +1531,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const currentGroupsMap = new Map<string, Group>(groups.filter(g => !g.deleted).map(g => [g.id, g]));
     const currentGroupIds = new Set(currentGroupsMap.keys());
     const currentStudentIds = new Set(students.filter(s => !s.deleted).map(s => s.id));
-    const currentStudentNames = new Set(students.filter(s => !s.deleted).map(s => s.name.toLowerCase()));
+    const currentStudentNames = new Set(students.filter(s => !s.deleted && Boolean(s.name)).map(s => s.name.toLowerCase()));
     const todayStr = formatLocalDate();
 
     // Clean up orphaned, duplicate, and stale lessons, and synchronize denormalized names
@@ -1546,6 +1739,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       hodComplaints,
       hodActionPlans,
       hodVisits,
+      schoolNotes,
+      financeAccounts,
+      financeCategories,
+      financeTransactions,
+      financeRecurring,
+      financeInstallments,
       exportedAt: new Date().toISOString()
     };
     const jsonStr = JSON.stringify(data, null, 2);
@@ -2121,6 +2320,218 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     });
   }, [schoolNotes]);
 
+  // Finance Methods
+  const addFinanceAccount = useCallback((accountData: Omit<FinanceAccount, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>): FinanceAccount => {
+    const newAccount: FinanceAccount = {
+      id: `facc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: Date.now(),
+      version: 1,
+      ...accountData,
+    };
+    const tracked = wrapMutation(newAccount);
+    setFinanceAccounts(prev => [tracked, ...(prev || [])]);
+    return tracked;
+  }, []);
+
+  const updateFinanceAccount = useCallback((id: string, updates: Partial<FinanceAccount>) => {
+    setFinanceAccounts(prev => (prev || []).map(acc => {
+      if (acc.id === id) {
+        return wrapMutation({ ...acc, ...updates, updatedAt: Date.now(), version: (acc.version || 1) + 1 });
+      }
+      return acc;
+    }));
+  }, []);
+
+  const deleteFinanceAccount = useCallback((id: string) => {
+    setFinanceAccounts(prev => (prev || []).map(acc => acc.id === id ? wrapDeletion(acc) : acc));
+  }, []);
+
+  const addFinanceCategory = useCallback((categoryData: Omit<FinanceCategory, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>): FinanceCategory => {
+    const newCat: FinanceCategory = {
+      id: `fcat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: Date.now(),
+      version: 1,
+      ...categoryData,
+    };
+    const tracked = wrapMutation(newCat);
+    setFinanceCategories(prev => [tracked, ...(prev || [])]);
+    return tracked;
+  }, []);
+
+  const updateFinanceCategory = useCallback((id: string, updates: Partial<FinanceCategory>) => {
+    setFinanceCategories(prev => (prev || []).map(cat => {
+      if (cat.id === id) {
+        return wrapMutation({ ...cat, ...updates, updatedAt: Date.now(), version: (cat.version || 1) + 1 });
+      }
+      return cat;
+    }));
+  }, []);
+
+  const deleteFinanceCategory = useCallback((id: string) => {
+    setFinanceCategories(prev => (prev || []).map(cat => cat.id === id ? wrapDeletion(cat) : cat));
+  }, []);
+
+  const addFinanceTransaction = useCallback((transactionData: Omit<FinanceTransaction, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>): FinanceTransaction => {
+    const newTx: FinanceTransaction = {
+      id: `ftx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: Date.now(),
+      version: 1,
+      ...transactionData,
+    };
+    const tracked = wrapMutation(newTx);
+    setFinanceTransactions(prev => [tracked, ...(prev || [])]);
+    
+    // Update account balances atomically
+    if (newTx.type === 'income' || newTx.type === 'expense') {
+      const amountChange = newTx.type === 'income' ? newTx.amount : -newTx.amount;
+      setFinanceAccounts(prev => {
+        const accounts = (prev && prev.length > 0) ? prev : [DEFAULT_FINANCE_ACCOUNT];
+        const targetId = newTx.accountId;
+        const exists = accounts.some(a => a.id === targetId);
+        if (!exists) {
+          return [
+            ...accounts,
+            {
+              id: targetId,
+              name: 'الخزينة الرئيسية (كاش)',
+              type: 'cash',
+              openingBalance: 0,
+              currentBalance: amountChange,
+              currency: 'EGP',
+              createdAt: new Date().toISOString(),
+              updatedAt: Date.now(),
+              version: 1
+            }
+          ];
+        }
+        return accounts.map(acc => {
+          if (acc.id === targetId) {
+            return wrapMutation({
+              ...acc,
+              currentBalance: (acc.currentBalance || 0) + amountChange,
+              updatedAt: Date.now(),
+              version: (acc.version || 1) + 1
+            });
+          }
+          return acc;
+        });
+      });
+    } else if (newTx.type === 'transfer' && newTx.toAccountId) {
+      setFinanceAccounts(prev => (prev || []).map(acc => {
+        if (acc.id === newTx.accountId) {
+          return wrapMutation({
+            ...acc,
+            currentBalance: (acc.currentBalance || 0) - newTx.amount,
+            updatedAt: Date.now(),
+            version: (acc.version || 1) + 1
+          });
+        }
+        if (acc.id === newTx.toAccountId) {
+          return wrapMutation({
+            ...acc,
+            currentBalance: (acc.currentBalance || 0) + newTx.amount,
+            updatedAt: Date.now(),
+            version: (acc.version || 1) + 1
+          });
+        }
+        return acc;
+      }));
+    }
+
+    // Register streak gamification
+    registerFinanceActivity();
+
+    return tracked;
+  }, [DEFAULT_FINANCE_ACCOUNT, registerFinanceActivity]);
+
+  const updateFinanceTransaction = useCallback((id: string, updates: Partial<FinanceTransaction>) => {
+    setFinanceTransactions(prev => (prev || []).map(tx => {
+      if (tx.id === id) {
+        return wrapMutation({ ...tx, ...updates, updatedAt: Date.now(), version: (tx.version || 1) + 1 });
+      }
+      return tx;
+    }));
+  }, []);
+
+  const deleteFinanceTransaction = useCallback((id: string) => {
+    setFinanceTransactions(prev => {
+      const target = (prev || []).find(tx => tx.id === id);
+      if (target && !target.deleted) {
+        if (target.type === 'income' || target.type === 'expense') {
+          const revertAmount = target.type === 'income' ? -target.amount : target.amount;
+          setFinanceAccounts(accs => (accs || []).map(a => a.id === target.accountId ? wrapMutation({
+            ...a,
+            currentBalance: (a.currentBalance || 0) + revertAmount,
+            updatedAt: Date.now(),
+            version: (a.version || 1) + 1
+          }) : a));
+        } else if (target.type === 'transfer' && target.toAccountId) {
+          setFinanceAccounts(accs => (accs || []).map(a => {
+            if (a.id === target.accountId) return wrapMutation({ ...a, currentBalance: (a.currentBalance || 0) + target.amount, updatedAt: Date.now(), version: (a.version || 1) + 1 });
+            if (a.id === target.toAccountId) return wrapMutation({ ...a, currentBalance: (a.currentBalance || 0) - target.amount, updatedAt: Date.now(), version: (a.version || 1) + 1 });
+            return a;
+          }));
+        }
+      }
+      return (prev || []).map(tx => tx.id === id ? wrapDeletion(tx) : tx);
+    });
+  }, []);
+
+  const addFinanceRecurring = useCallback((recurringData: Omit<FinanceRecurring, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>): FinanceRecurring => {
+    const newRec: FinanceRecurring = {
+      id: `frec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: Date.now(),
+      version: 1,
+      ...recurringData,
+    };
+    const tracked = wrapMutation(newRec);
+    setFinanceRecurring(prev => [tracked, ...(prev || [])]);
+    return tracked;
+  }, []);
+
+  const updateFinanceRecurring = useCallback((id: string, updates: Partial<FinanceRecurring>) => {
+    setFinanceRecurring(prev => (prev || []).map(rec => {
+      if (rec.id === id) {
+        return wrapMutation({ ...rec, ...updates, updatedAt: Date.now(), version: (rec.version || 1) + 1 });
+      }
+      return rec;
+    }));
+  }, []);
+
+  const deleteFinanceRecurring = useCallback((id: string) => {
+    setFinanceRecurring(prev => (prev || []).map(rec => rec.id === id ? wrapDeletion(rec) : rec));
+  }, []);
+
+  const addFinanceInstallment = useCallback((installmentData: Omit<FinanceInstallment, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>): FinanceInstallment => {
+    const newInst: FinanceInstallment = {
+      id: `finst_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: Date.now(),
+      version: 1,
+      ...installmentData,
+    };
+    const tracked = wrapMutation(newInst);
+    setFinanceInstallments(prev => [tracked, ...(prev || [])]);
+    return tracked;
+  }, []);
+
+  const updateFinanceInstallment = useCallback((id: string, updates: Partial<FinanceInstallment>) => {
+    setFinanceInstallments(prev => (prev || []).map(inst => {
+      if (inst.id === id) {
+        return wrapMutation({ ...inst, ...updates, updatedAt: Date.now(), version: (inst.version || 1) + 1 });
+      }
+      return inst;
+    }));
+  }, []);
+
+  const deleteFinanceInstallment = useCallback((id: string) => {
+    setFinanceInstallments(prev => (prev || []).map(inst => inst.id === id ? wrapDeletion(inst) : inst));
+  }, []);
+
   // Recently Deleted (Soft Delete Recovery)
   const restoreItem = (type: 'student' | 'group' | 'lesson', id: string) => {
     if (type === 'student') {
@@ -2487,7 +2898,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               lessonIds: initialIds,
               lessonDates: initialDates,
               paymentType: bundleSize > 1 ? 'package_bundle' : 'lesson_fee',
-              paymentMethod: 'vodafone_cash',
+              
               notes: `Zahlungszyklus (${bundleSize}er Paket)`,
               createdAt: new Date().toISOString()
             };
@@ -2694,9 +3105,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     notes?: string,
     discountAmount: number = 0,
     advanceAmount: number = 0,
-    refundAmount: number = 0
+    refundAmount: number = 0,
+    accountId?: string
   ) => {
     const today = formatLocalDate();
+    const targetAccountId = accountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+
     setPayments(prev => prev.map(p => {
       if (p.id === paymentId) {
         const newPaid = (p.amountPaid || 0) + paidAmount + advanceAmount - refundAmount;
@@ -2704,6 +3118,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const netDue = Math.max(0, p.amountDue - totalDiscount);
         const rem = Math.max(0, netDue - newPaid);
         const newStatus: PaymentStatus = rem === 0 ? 'paid' : newPaid > 0 ? 'partial' : 'pending';
+
+        // Auto-create transaction in Finance
+        if (paidAmount > 0) {
+          addFinanceTransaction({
+            type: 'income',
+            amount: paidAmount,
+            accountId: targetAccountId,
+            categoryId: 'cat_student_fees',
+            date: today,
+            note: `سداد اشتراك: ${p.studentName} (${p.groupName})` + (notes ? ` - ${notes}` : ''),
+            relatedStudentId: p.studentId,
+            relatedPaymentId: p.id
+          });
+        }
 
         return wrapMutation({
           ...p,
@@ -2714,7 +3142,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           remainingBalance: rem,
           status: newStatus,
           paidDate: today,
-          paymentMethod: method,
+          financeAccountId: targetAccountId,
           notes: notes ? (p.notes ? `${p.notes} • ${notes}` : notes) : p.notes
         } as PaymentRecord);
       }
@@ -2745,8 +3173,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     lessonIds: string[];
     existingPaymentRecordId?: string;
     notes?: string;
+    accountId?: string;
   }) => {
     const today = formatLocalDate();
+    const targetAccountId = data.accountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+    let finalPaymentId = data.existingPaymentRecordId || `pay_paid_${data.studentId}_${Date.now()}`;
 
     if (data.existingPaymentRecordId) {
       setPayments(prev => prev.map(p => {
@@ -2759,6 +3190,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             paidDate: today,
             lessonDates: data.lessonDates,
             lessonIds: data.lessonIds,
+            financeAccountId: targetAccountId,
             notes: data.notes || `Bezahlt am ${today}`
           } as PaymentRecord);
         }
@@ -2766,7 +3198,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }));
     } else {
       const newRecord: PaymentRecord = wrapMutation({
-        id: `pay_paid_${data.studentId}_${Date.now()}`,
+        id: finalPaymentId,
         studentId: data.studentId,
         studentName: data.studentName,
         groupId: data.groupId,
@@ -2777,7 +3209,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         dueDate: today,
         paidDate: today,
         status: 'paid',
-        paymentMethod: 'vodafone_cash',
+        financeAccountId: targetAccountId,
         lessonDates: data.lessonDates,
         lessonIds: data.lessonIds,
         notes: data.notes || `Bezahlt am ${today}`,
@@ -2785,6 +3217,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       } as PaymentRecord);
 
       setPayments(prev => [newRecord, ...prev]);
+    }
+
+    if (data.amountPaid > 0) {
+      addFinanceTransaction({
+        type: 'income',
+        amount: data.amountPaid,
+        accountId: targetAccountId,
+        categoryId: 'cat_student_fees',
+        date: today,
+        note: `دورة دراسية: ${data.studentName} (${data.groupName})` + (data.notes ? ` - ${data.notes}` : ''),
+        relatedStudentId: data.studentId,
+        relatedPaymentId: finalPaymentId
+      });
     }
 
     setStudents(prev => prev.map(s => s.id === data.studentId ? { ...s, paymentStatus: 'paid' } : s));
@@ -2814,7 +3259,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         remainingBalance: data.amountDue,
         dueDate: today,
         status: 'pending',
-        paymentMethod: 'vodafone_cash',
         lessonDates: data.lessonDates,
         lessonIds: data.lessonIds,
         notes: 'Noch offen (In Erwartung)',
@@ -2828,6 +3272,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const today = formatLocalDate();
     let targetStId = '';
     let newStStatus: PaymentStatus = 'pending';
+    const targetAccountId = financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
 
     setPayments(prev => prev.map(p => {
       if (p.id === paymentId) {
@@ -2835,6 +3280,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const isPaid = p.status === 'paid' || (p.amountPaid >= p.amountDue && p.amountDue > 0);
         if (isPaid) {
           newStStatus = 'pending';
+          // Void transaction if any
+          const existingTx = financeTransactions.find(tx => tx.relatedPaymentId === paymentId && !tx.deleted && tx.type === 'income');
+          if (existingTx) {
+            deleteFinanceTransaction(existingTx.id);
+          }
           return {
             ...p,
             amountPaid: 0,
@@ -2844,12 +3294,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           };
         } else {
           newStStatus = 'paid';
+          if (p.amountDue > 0) {
+            addFinanceTransaction({
+              type: 'income',
+              amount: p.amountDue,
+              accountId: p.financeAccountId || targetAccountId,
+              categoryId: 'cat_student_fees',
+              date: today,
+              note: `سداد اشتراك (1-كليك): ${p.studentName} (${p.groupName})`,
+              relatedStudentId: p.studentId,
+              relatedPaymentId: p.id
+            });
+          }
           return {
             ...p,
             amountPaid: p.amountDue,
             remainingBalance: 0,
             status: 'paid',
-            paidDate: today
+            paidDate: today,
+            financeAccountId: p.financeAccountId || targetAccountId
           };
         }
       }
@@ -2874,9 +3337,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       // Create payment record and mark as paid
       const fee = targetSt.monthlyFee || 200;
       const grp = groups.find(g => g.id === targetSt.groupId);
-      
+      const targetAccountId = financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+      const newPayId = `pay_st_${studentId}_${Date.now()}`;
+
       const newRec: PaymentRecord = {
-        id: `pay_st_${studentId}_${Date.now()}`,
+        id: newPayId,
         studentId: targetSt.id,
         studentName: targetSt.name,
         groupId: targetSt.groupId,
@@ -2887,12 +3352,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         dueDate: today,
         paidDate: today,
         status: 'paid',
-        paymentMethod: 'vodafone_cash',
+        financeAccountId: targetAccountId,
         notes: 'Schnell-Buchung (1-Klick Status)'
       };
 
       setPayments(prev => [newRec, ...prev]);
       setStudents(prev => prev.map(s => s.id === studentId ? { ...s, paymentStatus: 'paid' } : s));
+
+      if (fee > 0) {
+        addFinanceTransaction({
+          type: 'income',
+          amount: fee,
+          accountId: targetAccountId,
+          categoryId: 'cat_student_fees',
+          date: today,
+          note: `سداد اشتراك: ${targetSt.name} (${grp?.name || 'فردي'})`,
+          relatedStudentId: targetSt.id,
+          relatedPaymentId: newPayId
+        });
+      }
     }
   };
 
@@ -2918,7 +3396,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     confetti({ particleCount: 50, spread: 40 });
   };
 
-  const updateLessonPaymentStatus = (lessonId: string, status: PaymentStatus, customAmountPaid?: number) => {
+  const updateLessonPaymentStatus = (lessonId: string, status: PaymentStatus, customAmountPaid?: number, accountId?: string) => {
     const targetLesson = lessons.find(l => l.id === lessonId);
     if (!targetLesson) return;
 
@@ -2928,6 +3406,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       : (status === 'paid' ? due : 0);
 
     const today = formatLocalDate();
+    const targetAccountId = accountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
 
     // Update lesson status and amount
     setLessons(prev => prev.map(l => {
@@ -2952,9 +3431,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     // Sync corresponding payment record in payments list
+    let paymentRecordId = '';
     setPayments(prev => {
       const existingIdx = prev.findIndex(p => p.lessonId === lessonId || (p.lessonIds && p.lessonIds.includes(lessonId)));
       if (existingIdx >= 0) {
+        paymentRecordId = prev[existingIdx].id;
         return prev.map((p, idx) => {
           if (idx === existingIdx) {
             const rem = Math.max(0, p.amountDue - finalPaid - (p.discountAmount || 0));
@@ -2969,8 +3450,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return p;
         });
       } else {
+        paymentRecordId = `pay_l_${lessonId}_${Date.now()}`;
         const newRec: PaymentRecord = {
-          id: `pay_l_${lessonId}_${Date.now()}`,
+          id: paymentRecordId,
           studentId: targetLesson.studentId || '',
           studentName: targetLesson.studentName || targetLesson.groupName || targetLesson.title,
           groupId: targetLesson.groupId || '',
@@ -2982,14 +3464,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           dueDate: targetLesson.date,
           paidDate: status === 'paid' ? today : undefined,
           status,
-          paymentMethod: 'vodafone_cash',
+          financeAccountId: targetAccountId,
           notes: `Beendete Lektion (${targetLesson.date}): ${targetLesson.title}`
         };
         return [newRec, ...prev];
       }
     });
 
-    if (status === 'paid') {
+    if (status === 'paid' && finalPaid > 0) {
+      addFinanceTransaction({
+        type: 'income',
+        amount: finalPaid,
+        accountId: targetAccountId,
+        categoryId: 'cat_student_fees',
+        date: today,
+        note: `سداد حصة: ${targetLesson.studentName || targetLesson.groupName || targetLesson.title}`,
+        relatedStudentId: targetLesson.studentId,
+        relatedPaymentId: paymentRecordId || `pay_l_${lessonId}`
+      });
       confetti({ particleCount: 70, spread: 60 });
     }
   };
@@ -3062,8 +3554,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setLessons(prev => [newLesson, ...prev]);
 
     // Create corresponding payment record so it reflects in Revenue & Reports
+    const targetAccountId = financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+    const finalStatus = data.paymentStatus || (data.amountPaid >= data.amountDue ? 'paid' : data.amountPaid > 0 ? 'partial' : 'pending');
+    const newPayId = `p_ql_${Date.now()}`;
     const newPayment: PaymentRecord = {
-      id: `p_ql_${Date.now()}`,
+      id: newPayId,
       studentId: `temp_qs_${Date.now()}`,
       studentName: data.studentName,
       groupId: 'quick_group',
@@ -3071,10 +3566,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       amountDue: data.amountDue || 0,
       amountPaid: data.amountPaid || 0,
       dueDate: data.date,
-      status: data.paymentStatus || (data.amountPaid >= data.amountDue ? 'paid' : data.amountPaid > 0 ? 'partial' : 'pending'),
+      paidDate: finalStatus === 'paid' ? (data.date || formatLocalDate()) : undefined,
+      status: finalStatus,
+      financeAccountId: targetAccountId,
       notes: `⚡ Quick Lesson Payment (${data.date}): ${data.quickNotes || ''}`
     };
     setPayments(prev => [newPayment, ...prev]);
+
+    if ((data.amountPaid || 0) > 0) {
+      addFinanceTransaction({
+        type: 'income',
+        amount: data.amountPaid,
+        accountId: targetAccountId,
+        categoryId: 'cat_student_fees',
+        date: data.date || formatLocalDate(),
+        note: `حصة سريعة: ${data.studentName} (${data.title || 'درس'})`,
+        relatedPaymentId: newPayId
+      });
+    }
 
     confetti({ particleCount: 60, spread: 60 });
     return newLesson;
@@ -3167,6 +3676,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       hodActionPlans,
       hodVisits,
       schoolNotes,
+      financeAccounts,
+      financeCategories,
+      financeTransactions,
+      financeRecurring,
+      financeInstallments,
       syncQueue: []
     };
 
@@ -3264,6 +3778,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setSchoolNotes(data.schoolNotes);
         await storage.setItem('dl_school_notes', data.schoolNotes);
       }
+      if (data.financeAccounts) {
+        setFinanceAccounts(data.financeAccounts);
+        await storage.setItem('dl_finance_accounts', data.financeAccounts);
+      }
+      if (data.financeCategories) {
+        setFinanceCategories(data.financeCategories);
+        await storage.setItem('dl_finance_categories', data.financeCategories);
+      }
+      if (data.financeTransactions) {
+        setFinanceTransactions(data.financeTransactions);
+        await storage.setItem('dl_finance_transactions', data.financeTransactions);
+      }
+      if (data.financeRecurring) {
+        setFinanceRecurring(data.financeRecurring);
+        await storage.setItem('dl_finance_recurring', data.financeRecurring);
+      }
+      if (data.financeInstallments) {
+        setFinanceInstallments(data.financeInstallments);
+        await storage.setItem('dl_finance_installments', data.financeInstallments);
+      }
 
       // Reconcile and safeguard synchronization metadata
       const reconciledState = await applyRestoreSyncSafeguards(
@@ -3278,7 +3812,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           hodComplaints: data.hodComplaints || [],
           hodActionPlans: data.hodActionPlans || [],
           hodVisits: data.hodVisits || [],
-          schoolNotes: data.schoolNotes || []
+          schoolNotes: data.schoolNotes || [],
+          financeAccounts: data.financeAccounts || [],
+          financeCategories: data.financeCategories || [],
+          financeTransactions: data.financeTransactions || [],
+          financeRecurring: data.financeRecurring || [],
+          financeInstallments: data.financeInstallments || []
         },
         syncStateRef.current
       );
@@ -3337,6 +3876,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       hodComplaints,
       hodActionPlans,
       hodVisits,
+      schoolNotes,
+      financeAccounts,
+      financeCategories,
+      financeTransactions,
+      financeRecurring,
+      financeInstallments,
       syncQueue: [],
     };
     const jsonStr = JSON.stringify(backupObj, null, 2);
@@ -3624,7 +4169,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     hodComplaints,
     hodActionPlans,
     hodVisits,
-    schoolNotes
+    schoolNotes,
+    financeAccounts,
+    financeCategories,
+    financeTransactions,
+    financeRecurring,
+    financeInstallments
   });
   useEffect(() => {
     localDataRef.current = { 
@@ -3640,9 +4190,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       hodComplaints,
       hodActionPlans,
       hodVisits,
-      schoolNotes
+      schoolNotes,
+      financeAccounts,
+      financeCategories,
+      financeTransactions,
+      financeRecurring,
+      financeInstallments
     };
-  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes]);
+  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments]);
 
   const syncDataSource: SyncDataSource = {
     getLocalData: () => localDataRef.current,
@@ -3679,6 +4234,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         case 'hodVisits': {
           setHodVisits(data);
           await storage.setItem('hod_visit_records', data);
+          break;
+        }
+        case 'financeAccounts': {
+          setFinanceAccounts(data);
+          await storage.setItem('dl_finance_accounts', data);
+          break;
+        }
+        case 'financeCategories': {
+          setFinanceCategories(data);
+          await storage.setItem('dl_finance_categories', data);
+          break;
+        }
+        case 'financeTransactions': {
+          setFinanceTransactions(data);
+          await storage.setItem('dl_finance_transactions', data);
+          break;
+        }
+        case 'financeRecurring': {
+          setFinanceRecurring(data);
+          await storage.setItem('dl_finance_recurring', data);
+          break;
+        }
+        case 'financeInstallments': {
+          setFinanceInstallments(data);
+          await storage.setItem('dl_finance_installments', data);
           break;
         }
         case 'settings': {
@@ -3763,6 +4343,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setIsRecentlyDeletedModalOpen,
         profile,
         updateProfile,
+        registerFinanceActivity,
         
         refreshCalendarAndDashboard,
         backupToDrive,
@@ -3893,6 +4474,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         getNotesForClass,
         getNotesForStudent,
         getNotesForLesson,
+        financeAccounts: getActiveRecords(financeAccounts || []),
+        setFinanceAccounts,
+        addFinanceAccount,
+        updateFinanceAccount,
+        deleteFinanceAccount,
+        financeCategories: getActiveRecords(financeCategories || []),
+        setFinanceCategories,
+        addFinanceCategory,
+        updateFinanceCategory,
+        deleteFinanceCategory,
+        financeTransactions: getActiveRecords(financeTransactions || []),
+        setFinanceTransactions,
+        addFinanceTransaction,
+        updateFinanceTransaction,
+        deleteFinanceTransaction,
+        financeRecurring: getActiveRecords(financeRecurring || []),
+        setFinanceRecurring,
+        addFinanceRecurring,
+        updateFinanceRecurring,
+        deleteFinanceRecurring,
+        financeInstallments: getActiveRecords(financeInstallments || []),
+        setFinanceInstallments,
+        addFinanceInstallment,
+        updateFinanceInstallment,
+        deleteFinanceInstallment,
         addAppNotification,
         getHistoricalLessons,
         getHistoricalPayments,

@@ -23,10 +23,11 @@ export const SyncHistoryTimeline: React.FC<SyncHistoryTimelineProps> = ({
   const [selectedEntry, setSelectedEntry] = useState<SyncHistoryEntry | null>(null);
 
   const filteredHistory = history.filter(item => {
-    const matchesSearch = 
-      item.peerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.trigger.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.summary && item.summary.toLowerCase().includes(searchQuery.toLowerCase()));
+    const sQuery = (searchQuery || '').toLowerCase();
+    const matchesSearch = !sQuery ||
+      (item.peerName || '').toLowerCase().includes(sQuery) ||
+      (item.trigger || '').toLowerCase().includes(sQuery) ||
+      (item.summary && (item.summary || '').toLowerCase().includes(sQuery));
     
     const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
     return matchesSearch && matchesStatus;

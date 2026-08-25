@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Student, Group } from '../types';
+import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { Users, UserPlus, Search, Phone, Send, ChevronRight, Plus, MapPin, Video, FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, FileText, Award, DollarSign, Bot, ChevronDown, Filter } from 'lucide-react';
 import { StudentProfileModal } from './StudentProfileModal';
 import { GroupProfileModal } from './GroupProfileModal';
@@ -77,7 +78,7 @@ export const StudentsView: React.FC = () => {
     // completed lessons where student is part of the group, or is the individual student
     const studentLessons = lessons.filter(l => 
       l.status === 'completed' && l.report && 
-      (l.groupId === student.groupId || (l.studentId ? l.studentId === student.id : (!!l.studentName && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())))
+      (l.groupId === student.groupId || (l.studentId ? l.studentId === student.id : (Boolean(l.studentName) && Boolean(student.name) && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())))
     );
 
     const totalLessons = studentLessons.length;
@@ -117,21 +118,21 @@ export const StudentsView: React.FC = () => {
 
   const filteredStudents = activeStudents.filter(s => {
     const studentGroup = groups.find(g => g.id === s.groupId);
-    const term = searchTerm.toLowerCase();
+    const term = (searchTerm || '').toLowerCase();
     const matchesSearch = !term ||
-                          s.name.toLowerCase().includes(term) || 
-                          s.parentName.toLowerCase().includes(term) ||
-                          s.studentPhone.toLowerCase().includes(term) ||
-                          s.parentPhone.toLowerCase().includes(term) ||
-                          s.grade.toLowerCase().includes(term) ||
-                          (studentGroup && studentGroup.name.toLowerCase().includes(term));
+                          (s.name || '').toLowerCase().includes(term) || 
+                          (s.parentName || '').toLowerCase().includes(term) ||
+                          (s.studentPhone || '').toLowerCase().includes(term) ||
+                          (s.parentPhone || '').toLowerCase().includes(term) ||
+                          (s.grade || '').toLowerCase().includes(term) ||
+                          (studentGroup && (studentGroup.name || '').toLowerCase().includes(term));
     const matchesGrade = selectedGrade === 'all' || s.grade === selectedGrade;
     return matchesSearch && matchesGrade;
   });
 
   const sortedStudents = [...filteredStudents].sort((a, b) => {
     if (studentSortBy === 'name') {
-      return a.name.localeCompare(b.name);
+      return (a.name || '').localeCompare(b.name || '');
     }
     const statsA = getStudentStats(a);
     const statsB = getStudentStats(b);
@@ -152,23 +153,23 @@ export const StudentsView: React.FC = () => {
   });
 
   const filteredGroups = activeGroups.filter(g => {
-    const term = searchTerm.toLowerCase();
+    const term = (searchTerm || '').toLowerCase();
     const matchesSearch = !term ||
-                          g.name.toLowerCase().includes(term) ||
-                          g.grade.toLowerCase().includes(term);
+                          (g.name || '').toLowerCase().includes(term) ||
+                          (g.grade || '').toLowerCase().includes(term);
     const matchesGrade = selectedGrade === 'all' || g.grade === selectedGrade;
     const matchesDay = matchGroupDay(g, selectedGroupDay);
     return matchesSearch && matchesGrade && matchesDay;
   });
 
   const filteredArchivedStudents = archivedStudents.filter(s => {
-    const term = searchTerm.toLowerCase();
-    return !term || s.name.toLowerCase().includes(term) || s.parentName.toLowerCase().includes(term);
+    const term = (searchTerm || '').toLowerCase();
+    return !term || (s.name || '').toLowerCase().includes(term) || (s.parentName || '').toLowerCase().includes(term);
   });
 
   const filteredArchivedGroups = archivedGroups.filter(g => {
-    const term = searchTerm.toLowerCase();
-    return !term || g.name.toLowerCase().includes(term);
+    const term = (searchTerm || '').toLowerCase();
+    return !term || (g.name || '').toLowerCase().includes(term);
   });
 
   return (
@@ -274,9 +275,16 @@ export const StudentsView: React.FC = () => {
             className="flex-1 sm:flex-initial px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
           >
             <option value="all">{t('students_all_grades')}</option>
-            {Array.from({ length: 12 }, (_, i) => `Grade ${i + 1}`).map(g => (
-              <option key={g} value={g}>{g}</option>
-            ))}
+            <optgroup label={_t('مستويات الكورسات واللغات (Courses)', 'Course Levels (Language)', 'Sprachniveaus')}>
+              {COURSE_LEVELS.map(g => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </optgroup>
+            <optgroup label={_t('الصفوف المدرسية (School Grades)', 'School Grades', 'Schulklassen')}>
+              {SCHOOL_GRADES.map(g => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </optgroup>
           </select>
 
           {activeSegment === 'students' && (

@@ -27,8 +27,8 @@ export const AINameTransliterationModal: React.FC<AINameTransliterationModalProp
     if (selectedGroupId !== 'all' && s.groupId !== selectedGroupId) return false;
     if (filterMode === 'missing_only' && s.certificateName && s.certificateName.trim().length > 0) return false;
     if (searchQuery.trim().length > 0) {
-      const q = searchQuery.toLowerCase();
-      const nameMatch = s.name.toLowerCase().includes(q) || (s.certificateName && s.certificateName.toLowerCase().includes(q));
+      const q = (searchQuery || '').toLowerCase();
+      const nameMatch = (s.name || '').toLowerCase().includes(q) || (s.certificateName && s.certificateName.toLowerCase().includes(q));
       if (!nameMatch) return false;
     }
     return true;
