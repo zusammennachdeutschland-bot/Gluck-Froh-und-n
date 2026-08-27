@@ -543,7 +543,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
 
           if (data.todos) {
             setTodos(finalTodos);
-            await storage.setItem('dl_todos', finalTodos);
+            await storage.setItem('dl_quick_todos', finalTodos);
           }
 
           if (data.certificates) {
@@ -1129,7 +1129,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           }
           if (finalTodos) {
             setTodos(finalTodos);
-            await storage.setItem('dl_todos', finalTodos);
+            await storage.setItem('dl_quick_todos', finalTodos);
           }
         }
         if (selectedRestoreCategories.includes('school_hod')) {
@@ -1224,7 +1224,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         }
         if (rp.todos) {
           setTodos(rp.todos);
-          await storage.setItem('dl_todos', rp.todos);
+          await storage.setItem('dl_quick_todos', rp.todos);
         }
         if (rp.notificationSettings) {
           setNotificationSettings(rp.notificationSettings);

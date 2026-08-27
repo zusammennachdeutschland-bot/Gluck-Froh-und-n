@@ -321,58 +321,52 @@ function MainApp() {
         <main 
           className="flex-1 px-2.5 py-2.5 sm:p-3 md:p-4 overflow-y-auto pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] overflow-x-hidden relative"
         >
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={`mobile-${activeTab}`}
-              initial={{ opacity: 0, y: 6, scale: 0.99 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -6, scale: 0.99 }}
-              transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-              className="space-y-2.5 sm:space-y-3"
-            >
-              {activeTab === 'home' && (
-                <>
-                  {/* Daily Inspiration & Gratitude Card */}
-                  <InspirationCardWidget />
+          <div
+            key={`mobile-${activeTab}`}
+            className="space-y-2.5 sm:space-y-3 animate-in fade-in duration-150"
+          >
+            {activeTab === 'home' && (
+              <>
+                {/* Daily Inspiration & Gratitude Card */}
+                <InspirationCardWidget />
 
-                  {/* School Today Card */}
-                  <SchoolTodayCard />
+                {/* School Today Card */}
+                <SchoolTodayCard />
 
-                  {/* Today's Progress Timeline */}
-                  <TodaysProgressTimeline />
+                {/* Today's Progress Timeline */}
+                <TodaysProgressTimeline />
 
-                  {/* Compact Collapsible To-Do Widget */}
-                  <QuickTodoWidget />
+                {/* Compact Collapsible To-Do Widget */}
+                <QuickTodoWidget />
 
-                  <HomeworkFollowUpWidget />
+                <HomeworkFollowUpWidget />
 
-                  {/* Tomorrow's Lessons Compact Widget */}
-                  <TomorrowsLessonsWidget />
-                  <AvailableTodayWidget />
+                {/* Tomorrow's Lessons Compact Widget */}
+                <TomorrowsLessonsWidget />
+                <AvailableTodayWidget />
 
-                  {/* Weekly & Monthly Statistics */}
-                  <DailyStats />
+                {/* Weekly & Monthly Statistics */}
+                <DailyStats />
 
-                  {/* Payment Alerts */}
-                  <PaymentAlertsCard />
+                {/* Payment Alerts */}
+                <PaymentAlertsCard />
 
-                  {/* Smart Daily Summary Widget at bottom of Dashboard */}
-                  <SmartDailySummaryWidget />
-                </>
-              )}
+                {/* Smart Daily Summary Widget at bottom of Dashboard */}
+                <SmartDailySummaryWidget />
+              </>
+            )}
 
-              {activeTab === 'schedule' && <ScheduleView />}
-              {activeTab === 'students' && <StudentsView />}
-              {activeTab === 'history' && <SessionHistoryView />}
-              {activeTab === 'payments' && <FinanceView />}
-              {activeTab === 'reports' && <ReportsView />}
-              {activeTab === 'settings' && <SettingsView />}
-              {activeTab === 'freeTime' && <FreeTimeSlotsView />}
-              {activeTab === 'certificates' && <CertificateCenter />}
-              {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
-              {activeTab === 'hod' && <HodHubView />}
-            </motion.div>
-          </AnimatePresence>
+            {activeTab === 'schedule' && <ScheduleView />}
+            {activeTab === 'students' && <StudentsView />}
+            {activeTab === 'history' && <SessionHistoryView />}
+            {activeTab === 'payments' && <FinanceView />}
+            {activeTab === 'reports' && <ReportsView />}
+            {activeTab === 'settings' && <SettingsView />}
+            {activeTab === 'freeTime' && <FreeTimeSlotsView />}
+            {activeTab === 'certificates' && <CertificateCenter />}
+            {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
+            {activeTab === 'hod' && <HodHubView />}
+          </div>
         </main>
 
         {/* Bottom Navigation */}
@@ -459,7 +453,10 @@ export default function App() {
           'dl_notifications', 'dl_notification_settings', 'dl_inspiration_settings', 'dl_inspiration_messages',
           'dl_last_backup_time', 'dl_dismissed_dashboard_lessons', 'dl_recently_deleted',
           'dl_active_lesson_session', 'dl_notified_lesson_alerts', 'dl_local_backup_data',
-          'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records'
+          'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records',
+          'dl_school_notes', 'dl_finance_accounts', 'dl_finance_categories', 'dl_finance_transactions',
+          'dl_finance_recurring', 'dl_finance_installments', 'dl_finance_notifications',
+          'dl_settings', 'dl_sync_state'
         ];
         
         const values = await Promise.all(keys.map(k => storage.getItem(k)));

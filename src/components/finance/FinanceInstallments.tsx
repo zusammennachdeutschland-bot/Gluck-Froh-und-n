@@ -21,22 +21,27 @@ export const FinanceInstallments: React.FC = () => {
     const accId = selectedAccountId || inst.accountId || financeAccounts.find(a => !a.deleted)?.id;
     if (!accId) return;
 
+    const instAmt = inst.installmentAmount || 0;
+    const paidCount = inst.paidInstallments || 0;
+    const remAmt = inst.remainingAmount ?? Math.max(0, (inst.originalAmount || 0) - paidCount * instAmt);
+    const totalCount = inst.totalInstallments || 1;
+
     addFinanceTransaction({
       type: 'expense',
-      amount: inst.installmentAmount,
+      amount: instAmt,
       accountId: accId,
       categoryId: inst.categoryId,
       date: new Date().toISOString().split('T')[0],
-      note: inst.name + ' - ' + _t('قسط رقم', 'Installment #', 'Rate Nr.') + ' ' + (inst.paidInstallments + 1)
+      note: inst.name + ' - ' + _t('قسط رقم', 'Installment #', 'Rate Nr.') + ' ' + (paidCount + 1)
     });
 
-    const nextPaid = inst.paidInstallments + 1;
-    const remaining = Math.max(0, inst.remainingAmount - inst.installmentAmount);
-    const newStatus = nextPaid >= inst.totalInstallments || remaining === 0 ? 'completed' : 'active';
+    const nextPaid = paidCount + 1;
+    const remaining = Math.max(0, remAmt - instAmt);
+    const newStatus = nextPaid >= totalCount || remaining === 0 ? 'completed' : 'active';
     
-    let nextDue = inst.nextDueDate;
+    let nextDue = inst.nextDueDate || inst.firstDueDate || new Date().toISOString().split('T')[0];
     if (newStatus === 'active') {
-      const due = new Date(inst.nextDueDate);
+      const due = new Date(nextDue);
       if (inst.frequency === 'monthly') due.setMonth(due.getMonth() + 1);
       else if (inst.frequency === 'weekly') due.setDate(due.getDate() + 7);
       nextDue = due.toISOString().split('T')[0];
@@ -54,10 +59,11 @@ export const FinanceInstallments: React.FC = () => {
 
   const getStatus = (inst: FinanceInstallment) => {
     if (inst.status === 'completed') return 'completed';
-    if (!inst.nextDueDate) return 'active';
+    const dueDateStr = inst.nextDueDate || inst.firstDueDate;
+    if (!dueDateStr) return 'active';
     
     const today = new Date(); today.setHours(0,0,0,0);
-    const due = new Date(inst.nextDueDate); due.setHours(0,0,0,0);
+    const due = new Date(dueDateStr); due.setHours(0,0,0,0);
     const diffDays = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     
     if (diffDays < 0) return 'overdue';
@@ -74,11 +80,14 @@ export const FinanceInstallments: React.FC = () => {
 
     activeInstallments.forEach(inst => {
       if (inst.status !== 'completed') {
-        totalRemaining += inst.remainingAmount;
+        const instAmt = inst.installmentAmount || 0;
+        const remAmt = inst.remainingAmount ?? Math.max(0, (inst.originalAmount || 0) - (inst.paidInstallments || 0) * instAmt);
+        
+        totalRemaining += remAmt;
         activeCount++;
         
-        if (inst.frequency === 'monthly') monthlyCommitment += inst.installmentAmount;
-        else if (inst.frequency === 'weekly') monthlyCommitment += inst.installmentAmount * 4;
+        if (inst.frequency === 'monthly') monthlyCommitment += instAmt;
+        else if (inst.frequency === 'weekly') monthlyCommitment += instAmt * 4;
         
         const status = getStatus(inst);
         if (status === 'soon' || status === 'today' || status === 'overdue') dueSoonCount++;
@@ -149,7 +158,14 @@ export const FinanceInstallments: React.FC = () => {
            return 0;
         }).map(inst => {
           const status = getStatus(inst);
-          const progress = Math.round((inst.paidInstallments / inst.totalInstallments) * 100) || 0;
+          const origAmt = inst.originalAmount || 0;
+          const instAmt = inst.installmentAmount || 0;
+          const paidCount = inst.paidInstallments || 0;
+          const totalCount = inst.totalInstallments || 1;
+          const remAmt = inst.remainingAmount ?? Math.max(0, origAmt - paidCount * instAmt);
+          const paidAmt = Math.max(0, origAmt - remAmt);
+
+          const progress = totalCount > 0 ? Math.min(100, Math.max(0, Math.round((paidCount / totalCount) * 100))) : 0;
           
           return (
             <div 
@@ -169,7 +185,7 @@ export const FinanceInstallments: React.FC = () => {
                       {inst.notificationsEnabled && inst.status !== 'completed' && <Bell className="w-3 h-3 text-primary opacity-80" />}
                     </h4>
                     <p className="text-[10px] text-text-muted font-mono">
-                      {inst.paidInstallments} / {inst.totalInstallments} {_t('أقساط مسددة', 'paid', 'bezahlt')}
+                      {paidCount} / {totalCount} {_t('أقساط مسددة', 'paid', 'bezahlt')}
                     </p>
                   </div>
                 </div>
@@ -197,19 +213,19 @@ export const FinanceInstallments: React.FC = () => {
               <div className="grid grid-cols-4 gap-2 mb-2.5 py-1.5 px-2 bg-surface-hover/50 rounded-lg text-center">
                 <div>
                   <span className="text-[9px] text-text-muted block">{_t('الأصلي', 'Total', 'Total')}</span>
-                  <p className="font-bold text-xs text-text-main font-sans mt-0.5">{inst.originalAmount.toLocaleString()}</p>
+                  <p className="font-bold text-xs text-text-main font-sans mt-0.5">{origAmt.toLocaleString()}</p>
                 </div>
                 <div>
                   <span className="text-[9px] text-text-muted block">{_t('المدفوع', 'Paid', 'Bezahlt')}</span>
-                  <p className="font-bold text-xs text-emerald-500 font-sans mt-0.5">{(inst.originalAmount - inst.remainingAmount).toLocaleString()}</p>
+                  <p className="font-bold text-xs text-emerald-500 font-sans mt-0.5">{paidAmt.toLocaleString()}</p>
                 </div>
                 <div>
                   <span className="text-[9px] text-text-muted block">{_t('المتبقي', 'Left', 'Rest')}</span>
-                  <p className="font-bold text-xs text-rose-500 font-sans mt-0.5">{inst.remainingAmount.toLocaleString()}</p>
+                  <p className="font-bold text-xs text-rose-500 font-sans mt-0.5">{remAmt.toLocaleString()}</p>
                 </div>
                 <div>
                   <span className="text-[9px] text-text-muted block">{_t('القسط', 'Rate', 'Rate')}</span>
-                  <p className="font-bold text-xs text-primary font-sans mt-0.5">{inst.installmentAmount.toLocaleString()}</p>
+                  <p className="font-bold text-xs text-primary font-sans mt-0.5">{instAmt.toLocaleString()}</p>
                 </div>
               </div>
 
@@ -230,10 +246,10 @@ export const FinanceInstallments: React.FC = () => {
               {/* Bottom Actions */}
               <div className="flex items-center justify-between border-t border-surface-border pt-2">
                 <div className="text-[10px] text-text-muted">
-                  {inst.status !== 'completed' && inst.nextDueDate && (
+                  {inst.status !== 'completed' && (inst.nextDueDate || inst.firstDueDate) && (
                     <div className="flex items-center gap-1">
                       <CalendarDays className="w-3 h-3 text-text-muted" />
-                      <span>{_t('الاستحقاق:', 'Due:', 'Fällig:')} {new Date(inst.nextDueDate).toLocaleDateString()}</span>
+                      <span>{_t('الاستحقاق:', 'Due:', 'Fällig:')} {new Date(inst.nextDueDate || inst.firstDueDate).toLocaleDateString()}</span>
                     </div>
                   )}
                 </div>
@@ -273,7 +289,7 @@ export const FinanceInstallments: React.FC = () => {
                 <div className="absolute inset-0 bg-surface/95 backdrop-blur-sm rounded-xl p-3 flex flex-col justify-center border border-primary/30 z-10 animate-in fade-in zoom-in-95">
                   <h4 className="font-bold text-center text-text-main text-xs mb-2">
                     {_t('تأكيد سداد القسط', 'Confirm Installment Payment', 'Ratenzahlung bestätigen')}
-                    <span className="block text-sm text-primary font-black mt-0.5 font-sans">{inst.installmentAmount.toLocaleString()} EGP</span>
+                    <span className="block text-sm text-primary font-black mt-0.5 font-sans">{instAmt.toLocaleString()} EGP</span>
                   </h4>
                   <div className="mb-2 max-w-xs mx-auto w-full">
                     <label className="block text-[10px] text-text-muted mb-0.5">{_t('حساب السحب', 'Deduct from Account', 'Konto')}</label>

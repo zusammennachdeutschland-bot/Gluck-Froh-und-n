@@ -951,17 +951,33 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     const inst = rawFinanceInstallments[i];
     if (!inst || typeof inst !== 'object' || Array.isArray(inst)) continue;
     const id = typeof inst.id === 'string' && inst.id.trim() ? inst.id.trim() : `finst_imp_${Date.now()}_${i}`;
+    
+    const orig = Math.max(0, sanitizeNumber(inst.originalAmount ?? inst.amount, 0));
+    const down = Math.max(0, sanitizeNumber(inst.downPayment, 0));
+    const instAmt = Math.max(0, sanitizeNumber(inst.installmentAmount ?? inst.amountPerInstallment, 0));
+    const totalCount = sanitizeNumber(inst.totalInstallments, 1);
+    const paidCount = sanitizeNumber(inst.paidInstallments ?? inst.currentInstallment, 0);
+    const remaining = Math.max(0, sanitizeNumber(inst.remainingAmount ?? inst.remainingBalance, orig ? Math.max(0, orig - down - paidCount * instAmt) : 0));
+    const dueDate = typeof inst.nextDueDate === 'string' ? inst.nextDueDate : (typeof inst.firstDueDate === 'string' ? inst.firstDueDate : (typeof inst.dueDate === 'string' ? inst.dueDate : new Date().toISOString().split('T')[0]));
+
     sanitizedFinanceInstallments.push({
       ...inst,
       id,
       name: typeof inst.name === 'string' ? inst.name : 'Installment',
-      amountPerInstallment: Math.max(0, sanitizeNumber(inst.amountPerInstallment, 0)),
-      totalInstallments: sanitizeNumber(inst.totalInstallments, 1),
-      currentInstallment: sanitizeNumber(inst.currentInstallment, 1),
-      remainingBalance: sanitizeNumber(inst.remainingBalance, 0),
-      dueDate: typeof inst.dueDate === 'string' ? inst.dueDate : new Date().toISOString().split('T')[0],
+      categoryId: typeof inst.categoryId === 'string' ? inst.categoryId : '',
       accountId: typeof inst.accountId === 'string' ? inst.accountId : 'acc_main_cash',
-      providerName: typeof inst.providerName === 'string' ? inst.providerName : undefined,
+      originalAmount: orig,
+      downPayment: down,
+      installmentAmount: instAmt,
+      totalInstallments: totalCount,
+      paidInstallments: paidCount,
+      remainingAmount: remaining,
+      frequency: typeof inst.frequency === 'string' ? inst.frequency : 'monthly',
+      firstDueDate: typeof inst.firstDueDate === 'string' ? inst.firstDueDate : dueDate,
+      nextDueDate: dueDate,
+      status: inst.status === 'completed' || inst.status === 'overdue' ? inst.status : 'active',
+      notificationsEnabled: Boolean(inst.notificationsEnabled !== false),
+      notes: typeof inst.notes === 'string' ? inst.notes : undefined,
       createdAt: typeof inst.createdAt === 'string' ? inst.createdAt : new Date().toISOString(),
       updatedAt: typeof inst.updatedAt === 'number' ? inst.updatedAt : Date.now(),
       deleted: Boolean(inst.deleted),

@@ -32,10 +32,12 @@ export const FinanceView: React.FC = () => {
 
   const dueInstallments = financeInstallments.filter(inst => !inst.deleted).filter(inst => {
     if (inst.status !== 'active') return false;
-    if (inst.payments.length >= inst.totalMonths) return false;
-    // Check if next payment is due today or past
-    const nextDate = new Date(inst.startDate);
-    nextDate.setMonth(nextDate.getMonth() + inst.payments.length);
+    const paidCount = inst.paidInstallments ?? (Array.isArray((inst as any).payments) ? (inst as any).payments.length : 0);
+    const totalCount = inst.totalInstallments ?? (inst as any).totalMonths ?? 1;
+    if (paidCount >= totalCount) return false;
+    const dueDateStr = inst.nextDueDate || inst.firstDueDate || (inst as any).startDate;
+    if (!dueDateStr) return false;
+    const nextDate = new Date(dueDateStr);
     const today = new Date();
     return nextDate <= today;
   });

@@ -79,7 +79,7 @@ export const BottomNav: React.FC = () => {
     <div className="absolute bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))] left-2 sm:left-4 right-2 sm:right-4 z-40 max-w-lg mx-auto select-none pointer-events-none">
       <div className="relative w-full flex justify-center">
         {/* Floating Dock glassmorphism container */}
-        <div className="w-full bg-surface/85 dark:bg-background/90 backdrop-blur-xl border border-surface-border/40 dark:border-surface-border/60 rounded-[24px] shadow-[0_12px_40px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.45)] px-2 sm:px-3 py-1.5 sm:py-2 flex items-center justify-between pointer-events-auto relative">
+        <div className="w-full bg-surface/90 dark:bg-background/95 backdrop-blur-md border border-surface-border/50 dark:border-surface-border/60 rounded-[24px] shadow-[0_12px_30px_rgba(0,0,0,0.08)] dark:shadow-[0_12px_30px_rgba(0,0,0,0.5)] px-2 sm:px-3 py-1.5 sm:py-2 flex items-center justify-between pointer-events-auto relative">
           
           {/* LEFT TABS */}
           <div className="flex items-center gap-0.5 sm:gap-1">
@@ -91,46 +91,35 @@ export const BottomNav: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => handleTabClick(tab.id)}
-                  className="relative flex items-center justify-center py-1.5 sm:py-2 px-2 sm:px-2.5 rounded-full cursor-pointer transition-all focus:outline-none shrink-0"
+                  className="relative flex items-center justify-center py-1.5 sm:py-2 px-2 sm:px-2.5 rounded-full cursor-pointer focus:outline-none shrink-0"
                   style={{ WebkitTapHighlightColor: 'transparent' }}
                   title={tab.label}
                 >
-                  {/* Gliding Active background Pill using framer-motion */}
-                  {isActive && (
-                    <motion.div
-                      layoutId="activeTabPill"
-                      className="absolute inset-0 bg-primary/10 dark:bg-primary-soft rounded-full -z-10"
-                      transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                    />
-                  )}
+                  {/* Active background Pill */}
+                  <div
+                    className={`absolute inset-0 bg-primary/10 dark:bg-primary-soft rounded-full -z-10 transition-all duration-150 ease-out ${
+                      isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
+                    }`}
+                  />
 
-                  <motion.div 
-                    animate={{ scale: isActive ? 1.08 : 1 }}
-                    className="flex items-center gap-1.5"
-                  >
+                  <div className="flex items-center gap-1.5">
                     <IconComponent
-                      className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-200 ${
+                      className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-150 ${
                         isActive
                           ? 'text-primary dark:text-primary'
                           : 'text-text-muted/70 dark:text-slate-500 hover:text-slate-600 dark:hover:text-primary'
                       }`}
                     />
                     
-                    {/* Expandable Label only for active state */}
-                    <AnimatePresence initial={false}>
-                      {isActive && (
-                        <motion.span
-                          initial={{ width: 0, opacity: 0, scale: 0.8 }}
-                          animate={{ width: 'auto', opacity: 1, scale: 1 }}
-                          exit={{ width: 0, opacity: 0, scale: 0.8 }}
-                          transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                          className="text-[10px] sm:text-xs font-black tracking-tight text-primary dark:text-primary whitespace-nowrap overflow-hidden pr-0.5"
-                        >
-                          {tab.label}
-                        </motion.span>
-                      )}
-                    </AnimatePresence>
-                  </motion.div>
+                    {/* Expandable Label */}
+                    <span
+                      className={`text-[10px] sm:text-xs font-black tracking-tight text-primary dark:text-primary whitespace-nowrap overflow-hidden transition-all duration-150 ease-out pr-0.5 ${
+                        isActive ? 'max-w-[120px] opacity-100' : 'max-w-0 opacity-0'
+                      }`}
+                    >
+                      {tab.label}
+                    </span>
+                  </div>
                 </button>
               );
             })}
@@ -138,33 +127,33 @@ export const BottomNav: React.FC = () => {
 
           {/* CENTER Tactile Quick Action FAB */}
           <div className="relative flex items-center justify-center shrink-0 -mt-7 select-none">
-            {/* Soft breathing background rings */}
-            <div className="absolute inset-[-4px] bg-primary/10 dark:bg-primary-soft rounded-full animate-ping opacity-60 pointer-events-none scale-90" />
+            {/* Soft background glow */}
+            <div className="absolute inset-[-2px] bg-primary/10 dark:bg-primary-soft rounded-full pointer-events-none" />
             
-            <motion.button
-              whileHover={{ scale: 1.12, rotate: showQuickMenu ? 90 : 0 }}
-              whileTap={{ scale: 0.88 }}
+            <button
               onClick={() => {
                 setShowQuickMenu(prev => !prev);
                 setShowMoreMenu(false);
               }}
-              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-linear-to-tr from-primary to-primary-hover hover:from-primary hover:to-primary-hover text-white flex items-center justify-center shadow-lg shadow-primary/50 dark:shadow-primary/30 ring-[4px] sm:ring-[5px] ring-white dark:ring-black relative z-10 cursor-pointer focus:outline-none"
+              className={`w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-linear-to-tr from-primary to-primary-hover hover:from-primary hover:to-primary-hover text-white flex items-center justify-center shadow-lg shadow-primary/40 dark:shadow-primary/30 ring-[4px] sm:ring-[5px] ring-white dark:ring-black relative z-10 cursor-pointer focus:outline-none transition-transform duration-150 active:scale-90 ${
+                showQuickMenu ? 'rotate-45' : 'rotate-0'
+              }`}
               style={{ WebkitTapHighlightColor: 'transparent' }}
               aria-label="Schnell-Eintrag"
               title="Aktionen anzeigen"
             >
               <Zap className="w-5 h-5 sm:w-5.5 sm:h-5.5 fill-white" />
-            </motion.button>
+            </button>
 
             {/* Quick Action Popover Menu */}
             <AnimatePresence>
               {showQuickMenu && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.9, y: 15 }}
+                  initial={{ opacity: 0, scale: 0.95, y: 8 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.9, y: 15 }}
-                  transition={{ type: 'spring', stiffness: 450, damping: 25 }}
-                  className="absolute bottom-16 left-1/2 -translate-x-1/2 w-60 bg-surface/95 dark:bg-background/95 backdrop-blur-xl border border-surface-border/40 dark:border-surface-border/60 rounded-[20px] shadow-xl p-1.5 space-y-1 z-50 pointer-events-auto origin-bottom"
+                  exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                  transition={{ duration: 0.1, ease: 'easeOut' }}
+                  className="absolute bottom-16 left-1/2 -translate-x-1/2 w-60 bg-surface/95 dark:bg-background/95 backdrop-blur-md border border-surface-border/40 dark:border-surface-border/60 rounded-[20px] shadow-xl p-1.5 space-y-1 z-50 pointer-events-auto origin-bottom"
                 >
                   <button
                     onClick={() => {
@@ -216,25 +205,20 @@ export const BottomNav: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => handleTabClick(tab.id)}
-                  className="relative flex items-center justify-center py-1.5 sm:py-2 px-2 sm:px-2.5 rounded-full cursor-pointer transition-all focus:outline-none shrink-0"
+                  className="relative flex items-center justify-center py-1.5 sm:py-2 px-2 sm:px-2.5 rounded-full cursor-pointer focus:outline-none shrink-0"
                   style={{ WebkitTapHighlightColor: 'transparent' }}
                   title={tab.label}
                 >
-                  {isActive && (
-                    <motion.div
-                      layoutId="activeTabPill"
-                      className="absolute inset-0 bg-primary/10 dark:bg-primary-soft rounded-full -z-10"
-                      transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                    />
-                  )}
+                  <div
+                    className={`absolute inset-0 bg-primary/10 dark:bg-primary-soft rounded-full -z-10 transition-all duration-150 ease-out ${
+                      isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
+                    }`}
+                  />
 
-                  <motion.div 
-                    animate={{ scale: isActive ? 1.08 : 1 }}
-                    className="flex items-center gap-1.5"
-                  >
+                  <div className="flex items-center gap-1.5">
                     <div className="relative">
                       <IconComponent
-                        className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-200 ${
+                        className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-150 ${
                           isActive
                             ? 'text-primary dark:text-primary'
                             : 'text-text-muted/70 dark:text-slate-500 hover:text-slate-600 dark:hover:text-primary'
@@ -247,20 +231,14 @@ export const BottomNav: React.FC = () => {
                       )}
                     </div>
                     
-                    <AnimatePresence initial={false}>
-                      {isActive && (
-                        <motion.span
-                          initial={{ width: 0, opacity: 0, scale: 0.8 }}
-                          animate={{ width: 'auto', opacity: 1, scale: 1 }}
-                          exit={{ width: 0, opacity: 0, scale: 0.8 }}
-                          transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                          className="text-[10px] sm:text-xs font-black tracking-tight text-primary dark:text-primary whitespace-nowrap overflow-hidden pr-0.5"
-                        >
-                          {tab.label}
-                        </motion.span>
-                      )}
-                    </AnimatePresence>
-                  </motion.div>
+                    <span
+                      className={`text-[10px] sm:text-xs font-black tracking-tight text-primary dark:text-primary whitespace-nowrap overflow-hidden transition-all duration-150 ease-out pr-0.5 ${
+                        isActive ? 'max-w-[120px] opacity-100' : 'max-w-0 opacity-0'
+                      }`}
+                    >
+                      {tab.label}
+                    </span>
+                  </div>
                 </button>
               );
             })}
@@ -272,55 +250,44 @@ export const BottomNav: React.FC = () => {
                   setShowMoreMenu(prev => !prev);
                   setShowQuickMenu(false);
                 }}
-                className="relative flex items-center justify-center py-1.5 sm:py-2 px-2 sm:px-2.5 rounded-full cursor-pointer transition-all focus:outline-none shrink-0"
+                className="relative flex items-center justify-center py-1.5 sm:py-2 px-2 sm:px-2.5 rounded-full cursor-pointer focus:outline-none shrink-0"
                 style={{ WebkitTapHighlightColor: 'transparent' }}
                 title={moreTab.label}
               >
-                {isMoreTabActive && (
-                  <motion.div
-                    layoutId="activeTabPill"
-                    className="absolute inset-0 bg-primary/10 dark:bg-primary-soft rounded-full -z-10"
-                    transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                  />
-                )}
+                <div
+                  className={`absolute inset-0 bg-primary/10 dark:bg-primary-soft rounded-full -z-10 transition-all duration-150 ease-out ${
+                    isMoreTabActive ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
+                  }`}
+                />
 
-                <motion.div 
-                  animate={{ scale: isMoreTabActive ? 1.08 : 1 }}
-                  className="flex items-center gap-1.5"
-                >
+                <div className="flex items-center gap-1.5">
                   <moreTab.icon
-                    className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-200 ${
+                    className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-150 ${
                       isMoreTabActive
                         ? 'text-primary dark:text-primary'
                         : 'text-text-muted/70 dark:text-slate-500 hover:text-slate-600 dark:hover:text-primary'
                     }`}
                   />
                   
-                  <AnimatePresence initial={false}>
-                    {isMoreTabActive && (
-                      <motion.span
-                        initial={{ width: 0, opacity: 0, scale: 0.8 }}
-                        animate={{ width: 'auto', opacity: 1, scale: 1 }}
-                        exit={{ width: 0, opacity: 0, scale: 0.8 }}
-                        transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                        className="text-[10px] sm:text-xs font-black tracking-tight text-primary dark:text-primary whitespace-nowrap overflow-hidden pr-0.5"
-                      >
-                        {moreTab.label}
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
+                  <span
+                    className={`text-[10px] sm:text-xs font-black tracking-tight text-primary dark:text-primary whitespace-nowrap overflow-hidden transition-all duration-150 ease-out pr-0.5 ${
+                      isMoreTabActive ? 'max-w-[120px] opacity-100' : 'max-w-0 opacity-0'
+                    }`}
+                  >
+                    {moreTab.label}
+                  </span>
+                </div>
               </button>
 
               {/* Modern Frosted-glass context menu popover */}
               <AnimatePresence>
                 {showMoreMenu && (
                   <motion.div
-                    initial={{ opacity: 0, scale: 0.9, y: 15 }}
+                    initial={{ opacity: 0, scale: 0.95, y: 8 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.9, y: 15 }}
-                    transition={{ type: 'spring', stiffness: 450, damping: 25 }}
-                    className={`absolute bottom-14 ${isRtl ? 'left-0 origin-bottom-left' : 'right-0 origin-bottom-right'} w-48 sm:w-52 bg-surface/95 dark:bg-background/95 backdrop-blur-xl border border-surface-border/40 dark:border-surface-border/60 rounded-[20px] shadow-xl p-1.5 space-y-1.5 z-50`}
+                    exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                    transition={{ duration: 0.1, ease: 'easeOut' }}
+                    className={`absolute bottom-14 ${isRtl ? 'left-0 origin-bottom-left' : 'right-0 origin-bottom-right'} w-48 sm:w-52 bg-surface/95 dark:bg-background/95 backdrop-blur-md border border-surface-border/40 dark:border-surface-border/60 rounded-[20px] shadow-xl p-1.5 space-y-1.5 z-50`}
                   >
                     <button
                       onClick={() => handleTabClick('certificates')}

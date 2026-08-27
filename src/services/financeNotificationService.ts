@@ -44,8 +44,8 @@ export const scheduleFinanceNotifications = async (
        if (dueEvening > now) schedules.push({ date: dueEvening, title: 'Payment Still Unpaid', body: `Your ${rec.name} bill of ${rec.amount} EGP is due today.` });
     });
 
-    installments.filter(i => i.status !== 'completed' && i.notificationsEnabled !== false && i.nextDueDate).forEach(inst => {
-       const due = new Date(inst.nextDueDate!);
+    installments.filter(i => i.status !== 'completed' && i.notificationsEnabled !== false && (i.nextDueDate || i.firstDueDate)).forEach(inst => {
+       const due = new Date(inst.nextDueDate || inst.firstDueDate);
        
        const fiveDaysBefore = new Date(due); fiveDaysBefore.setDate(due.getDate() - 5); fiveDaysBefore.setHours(10, 0, 0, 0);
        const oneDayBefore = new Date(due); oneDayBefore.setDate(due.getDate() - 1); oneDayBefore.setHours(10, 0, 0, 0);

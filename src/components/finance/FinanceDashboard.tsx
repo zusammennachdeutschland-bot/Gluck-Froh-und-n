@@ -125,7 +125,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
         const diff = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         if (diff <= 7) {
           count++;
-          amount += inst.installmentAmount;
+          amount += (inst.installmentAmount || 0);
         }
       }
     });

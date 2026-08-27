@@ -38,7 +38,10 @@ import {
   INITIAL_TEACHER_PROFILE, INITIAL_GROUPS, INITIAL_STUDENTS, 
   INITIAL_LESSONS, INITIAL_PAYMENT_RECORDS, INITIAL_NOTIFICATIONS,
   INITIAL_INSPIRATION_SETTINGS, INITIAL_INSPIRATION_MESSAGES,
-  DEFAULT_NOTIFICATION_SETTINGS
+  DEFAULT_NOTIFICATION_SETTINGS,
+  INITIAL_TODOS, INITIAL_CERTIFICATES, INITIAL_SCHOOL_NOTES,
+  INITIAL_HOD_STUDENTS, INITIAL_HOD_VISITS, INITIAL_HOD_ACTION_PLANS, INITIAL_HOD_COMPLAINTS,
+  INITIAL_FINANCE_TRANSACTIONS, INITIAL_FINANCE_ACCOUNTS, INITIAL_FINANCE_RECURRING, INITIAL_FINANCE_INSTALLMENTS, INITIAL_FINANCE_NOTIFICATIONS
 } from '../data/initialData';
 import confetti from 'canvas-confetti';
 import { Capacitor } from '@capacitor/core';
@@ -378,10 +381,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [todos, setTodos] = useState<any[]>(() => {
     const saved = initialData['dl_quick_todos'];
-    return saved !== null && saved !== undefined ? saved : [];
+    return Array.isArray(saved) ? saved : INITIAL_TODOS;
   });
 
-  const isInitializedRef = React.useRef(false);
+  const isInitializedRef = React.useRef(true);
   const [syncState, setSyncState] = useState<SyncStateMetadata | null>(null);
   const syncStateRef = React.useRef<SyncStateMetadata | null>(null);
   useEffect(() => {
@@ -764,7 +767,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [certificates, setCertificates] = useState<CertificateRecord[]>(() => {
     const saved = initialData['dl_certificates'];
-    const raw: CertificateRecord[] = Array.isArray(saved) ? saved : [];
+    const raw: CertificateRecord[] = Array.isArray(saved) ? saved : INITIAL_CERTIFICATES;
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `cert_${Date.now()}_${idx}`;
@@ -785,7 +788,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Head of Department (HOD) System States with SyncableRecord schema
   const [hodStudents, setHodStudents] = useState<HodGermanStudent[]>(() => {
     const saved = initialData['hod_german_students'];
-    const raw: HodGermanStudent[] = Array.isArray(saved) ? saved : [];
+    const raw: HodGermanStudent[] = Array.isArray(saved) ? saved : INITIAL_HOD_STUDENTS;
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_st_${Date.now()}_${idx}`;
@@ -805,7 +808,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [hodComplaints, setHodComplaints] = useState<Complaint[]>(() => {
     const saved = initialData['hod_complaints'];
-    const raw: Complaint[] = Array.isArray(saved) ? saved : [];
+    const raw: Complaint[] = Array.isArray(saved) ? saved : INITIAL_HOD_COMPLAINTS;
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_cmp_${Date.now()}_${idx}`;
@@ -825,7 +828,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [hodActionPlans, setHodActionPlans] = useState<StudentActionPlan[]>(() => {
     const saved = initialData['hod_student_action_plans'];
-    const raw: StudentActionPlan[] = Array.isArray(saved) ? saved : [];
+    const raw: StudentActionPlan[] = Array.isArray(saved) ? saved : INITIAL_HOD_ACTION_PLANS;
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_plan_${Date.now()}_${idx}`;
@@ -845,7 +848,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [hodVisits, setHodVisits] = useState<VisitRecord[]>(() => {
     const saved = initialData['hod_visit_records'];
-    const raw: VisitRecord[] = Array.isArray(saved) ? saved : [];
+    const raw: VisitRecord[] = Array.isArray(saved) ? saved : INITIAL_HOD_VISITS;
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_vst_${Date.now()}_${idx}`;
@@ -887,7 +890,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // School & Lesson Notes State with SyncableRecord schema
   const [schoolNotes, setSchoolNotes] = useState<SchoolNote[]>(() => {
     const saved = initialData['dl_school_notes'];
-    const raw: SchoolNote[] = Array.isArray(saved) ? saved : [];
+    const raw: SchoolNote[] = Array.isArray(saved) ? saved : INITIAL_SCHOOL_NOTES;
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `snote_${Date.now()}_${idx}`;
@@ -929,26 +932,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Finance States
   const [financeAccounts, setFinanceAccounts] = useState<FinanceAccount[]>(() => {
     const raw = initialData['dl_finance_accounts'];
-    if (Array.isArray(raw) && raw.length > 0) return raw;
-    return [DEFAULT_FINANCE_ACCOUNT];
+    if (Array.isArray(raw)) return raw;
+    return INITIAL_FINANCE_ACCOUNTS;
   });
   const [financeCategories, setFinanceCategories] = useState<FinanceCategory[]>(() => {
     const raw = initialData['dl_finance_categories'];
-    if (Array.isArray(raw) && raw.length > 0) return raw;
+    if (Array.isArray(raw)) return raw;
     return DEFAULT_FINANCE_CATEGORIES;
   });
   const [financeTransactions, setFinanceTransactions] = useState<FinanceTransaction[]>(() => {
-    return Array.isArray(initialData['dl_finance_transactions']) ? initialData['dl_finance_transactions'] : [];
+    const raw = initialData['dl_finance_transactions'];
+    return Array.isArray(raw) ? raw : INITIAL_FINANCE_TRANSACTIONS;
   });
   const [financeRecurring, setFinanceRecurring] = useState<FinanceRecurring[]>(() => {
-    return Array.isArray(initialData['dl_finance_recurring']) ? initialData['dl_finance_recurring'] : [];
+    const raw = initialData['dl_finance_recurring'];
+    return Array.isArray(raw) ? raw : INITIAL_FINANCE_RECURRING;
   });
   const [financeInstallments, setFinanceInstallments] = useState<FinanceInstallment[]>(() => {
-    return Array.isArray(initialData['dl_finance_installments']) ? initialData['dl_finance_installments'] : [];
+    const raw = initialData['dl_finance_installments'];
+    return Array.isArray(raw) ? raw : INITIAL_FINANCE_INSTALLMENTS;
   });
 
   const [financeNotifications, setFinanceNotifications] = useState<FinanceNotification[]>(() => {
-    return Array.isArray(initialData['dl_finance_notifications']) ? initialData['dl_finance_notifications'] : [];
+    const raw = initialData['dl_finance_notifications'];
+    return Array.isArray(raw) ? raw : INITIAL_FINANCE_NOTIFICATIONS;
   });
 
   useEffect(() => {
@@ -1934,19 +1941,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       if (data.hodStudents) {
         setHodStudents(data.hodStudents);
-        await storage.setItem('dl_hod_students', data.hodStudents);
+        await storage.setItem('hod_german_students', data.hodStudents);
       }
       if (data.hodComplaints) {
         setHodComplaints(data.hodComplaints);
-        await storage.setItem('dl_hod_complaints', data.hodComplaints);
+        await storage.setItem('hod_complaints', data.hodComplaints);
       }
       if (data.hodActionPlans) {
         setHodActionPlans(data.hodActionPlans);
-        await storage.setItem('dl_hod_action_plans', data.hodActionPlans);
+        await storage.setItem('hod_student_action_plans', data.hodActionPlans);
       }
       if (data.hodVisits) {
         setHodVisits(data.hodVisits);
-        await storage.setItem('dl_hod_visits', data.hodVisits);
+        await storage.setItem('hod_visit_records', data.hodVisits);
       }
       if (data.schoolNotes) {
         setSchoolNotes(data.schoolNotes);
@@ -3902,19 +3909,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       if (data.hodStudents) {
         setHodStudents(data.hodStudents);
-        await storage.setItem('dl_hod_students', data.hodStudents);
+        await storage.setItem('hod_german_students', data.hodStudents);
       }
       if (data.hodComplaints) {
         setHodComplaints(data.hodComplaints);
-        await storage.setItem('dl_hod_complaints', data.hodComplaints);
+        await storage.setItem('hod_complaints', data.hodComplaints);
       }
       if (data.hodActionPlans) {
         setHodActionPlans(data.hodActionPlans);
-        await storage.setItem('dl_hod_action_plans', data.hodActionPlans);
+        await storage.setItem('hod_student_action_plans', data.hodActionPlans);
       }
       if (data.hodVisits) {
         setHodVisits(data.hodVisits);
-        await storage.setItem('dl_hod_visits', data.hodVisits);
+        await storage.setItem('hod_visit_records', data.hodVisits);
       }
       if (data.schoolNotes) {
         setSchoolNotes(data.schoolNotes);
