@@ -311,47 +311,6 @@ function MainApp() {
   }, []);
 
 
-  const [touchStartX, setTouchStartX] = useState<number | null>(null);
-  const [touchEndX, setTouchEndX] = useState<number | null>(null);
-  const [touchStartY, setTouchStartY] = useState<number | null>(null);
-
-  const TABS_ORDER = ['home', 'schedule', 'students', 'history', 'payments', 'reports', 'settings'];
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    setTouchEndX(null);
-    setTouchStartX(e.targetTouches[0].clientX);
-    setTouchStartY(e.targetTouches[0].clientY);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!touchStartX || !touchStartY) return;
-    const currentX = e.targetTouches[0].clientX;
-    const currentY = e.targetTouches[0].clientY;
-    
-    // Only detect swipe if horizontal movement is greater than vertical movement
-    if (Math.abs(currentX - touchStartX) > Math.abs(currentY - touchStartY)) {
-      setTouchEndX(currentX);
-    }
-  };
-
-  const handleTouchEnd = () => {
-    if (!touchStartX || !touchEndX) return;
-    const distance = touchStartX - touchEndX;
-    const isLeftSwipe = distance > 50;
-    const isRightSwipe = distance < -50;
-
-    const currentIndex = TABS_ORDER.indexOf(activeTab);
-
-    if (isLeftSwipe && currentIndex < TABS_ORDER.length - 1) {
-      setActiveTab(TABS_ORDER[currentIndex + 1] as any);
-    }
-    if (isRightSwipe && currentIndex > 0) {
-      setActiveTab(TABS_ORDER[currentIndex - 1] as any);
-    }
-    setTouchStartX(null);
-    setTouchEndX(null);
-  };
-
   return (
     <div className="min-h-[100dvh] bg-background text-text-main font-sans antialiased overflow-hidden">
       {/* ================= MOBILE EXPERIENCE (Preserved 100%) ================= */}
@@ -361,9 +320,6 @@ function MainApp() {
         {/* Tab View Content Area */}
         <main 
           className="flex-1 px-2.5 py-2.5 sm:p-3 md:p-4 overflow-y-auto pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] overflow-x-hidden relative"
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
         >
           <AnimatePresence mode="wait">
             <motion.div

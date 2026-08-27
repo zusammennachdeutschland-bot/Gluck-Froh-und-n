@@ -300,7 +300,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
         <div className="absolute top-0 right-0 w-24 h-24 bg-primary/10 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none" />
 
         <div className="space-y-2 relative z-10">
-          <label className="text-xs font-bold text-primary-hover dark:text-primary-soft flex items-center justify-between">
+          <label className="text-xs font-bold text-primary-hover dark:text-primary-hover flex items-center justify-between">
             <span className="flex items-center gap-1.5">
               <Calendar className="w-4 h-4" />
               Tage auswählen (Select Days) *
@@ -326,7 +326,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
 
         {scheduleDays.length > 0 && (
           <div className="space-y-2 relative z-10 pt-2 border-t border-primary-border/20">
-            <label className="text-xs font-bold text-primary-hover dark:text-primary-soft">Uhrzeit pro Tag (Time per Day)</label>
+            <label className="text-xs font-bold text-primary-hover dark:text-primary-hover">Uhrzeit pro Tag (Time per Day)</label>
             <div className="grid grid-cols-2 gap-2">
               {scheduleDays.map(day => (
                 <div key={day} className="flex items-center gap-2 bg-surface p-2 rounded-xl border border-primary-border/20">

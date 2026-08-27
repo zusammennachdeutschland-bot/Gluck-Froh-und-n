@@ -108,20 +108,22 @@ ${nextHomework}
       const examGrade = lesson.report?.studentExamGrade?.[st.id];
       const examScore = examGrade !== undefined ? `${examGrade} / 10` : 'لا يوجد';
 
-      const studentNote = lesson.report?.studentNotes?.[st.id] || 'مستوى ممتاز ومتفاعل في الحصة.';
+      const studentNote = lesson.report?.studentNotes?.[st.id] || '';
       const perfFeedback = lesson.report?.studentPerformance?.[st.id]?.generatedFeedback?.parent;
+
+      const noteText = studentNote.trim() ? `\n• ملاحظات: ${studentNote.trim()}` : '';
 
       text += `
 👤 [${idx + 1}] الطالب: ${st.name}
 • الحضور: ${attendanceArabic}
 • الواجب السابق: ${homeworkOption}
 • درجة الإملاء: ${dictationScore}
-• درجة الامتحان: ${examScore}
-• ملاحظات: ${studentNote}${perfFeedback ? `\n• أداء الحصة: ${perfFeedback}` : ''}\n----------------------------------`;
+• درجة الامتحان: ${examScore}${noteText}${perfFeedback ? `\n• أداء الحصة: ${perfFeedback}` : ''}\n----------------------------------`;
     });
 
     const teacherArName = getTeacherArabicName(profile, 'المعلم');
-    const teacherSig = teacherArName.startsWith('أ.') || teacherArName.startsWith('الأستاذ') ? teacherArName : `أ. ${teacherArName}`;
+    const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
+    const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
     text += `\n\nشكراً لكم،\n${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
     return text;
   };
@@ -164,10 +166,13 @@ ${nextHomework}
 
     const taughtToday = lesson.report?.teacherNotes || 'لم يحدد بعد';
     const nextHomework = lesson.report?.homeworkDescription || 'لا يوجد واجب';
-    const notesCombined = studentNote.trim() || 'مستوى الطالب ممتاز ومتفاعل خلال الحصة.';
+    const cleanStudentNote = studentNote.trim();
 
     const teacherArName = getTeacherArabicName(profile, 'المعلم');
-    const teacherSig = teacherArName.startsWith('أ.') || teacherArName.startsWith('الأستاذ') ? teacherArName : `أ. ${teacherArName}`;
+    const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
+    const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
+
+    const notesSection = cleanStudentNote ? `\n\nملاحظات المعلم:\n• ${cleanStudentNote}` : '';
 
     const generated = `السلام عليكم ورحمة الله وبركاته 👋
 
@@ -187,11 +192,9 @@ ${homeworkOption}
 ${dictationScore}
 
 درجة الامتحان (Quiz):
-${examScore}
+${examScore}${notesSection}${perfFeedback ? `\n\nأداء الحصة:\n• ${perfFeedback}` : ''}
 
-ملاحظات المعلم:
-• ${notesCombined}
-${perfFeedback ? `\nأداء الحصة:\n• ${perfFeedback}\n\n` : '\n'}شكراً لكم،
+شكراً لكم،
 ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
 
     setFinalGeneratedText(generated);

@@ -198,7 +198,7 @@ export const Header: React.FC = () => {
             <div className="leading-tight min-w-0 flex-1 pr-1">
               {activeTab === 'home' ? (
                 <>
-                  <p className="text-[10px] font-black uppercase tracking-wider text-primary/80 dark:text-primary-soft flex items-center gap-1">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-primary dark:text-primary-hover flex items-center gap-1">
                     <span>{t('greeting') || 'WELCOME'}</span>
                     <span className="inline-block animate-wave text-[11px]">👋</span>
                   </p>
