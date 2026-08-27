@@ -124,6 +124,61 @@
             android:permission="android.permission.BIND_REMOTEVIEWS"
         />
 
+        <!-- Widget 9: Contact & Reminders -->
+        <receiver
+            android:name=".ContactReminderWidget"
+            android:label="@string/widget_name_contact_remind"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/contact_reminder_widget_info" />
+        </receiver>
+        <service
+            android:name=".ContactReminderWidgetService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+        />
+
+        <!-- Widget 10: Interactive Full Schedule -->
+        <receiver
+            android:name=".ScheduleDayWidget"
+            android:label="@string/widget_name_interactive_schedule"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.glueck.app.ACTION_SCHEDULE_PREV_DAY" />
+                <action android:name="com.glueck.app.ACTION_SCHEDULE_NEXT_DAY" />
+                <action android:name="com.glueck.app.ACTION_SCHEDULE_TODAY" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/interactive_schedule_widget_info" />
+        </receiver>
+        <service
+            android:name=".ScheduleDayWidgetService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+        />
+
+        <!-- Widget 11: Installments & Recurring Bills Tracker -->
+        <receiver
+            android:name=".InstallmentsPaymentsWidget"
+            android:label="@string/widget_name_installments_payments"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/installments_payments_widget_info" />
+        </receiver>
+
+        <!-- Widget 12: Quick Transactions & Deposit Shortcut -->
+        <receiver
+            android:name=".QuickTransactionWidget"
+            android:label="@string/widget_name_quick_transactions"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/quick_transactions_widget_info" />
+        </receiver>
+
         <!-- Live Timer Foreground Service for System Notification Tray & Honor Magic Capsule -->
         <service
             android:name=".LiveTimerService"

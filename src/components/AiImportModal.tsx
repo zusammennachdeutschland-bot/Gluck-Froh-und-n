@@ -98,6 +98,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
       pricePerSession,
       zoomLink: group.type === 'online' ? (group.zoom_link || '') : undefined,
       address: group.type === 'offline' ? (group.address || '') : undefined,
+      whatsAppGroupLink: group.whatsapp_link || '',
       color: 'indigo'
     });
 

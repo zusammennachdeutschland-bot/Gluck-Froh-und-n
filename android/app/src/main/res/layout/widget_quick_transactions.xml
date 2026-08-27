@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:padding="6dp"
+    android:gravity="center"
+    android:background="@drawable/widget_bg">
+
+    <!-- 1. Quick Student Payment -->
+    <LinearLayout
+        android:id="@+id/btn_quick_student_pay"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginEnd="4dp"
+        android:gravity="center"
+        android:padding="4dp"
+        android:orientation="vertical"
+        android:background="@drawable/widget_item_bg">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="💰"
+            android:textSize="18sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="دفعة طالب"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#22C55E"
+            android:maxLines="1" />
+    </LinearLayout>
+
+    <!-- 2. Quick Income / Deposit -->
+    <LinearLayout
+        android:id="@+id/btn_quick_income"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginEnd="4dp"
+        android:gravity="center"
+        android:padding="4dp"
+        android:orientation="vertical"
+        android:background="@drawable/widget_item_bg">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="➕"
+            android:textSize="18sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="إيداع / دخل"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#38BDF8"
+            android:maxLines="1" />
+    </LinearLayout>
+
+    <!-- 3. Quick Expense -->
+    <LinearLayout
+        android:id="@+id/btn_quick_expense"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginEnd="4dp"
+        android:gravity="center"
+        android:padding="4dp"
+        android:orientation="vertical"
+        android:background="@drawable/widget_item_bg">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="➖"
+            android:textSize="18sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="مصروف"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#F43F5E"
+            android:maxLines="1" />
+    </LinearLayout>
+
+    <!-- 4. Quick Transfer -->
+    <LinearLayout
+        android:id="@+id/btn_quick_transfer"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:padding="4dp"
+        android:orientation="vertical"
+        android:background="@drawable/widget_item_bg">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🔄"
+            android:textSize="18sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="تحويل"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#A855F7"
+            android:maxLines="1" />
+    </LinearLayout>
+</LinearLayout>

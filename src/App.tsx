@@ -1,5 +1,5 @@
 import { App as CapacitorApp } from '@capacitor/app';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/Header';
 import { TodaysProgressTimeline } from './components/TodaysProgressTimeline';
@@ -42,6 +42,7 @@ import { RecentlyDeletedModal } from './components/RecentlyDeletedModal';
 import { SetupWizard } from './components/SetupWizard';
 import { BackupModal } from './components/BackupModal';
 import { FloatingNetworkMonitor } from './components/FloatingNetworkMonitor';
+import { AddFinanceTransactionModal } from './components/finance/modals/AddFinanceTransactionModal';
 
 import { useLessonReminders } from './hooks/useLessonReminders';
 import { Capacitor } from '@capacitor/core';
@@ -65,83 +66,130 @@ function MainApp() {
     isRecentlyDeletedModalOpen, setIsRecentlyDeletedModalOpen
   } = useApp();
 
-  // Native Widget Deep-Link Router (ags19://...)
+  const [quickTransactionType, setQuickTransactionType] = useState<'income' | 'expense' | 'transfer' | null>(null);
+  const [pendingLessonId, setPendingLessonId] = useState<string | null>(null);
+
+  // Deep Link handler
+  const handleDeepLink = useCallback((url: string) => {
+    if (!url) return;
+    console.log('Handling deep link URL:', url);
+
+    // 1. Handle Lesson Deep Links: ags19://lesson/{id}
+    if (url.includes('ags19://lesson/')) {
+      const rawId = url.split('ags19://lesson/')[1];
+      const lessonId = rawId ? rawId.split('?')[0].split('/')[0] : '';
+      if (lessonId && lessonId !== 'null') {
+        const targetLesson = lessons.find(l => l.id === lessonId);
+        if (targetLesson) {
+          openLessonControl(targetLesson);
+        } else {
+          setPendingLessonId(lessonId);
+        }
+      }
+    } 
+    // 2. Handle Action Deep Links: ags19://action/{action} or ags19://{action}
+    else {
+      let action = '';
+      if (url.includes('ags19://action/')) {
+        action = url.split('ags19://action/')[1]?.split('?')[0]?.split('/')[0]?.toLowerCase();
+      } else if (url.includes('ags19://')) {
+        action = url.split('ags19://')[1]?.split('?')[0]?.split('/')[0]?.toLowerCase();
+      }
+
+      if (action) {
+        switch (action) {
+          case 'payments':
+          case 'quick_payment':
+          case 'quick_student_payment':
+            setActiveTab('payments');
+            break;
+          case 'quick_income':
+            setQuickTransactionType('income');
+            break;
+          case 'quick_expense':
+            setQuickTransactionType('expense');
+            break;
+          case 'quick_transfer':
+            setQuickTransactionType('transfer');
+            break;
+          case 'schedule':
+            setActiveTab('schedule');
+            break;
+          case 'students':
+            setActiveTab('students');
+            break;
+          case 'history':
+            setActiveTab('history');
+            break;
+          case 'reports':
+            setActiveTab('reports');
+            break;
+          case 'settings':
+            setActiveTab('settings');
+            break;
+          case 'freetime':
+          case 'free_time':
+            setActiveTab('freeTime');
+            break;
+          case 'home':
+          case 'dashboard':
+            setActiveTab('home');
+            break;
+          case 'todos':
+          case 'todo':
+          case 'tasks':
+            setActiveTab('home');
+            break;
+          case 'quick_lesson':
+          case 'add_quick_lesson':
+            setIsAddQuickLessonModalOpen(true);
+            break;
+          case 'add_lesson':
+            setIsAddLessonModalOpen(true);
+            break;
+          case 'add_student':
+            setIsAddStudentModalOpen(true);
+            break;
+          case 'add_group':
+            setIsAddGroupModalOpen(true);
+            break;
+          case 'start_lesson':
+            setIsStartLessonNowModalOpen(true);
+            break;
+        }
+      }
+    }
+  }, [lessons, openLessonControl, setActiveTab, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, setIsAddStudentModalOpen, setIsAddGroupModalOpen, setIsStartLessonNowModalOpen]);
+
+  // Check pending lesson once lessons load
+  useEffect(() => {
+    if (pendingLessonId && lessons.length > 0) {
+      const target = lessons.find(l => l.id === pendingLessonId);
+      if (target) {
+        openLessonControl(target);
+        setPendingLessonId(null);
+      }
+    }
+  }, [pendingLessonId, lessons, openLessonControl]);
+
+  // Native Widget Deep-Link Router & Cold Start listener
   useEffect(() => {
     let urlListener: any = null;
 
+    // Check cold-start launch URL
+    CapacitorApp.getLaunchUrl()
+      .then(launchUrl => {
+        if (launchUrl && launchUrl.url) {
+          handleDeepLink(launchUrl.url);
+        }
+      })
+      .catch(() => {});
+
+    // Listen for runtime deep-links
     const setupUrlListener = async () => {
       urlListener = await CapacitorApp.addListener('appUrlOpen', (data: { url: string }) => {
-        console.log('App opened with deep link URL:', data?.url);
-        if (!data || !data.url) return;
-
-        const url = data.url;
-
-        // 1. Handle Lesson Deep Links: ags19://lesson/{id}
-        if (url.includes('ags19://lesson/')) {
-          const rawId = url.split('ags19://lesson/')[1];
-          const lessonId = rawId ? rawId.split('?')[0].split('/')[0] : '';
-          if (lessonId && lessonId !== 'null') {
-            const targetLesson = lessons.find(l => l.id === lessonId);
-            if (targetLesson) {
-              openLessonControl(targetLesson);
-            }
-          }
-        } 
-        // 2. Handle Action Deep Links: ags19://action/{action} or ags19://{action}
-        else {
-          let action = '';
-          if (url.includes('ags19://action/')) {
-            action = url.split('ags19://action/')[1]?.split('?')[0]?.split('/')[0]?.toLowerCase();
-          } else if (url.includes('ags19://')) {
-            action = url.split('ags19://')[1]?.split('?')[0]?.split('/')[0]?.toLowerCase();
-          }
-
-          if (action) {
-            switch (action) {
-              case 'payments':
-                setActiveTab('payments');
-                break;
-              case 'schedule':
-                setActiveTab('schedule');
-                break;
-              case 'students':
-                setActiveTab('students');
-                break;
-              case 'history':
-                setActiveTab('history');
-                break;
-              case 'reports':
-                setActiveTab('reports');
-                break;
-              case 'settings':
-                setActiveTab('settings');
-                break;
-              case 'freetime':
-              case 'free_time':
-                setActiveTab('freeTime');
-                break;
-              case 'home':
-              case 'dashboard':
-                setActiveTab('home');
-                break;
-              case 'quick_lesson':
-              case 'add_quick_lesson':
-                setIsAddQuickLessonModalOpen(true);
-                break;
-              case 'add_lesson':
-                setIsAddLessonModalOpen(true);
-                break;
-              case 'add_student':
-                setIsAddStudentModalOpen(true);
-                break;
-              case 'add_group':
-                setIsAddGroupModalOpen(true);
-                break;
-              case 'start_lesson':
-                setIsStartLessonNowModalOpen(true);
-                break;
-            }
-          }
+        if (data?.url) {
+          handleDeepLink(data.url);
         }
       });
     };
@@ -155,7 +203,7 @@ function MainApp() {
         urlListener.remove();
       }
     };
-  }, [lessons, openLessonControl, setActiveTab, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, setIsAddStudentModalOpen, setIsAddGroupModalOpen, setIsStartLessonNowModalOpen]);
+  }, [handleDeepLink]);
 
   const stateRef = useRef({
     activeTab,
@@ -426,6 +474,12 @@ function MainApp() {
       <GlobalSearchModal />
       <RecentlyDeletedModal />
       <SetupWizard />
+      {quickTransactionType && (
+        <AddFinanceTransactionModal
+          type={quickTransactionType}
+          onClose={() => setQuickTransactionType(null)}
+        />
+      )}
     </div>
   );
 }

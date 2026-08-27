@@ -101,6 +101,8 @@ export interface TeacherSettingsRecord extends SyncableRecord {
     bufferBetweenLessonsMins?: number;
     autoAlertMinutes?: number;
   };
+  recentlyDeleted?: RecentlyDeletedData;
+  dismissedDashboardLessons?: string[];
   syncedAt?: number;
 }
 
@@ -639,6 +641,33 @@ export interface StudentPaymentDetail {
   notes?: string;
 }
 
+
+export type PerformanceLevel = 'needs_support' | 'developing' | 'good' | 'very_good' | 'excellent';
+export type ParticipationLevel = 'active' | 'good' | 'quiet' | 'needs_encouragement';
+export type UnderstandingLevel = 'excellent' | 'good' | 'developing' | 'needs_review';
+export type SpeakingLevel = 'confident' | 'good' | 'improving' | 'needs_practice';
+export type FocusLevel = 'excellent' | 'good' | 'sometimes_distracted' | 'needs_more_focus';
+export type ProgressLevel = 'improved' | 'stable' | 'needs_attention';
+
+export interface GeneratedFeedback {
+  short: string;
+  parent: string;
+  detailed: string;
+}
+
+export interface StudentSessionPerformance {
+  level?: PerformanceLevel;
+  participation?: ParticipationLevel;
+  understanding?: UnderstandingLevel;
+  speaking?: SpeakingLevel;
+  focus?: FocusLevel;
+  progress?: ProgressLevel;
+  generatedFeedback?: GeneratedFeedback;
+  feedbackLanguage?: 'ar' | 'en' | 'de';
+  generatedAt?: string;
+  feedbackVariantId?: string;
+}
+
 export interface LessonReport {
   attendanceStatus?: AttendanceStatus;
   studentAttendance?: Record<string, AttendanceStatus>;
@@ -664,6 +693,7 @@ export interface LessonReport {
   studentDictationGrade?: Record<string, number>;
   studentExamGrade?: Record<string, number>;
   studentNotes?: Record<string, string>;
+  studentPerformance?: Record<string, StudentSessionPerformance>;
   savedAt?: string;
   scores?: any;
 }
@@ -797,6 +827,7 @@ export interface BackupData {
   financeTransactions?: FinanceTransaction[];
   financeRecurring?: FinanceRecurring[];
   financeInstallments?: FinanceInstallment[];
+  financeNotifications?: FinanceNotification[];
 }
 
 export type InspirationFrequency = 'disabled' | 'daily' | 'before_first_lesson' | 'random_daily';
@@ -811,25 +842,62 @@ export interface InspirationMessage {
   createdAt?: string;
 }
 
+export interface FinanceNotification extends SyncableRecord {
+  title: string;
+  message: string;
+  amount?: number;
+  priority: 'critical' | 'warning' | 'informational';
+  read: boolean;
+  relatedId?: string; // e.g. recurringId or installmentId
+  type: 'recurring' | 'installment' | 'investment' | 'system';
+  dueDate?: string;
+  createdAt: string;
+}
+
 export interface FinanceAccount extends SyncableRecord {
   name: string;
-  type: 'cash' | 'bank' | 'wallet' | 'other';
-  openingBalance: number;
-  currentBalance: number;
+  type: 'cash' | 'bank' | 'wallet' | 'credit' | 'investment' | 'other';
   currency: string;
-  createdAt: string;
+  currentBalance: number;
+  initialBalance?: number;
+  openingBalance?: number;
+  creditLimit?: number;
+  accountNumber?: string;
+  bankName?: string;
+  color?: string;
+  annualInterestRate?: number;
+  annualRate?: number;
+  isActive?: boolean;
+  investmentEnabled?: boolean;
+  calculationFrequency?: string;
+  compounding?: string;
+  createdAt?: string;
+  
+  // New investment fields
+  initialCapital?: number;
+  totalContributions?: number;
+  accumulatedReturns?: number;
+  compoundingFrequency?: 'daily' | 'monthly' | 'yearly';
+  reinvestReturns?: boolean;
+  recurringContributionAmount?: number;
+  recurringContributionFrequency?: 'daily' | 'weekly' | 'monthly';
+  nextContributionDate?: string;
+  lastCompoundedDate?: string;
 }
 
 export interface FinanceCategory extends SyncableRecord {
   name: string;
   type: 'income' | 'expense' | 'transfer';
+  parentId?: string;
   icon?: string;
   color?: string;
+  isDefault?: boolean;
+  isActive?: boolean;
   createdAt: string;
 }
 
 export interface FinanceTransaction extends SyncableRecord {
-  type: 'income' | 'expense' | 'transfer';
+  type: 'income' | 'expense' | 'transfer' | 'adjustment' | 'investment_return';
   amount: number;
   accountId: string;
   toAccountId?: string;
@@ -839,29 +907,43 @@ export interface FinanceTransaction extends SyncableRecord {
   relatedStudentId?: string;
   relatedPaymentId?: string;
   createdAt: string;
+  investmentPeriodKey?: string; // used to prevent duplicate returns
 }
 
 export interface FinanceRecurring extends SyncableRecord {
   name: string;
+  type?: 'income' | 'expense';
   amount: number;
   categoryId: string;
   accountId: string;
   frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
   dueDayOfMonth?: number;
+  startDate?: string;
+  endDate?: string;
+  nextDueDate?: string;
+  notificationsEnabled?: boolean;
+  isActive?: boolean;
   lastPaidDate?: string;
   createdAt: string;
 }
 
 export interface FinanceInstallment extends SyncableRecord {
   name: string;
-  amountPerInstallment: number;
-  totalInstallments: number;
-  currentInstallment: number;
-  remainingBalance: number;
-  dueDate: string;
+  categoryId: string;
   accountId: string;
-  providerName?: string;
-  createdAt: string;
+  originalAmount: number;
+  downPayment: number;
+  installmentAmount: number;
+  totalInstallments: number;
+  paidInstallments: number;
+  remainingAmount: number;
+  frequency: string;
+  firstDueDate: string;
+  nextDueDate: string;
+  status: 'active' | 'completed' | 'overdue';
+  notificationsEnabled: boolean;
+  notes?: string;
+  createdAt?: string;
 }
 
 export interface InspirationSettings {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
@@ -10,6 +10,7 @@ import { DEFAULT_OFFLINE_AVATAR } from '../../data/avatarPresets';
 import { SyncHeaderButton } from '../sync/SyncHeaderButton';
 import { SyncCenterModal } from '../sync/SyncCenterModal';
 import { pairWithPeer } from '../../services/sync/syncClient';
+import { calculateDuePaymentCycles } from '../../utils/paymentUtils';
 
 interface DesktopSidebarProps {
   onOpenSyncModal?: () => void;
@@ -46,6 +47,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
     students,
     groups,
     lessons,
+    payments,
     t,
     language,
     _t
@@ -54,11 +56,23 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
   const [internalSyncOpen, setInternalSyncOpen] = useState(false);
   const [activityLogs, setActivityLogs] = useState<{ id: string; message: string; time: string }[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [seenDueCount, setSeenDueCount] = useState(0);
 
   const unreadCount = notifications.filter(n => !n.read).length;
   const deletedCount = recentlyDeleted.students.length + recentlyDeleted.groups.length + recentlyDeleted.lessons.length;
   const activeStudentsCount = students.filter(s => s.status !== 'archived').length;
   const activeGroupsCount = groups.filter(g => g.status !== 'archived').length;
+
+  const dueCycles = calculateDuePaymentCycles(students, groups, lessons, payments);
+  const dueCount = dueCycles.length;
+
+  useEffect(() => {
+    if (activeTab === 'payments' || activeTab === 'finance') {
+      setSeenDueCount(dueCount);
+    }
+  }, [activeTab, dueCount]);
+
+  const unreadDueCount = (activeTab === 'payments' || activeTab === 'finance') ? 0 : Math.max(0, dueCount - seenDueCount);
 
   const onlineCount = syncState?.pairedPeers
     ? syncState.pairedPeers.filter(p => {
@@ -169,7 +183,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
     { id: 'home', label: t('nav_home') || 'Startseite', icon: Home, badge: null },
     { id: 'schedule', label: t('nav_schedule') || 'Termine & Unterricht', icon: Calendar, badge: lessons.filter(l => l.date === new Date().toISOString().split('T')[0] && l.status !== 'cancelled').length || null },
     { id: 'students', label: t('nav_students') || 'Schüler & Gruppen', icon: Users, badge: `${activeStudentsCount}` },
-    { id: 'payments', label: t('nav_payments') || 'Zahlungen & Finanzen', icon: Wallet, badge: null },
+    { id: 'payments', label: t('nav_payments') || 'Zahlungen & Finanzen', icon: Wallet, badge: unreadDueCount > 0 ? `${unreadDueCount}` : null },
     { id: 'history', label: t('nav_history') || 'Sitzungsverlauf', icon: History, badge: null },
     { id: 'reports', label: t('nav_reports') || 'Berichte & Analysen', icon: BarChart2, badge: null },
     { id: 'certificates', label: t('nav_certificates') || 'Zertifikate-Studio', icon: Award, badge: null },

@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
-import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, LessonReport } from '../types';
+import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, LessonReport, StudentSessionPerformance } from '../types';
 import { 
   X, Play, Pause, Square, Video, MapPin, Send, Phone, CheckCircle2, 
   Clock, AlertCircle, Sparkles, FileText, Award, DollarSign, ExternalLink, Navigation,
   Zap, UserPlus, XCircle, Ban
 } from 'lucide-react';
 import { ParentSummaryModal } from './ParentSummaryModal';
+import { StudentSessionPerformanceSelector } from './StudentSessionPerformanceSelector';
 import { ArabicParentReportModal } from './ArabicParentReportModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { HomeworkFollowUpModal } from './HomeworkFollowUpModal';
@@ -61,17 +62,18 @@ export const LessonControlModal: React.FC = () => {
   const [studentDictationGrade, setStudentDictationGrade] = useState<Record<string, number>>({});
   const [studentExamGrade, setStudentExamGrade] = useState<Record<string, number>>({});
   const [studentNotes, setStudentNotes] = useState<Record<string, string>>({});
+  const [studentPerformance, setStudentPerformance] = useState<Record<string, StudentSessionPerformance>>({});
 
   const [homeworkStatus, setHomeworkStatus] = useState<HomeworkStatus>('assigned');
-  const [homeworkTitle, setHomeworkTitle] = useState('Kapitel 3: Grammatik Übungen');
-  const [homeworkDescription, setHomeworkDescription] = useState('Seiten 45-48 im Arbeitsbuch fertigstellen.');
-  const [quizScore, setQuizScore] = useState<number>(85);
-  const [examScore, setExamScore] = useState<number>(90);
-  const [participationScore, setParticipationScore] = useState<number>(95);
+  const [homeworkTitle, setHomeworkTitle] = useState('');
+  const [homeworkDescription, setHomeworkDescription] = useState('');
+  const [quizScore, setQuizScore] = useState<number>(0);
+  const [examScore, setExamScore] = useState<number>(0);
+  const [participationScore, setParticipationScore] = useState<number>(0);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('paid');
-  const [amountPaid, setAmountPaid] = useState<number>(200);
+  const [amountPaid, setAmountPaid] = useState<number>(0);
   const [packageChoice, setPackageChoice] = useState<number>(selectedLesson?.totalSessionsInPackage || 4);
-  const [teacherNotes, setTeacherNotes] = useState('Gute Interaktion, Wortschatz wurde erfolgreich wiederholt.');
+  const [teacherNotes, setTeacherNotes] = useState('');
   const [studentPayments, setStudentPayments] = useState<Record<string, { status: PaymentStatus; amount: number }>>({});
   const [reminderCopied, setReminderCopied] = useState(false);
   const [showLessonReminderModal, setShowLessonReminderModal] = useState(false);
@@ -125,6 +127,7 @@ export const LessonControlModal: React.FC = () => {
         setStudentExamGrade({});
       }
 
+      if (selectedLesson.report.studentPerformance) setStudentPerformance(selectedLesson.report.studentPerformance);
       if (selectedLesson.report.studentNotes) {
         setStudentNotes(selectedLesson.report.studentNotes);
       } else {
@@ -134,9 +137,9 @@ export const LessonControlModal: React.FC = () => {
       setHomeworkStatus(selectedLesson.report.homeworkStatus || 'assigned');
       setHomeworkTitle(selectedLesson.report.homeworkTitle || '');
       setHomeworkDescription(selectedLesson.report.homeworkDescription || '');
-      setQuizScore(selectedLesson.report.quizScore || 85);
-      setExamScore(selectedLesson.report.examScore || 90);
-      setParticipationScore(selectedLesson.report.participationScore || 95);
+      setQuizScore(selectedLesson.report.quizScore || 0);
+      setExamScore(selectedLesson.report.examScore || 0);
+      setParticipationScore(selectedLesson.report.participationScore || 0);
       setPaymentStatus(selectedLesson.report.paymentStatus || 'paid');
       setAmountPaid(selectedLesson.report.amountPaid || selectedLesson.amountDue);
       setTeacherNotes(selectedLesson.report.teacherNotes || '');
@@ -225,6 +228,7 @@ export const LessonControlModal: React.FC = () => {
             if (draft.studentDictationGrade) setStudentDictationGrade(draft.studentDictationGrade);
             if (draft.studentExamGrade) setStudentExamGrade(draft.studentExamGrade);
             if (draft.studentNotes) setStudentNotes(draft.studentNotes);
+            if (draft.studentPerformance) setStudentPerformance(draft.studentPerformance);
             setShowReportForm(true);
             setIsEditingReport(true);
           }
@@ -240,10 +244,10 @@ export const LessonControlModal: React.FC = () => {
       storage.setItem(`dl_draft_report_${selectedLesson.id}`, {
         attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription,
         quizScore, examScore, participationScore, teacherNotes,
-        lessonWhatWasTaught, lessonNextHomework, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes
+        lessonWhatWasTaught, lessonNextHomework, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance
       });
     }
-  }, [selectedLesson?.id, attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription, quizScore, examScore, participationScore, teacherNotes, lessonWhatWasTaught, lessonNextHomework, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes]);
+  }, [selectedLesson?.id, attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription, quizScore, examScore, participationScore, teacherNotes, lessonWhatWasTaught, lessonNextHomework, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance]);
 
   const handleSendPaymentReminder = () => {
     const teacherAr = getTeacherArabicName(profile, 'المعلم');
@@ -345,6 +349,24 @@ export const LessonControlModal: React.FC = () => {
   );
   const recipientPhone = formatWhatsAppPhone(rawRecipientPhone);
 
+  const isGroupLesson = targetGroup && students.filter(s => s.groupId === targetGroup.id).length > 1;
+  const groupWhatsAppLink = targetGroup?.whatsAppGroupLink || '';
+
+  const sendWhatsAppWithGroupCheck = (text: string) => {
+    if (isGroupLesson) {
+      if (groupWhatsAppLink) {
+        navigator.clipboard.writeText(text);
+        alert('تم نسخ الرسالة. سيتم فتح الجروب الآن لتلصق الرسالة.');
+        window.open(groupWhatsAppLink, '_blank');
+        return;
+      } else {
+        alert('هذا الجروب غير مسجل له رابط واتساب. يرجى إضافة رابط الجروب من إعدادات الجروب أولاً لتتمكن من الإرسال.');
+        return;
+      }
+    }
+    sendWhatsAppWithGroupCheck(text);
+  };
+
   const formatTimer = (totalSecs: number) => {
     const mins = Math.floor(totalSecs / 60);
     const secs = totalSecs % 60;
@@ -399,6 +421,7 @@ export const LessonControlModal: React.FC = () => {
       studentDictationGrade: isQuick ? (Object.keys(studentDictationGrade).length > 0 ? studentDictationGrade : { [qId]: 10 }) : studentDictationGrade,
       studentExamGrade: isQuick ? (Object.keys(studentExamGrade).length > 0 ? studentExamGrade : { [qId]: 10 }) : studentExamGrade,
       studentNotes: isQuick ? (Object.keys(studentNotes).length > 0 ? studentNotes : { [qId]: selectedLesson.quickNotes || '' }) : studentNotes,
+      studentPerformance,
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
@@ -418,32 +441,28 @@ export const LessonControlModal: React.FC = () => {
     const teacherEn = getTeacherEnglishName(profile, 'Lehrkraft');
     const teacherSig = teacherEn.startsWith('Herr ') || teacherEn.startsWith('Frau ') ? teacherEn : `Herr ${teacherEn}`;
     const text = `Hallo! Erinnerung an die Deutschstunde (${selectedLesson.title}) heute um ${selectedLesson.time} Uhr.\nMit freundlichen Grüßen,\n${teacherSig}`;
-    const url = buildWhatsAppUrl(recipientPhone, text);
-    window.open(url, '_blank');
+    sendWhatsAppWithGroupCheck(text);
   };
 
   const handleSendOfflineLessonStartMessage = () => {
     const teacherAr = getTeacherArabicName(profile, 'المعلم');
     const teacherSig = teacherAr.startsWith('أ.') || teacherAr.startsWith('الأستاذ') ? teacherAr : `أ. ${teacherAr}`;
     const text = `السلام عليكم ورحمة الله وبركاته\n\nتم بدء الحصة الآن.\n\nنحيطكم علماً بأن الطالب بدأ الحصة في موعدها المحدد.\n\nمع تحيات\n${teacherSig}`;
-    const url = buildWhatsAppUrl(recipientPhone, text);
-    window.open(url, '_blank');
+    sendWhatsAppWithGroupCheck(text);
   };
 
   const handleSendPaymentRequestMessage = () => {
     const teacherAr = getTeacherArabicName(profile, 'المعلم');
     const teacherSig = teacherAr.startsWith('أ.') || teacherAr.startsWith('الأستاذ') ? teacherAr : `أ. ${teacherAr}`;
     const text = `السلام عليكم ورحمة الله وبركاته\n\nتم الانتهاء من عدد الحصص المتفق عليها.\nبرجاء تحويل الرسوم المستحقة.\n\nمع تحيات\n${teacherSig}`;
-    const url = buildWhatsAppUrl(recipientPhone, text);
-    window.open(url, '_blank');
+    sendWhatsAppWithGroupCheck(text);
   };
 
   const handleStartTrip = () => {
     const teacherAr = getTeacherArabicName(profile, 'المعلم');
     const teacherSig = teacherAr.startsWith('أ.') || teacherAr.startsWith('الأستاذ') ? teacherAr : `أ. ${teacherAr}`;
     const text = `السلام عليكم ورحمة الله وبركاته\n\n${teacherSig} في الطريق الآن للحصة (${selectedLesson.title}). الوصول المتوقع خلال 20-30 دقيقة إن شاء الله. 🚗`;
-    const url = buildWhatsAppUrl(recipientPhone, text);
-    window.open(url, '_blank');
+    sendWhatsAppWithGroupCheck(text);
   };
 
   const handleOpenMaps = () => {
@@ -454,7 +473,11 @@ export const LessonControlModal: React.FC = () => {
 
   return (
     <div 
-      onClick={closeLessonControl} 
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          closeLessonControl();
+        }
+      }} 
       className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center sm: pt-[max(24px,env(safe-area-inset-top,24px))] overflow-y-auto p-0 sm:p-4 pb-0"
     >
       <div 
@@ -463,30 +486,30 @@ export const LessonControlModal: React.FC = () => {
       >
         <div className="w-10 h-1 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2 mb-1 sm:hidden shrink-0" />
         {/* Top Header */}
-        <div className="bg-slate-900 text-white p-3.5 flex items-center justify-between relative">
+        <div className="bg-surface border-b border-surface-border p-3.5 sm:p-4 flex items-center justify-between relative shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className={`p-2 rounded-lg ${
-              selectedLesson.type === 'online' ? 'bg-primary' : 'bg-primary'
-            }`}>
-              {selectedLesson.type === 'online' ? <Video className="w-4 h-4 text-white" /> : <MapPin className="w-4 h-4 text-white" />}
+            <div className="p-2 sm:p-2.5 bg-primary-soft text-primary rounded-xl shrink-0">
+              {selectedLesson.type === 'online' ? <Video className="w-4 h-4 sm:w-5 sm:h-5" /> : <MapPin className="w-4 h-4 sm:w-5 sm:h-5" />}
             </div>
 
             <div>
               <div className="flex items-center gap-1.5">
-                <span className="bg-primary/20 text-primary/70 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border border-primary/30">
+                <span className="bg-primary-soft text-primary font-mono text-[10px] font-black px-1.5 py-0.5 rounded border border-primary-border">
                   {(selectedLesson.type || '').toUpperCase()}
                 </span>
-                <span className="text-[11px] text-text-muted/70 font-medium">{selectedLesson.grade}</span>
+                {selectedLesson.grade && (
+                  <span className="text-[11px] text-text-muted font-bold">{selectedLesson.grade}</span>
+                )}
               </div>
-              <h2 className="text-base font-black tracking-tight">{selectedLesson.title}</h2>
+              <h2 className="text-base sm:text-lg font-black tracking-tight text-text-main mt-0.5">{selectedLesson.title}</h2>
             </div>
           </div>
 
           <button
             onClick={closeLessonControl}
-            className="p-1.5 hover:bg-surface/10 rounded-full transition-colors cursor-pointer text-slate-300 hover:text-white"
+            className="p-1.5 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main rounded-full transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
@@ -1081,7 +1104,7 @@ export const LessonControlModal: React.FC = () => {
                                           onClick={() => {
                                             setStudentDictationGrade(prev => ({ ...prev, [st.id]: score }));
                                           }}
-                                          className={`w-6 h-6 rounded-md text-[10px] font-black flex items-center justify-center border transition-all ${
+                                          className={`w-7 h-7 sm:w-6 sm:h-6 rounded-lg sm:rounded-md text-xs sm:text-[10px] font-black flex items-center justify-center border transition-all cursor-pointer ${
                                             stDict === score
                                               ? 'bg-primary text-white border-primary shadow-2xs scale-105'
                                               : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200'
@@ -1104,7 +1127,7 @@ export const LessonControlModal: React.FC = () => {
                                           onClick={() => {
                                             setStudentExamGrade(prev => ({ ...prev, [st.id]: score }));
                                           }}
-                                          className={`w-6 h-6 rounded-md text-[10px] font-black flex items-center justify-center border transition-all ${
+                                          className={`w-7 h-7 sm:w-6 sm:h-6 rounded-lg sm:rounded-md text-xs sm:text-[10px] font-black flex items-center justify-center border transition-all cursor-pointer ${
                                             stExam === score
                                               ? 'bg-primary text-white border-primary shadow-2xs scale-105'
                                               : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200'
@@ -1129,6 +1152,11 @@ export const LessonControlModal: React.FC = () => {
                                       placeholder={t('auto_e_g_excellent_listening_skill')}
                                     />
                                   </div>
+                                  <StudentSessionPerformanceSelector 
+                                    performance={studentPerformance[st.id]}
+                                    onChange={(perf) => setStudentPerformance(prev => ({ ...prev, [st.id]: perf }))}
+                                    language='ar'
+                                  />
                                 </div>
                               ) : (
                                 <div className="mt-2 py-1.5 px-2 bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40 rounded-lg text-center animate-fade-in">

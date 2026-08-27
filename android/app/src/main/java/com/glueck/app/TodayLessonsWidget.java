@@ -25,6 +25,7 @@ public class TodayLessonsWidget extends AppWidgetProvider {
         views.setOnClickPendingIntent(R.id.widget_header, headerPendingIntent);
 
         Intent clickIntentTemplate = new Intent(context, MainActivity.class);
+        clickIntentTemplate.setAction(Intent.ACTION_VIEW);
         PendingIntent clickPendingIntentTemplate = PendingIntent.getActivity(context, 1, clickIntentTemplate, PendingIntent.FLAG_UPDATE_CURRENT | (android.os.Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0));
         views.setPendingIntentTemplate(R.id.widget_list_view, clickPendingIntentTemplate);
 

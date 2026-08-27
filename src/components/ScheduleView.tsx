@@ -77,14 +77,25 @@ export const ScheduleView: React.FC = () => {
   const dayConflicts = useMemo(() => {
     const conflicts: string[] = [];
     const nonCancelled = activeLessons.filter(l => l.status !== 'cancelled');
-    for (let i = 0; i < nonCancelled.length; i++) {
-      for (let j = i + 1; j < nonCancelled.length; j++) {
-        if (checkOverlap(nonCancelled[i], nonCancelled[j])) {
-          if (!conflicts.includes(nonCancelled[i].id)) conflicts.push(nonCancelled[i].id);
-          if (!conflicts.includes(nonCancelled[j].id)) conflicts.push(nonCancelled[j].id);
+    
+    // Group by date first to avoid O(N^2) across the entire dataset
+    const lessonsByDate: Record<string, Lesson[]> = {};
+    nonCancelled.forEach(l => {
+      if (!lessonsByDate[l.date]) lessonsByDate[l.date] = [];
+      lessonsByDate[l.date].push(l);
+    });
+
+    Object.values(lessonsByDate).forEach(dayLessonsList => {
+      for (let i = 0; i < dayLessonsList.length; i++) {
+        for (let j = i + 1; j < dayLessonsList.length; j++) {
+          if (checkOverlap(dayLessonsList[i], dayLessonsList[j])) {
+            if (!conflicts.includes(dayLessonsList[i].id)) conflicts.push(dayLessonsList[i].id);
+            if (!conflicts.includes(dayLessonsList[j].id)) conflicts.push(dayLessonsList[j].id);
+          }
         }
       }
-    }
+    });
+    
     return conflicts;
   }, [activeLessons]);
 

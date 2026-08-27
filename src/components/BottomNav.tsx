@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Home, Calendar, Users, MoreHorizontal, Wallet, BarChart2, Settings, Zap, History, Play, Clock, Award, BookOpen, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { calculateDuePaymentCycles } from '../utils/paymentUtils';
 
 export const BottomNav: React.FC = () => {
   const { 
@@ -11,13 +12,29 @@ export const BottomNav: React.FC = () => {
     setIsStartLessonNowModalOpen, 
     t,
     language,
-    _t
+    _t,
+    students,
+    groups,
+    lessons,
+    payments
   } = useApp();
   
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showQuickMenu, setShowQuickMenu] = useState(false);
+  const [seenDueCount, setSeenDueCount] = useState(0);
 
   const isRtl = language === 'ar' || (typeof document !== 'undefined' && document.documentElement.dir === 'rtl');
+
+  const dueCycles = calculateDuePaymentCycles(students, groups, lessons, payments);
+  const dueCount = dueCycles.length;
+
+  useEffect(() => {
+    if (activeTab === 'payments' || activeTab === 'finance') {
+      setSeenDueCount(dueCount);
+    }
+  }, [activeTab, dueCount]);
+
+  const unreadDueCount = (activeTab === 'payments' || activeTab === 'finance') ? 0 : Math.max(0, dueCount - seenDueCount);
 
   // Helper to determine if "More" sub-tabs are active
   const isHistoryActive = activeTab === 'history';
@@ -35,7 +52,7 @@ export const BottomNav: React.FC = () => {
   ];
 
   const rightTabs = [
-    { id: 'payments', label: t('nav_payments') || 'Zahlungen', icon: Wallet },
+    { id: 'payments', label: t('nav_payments') || 'Zahlungen', icon: Wallet, badge: unreadDueCount > 0 ? unreadDueCount : null },
     { id: 'schoolSchedule', label: _t('المدرسة', 'School', 'Schule'), icon: BookOpen },
     { id: 'hod', label: _t('القسم', 'HOD', 'Fachleiter'), icon: Layers },
   ];
@@ -215,13 +232,20 @@ export const BottomNav: React.FC = () => {
                     animate={{ scale: isActive ? 1.08 : 1 }}
                     className="flex items-center gap-1.5"
                   >
-                    <IconComponent
-                      className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-200 ${
-                        isActive
-                          ? 'text-primary dark:text-primary'
-                          : 'text-text-muted/70 dark:text-slate-500 hover:text-slate-600 dark:hover:text-primary'
-                      }`}
-                    />
+                    <div className="relative">
+                      <IconComponent
+                        className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-200 ${
+                          isActive
+                            ? 'text-primary dark:text-primary'
+                            : 'text-text-muted/70 dark:text-slate-500 hover:text-slate-600 dark:hover:text-primary'
+                        }`}
+                      />
+                      {(tab as any).badge && (
+                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold px-1 min-w-[14px] h-[14px] rounded-full flex items-center justify-center shadow-sm">
+                          {(tab as any).badge}
+                        </span>
+                      )}
+                    </div>
                     
                     <AnimatePresence initial={false}>
                       {isActive && (

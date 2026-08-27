@@ -345,13 +345,19 @@ export const sendSystemNotification = async (title: string, body: string, tag: s
     try {
       await initNotificationChannels();
       const notifId = Math.floor(Math.random() * 100000);
+      
+      let channelId = 'lessons_reminders';
+      if (tag === 'payment') channelId = 'payment_due';
+      if (tag === 'lessonStart') channelId = 'lesson_start';
+      if (tag === 'attendance') channelId = 'attendance_reminder';
+      
       await LocalNotifications.schedule({
         notifications: [
           {
             id: notifId,
             title,
             body,
-            channelId: 'lessons_reminders',
+            channelId,
             schedule: { at: new Date(Date.now() + 100) },
           }
         ]

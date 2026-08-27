@@ -8,7 +8,7 @@
     android:targetCellHeight="3"
     android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/widget_todo"
-    android:previewLayout="@layout/widget_todo"
+    android:previewLayout="@layout/widget_preview_todo"
     android:description="@string/widget_desc_todo_tasks"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen" />

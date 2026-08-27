@@ -87,28 +87,42 @@ ${lessonDatesStr || 'لا توجد حصص مسجلة حتى الآن'}
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center sm: overflow-y-auto p-0 sm:p-4 pb-0">
-      <div className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-lg shadow-2xl overflow-hidden animate-scale-up space-y-0 font-sans">
+    <div 
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center sm: overflow-y-auto p-0 sm:p-4 pb-0"
+    >
+      <div 
+        onClick={(e) => e.stopPropagation()}
+        className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-lg shadow-2xl overflow-hidden animate-scale-up space-y-0 font-sans"
+      >
         <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
         
         {/* Header */}
-        <div className="bg-gradient-to-r from-primary via-primary to-primary-hover p-5 text-white flex items-center justify-between">
-          <div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-primary-soft bg-surface/20 px-2.5 py-0.5 rounded-full">
-              WhatsApp الرسالة التلقائية
-            </span>
-            <h3 className="text-lg font-black mt-1 flex items-center gap-2">
-              <MessageSquare className="w-5 h-5 fill-white" />
-              <span>إرسال ملخص السداد والحضور (Send Payment Summary)</span>
-            </h3>
-            <p className="text-xs text-primary-soft">
-              تقرير الحضور والمستحقات المالية لولي الأمر باللغة العربية.
-            </p>
+        <div className="bg-surface border-b border-surface-border p-4 sm:p-5 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 sm:p-2.5 bg-primary-soft text-primary rounded-xl shrink-0">
+              <MessageSquare className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-primary bg-primary-soft border border-primary-border px-2 py-0.5 rounded-full inline-block">
+                WhatsApp الرسالة التلقائية
+              </span>
+              <h3 className="text-base sm:text-lg font-black mt-1 text-text-main">
+                إرسال ملخص السداد والحضور
+              </h3>
+              <p className="text-xs text-text-muted">
+                تقرير الحضور والمستحقات المالية لولي الأمر باللغة العربية
+              </p>
+            </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-2 hover:bg-surface/20 rounded-full text-white transition-colors cursor-pointer"
+            className="p-1.5 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>

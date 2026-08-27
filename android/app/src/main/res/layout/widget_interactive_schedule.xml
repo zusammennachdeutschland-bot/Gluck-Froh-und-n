@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg">
+
+    <!-- Day Navigation Bar -->
+    <LinearLayout
+        android:id="@+id/widget_schedule_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#222222"
+        android:padding="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <!-- Previous Day Button -->
+        <TextView
+            android:id="@+id/btn_prev_day"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:gravity="center"
+            android:text="◀"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#38BDF8"
+            android:background="#1E293B" />
+
+        <!-- Date Display / App Open Trigger -->
+        <TextView
+            android:id="@+id/tv_schedule_date_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:text="📅 جدول اليوم"
+            android:textStyle="bold"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <!-- Next Day Button -->
+        <TextView
+            android:id="@+id/btn_next_day"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:gravity="center"
+            android:text="▶"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#38BDF8"
+            android:background="#1E293B" />
+
+        <!-- Today Reset Button -->
+        <TextView
+            android:id="@+id/btn_today_reset"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginStart="6dp"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="⟳ اليوم"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="#10B981"
+            android:background="#064E3B" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ListView
+            android:id="@+id/widget_schedule_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:divider="@android:color/transparent"
+            android:dividerHeight="6dp"
+            android:padding="6dp" />
+
+        <TextView
+            android:id="@+id/widget_empty_schedule_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="لا توجد حصص مجدولة لهذا اليوم"
+            android:textColor="#888888"
+            android:textSize="13sp"
+            android:visibility="gone" />
+    </FrameLayout>
+</LinearLayout>

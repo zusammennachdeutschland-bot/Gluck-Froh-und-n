@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../../context/AppContext';
-import { X, Save, CreditCard } from 'lucide-react';
+import { X, Save, CreditCard, Bell } from 'lucide-react';
 import { FinanceInstallment } from '../../../types';
 
 interface AddFinanceInstallmentModalProps {
@@ -9,168 +9,234 @@ interface AddFinanceInstallmentModalProps {
 }
 
 export const AddFinanceInstallmentModal: React.FC<AddFinanceInstallmentModalProps> = ({ onClose, existingInstallment }) => {
-  const { _t, addFinanceInstallment, updateFinanceInstallment, financeAccounts } = useApp();
-  
+  const { _t, addFinanceInstallment, updateFinanceInstallment, financeCategories, financeAccounts } = useApp();
+
   const [name, setName] = useState(existingInstallment?.name || '');
-  const [amountPerInstallment, setAmountPerInstallment] = useState(existingInstallment?.amountPerInstallment?.toString() || '');
-  const [totalInstallments, setTotalInstallments] = useState(existingInstallment?.totalInstallments?.toString() || '10');
-  const [currentInstallment, setCurrentInstallment] = useState(existingInstallment?.currentInstallment?.toString() || '0');
-  const [dueDate, setDueDate] = useState(existingInstallment?.dueDate || new Date().toISOString().split('T')[0]);
-  const [accountId, setAccountId] = useState(existingInstallment?.accountId || (financeAccounts[0]?.id || ''));
-  const [providerName, setProviderName] = useState(existingInstallment?.providerName || '');
+  const [categoryId, setCategoryId] = useState(existingInstallment?.categoryId || (financeCategories.find(c => c.type === 'expense' && !c.deleted)?.id || ''));
+  const [accountId, setAccountId] = useState(existingInstallment?.accountId || (financeAccounts.find(a => !a.deleted)?.id || ''));
+  
+  const [originalAmount, setOriginalAmount] = useState(existingInstallment?.originalAmount?.toString() || '');
+  const [downPayment, setDownPayment] = useState(existingInstallment?.downPayment?.toString() || '0');
+  const [totalInstallments, setTotalInstallments] = useState(existingInstallment?.totalInstallments?.toString() || '12');
+  const [installmentAmount, setInstallmentAmount] = useState(existingInstallment?.installmentAmount?.toString() || '');
+  
+  const [frequency, setFrequency] = useState(existingInstallment?.frequency || 'monthly');
+  const [firstDueDate, setFirstDueDate] = useState(existingInstallment?.firstDueDate || new Date().toISOString().split('T')[0]);
+  
+  const [notes, setNotes] = useState(existingInstallment?.notes || '');
+  const [notificationsEnabled, setNotificationsEnabled] = useState(existingInstallment?.notificationsEnabled !== false);
+
+  // Auto-calculate installment amount if left empty
+  useEffect(() => {
+    if (originalAmount && totalInstallments && !existingInstallment) {
+      const orig = parseFloat(originalAmount) || 0;
+      const down = parseFloat(downPayment) || 0;
+      const count = parseInt(totalInstallments) || 1;
+      const remaining = Math.max(0, orig - down);
+      
+      const calcAmount = remaining / count;
+      setInstallmentAmount(calcAmount.toFixed(2));
+    }
+  }, [originalAmount, downPayment, totalInstallments, existingInstallment]);
 
   const handleSave = () => {
-    const amount = parseFloat(amountPerInstallment);
-    const total = parseInt(totalInstallments, 10);
-    const current = parseInt(currentInstallment, 10) || 0;
+    if (!name.trim() || !originalAmount || !totalInstallments || !installmentAmount || !categoryId || !accountId) return;
 
-    if (!name.trim() || !amount || amount <= 0 || !total || total <= 0) return;
-
-    const remainingBalance = Math.max(0, (total - current) * amount);
+    const orig = parseFloat(originalAmount);
+    const down = parseFloat(downPayment) || 0;
+    const count = parseInt(totalInstallments);
+    const instAmt = parseFloat(installmentAmount);
 
     if (existingInstallment) {
       updateFinanceInstallment(existingInstallment.id, {
-        name: name.trim(),
-        amountPerInstallment: amount,
-        totalInstallments: total,
-        currentInstallment: current,
-        remainingBalance,
-        dueDate,
+        name,
+        categoryId,
         accountId,
-        providerName: providerName.trim()
+        originalAmount: orig,
+        downPayment: down,
+        installmentAmount: instAmt,
+        totalInstallments: count,
+        frequency,
+        firstDueDate,
+        notes,
+        notificationsEnabled
       });
     } else {
+      const remaining = Math.max(0, orig - down);
       addFinanceInstallment({
-        name: name.trim(),
-        amountPerInstallment: amount,
-        totalInstallments: total,
-        currentInstallment: current,
-        remainingBalance,
-        dueDate,
+        name,
+        categoryId,
         accountId,
-        providerName: providerName.trim()
+        originalAmount: orig,
+        downPayment: down,
+        installmentAmount: instAmt,
+        totalInstallments: count,
+        paidInstallments: 0,
+        remainingAmount: remaining,
+        frequency,
+        firstDueDate,
+        nextDueDate: firstDueDate,
+        status: 'active',
+        notificationsEnabled,
+        notes
       });
     }
     onClose();
   };
 
+  const filteredCategories = financeCategories.filter(c => !c.deleted && c.type === 'expense');
+  const activeAccounts = financeAccounts.filter(a => !a.deleted);
+
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center items-center bg-slate-950/60 backdrop-blur-xs">
-      <div className="w-full md:w-full md:max-w-md bg-surface border-t md:border border-surface-border md:rounded-2xl shadow-2xl rounded-t-2xl overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-surface rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
         <div className="flex items-center justify-between p-4 border-b border-surface-border">
-          <h3 className="text-lg font-bold flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-purple-500" />
-            {existingInstallment ? _t('تعديل القسط أو الجمعية', 'Edit Installment', 'Rate bearbeiten') : _t('إضافة قسط أو جمعية', 'Add Installment / Association', 'Rate / Verein hinzufügen')}
+          <h3 className="text-lg font-bold text-text-main flex items-center gap-2">
+            <CreditCard className="w-5 h-5 text-primary" />
+            {existingInstallment ? _t('تعديل قسط', 'Edit Installment', 'Rate bearbeiten') : _t('إضافة قسط جديد', 'Add New Installment', 'Neue Rate')}
           </h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-surface-hover rounded-lg text-text-muted cursor-pointer">
+          <button onClick={onClose} className="p-1.5 hover:bg-surface-hover rounded-lg text-text-muted transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-4 space-y-4 max-h-[80vh] overflow-y-auto">
+        <div className="p-4 overflow-y-auto space-y-4">
           <div>
-            <label className="block text-xs font-bold text-text-muted mb-1.5">
-              {_t('اسم القسط / الجمعية', 'Installment / Association Name', 'Name der Rate')} *
-            </label>
+            <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('اسم أو وصف القسط', 'Name / Description', 'Name')} *</label>
             <input 
               type="text" 
               value={name} 
               onChange={e => setName(e.target.value)} 
-              placeholder={_t('مثال: قسط اللاب توب، جمعية المدرسين', 'e.g. Laptop Installment, Teachers Association', 'z.B. Laptop-Rate')}
-              className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-hidden"
+              placeholder={_t('مثال: آيفون، سيارة', 'e.g. Phone, Car', 'z.B. Telefon, Auto')}
+              className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-none"
               autoFocus
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-text-muted mb-1.5">
-                {_t('قيمة القسط الواحد', 'Amount per Installment', 'Betrag pro Rate')} *
-              </label>
-              <input 
-                type="number" 
-                value={amountPerInstallment} 
-                onChange={e => setAmountPerInstallment(e.target.value)} 
-                placeholder="1000"
-                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-hidden"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-text-muted mb-1.5">
-                {_t('إجمالي عدد الأقساط', 'Total Installments', 'Gesamtanzahl Raten')} *
-              </label>
-              <input 
-                type="number" 
-                value={totalInstallments} 
-                onChange={e => setTotalInstallments(e.target.value)} 
-                placeholder="10"
-                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-hidden"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-text-muted mb-1.5">
-                {_t('الأقساط المدفوعة مسبقاً', 'Already Paid Installments', 'Bereits bezahlt')}
-              </label>
-              <input 
-                type="number" 
-                value={currentInstallment} 
-                onChange={e => setCurrentInstallment(e.target.value)} 
-                placeholder="0"
-                min="0"
-                max={totalInstallments || '100'}
-                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-hidden"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-text-muted mb-1.5">
-                {_t('تاريخ الاستحقاق الأول', 'First Due Date', 'Fälligkeitsdatum')}
-              </label>
-              <input 
-                type="date" 
-                value={dueDate} 
-                onChange={e => setDueDate(e.target.value)} 
-                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-hidden"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-text-muted mb-1.5">
-                {_t('حساب الخصم الافتراضي', 'Default Account', 'Standardkonto')}
-              </label>
+              <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('التصنيف', 'Category', 'Kategorie')} *</label>
               <select 
-                value={accountId} 
-                onChange={e => setAccountId(e.target.value)}
-                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-hidden"
+                value={categoryId} 
+                onChange={e => setCategoryId(e.target.value)}
+                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-none"
               >
-                <option value="">{_t('اختر حساب...', 'Select Account...', 'Konto wählen...')}</option>
-                {financeAccounts.filter(a => !a.deleted).map(acc => (
-                  <option key={acc.id} value={acc.id}>{acc.name} ({acc.currentBalance.toLocaleString()} {acc.currency})</option>
+                <option value="" disabled>{_t('اختر تصنيف', 'Select Category', 'Kategorie wählen')}</option>
+                {filteredCategories.map(c => (
+                  <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-bold text-text-muted mb-1.5">
-                {_t('الجهة / المستفيد (اختياري)', 'Provider / Recipient', 'Empfänger')}
-              </label>
+              <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('حساب الدفع', 'Account', 'Konto')} *</label>
+              <select 
+                value={accountId} 
+                onChange={e => setAccountId(e.target.value)}
+                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-none"
+              >
+                <option value="" disabled>{_t('اختر حساب', 'Select Account', 'Konto wählen')}</option>
+                {activeAccounts.map(a => (
+                  <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 bg-surface-hover p-3 rounded-xl border border-surface-border">
+            <div>
+              <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('المبلغ الأصلي الإجمالي', 'Total Original Amount', 'Gesamtbetrag')} *</label>
               <input 
-                type="text" 
-                value={providerName} 
-                onChange={e => setProviderName(e.target.value)} 
-                placeholder={_t('مثال: البنك / بي تك / زميل', 'e.g. Bank, Store, Colleague', 'z.B. Bank, Kollege')}
-                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-hidden"
+                type="number" 
+                value={originalAmount} 
+                onChange={e => setOriginalAmount(e.target.value)} 
+                placeholder="24000"
+                className="w-full px-3 py-2 bg-surface border border-surface-border rounded-lg text-sm focus:ring-1 focus:ring-primary outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('المقدم (إن وجد)', 'Down Payment (Optional)', 'Anzahlung')}</label>
+              <input 
+                type="number" 
+                value={downPayment} 
+                onChange={e => setDownPayment(e.target.value)} 
+                placeholder="4000"
+                className="w-full px-3 py-2 bg-surface border border-surface-border rounded-lg text-sm focus:ring-1 focus:ring-primary outline-none"
               />
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('عدد الأقساط', 'No. of Installments', 'Anzahl der Raten')} *</label>
+              <input 
+                type="number" 
+                value={totalInstallments} 
+                onChange={e => setTotalInstallments(e.target.value)} 
+                placeholder="12"
+                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('قيمة القسط', 'Installment Amount', 'Ratenbetrag')} *</label>
+              <input 
+                type="number" 
+                value={installmentAmount} 
+                onChange={e => setInstallmentAmount(e.target.value)} 
+                placeholder="0.00"
+                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-none font-bold text-primary"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('دورية الدفع', 'Frequency', 'Häufigkeit')}</label>
+              <select 
+                value={frequency} 
+                onChange={e => setFrequency(e.target.value as any)}
+                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-none"
+              >
+                <option value="weekly">{_t('أسبوعياً', 'Weekly', 'Wöchentlich')}</option>
+                <option value="monthly">{_t('شهرياً', 'Monthly', 'Monatlich')}</option>
+                <option value="yearly">{_t('سنوياً', 'Yearly', 'Jährlich')}</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('تاريخ أول استحقاق', 'First Due Date', 'Erstes Fälligkeitsdatum')}</label>
+              <input 
+                type="date" 
+                value={firstDueDate} 
+                onChange={e => setFirstDueDate(e.target.value)}
+                className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2 mt-4 p-4 bg-surface-hover rounded-xl border border-surface-border">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm font-bold text-text-main flex items-center gap-2">
+                <Bell className="w-4 h-4 text-primary" />
+                {_t('تفعيل التنبيهات', 'Enable Notifications', 'Benachrichtigungen aktivieren')}
+              </span>
+              <input 
+                type="checkbox"
+                checked={notificationsEnabled}
+                onChange={e => setNotificationsEnabled(e.target.checked)}
+                className="w-5 h-5 accent-primary"
+              />
+            </label>
+            <p className="text-xs text-text-muted pr-6">
+              {_t('سيتم تذكيرك قبل موعد الدفع بـ 5 أيام ويوم واحد وفي نفس اليوم.', 'You will be reminded 5 days, 1 day before, and on the due date.', 'Sie werden vor dem Fälligkeitsdatum erinnert.')}
+            </p>
+          </div>
+
+        </div>
+
+        <div className="p-4 border-t border-surface-border">
           <button 
-            onClick={handleSave} 
-            disabled={!name.trim() || !amountPerInstallment || parseFloat(amountPerInstallment) <= 0 || !totalInstallments || parseInt(totalInstallments, 10) <= 0}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-primary hover:bg-primary-hover text-white rounded-xl font-bold disabled:opacity-50 mt-2 transition-colors cursor-pointer shadow-2xs"
+            onClick={handleSave}
+            disabled={!name.trim() || !originalAmount || !totalInstallments || !installmentAmount || !categoryId || !accountId}
+            className="w-full py-3 bg-primary hover:bg-primary-hover text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 shadow-xs"
           >
             <Save className="w-5 h-5" />
             {_t('حفظ القسط', 'Save Installment', 'Rate speichern')}

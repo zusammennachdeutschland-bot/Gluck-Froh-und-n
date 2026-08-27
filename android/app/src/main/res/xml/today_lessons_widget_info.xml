@@ -8,7 +8,7 @@
     android:targetCellHeight="2"
     android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/widget_today_lessons"
-    android:previewLayout="@layout/widget_today_lessons"
+    android:previewLayout="@layout/widget_preview_today_lessons"
     android:description="@string/widget_desc_today_lessons"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen" />

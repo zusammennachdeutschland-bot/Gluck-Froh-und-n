@@ -14,6 +14,10 @@
     <string name="widget_name_quick_actions">Quick Attendance</string>
     <string name="widget_name_current_lesson">Current Active Lesson</string>
     <string name="widget_name_todo_tasks">To-Do Tasks</string>
+    <string name="widget_name_contact_remind">Contact &amp; Reminders</string>
+    <string name="widget_name_interactive_schedule">Interactive Full Schedule</string>
+    <string name="widget_name_installments_payments">Installments &amp; Bills Tracker</string>
+    <string name="widget_name_quick_transactions">Quick Deposit &amp; Transactions</string>
 
     <!-- Widget Descriptions -->
     <string name="widget_desc_teacher_overview">Summary of daily lessons, total students, attendance rate, monthly revenue, and overdue payments.</string>
@@ -24,4 +28,8 @@
     <string name="widget_desc_quick_actions">Quick shortcuts to start lessons, add students, collect payments, and send messages.</string>
     <string name="widget_desc_current_lesson">Live stopwatch timer, group name, and attendance for the active lesson.</string>
     <string name="widget_desc_todo_tasks">Quick access to open teacher tasks and to-do items.</string>
+    <string name="widget_desc_contact_remind">One-tap WhatsApp, phone calls, and lesson reminders for today\'s students.</string>
+    <string name="widget_desc_interactive_schedule">Browse full lesson schedules and change displayed days directly from your home screen.</string>
+    <string name="widget_desc_installments_payments">Monitor due installments, monthly recurring bills, and overdue student payments.</string>
+    <string name="widget_desc_quick_transactions">Instant shortcuts to record income, deposits, expenses, and student payments.</string>
 </resources>

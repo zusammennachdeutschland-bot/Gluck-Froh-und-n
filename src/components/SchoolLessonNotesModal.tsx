@@ -63,45 +63,27 @@ export const SchoolLessonNotesModal: React.FC<SchoolLessonNotesModalProps> = ({
   const [isStudentPickerOpen, setIsStudentPickerOpen] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
 
-  // Find matching students for this class from existing groups & HOD records
   const matchingStudents = useMemo(() => {
     const list: { id: string; name: string; source: string }[] = [];
     const seenNames = new Set<string>();
+    const normalizedClass = className.trim().toLowerCase().replace(/\s+/g, '');
 
-    const normalizedClass = className.trim().toLowerCase();
-
-    // 1. Check Groups matching className
-    const matchingGroups = groups.filter(g => 
-      !g.deleted && 
-      (g.name.toLowerCase().includes(normalizedClass) || normalizedClass.includes(g.name.toLowerCase()))
-    );
-    const matchingGroupIds = new Set(matchingGroups.map(g => g.id));
-
-    students.filter(s => !s.deleted && (matchingGroupIds.has(s.groupId) || (s.grade && normalizedClass.includes(s.grade.toLowerCase())))).forEach(s => {
-      if (!seenNames.has(s.name.toLowerCase())) {
-        seenNames.add(s.name.toLowerCase());
-        list.push({ id: s.id, name: s.name, source: 'Student' });
-      }
-    });
-
-    // 2. Check HOD students
-    hodStudents.filter(h => !h.deleted && (h.className?.toLowerCase() === normalizedClass || !normalizedClass)).forEach(h => {
+    // 1. Check HOD students matching this class exactly or leniently
+    hodStudents.filter(h => {
+      if (h.deleted) return false;
+      if (!normalizedClass) return true;
+      const hClass = (h.className || '').trim().toLowerCase().replace(/\s+/g, '');
+      return hClass === normalizedClass;
+    }).forEach(h => {
       const name = h.nameAr || h.nameEn || h.name || 'Student';
       if (!seenNames.has(name.toLowerCase())) {
         seenNames.add(name.toLowerCase());
-        list.push({ id: h.id, name, source: 'HOD' });
+        list.push({ id: h.id, name, source: 'Student' });
       }
     });
 
-    // 3. Fallback: If no matching found, show all students
-    if (list.length === 0) {
-      students.filter(s => !s.deleted).slice(0, 30).forEach(s => {
-        list.push({ id: s.id, name: s.name, source: 'Student' });
-      });
-    }
-
     return list;
-  }, [students, groups, hodStudents, className]);
+  }, [hodStudents, className]);
 
   const filteredPickerStudents = useMemo(() => {
     if (!studentSearch.trim()) return matchingStudents;

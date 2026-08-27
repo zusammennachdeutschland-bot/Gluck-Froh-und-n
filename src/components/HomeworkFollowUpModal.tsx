@@ -49,9 +49,15 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
       console.warn("[Homework Audit Log] Lesson relationship is broken. Cannot find previous lesson.");
     } else {
       try {
-        const hwTitle = prevLesson.report?.homeworkTitle;
-        const hwDesc = prevLesson.report?.homeworkDescription;
-        const legacyHomework = (prevLesson.report as any)?.homework;
+        let hwTitle = prevLesson.report?.homeworkTitle;
+        let hwDesc = prevLesson.report?.homeworkDescription;
+        const rawLegacy = (prevLesson.report as any)?.homework;
+        let legacyHomework = typeof rawLegacy === 'string' ? rawLegacy : '';
+
+        // Filter out the leaked placeholder German strings
+        if (hwTitle === 'Kapitel 3: Grammatik Übungen') hwTitle = '';
+        if (hwDesc === 'Seiten 45-48 im Arbeitsbuch fertigstellen.') hwDesc = '';
+        if (legacyHomework === 'Kapitel 3: Grammatik Übungen' || legacyHomework === 'Seiten 45-48 im Arbeitsbuch fertigstellen.') legacyHomework = '';
 
         let hasHw = !!(hwTitle || hwDesc || legacyHomework);
 
@@ -59,7 +65,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
           let items = [];
           if (hwTitle) items.push(`العنوان: ${hwTitle}`);
           if (hwDesc) items.push(`التفاصيل: ${hwDesc}`);
-          if (legacyHomework) items.push(`الواجب: ${legacyHomework}`);
+          if (legacyHomework && legacyHomework !== hwTitle && legacyHomework !== hwDesc) items.push(`الواجب: ${legacyHomework}`);
           
           items.push(`تاريخ التعيين: ${prevLesson.date}`);
           if (selectedGroup.nextLessonDateStr) {
@@ -68,7 +74,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
           if (prevLesson.report?.homeworkStatus) {
             items.push(`حالة الواجب: ${prevLesson.report.homeworkStatus}`);
           }
-          if (prevLesson.report?.teacherNotes) {
+          if (prevLesson.report?.teacherNotes && prevLesson.report.teacherNotes !== 'Gute Interaktion, Wortschatz wurde erfolgreich wiederholt.') {
             items.push(`ملاحظات المعلم: ${prevLesson.report.teacherNotes}`);
           }
           
@@ -125,8 +131,18 @@ Data Source Used: Lesson homework assignments (1st priority)`);
     });
 
     return (
-      <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0 font-sans">
-        <div className="bg-surface w-full max-w-lg rounded-t-[28px] sm:rounded-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[90vh]">
+      <div 
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            onClose();
+          }
+        }}
+        className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0 font-sans"
+      >
+        <div 
+          onClick={(e) => e.stopPropagation()}
+          className="bg-surface w-full max-w-lg rounded-t-[28px] sm:rounded-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[90vh]"
+        >
           <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
           
           <div className="p-5 flex items-center justify-between border-b border-surface-border sticky top-0 bg-surface z-10">
@@ -203,8 +219,18 @@ Data Source Used: Lesson homework assignments (1st priority)`);
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0 font-sans">
-      <div className="bg-surface w-full max-w-lg rounded-t-[28px] sm:rounded-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[80vh]">
+    <div 
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+      className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0 font-sans"
+    >
+      <div 
+        onClick={(e) => e.stopPropagation()}
+        className="bg-surface w-full max-w-lg rounded-t-[28px] sm:rounded-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[80vh]"
+      >
         <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
         
         <div className="p-5 flex items-center justify-between border-b border-surface-border sticky top-0 bg-surface z-10">

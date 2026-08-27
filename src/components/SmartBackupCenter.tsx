@@ -349,7 +349,12 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           hodStudents,
           hodComplaints,
           hodActionPlans,
-          hodVisits
+          hodVisits,
+          financeAccounts,
+          financeCategories,
+          financeTransactions,
+          financeRecurring,
+          financeInstallments
         };
 
         const backupPayload = {
@@ -370,11 +375,13 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             hodStudents: hodStudents?.length || 0,
             hodComplaints: hodComplaints?.length || 0,
             hodActionPlans: hodActionPlans?.length || 0,
-            hodVisits: hodVisits?.length || 0
+            hodVisits: hodVisits?.length || 0,
+            financeAccounts: financeAccounts?.length || 0,
+            financeTransactions: financeTransactions?.length || 0
           },
           metadata: {
             teacherName: profile.displayName || 'Teacher',
-            totalRecords: (students?.length || 0) + (groups?.length || 0) + (lessons?.length || 0) + (payments?.length || 0) + (certificates?.length || 0) + (hodStudents?.length || 0),
+            totalRecords: (students?.length || 0) + (groups?.length || 0) + (lessons?.length || 0) + (payments?.length || 0) + (certificates?.length || 0) + (hodStudents?.length || 0) + (financeAccounts?.length || 0) + (financeTransactions?.length || 0),
             estimatedSizeKb: Math.round(JSON.stringify(payloadData).length / 1024)
           },
           data: payloadData

@@ -37,6 +37,7 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
 
   // Generate German educational lesson summary message
   const generateSummaryText = () => {
+    const perfFeedback = report?.studentPerformance?.[activeStudent?.id || '']?.generatedFeedback?.detailed || '';
     const attendance = report?.attendanceStatus === 'present' ? 'Anwesend (Present) ✅' : report?.attendanceStatus === 'late' ? 'Verspätet (Late) ⚠️' : 'Abwesend (Absent) ❌';
     const homework = report?.homeworkStatus === 'completed' ? 'Vollständig erledigt (Completed) ✅' : report?.homeworkStatus === 'assigned' ? 'Neu aufgegeben (Assigned) 📝' : 'Nicht erledigt ❌';
     
@@ -53,7 +54,7 @@ Hier ist der Unterrichtsbericht für ${lesson.studentName || lesson.title} vom $
   • Mitarbeit: ${report?.participationScore ?? 'N/A'}/100
 
 📝 Anmerkung der Lehrkraft:
-"${report?.teacherNotes || 'Sehr gute Leistung und aktive Teilnahme im Unterricht.'}"
+"${report?.teacherNotes || 'Sehr gute Leistung und aktive Teilnahme im Unterricht.'}"${perfFeedback ? `\n\nLeistungsbericht:\n${perfFeedback}` : ''}
 
 Mit freundlichen Grüßen,
 ${getTeacherEnglishName(profile, 'Lehrer/in')}
@@ -75,23 +76,33 @@ Glück fröhlich und froh 🇩🇪`;
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center pt-[max(24px,env(safe-area-inset-top,24px))] p-0 sm:p-4 pb-0">
-      <div className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-lg shadow-2xl overflow-hidden animate-scale-up">
+    <div 
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center pt-[max(24px,env(safe-area-inset-top,24px))] p-0 sm:p-4 pb-0"
+    >
+      <div 
+        onClick={(e) => e.stopPropagation()}
+        className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-lg shadow-2xl overflow-hidden animate-scale-up"
+      >
         <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
         {/* Modal Header */}
-        <div className="bg-gradient-to-r from-primary to-primary-hover p-5 text-white flex items-center justify-between">
+        <div className="bg-surface border-b border-surface-border p-4 sm:p-5 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-surface/20 rounded-xl">
-              <MessageSquare className="w-5 h-5 text-white" />
+            <div className="p-2 sm:p-2.5 bg-primary-soft text-primary rounded-xl shrink-0">
+              <MessageSquare className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold">Parent Summary & Communication</h2>
-              <p className="text-xs text-primary-soft">{lesson.title} • {lesson.date}</p>
+              <h2 className="text-base font-bold text-text-main">Parent Summary & Communication</h2>
+              <p className="text-xs text-text-muted">{lesson.title} • {lesson.date}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-surface/20 rounded-full transition-colors cursor-pointer"
+            className="p-1.5 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>

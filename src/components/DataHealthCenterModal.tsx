@@ -7,7 +7,8 @@ import { storage } from '../services/storageService';
 import { 
   X, CheckCircle2, AlertTriangle, AlertCircle, ChevronRight, Activity, 
   Video, MapPin, RefreshCw, Trash2, Eye, Database, ShieldCheck, 
-  Users, UserX, Calendar, DollarSign, CheckSquare, BookOpen, Award, Sparkles
+  Users, UserX, Calendar, DollarSign, CheckSquare, BookOpen, Award, Sparkles,
+  MessageSquare
 } from 'lucide-react';
 
 interface DataHealthCenterModalProps {
@@ -259,8 +260,15 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
     const groupsWithoutPrice: Group[] = [];
     const groupsWithoutZoomLink: Group[] = [];
     const groupsWithoutAddress: Group[] = [];
+    const groupsWithMultipleStudentsWithoutWhatsApp: { group: Group; studentCount: number }[] = [];
+
+    // Map active student count per group
+    const studentCountByGroupId: Record<string, number> = {};
 
     students.forEach(st => {
+      if (st.groupId) {
+        studentCountByGroupId[st.groupId] = (studentCountByGroupId[st.groupId] || 0) + 1;
+      }
       if (!st.parentPhone || st.parentPhone.trim() === '') {
         studentsWithoutParentPhone.push(st);
       }
@@ -283,6 +291,11 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
       if (g.type === 'offline' && (!g.address || g.address.trim() === '')) {
         groupsWithoutAddress.push(g);
       }
+      
+      const count = studentCountByGroupId[g.id] || 0;
+      if (count > 1 && (!g.whatsAppGroupLink || g.whatsAppGroupLink.trim() === '')) {
+        groupsWithMultipleStudentsWithoutWhatsApp.push({ group: g, studentCount: count });
+      }
     });
 
     const completeStudentsCount = Math.max(0, students.length - studentsWithoutParentPhone.length - studentsWithoutEnglishName.length);
@@ -294,7 +307,8 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
       groupsWithoutSchedule,
       groupsWithoutPrice,
       groupsWithoutZoomLink,
-      groupsWithoutAddress
+      groupsWithoutAddress,
+      groupsWithMultipleStudentsWithoutWhatsApp
     };
   }, [students, groups]);
 
@@ -856,6 +870,34 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
                       <button 
                         onClick={() => setSelectedGroup(g)}
                         className="px-3 py-1 bg-amber-500 text-white rounded-md font-bold hover:bg-amber-600 transition-colors cursor-pointer"
+                      >
+                        {_t('إصلاح', 'Fix Now')}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Groups with More Than 1 Student Missing WhatsApp Link */}
+            {healthData.groupsWithMultipleStudentsWithoutWhatsApp.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold text-xs">
+                  <MessageSquare className="w-4 h-4" />
+                  <span>{healthData.groupsWithMultipleStudentsWithoutWhatsApp.length} {_t('مجموعات (أكثر من طالب) بدون رابط واتساب', 'Groups (>1 student) missing WhatsApp link', 'Gruppen (>1 Schüler) ohne WhatsApp-Link')}</span>
+                </div>
+                <div className="space-y-1 pl-6 rtl:pl-0 rtl:pr-6">
+                  {healthData.groupsWithMultipleStudentsWithoutWhatsApp.map(({ group: g, studentCount }) => (
+                    <div key={g.id} className="flex items-center justify-between p-2 bg-surface-hover/50 rounded-lg text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-text-main">{g.name}</span>
+                        <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold px-1.5 py-0.5 rounded">
+                          {studentCount} {_t('طلاب', 'students', 'Schüler')}
+                        </span>
+                      </div>
+                      <button 
+                        onClick={() => setSelectedGroup(g)}
+                        className="px-3 py-1 bg-emerald-600 text-white rounded-md font-bold hover:bg-emerald-700 transition-colors cursor-pointer"
                       >
                         {_t('إصلاح', 'Fix Now')}
                       </button>

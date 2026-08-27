@@ -26,7 +26,11 @@ public class WidgetManagerPlugin extends Plugin {
             TodoWidget.class,
             RevenueWidget.class,
             MiniDashboardWidget.class,
-            UpcomingLessonsWidget.class
+            UpcomingLessonsWidget.class,
+            ContactReminderWidget.class,
+            ScheduleDayWidget.class,
+            InstallmentsPaymentsWidget.class,
+            QuickTransactionWidget.class
         };
 
         for (Class<?> widgetClass : widgetClasses) {

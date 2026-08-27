@@ -1,3 +1,4 @@
+import { DEFAULT_FINANCE_CATEGORIES } from "../data/defaultFinanceCategories";
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   TeacherProfile, Group, Student, Lesson, PaymentRecord, NotificationItem, 
@@ -5,7 +6,7 @@ import {
   InspirationSettings, InspirationMessage, InspirationFrequency, InspirationDisplayMethod, InspirationSource,
   NotificationSettings, ScheduledNotificationItem, TeacherSettingsRecord, SyncCycleReport, PendingOutboxSummary, SyncHistoryEntry,
   CertificateRecord, HodGermanStudent, Complaint, StudentActionPlan, VisitRecord, SchoolNote,
-  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment
+  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment, FinanceNotification
 } from '../types';
 import { 
   clearActiveLessonNotification, getPendingScheduledNotifications, 
@@ -299,6 +300,13 @@ interface AppContextType {
   updateFinanceInstallment: (id: string, updates: Partial<FinanceInstallment>) => void;
   deleteFinanceInstallment: (id: string) => void;
 
+  financeNotifications: FinanceNotification[];
+  addFinanceNotification: (notification: Omit<FinanceNotification, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>) => FinanceNotification;
+  updateFinanceNotification: (id: string, updates: Partial<FinanceNotification>) => void;
+  markFinanceNotificationAsRead: (id: string) => void;
+  markAllFinanceNotificationsAsRead: () => void;
+  deleteFinanceNotification: (id: string) => void;
+
   backupToDrive: () => void | Promise<void>;
   restoreFromDrive: (jsonString: string) => boolean;
   addAppNotification: (title: string, message: string, type: 'system' | 'reminder' | 'payment', extraFields?: any) => void;
@@ -466,6 +474,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return tracked;
   };
 
+  const bumpSyncRevision = () => {
+    const currentState = syncStateRef.current;
+    if (currentState) {
+      const nextRev = syncRevisionRef.current + 1;
+      syncRevisionRef.current = nextRev;
+      setSyncState(prev => prev ? { ...prev, localRevisionCounter: nextRev } : prev);
+      storage.setItem('dl_sync_state', { ...currentState, localRevisionCounter: nextRev });
+      autoSyncEngine.notifyLocalMutation();
+    }
+  };
+
   useEffect(() => {
     const timer = setTimeout(() => {
       isInitializedRef.current = true;
@@ -561,12 +580,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
     const cutoffStr = formatLocalDate(sixtyDaysAgo);
 
-    return (raw || []).filter(l => {
+    const filtered = (Array.isArray(raw) ? raw : []).filter(l => {
+      if (!l) return false;
       if (l.deleted) return false;
-      if (!l.date) return true;
+      if (!l.date || typeof l.date !== 'string') return true;
       if (l.date >= cutoffStr) return true;
       if (l.status === 'scheduled' || isPendingStatus(l.status)) return true;
       return false;
+    });
+
+    const bestLessons = new Map<string, Lesson>();
+    filtered.forEach(lesson => {
+      if (lesson.groupId && lesson.groupId !== 'quick_group') {
+        const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
+        const existingBest = bestLessons.get(key);
+        if (!existingBest) {
+          bestLessons.set(key, lesson);
+        } else {
+          const score = (l: Lesson) => {
+             let s = 0;
+             if (l.status !== 'scheduled') s += 100;
+             if (l.report && Object.keys(l.report).length > 0) s += 50;
+             if (l.studentPayments && Object.keys(l.studentPayments).length > 0) s += 50;
+             return s;
+          };
+          const currentScore = score(lesson);
+          const bestScore = score(existingBest);
+          if (currentScore > bestScore) {
+             bestLessons.set(key, lesson);
+          } else if (currentScore === bestScore) {
+             if (lesson.updatedAt && existingBest.updatedAt && lesson.updatedAt > existingBest.updatedAt) {
+               bestLessons.set(key, lesson);
+             } else if (!existingBest.updatedAt && lesson.updatedAt) {
+               bestLessons.set(key, lesson);
+             }
+          }
+        }
+      }
+    });
+
+    return filtered.filter(lesson => {
+      if (lesson.groupId && lesson.groupId !== 'quick_group') {
+        const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
+        if (bestLessons.get(key)?.id !== lesson.id) {
+          return false;
+        }
+      }
+      return true;
     });
   };
 
@@ -574,7 +634,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const saved = initialData['dl_lessons'];
     const raw: Lesson[] = saved !== null && saved !== undefined ? saved : INITIAL_LESSONS;
     const seen = new Set<string>();
-    const sanitized = raw.map((item, idx) => {
+    const sanitized = (Array.isArray(raw) ? raw : []).map((item, idx) => {
       if (seen.has(item.id)) {
         const newId = `${item.id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
         return { ...item, id: newId };
@@ -597,10 +657,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
     const cutoffStr = formatLocalDate(sixtyDaysAgo);
 
-    return (raw || []).filter(p => {
+    return (Array.isArray(raw) ? raw : []).filter(p => {
+      if (!p) return false;
       if (p.deleted) return false;
       const d = p.paidDate || p.dueDate || p.createdAt || '';
-      if (!d) return true;
+      if (!d || typeof d !== 'string') return true;
       if (d.substring(0, 10) >= cutoffStr) return true;
       if (p.status === 'pending' || p.status === 'partial') return true;
       return false;
@@ -863,14 +924,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     version: 1
   };
 
-  const DEFAULT_FINANCE_CATEGORIES: FinanceCategory[] = [
-    { id: 'cat_student_fees', name: 'مصاريف واشتراكات الطلاب', type: 'income', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
-    { id: 'cat_private_lessons', name: 'حصص خاصة وفردية', type: 'income', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
-    { id: 'cat_rent', name: 'إيجار القاعات والسنتر', type: 'expense', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
-    { id: 'cat_salary', name: 'رواتب المساعدين والموظفين', type: 'expense', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
-    { id: 'cat_materials', name: 'طباعة وتصوير مذكرات', type: 'expense', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
-    { id: 'cat_general_expense', name: 'مصروفات عامة ونثريات', type: 'expense', createdAt: new Date().toISOString(), updatedAt: Date.now(), version: 1 },
-  ];
+  
 
   // Finance States
   const [financeAccounts, setFinanceAccounts] = useState<FinanceAccount[]>(() => {
@@ -891,6 +945,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
   const [financeInstallments, setFinanceInstallments] = useState<FinanceInstallment[]>(() => {
     return Array.isArray(initialData['dl_finance_installments']) ? initialData['dl_finance_installments'] : [];
+  });
+
+  const [financeNotifications, setFinanceNotifications] = useState<FinanceNotification[]>(() => {
+    return Array.isArray(initialData['dl_finance_notifications']) ? initialData['dl_finance_notifications'] : [];
   });
 
   useEffect(() => {
@@ -914,6 +972,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('dl_finance_installments', financeInstallments);
   }, [financeInstallments]);
 
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('dl_finance_notifications', financeNotifications);
+  }, [financeNotifications]);
+
   // Reconciliation: Ensure paid payments have transactions and default account exists
   const hasReconciledRef = useRef(false);
   useEffect(() => {
@@ -924,9 +987,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (financeAccounts.filter(a => !a.deleted).length === 0) {
       setFinanceAccounts([DEFAULT_FINANCE_ACCOUNT]);
     }
-    if (financeCategories.filter(c => !c.deleted).length === 0) {
+    
+    // Merge new default categories if they are missing
+    const hasNewCategories = financeCategories.some(c => c.id === 'exp_housing');
+    if (!hasNewCategories) {
+      setFinanceCategories(prev => {
+        // Keep old ones, but maybe mark old default ones as isActive: false so they don't clutter the UI
+        // We'll just append the new ones.
+        const existingIds = new Set(prev.map(c => c.id));
+        const toAdd = DEFAULT_FINANCE_CATEGORIES.filter(c => !existingIds.has(c.id));
+        return [...prev, ...toAdd];
+      });
+    } else if (financeCategories.filter(c => !c.deleted).length === 0) {
       setFinanceCategories(DEFAULT_FINANCE_CATEGORIES);
     }
+
 
     const defaultAccId = financeAccounts.find(a => !a.deleted)?.id || DEFAULT_FINANCE_ACCOUNT.id;
 
@@ -1072,6 +1147,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       storage.setItem('dl_dismissed_dashboard_lessons', updated);
       return updated;
     });
+    bumpSyncRevision();
   };
 
   // Global Search & Recently Deleted modals
@@ -1458,7 +1534,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 8));
 
             newAutoLessons.push(wrapMutation({
-              id: `l_${Date.now()}_auto_${Math.random().toString(36).substring(2, 6)}_${dayOffset}`,
+              id: `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`,
               groupId: group.id,
               groupName: group.name,
               title: `${group.name} Lektion`,
@@ -1547,9 +1623,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     // Clean up orphaned, duplicate, and stale lessons, and synchronize denormalized names
     setLessons(prev => {
-      const seenGroupLessons = new Set<string>();
+      const filteredAndDeduplicated = filterActiveLessons(prev);
 
-      return prev
+      return filteredAndDeduplicated
         .filter(lesson => {
           // If group lesson and group no longer exists
           if (lesson.groupId && lesson.groupId !== 'quick_group' && !currentGroupIds.has(lesson.groupId)) {
@@ -1561,15 +1637,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           }
           if (lesson.studentName && !lesson.isQuickLesson && !currentStudentNames.has(lesson.studentName.toLowerCase()) && !lesson.groupId) {
             return false;
-          }
-
-          // Deduplicate group lessons (same group, same date, same time)
-          if (lesson.groupId && lesson.groupId !== 'quick_group' && !lesson.deleted) {
-            const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
-            if (seenGroupLessons.has(key)) {
-              return false;
-            }
-            seenGroupLessons.add(key);
           }
 
           // Clean up stale future scheduled lessons that do not match the group's current schedule slots
@@ -1756,6 +1823,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeTransactions,
       financeRecurring,
       financeInstallments,
+      financeNotifications,
       exportedAt: new Date().toISOString()
     };
     const jsonStr = JSON.stringify(data, null, 2);
@@ -1843,7 +1911,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       if (data.todos) {
         setTodos(data.todos);
-        await storage.setItem('dl_todos', data.todos);
+        await storage.setItem('dl_quick_todos', data.todos);
       }
       if (data.theme) {
         setTheme(data.theme);
@@ -1883,6 +1951,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (data.schoolNotes) {
         setSchoolNotes(data.schoolNotes);
         await storage.setItem('dl_school_notes', data.schoolNotes);
+      }
+      if (data.financeAccounts) {
+        setFinanceAccounts(data.financeAccounts);
+        await storage.setItem('dl_finance_accounts', data.financeAccounts);
+      }
+      if (data.financeCategories) {
+        setFinanceCategories(data.financeCategories);
+        await storage.setItem('dl_finance_categories', data.financeCategories);
+      }
+      if (data.financeTransactions) {
+        setFinanceTransactions(data.financeTransactions);
+        await storage.setItem('dl_finance_transactions', data.financeTransactions);
+      }
+      if (data.financeRecurring) {
+        setFinanceRecurring(data.financeRecurring);
+        await storage.setItem('dl_finance_recurring', data.financeRecurring);
+      }
+      if (data.financeInstallments) {
+        setFinanceInstallments(data.financeInstallments);
+        await storage.setItem('dl_finance_installments', data.financeInstallments);
+      }
+      if (data.financeNotifications) {
+        setFinanceNotifications(data.financeNotifications);
+        await storage.setItem('dl_finance_notifications', data.financeNotifications);
       }
 
       const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -2004,14 +2096,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return false;
         };
 
-        // Filter out future scheduled lessons of this group that don't match the new slots or were generated under old schedule
-        const preservedLessons = updatedLessons.filter(l => l.groupId !== id || isHistoricalOrLocked(l));
+        // Reconcile future scheduled lessons of this group that don't match the new slots or were generated under old schedule
+        const reconciledLessons = updatedLessons.map(l => {
+          if (l.groupId !== id || isHistoricalOrLocked(l)) return l;
+          return wrapDeletion(l);
+        });
 
         if (newSlots.length === 0) {
-          return preservedLessons;
+          return reconciledLessons;
         }
 
-        const pastGroupLessonsCount = preservedLessons.filter(l => l.groupId === id && !l.deleted).length;
+        const pastGroupLessonsCount = reconciledLessons.filter(l => l.groupId === id && !l.deleted).length;
         const startingNum = updatedGroup.startingSessionNumber || 1;
         const sessionCount = updatedGroup.sessionCount || 8;
 
@@ -2033,7 +2128,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             const dateStr = formatLocalDate(d);
             const sessionTime = matchingSlot.time || '17:00';
 
-            const alreadyExists = preservedLessons.some(l => 
+            const alreadyExists = reconciledLessons.some(l => 
               l.groupId === id && !l.deleted && l.date === dateStr && l.time === sessionTime
             ) || newGeneratedLessons.some(nl => 
               nl.groupId === id && nl.date === dateStr && nl.time === sessionTime
@@ -2044,7 +2139,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               const sessionNumber = ((startingNum - 1 + currentSessionIndex) % sessionCount) + 1;
 
               newGeneratedLessons.push(wrapMutation({
-                id: `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}_${dayOffset}`,
+                id: `l_auto_${updatedGroup.id}_${dateStr}_${sessionTime.replace(':', '')}`,
                 groupId: updatedGroup.id,
                 groupName: updatedGroup.name,
                 title: `${updatedGroup.name} Lektion`,
@@ -2066,7 +2161,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           }
         }
 
-        return [...preservedLessons, ...newGeneratedLessons];
+        return [...reconciledLessons, ...newGeneratedLessons];
       }
 
       return updatedLessons;
@@ -2396,8 +2491,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setFinanceTransactions(prev => [tracked, ...(prev || [])]);
     
     // Update account balances atomically
-    if (newTx.type === 'income' || newTx.type === 'expense') {
-      const amountChange = newTx.type === 'income' ? newTx.amount : -newTx.amount;
+    if (newTx.type === 'income' || newTx.type === 'expense' || newTx.type === 'investment_return' || newTx.type === 'adjustment') {
+      const amountChange = (newTx.type === 'income' || newTx.type === 'investment_return' || (newTx.type === 'adjustment' && newTx.amount > 0)) ? newTx.amount : -Math.abs(newTx.amount);
       setFinanceAccounts(prev => {
         const accounts = (prev && prev.length > 0) ? prev : [DEFAULT_FINANCE_ACCOUNT];
         const targetId = newTx.accountId;
@@ -2471,8 +2566,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setFinanceTransactions(prev => {
       const target = (prev || []).find(tx => tx.id === id);
       if (target && !target.deleted) {
-        if (target.type === 'income' || target.type === 'expense') {
-          const revertAmount = target.type === 'income' ? -target.amount : target.amount;
+        if (target.type === 'income' || target.type === 'expense' || target.type === 'investment_return' || target.type === 'adjustment') {
+          const revertAmount = (target.type === 'income' || target.type === 'investment_return' || (target.type === 'adjustment' && target.amount > 0)) ? -Math.abs(target.amount) : Math.abs(target.amount);
           setFinanceAccounts(accs => (accs || []).map(a => a.id === target.accountId ? wrapMutation({
             ...a,
             currentBalance: (a.currentBalance || 0) + revertAmount,
@@ -2543,6 +2638,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setFinanceInstallments(prev => (prev || []).map(inst => inst.id === id ? wrapDeletion(inst) : inst));
   }, []);
 
+  const addFinanceNotification = useCallback((notification: Omit<FinanceNotification, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>) => {
+    const newNotif: FinanceNotification = wrapMutation({
+      ...notification,
+      id: `fn_notif_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      createdAt: new Date().toISOString()
+    });
+    setFinanceNotifications(prev => [newNotif, ...(prev || [])]);
+    
+    // Also trigger the native phone notification
+    addAppNotification(
+      notification.title,
+      notification.message,
+      'payment'
+    );
+    
+    return newNotif;
+  }, [addAppNotification]);
+
+  const updateFinanceNotification = useCallback((id: string, updates: Partial<FinanceNotification>) => {
+    setFinanceNotifications(prev => (prev || []).map(n => n.id === id ? wrapMutation({ ...n, ...updates }) : n));
+  }, []);
+
+  const markFinanceNotificationAsRead = useCallback((id: string) => {
+    setFinanceNotifications(prev => (prev || []).map(n => n.id === id ? wrapMutation({ ...n, read: true }) : n));
+  }, []);
+
+  const markAllFinanceNotificationsAsRead = useCallback(() => {
+    setFinanceNotifications(prev => (prev || []).map(n => wrapMutation({ ...n, read: true })));
+  }, []);
+
+  const deleteFinanceNotification = useCallback((id: string) => {
+    setFinanceNotifications(prev => (prev || []).map(n => n.id === id ? wrapMutation({ ...n, deleted: true }) : n));
+  }, []);
+
   // Recently Deleted (Soft Delete Recovery)
   const restoreItem = (type: 'student' | 'group' | 'lesson', id: string) => {
     if (type === 'student') {
@@ -2593,10 +2722,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     } else if (type === 'lesson') {
       setRecentlyDeleted(prev => ({ ...prev, lessons: prev.lessons.filter(d => d.item.id !== id) }));
     }
+    bumpSyncRevision();
   };
 
   const clearRecentlyDeleted = () => {
     setRecentlyDeleted({ students: [], groups: [], lessons: [] });
+    bumpSyncRevision();
   };
 
   // Lesson operations with session calculation
@@ -3748,7 +3879,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       if (data.todos) {
         setTodos(data.todos);
-        await storage.setItem('dl_todos', data.todos);
+        await storage.setItem('dl_quick_todos', data.todos);
       }
       if (data.theme) {
         setTheme(data.theme);
@@ -3828,7 +3959,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           financeCategories: data.financeCategories || [],
           financeTransactions: data.financeTransactions || [],
           financeRecurring: data.financeRecurring || [],
-          financeInstallments: data.financeInstallments || []
+          financeInstallments: data.financeInstallments || [],
+          financeNotifications: data.financeNotifications || []
         },
         syncStateRef.current
       );
@@ -3893,6 +4025,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeTransactions,
       financeRecurring,
       financeInstallments,
+      financeNotifications,
       syncQueue: [],
     };
     const jsonStr = JSON.stringify(backupObj, null, 2);
@@ -4142,6 +4275,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         todos,
         groups,
         profile,
+        financeInstallments,
+        financeRecurring,
         activeSession: activeLessonSession ? {
           id: activeLessonSession.lessonId,
           groupName: activeLessonSession.groupName,
@@ -4151,7 +4286,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }).catch(err => console.warn('Master widget sync error:', err));
     }, 1000);
     return () => clearTimeout(timer);
-  }, [lessons, students, payments, todos, groups, profile, activeLessonSession]);
+  }, [lessons, students, payments, todos, groups, profile, activeLessonSession, financeInstallments, financeRecurring]);
 
   const teacherSettingsRecord: TeacherSettingsRecord = useMemo(() => ({
     id: 'singleton_teacher_settings',
@@ -4161,11 +4296,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       bufferBetweenLessonsMins: 15,
       autoAlertMinutes: 30
     },
+    recentlyDeleted,
+    dismissedDashboardLessons: dismissedDashboardLessonIds,
     updatedAt: Date.now(),
     originDeviceId: syncState?.localDeviceId || 'local',
     originRevision: syncRevisionRef.current,
     deleted: false
-  }), [profile, syncState?.localDeviceId]);
+  }), [profile, recentlyDeleted, dismissedDashboardLessonIds, syncState?.localDeviceId]);
 
   const localDataRef = React.useRef({ 
     groups, 
@@ -4185,7 +4322,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     financeCategories,
     financeTransactions,
     financeRecurring,
-    financeInstallments
+    financeInstallments,
+    financeNotifications
   });
   useEffect(() => {
     localDataRef.current = { 
@@ -4206,12 +4344,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeCategories,
       financeTransactions,
       financeRecurring,
-      financeInstallments
+      financeInstallments,
+      financeNotifications
     };
-  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments]);
+  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications]);
 
   const syncDataSource: SyncDataSource = {
-    getLocalData: () => localDataRef.current,
+    getLocalData: () => {
+      const data = { ...localDataRef.current };
+      
+      if (fullLessonsRef.current && fullLessonsRef.current.length > 0) {
+        // Guarantee latest active lessons are merged synchronously regardless of async storage queue
+        const activeMap = new Map(data.lessons.map((l: any) => [l.id, l]));
+        const fullMerged = fullLessonsRef.current.map(l => activeMap.has(l.id) ? activeMap.get(l.id) : l);
+        const fullIds = new Set(fullMerged.map(l => l.id));
+        data.lessons.forEach((l: any) => {
+          if (!fullIds.has(l.id)) fullMerged.unshift(l);
+        });
+        data.lessons = fullMerged;
+      }
+      
+      if (fullPaymentsRef.current && fullPaymentsRef.current.length > 0) {
+        // Guarantee latest active payments are merged synchronously regardless of async storage queue
+        const activeMap = new Map(data.payments.map((p: any) => [p.id, p]));
+        const fullMerged = fullPaymentsRef.current.map(p => activeMap.has(p.id) ? activeMap.get(p.id) : p);
+        const fullIds = new Set(fullMerged.map(p => p.id));
+        data.payments.forEach((p: any) => {
+          if (!fullIds.has(p.id)) fullMerged.unshift(p);
+        });
+        data.payments = fullMerged;
+      }
+      
+      return data;
+    },
     getSyncState: () => syncStateRef.current as SyncStateMetadata,
     saveMergedData: async (key: string, data: any[]) => {
       switch (key) {
@@ -4244,7 +4409,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         }
         case 'todos': {
           setTodos(data);
-          await storage.setItem('dl_todos', data);
+          await storage.setItem('dl_quick_todos', data);
           break;
         }
         case 'certificates': {
@@ -4302,14 +4467,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           await storage.setItem('dl_finance_installments', data);
           break;
         }
+        case 'financeNotifications': {
+          setFinanceNotifications(data);
+          await storage.setItem('dl_finance_notifications', data);
+          break;
+        }
         case 'settings': {
-          if (Array.isArray(data) && data.length > 0 && data[0]?.profile) {
-            const incomingProfile = data[0].profile;
-            setProfile(incomingProfile);
-            if (incomingProfile.language && ['ar', 'en', 'de'].includes(incomingProfile.language)) {
-              setLanguageState(incomingProfile.language);
+          if (Array.isArray(data) && data.length > 0) {
+            const incoming = data[0];
+            if (incoming?.profile) {
+              const incomingProfile = incoming.profile;
+              setProfile(incomingProfile);
+              if (incomingProfile.language && ['ar', 'en', 'de'].includes(incomingProfile.language)) {
+                setLanguageState(incomingProfile.language);
+              }
+              await storage.setItem('dl_profile', incomingProfile);
             }
-            await storage.setItem('dl_profile', incomingProfile);
+            if (incoming?.recentlyDeleted) {
+              setRecentlyDeleted(incoming.recentlyDeleted);
+              await storage.setItem('dl_recently_deleted', incoming.recentlyDeleted);
+            }
+            if (incoming?.dismissedDashboardLessons) {
+              setDismissedDashboardLessonIds(incoming.dismissedDashboardLessons);
+              await storage.setItem('dl_dismissed_dashboard_lessons', incoming.dismissedDashboardLessons);
+            }
             await storage.setItem('dl_settings', data);
           }
           break;
@@ -4540,6 +4721,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         addFinanceInstallment,
         updateFinanceInstallment,
         deleteFinanceInstallment,
+        
+        financeNotifications: getActiveRecords(financeNotifications || []),
+        addFinanceNotification,
+        updateFinanceNotification,
+        markFinanceNotificationAsRead,
+        markAllFinanceNotificationsAsRead,
+        deleteFinanceNotification,
         addAppNotification,
         getHistoricalLessons,
         getHistoricalPayments,

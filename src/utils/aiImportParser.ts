@@ -19,6 +19,7 @@ export interface ParsedGroupData {
   lesson_price?: number;
   zoom_link?: string;
   address?: string;
+  whatsapp_link?: string;
 }
 
 export interface ParsedStudentData {
@@ -44,6 +45,7 @@ lesson_price=100
 payment_type=every_4_lessons
 payment_amount=400
 zoom_link=https://zoom.us/j/123456789
+whatsapp_link=https://chat.whatsapp.com/ExampleInviteLink
 
 [SCHEDULE]
 Thursday|20:00
@@ -60,6 +62,7 @@ lesson_price=150
 payment_type=every_8_lessons
 payment_amount=1200
 address=Cairo Center, Building 5
+whatsapp_link=https://chat.whatsapp.com/ExampleGroupLink
 
 [SCHEDULE]
 Saturday|15:00
@@ -73,7 +76,7 @@ export const AI_PROMPT_TEMPLATE_AR = `أنت مساعد إدخال بيانات 
 
 وظيفتك الأساسية:
 1. استقبال النص العادي أو الملاحظات الخام للمجموعات والطلاب من المعلم.
-2. استخراج وفحص جميع معلومات المجموعة، المواعيد، نظام الدفع، ورابط الحصة/العنوان، وقائمة الطلاب.
+2. استخراج وفحص جميع معلومات المجموعة، المواعيد، نظام الدفع، ورابط الحصة/العنوان، رابط جروب الواتساب، وقائمة الطلاب.
 3. التحقق من وجود كافة البيانات المطلوبة كاملة وبدون استثناء قبل إنشاء المجموعة.
 4. إذا كان أي بيان مطلوب مفقوداً أو غير واضح، **قم بسؤال المعلم مباشرة عن البيانات المفقودة فقط أولاً** ولا تقم بتوليد كود الاستيراد النهائي.
 5. لا تقم أبداً بتوليد كود استيراد جزئي أو ناقص.
@@ -88,6 +91,7 @@ export const AI_PROMPT_TEMPLATE_AR = `أنت مساعد إدخال بيانات 
 - سعر الحصة (lesson_price): (مطلوب).
 - نظام الدفع (payment_type): اختر حصراً من (per_lesson, every_4_lessons, every_8_lessons, every_12_lessons, monthly) (مطلوب).
 - المبلغ الإجمالي (payment_amount): يتم حسابه تلقائياً بناءً على سعر الحصة ونظام الدفع.
+- رابط جروب الواتساب (whatsapp_link): **إجباري ومطلوب إذا كانت المجموعة تحتوي على أكثر من طالب واحد (> 1 طالب)**! (أما إذا كان طالباً واحداً فقط فهو اختياري).
 
 شروط هامة ونوع الحضور:
 * إذا كان نوع المجموعة "online":
@@ -96,6 +100,8 @@ export const AI_PROMPT_TEMPLATE_AR = `أنت مساعد إدخال بيانات 
 * إذا كان نوع المجموعة "offline":
   - يجب توفير عنوان المكان (address) إجبارياً!
   - رابط زووم (zoom_link) غير مطلوب.
+* شرط رابط الواتساب (WhatsApp Link Rule):
+  - إذا كانت المجموعة تضم طالبين فأكثر (أكثر من طالب واحد)، يجب على المساعد سؤال المعلم عن رابط جروب الواتساب (whatsapp_link) كبيان إجباري قبل إصدار الكود!
 
 2. مواعيد الحصص [SCHEDULE]:
 - يوم واحد على الأقل من أيام الأسبوع بالإنجليزية (Saturday, Sunday, Monday, Tuesday, Wednesday, Thursday, Friday).
@@ -114,12 +120,12 @@ export const AI_PROMPT_TEMPLATE_AR = `أنت مساعد إدخال بيانات 
   جودي|Judy|201200005170|
 
 ==================== التعامل مع البيانات المفقودة ====================
-- إذا كانت هناك بيانات مطلوبة مفقودة، **لا تولد كود الاستيراد [GROUP]**.
+- إذا كانت هناك بيانات مطلوبة مفقودة (مثل رابط زووم للأونلاين، عنوان للأوفلاين، أو رابط جروب الواتساب لمجموعة بها أكثر من طالب)، **لا تولد كود الاستيراد [GROUP]**.
 - بدلاً من ذلك، اسأل المعلم بوضوح ومباشرة عن البيانات المفقودة فقط، مثال:
 [MISSING_INFORMATION]
-zoom_link=Missing
+whatsapp_link=Missing
 
-"يرجى تزويدي برابط زووم للمجموعة الأونلاين لإكمال الحفظ."
+"يرجى تزويدي برابط جروب الواتساب للمجموعة نظراً لأن المجموعة تضم أكثر من طالب."
 
 ==================== التنسيق النهائي عند اكتمال البيانات ====================
 عند توفر كافة البيانات المطلوبة والتحقق منها، أخرج كود الاستيراد النهائي داخل كود بلين تيكست بالتنسيق المباشر التالي:
@@ -133,6 +139,7 @@ lesson_price=100
 payment_type=every_4_lessons
 payment_amount=400
 zoom_link=https://zoom.us/example
+whatsapp_link=https://chat.whatsapp.com/ExampleLink
 
 [SCHEDULE]
 Thursday|20:00
@@ -152,7 +159,7 @@ export const AI_PROMPT_TEMPLATE_EN = `You are a strict Educational Management Sy
 
 YOUR CORE ROLE:
 1. Receive raw student/group notes from the teacher.
-2. Identify all group details, schedule timings, payment configurations, Zoom/Address details, and student records.
+2. Identify all group details, schedule timings, payment configurations, Zoom/Address details, WhatsApp group link, and student records.
 3. Verify that ALL required information exists and is valid before creating the group.
 4. If ANY required information is missing, ASK THE TEACHER ONLY FOR THE MISSING INFORMATION FIRST. Do NOT generate the import block.
 5. NEVER generate a partial or incomplete import block.
@@ -167,14 +174,17 @@ YOUR CORE ROLE:
 - Price Per Lesson (lesson_price): (Required)
 - Payment Type (payment_type): Strictly one of: per_lesson, every_4_lessons, every_8_lessons, every_12_lessons, monthly (Required)
 - Payment Amount (payment_amount): Total calculated package amount.
+- WhatsApp Group Link (whatsapp_link): **REQUIRED if the group has more than one student (> 1 student)**! (Optional if only 1 student).
 
-LOCATION / VIRTUAL LINK RULES:
+LOCATION / VIRTUAL LINK / WHATSAPP RULES:
 * If Attendance Type is "online":
   - Zoom Link (zoom_link) is REQUIRED!
   - Address is not required.
 * If Attendance Type is "offline":
   - Address / Location (address) is REQUIRED!
   - Zoom Link is not required.
+* WHATSAPP GROUP LINK RULE:
+  - If the group has more than 1 student, you MUST ask for the WhatsApp group link (whatsapp_link) before generating the code!
 
 2. CLASS SCHEDULE [SCHEDULE]:
 - At least one valid day (Saturday, Sunday, Monday, Tuesday, Wednesday, Thursday, Friday).
@@ -193,12 +203,12 @@ LOCATION / VIRTUAL LINK RULES:
   جودي|Judy|201200005170|
 
 ==================== MISSING INFORMATION BEHAVIOR ====================
-- If any required field is missing (e.g., missing Zoom link for online group, missing address for offline group, or missing parent phone for a student), DO NOT generate the [GROUP] import block.
+- If any required field is missing (e.g., missing Zoom link for online group, missing address for offline group, missing WhatsApp link for a group with >1 student, or missing parent phone for a student), DO NOT generate the [GROUP] import block.
 - Specify what is missing and ask the teacher ONLY for the missing details:
 [MISSING_INFORMATION]
-zoom_link=Missing
+whatsapp_link=Missing
 
-"Please provide the Zoom link for this online group so I can complete the import."
+"Please provide the WhatsApp group link for this group since it contains more than one student."
 
 ==================== FINAL OUTPUT FORMAT (WHEN ALL DATA IS COMPLETE) ====================
 When ALL required information is present and validated, output the final result inside a plain-text code block in EXACTLY this format:
@@ -212,6 +222,7 @@ lesson_price=100
 payment_type=every_4_lessons
 payment_amount=400
 zoom_link=https://zoom.us/example
+whatsapp_link=https://chat.whatsapp.com/ExampleLink
 
 [SCHEDULE]
 Thursday|20:00
@@ -387,6 +398,7 @@ export function parseAiImportText(text: string): AiImportResult {
 
   const rawZoomLink = groupKv['zoom_link'] || groupKv['zoomlink'] || groupKv['zoom_meeting_link'] || groupKv['zoom'] || groupKv['meeting_link'] || '';
   const rawAddress = groupKv['address'] || groupKv['location'] || groupKv['place'] || groupKv['center'] || '';
+  const rawWhatsappLink = groupKv['whatsapp_link'] || groupKv['whatsapplink'] || groupKv['whatsapp'] || groupKv['whatsapp_group_link'] || groupKv['whatsapp_group'] || groupKv['chat_link'] || '';
 
   if (!name.trim()) {
     errors.push('Group "name" field is required in [GROUP] section.');
@@ -748,6 +760,11 @@ export function parseAiImportText(text: string): AiImportResult {
     errors.push('At least one student record is required in the [STUDENTS] section.');
   }
 
+  // Validate WhatsApp group link if group has more than 1 student
+  if (parsedStudents.length > 1 && !rawWhatsappLink.trim()) {
+    errors.push('WhatsApp Group Link ("whatsapp_link=...") is required for groups with more than one student (>1 student).');
+  }
+
   const isValid = errors.length === 0;
 
   const groupData: ParsedGroupData | null =
@@ -765,6 +782,7 @@ export function parseAiImportText(text: string): AiImportResult {
           lesson_price: parsedLessonPrice,
           zoom_link: rawZoomLink.trim() || undefined,
           address: rawAddress.trim() || undefined,
+          whatsapp_link: rawWhatsappLink.trim() || undefined,
         }
       : null;
 

@@ -1,9 +1,10 @@
 import { Preferences } from '@capacitor/preferences';
 import { registerPlugin } from '@capacitor/core';
-import { Lesson, Student, PaymentRecord, TodoItem, Group, TeacherProfile } from '../types';
+import { Lesson, Student, PaymentRecord, TodoItem, Group, TeacherProfile, FinanceInstallment, FinanceRecurring } from '../types';
 import { formatLocalDate } from '../utils/timeUtils';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
 import { calculateOverallAttendance } from '../utils/lessonUtils';
+import { buildWhatsAppUrl, formatWhatsAppPhone } from '../utils/phoneUtils';
 
 export interface WidgetManagerPlugin {
   updateWidget(): Promise<void>;
@@ -261,6 +262,179 @@ export const syncUpcomingLessonsToWidget = async (lessons: Lesson[], students: S
 };
 
 /**
+ * 9. Sync Contact & Reminders ('widget_contact_reminders')
+ */
+export const syncContactRemindersToWidget = async (
+  lessons: Lesson[],
+  students: Student[],
+  groups: Group[] = []
+) => {
+  try {
+    const todayStr = formatLocalDate();
+    const todayLessons = lessons
+      .filter(l => l.date === todayStr)
+      .sort((a, b) => a.time.localeCompare(b.time));
+
+    const contactItems: Array<{
+      id: string;
+      studentId: string;
+      studentName: string;
+      groupName: string;
+      time: string;
+      phone: string;
+      whatsappUrl: string;
+    }> = [];
+
+    todayLessons.forEach(l => {
+      const formattedTime = formatTime12h(l.time);
+      if (l.studentId) {
+        const student = students.find(s => s.id === l.studentId);
+        const rawPhone = student?.studentPhone || student?.phone || student?.parentPhone || '';
+        const whatsappUrl = rawPhone ? buildWhatsAppUrl(rawPhone, `مرحباً، أذكرك بحصتك اليوم في الساعة ${formattedTime}`) : '';
+        contactItems.push({
+          id: l.id,
+          studentId: l.studentId,
+          studentName: student?.name || l.studentName || 'طالب',
+          groupName: l.groupName || '',
+          time: formattedTime,
+          phone: rawPhone,
+          whatsappUrl
+        });
+      } else if (l.groupId) {
+        const group = groups.find(g => g.id === l.groupId);
+        const groupStudents = students.filter(s => s.groupId === l.groupId);
+        if (groupStudents.length > 0) {
+          groupStudents.forEach(s => {
+            const rawPhone = s.studentPhone || s.phone || s.parentPhone || '';
+            const whatsappUrl = rawPhone ? buildWhatsAppUrl(rawPhone, `مرحباً ${s.name}، أذكرك بحصة ${group?.name || 'المجموعة'} اليوم في الساعة ${formattedTime}`) : '';
+            contactItems.push({
+              id: l.id,
+              studentId: s.id,
+              studentName: s.name,
+              groupName: group?.name || l.groupName || 'مجموعة',
+              time: formattedTime,
+              phone: rawPhone,
+              whatsappUrl
+            });
+          });
+        } else {
+          contactItems.push({
+            id: l.id,
+            studentId: '',
+            studentName: group?.name || l.groupName || 'مجموعة',
+            groupName: '',
+            time: formattedTime,
+            phone: '',
+            whatsappUrl: ''
+          });
+        }
+      }
+    });
+
+    await Preferences.set({
+      key: 'widget_contact_reminders',
+      value: JSON.stringify(contactItems)
+    });
+  } catch (e) {
+    console.warn('Sync Contact Reminders failed', e);
+  }
+};
+
+/**
+ * 10. Sync Interactive Full Schedule ('widget_all_schedule_lessons')
+ */
+export const syncInteractiveScheduleToWidget = async (
+  lessons: Lesson[],
+  groups: Group[] = [],
+  students: Student[] = []
+) => {
+  try {
+    const scheduleItems = lessons.map(l => {
+      let details = l.notes || l.grade || '';
+      if (!details) {
+        if (l.groupId) {
+          const g = groups.find(grp => grp.id === l.groupId);
+          details = g ? `${g.grade || ''} (${g.name})` : (l.groupName || '');
+        } else if (l.studentId) {
+          const s = students.find(stu => stu.id === l.studentId);
+          details = s?.grade || 'حصة خاصة';
+        }
+      }
+      return {
+        id: l.id,
+        date: l.date,
+        time: formatTime12h(l.time),
+        rawTime: l.time,
+        title: l.title || l.studentName || l.groupName || 'حصة',
+        status: l.status,
+        details: details.trim()
+      };
+    });
+
+    await Preferences.set({
+      key: 'widget_all_schedule_lessons',
+      value: JSON.stringify(scheduleItems)
+    });
+  } catch (e) {
+    console.warn('Sync Interactive Schedule failed', e);
+  }
+};
+
+/**
+ * 11. Sync Installments & Recurring & Due Payments ('widget_finance_details')
+ */
+export const syncFinanceTrackerToWidget = async (
+  students: Student[],
+  groups: Group[] = [],
+  lessons: Lesson[] = [],
+  payments: PaymentRecord[] = [],
+  financeInstallments: FinanceInstallment[] = [],
+  financeRecurring: FinanceRecurring[] = []
+) => {
+  try {
+    // 1. Due Installments
+    const activeInstallments = financeInstallments.filter(i => !i.deleted && i.status !== 'completed');
+    const dueInstallmentsCount = activeInstallments.length;
+    const dueInstallmentsTotal = activeInstallments.reduce((sum, i) => {
+      const remaining = typeof i.remainingAmount === 'number'
+        ? i.remainingAmount
+        : Math.max(0, (i.originalAmount || 0) - ((i.paidInstallments || 0) * (i.installmentAmount || 0) + (i.downPayment || 0)));
+      return sum + remaining;
+    }, 0);
+
+    // 2. Due Recurring
+    const activeRecurring = financeRecurring.filter(r => !r.deleted && r.isActive !== false);
+    const dueRecurringCount = activeRecurring.length;
+    const dueRecurringTotal = activeRecurring.reduce((sum, r) => sum + (r.amount || 0), 0);
+
+    // 3. Due Students
+    const dueCycles = calculateDuePaymentCycles(students, groups, lessons, payments);
+    const dueStudentsCount = new Set(dueCycles.map(c => c.studentId).filter(Boolean)).size || dueCycles.length;
+    const dueStudentsTotal = dueCycles.reduce((sum, item) => {
+      const existingRec = payments.find(p => p.id === item.existingPaymentRecordId);
+      const paid = existingRec ? (existingRec.amountPaid || 0) : 0;
+      const discount = existingRec ? (existingRec.discountAmount || 0) : 0;
+      const remaining = Math.max(0, item.amountDue - paid - discount);
+      return sum + remaining;
+    }, 0);
+
+    await Preferences.set({
+      key: 'widget_finance_details',
+      value: JSON.stringify({
+        dueInstallmentsCount,
+        dueInstallmentsTotal,
+        dueRecurringCount,
+        dueRecurringTotal,
+        dueStudentsCount,
+        dueStudentsTotal
+      })
+    });
+  } catch (e) {
+    console.warn('Sync Finance Tracker failed', e);
+  }
+};
+
+/**
  * Master Sync All Widgets & Trigger Native Android Refresh Broadcast
  */
 export const syncAllWidgetsToNative = async (data: {
@@ -271,9 +445,21 @@ export const syncAllWidgetsToNative = async (data: {
   groups?: Group[];
   profile?: TeacherProfile;
   activeSession?: { id: string; groupName: string; startTime: number; attendanceCount: number } | null;
+  financeInstallments?: FinanceInstallment[];
+  financeRecurring?: FinanceRecurring[];
 }) => {
   try {
-    const { lessons, students, payments, todos, groups = [], profile, activeSession } = data;
+    const {
+      lessons,
+      students,
+      payments,
+      todos,
+      groups = [],
+      profile,
+      activeSession,
+      financeInstallments = [],
+      financeRecurring = []
+    } = data;
     const todayStr = formatLocalDate();
     const todayLessons = lessons.filter(l => l.date === todayStr);
 
@@ -289,7 +475,10 @@ export const syncAllWidgetsToNative = async (data: {
       syncTodosToWidget(todos),
       syncRevenueToWidget(payments, profile),
       syncMiniDashboardToWidget(todayLessons.length, students.length, attendanceRate, monthlyRev, overdueCount),
-      syncUpcomingLessonsToWidget(lessons, students)
+      syncUpcomingLessonsToWidget(lessons, students),
+      syncContactRemindersToWidget(lessons, students, groups),
+      syncInteractiveScheduleToWidget(lessons, groups, students),
+      syncFinanceTrackerToWidget(students, groups, lessons, payments, financeInstallments, financeRecurring)
     ]);
 
     // Trigger native Android widget broadcast update

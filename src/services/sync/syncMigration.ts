@@ -12,7 +12,13 @@ const MIGRATION_KEYS = [
   'hod_german_students',
   'hod_complaints',
   'hod_student_action_plans',
-  'hod_visit_records'
+  'hod_visit_records',
+  'dl_school_notes',
+  'dl_finance_accounts',
+  'dl_finance_categories',
+  'dl_finance_transactions',
+  'dl_finance_recurring',
+  'dl_finance_installments'
 ];
 
 /**
