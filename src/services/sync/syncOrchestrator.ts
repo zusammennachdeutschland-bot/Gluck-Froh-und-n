@@ -5,7 +5,9 @@ import {
   SyncDeltaPayload, 
   SyncCycleReport, 
   SyncEntityDiff, 
-  SyncConflictRecord
+  SyncConflictRecord,
+  FinanceAccount,
+  FinanceTransaction
 } from '../../types';
 import { exchangeDeltas } from './syncClient';
 import { resolvePeerIp } from './discoveryService';
@@ -14,6 +16,7 @@ import { mergeEntities } from './mergeEngine';
 import { syncHistoryService } from './syncHistoryService';
 import { negotiateProtocol, adaptOutboundPayloadForPeer } from './protocolNegotiator';
 import { syncEventQueue } from './syncEventQueue';
+import { recalculateAllAccountBalances } from '../financeService';
 
 export interface SyncDataSource {
   getLocalData: () => Record<string, SyncableRecord[]>;
@@ -83,7 +86,13 @@ export async function runSyncCycle(
     const localData = dataSource.getLocalData();
     const localDevice = { id: syncState.localDeviceId, name: syncState.localDeviceName };
     const pendingEvents = await syncEventQueue.getPendingEvents();
-    const rawOutboundDelta = buildOutboundDelta(peerId, syncState.peerWatermarkTable, localData, localDevice);
+    const rawOutboundDelta = buildOutboundDelta(
+      peerId, 
+      syncState.peerWatermarkTable, 
+      localData, 
+      localDevice,
+      { peerLastSynced: peer.lastSyncedTimestamp }
+    );
     if (pendingEvents.length > 0) {
       rawOutboundDelta.syncEvents = pendingEvents;
     }
@@ -116,7 +125,8 @@ export async function runSyncCycle(
               return {
                 ...l,
                 status: 'cancelled',
-                updatedAt: Date.now()
+                updatedAt: Date.now(),
+                version: (l.version || 1) + 1
               };
             }
             return l;
@@ -219,7 +229,8 @@ export async function handleInboundExchange(inboundDelta: SyncDeltaPayload, data
             return {
               ...l,
               status: 'cancelled',
-              updatedAt: Date.now()
+              updatedAt: Date.now(),
+              version: (l.version || 1) + 1
             };
           }
           return l;
@@ -245,7 +256,14 @@ export async function handleInboundExchange(inboundDelta: SyncDeltaPayload, data
   // 2. Build our delta payload to send back
   const localDevice = { id: syncState.localDeviceId, name: syncState.localDeviceName };
   const pendingEvents = await syncEventQueue.getPendingEvents();
-  const rawOutboundDelta = buildOutboundDelta(peerId, syncState.peerWatermarkTable, localData, localDevice);
+  const pairedPeer = (syncState.pairedPeers || []).find(p => p.deviceId === peerId);
+  const rawOutboundDelta = buildOutboundDelta(
+    peerId, 
+    syncState.peerWatermarkTable, 
+    localData, 
+    localDevice,
+    { peerLastSynced: pairedPeer?.lastSyncedTimestamp }
+  );
   if (pendingEvents.length > 0) {
     rawOutboundDelta.syncEvents = pendingEvents;
   }

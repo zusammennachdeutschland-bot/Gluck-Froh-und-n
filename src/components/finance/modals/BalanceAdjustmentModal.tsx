@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../../../context/AppContext';
 import { X, Save, Edit2 } from 'lucide-react';
 import { FinanceAccount } from '../../../types';
+import { computeAccountBalance } from '../../../services/financeService';
 import { v4 as uuidv4 } from 'uuid';
 
 interface BalanceAdjustmentModalProps {
@@ -10,32 +11,28 @@ interface BalanceAdjustmentModalProps {
 }
 
 export const BalanceAdjustmentModal: React.FC<BalanceAdjustmentModalProps> = ({ onClose, account }) => {
-  const { _t, addFinanceTransaction, updateFinanceAccount } = useApp();
+  const { _t, addFinanceTransaction, financeTransactions } = useApp();
+  const currentDerivedBalance = computeAccountBalance(account, financeTransactions);
   
-  const [newBalance, setNewBalance] = useState(account.currentBalance.toString());
+  const [newBalance, setNewBalance] = useState(currentDerivedBalance.toString());
 
   const handleSave = () => {
     const balanceNum = parseFloat(newBalance);
     if (isNaN(balanceNum)) return;
     
-    const difference = balanceNum - account.currentBalance;
+    const difference = Math.round((balanceNum - currentDerivedBalance) * 100) / 100;
     if (difference === 0) {
       onClose();
       return;
     }
 
-    // Update account balance
-    updateFinanceAccount(account.id, {
-      currentBalance: balanceNum
-    });
-
-    // Create adjustment transaction
+    // Create adjustment transaction which updates account balance atomically
     addFinanceTransaction({
       type: 'adjustment',
-      amount: Math.abs(difference),
+      amount: difference,
       accountId: account.id,
       date: new Date().toISOString(),
-      note: _t('تسوية رصيد', 'Balance Adjustment', 'Kontenabstimmung') + ` (${difference > 0 ? '+' : ''}${difference} ${account.currency})`
+      note: _t('تسوية رصيد', 'Balance Adjustment', 'Kontenabstimmung') + ` (${difference > 0 ? '+' : ''}${difference.toLocaleString()} ${account.currency})`
     });
 
     onClose();
@@ -56,7 +53,7 @@ export const BalanceAdjustmentModal: React.FC<BalanceAdjustmentModalProps> = ({ 
         <div className="p-4 space-y-4">
           <div className="p-4 bg-surface-hover rounded-xl text-center border border-surface-border">
             <div className="text-xs font-bold text-text-muted mb-1">{_t('الرصيد الحالي', 'Current Balance', 'Aktuelles Guthaben')}</div>
-            <div className="text-xl font-black text-text-main">{account.currentBalance.toLocaleString()} {account.currency}</div>
+            <div className="text-xl font-black text-text-main">{currentDerivedBalance.toLocaleString()} {account.currency}</div>
           </div>
           
           <div>

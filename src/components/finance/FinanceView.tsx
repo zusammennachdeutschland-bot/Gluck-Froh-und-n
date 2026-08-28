@@ -82,7 +82,6 @@ export const FinanceView: React.FC = () => {
         
         if (needsUpdate) {
           updates.totalContributions = newContributions;
-          updates.currentBalance = newBalance;
           updates.nextContributionDate = nextDate.toISOString().split('T')[0];
         }
       }
@@ -96,7 +95,6 @@ export const FinanceView: React.FC = () => {
         lastDate.setDate(lastDate.getDate() + 1);
         
         let newReturns = acc.accumulatedReturns || 0;
-        let newBalance = updates.currentBalance !== undefined ? updates.currentBalance : acc.currentBalance;
         let returnsNeedsUpdate = false;
         
         while (lastDate <= todayDate) {
@@ -136,9 +134,6 @@ export const FinanceView: React.FC = () => {
               });
               
               newReturns += dailyProfit;
-              if (acc.reinvestReturns) {
-                newBalance += dailyProfit;
-              }
               returnsNeedsUpdate = true;
             }
           }
@@ -148,7 +143,6 @@ export const FinanceView: React.FC = () => {
         
         if (returnsNeedsUpdate) {
           updates.accumulatedReturns = newReturns;
-          updates.currentBalance = newBalance;
           needsUpdate = true;
         }
         

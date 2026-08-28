@@ -71,11 +71,17 @@ export function mergeEntities<T extends SyncableRecord>(
       let shouldAcceptIncoming = false;
       let resolutionStrategy: 'LWW' | 'TIE_BREAKER' | 'FIELD_MERGE' = 'LWW';
 
+      const incomingVer = (incomingItem as any).version || 0;
+      const localVer = (localItem as any).version || 0;
+
       if (incomingTime > localTime) {
         shouldAcceptIncoming = true;
       } else if (incomingTime === localTime) {
-        // Higher originRevision wins, or deterministic tie-breaker using device IDs
-        if (incomingRev > localRev) {
+        // Higher version wins, then higher originRevision, then deterministic device ID tie-breaker
+        if (incomingVer > localVer) {
+          shouldAcceptIncoming = true;
+          resolutionStrategy = 'TIE_BREAKER';
+        } else if (incomingRev > localRev) {
           shouldAcceptIncoming = true;
           resolutionStrategy = 'TIE_BREAKER';
         } else if (incomingRev === localRev) {
@@ -86,6 +92,16 @@ export function mergeEntities<T extends SyncableRecord>(
             shouldAcceptIncoming = true;
             resolutionStrategy = 'TIE_BREAKER';
           }
+        }
+      } else if (incomingVer > localVer && (incomingTime >= localTime - 5000)) {
+        // Higher logical version with minor clock drift
+        shouldAcceptIncoming = true;
+        resolutionStrategy = 'TIE_BREAKER';
+      } else if (((incomingItem.deleted && !localItem.deleted) || ((incomingItem as any).status === 'cancelled' && (localItem as any).status !== 'cancelled'))) {
+        // Intentional deletion or session cancellation tombstone: prioritize cancellation/deletion if version >= local or reasonable timestamp
+        if (incomingVer >= localVer || incomingTime >= localTime - 300000) {
+          shouldAcceptIncoming = true;
+          resolutionStrategy = 'TIE_BREAKER';
         }
       }
 

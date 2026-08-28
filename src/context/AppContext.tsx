@@ -8,6 +8,7 @@ import {
   CertificateRecord, HodGermanStudent, Complaint, StudentActionPlan, VisitRecord, SchoolNote,
   FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment, FinanceNotification
 } from '../types';
+import { recalculateAllAccountBalances, computeAccountBalance } from '../services/financeService';
 import { 
   clearActiveLessonNotification, getPendingScheduledNotifications, 
   cancelScheduledNotification, cancelAllScheduledNotifications, rebuildAllNotificationSchedules,
@@ -731,8 +732,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return new Promise<Lesson[]>((resolve, reject) => {
       lessonSyncQueue = lessonSyncQueue.then(async () => {
         try {
-          const full = (await storage.getItem<Lesson[]>('dl_lessons')) || lessons;
+          const full = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
+            ? fullLessonsRef.current
+            : ((await storage.getItem<Lesson[]>('dl_lessons')) || lessons);
           const updated = updater(full || []);
+          fullLessonsRef.current = updated;
           await storage.setItem('dl_lessons', updated);
           setLessons(filterActiveLessons(updated));
           resolve(updated);
@@ -750,8 +754,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return new Promise<PaymentRecord[]>((resolve, reject) => {
       paymentSyncQueue = paymentSyncQueue.then(async () => {
         try {
-          const full = (await storage.getItem<PaymentRecord[]>('dl_payments')) || payments;
+          const full = (fullPaymentsRef.current && fullPaymentsRef.current.length > 0)
+            ? fullPaymentsRef.current
+            : ((await storage.getItem<PaymentRecord[]>('dl_payments')) || payments);
           const updated = updater(full || []);
+          fullPaymentsRef.current = updated;
           await storage.setItem('dl_payments', updated);
           setPayments(filterActivePayments(updated));
           resolve(updated);
@@ -1066,22 +1073,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
       });
 
-      setFinanceTransactions(prev => [...newTransactions, ...(prev || [])]);
-
-      // Update the account balance for the reconciled transactions
-      setFinanceAccounts(prev => {
-        const accounts = prev && prev.length > 0 ? prev : [DEFAULT_FINANCE_ACCOUNT];
-        return accounts.map(acc => {
-          if (acc.id === defaultAccId) {
-            return wrapMutation({
-              ...acc,
-              currentBalance: (acc.currentBalance || 0) + totalRecoveredAmount,
-              updatedAt: Date.now(),
-              version: (acc.version || 1) + 1
-            });
-          }
-          return acc;
+      setFinanceTransactions(prev => {
+        const nextTxs = [...newTransactions, ...(prev || [])];
+        setFinanceAccounts(accs => {
+          const accounts = accs && accs.length > 0 ? accs : [DEFAULT_FINANCE_ACCOUNT];
+          return recalculateAllAccountBalances(accounts, nextTxs);
         });
+        return nextTxs;
       });
     }
   }, [payments, financeTransactions, financeAccounts, financeCategories]);
@@ -2042,6 +2040,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       id: `g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
     } as Group);
     setGroups(prev => [...prev, newGroup]);
+    autoSyncEngine.notifyMutation('groups', newGroup.id);
     return newGroup;
   };
 
@@ -2055,6 +2054,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       name: `${targetGroup.name} (Kopie)`,
     } as Group);
     setGroups(prev => [...prev, duplicatedGroup]);
+    autoSyncEngine.notifyMutation('groups', duplicatedGroup.id);
     confetti({ particleCount: 50, spread: 40 });
     return duplicatedGroup;
   };
@@ -2247,6 +2247,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       joinedDate: formatLocalDate()
     } as Student);
     setStudents(prev => [...prev, newStudent]);
+    autoSyncEngine.notifyMutation('students', newStudent.id);
     return newStudent;
   };
 
@@ -2255,12 +2256,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const oldName = existingStudent?.name;
 
     setStudents(prev => prev.map(s => (s.id === id ? wrapMutation({ ...s, ...updates } as Student) : s)));
+    autoSyncEngine.notifyMutation('students', id);
 
     // Propagate student name changes to other synced database collections (lessons and payments)
     if (updates.name && oldName && updates.name !== oldName) {
       const newName = updates.name;
       
-      setLessons(prev => prev.map(l => {
+      const lessonUpdater = (allLessons: Lesson[]) => allLessons.map(l => {
         const matchesId = l.studentId === id;
         const matchesName = l.studentName === oldName;
         if (matchesId || matchesName) {
@@ -2275,9 +2277,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           } as Lesson);
         }
         return l;
-      }));
+      });
 
-      setPayments(prev => prev.map(p => {
+      if (fullLessonsRef.current) {
+        fullLessonsRef.current = lessonUpdater(fullLessonsRef.current);
+      }
+      updateFullLessonsStorage(lessonUpdater);
+
+      const paymentUpdater = (allPayments: PaymentRecord[]) => allPayments.map(p => {
         const matchesId = p.studentId === id;
         const matchesName = p.studentName === oldName;
         if (matchesId || matchesName) {
@@ -2292,7 +2299,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           } as PaymentRecord);
         }
         return p;
-      }));
+      });
+
+      if (fullPaymentsRef.current) {
+        fullPaymentsRef.current = paymentUpdater(fullPaymentsRef.current);
+      }
+      updateFullPaymentsStorage(paymentUpdater);
+
+      autoSyncEngine.notifyMutation('lessons', id);
+      autoSyncEngine.notifyMutation('payments', id);
     }
   };
 
@@ -2305,6 +2320,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }));
     }
     setStudents(prev => prev.map(s => s.id === id ? wrapDeletion(s) : s));
+    autoSyncEngine.notifyMutation('students', id);
   };
 
   const archiveStudent = (id: string) => {
@@ -2456,26 +2472,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Finance Methods
   const addFinanceAccount = useCallback((accountData: Omit<FinanceAccount, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>): FinanceAccount => {
+    const initBal = accountData.initialBalance !== undefined 
+      ? accountData.initialBalance 
+      : (accountData.currentBalance !== undefined ? accountData.currentBalance : (accountData.openingBalance || 0));
     const newAccount: FinanceAccount = {
       id: `facc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       createdAt: new Date().toISOString(),
       updatedAt: Date.now(),
       version: 1,
       ...accountData,
+      initialBalance: initBal,
+      currentBalance: initBal,
     };
     const tracked = wrapMutation(newAccount);
-    setFinanceAccounts(prev => [tracked, ...(prev || [])]);
+    setFinanceAccounts(prev => {
+      const nextAccounts = [tracked, ...(prev || [])];
+      return recalculateAllAccountBalances(nextAccounts, financeTransactions);
+    });
     return tracked;
-  }, []);
+  }, [financeTransactions]);
 
   const updateFinanceAccount = useCallback((id: string, updates: Partial<FinanceAccount>) => {
-    setFinanceAccounts(prev => (prev || []).map(acc => {
-      if (acc.id === id) {
-        return wrapMutation({ ...acc, ...updates, updatedAt: Date.now(), version: (acc.version || 1) + 1 });
-      }
-      return acc;
-    }));
-  }, []);
+    setFinanceAccounts(prev => {
+      const nextAccounts = (prev || []).map(acc => {
+        if (acc.id === id) {
+          return wrapMutation({ ...acc, ...updates, updatedAt: Date.now(), version: (acc.version || 1) + 1 });
+        }
+        return acc;
+      });
+      return recalculateAllAccountBalances(nextAccounts, financeTransactions);
+    });
+  }, [financeTransactions]);
 
   const deleteFinanceAccount = useCallback((id: string) => {
     setFinanceAccounts(prev => (prev || []).map(acc => acc.id === id ? wrapDeletion(acc) : acc));
@@ -2516,24 +2543,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       ...transactionData,
     };
     const tracked = wrapMutation(newTx);
-    setFinanceTransactions(prev => [tracked, ...(prev || [])]);
     
-    // Update account balances atomically
-    if (newTx.type === 'income' || newTx.type === 'expense' || newTx.type === 'investment_return' || newTx.type === 'adjustment') {
-      const amountChange = (newTx.type === 'income' || newTx.type === 'investment_return' || (newTx.type === 'adjustment' && newTx.amount > 0)) ? newTx.amount : -Math.abs(newTx.amount);
-      setFinanceAccounts(prev => {
-        const accounts = (prev && prev.length > 0) ? prev : [DEFAULT_FINANCE_ACCOUNT];
+    setFinanceTransactions(prev => {
+      const nextTxs = [tracked, ...(prev || [])];
+      
+      // Update account balances deterministically from the single source of truth
+      setFinanceAccounts(prevAccs => {
+        const accounts = (prevAccs && prevAccs.length > 0) ? prevAccs : [DEFAULT_FINANCE_ACCOUNT];
         const targetId = newTx.accountId;
         const exists = accounts.some(a => a.id === targetId);
+        let updatedList = accounts;
         if (!exists) {
-          return [
+          updatedList = [
             ...accounts,
             {
               id: targetId,
               name: 'الخزينة الرئيسية (كاش)',
               type: 'cash',
               openingBalance: 0,
-              currentBalance: amountChange,
+              initialBalance: 0,
+              currentBalance: 0,
               currency: 'EGP',
               createdAt: new Date().toISOString(),
               updatedAt: Date.now(),
@@ -2541,11 +2570,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             }
           ];
         }
-        return accounts.map(acc => {
-          if (acc.id === targetId) {
+        
+        const recalculated = recalculateAllAccountBalances(updatedList, nextTxs);
+        return recalculated.map(acc => {
+          if (acc.id === newTx.accountId || (newTx.type === 'transfer' && acc.id === newTx.toAccountId)) {
             return wrapMutation({
               ...acc,
-              currentBalance: (acc.currentBalance || 0) + amountChange,
               updatedAt: Date.now(),
               version: (acc.version || 1) + 1
             });
@@ -2553,27 +2583,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return acc;
         });
       });
-    } else if (newTx.type === 'transfer' && newTx.toAccountId) {
-      setFinanceAccounts(prev => (prev || []).map(acc => {
-        if (acc.id === newTx.accountId) {
-          return wrapMutation({
-            ...acc,
-            currentBalance: (acc.currentBalance || 0) - newTx.amount,
-            updatedAt: Date.now(),
-            version: (acc.version || 1) + 1
-          });
-        }
-        if (acc.id === newTx.toAccountId) {
-          return wrapMutation({
-            ...acc,
-            currentBalance: (acc.currentBalance || 0) + newTx.amount,
-            updatedAt: Date.now(),
-            version: (acc.version || 1) + 1
-          });
-        }
-        return acc;
-      }));
-    }
+
+      return nextTxs;
+    });
 
     // Register streak gamification
     registerFinanceActivity();
@@ -2582,35 +2594,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   }, [DEFAULT_FINANCE_ACCOUNT, registerFinanceActivity]);
 
   const updateFinanceTransaction = useCallback((id: string, updates: Partial<FinanceTransaction>) => {
-    setFinanceTransactions(prev => (prev || []).map(tx => {
-      if (tx.id === id) {
-        return wrapMutation({ ...tx, ...updates, updatedAt: Date.now(), version: (tx.version || 1) + 1 });
-      }
-      return tx;
-    }));
+    setFinanceTransactions(prev => {
+      const nextTxs = (prev || []).map(tx => {
+        if (tx.id === id) {
+          return wrapMutation({ ...tx, ...updates, updatedAt: Date.now(), version: (tx.version || 1) + 1 });
+        }
+        return tx;
+      });
+
+      setFinanceAccounts(prevAccs => {
+        const recalculated = recalculateAllAccountBalances(prevAccs || [], nextTxs);
+        return recalculated;
+      });
+
+      return nextTxs;
+    });
   }, []);
 
   const deleteFinanceTransaction = useCallback((id: string) => {
     setFinanceTransactions(prev => {
       const target = (prev || []).find(tx => tx.id === id);
-      if (target && !target.deleted) {
-        if (target.type === 'income' || target.type === 'expense' || target.type === 'investment_return' || target.type === 'adjustment') {
-          const revertAmount = (target.type === 'income' || target.type === 'investment_return' || (target.type === 'adjustment' && target.amount > 0)) ? -Math.abs(target.amount) : Math.abs(target.amount);
-          setFinanceAccounts(accs => (accs || []).map(a => a.id === target.accountId ? wrapMutation({
-            ...a,
-            currentBalance: (a.currentBalance || 0) + revertAmount,
-            updatedAt: Date.now(),
-            version: (a.version || 1) + 1
-          }) : a));
-        } else if (target.type === 'transfer' && target.toAccountId) {
-          setFinanceAccounts(accs => (accs || []).map(a => {
-            if (a.id === target.accountId) return wrapMutation({ ...a, currentBalance: (a.currentBalance || 0) + target.amount, updatedAt: Date.now(), version: (a.version || 1) + 1 });
-            if (a.id === target.toAccountId) return wrapMutation({ ...a, currentBalance: (a.currentBalance || 0) - target.amount, updatedAt: Date.now(), version: (a.version || 1) + 1 });
-            return a;
-          }));
-        }
-      }
-      return (prev || []).map(tx => tx.id === id ? wrapDeletion(tx) : tx);
+      if (!target) return prev || [];
+      
+      const nextTxs = (prev || []).map(tx => tx.id === id ? wrapDeletion(tx) : tx);
+      
+      setFinanceAccounts(prevAccs => {
+        const recalculated = recalculateAllAccountBalances(prevAccs || [], nextTxs);
+        return recalculated.map(acc => {
+          if (acc.id === target.accountId || (target.type === 'transfer' && acc.id === target.toAccountId)) {
+            return wrapMutation({
+              ...acc,
+              updatedAt: Date.now(),
+              version: (acc.version || 1) + 1
+            });
+          }
+          return acc;
+        });
+      });
+
+      return nextTxs;
     });
   }, []);
 
@@ -2713,6 +2735,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return [...prev, wrapMutation({ ...target.item, deleted: false } as any)];
         });
         setRecentlyDeleted(prev => ({ ...prev, students: prev.students.filter(d => d.item.id !== id) }));
+        autoSyncEngine.notifyMutation('students', id);
       }
     } else if (type === 'group') {
       const target = recentlyDeleted.groups.find(d => d.item.id === id);
@@ -2725,18 +2748,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return [...prev, wrapMutation({ ...target.item, deleted: false } as any)];
         });
         setRecentlyDeleted(prev => ({ ...prev, groups: prev.groups.filter(d => d.item.id !== id) }));
+        autoSyncEngine.notifyMutation('groups', id);
       }
     } else if (type === 'lesson') {
       const target = recentlyDeleted.lessons.find(d => d.item.id === id);
       if (target) {
-        setLessons(prev => {
-          const exists = prev.some(l => l.id === id);
+        const lessonRestorer = (allLessons: Lesson[]) => {
+          const exists = allLessons.some(l => l.id === id);
           if (exists) {
-            return prev.map(l => l.id === id ? wrapMutation({ ...target.item, deleted: false } as any) : l);
+            return allLessons.map(l => l.id === id ? wrapMutation({ ...target.item, deleted: false } as any) : l);
           }
-          return [...prev, wrapMutation({ ...target.item, deleted: false } as any)];
-        });
+          return [...allLessons, wrapMutation({ ...target.item, deleted: false } as any)];
+        };
+
+        if (fullLessonsRef.current) {
+          fullLessonsRef.current = lessonRestorer(fullLessonsRef.current);
+        }
+        updateFullLessonsStorage(lessonRestorer);
+
         setRecentlyDeleted(prev => ({ ...prev, lessons: prev.lessons.filter(d => d.item.id !== id) }));
+        autoSyncEngine.notifyMutation('lessons', id);
       }
     }
     confetti({ particleCount: 50, spread: 40 });
@@ -2791,34 +2822,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     if (createdLessons.length > 0) {
-      setLessons(prev => [...prev, ...createdLessons]);
+      if (fullLessonsRef.current) {
+        fullLessonsRef.current = [...fullLessonsRef.current, ...createdLessons];
+      }
+      updateFullLessonsStorage(prev => [...prev, ...createdLessons]);
+      autoSyncEngine.notifyMutation('lessons', createdLessons[0]?.id || 'new');
     }
     return createdLessons;
   };
 
   const updateLesson = (id: string, updates: Partial<Lesson>) => {
-    setLessons(prev => prev.map(l => (l.id === id ? wrapMutation({ ...l, ...updates } as Lesson) : l)));
+    const updater = (allLessons: Lesson[]) =>
+      allLessons.map(l => (l.id === id ? wrapMutation({ ...l, ...updates } as Lesson) : l));
+    if (fullLessonsRef.current) {
+      fullLessonsRef.current = updater(fullLessonsRef.current);
+    }
+    updateFullLessonsStorage(updater);
     if (selectedLesson && selectedLesson.id === id) {
       setSelectedLesson(prev => prev ? { ...prev, ...updates } : null);
     }
+    autoSyncEngine.notifyMutation('lessons', id);
   };
 
   const deleteLesson = (id: string) => {
-    const targetLesson = lessons.find(l => l.id === id);
+    const targetLesson = (fullLessonsRef.current || lessons).find(l => l.id === id);
     if (targetLesson) {
       setRecentlyDeleted(prev => ({
         ...prev,
         lessons: [{ item: targetLesson, deletedAt: new Date().toISOString() }, ...prev.lessons]
       }));
     }
-    setLessons(prev => prev.map(l => l.id === id ? wrapDeletion(l) : l));
+    const updater = (allLessons: Lesson[]) =>
+      allLessons.map(l => (l.id === id ? wrapDeletion(l) : l));
+    if (fullLessonsRef.current) {
+      fullLessonsRef.current = updater(fullLessonsRef.current);
+    }
+    updateFullLessonsStorage(updater);
     if (selectedLesson?.id === id) {
       closeLessonControl();
     }
+    autoSyncEngine.notifyMutation('lessons', id);
   };
 
   const deleteFutureGroupLessons = (groupId: string, fromDate: string, currentLessonId?: string) => {
-    setLessons(prev => prev.map(l => {
+    const updater = (allLessons: Lesson[]) => allLessons.map(l => {
       if (l.groupId === groupId && !l.deleted) {
         const isTarget = (currentLessonId && l.id === currentLessonId) || l.date >= fromDate;
         const isModifiable = l.status === 'scheduled' && (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes));
@@ -2827,14 +2874,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         }
       }
       return l;
-    }));
+    });
+    if (fullLessonsRef.current) {
+      fullLessonsRef.current = updater(fullLessonsRef.current);
+    }
+    updateFullLessonsStorage(updater);
     if (selectedLesson && selectedLesson.groupId === groupId && (selectedLesson.id === currentLessonId || selectedLesson.date >= fromDate)) {
       closeLessonControl();
     }
+    autoSyncEngine.notifyMutation('lessons', groupId);
   };
 
   const deleteAllGroupLessons = (groupId: string, onlyScheduled: boolean = false) => {
-    setLessons(prev => prev.map(l => {
+    const updater = (allLessons: Lesson[]) => allLessons.map(l => {
       if (l.groupId === groupId && !l.deleted) {
         if (onlyScheduled) {
           if (l.status === 'scheduled' && !l.report) {
@@ -2845,10 +2897,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         return wrapDeletion(l);
       }
       return l;
-    }));
+    });
+    if (fullLessonsRef.current) {
+      fullLessonsRef.current = updater(fullLessonsRef.current);
+    }
+    updateFullLessonsStorage(updater);
     if (selectedLesson && selectedLesson.groupId === groupId) {
       closeLessonControl();
     }
+    autoSyncEngine.notifyMutation('lessons', groupId);
   };
 
   const saveLessonReport = (lessonId: string, report: LessonReport, packageCount?: number) => {
@@ -2864,7 +2921,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       ? students.filter(s => s.groupId === targetLesson.groupId)
       : [];
 
-    setLessons(prev => prev.map(l => {
+    const reportUpdater = (allLessons: Lesson[]) => allLessons.map(l => {
       if (l.id === lessonId) {
         const updatedStudentPayments: Record<string, StudentPaymentDetail> = {};
         if (report.studentPayments) {
@@ -2890,11 +2947,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         } as Lesson);
       }
       return l;
-    }));
+    });
+
+    if (fullLessonsRef.current) {
+      fullLessonsRef.current = reportUpdater(fullLessonsRef.current);
+    }
+    updateFullLessonsStorage(reportUpdater);
+    autoSyncEngine.notifyMutation('lessons', lessonId);
 
     // Auto-sync payment records directly into Payments Center (Zahlungszentrum) based on attended lesson cycles
-    setPayments(prev => {
-      let nextPayments = [...prev];
+    const paymentUpdater = (prevPayments: PaymentRecord[]) => {
+      let nextPayments = [...prevPayments];
 
       const targetStudents = groupSts.length > 0
         ? groupSts
@@ -2916,7 +2979,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           // Format lesson date as DD/MM/YYYY
           const parts = targetLesson.date.split('-');
           const formattedDate = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : targetLesson.date;
-
 
           // Get starting session offset for the first cycle
           const hasPaidPayments = nextPayments.some(p => p.studentId === st.id && p.status === 'paid');
@@ -3079,7 +3141,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
 
       return nextPayments;
-    });
+    };
+
+    updateFullPaymentsStorage(paymentUpdater);
+    autoSyncEngine.notifyMutation('payments', lessonId);
 
     // Update students payment status in state
     setStudents(prev => prev.map(s => {
@@ -3120,31 +3185,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const cancelLesson = (lessonId: string, notes?: string) => {
     syncEventQueue.enqueue('session_cancelled', { lessonId, notes, timestamp: Date.now() });
-    setLessons(prev => prev.map(l => {
-      if (l.id === lessonId) {
-        const existingNotes = l.report?.teacherNotes || l.quickNotes || '';
-        const combinedNotes = notes 
-          ? (existingNotes ? `${existingNotes} | Absage-Notiz: ${notes}` : `Absage-Notiz: ${notes}`) 
-          : existingNotes;
 
-        return wrapMutation({
-          ...l,
-          status: 'cancelled' as LessonStatus,
-          report: l.report ? {
-            ...l.report,
-            teacherNotes: combinedNotes,
-            savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          } : {
-            attendanceStatus: 'absent' as AttendanceStatus,
-            homeworkStatus: 'not_completed' as HomeworkStatus,
-            paymentStatus: l.paymentStatus || 'pending',
-            teacherNotes: combinedNotes || 'Lektion abgesagt',
-            savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          }
-        } as Lesson);
-      }
-      return l;
-    }));
+    const updater = (allLessons: Lesson[]): Lesson[] => {
+      return allLessons.map(l => {
+        if (l.id === lessonId) {
+          const existingNotes = l.report?.teacherNotes || l.quickNotes || '';
+          const combinedNotes = notes 
+            ? (existingNotes ? `${existingNotes} | Absage-Notiz: ${notes}` : `Absage-Notiz: ${notes}`) 
+            : existingNotes;
+
+          return wrapMutation({
+            ...l,
+            status: 'cancelled' as LessonStatus,
+            report: l.report ? {
+              ...l.report,
+              teacherNotes: combinedNotes,
+              savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            } : {
+              attendanceStatus: 'absent' as AttendanceStatus,
+              homeworkStatus: 'not_completed' as HomeworkStatus,
+              paymentStatus: l.paymentStatus || 'pending',
+              teacherNotes: combinedNotes || 'Lektion abgesagt',
+              savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }
+          } as Lesson);
+        }
+        return l;
+      });
+    };
+
+    if (fullLessonsRef.current) {
+      fullLessonsRef.current = updater(fullLessonsRef.current);
+    }
+    updateFullLessonsStorage(updater);
 
     if (selectedLesson && selectedLesson.id === lessonId) {
       setSelectedLesson(prev => prev ? {
@@ -3163,6 +3236,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       } : null);
       closeLessonControl();
     }
+
+    autoSyncEngine.notifyMutation('lessons', lessonId);
   };
 
   const generateGroupScheduleLessons = (groupId: string, days: string[], defaultTime: string, numWeeks: number = 4, customDayTimes?: Record<string, string>, groupOverride?: Group) => {
@@ -3580,7 +3655,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const targetAccountId = accountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
 
     // Update lesson status and amount
-    setLessons(prev => prev.map(l => {
+    const lessonUpdater = (allLessons: Lesson[]) => allLessons.map(l => {
       if (l.id === lessonId) {
         return wrapMutation({
           ...l,
@@ -3594,20 +3669,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         } as Lesson);
       }
       return l;
-    }));
+    });
+
+    if (fullLessonsRef.current) {
+      fullLessonsRef.current = lessonUpdater(fullLessonsRef.current);
+    }
+    updateFullLessonsStorage(lessonUpdater);
+    autoSyncEngine.notifyMutation('lessons', lessonId);
 
     // Update student payment status if individual student
     if (targetLesson.studentId) {
       setStudents(prev => prev.map(s => s.id === targetLesson.studentId ? wrapMutation({ ...s, paymentStatus: status } as Student) : s));
+      autoSyncEngine.notifyMutation('students', targetLesson.studentId);
     }
 
     // Sync corresponding payment record in payments list
     let paymentRecordId = '';
-    setPayments(prev => {
-      const existingIdx = prev.findIndex(p => p.lessonId === lessonId || (p.lessonIds && p.lessonIds.includes(lessonId)));
+    const paymentUpdater = (prevPayments: PaymentRecord[]) => {
+      const existingIdx = prevPayments.findIndex(p => p.lessonId === lessonId || (p.lessonIds && p.lessonIds.includes(lessonId)));
       if (existingIdx >= 0) {
-        paymentRecordId = prev[existingIdx].id;
-        return prev.map((p, idx) => {
+        paymentRecordId = prevPayments[existingIdx].id;
+        return prevPayments.map((p, idx) => {
           if (idx === existingIdx) {
             const rem = Math.max(0, p.amountDue - finalPaid - (p.discountAmount || 0));
             return wrapMutation({
@@ -3638,9 +3720,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           financeAccountId: targetAccountId,
           notes: `Beendete Lektion (${targetLesson.date}): ${targetLesson.title}`
         } as PaymentRecord);
-        return [newRec, ...prev];
+        return [newRec, ...prevPayments];
       }
-    });
+    };
+
+    updateFullPaymentsStorage(paymentUpdater);
+    autoSyncEngine.notifyMutation('payments', lessonId);
 
     if (status === 'paid' && finalPaid > 0) {
       addFinanceTransaction({
@@ -4541,8 +4626,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           break;
         }
         case 'financeAccounts': {
-          setFinanceAccounts(data);
-          await storage.setItem('dl_finance_accounts', data);
+          setFinanceAccounts(prevAccounts => {
+            const currentTxs = (financeTransactions && Array.isArray(financeTransactions)) ? financeTransactions : [];
+            const recalculated = recalculateAllAccountBalances(data, currentTxs);
+            storage.setItem('dl_finance_accounts', recalculated);
+            return recalculated;
+          });
           break;
         }
         case 'financeCategories': {
@@ -4553,6 +4642,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         case 'financeTransactions': {
           setFinanceTransactions(data);
           await storage.setItem('dl_finance_transactions', data);
+          setFinanceAccounts(prevAccounts => {
+            const currentAccs = (prevAccounts && prevAccounts.length > 0) ? prevAccounts : (financeAccounts || []);
+            const recalculated = recalculateAllAccountBalances(currentAccs, data);
+            storage.setItem('dl_finance_accounts', recalculated);
+            return recalculated;
+          });
           break;
         }
         case 'financeRecurring': {

@@ -13,20 +13,38 @@ export function buildOutboundDelta(
   targetPeerId: string,
   watermarkTable: PeerWatermarkTable,
   localData: Record<string, SyncableRecord[]>,
-  localDevice: { id: string; name: string }
+  localDevice: { id: string; name: string },
+  options?: {
+    forceFull?: boolean;
+    peerLastSynced?: number;
+  }
 ): SyncDeltaPayload {
   const records: SyncDeltaPayload['records'] = {};
   let totalCount = 0;
+  const isForceFull = !!options?.forceFull;
+  const peerLastSynced = options?.peerLastSynced || 0;
 
   for (const [key, items] of Object.entries(localData)) {
     if (!Array.isArray(items)) continue;
 
     const filteredItems = items.filter((record) => {
+      if (!record || !record.id) return false;
+      if (isForceFull) return true;
+
       const originId = record.originDeviceId || 'unknown';
       const originRev = record.originRevision || 0;
       const seenRevision = watermarkTable[targetPeerId]?.[originId] || 0;
       
-      return originRev > seenRevision;
+      // Multi-layer change detection to prevent missed sync:
+      // 1. Revision is higher than last seen watermark for origin
+      const revHigher = originRev > seenRevision;
+      // 2. Or record was updated after peer's last known sync timestamp (with 3-sec clock skew tolerance)
+      const timeNewer = peerLastSynced > 0 && (record.updatedAt || 0) > (peerLastSynced - 3000);
+      // 3. Or tombstone / cancellation modified recently
+      const isRecentTombstone = (record.deleted || (record as any).status === 'cancelled') && 
+        (peerLastSynced === 0 || (record.updatedAt || 0) > (peerLastSynced - 60000));
+
+      return revHigher || timeNewer || isRecentTombstone;
     });
 
     if (filteredItems.length > 0) {
