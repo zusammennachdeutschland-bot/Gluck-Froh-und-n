@@ -381,7 +381,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [todos, setTodos] = useState<any[]>(() => {
     const saved = initialData['dl_quick_todos'];
-    return Array.isArray(saved) ? saved : INITIAL_TODOS;
+    return Array.isArray(saved) ? saved : [];
   });
 
   const isInitializedRef = React.useRef(true);
@@ -504,6 +504,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [profile, setProfile] = useState<TeacherProfile>(() => {
     const saved = initialData['dl_profile'];
+    const isCompleted = typeof window !== 'undefined' && localStorage.getItem('dl_setup_completed') === 'true';
+    if (!isCompleted) {
+      return {
+        id: 't1',
+        displayName: '',
+        displayNameAr: '',
+        displayNameEn: '',
+        email: '',
+        avatarUrl: '',
+        currency: 'USD',
+        language: 'de',
+        phone: '',
+        workingHours: {
+          workingDays: [],
+          startTime: '08:00',
+          endTime: '16:00',
+        },
+        weeklyWorkingHours: {}
+      };
+    }
     return saved !== null && saved !== undefined ? saved : INITIAL_TEACHER_PROFILE;
   });
 
@@ -545,7 +565,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Initial state for fresh start with duplicate ID sanitization
   const [groups, setGroups] = useState<Group[]>(() => {
     const saved = initialData['dl_groups'];
-    const raw: Group[] = saved !== null && saved !== undefined ? saved : INITIAL_GROUPS;
+    const raw: Group[] = saved !== null && saved !== undefined ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       if (seen.has(item.id)) {
@@ -559,7 +579,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [students, setStudents] = useState<Student[]>(() => {
     const saved = initialData['dl_students'];
-    const raw: Student[] = saved !== null && saved !== undefined ? saved : INITIAL_STUDENTS;
+    const raw: Student[] = saved !== null && saved !== undefined ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       let st = item;
@@ -635,7 +655,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [lessons, setLessons] = useState<Lesson[]>(() => {
     const saved = initialData['dl_lessons'];
-    const raw: Lesson[] = saved !== null && saved !== undefined ? saved : INITIAL_LESSONS;
+    const raw: Lesson[] = saved !== null && saved !== undefined ? saved : [];
     const seen = new Set<string>();
     const sanitized = (Array.isArray(raw) ? raw : []).map((item, idx) => {
       if (seen.has(item.id)) {
@@ -649,9 +669,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
 
   const fullLessonsRef = useRef<Lesson[]>(
-    Array.isArray(initialData['dl_lessons']) && initialData['dl_lessons'].length > 0 
+    Array.isArray(initialData['dl_lessons']) 
       ? initialData['dl_lessons'] 
-      : INITIAL_LESSONS
+      : []
   );
 
   // Memory Optimization: Filter active payments for global RAM state
@@ -673,7 +693,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [payments, setPayments] = useState<PaymentRecord[]>(() => {
     const saved = initialData['dl_payments'];
-    const raw: PaymentRecord[] = saved !== null && saved !== undefined ? saved : INITIAL_PAYMENT_RECORDS;
+    const raw: PaymentRecord[] = saved !== null && saved !== undefined ? saved : [];
     const seen = new Set<string>();
     const sanitized = raw.map((item, idx) => {
       if (seen.has(item.id)) {
@@ -687,21 +707,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
 
   const fullPaymentsRef = useRef<PaymentRecord[]>(
-    Array.isArray(initialData['dl_payments']) && initialData['dl_payments'].length > 0 
+    Array.isArray(initialData['dl_payments']) 
       ? initialData['dl_payments'] 
-      : INITIAL_PAYMENT_RECORDS
+      : []
   );
 
   // Asynchronous Database Query methods for historical views (SessionHistoryView & ReportsView)
   const getHistoricalLessons = async (): Promise<Lesson[]> => {
     const full = await storage.getItem<Lesson[]>('dl_lessons');
-    const source = full && Array.isArray(full) && full.length > 0 ? full : lessons;
+    const source = full && Array.isArray(full) ? full : lessons;
     return source.filter(l => !l.deleted);
   };
 
   const getHistoricalPayments = async (): Promise<PaymentRecord[]> => {
     const full = await storage.getItem<PaymentRecord[]>('dl_payments');
-    const source = full && Array.isArray(full) && full.length > 0 ? full : payments;
+    const source = full && Array.isArray(full) ? full : payments;
     return source.filter(p => !p.deleted);
   };
 
@@ -753,7 +773,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     const saved = initialData['dl_notifications'];
-    const raw: NotificationItem[] = saved !== null && saved !== undefined ? saved : INITIAL_NOTIFICATIONS;
+    const raw: NotificationItem[] = saved !== null && saved !== undefined ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       if (seen.has(item.id)) {
@@ -767,7 +787,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [certificates, setCertificates] = useState<CertificateRecord[]>(() => {
     const saved = initialData['dl_certificates'];
-    const raw: CertificateRecord[] = Array.isArray(saved) ? saved : INITIAL_CERTIFICATES;
+    const raw: CertificateRecord[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `cert_${Date.now()}_${idx}`;
@@ -788,7 +808,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Head of Department (HOD) System States with SyncableRecord schema
   const [hodStudents, setHodStudents] = useState<HodGermanStudent[]>(() => {
     const saved = initialData['hod_german_students'];
-    const raw: HodGermanStudent[] = Array.isArray(saved) ? saved : INITIAL_HOD_STUDENTS;
+    const raw: HodGermanStudent[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_st_${Date.now()}_${idx}`;
@@ -808,7 +828,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [hodComplaints, setHodComplaints] = useState<Complaint[]>(() => {
     const saved = initialData['hod_complaints'];
-    const raw: Complaint[] = Array.isArray(saved) ? saved : INITIAL_HOD_COMPLAINTS;
+    const raw: Complaint[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_cmp_${Date.now()}_${idx}`;
@@ -828,7 +848,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [hodActionPlans, setHodActionPlans] = useState<StudentActionPlan[]>(() => {
     const saved = initialData['hod_student_action_plans'];
-    const raw: StudentActionPlan[] = Array.isArray(saved) ? saved : INITIAL_HOD_ACTION_PLANS;
+    const raw: StudentActionPlan[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_plan_${Date.now()}_${idx}`;
@@ -848,7 +868,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [hodVisits, setHodVisits] = useState<VisitRecord[]>(() => {
     const saved = initialData['hod_visit_records'];
-    const raw: VisitRecord[] = Array.isArray(saved) ? saved : INITIAL_HOD_VISITS;
+    const raw: VisitRecord[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_vst_${Date.now()}_${idx}`;
@@ -890,7 +910,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // School & Lesson Notes State with SyncableRecord schema
   const [schoolNotes, setSchoolNotes] = useState<SchoolNote[]>(() => {
     const saved = initialData['dl_school_notes'];
-    const raw: SchoolNote[] = Array.isArray(saved) ? saved : INITIAL_SCHOOL_NOTES;
+    const raw: SchoolNote[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `snote_${Date.now()}_${idx}`;
@@ -933,7 +953,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const [financeAccounts, setFinanceAccounts] = useState<FinanceAccount[]>(() => {
     const raw = initialData['dl_finance_accounts'];
     if (Array.isArray(raw)) return raw;
-    return INITIAL_FINANCE_ACCOUNTS;
+    return [];
   });
   const [financeCategories, setFinanceCategories] = useState<FinanceCategory[]>(() => {
     const raw = initialData['dl_finance_categories'];
@@ -942,20 +962,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
   const [financeTransactions, setFinanceTransactions] = useState<FinanceTransaction[]>(() => {
     const raw = initialData['dl_finance_transactions'];
-    return Array.isArray(raw) ? raw : INITIAL_FINANCE_TRANSACTIONS;
+    return Array.isArray(raw) ? raw : [];
   });
   const [financeRecurring, setFinanceRecurring] = useState<FinanceRecurring[]>(() => {
     const raw = initialData['dl_finance_recurring'];
-    return Array.isArray(raw) ? raw : INITIAL_FINANCE_RECURRING;
+    return Array.isArray(raw) ? raw : [];
   });
   const [financeInstallments, setFinanceInstallments] = useState<FinanceInstallment[]>(() => {
     const raw = initialData['dl_finance_installments'];
-    return Array.isArray(raw) ? raw : INITIAL_FINANCE_INSTALLMENTS;
+    return Array.isArray(raw) ? raw : [];
   });
 
   const [financeNotifications, setFinanceNotifications] = useState<FinanceNotification[]>(() => {
     const raw = initialData['dl_finance_notifications'];
-    return Array.isArray(raw) ? raw : INITIAL_FINANCE_NOTIFICATIONS;
+    return Array.isArray(raw) ? raw : [];
   });
 
   useEffect(() => {
@@ -3649,19 +3669,88 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const clearAllData = async () => {
-    // Clear all storage engines completely (localforage database, localStorage, memoryStore)
+    // Clear all storage engines completely
     await storage.clear();
+    localStorage.removeItem('dl_setup_completed');
 
-    // Reset all React state to defaults
+    // Explicitly write empty arrays/records to storage so initialization doesn't fall back to initial demo data
+    await storage.setItem('dl_groups', []);
+    await storage.setItem('dl_students', []);
+    await storage.setItem('dl_lessons', []);
+    await storage.setItem('dl_payments', []);
+    await storage.setItem('dl_notifications', []);
+    await storage.setItem('dl_quick_todos', []);
+    await storage.setItem('dl_certificates', []);
+    await storage.setItem('hod_german_students', []);
+    await storage.setItem('hod_complaints', []);
+    await storage.setItem('hod_student_action_plans', []);
+    await storage.setItem('hod_visit_records', []);
+    await storage.setItem('dl_school_notes', []);
+    await storage.setItem('dl_finance_accounts', []);
+    await storage.setItem('dl_finance_categories', []);
+    await storage.setItem('dl_finance_transactions', []);
+    await storage.setItem('dl_finance_recurring', []);
+    await storage.setItem('dl_finance_installments', []);
+    await storage.setItem('dl_finance_notifications', []);
+    await storage.setItem('dl_profile', {
+      id: 't1',
+      displayName: '',
+      displayNameAr: '',
+      displayNameEn: '',
+      email: '',
+      avatarUrl: '',
+      currency: 'USD',
+      language: 'de',
+      phone: '',
+      workingHours: {
+        workingDays: [],
+        startTime: '08:00',
+        endTime: '16:00',
+      },
+      weeklyWorkingHours: {}
+    });
+    await storage.setItem('dl_recently_deleted', { students: [], groups: [], lessons: [] });
+    await storage.setItem('dl_dismissed_dashboard_lessons', []);
+    await storage.setItem('dl_notified_lesson_alerts', []);
+
+    // Reset all React state to defaults & empty
     setGroups([]);
     setStudents([]);
     setLessons([]);
     setPayments([]);
     setNotifications([]);
     setCertificates([]);
+    setTodos([]);
+    setHodStudents([]);
+    setHodComplaints([]);
+    setHodActionPlans([]);
+    setHodVisits([]);
+    setSchoolNotes([]);
+    setFinanceAccounts([]);
+    setFinanceCategories([]);
+    setFinanceTransactions([]);
+    setFinanceRecurring([]);
+    setFinanceInstallments([]);
+    setFinanceNotifications([]);
     setRecentlyDeleted({ students: [], groups: [], lessons: [] });
     setDismissedDashboardLessonIds([]);
-    setProfile(INITIAL_TEACHER_PROFILE);
+    setProfile({
+      id: 't1',
+      displayName: '',
+      displayNameAr: '',
+      displayNameEn: '',
+      email: '',
+      avatarUrl: '',
+      currency: 'USD',
+      language: 'de',
+      phone: '',
+      workingHours: {
+        workingDays: [],
+        startTime: '08:00',
+        endTime: '16:00',
+      },
+      weeklyWorkingHours: {}
+    });
     setNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS);
     setInspirationSettings(INITIAL_INSPIRATION_SETTINGS);
     setInspirationMessages(INITIAL_INSPIRATION_MESSAGES);

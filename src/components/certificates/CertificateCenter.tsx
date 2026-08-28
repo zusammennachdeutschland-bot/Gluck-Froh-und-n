@@ -102,16 +102,16 @@ export const CertificateCenter: React.FC = () => {
     <div className="space-y-4 pb-12">
       
       {/* Top Banner / Hero Card */}
-      <div className="p-3 sm:p-4 bg-linear-to-br from-amber-500/10 via-primary/5 to-surface dark:from-amber-950/20 dark:via-primary-soft dark:to-surface rounded-xl border border-amber-500/20 shadow-2xs space-y-2.5">
+      <div className="p-3 sm:p-4 bg-linear-to-br from-primary/10 via-primary/5 to-surface dark:from-primary-soft/30 dark:via-primary-soft/10 dark:to-surface rounded-xl border border-primary/20 shadow-2xs space-y-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-xs shadow-amber-500/20 shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center font-bold shadow-xs shadow-primary/20 shrink-0">
               <Award className="w-5 h-5" />
             </div>
             <div>
               <h1 className="text-base sm:text-lg font-black text-text-main flex items-center gap-2">
                 <span>{_t('مركز الشهادات والتكريم', 'Certificate & Honors Center', 'Zertifikate- & Ehrencenter')}</span>
-                <span className="text-[11px] px-2 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold">
+                <span className="text-[11px] px-2 py-0.2 rounded-full bg-primary/15 text-primary font-bold">
                   {activeCertificates.length}
                 </span>
               </h1>
@@ -125,27 +125,27 @@ export const CertificateCenter: React.FC = () => {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 w-full sm:w-auto sm:flex sm:items-center">
             <button
               onClick={() => setIsAIDesignerOpen(true)}
-              className="px-2 sm:px-2.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
+              className="px-2 sm:px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
               title="AI Certificate Background Designer"
             >
-              <Palette className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+              <Palette className="w-3.5 h-3.5 text-white/90 shrink-0" />
               <span className="truncate">{_t('مصمم خلفيات AI', 'AI Backgrounds', 'KI-Hintergründe')}</span>
             </button>
 
             <button
               onClick={() => setIsAiModalOpen(true)}
-              className="px-2 sm:px-2.5 py-1.5 bg-surface dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-text-main border border-surface-border dark:border-slate-700 rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
+              className="px-2 sm:px-2.5 py-1.5 bg-surface dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border dark:border-surface-border rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
               title="AI Name Transliteration"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
               <span className="truncate">{_t('أسماء الطلاب AI', 'AI Names', 'KI-Namen')}</span>
             </button>
 
             <button
               onClick={() => setIsBulkModalOpen(true)}
-              className="px-2 sm:px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
+              className="px-2 sm:px-2.5 py-1.5 bg-surface dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border dark:border-surface-border rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
             >
-              <Layers className="w-3.5 h-3.5 shrink-0" />
+              <Layers className="w-3.5 h-3.5 text-primary shrink-0" />
               <span className="truncate">{_t('تكريم جماعي', 'Bulk Issue', 'Gruppe ehren')}</span>
             </button>
 
@@ -166,16 +166,16 @@ export const CertificateCenter: React.FC = () => {
 
         {/* Metrics Grid */}
         <div className="grid grid-cols-3 gap-2 pt-0.5 text-center">
-          <div className="p-2 bg-surface/80 dark:bg-slate-900/80 rounded-lg border border-surface-border dark:border-slate-800">
+          <div className="p-2 bg-surface/80 dark:bg-background/80 rounded-lg border border-surface-border dark:border-surface-border">
             <span className="block text-[9px] font-bold text-text-muted uppercase tracking-wider">
               {_t('إجمالي الشهادات', 'Total Issued', 'Ausgestellt')}
             </span>
-            <span className="block text-sm sm:text-base font-black text-amber-600 dark:text-amber-400">
+            <span className="block text-sm sm:text-base font-black text-primary">
               {activeCertificates.length}
             </span>
           </div>
 
-          <div className="p-2 bg-surface/80 dark:bg-slate-900/80 rounded-lg border border-surface-border dark:border-slate-800">
+          <div className="p-2 bg-surface/80 dark:bg-background/80 rounded-lg border border-surface-border dark:border-surface-border">
             <span className="block text-[9px] font-bold text-text-muted uppercase tracking-wider">
               {_t('الطلاب المكرمون', 'Honored Students', 'Geehrte Schüler')}
             </span>
@@ -184,11 +184,11 @@ export const CertificateCenter: React.FC = () => {
             </span>
           </div>
 
-          <div className="p-2 bg-surface/80 dark:bg-slate-900/80 rounded-lg border border-surface-border dark:border-slate-800">
+          <div className="p-2 bg-surface/80 dark:bg-background/80 rounded-lg border border-surface-border dark:border-surface-border">
             <span className="block text-[9px] font-bold text-text-muted uppercase tracking-wider">
               {_t('المجموعات المكرمة', 'Active Groups', 'Gruppen')}
             </span>
-            <span className="block text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400">
+            <span className="block text-sm sm:text-base font-black text-primary">
               {groups.length}
             </span>
           </div>
@@ -323,7 +323,7 @@ export const CertificateCenter: React.FC = () => {
                         <span>{grp?.name || 'Ohne Gruppe'}</span>
                         <span>•</span>
                         {hasCertificates ? (
-                          <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
+                          <span className="text-primary font-bold flex items-center gap-1">
                             <Award className="w-3 h-3" />
                             {studentCerts.length} {_t('شهادات ممنوحة', 'certificates awarded', 'Zertifikate')}
                           </span>
@@ -339,7 +339,7 @@ export const CertificateCenter: React.FC = () => {
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       onClick={() => handleOpenCreateForStudent(student.id)}
-                      className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-black text-xs flex items-center gap-1 transition-all shadow-2xs cursor-pointer"
+                      className="px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-lg font-black text-xs flex items-center gap-1 transition-all shadow-2xs cursor-pointer"
                     >
                       <Award className="w-3 h-3" />
                       <span>{_t('تكريم الطالب', 'Honor Student', 'Schüler ehren')}</span>
@@ -358,7 +358,7 @@ export const CertificateCenter: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
           {honoredStudentsList.length === 0 ? (
             <div className="p-6 text-center bg-surface dark:bg-slate-900 rounded-xl border border-surface-border dark:border-slate-800 space-y-1.5 col-span-full">
-              <Award className="w-8 h-8 text-amber-500/40 mx-auto" />
+              <Award className="w-8 h-8 text-primary/40 mx-auto" />
               <h3 className="font-black text-xs sm:text-sm text-text-main">{_t('لم يتم إصدار شهادات بعد', 'No honored students yet', 'Noch keine geehrten Schüler')}</h3>
               <p className="text-[11px] text-text-muted">{_t('ابدأ بإصدار شهادات لطلابك المتميزين', 'Start issuing certificates to your outstanding students', 'Stellen Sie Zertifikate für Ihre Schüler aus')}</p>
             </div>
@@ -374,7 +374,7 @@ export const CertificateCenter: React.FC = () => {
                 >
                   <div className="flex items-center justify-between gap-2.5">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center font-black shrink-0">
+                      <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-black shrink-0">
                         <Award className="w-4 h-4" />
                       </div>
                       <div className="min-w-0">

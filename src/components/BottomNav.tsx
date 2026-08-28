@@ -42,7 +42,6 @@ export const BottomNav: React.FC = () => {
   const isSettingsActive = activeTab === 'settings';
   const isCertificatesActive = activeTab === 'certificates';
   const isFreeTimeActive = activeTab === 'freeTime';
-  const isMoreTabActive = isHistoryActive || isReportsActive || isSettingsActive || isCertificatesActive || isFreeTimeActive;
 
   // Define primary tabs
   const leftTabs = [
@@ -57,21 +56,8 @@ export const BottomNav: React.FC = () => {
     { id: 'hod', label: _t('القسم', 'HOD', 'Fachleiter'), icon: Layers },
   ];
 
-  // Dynamic more tab metadata
-  const getMoreTabMetadata = () => {
-    if (isCertificatesActive) return { label: t('nav_certificates') || 'Zertifikate', icon: Award, colorClass: 'text-primary' };
-    if (isHistoryActive) return { label: t('nav_history') || 'Sitzungen', icon: History, colorClass: 'text-primary' };
-    if (isReportsActive) return { label: t('nav_reports') || 'Berichte', icon: BarChart2, colorClass: 'text-primary' };
-    if (isFreeTimeActive) return { label: t('nav_free_time') || 'Freie Termine', icon: Clock, colorClass: 'text-primary' };
-    if (isSettingsActive) return { label: t('nav_settings') || 'Einstellungen', icon: Settings, colorClass: 'text-primary' };
-    return { label: t('nav_more') || 'Mehr', icon: MoreHorizontal, colorClass: 'text-text-muted/70' };
-  };
-
-  const moreTab = getMoreTabMetadata();
-
   const handleTabClick = (tabId: string) => {
     setActiveTab(tabId as any);
-    setShowMoreMenu(false);
     setShowQuickMenu(false);
   };
 
@@ -195,7 +181,7 @@ export const BottomNav: React.FC = () => {
             </AnimatePresence>
           </div>
 
-          {/* RIGHT TABS */}
+            {/* RIGHT TABS */}
           <div className="flex items-center gap-0.5 sm:gap-1">
             {rightTabs.map((tab) => {
               const IconComponent = tab.icon;
@@ -242,114 +228,6 @@ export const BottomNav: React.FC = () => {
                 </button>
               );
             })}
-
-            {/* MORE BUTTON */}
-            <div className="relative shrink-0">
-              <button
-                onClick={() => {
-                  setShowMoreMenu(prev => !prev);
-                  setShowQuickMenu(false);
-                }}
-                className="relative flex items-center justify-center py-1.5 sm:py-2 px-2 sm:px-2.5 rounded-full cursor-pointer focus:outline-none shrink-0"
-                style={{ WebkitTapHighlightColor: 'transparent' }}
-                title={moreTab.label}
-              >
-                <div
-                  className={`absolute inset-0 bg-primary/10 dark:bg-primary-soft rounded-full -z-10 transition-all duration-150 ease-out ${
-                    isMoreTabActive ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
-                  }`}
-                />
-
-                <div className="flex items-center gap-1.5">
-                  <moreTab.icon
-                    className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-150 ${
-                      isMoreTabActive
-                        ? 'text-primary dark:text-primary'
-                        : 'text-text-muted/70 dark:text-slate-500 hover:text-slate-600 dark:hover:text-primary'
-                    }`}
-                  />
-                  
-                  <span
-                    className={`text-[10px] sm:text-xs font-black tracking-tight text-primary dark:text-primary whitespace-nowrap overflow-hidden transition-all duration-150 ease-out pr-0.5 ${
-                      isMoreTabActive ? 'max-w-[120px] opacity-100' : 'max-w-0 opacity-0'
-                    }`}
-                  >
-                    {moreTab.label}
-                  </span>
-                </div>
-              </button>
-
-              {/* Modern Frosted-glass context menu popover */}
-              <AnimatePresence>
-                {showMoreMenu && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: 8 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 8 }}
-                    transition={{ duration: 0.1, ease: 'easeOut' }}
-                    className={`absolute bottom-14 ${isRtl ? 'left-0 origin-bottom-left' : 'right-0 origin-bottom-right'} w-48 sm:w-52 bg-surface/95 dark:bg-background/95 backdrop-blur-md border border-surface-border/40 dark:border-surface-border/60 rounded-[20px] shadow-xl p-1.5 space-y-1.5 z-50`}
-                  >
-                    <button
-                      onClick={() => handleTabClick('certificates')}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start ${
-                        activeTab === 'certificates'
-                          ? 'bg-primary-soft text-primary dark:bg-primary-soft dark:text-primary'
-                          : 'hover:bg-background dark:hover:bg-slate-900 text-text-main'
-                      }`}
-                    >
-                      <Award className="w-4 h-4 text-primary shrink-0" />
-                      <span>{t('nav_certificates') || (language === 'ar' ? 'الشهادات والتكريم' : 'Zertifikate')}</span>
-                    </button>
-                    <button
-                      onClick={() => handleTabClick('freeTime')}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start ${
-                        activeTab === 'freeTime'
-                          ? 'bg-primary-soft text-primary dark:bg-primary-soft dark:text-primary'
-                          : 'hover:bg-background dark:hover:bg-slate-900 text-text-main'
-                      }`}
-                    >
-                      <Clock className="w-4 h-4 text-primary shrink-0" />
-                      <span>{t('nav_free_time') || 'Free Time'}</span>
-                    </button>
-                    <button
-                      onClick={() => handleTabClick('history')}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start ${
-                        activeTab === 'history'
-                          ? 'bg-primary-soft text-primary dark:bg-primary-soft dark:text-primary'
-                          : 'hover:bg-background dark:hover:bg-slate-900 text-text-main'
-                      }`}
-                    >
-                      <History className="w-4 h-4 text-primary shrink-0" />
-                      <span>{t('nav_history') || 'Sitzungen'}</span>
-                    </button>
-
-                    <button
-                      onClick={() => handleTabClick('reports')}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start ${
-                        activeTab === 'reports'
-                          ? 'bg-primary-soft text-primary dark:bg-primary-soft dark:text-primary'
-                          : 'hover:bg-background dark:hover:bg-slate-900 text-text-main'
-                      }`}
-                    >
-                      <BarChart2 className="w-4 h-4 text-primary shrink-0" />
-                      <span>{t('nav_reports') || 'Berichte'}</span>
-                    </button>
-
-                    <button
-                      onClick={() => handleTabClick('settings')}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start ${
-                        activeTab === 'settings'
-                          ? 'bg-primary-soft text-primary dark:bg-primary-soft dark:text-primary'
-                          : 'hover:bg-background dark:hover:bg-slate-900 text-text-main'
-                      }`}
-                    >
-                      <Settings className="w-4 h-4 text-primary shrink-0" />
-                      <span>{t('nav_settings') || 'Einstellungen'}</span>
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
           </div>
 
         </div>

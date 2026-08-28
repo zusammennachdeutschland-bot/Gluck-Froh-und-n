@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatLocalDate } from '../utils/timeUtils';
-import { Bell, RefreshCw, CheckCircle2, Camera, Clock, Search, Trash2 } from 'lucide-react';
+import { Bell, RefreshCw, CheckCircle2, Camera, Clock, Trash2, MoreHorizontal, Award, History, BarChart2, Settings } from 'lucide-react';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
 import { NotificationsModal } from './NotificationsModal';
@@ -15,13 +15,13 @@ export const Header: React.FC = () => {
   
   const { 
     activeTab,
+    setActiveTab,
     profile, 
     updateProfile, 
     notifications, 
     lessons, 
     openLessonControl, 
     refreshCalendarAndDashboard, 
-    setIsGlobalSearchOpen,
     setIsRecentlyDeletedModalOpen,
     recentlyDeleted,
     t,
@@ -41,6 +41,9 @@ export const Header: React.FC = () => {
   } = useApp();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showToast, setShowToast] = useState(false);
+  const [showMoreHeaderMenu, setShowMoreHeaderMenu] = useState(false);
+
+  const isRtl = language === 'ar' || (typeof document !== 'undefined' && document.documentElement.dir === 'rtl');
 
   // Sync State UI
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -184,9 +187,9 @@ export const Header: React.FC = () => {
 
       {/* Compact Premium Dashboard Header */}
       <header className="bg-surface dark:bg-black border-b border-surface-border/80 px-3.5 py-2.5 sticky top-0 z-30 transition-colors shadow-2xs">
-        <div className="flex items-center justify-between gap-2.5 max-w-lg mx-auto">
+        <div className="flex items-center justify-between gap-2 max-w-lg mx-auto">
           {/* Profile & Greeting / Tab Indicator */}
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div className="flex items-center gap-2 min-w-0 flex-1 px-1">
             <div className="relative group shrink-0">
               <AvatarImage
                 name={profile.displayName}
@@ -225,21 +228,8 @@ export const Header: React.FC = () => {
             </div>
           </div>
 
-          {/* Right Action Controls: Unified Command Pill with Spring Animations */}
+          {/* Right Action Controls: Trash, Refresh, Sync, Bell, Three Dots Menu */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Global Search Button */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-              onClick={() => setIsGlobalSearchOpen(true)}
-              className="p-2 sm:p-2.5 rounded-full bg-background dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border/80 transition-colors cursor-pointer"
-              aria-label="Global Search"
-              title="Suchen..."
-            >
-              <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </motion.button>
-
             {/* Recently Deleted / Trash Bin */}
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -294,6 +284,62 @@ export const Header: React.FC = () => {
                 </span>
               )}
             </motion.button>
+
+            {/* Header Three Dots / More Menu Button - Last on the right side */}
+            <div className="relative shrink-0">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                onClick={() => setShowMoreHeaderMenu(prev => !prev)}
+                className="p-2 sm:p-2.5 rounded-full bg-background dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border/80 transition-colors cursor-pointer"
+                aria-label="More Options"
+                title="Mehr Optionen"
+              >
+                <MoreHorizontal className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </motion.button>
+
+              {/* Dropdown Menu */}
+              {showMoreHeaderMenu && (
+                <div className={`absolute top-full mt-2 ${isRtl ? 'left-0' : 'right-0'} w-48 sm:w-52 bg-surface/95 dark:bg-background/95 backdrop-blur-md border border-surface-border/40 dark:border-surface-border/60 rounded-[20px] shadow-xl p-1.5 space-y-1.5 z-50`}>
+                  <button
+                    onClick={() => { setActiveTab('certificates'); setShowMoreHeaderMenu(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start hover:bg-background dark:hover:bg-slate-900 text-text-main"
+                  >
+                    <Award className="w-4 h-4 text-primary shrink-0" />
+                    <span>{t('nav_certificates') || 'Zertifikate'}</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveTab('freeTime'); setShowMoreHeaderMenu(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start hover:bg-background dark:hover:bg-slate-900 text-text-main"
+                  >
+                    <Clock className="w-4 h-4 text-primary shrink-0" />
+                    <span>{t('nav_free_time') || 'Free Time'}</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveTab('history'); setShowMoreHeaderMenu(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start hover:bg-background dark:hover:bg-slate-900 text-text-main"
+                  >
+                    <History className="w-4 h-4 text-primary shrink-0" />
+                    <span>{t('nav_history') || 'Sitzungen'}</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveTab('reports'); setShowMoreHeaderMenu(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start hover:bg-background dark:hover:bg-slate-900 text-text-main"
+                  >
+                    <BarChart2 className="w-4 h-4 text-primary shrink-0" />
+                    <span>{t('nav_reports') || 'Berichte'}</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveTab('settings'); setShowMoreHeaderMenu(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start hover:bg-background dark:hover:bg-slate-900 text-text-main"
+                  >
+                    <Settings className="w-4 h-4 text-primary shrink-0" />
+                    <span>{t('nav_settings') || 'Einstellungen'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>

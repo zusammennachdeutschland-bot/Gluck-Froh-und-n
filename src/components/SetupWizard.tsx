@@ -123,8 +123,9 @@ export const SetupWizard: React.FC = () => {
   // Check if wizard should be open on initial load
   useEffect(() => {
     const isCompleted = localStorage.getItem('dl_setup_completed') === 'true';
-    if (!isCompleted && profile.displayName === 'Teacher') {
+    if (!isCompleted || !profile.displayName || profile.displayName.trim() === '' || profile.displayName === 'Teacher' || profile.displayName === 'أ. أحمد محمود') {
       setIsOpen(true);
+      setCurrentStep(0);
     }
   }, [profile.displayName]);
 
