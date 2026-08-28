@@ -4,6 +4,7 @@ import { formatLocalDate } from '../utils/timeUtils';
 import { Bell, RefreshCw, CheckCircle2, Camera, Clock, Trash2, MoreHorizontal, Award, History, BarChart2, Settings } from 'lucide-react';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
+import { GlueckBuddyAvatar } from './buddy/GlueckBuddyAvatar';
 import { NotificationsModal } from './NotificationsModal';
 import { motion } from 'motion/react';
 import { SyncHeaderButton } from './sync/SyncHeaderButton';
@@ -190,13 +191,7 @@ export const Header: React.FC = () => {
         <div className="flex items-center justify-between gap-2 max-w-lg mx-auto">
           {/* Profile & Greeting / Tab Indicator */}
           <div className="flex items-center gap-2 min-w-0 flex-1 px-1">
-            <div className="relative group shrink-0">
-              <AvatarImage
-                name={profile.displayName}
-                className="w-10 h-10 rounded-full font-black ring-2 ring-primary/25 dark:ring-primary/40 shadow-xs transition-transform group-hover:scale-105"
-              />
-              <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white dark:border-black rounded-full shadow-2xs" />
-            </div>
+            <GlueckBuddyAvatar />
 
             <div className="leading-tight min-w-0 flex-1 pr-1">
               {activeTab === 'home' ? (
