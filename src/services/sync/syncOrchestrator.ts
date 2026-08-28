@@ -13,6 +13,7 @@ import { buildOutboundDelta, updateWatermarks, resetWatermarksForPeer } from './
 import { mergeEntities } from './mergeEngine';
 import { syncHistoryService } from './syncHistoryService';
 import { negotiateProtocol, adaptOutboundPayloadForPeer } from './protocolNegotiator';
+import { syncEventQueue } from './syncEventQueue';
 
 export interface SyncDataSource {
   getLocalData: () => Record<string, SyncableRecord[]>;
@@ -81,7 +82,11 @@ export async function runSyncCycle(
     // 3. Negotiate capabilities and build the outbound delta payload
     const localData = dataSource.getLocalData();
     const localDevice = { id: syncState.localDeviceId, name: syncState.localDeviceName };
+    const pendingEvents = await syncEventQueue.getPendingEvents();
     const rawOutboundDelta = buildOutboundDelta(peerId, syncState.peerWatermarkTable, localData, localDevice);
+    if (pendingEvents.length > 0) {
+      rawOutboundDelta.syncEvents = pendingEvents;
+    }
 
     const agreedCapabilities = peer.capabilities || ['core_entities'];
     const negotiatedVersion = peer.protocolVersion || 1;
@@ -96,6 +101,37 @@ export async function runSyncCycle(
       emptyReport.errorMessage = `Peer rejected or failed to answer exchange request.`;
       await recordSyncHistory(emptyReport);
       return { success: false, report: emptyReport };
+    }
+
+    // Process incoming sync events (e.g. session cancellations)
+    if (inboundDelta.syncEvents && Array.isArray(inboundDelta.syncEvents)) {
+      for (const evt of inboundDelta.syncEvents) {
+        if (evt.type === 'session_cancelled' && evt.payload?.lessonId) {
+          const lessonId = evt.payload.lessonId;
+          const lessons = localData['lessons'] || [];
+          let updated = false;
+          const updatedLessons = lessons.map((l: any) => {
+            if (l.id === lessonId && l.status !== 'cancelled') {
+              updated = true;
+              return {
+                ...l,
+                status: 'cancelled',
+                updatedAt: Date.now()
+              };
+            }
+            return l;
+          });
+          if (updated) {
+            localData['lessons'] = updatedLessons;
+            await dataSource.saveMergedData('lessons', updatedLessons);
+          }
+        }
+      }
+    }
+
+    // Clear sent outgoing sync events
+    if (pendingEvents.length > 0) {
+      await syncEventQueue.clearEvents(pendingEvents.map(e => e.id));
     }
 
     // 5. Ingestion Phase: Merge received records into local storage with diff tracking
@@ -170,6 +206,32 @@ export async function handleInboundExchange(inboundDelta: SyncDeltaPayload, data
   const localData = dataSource.getLocalData();
   const peerId = inboundDelta.senderDeviceId;
 
+  // Process incoming sync events (e.g. session cancellations)
+  if (inboundDelta.syncEvents && Array.isArray(inboundDelta.syncEvents)) {
+    for (const evt of inboundDelta.syncEvents) {
+      if (evt.type === 'session_cancelled' && evt.payload?.lessonId) {
+        const lessonId = evt.payload.lessonId;
+        const lessons = localData['lessons'] || [];
+        let updated = false;
+        const updatedLessons = lessons.map((l: any) => {
+          if (l.id === lessonId && l.status !== 'cancelled') {
+            updated = true;
+            return {
+              ...l,
+              status: 'cancelled',
+              updatedAt: Date.now()
+            };
+          }
+          return l;
+        });
+        if (updated) {
+          localData['lessons'] = updatedLessons;
+          await dataSource.saveMergedData('lessons', updatedLessons);
+        }
+      }
+    }
+  }
+
   // 1. Ingestion Phase: Merge received records into local storage
   for (const [key, incomingRecords] of Object.entries(inboundDelta.records)) {
     if (Array.isArray(incomingRecords) && incomingRecords.length > 0) {
@@ -182,7 +244,16 @@ export async function handleInboundExchange(inboundDelta: SyncDeltaPayload, data
 
   // 2. Build our delta payload to send back
   const localDevice = { id: syncState.localDeviceId, name: syncState.localDeviceName };
-  const outboundDelta = buildOutboundDelta(peerId, syncState.peerWatermarkTable, localData, localDevice);
+  const pendingEvents = await syncEventQueue.getPendingEvents();
+  const rawOutboundDelta = buildOutboundDelta(peerId, syncState.peerWatermarkTable, localData, localDevice);
+  if (pendingEvents.length > 0) {
+    rawOutboundDelta.syncEvents = pendingEvents;
+  }
+  const outboundDelta = adaptOutboundPayloadForPeer(rawOutboundDelta, syncState.peerWatermarkTable[peerId] ? 1 : 1, ['core_entities']);
+
+  if (pendingEvents.length > 0) {
+    await syncEventQueue.clearEvents(pendingEvents.map(e => e.id));
+  }
 
   // 3. Update Watermarks
   let newWatermarks = syncState.peerWatermarkTable || {};

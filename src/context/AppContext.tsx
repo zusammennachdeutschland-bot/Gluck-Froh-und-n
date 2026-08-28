@@ -31,6 +31,7 @@ import { connectivityEngine } from '../services/sync/connectivityEngine';
 import { presenceService } from '../services/sync/presenceService';
 import { autoSyncEngine } from '../services/sync/autoSyncEngine';
 import { syncHistoryService } from '../services/sync/syncHistoryService';
+import { syncEventQueue } from '../services/sync/syncEventQueue';
 import { applyRestoreSyncSafeguards } from '../services/sync/backupSafetyService';
 import { SyncStateMetadata, PairedPeer, DevicePresenceState, SyncConnectionState } from '../types';
 
@@ -3118,6 +3119,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const cancelLesson = (lessonId: string, notes?: string) => {
+    syncEventQueue.enqueue('session_cancelled', { lessonId, notes, timestamp: Date.now() });
     setLessons(prev => prev.map(l => {
       if (l.id === lessonId) {
         const existingNotes = l.report?.teacherNotes || l.quickNotes || '';

@@ -141,6 +141,14 @@ export function calculatePendingOutbox(
           const noteType = (record as any).type || 'note';
           const target = (record as any).studentName || (record as any).className || 'Lesson';
           title = `Note (${noteType} - ${target}): ${((record as any).text || '').substring(0, 25)}`;
+        } else if (entityType === 'lessons') {
+          const lesson = record as any;
+          const lTitle = lesson.groupName || lesson.subjectName || lesson.studentName || 'Lesson';
+          const isCancelled = lesson.status === 'cancelled';
+          const dateStr = lesson.date ? ` (${lesson.date}${lesson.startTime ? ' ' + lesson.startTime : ''})` : '';
+          title = isCancelled 
+            ? `🚫 Cancelled Session: ${lTitle}${dateStr}` 
+            : `📅 Lesson: ${lTitle}${dateStr}`;
         } else if (entityType === 'financeAccounts') {
           title = `Finance Account: ${(record as any).name || (record as any).id}`;
         } else if (entityType === 'financeCategories') {

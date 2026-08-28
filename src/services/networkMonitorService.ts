@@ -145,28 +145,61 @@ class NetworkMonitorService {
 
     const startTime = performance.now();
     const cacheBuster = `_t=${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    
-    // Choose ping endpoint: test health API or favicon asset
-    const pingUrl = `/api/health?${cacheBuster}`;
 
     try {
-      const response = await fetch(pingUrl, {
-        method: 'HEAD',
-        cache: 'no-store',
-        signal: controller.signal,
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
+      // Choose ping endpoint: test health API, fallback to current origin or favicon if static AppImage / offline
+      const endpoints = [
+        `/api/health?${cacheBuster}`,
+        `./?${cacheBuster}`,
+        `/favicon.ico?${cacheBuster}`
+      ];
+
+      let success = false;
+      let lastStatus = 200;
+
+      for (const pingUrl of endpoints) {
+        if (controller.signal.aborted) break;
+        try {
+          const response = await fetch(pingUrl, {
+            method: 'HEAD',
+            cache: 'no-store',
+            signal: controller.signal,
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
+            }
+          });
+          lastStatus = response.status;
+          if (response.ok || response.status === 404 || response.status === 304 || response.status < 500) {
+            success = true;
+            break;
+          }
+        } catch {
+          // Try next endpoint fallback
         }
-      });
+      }
+
+      // If HEAD failed across all, try a lightweight GET on origin or index
+      if (!success && !controller.signal.aborted) {
+        try {
+          const response = await fetch(`./?${cacheBuster}`, {
+            method: 'GET',
+            cache: 'no-store',
+            signal: controller.signal
+          });
+          if (response.status < 500) {
+            success = true;
+            lastStatus = response.status;
+          }
+        } catch {}
+      }
 
       clearTimeout(timeoutId);
       const endTime = performance.now();
       const rawPing = Math.round(endTime - startTime);
-      // Bound minimum ping to 1ms to reflect real physical transport
       const measuredPing = Math.max(1, rawPing);
 
-      if (response.ok || response.status === 404 || response.status === 304 || response.status < 500) {
+      if (success) {
         this.totalPingSum += measuredPing;
         const newSuccessCount = this.metrics.successfulChecks + 1;
         const newAverage = Math.round(this.totalPingSum / newSuccessCount);
@@ -187,11 +220,10 @@ class NetworkMonitorService {
           ...this.getNetworkInfo()
         };
       } else {
-        throw new Error(`Ping failed with status: ${response.status}`);
+        throw new Error(`Ping failed with status: ${lastStatus}`);
       }
     } catch (err: any) {
       clearTimeout(timeoutId);
-      const isAbort = err.name === 'AbortError';
       const isOfflineNow = typeof navigator !== 'undefined' && navigator.onLine === false;
 
       this.metrics = {

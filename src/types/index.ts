@@ -158,6 +158,13 @@ export interface SyncDeltaPayload {
     financeRecurring?: FinanceRecurring[];
     financeInstallments?: FinanceInstallment[];
   };
+  syncEvents?: Array<{
+    id: string;
+    type: string;
+    payload: any;
+    timestamp: number;
+    deviceId: string;
+  }>;
   metadata?: {
     totalEntitiesCount?: number;
     checksum?: string;

@@ -128,26 +128,34 @@ export const OutboxInspector: React.FC<OutboxInspectorProps> = ({
                   ) : (
                     <div className="space-y-2">
                       <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Queued Records</div>
-                      {entityItems.map((item: PendingEntityItem) => (
-                        <div 
-                          key={item.id}
-                          className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-xs"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={`w-2 h-2 rounded-full ${item.isDeleted ? 'bg-red-500' : 'bg-emerald-500'}`} />
-                            <span className="font-medium text-gray-900 dark:text-gray-100">{item.title}</span>
-                            {item.isDeleted && (
-                              <span className="text-[10px] uppercase font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/50 px-1.5 py-0.5 rounded">
-                                Deleted
-                              </span>
-                            )}
+                      {entityItems.map((item: PendingEntityItem) => {
+                        const isCancelledSession = item.entityType === 'lessons' && item.title.includes('Cancelled');
+                        return (
+                          <div 
+                            key={item.id}
+                            className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-xs"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full ${item.isDeleted || isCancelledSession ? 'bg-red-500' : 'bg-emerald-500'}`} />
+                              <span className="font-medium text-gray-900 dark:text-gray-100">{item.title}</span>
+                              {item.isDeleted && (
+                                <span className="text-[10px] uppercase font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/50 px-1.5 py-0.5 rounded">
+                                  Deleted
+                                </span>
+                              )}
+                              {isCancelledSession && (
+                                <span className="text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-1.5 py-0.5 rounded">
+                                  Cancelled
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-gray-500">
+                              <span className="font-mono text-[10px]">Rev #{item.originRevision}</span>
+                              <span>{new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-3 text-gray-500">
-                            <span className="font-mono text-[10px]">Rev #{item.originRevision}</span>
-                            <span>{new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
