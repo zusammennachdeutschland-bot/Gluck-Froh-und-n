@@ -17,21 +17,24 @@ export const StageCommunicationView: React.FC = () => {
   const schoolSettings = useMemo(() => profile?.schoolSettings || {} as any, [profile?.schoolSettings]);
 
   // Stage Managers list
-  const stageManagers: StageManager[] = schoolSettings.stageManagers || [];
+  const stageManagers: StageManager[] = useMemo(() => schoolSettings.stageManagers || [], [schoolSettings.stageManagers]);
 
-  const teachers = schoolSettings.teachers || [];
-  const complaints: Complaint[] = schoolSettings.complaints || [];
-  const actionPlans: StudentActionPlan[] = schoolSettings.actionPlans || [];
-  const stageFollowUps: StageFollowUpRecord[] = schoolSettings.stageFollowUps || [];
+  const teachers = useMemo(() => schoolSettings.teachers || [], [schoolSettings.teachers]);
+  const complaints: Complaint[] = useMemo(() => schoolSettings.complaints || [], [schoolSettings.complaints]);
+  const actionPlans: StudentActionPlan[] = useMemo(() => schoolSettings.actionPlans || [], [schoolSettings.actionPlans]);
+  const stageFollowUps: StageFollowUpRecord[] = useMemo(() => schoolSettings.stageFollowUps || [], [schoolSettings.stageFollowUps]);
 
   // Selected Stage Manager & Report Form State
   const [selectedManager, setSelectedManager] = useState<StageManager | null>(stageManagers[0] || null);
 
   React.useEffect(() => {
     if (stageManagers.length > 0) {
-      if (!selectedManager || !stageManagers.some(m => m.id === selectedManager.id)) {
-        setSelectedManager(stageManagers[0]);
-      }
+      setSelectedManager(prev => {
+        if (!prev || !stageManagers.some(m => m.id === prev.id)) {
+          return stageManagers[0];
+        }
+        return prev;
+      });
     } else {
       setSelectedManager(null);
     }

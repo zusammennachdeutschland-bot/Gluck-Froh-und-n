@@ -161,6 +161,11 @@ function MainApp() {
     }
   }, [lessons, openLessonControl, setActiveTab, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, setIsAddStudentModalOpen, setIsAddGroupModalOpen, setIsStartLessonNowModalOpen]);
 
+  const handleDeepLinkRef = useRef(handleDeepLink);
+  useEffect(() => {
+    handleDeepLinkRef.current = handleDeepLink;
+  }, [handleDeepLink]);
+
   // Check pending lesson once lessons load
   useEffect(() => {
     if (pendingLessonId && lessons.length > 0) {
@@ -180,7 +185,7 @@ function MainApp() {
     CapacitorApp.getLaunchUrl()
       .then(launchUrl => {
         if (launchUrl && launchUrl.url) {
-          handleDeepLink(launchUrl.url);
+          handleDeepLinkRef.current(launchUrl.url);
         }
       })
       .catch(() => {});
@@ -189,7 +194,7 @@ function MainApp() {
     const setupUrlListener = async () => {
       urlListener = await CapacitorApp.addListener('appUrlOpen', (data: { url: string }) => {
         if (data?.url) {
-          handleDeepLink(data.url);
+          handleDeepLinkRef.current(data.url);
         }
       });
     };
@@ -203,7 +208,7 @@ function MainApp() {
         urlListener.remove();
       }
     };
-  }, [handleDeepLink]);
+  }, []);
 
   const stateRef = useRef({
     activeTab,

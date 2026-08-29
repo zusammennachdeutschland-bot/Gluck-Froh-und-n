@@ -145,6 +145,9 @@ export function calculatePendingOutbox(
         let title = (record as any).name || (record as any).title || (record as any).id || 'Record';
         if (entityType === 'settings') {
           title = 'Teacher Profile & Settings';
+        } else if (entityType === 'todos') {
+          const todo = record as any;
+          title = `Task: ${todo.text ? (todo.text.length > 30 ? todo.text.substring(0, 30) + '...' : todo.text) : (todo.id || 'Todo')}`;
         } else if (entityType === 'hodStudents') {
           title = (record as any).nameAr || (record as any).nameEn || (record as any).name || 'HOD German Student';
         } else if (entityType === 'hodComplaints') {

@@ -42,11 +42,13 @@ export const GlueckBuddyFloating: React.FC = () => {
           <div className="absolute inset-0 bg-primary/20 rounded-full blur-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
           {/* Character Scene */}
-          <div className="relative p-1.5 bg-surface/90 dark:bg-slate-900/90 backdrop-blur-md rounded-2xl border border-primary/30 shadow-xl overflow-hidden">
-            <BuddyAnimation mood={workload.mood} size="lg" />
+          <div className="relative p-1.5 bg-surface/90 dark:bg-slate-900/90 backdrop-blur-md rounded-2xl border border-primary/30 shadow-xl">
+            <div className="rounded-xl overflow-visible flex items-center justify-center">
+              <BuddyAnimation mood={workload.mood} size="lg" popOut={true} />
+            </div>
 
             {/* Score Badge Pill */}
-            <div className="absolute -top-1.5 -left-1.5 px-1.5 py-0.5 rounded-full bg-primary text-white text-[9px] font-black shadow-xs ring-2 ring-white dark:ring-slate-900">
+            <div className="absolute -top-1.5 -left-1.5 min-w-[22px] h-[18px] px-1.5 rounded-full bg-linear-to-r from-primary to-indigo-600 text-white text-[10px] font-black tracking-tight shadow-sm ring-2 ring-white dark:ring-slate-900 flex items-center justify-center">
               {workload.score}
             </div>
           </div>

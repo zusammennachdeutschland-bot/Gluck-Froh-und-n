@@ -6,7 +6,8 @@ import {
   InspirationSettings, InspirationMessage, InspirationFrequency, InspirationDisplayMethod, InspirationSource,
   NotificationSettings, ScheduledNotificationItem, TeacherSettingsRecord, SyncCycleReport, PendingOutboxSummary, SyncHistoryEntry,
   CertificateRecord, HodGermanStudent, Complaint, StudentActionPlan, VisitRecord, SchoolNote,
-  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment, FinanceNotification
+  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment, FinanceNotification,
+  TodoItem
 } from '../types';
 import { recalculateAllAccountBalances, computeAccountBalance } from '../services/financeService';
 import { 
@@ -53,8 +54,12 @@ import { validateAndSanitizeBackupPayload } from '../utils/backupEngine';
 import { syncAllWidgetsToNative } from '../services/widgetService';
 
 interface AppContextType {
-  todos: any[];
-  setTodos: any;
+  todos: TodoItem[];
+  setTodos: React.Dispatch<React.SetStateAction<TodoItem[]>>;
+  addTodo: (text: string, options?: { completed?: boolean; dueDate?: string; category?: string }) => TodoItem;
+  updateTodo: (id: string, updates: Partial<TodoItem>) => void;
+  toggleTodo: (id: string) => void;
+  deleteTodo: (id: string) => void;
   // Navigation & Theme & Language & Accent
   theme: 'light' | 'dark';
   toggleTheme: () => void;
@@ -381,9 +386,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     
   }, [accentColor]);
 
-  const [todos, setTodos] = useState<any[]>(() => {
+  const [todos, setTodos] = useState<TodoItem[]>(() => {
     const saved = initialData['dl_quick_todos'];
-    return Array.isArray(saved) ? saved : [];
+    const raw: any[] = Array.isArray(saved) ? saved : (Array.isArray(INITIAL_TODOS) ? INITIAL_TODOS : []);
+    const seen = new Set<string>();
+    return raw.map((item, idx) => {
+      const id = item.id || `todo_${Date.now()}_${idx}`;
+      const migratedItem: TodoItem = {
+        ...item,
+        id: seen.has(id) ? `${id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}` : id,
+        text: item.text || item.title || '',
+        completed: !!item.completed,
+        dueDate: item.dueDate || undefined,
+        category: item.category || undefined,
+        createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
+        updatedAt: item.updatedAt || Date.now(),
+        updatedByDeviceId: item.updatedByDeviceId || 'local',
+        originDeviceId: item.originDeviceId || 'local',
+        originRevision: item.originRevision || 1,
+        deleted: !!item.deleted,
+        version: item.version || 1
+      };
+      seen.add(migratedItem.id);
+      return migratedItem;
+    });
   });
 
   const isInitializedRef = React.useRef(true);
@@ -554,14 +580,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     document.documentElement.setAttribute('lang', language);
   }, [language]);
 
-  const t = (key: TranslationKey): string => {
+  const t = useCallback((key: TranslationKey): string => {
     const val = translations[language]?.[key] || translations['de']?.[key] || translations['en']?.[key] || translations['ar']?.[key];
     if (val !== undefined && val !== null && val !== '') return val;
     return '';
-  };
-  const _t = (ar: string, en: string, de?: string): string => {
+  }, [language]);
+
+  const _t = useCallback((ar: string, en: string, de?: string): string => {
     return language === 'ar' ? ar : language === 'de' ? (de || en) : en;
-  };
+  }, [language]);
 
   
   // Initial state for fresh start with duplicate ID sanitization
@@ -715,17 +742,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   );
 
   // Asynchronous Database Query methods for historical views (SessionHistoryView & ReportsView)
-  const getHistoricalLessons = async (): Promise<Lesson[]> => {
+  const getHistoricalLessons = useCallback(async (): Promise<Lesson[]> => {
     const full = await storage.getItem<Lesson[]>('dl_lessons');
     const source = full && Array.isArray(full) ? full : lessons;
     return source.filter(l => !l.deleted);
-  };
+  }, [lessons]);
 
-  const getHistoricalPayments = async (): Promise<PaymentRecord[]> => {
+  const getHistoricalPayments = useCallback(async (): Promise<PaymentRecord[]> => {
     const full = await storage.getItem<PaymentRecord[]>('dl_payments');
     const source = full && Array.isArray(full) ? full : payments;
     return source.filter(p => !p.deleted);
-  };
+  }, [payments]);
 
   // Safe atomic full-storage manipulation methods to prevent synchronization race conditions or phantom resurrection
   const updateFullLessonsStorage = useCallback(async (updater: (allLessons: Lesson[]) => Lesson[]): Promise<Lesson[]> => {
@@ -1381,12 +1408,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     confetti({ particleCount: 50, spread: 60 });
   };
 
-  const dismissInspirationCard = () => {
+  const dismissInspirationCard = useCallback(() => {
     setActiveInspirationCard(null);
     setIsInspirationDismissedToday(true);
-  };
+  }, []);
 
-  const checkAndTriggerInspirationReminder = (triggerType: 'manual' | 'app_load' | 'before_lesson' = 'app_load') => {
+  const checkAndTriggerInspirationReminder = useCallback((triggerType: 'manual' | 'app_load' | 'before_lesson' = 'app_load') => {
     if (inspirationSettings.frequency === 'disabled' && triggerType !== 'manual') {
       return;
     }
@@ -1457,12 +1484,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
       addAppNotification('💡 إلهام وامتنان اليوم', selectedMsg.text, 'system');
     }
-  };
+  }, [inspirationSettings, inspirationMessages, isInspirationDismissedToday, activeInspirationCard, lessons]);
 
-  // Auto Trigger Effect for Inspiration Reminders
+  // Auto Trigger Effect for Inspiration Reminders (Guarded for single app-load trigger)
+  const hasTriggeredInspirationLoadRef = useRef(false);
   useEffect(() => {
+    if (hasTriggeredInspirationLoadRef.current) return;
+    hasTriggeredInspirationLoadRef.current = true;
     checkAndTriggerInspirationReminder('app_load');
-  }, [inspirationSettings.frequency, inspirationSettings.source, inspirationSettings.displayMethod, lessons]);
+  }, [checkAndTriggerInspirationReminder]);
 
   // 30-Minute Upcoming Lesson Alert Check Worker
   const [notifiedLessonAlerts, setNotifiedLessonAlerts] = useState<Record<string, boolean>>(() => {
@@ -2288,14 +2318,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const matchesId = p.studentId === id;
         const matchesName = p.studentName === oldName;
         if (matchesId || matchesName) {
-          let updatedTitle = p.title;
-          if (p.title && p.title.includes(oldName)) {
-            updatedTitle = p.title.replace(oldName, newName);
+          let updatedNote = (p as any).note || (p as any).title;
+          if (updatedNote && updatedNote.includes(oldName)) {
+            updatedNote = updatedNote.replace(oldName, newName);
           }
           return wrapMutation({
             ...p,
             studentName: newName,
-            title: updatedTitle
+            note: updatedNote
           } as PaymentRecord);
         }
         return p;
@@ -2402,6 +2432,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const deleteCertificate = (id: string) => {
     setCertificates(prev => (prev || []).map(c => (c.id === id ? wrapDeletion(c) : c)));
   };
+
+  // Quick Todos Methods
+  const addTodo = useCallback((text: string, options?: { completed?: boolean; dueDate?: string; category?: string }): TodoItem => {
+    const trimmed = text.trim();
+    const newTodo: TodoItem = {
+      id: `todo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      text: trimmed,
+      completed: !!options?.completed,
+      dueDate: options?.dueDate,
+      category: options?.category,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      version: 1,
+      deleted: false,
+      originDeviceId: syncStateRef.current?.localDeviceId || 'local',
+      originRevision: (syncRevisionRef.current || 0) + 1
+    };
+    const tracked = wrapMutation(newTodo);
+    setTodos(prev => [tracked, ...(prev || [])]);
+    return tracked;
+  }, [wrapMutation]);
+
+  const updateTodo = useCallback((id: string, updates: Partial<TodoItem>) => {
+    setTodos(prev => (prev || []).map(todo => {
+      if (todo.id === id) {
+        const updated: TodoItem = {
+          ...todo,
+          ...updates,
+          updatedAt: Date.now(),
+          version: (todo.version || 1) + 1
+        };
+        return wrapMutation(updated);
+      }
+      return todo;
+    }));
+  }, [wrapMutation]);
+
+  const toggleTodo = useCallback((id: string) => {
+    setTodos(prev => (prev || []).map(todo => {
+      if (todo.id === id) {
+        const updated: TodoItem = {
+          ...todo,
+          completed: !todo.completed,
+          updatedAt: Date.now(),
+          version: (todo.version || 1) + 1
+        };
+        return wrapMutation(updated);
+      }
+      return todo;
+    }));
+  }, [wrapMutation]);
+
+  const deleteTodo = useCallback((id: string) => {
+    setTodos(prev => (prev || []).map(todo => (todo.id === id ? wrapDeletion(todo) : todo)));
+  }, [wrapDeletion]);
 
   // School & Lesson Notes Methods
   const addSchoolNote = useCallback((noteData: Omit<SchoolNote, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted'>): SchoolNote => {
@@ -4285,15 +4370,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   // Control modal open/close
-  const openLessonControl = (lesson: Lesson) => {
+  const openLessonControl = useCallback((lesson: Lesson) => {
     setSelectedLesson(lesson);
     setIsControlModalOpen(true);
-  };
+  }, []);
 
-  const closeLessonControl = () => {
+  const closeLessonControl = useCallback(() => {
     setIsControlModalOpen(false);
     setSelectedLesson(null);
-  };
+  }, []);
 
   // Active Running Lesson Timer Engine State
   const [activeLessonSession, setActiveLessonSession] = useState<ActiveLessonSession | null>(() => {
@@ -4737,11 +4822,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return await startLocalServer(syncState.localDeviceName, syncState.localDeviceId, syncState, syncDataSource);
   };
 
+  // Memoize active records to prevent infinite re-render cascades
+  const activeGroups = useMemo(() => getActiveRecords(groups), [groups]);
+  const activeStudents = useMemo(() => getActiveRecords(enrichedStudents), [enrichedStudents]);
+  const activeLessons = useMemo(() => getActiveRecords(lessons), [lessons]);
+  const activePayments = useMemo(() => getActiveRecords(payments), [payments]);
+  const activeCertificates = useMemo(() => getActiveRecords(certificates || []), [certificates]);
+  const activeNotifications = useMemo(() => getActiveRecords(notifications), [notifications]);
+  const activeTodos = useMemo(() => getActiveRecords(todos || []), [todos]);
+  const activeSchoolNotes = useMemo(() => getActiveRecords(schoolNotes || []), [schoolNotes]);
+  const activeFinanceAccounts = useMemo(() => getActiveRecords(financeAccounts || []), [financeAccounts]);
+  const activeFinanceCategories = useMemo(() => getActiveRecords(financeCategories || []), [financeCategories]);
+  const activeFinanceTransactions = useMemo(() => getActiveRecords(financeTransactions || []), [financeTransactions]);
+  const activeFinanceRecurring = useMemo(() => getActiveRecords(financeRecurring || []), [financeRecurring]);
+  const activeFinanceInstallments = useMemo(() => getActiveRecords(financeInstallments || []), [financeInstallments]);
+  const activeFinanceNotifications = useMemo(() => getActiveRecords(financeNotifications || []), [financeNotifications]);
+
   return (
     <AppContext.Provider
       value={{
-        todos,
+        todos: activeTodos,
         setTodos,
+        addTodo,
+        updateTodo,
+        toggleTodo,
+        deleteTodo,
         theme,
         toggleTheme,
         language,
@@ -4770,21 +4875,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         importBackupFile,
         exportBackupFile,
         verifyBackupIntegrity,
-        groups: getActiveRecords(groups),
+        groups: activeGroups,
         addGroup,
         duplicateGroup,
         updateGroup,
         deleteGroup,
         archiveGroup,
         cascadeDeleteGroup,
-        students: getActiveRecords(enrichedStudents),
+        students: activeStudents,
         addStudent,
         updateStudent,
         deleteStudent,
         archiveStudent,
         uploadStudentDocument,
         deleteStudentDocument,
-        lessons: getActiveRecords(lessons),
+        lessons: activeLessons,
         addLesson,
         addQuickLesson,
         convertQuickLessonToStudent,
@@ -4799,7 +4904,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         restoreItem,
         permanentlyDeleteItem,
         clearRecentlyDeleted,
-        payments: getActiveRecords(payments),
+        payments: activePayments,
         recordPayment,
         addPaymentRecord,
         markCyclePaymentPaid,
@@ -4808,7 +4913,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         toggleStudentPaymentStatus,
         updateStudentPaymentPlan,
         updateLessonPaymentStatus,
-        certificates: getActiveRecords(certificates || []),
+        certificates: activeCertificates,
         addCertificate,
         addCertificatesBulk,
         updateCertificate,
@@ -4816,7 +4921,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setCertificates,
         updateStudentCertificateName,
         updateStudentCertificateNamesBulk,
-        notifications: getActiveRecords(notifications),
+        notifications: activeNotifications,
         markNotificationRead,
         markAllNotificationsRead,
         clearAllNotifications,
@@ -4881,7 +4986,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setHodActionPlans,
         hodVisits,
         setHodVisits,
-        schoolNotes: getActiveRecords(schoolNotes || []),
+        schoolNotes: activeSchoolNotes,
         setSchoolNotes,
         addSchoolNote,
         updateSchoolNote,
@@ -4889,33 +4994,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         getNotesForClass,
         getNotesForStudent,
         getNotesForLesson,
-        financeAccounts: getActiveRecords(financeAccounts || []),
+        financeAccounts: activeFinanceAccounts,
         setFinanceAccounts,
         addFinanceAccount,
         updateFinanceAccount,
         deleteFinanceAccount,
-        financeCategories: getActiveRecords(financeCategories || []),
+        financeCategories: activeFinanceCategories,
         setFinanceCategories,
         addFinanceCategory,
         updateFinanceCategory,
         deleteFinanceCategory,
-        financeTransactions: getActiveRecords(financeTransactions || []),
+        financeTransactions: activeFinanceTransactions,
         setFinanceTransactions,
         addFinanceTransaction,
         updateFinanceTransaction,
         deleteFinanceTransaction,
-        financeRecurring: getActiveRecords(financeRecurring || []),
+        financeRecurring: activeFinanceRecurring,
         setFinanceRecurring,
         addFinanceRecurring,
         updateFinanceRecurring,
         deleteFinanceRecurring,
-        financeInstallments: getActiveRecords(financeInstallments || []),
+        financeInstallments: activeFinanceInstallments,
         setFinanceInstallments,
         addFinanceInstallment,
         updateFinanceInstallment,
         deleteFinanceInstallment,
         
-        financeNotifications: getActiveRecords(financeNotifications || []),
+        financeNotifications: activeFinanceNotifications,
         addFinanceNotification,
         updateFinanceNotification,
         markFinanceNotificationAsRead,

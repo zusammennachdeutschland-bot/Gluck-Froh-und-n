@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { ListTodo, ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
-import { TodoItem } from "../types";
+import { ListTodo, ChevronDown, ChevronUp, Plus, X, Check, Circle } from 'lucide-react';
 
 export const QuickTodoWidget: React.FC = () => {
-  const { t, todos, setTodos } = useApp();
+  const { t, todos, addTodo, deleteTodo, toggleTodo } = useApp();
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [newTaskText, setNewTaskText] = useState('');
@@ -14,19 +13,22 @@ export const QuickTodoWidget: React.FC = () => {
     const trimmed = newTaskText.trim();
     if (!trimmed) return;
 
-    const newTodo: TodoItem = {
-      id: Date.now().toString(),
-      text: trimmed,
-      createdAt: Date.now()
-    };
-
-    setTodos(prev => [newTodo, ...prev]);
+    addTodo(trimmed);
     setNewTaskText('');
   };
 
-  const handleRemoveTodo = (id: string) => {
-    setTodos(prev => prev.filter(item => item.id !== id));
+  const handleRemoveTodo = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    deleteTodo(id);
   };
+
+  const handleToggleTodo = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    toggleTodo(id);
+  };
+
+  const activeTodosList = (todos || []).filter(t => !t.completed);
+  const completedTodosList = (todos || []).filter(t => t.completed);
 
   return (
     <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl shadow-2xs overflow-hidden transition-all">
@@ -45,7 +47,7 @@ export const QuickTodoWidget: React.FC = () => {
             {t('todo_widget_title') || 'Quick Todos'}
           </span>
           <span className="text-[10px] font-bold bg-primary-soft text-primary dark:bg-primary-soft/80 dark:text-primary/70 px-1.5 py-0.2 rounded shrink-0">
-            {todos.length}
+            {activeTodosList.length}
           </span>
         </div>
         <div className="flex items-center gap-1 text-text-muted/70 shrink-0">
@@ -58,32 +60,33 @@ export const QuickTodoWidget: React.FC = () => {
       </button>
 
       {/* Collapsed Small Text Task Preview */}
-      {!isExpanded && todos.length > 0 && (
+      {!isExpanded && activeTodosList.length > 0 && (
         <div className="px-3 pb-2 pt-0 text-[11px] text-slate-600 dark:text-slate-300 space-y-1 border-t border-slate-100/60 dark:border-surface-border/40">
-          {todos.slice(0, 4).map((todo) => (
+          {activeTodosList.slice(0, 4).map((todo) => (
             <div key={todo.id} className="flex items-center justify-between gap-2 py-0.5">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+              <button
+                type="button"
+                onClick={(e) => handleToggleTodo(todo.id, e)}
+                className="flex items-center gap-1.5 min-w-0 text-left cursor-pointer group flex-1"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 group-hover:scale-125 transition-transform" />
                 <span className="text-[11px] font-medium text-slate-700 dark:text-slate-200 truncate leading-snug">
                   {todo.text}
                 </span>
-              </div>
+              </button>
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRemoveTodo(todo.id);
-                }}
-                className="p-0.5 text-slate-400 hover:text-primary transition-colors cursor-pointer shrink-0"
-                title="Done"
+                onClick={(e) => handleRemoveTodo(todo.id, e)}
+                className="p-0.5 text-slate-400 hover:text-red-500 transition-colors cursor-pointer shrink-0"
+                title="Delete"
               >
                 <X className="w-3 h-3" />
               </button>
             </div>
           ))}
-          {todos.length > 4 && (
+          {activeTodosList.length > 4 && (
             <div className="text-[10px] font-bold text-primary/80 pt-0.5">
-              +{todos.length - 4} {t('todo_more_tasks') || 'more tasks...'}
+              +{activeTodosList.length - 4} {t('todo_more_tasks') || 'more tasks...'}
             </div>
           )}
         </div>
@@ -112,7 +115,7 @@ export const QuickTodoWidget: React.FC = () => {
           </form>
 
           {/* Task List */}
-          {todos.length === 0 ? (
+          {(todos || []).length === 0 ? (
             <div className="text-center py-1.5 text-xs font-medium text-text-muted/70 dark:text-slate-500">
               {t('todo_no_tasks') || 'Keine offenen Todos'}
             </div>
@@ -121,19 +124,40 @@ export const QuickTodoWidget: React.FC = () => {
               {(todos || []).map((todo) => (
                 <li
                   key={todo.id}
-                  className="flex items-center justify-between gap-2 px-2.5 py-1 bg-background/90 dark:bg-slate-800/60 rounded-lg border border-slate-100 dark:border-surface-border-soft/50 group transition-colors"
+                  className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border transition-colors ${
+                    todo.completed
+                      ? 'bg-slate-50/60 dark:bg-slate-900/40 border-slate-100 dark:border-slate-800 opacity-60'
+                      : 'bg-background/90 dark:bg-slate-800/60 border-slate-100 dark:border-surface-border-soft/50'
+                  }`}
                 >
-                  <span className="text-[11px] font-medium text-text-main break-words flex-1 leading-snug">
-                    {todo.text}
-                  </span>
                   <button
                     type="button"
-                    onClick={() => handleRemoveTodo(todo.id)}
-                    className="p-0.5 text-slate-400 hover:text-primary hover:bg-primary-soft dark:hover:bg-primary-soft/50 rounded transition-colors cursor-pointer shrink-0"
-                    title="Complete & Remove"
-                    aria-label="Remove task"
+                    onClick={(e) => handleToggleTodo(todo.id, e)}
+                    className="flex items-center gap-2 flex-1 min-w-0 text-left cursor-pointer"
                   >
-                    <X className="w-3 h-3" />
+                    <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border transition-colors ${
+                      todo.completed
+                        ? 'bg-emerald-500 border-emerald-500 text-white'
+                        : 'border-slate-300 dark:border-slate-600 hover:border-primary'
+                    }`}>
+                      {todo.completed && <Check className="w-3 h-3 stroke-[3]" />}
+                    </span>
+                    <span className={`text-[11px] font-medium break-words leading-snug ${
+                      todo.completed
+                        ? 'line-through text-slate-400 dark:text-slate-500'
+                        : 'text-text-main'
+                    }`}>
+                      {todo.text}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleRemoveTodo(todo.id, e)}
+                    className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition-colors cursor-pointer shrink-0"
+                    title="Delete task"
+                    aria-label="Delete task"
+                  >
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 </li>
               ))}

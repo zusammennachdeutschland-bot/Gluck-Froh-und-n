@@ -16,6 +16,8 @@ import { SchoolSettingsSection } from './SchoolSettingsSection';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
 import { getEffectiveSchoolEndForDay, formatTime } from '../utils/timeUtils';
+import { BuddyCustomizer } from './buddy/BuddyCustomizer';
+import { BuddyCustomization, DEFAULT_BUDDY_CUSTOMIZATION } from '../types/buddy';
 
 type SettingsCategory = 
   | 'language'
@@ -68,6 +70,7 @@ export const SettingsView: React.FC = () => {
   const [displayNameAr, setDisplayNameAr] = useState(profile.displayNameAr || profile.nameAr || '');
   const [email, setEmail] = useState(profile.email || '');
   const [currency, setCurrency] = useState(profile.currency || 'EGP');
+  const [buddyConfig, setBuddyConfig] = useState<BuddyCustomization>(() => profile.buddyCustomization || DEFAULT_BUDDY_CUSTOMIZATION);
   const [weeklyWorkingHours, setWeeklyWorkingHours] = useState(profile.weeklyWorkingHours || {
     0: { isOff: true, startTime: '09:00', endTime: '21:00' },
     1: { isOff: false, startTime: '09:00', endTime: '21:00' },
@@ -173,6 +176,7 @@ export const SettingsView: React.FC = () => {
       nameAr: displayNameAr.trim(),
       email, 
       currency,
+      buddyCustomization: buddyConfig,
       weeklyWorkingHours
     });
     triggerSaveToast();
@@ -783,6 +787,17 @@ export const SettingsView: React.FC = () => {
               )}
               </fieldset>
             </form>
+          </div>
+
+          {/* 🌟 Glück Buddy Avatar Customizer Section */}
+          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 shadow-2xs space-y-3">
+            <BuddyCustomizer
+              value={buddyConfig}
+              onChange={(newConfig) => {
+                setBuddyConfig(newConfig);
+                updateProfile({ buddyCustomization: newConfig });
+              }}
+            />
           </div>
 
           {/* 🎯 Financial Goals Section */}

@@ -43,8 +43,12 @@ export const FinanceView: React.FC = () => {
   });
 
 
-  // Process Investments (Contributions & Returns)
+  // Process Investments (Contributions & Returns) once per mount/day
+  const hasProcessedInvestmentsRef = React.useRef(false);
   useEffect(() => {
+    if (hasProcessedInvestmentsRef.current) return;
+    hasProcessedInvestmentsRef.current = true;
+
     const todayStr = new Date().toISOString().split('T')[0];
     const todayDate = new Date();
 
@@ -89,74 +93,65 @@ export const FinanceView: React.FC = () => {
       // Return Generation
       const rate = acc.annualInterestRate || 0;
       if (rate > 0 && acc.compoundingFrequency) {
-        // We need a lastCompoundedDate, fallback to createdAt if not exists
-        let lastDate = acc.lastCompoundedDate ? new Date(acc.lastCompoundedDate) : new Date(acc.createdAt);
-        // Start from next day
-        lastDate.setDate(lastDate.getDate() + 1);
-        
-        let newReturns = acc.accumulatedReturns || 0;
-        let returnsNeedsUpdate = false;
-        
-        while (lastDate <= todayDate) {
-          // Calculate one period of return
-          // Daily return = Rate / 365
-          // Monthly return = Rate / 12
-          // Yearly return = Rate
-          let returnRate = 0;
-          let shouldCalculate = false;
-          
-          if (acc.compoundingFrequency === 'daily') {
-            returnRate = (rate / 100) / 365;
-            shouldCalculate = true;
-          } else if (acc.compoundingFrequency === 'monthly' && lastDate.getDate() === 1) {
-            returnRate = (rate / 100) / 12;
-            shouldCalculate = true;
-          } else if (acc.compoundingFrequency === 'yearly' && lastDate.getMonth() === 0 && lastDate.getDate() === 1) {
-            returnRate = (rate / 100);
-            shouldCalculate = true;
-          }
-
-          if (shouldCalculate) {
-            // Capital base depends on reinvestReturns
-            const baseCapital = acc.reinvestReturns 
-              ? (acc.initialCapital || acc.initialBalance || 0) + (updates.totalContributions ?? (acc.totalContributions || 0)) + newReturns
-              : (acc.initialCapital || acc.initialBalance || 0) + (updates.totalContributions ?? (acc.totalContributions || 0));
-              
-            const dailyProfit = baseCapital * returnRate;
-            
-            if (dailyProfit > 0) {
-              addFinanceTransaction({
-                accountId: acc.id,
-                amount: dailyProfit,
-                type: 'investment_return',
-                note: 'Investment Return',
-                date: lastDate.toISOString()
-              });
-              
-              newReturns += dailyProfit;
-              returnsNeedsUpdate = true;
-            }
-          }
-          
+        // If already compounded today, skip
+        if (acc.lastCompoundedDate === todayStr) {
+          // no-op
+        } else {
+          let lastDate = acc.lastCompoundedDate ? new Date(acc.lastCompoundedDate) : new Date(acc.createdAt);
+          // Start from next day
           lastDate.setDate(lastDate.getDate() + 1);
-        }
-        
-        if (returnsNeedsUpdate) {
-          updates.accumulatedReturns = newReturns;
+          
+          let newReturns = acc.accumulatedReturns || 0;
+          let returnsNeedsUpdate = false;
+          
+          while (lastDate <= todayDate) {
+            let returnRate = 0;
+            let shouldCalculate = false;
+            
+            if (acc.compoundingFrequency === 'daily') {
+              returnRate = (rate / 100) / 365;
+              shouldCalculate = true;
+            } else if (acc.compoundingFrequency === 'monthly' && lastDate.getDate() === 1) {
+              returnRate = (rate / 100) / 12;
+              shouldCalculate = true;
+            } else if (acc.compoundingFrequency === 'yearly' && lastDate.getMonth() === 0 && lastDate.getDate() === 1) {
+              returnRate = (rate / 100);
+              shouldCalculate = true;
+            }
+
+            if (shouldCalculate) {
+              const baseCapital = acc.reinvestReturns 
+                ? (acc.initialCapital || acc.initialBalance || 0) + (updates.totalContributions ?? (acc.totalContributions || 0)) + newReturns
+                : (acc.initialCapital || acc.initialBalance || 0) + (updates.totalContributions ?? (acc.totalContributions || 0));
+                
+              const dailyProfit = baseCapital * returnRate;
+              
+              if (dailyProfit > 0) {
+                addFinanceTransaction({
+                  accountId: acc.id,
+                  amount: dailyProfit,
+                  type: 'investment_return',
+                  note: 'Investment Return',
+                  date: lastDate.toISOString()
+                });
+                
+                newReturns += dailyProfit;
+                returnsNeedsUpdate = true;
+              }
+            }
+            
+            lastDate.setDate(lastDate.getDate() + 1);
+          }
+          
+          if (returnsNeedsUpdate) {
+            updates.accumulatedReturns = newReturns;
+            needsUpdate = true;
+          }
+          
+          updates.lastCompoundedDate = todayStr;
           needsUpdate = true;
         }
-        
-        // Always update lastCompoundedDate so we don't recalculate today
-        updates.lastCompoundedDate = todayStr;
-        needsUpdate = true;
       }
-      // Simple daily compounding check (Proof of concept for the requirements)
-      // In a real financial engine, this requires tracking last compounding date.
-      // For now, if reinvestReturns is ON, and compounding is Daily, we can calculate today's return.
-      // To prevent spamming transactions every single day for every account, the requirement said:
-      // "النظام يجب أن يسجل الـ 100 EGP كإضافة فعلية لرأس المال في كل موعد استحقاق"
-      // But for Returns it says: "Day 1 Contribution +500, Return +12. Day 2 Return +10"
-      // Let's add a lastReturnDate to the account type temporarily or just use today for demo.
       
       if (needsUpdate && Object.keys(updates).length > 0) {
         updateFinanceAccount(acc.id, updates);
@@ -165,7 +160,10 @@ export const FinanceView: React.FC = () => {
   }, [financeAccounts, updateFinanceAccount, addFinanceTransaction]);
 
   // Auto-generate notifications
+  const hasCheckedNotificationsRef = React.useRef(false);
   useEffect(() => {
+    if (hasCheckedNotificationsRef.current) return;
+    hasCheckedNotificationsRef.current = true;
     const today = new Date().toISOString().split('T')[0];
     
     // Check due recurring

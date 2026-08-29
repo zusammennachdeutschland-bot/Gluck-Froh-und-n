@@ -1,3 +1,6 @@
+import { BuddyCustomization } from './buddy';
+export * from './buddy';
+
 export type GradeLevel = 
   | 'Grade 1' | 'Grade 2' | 'Grade 3' | 'Grade 4' 
   | 'Grade 5' | 'Grade 6' | 'Grade 7' | 'Grade 8' 
@@ -311,6 +314,7 @@ export interface TeacherProfile {
   financeStreak?: number;
   financeLastActivityDate?: string;
   schoolSettings?: SchoolSettings;
+  buddyCustomization?: BuddyCustomization;
 }
 
 export interface SchoolDayPresence {
@@ -1012,6 +1016,9 @@ export interface NotificationItem extends SyncableRecord {
 }
 export interface TodoItem extends SyncableRecord {
   text: string;
+  completed?: boolean;
+  dueDate?: string;
+  category?: string;
   createdAt: number;
 }
 

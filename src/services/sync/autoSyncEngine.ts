@@ -92,7 +92,7 @@ class AutoSyncEngine {
    * Called by AppContext whenever a local mutation occurs.
    * Debounces the sync trigger and coalesces rapid edits into a single sync run.
    */
-  public notifyLocalMutation() {
+  public notifyLocalMutation(_entityType?: string, _entityId?: string) {
     if (!this.isAutoSyncEnabled || !this.dataSource) return;
 
     const syncState = this.dataSource.getSyncState();
@@ -119,6 +119,10 @@ class AutoSyncEngine {
     this.debounceTimer = setTimeout(() => {
       this.flushPendingSyncs('Auto Sync');
     }, DEBOUNCE_DELAY_MS);
+  }
+
+  public notifyMutation(_entityType?: string, _entityId?: string) {
+    this.notifyLocalMutation(_entityType, _entityId);
   }
 
   /**

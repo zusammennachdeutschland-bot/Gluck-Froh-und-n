@@ -8,6 +8,9 @@ import {
   Layers, Palette, Star, Building2, BookOpen, UserCheck, School
 } from 'lucide-react';
 import { AppLanguage, AccentColor, NotificationSound, SchoolSettings, SchoolPeriodSettings, SchoolDayPresence } from '../types';
+import { BuddyCustomization, DEFAULT_BUDDY_CUSTOMIZATION } from '../types/buddy';
+import { BuddyCustomizer } from './buddy/BuddyCustomizer';
+import { BuddyAnimation } from './buddy/BuddyAnimation';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { getSchoolSettings, DEFAULT_SCHOOL_SETTINGS } from '../utils/schoolUtils';
@@ -66,8 +69,11 @@ export const SetupWizard: React.FC = () => {
   const [displayName, setDisplayName] = useState(profile.displayName === 'Teacher' ? '' : profile.displayName);
   const [displayNameEn, setDisplayNameEn] = useState(profile.displayNameEn || profile.nameEn || '');
   const [displayNameAr, setDisplayNameAr] = useState(profile.displayNameAr || profile.nameAr || '');
-  const [selectedAvatar, setSelectedAvatar] = useState<string>(profile.avatarUrl || '👨‍🏫');
+  const [selectedAvatar, setSelectedAvatar] = useState<string>(profile.avatarUrl || '');
   const [customAvatarImg, setCustomAvatarImg] = useState<string>(profile.avatarUrl && profile.avatarUrl.startsWith('data:') ? profile.avatarUrl : '');
+  const [buddyConfig, setBuddyConfig] = useState<BuddyCustomization>(() => {
+    return profile.buddyCustomization || DEFAULT_BUDDY_CUSTOMIZATION;
+  });
   const [phone, setPhone] = useState(profile.phone || '');
   const [whatsappNumber, setWhatsappNumber] = useState(profile.whatsappNumber || '');
   const [email, setEmail] = useState(profile.email || '');
@@ -279,6 +285,7 @@ export const SetupWizard: React.FC = () => {
       defaultMeetLink: defaultMeetLink.trim(),
       enableLessonAlerts,
       schoolSettings: updatedSchoolSettings,
+      buddyCustomization: buddyConfig,
       workingHours: {
         workingDays: selectedDays,
         startTime,
@@ -603,45 +610,49 @@ export const SetupWizard: React.FC = () => {
                     </p>
                   </div>
 
-                  {/* Avatar Picker */}
-                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                        {_t('الصورة الرمزية / الشعار', 'Teacher Avatar / Icon', 'Lehrer-Avatar')}
-                      </span>
-                      <label className="text-xs font-bold text-primary hover:underline cursor-pointer flex items-center gap-1">
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>{_t('رفع صورة مخصصة', 'Upload Photo', 'Foto hochladen')}</span>
-                        <input type="file" accept="image/*" onChange={handleAvatarFileUpload} className="hidden" />
-                      </label>
-                    </div>
+                  {/* Buddy Mascot Customizer & Avatar */}
+                  <div className="space-y-3">
+                    <BuddyCustomizer
+                      value={buddyConfig}
+                      onChange={setBuddyConfig}
+                    />
 
-                    <div className="flex items-center gap-2.5 overflow-x-auto py-1">
-                      {customAvatarImg && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedAvatar(customAvatarImg)}
-                          className={`relative w-12 h-12 rounded-xl overflow-hidden border-2 flex-shrink-0 ${
-                            selectedAvatar === customAvatarImg ? 'border-primary ring-2 ring-primary/30 scale-105' : 'border-slate-300'
-                          }`}
-                        >
-                          <img src={customAvatarImg} alt="Custom" className="w-full h-full object-cover" />
-                        </button>
-                      )}
-                      {PRESET_AVATARS.map((av) => (
-                        <button
-                          key={av.id}
-                          type="button"
-                          onClick={() => setSelectedAvatar(av.icon)}
-                          className={`w-11 h-11 rounded-xl flex-shrink-0 flex items-center justify-center text-xl border transition-all cursor-pointer ${
-                            selectedAvatar === av.icon 
-                              ? 'border-primary bg-primary/10 ring-2 ring-primary/20 scale-105 shadow-sm' 
-                              : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:scale-105'
-                          }`}
-                        >
-                          {av.icon}
-                        </button>
-                      ))}
+                    {/* Or Upload Custom Teacher Photo */}
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {customAvatarImg ? (
+                          <div className="w-8 h-8 rounded-lg overflow-hidden border border-primary/40 shrink-0">
+                            <img src={customAvatarImg} alt="Uploaded" className="w-full h-full object-cover" />
+                          </div>
+                        ) : (
+                          <Camera className="w-4 h-4 text-slate-400" />
+                        )}
+                        <div>
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                            {customAvatarImg ? _t('تم تعيين صورة مخصصة', 'Custom Photo Uploaded', 'Eigenes Foto ausgewählt') : _t('أو استخدام صورة شخصية حقيقية', 'Or use a real profile photo', 'Oder eigenes Profilfoto')}
+                          </p>
+                          <p className="text-[10px] text-slate-500">
+                            {_t('اختياري — تظهر في الشهادات والتقارير الرسمية', 'Optional — used in certificates and reports', 'Optional für Zertifikate')}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {customAvatarImg && (
+                          <button
+                            type="button"
+                            onClick={() => { setCustomAvatarImg(''); setSelectedAvatar(''); }}
+                            className="text-[11px] font-bold text-red-500 hover:underline cursor-pointer"
+                          >
+                            {_t('حذف', 'Remove', 'Entfernen')}
+                          </button>
+                        )}
+                        <label className="text-xs font-bold px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer flex items-center gap-1.5 transition-colors">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{customAvatarImg ? _t('تغيير', 'Change', 'Ändern') : _t('رفع صورة', 'Upload', 'Hochladen')}</span>
+                          <input type="file" accept="image/*" onChange={handleAvatarFileUpload} className="hidden" />
+                        </label>
+                      </div>
                     </div>
                   </div>
 
@@ -1292,11 +1303,11 @@ export const SetupWizard: React.FC = () => {
                       {/* Teacher Row */}
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-2xl overflow-hidden flex-shrink-0">
-                            {selectedAvatar.startsWith('data:') ? (
-                              <img src={selectedAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                          <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-2xl overflow-visible flex-shrink-0">
+                            {customAvatarImg ? (
+                              <img src={customAvatarImg} alt="Avatar" className="w-full h-full object-cover rounded-2xl" />
                             ) : (
-                              <span>{selectedAvatar}</span>
+                              <BuddyAnimation mood="celebration" size="sm" customization={buddyConfig} popOut={true} />
                             )}
                           </div>
                           <div>
