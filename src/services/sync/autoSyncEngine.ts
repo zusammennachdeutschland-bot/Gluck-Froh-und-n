@@ -184,7 +184,7 @@ class AutoSyncEngine {
     // If automatic trigger and peer is quarantined, skip silently
     if (trigger !== 'Manual Sync' && this.isQuarantined(peerId)) {
       const skipReport: SyncCycleReport = {
-        id: 'sync_quarantine_' + Date.now(),
+        id: 'sync_quarantine_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
         timestamp: Date.now(),
         peerId,
         peerName: 'Peer',
@@ -204,7 +204,7 @@ class AutoSyncEngine {
     if (!acquired) {
       console.warn(`[AutoSyncEngine] Sync skipped: lock is currently held by ${this.syncLock.owner}`);
       const busyReport: SyncCycleReport = {
-        id: 'sync_busy_' + Date.now(),
+        id: 'sync_busy_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
         timestamp: Date.now(),
         peerId,
         peerName: 'Peer',
@@ -249,7 +249,7 @@ class AutoSyncEngine {
     } catch (err: any) {
       this.recordFailure(peerId);
       const errorReport: SyncCycleReport = {
-        id: 'sync_err_' + Date.now(),
+        id: 'sync_err_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
         timestamp: Date.now(),
         peerId,
         peerName: 'Peer',

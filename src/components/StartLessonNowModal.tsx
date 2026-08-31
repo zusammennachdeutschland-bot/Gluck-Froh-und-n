@@ -128,8 +128,9 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
       amountDue = grp?.pricePerSession || grp?.monthlyPackagePrice || 200;
     }
 
-    // 1. Create new Lesson object in context
-    const newLessonId = `l_spont_${Date.now()}`;
+    // 1. Create new Lesson object in context with a robust collision-proof ID
+    const randomSuffix = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).substring(2, 8);
+    const newLessonId = `l_spont_${Date.now()}_${randomSuffix}`;
     const newLessonData = {
       id: newLessonId,
       groupId: targetGroupId,

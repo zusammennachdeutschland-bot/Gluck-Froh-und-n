@@ -8,6 +8,7 @@ import { SyncConnectionState, DevicePresenceState } from '../../types';
 import { CopyableBlock } from './CopyableBlock';
 import { connectivityEngine } from '../../services/sync/connectivityEngine';
 import { runSyncStressBenchmark, BenchmarkMetrics } from '../../services/sync/benchmarkSync';
+import { useApp } from '../../context/AppContext';
 
 interface DiagnosticsCenterProps {
   connectionState: SyncConnectionState;
@@ -22,6 +23,7 @@ export const DiagnosticsCenter: React.FC<DiagnosticsCenterProps> = ({
   pendingCount,
   id
 }) => {
+  const { _t } = useApp();
   const [isRunningTests, setIsRunningTests] = useState(false);
   const [testResults, setTestResults] = useState<{
     internetReachability: 'pass' | 'fail' | 'testing';
@@ -60,16 +62,16 @@ export const DiagnosticsCenter: React.FC<DiagnosticsCenterProps> = ({
     switch (state) {
       case 'SYNC_READY':
       case 'BROKER_CONNECTED':
-        return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">🟢 Healthy ({state})</span>;
+        return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">🟢 {_t('جاهز ومتصل', 'Healthy', 'Bereit')} ({state})</span>;
       case 'SYNCING':
-        return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300">🔵 Active ({state})</span>;
+        return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-primary-soft text-primary border border-primary/20">🔵 {_t('مزامنة جارية', 'Active Syncing', 'Aktiv')} ({state})</span>;
       case 'INTERNET_AVAILABLE':
       case 'NETWORK_CONNECTED':
-        return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300">🟡 Standby ({state})</span>;
+        return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">🟡 {_t('في وضع الاستعداد', 'Standby', 'Standby')} ({state})</span>;
       case 'OFFLINE':
       case 'SYNC_ERROR':
       default:
-        return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 dark:bg-red-950 text-red-800 dark:text-red-300">🔴 Attention ({state})</span>;
+        return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20">🔴 {_t('غير متصل', 'Attention', 'Offline')} ({state})</span>;
     }
   };
 
@@ -89,89 +91,93 @@ export const DiagnosticsCenter: React.FC<DiagnosticsCenterProps> = ({
   return (
     <div id={id} className="space-y-6">
       {/* Top Banner & Trigger */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-gray-50 to-slate-100 dark:from-gray-900 dark:to-gray-800/80 border border-gray-200 dark:border-gray-700/80">
-        <div>
-          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <Activity className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            System Health & Diagnostic Suite
-          </h3>
-          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-            Real-time telemetry, peer latency graphs, and storage integrity validation.
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-surface border border-surface-border shadow-xs">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-primary-soft text-primary border border-primary/20 flex items-center justify-center shadow-xs shrink-0">
+            <Activity className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-base font-black text-text-main">
+              {_t('فحص وصحة نظام المزامنة والشبكة', 'System Health & Diagnostic Suite', 'Systemdiagnose & Netzwerkprüfung')}
+            </h3>
+            <p className="text-xs text-text-muted mt-0.5">
+              {_t('قياس استجابة الأجهزة، فحص سلامة التخزين المحلي، وسجلات تتبع الأداء.', 'Real-time telemetry, peer latency graphs, and storage integrity validation.', 'Echtzeit-Telemetrie, Latenz und Speicherintegritätsprüfung.')}
+            </p>
+          </div>
         </div>
 
         <button
           type="button"
           onClick={runFullDiagnostics}
           disabled={isRunningTests}
-          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold text-sm transition-all shadow-md disabled:opacity-50"
+          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover active:bg-primary text-white font-bold text-xs transition-all shadow-xs disabled:opacity-40 shrink-0 cursor-pointer"
         >
           <Play className={`w-4 h-4 ${isRunningTests ? 'animate-spin' : ''}`} />
-          <span>{isRunningTests ? 'Running Diagnostic Tests...' : 'Run Full System Test'}</span>
+          <span>{isRunningTests ? _t('جارٍ تشغيل الفحص...', 'Running Diagnostic Tests...', 'Diagnose läuft...') : _t('بدء الفحص الشامل', 'Run Full System Test', 'Vollständigen Test starten')}</span>
         </button>
       </div>
 
       {/* State Machine Overview Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
-          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 block mb-1">State Machine</span>
+        <div className="p-4 rounded-2xl bg-surface border border-surface-border shadow-xs">
+          <span className="text-[10px] font-black uppercase tracking-wider text-text-muted block mb-2">{_t('حالة الاتصال العامة', 'State Machine', 'Verbindungsstatus')}</span>
           {getStatusBadge(connectionState)}
         </div>
-        <div className="p-4 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
-          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 block mb-1">Active Presences</span>
-          <span className="font-bold text-gray-900 dark:text-gray-100 text-sm">
-            {presenceList.filter(p => p.isOnline).length} / {presenceList.length} Connected
+        <div className="p-4 rounded-2xl bg-surface border border-surface-border shadow-xs">
+          <span className="text-[10px] font-black uppercase tracking-wider text-text-muted block mb-1">{_t('الأجهزة المتصلة الحية', 'Active Presences', 'Aktive Geräte')}</span>
+          <span className="font-black text-text-main text-sm">
+            {presenceList.filter(p => p.isOnline).length} / {presenceList.length} {_t('متصل الآن', 'Connected', 'Verbunden')}
           </span>
         </div>
-        <div className="p-4 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
-          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 block mb-1">Pending Outbox</span>
-          <span className="font-bold text-gray-900 dark:text-gray-100 text-sm">
-            {pendingCount} Deltas Queued
+        <div className="p-4 rounded-2xl bg-surface border border-surface-border shadow-xs">
+          <span className="text-[10px] font-black uppercase tracking-wider text-text-muted block mb-1">{_t('تعديلات قيد الإرسال', 'Pending Outbox', 'Wartende Änderungen')}</span>
+          <span className="font-black text-text-main text-sm">
+            {pendingCount} {_t('تعديلات معلقة', 'Deltas Queued', 'Deltas')}
           </span>
         </div>
       </div>
 
       {/* Active Diagnostics Test Output */}
       {testResults && (
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 sm:p-5 space-y-4">
-          <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center justify-between">
-            <span>Automated Test Run Results</span>
-            <span className="text-xs text-gray-500 font-normal font-mono">
+        <div className="rounded-2xl border border-surface-border bg-surface p-5 space-y-4 shadow-xs">
+          <h4 className="text-sm font-black text-text-main flex items-center justify-between">
+            <span>{_t('نتائج الفحص الآلي للمنظومة', 'Automated Test Run Results', 'Automatische Testergebnisse')}</span>
+            <span className="text-xs text-text-muted font-normal font-mono bg-background px-2.5 py-0.5 rounded-md border border-surface-border">
               {new Date(testResults.timestamp).toLocaleTimeString()}
             </span>
           </h4>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="p-3 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/40 flex items-center justify-between">
-              <span className="font-medium text-gray-700 dark:text-gray-300">Internet Reachability</span>
+            <div className="p-3.5 rounded-xl border border-surface-border bg-background flex items-center justify-between">
+              <span className="font-bold text-text-main">{_t('الوصول للإنترنت', 'Internet Reachability', 'Internetverbindung')}</span>
               {testResults.internetReachability === 'pass' ? (
-                <span className="text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Pass</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-black flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> {_t('سليم', 'Pass', 'Bestanden')}</span>
               ) : (
-                <span className="text-red-600 font-bold flex items-center gap-1"><XCircle className="w-3.5 h-3.5" /> Fail</span>
+                <span className="text-red-600 dark:text-red-400 font-black flex items-center gap-1"><XCircle className="w-4 h-4" /> {_t('غير متوفر', 'Fail', 'Fehlgeschlagen')}</span>
               )}
             </div>
-            <div className="p-3 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/40 flex items-center justify-between">
-              <span className="font-medium text-gray-700 dark:text-gray-300">Broker Signaling</span>
+            <div className="p-3.5 rounded-xl border border-surface-border bg-background flex items-center justify-between">
+              <span className="font-bold text-text-main">{_t('خادم الإشارات والتوجيه', 'Broker Signaling', 'Signalisierungs-Server')}</span>
               {testResults.brokerSignaling === 'pass' ? (
-                <span className="text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Pass</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-black flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> {_t('سليم', 'Pass', 'Bestanden')}</span>
               ) : (
-                <span className="text-amber-600 font-bold flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Standby</span>
+                <span className="text-amber-600 dark:text-amber-400 font-black flex items-center gap-1"><AlertTriangle className="w-4 h-4" /> {_t('استعداد', 'Standby', 'Standby')}</span>
               )}
             </div>
-            <div className="p-3 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/40 flex items-center justify-between">
-              <span className="font-medium text-gray-700 dark:text-gray-300">Storage Throughput</span>
+            <div className="p-3.5 rounded-xl border border-surface-border bg-background flex items-center justify-between">
+              <span className="font-bold text-text-main">{_t('كفاءة التخزين المحلي', 'Storage Throughput', 'Speicherdurchsatz')}</span>
               {testResults.storageIntegrity === 'pass' ? (
-                <span className="text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> {testResults.benchmark?.performanceGrade}</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-black flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> {testResults.benchmark?.performanceGrade}</span>
               ) : (
-                <span className="text-red-600 font-bold flex items-center gap-1"><XCircle className="w-3.5 h-3.5" /> Degraded</span>
+                <span className="text-red-600 dark:text-red-400 font-black flex items-center gap-1"><XCircle className="w-4 h-4" /> {_t('منخفض', 'Degraded', 'Reduziert')}</span>
               )}
             </div>
           </div>
 
           {testResults.benchmark && (
-            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/30 border border-gray-100 dark:border-gray-800 text-xs space-y-1 font-mono text-gray-600 dark:text-gray-300">
-              <div>Stress Test: <strong>{testResults.benchmark.totalEntities} entities</strong> across <strong>{testResults.benchmark.devicesSimulated} devices</strong></div>
-              <div>Delta Generation: <strong>{testResults.benchmark.deltaBuildTimeMs}ms</strong> | 3-Way Merge: <strong>{testResults.benchmark.mergeExecutionTimeMs}ms</strong></div>
+            <div className="p-3.5 rounded-xl bg-background border border-surface-border text-xs space-y-1 font-mono text-text-muted">
+              <div>Stress Test: <strong className="text-text-main">{testResults.benchmark.totalEntities} entities</strong> across <strong className="text-text-main">{testResults.benchmark.devicesSimulated} devices</strong></div>
+              <div>Delta Generation: <strong className="text-text-main">{testResults.benchmark.deltaBuildTimeMs}ms</strong> | 3-Way Merge: <strong className="text-text-main">{testResults.benchmark.mergeExecutionTimeMs}ms</strong></div>
             </div>
           )}
         </div>
@@ -179,11 +185,11 @@ export const DiagnosticsCenter: React.FC<DiagnosticsCenterProps> = ({
 
       {/* Copyable Full Telemetry Logs Container for Support */}
       <div className="space-y-2">
-        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 block">
-          Support Diagnostic Export
+        <span className="text-[10px] font-black uppercase tracking-wider text-text-muted block">
+          {_t('سجل التشخيص للتصدير والدعم الفني', 'Support Diagnostic Export', 'Diagnose-Export für Support')}
         </span>
         <CopyableBlock
-          title="Diagnostic Dump (One-Click Copy for Support)"
+          title={_t('تقرير فحص المنظومة الكامل (نسخ بنقرة واحدة)', 'Diagnostic Dump (One-Click Copy for Support)', 'Vollständiger Diagnosebericht (1-Klick-Kopie)')}
           content={JSON.stringify(fullDiagnosticLog, null, 2)}
           maxHeight="max-h-56"
         />

@@ -7,12 +7,21 @@ import { BulkCertificateModal } from './BulkCertificateModal';
 import { CertificatePreviewModal } from './CertificatePreviewModal';
 import { AINameTransliterationModal } from './AINameTransliterationModal';
 import { AIBackgroundDesignerModal } from './AIBackgroundDesignerModal';
-import { downloadCertificatePDF, shareCertificateWhatsApp } from '../../utils/certificateExportUtils';
+import { 
+  downloadCertificatePDF, 
+  downloadCertificateImage,
+  shareCertificateWhatsApp,
+  shareCertificate,
+  saveCertificateToPhoneFolder,
+  saveAllCertificatesToPhoneFolder,
+  CERTIFICATES_FOLDER_NAME
+} from '../../utils/certificateExportUtils';
 import { 
   Award, Plus, Sparkles, Layers, Search, Filter, Eye, Download, Share2, 
   Users, CheckCircle2, Star, Calendar, ArrowRight, UserCheck, ShieldCheck,
-  Palette, Image as ImageIcon, Trash2
+  Palette, Image as ImageIcon, Trash2, FolderDown, Send, FileText, Loader2, Info
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { motion, AnimatePresence } from 'motion/react';
 
 export const CertificateCenter: React.FC = () => {
@@ -35,6 +44,13 @@ export const CertificateCenter: React.FC = () => {
   const [editingCertificate, setEditingCertificate] = useState<CertificateRecord | undefined>(undefined);
   const [certToDelete, setCertToDelete] = useState<CertificateRecord | null>(null);
 
+  // Phone Folder Batch Export States
+  const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
+  const [isBatchExporting, setIsBatchExporting] = useState(false);
+  const [batchFormat, setBatchFormat] = useState<'pdf' | 'png'>('pdf');
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; name: string } | null>(null);
+  const [batchSummary, setBatchSummary] = useState<string | null>(null);
+
   // Active certificates (excluding deleted ones if any)
   const safeCertificates = certificates || [];
   const safeStudents = students || [];
@@ -45,6 +61,36 @@ export const CertificateCenter: React.FC = () => {
   // Set of students with certificates
   const honoredStudentIds = new Set(activeCertificates.map(c => c.studentId));
   const totalHonoredStudents = safeStudents.filter(s => honoredStudentIds.has(s.id)).length;
+
+  const handleBatchExportToFolder = async () => {
+    if (activeCertificates.length === 0 || isBatchExporting) return;
+    setIsBatchExporting(true);
+    setBatchSummary(null);
+    setBatchProgress({ current: 0, total: activeCertificates.length, name: '...' });
+
+    try {
+      const res = await saveAllCertificatesToPhoneFolder(
+        activeCertificates,
+        batchFormat,
+        (curr, total, studentName) => {
+          setBatchProgress({ current: curr, total, name: studentName });
+        }
+      );
+
+      setBatchSummary(
+        _t(
+          `تم حفظ ${res.savedCount} شهادة بنجاح في مجلد:\n${res.folderPath}`,
+          `Successfully saved ${res.savedCount} certificates to:\n${res.folderPath}`,
+          `${res.savedCount} Zertifikate wurden im Ordner gespeichert`
+        )
+      );
+    } catch (err) {
+      console.error('Batch export error:', err);
+      setBatchSummary(_t('حدث خطأ أثناء التصدير الجماعي', 'Batch export failed', 'Fehler beim Export'));
+    } finally {
+      setIsBatchExporting(false);
+    }
+  };
 
   // Filtered Students to Honor (Only those who DO NOT have any certificates yet)
   const studentsToHonor = safeStudents.filter(s => {
@@ -122,7 +168,7 @@ export const CertificateCenter: React.FC = () => {
           </div>
 
           {/* Top Quick Actions */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 w-full sm:w-auto sm:flex sm:items-center">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 w-full sm:w-auto sm:flex sm:items-center">
             <button
               onClick={() => setIsAIDesignerOpen(true)}
               className="px-2 sm:px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
@@ -147,6 +193,15 @@ export const CertificateCenter: React.FC = () => {
             >
               <Layers className="w-3.5 h-3.5 text-primary shrink-0" />
               <span className="truncate">{_t('تكريم جماعي', 'Bulk Issue', 'Gruppe ehren')}</span>
+            </button>
+
+            <button
+              onClick={() => setIsFolderModalOpen(true)}
+              className="px-2 sm:px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
+              title={_t('مجلد شهادات الهاتف', 'Phone Folder', 'Telefonordner')}
+            >
+              <FolderDown className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="truncate">{_t('مجلد الهاتف (AGS)', 'Phone Folder', 'Telefonordner')}</span>
             </button>
 
             <button
@@ -408,7 +463,7 @@ export const CertificateCenter: React.FC = () => {
                           <span className="block font-black text-xs text-text-main truncate">{cert.courseOrLevelTitle}</span>
                           <span className="block text-[9px] text-text-muted truncate">{cert.issueDate} • {cert.type}</span>
                         </div>
-                        <div className="flex items-center gap-0.5 shrink-0">
+                        <div className="flex items-center gap-1 shrink-0">
                           <button
                             type="button"
                             onClick={e => {
@@ -416,9 +471,42 @@ export const CertificateCenter: React.FC = () => {
                               downloadCertificatePDF(cert);
                             }}
                             className="p-1 text-text-muted hover:text-primary transition-colors cursor-pointer"
-                            title="Download PDF"
+                            title={_t('تحميل PDF', 'Download PDF', 'PDF')}
                           >
                             <Download className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              downloadCertificateImage(cert, 'png');
+                            }}
+                            className="p-1 text-text-muted hover:text-primary transition-colors cursor-pointer"
+                            title={_t('صورة PNG', 'Download PNG', 'PNG')}
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              saveCertificateToPhoneFolder(cert);
+                            }}
+                            className="p-1 text-text-muted hover:text-amber-600 transition-colors cursor-pointer"
+                            title={_t('حفظ في مجلد الهاتف', 'Save to Phone Folder', 'Im Ordner speichern')}
+                          >
+                            <FolderDown className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              shareCertificate(cert, cert.title, cert.recipientName || cert.studentName, 'png');
+                            }}
+                            className="p-1 text-text-muted hover:text-primary transition-colors cursor-pointer"
+                            title={_t('مشاركة', 'Share', 'Teilen')}
+                          >
+                            <Send className="w-3.5 h-3.5" />
                           </button>
                           <button
                             type="button"
@@ -427,7 +515,7 @@ export const CertificateCenter: React.FC = () => {
                               shareCertificateWhatsApp(cert, student.parentPhone || student.studentPhone);
                             }}
                             className="p-1 text-text-muted hover:text-emerald-500 transition-colors cursor-pointer"
-                            title="Share"
+                            title="WhatsApp"
                           >
                             <Share2 className="w-3.5 h-3.5" />
                           </button>
@@ -507,16 +595,37 @@ export const CertificateCenter: React.FC = () => {
                         <button
                           onClick={() => setSelectedCertForPreview(cert)}
                           className="p-1.5 bg-slate-50 dark:bg-slate-800 text-text-main hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
-                          title="View"
+                          title={_t('معاينة', 'Preview', 'Vorschau')}
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => downloadCertificatePDF(cert)}
                           className="p-1.5 bg-primary/10 text-primary hover:bg-primary hover:text-white rounded-lg transition-colors cursor-pointer"
-                          title="Download PDF"
+                          title={_t('تحميل PDF', 'Download PDF', 'PDF')}
                         >
                           <Download className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => downloadCertificateImage(cert, 'png')}
+                          className="p-1.5 bg-sky-500/10 text-sky-600 hover:bg-sky-600 hover:text-white rounded-lg transition-colors cursor-pointer"
+                          title={_t('صورة PNG', 'PNG Image', 'PNG Bild')}
+                        >
+                          <ImageIcon className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => saveCertificateToPhoneFolder(cert)}
+                          className="p-1.5 bg-amber-500/10 text-amber-700 hover:bg-amber-600 hover:text-white rounded-lg transition-colors cursor-pointer"
+                          title={_t('حفظ في مجلد الهاتف', 'Save to Phone Folder', 'Im Ordner speichern')}
+                        >
+                          <FolderDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => shareCertificate(cert, cert.title, cert.recipientName || cert.studentName, 'png')}
+                          className="p-1.5 bg-indigo-500/10 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg transition-colors cursor-pointer"
+                          title={_t('مشاركة', 'Share', 'Teilen')}
+                        >
+                          <Send className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => shareCertificateWhatsApp(cert, st?.parentPhone || st?.studentPhone)}
@@ -543,6 +652,148 @@ export const CertificateCenter: React.FC = () => {
       )}
 
       {/* Modals */}
+      {isFolderModalOpen && (
+        <div onClick={() => !isBatchExporting && setIsFolderModalOpen(false)} className="fixed inset-0 z-55 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div onClick={e => e.stopPropagation()} className="bg-surface dark:bg-slate-900 rounded-3xl p-5 max-w-md w-full border border-surface-border dark:border-slate-800 shadow-2xl space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between border-b border-surface-border dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold">
+                  <FolderDown className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-text-main">
+                    {_t('مجلد شهادات الهاتف', 'Phone Certificates Folder', 'Telefon-Zertifikate-Ordner')}
+                  </h3>
+                  <p className="text-[11px] text-text-muted">
+                    {CERTIFICATES_FOLDER_NAME}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => !isBatchExporting && setIsFolderModalOpen(false)}
+                disabled={isBatchExporting}
+                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-text-muted hover:text-text-main flex items-center justify-center text-xs font-bold disabled:opacity-40"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-1.5">
+                <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-bold text-xs">
+                  <Info className="w-4 h-4 shrink-0" />
+                  <span>{_t('مسار تخزين الشهادات بالهاتف', 'Storage Location on Phone', 'Speicherort')}</span>
+                </div>
+                <p className="text-[11px] text-text-muted leading-relaxed font-mono" dir="ltr">
+                  /Documents/{CERTIFICATES_FOLDER_NAME}/
+                </p>
+                <p className="text-[10px] text-text-muted">
+                  {_t(
+                    'يقوم النظام تلقائياً بإنشاء هذا المجلد وتخزين كافة الشهادات بداخله للرجوع إليها في أي وقت بدون إنترنت.',
+                    'The app automatically creates this folder and saves all your certificates inside it for offline access anytime.',
+                    'Die App erstellt diesen Ordner und speichert alle Zertifikate darin.'
+                  )}
+                </p>
+              </div>
+
+              {/* Format selection */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-text-main block">
+                  {_t('صيغة التصدير الجماعي:', 'Batch Export Format:', 'Export-Format:')}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={isBatchExporting}
+                    onClick={() => setBatchFormat('pdf')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      batchFormat === 'pdf'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-surface-border text-text-muted hover:border-slate-300'
+                    }`}
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>PDF (.pdf)</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isBatchExporting}
+                    onClick={() => setBatchFormat('png')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      batchFormat === 'png'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-surface-border text-text-muted hover:border-slate-300'
+                    }`}
+                  >
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    <span>PNG Image (.png)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Progress and status */}
+              {isBatchExporting && batchProgress && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl space-y-2 border border-surface-border dark:border-slate-700">
+                  <div className="flex items-center justify-between text-xs font-bold text-text-main">
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                      {_t('جاري الحفظ والتصدير للمجلد...', 'Exporting to phone folder...', 'Wird exportiert...')}
+                    </span>
+                    <span className="text-primary font-mono font-black">
+                      {batchProgress.current} / {batchProgress.total}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-primary h-full transition-all duration-300 rounded-full"
+                      style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-[10.5px] text-text-muted truncate">
+                    {_t('جاري معالجة شهادة: ', 'Processing: ', 'Verarbeitung: ')}
+                    <span className="font-bold text-text-main">{batchProgress.name}</span>
+                  </p>
+                </div>
+              )}
+
+              {batchSummary && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-bold flex items-start gap-2 whitespace-pre-line">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{batchSummary}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isBatchExporting || activeCertificates.length === 0}
+                onClick={handleBatchExportToFolder}
+                className="py-3 px-4 bg-primary hover:bg-primary-hover text-white rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                {isBatchExporting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>{_t('جاري التصدير إلى الهاتف...', 'Exporting to device...', 'Wird exportiert...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <FolderDown className="w-4 h-4" />
+                    <span>
+                      {_t(
+                        `حفظ جميع الشهادات (${activeCertificates.length}) في مجلد الهاتف`,
+                        `Save All Certificates (${activeCertificates.length}) to Phone Folder`,
+                        `Alle Zertifikate (${activeCertificates.length}) im Ordner speichern`
+                      )}
+                    </span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isCreateModalOpen && (
         <CreateCertificateModal
           initialStudentId={selectedStudentForHonor}

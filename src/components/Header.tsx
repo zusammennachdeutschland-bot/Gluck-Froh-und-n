@@ -1,12 +1,10 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatLocalDate } from '../utils/timeUtils';
-import { Bell, RefreshCw, CheckCircle2, Camera, Clock, Trash2, MoreHorizontal, Award, History, BarChart2, Settings } from 'lucide-react';
-import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
-import { AvatarImage } from './AvatarImage';
+import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X } from 'lucide-react';
 import { GlueckBuddyAvatar } from './buddy/GlueckBuddyAvatar';
 import { NotificationsModal } from './NotificationsModal';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { SyncHeaderButton } from './sync/SyncHeaderButton';
 import { SyncCenterModal } from './sync/SyncCenterModal';
 import { pairWithPeer } from '../services/sync/syncClient';
@@ -18,7 +16,6 @@ export const Header: React.FC = () => {
     activeTab,
     setActiveTab,
     profile, 
-    updateProfile, 
     notifications, 
     lessons, 
     openLessonControl, 
@@ -26,6 +23,7 @@ export const Header: React.FC = () => {
     setIsRecentlyDeletedModalOpen,
     recentlyDeleted,
     t,
+    _t,
     syncState,
     isSyncReady,
     connectionState,
@@ -42,7 +40,7 @@ export const Header: React.FC = () => {
   } = useApp();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showToast, setShowToast] = useState(false);
-  const [showMoreHeaderMenu, setShowMoreHeaderMenu] = useState(false);
+  const [showMainMenuDrawer, setShowMainMenuDrawer] = useState(false);
 
   const isRtl = language === 'ar' || (typeof document !== 'undefined' && document.documentElement.dir === 'rtl');
 
@@ -123,7 +121,7 @@ export const Header: React.FC = () => {
         }
         addLog(`Synced with ${peersToSync.length} device(s)`);
       }
-    } catch(e) {
+    } catch {
       addLog(`Sync error occurred`);
     } finally {
       setIsSyncing(false);
@@ -170,14 +168,6 @@ export const Header: React.FC = () => {
     return upcoming[0] || null;
   }, [lessons, profile.enableLessonAlerts, profile.enableBrowserPush]);
 
-  const handleRefresh = () => {
-    refreshCalendarAndDashboard();
-    setShowToast(true);
-    setTimeout(() => {
-      setShowToast(false);
-    }, 2500);
-  };
-
   return (
     <>
       {/* Premium Safe Area Spacer for Android Status Bar */}
@@ -186,21 +176,22 @@ export const Header: React.FC = () => {
         style={{ height: 'max(24px, env(safe-area-inset-top, 24px))' }}
       />
 
-      {/* Compact Premium Dashboard Header */}
-      <header className="bg-surface dark:bg-black border-b border-surface-border/80 px-3.5 py-2.5 sticky top-0 z-30 transition-colors shadow-2xs">
-        <div className="flex items-center justify-between gap-2 max-w-lg mx-auto">
-          {/* Profile & Greeting / Tab Indicator */}
-          <div className="flex items-center gap-2 min-w-0 flex-1 px-1">
+      {/* Compact Header */}
+      <header className="bg-surface dark:bg-black border-b border-surface-border/80 px-3.5 py-2 sticky top-0 z-30 transition-colors shadow-2xs">
+        <div className="flex items-center justify-between gap-3 max-w-lg mx-auto">
+          
+          {/* Start: Profile Avatar & Greeting / Active Tab Name */}
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <GlueckBuddyAvatar />
 
-            <div className="leading-tight min-w-0 flex-1 pr-1">
+            <div className="leading-tight min-w-0 flex-1">
               {activeTab === 'home' ? (
                 <>
                   <p className="text-[10px] font-black uppercase tracking-wider text-primary dark:text-primary-hover flex items-center gap-1">
                     <span>{t('greeting') || 'WELCOME'}</span>
                     <span className="inline-block animate-wave text-[11px]">👋</span>
                   </p>
-                  <h1 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-slate-100 leading-snug whitespace-normal break-words">
+                  <h1 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-slate-100 leading-snug whitespace-normal break-words truncate">
                     {profile.displayName}
                   </h1>
                 </>
@@ -209,13 +200,17 @@ export const Header: React.FC = () => {
                   <p className="text-[9px] font-black uppercase tracking-widest text-primary dark:text-primary">
                     Glück fröhlich und froh
                   </p>
-                  <h1 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100 capitalize leading-snug whitespace-normal break-words">
+                  <h1 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100 capitalize leading-snug whitespace-normal break-words truncate">
                     {activeTab === 'schedule' ? (t('nav_schedule') || 'Termine')
                      : activeTab === 'students' ? (t('nav_students') || 'Schüler')
                      : activeTab === 'history' ? (t('nav_history') || 'Sitzungen')
                      : activeTab === 'payments' ? (t('nav_payments') || 'Zahlungen')
                      : activeTab === 'reports' ? (t('nav_reports') || 'Berichte')
                      : activeTab === 'settings' ? (t('nav_settings') || 'Einstellungen')
+                     : activeTab === 'certificates' ? (t('nav_certificates') || 'Zertifikate')
+                     : activeTab === 'freeTime' ? (t('nav_free_time') || 'Free Time')
+                     : activeTab === 'schoolSchedule' ? _t('المدرسة', 'School', 'Schule')
+                     : activeTab === 'hod' ? _t('القسم', 'HOD', 'Fachleiter')
                      : activeTab}
                   </h1>
                 </>
@@ -223,56 +218,23 @@ export const Header: React.FC = () => {
             </div>
           </div>
 
-          {/* Right Action Controls: Trash, Refresh, Sync, Bell, Three Dots Menu */}
+          {/* End Action Toolbar: Notifications, Sync, Settings, 3-Bars Menu */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Recently Deleted / Trash Bin */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-              onClick={() => setIsRecentlyDeletedModalOpen(true)}
-              className="relative p-2 sm:p-2.5 rounded-full bg-background dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border/80 transition-colors cursor-pointer"
-              aria-label="Recently Deleted"
-              title="Zuletzt gelöscht"
-            >
-              <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              {deletedCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-blue-500 text-white font-black text-[9px] rounded-full flex items-center justify-center ring-2 ring-white dark:ring-black">
-                  {deletedCount}
-                </span>
-              )}
-            </motion.button>
-
-            {/* Refresh Data Button */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-              onClick={handleRefresh}
-              className="p-2 sm:p-2.5 rounded-full bg-background dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border/80 transition-colors cursor-pointer flex items-center justify-center shrink-0"
-              title={t('auto_refresh_data')}
-            >
-              <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </motion.button>
-
-            {isSyncReady && syncState && (
-              <SyncHeaderButton 
-                status={syncStatus}
-                connectedCount={onlineCount}
-                onClick={() => setIsSyncModalOpen(true)}
-              />
-            )}
-
             {/* Notification Bell */}
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               transition={{ type: 'spring', stiffness: 400, damping: 17 }}
               onClick={() => setShowNotifications(true)}
-              className="relative p-2 sm:p-2.5 rounded-full bg-background dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border/80 transition-colors cursor-pointer"
+              className={`relative p-2 sm:p-2.5 rounded-full border transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
+                showNotifications
+                  ? 'bg-primary text-white border-primary shadow-xs'
+                  : 'bg-background dark:bg-background hover:bg-surface-hover text-text-main border-surface-border/80'
+              }`}
               aria-label="Notifications"
+              title={t('notifications') || 'Benachrichtigungen'}
             >
-              <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <Bell className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${showNotifications ? 'text-white' : 'text-primary'}`} />
               {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-red-500 text-white font-black text-[9px] rounded-full flex items-center justify-center ring-2 ring-white dark:ring-black animate-bounce">
                   {unreadCount}
@@ -280,64 +242,164 @@ export const Header: React.FC = () => {
               )}
             </motion.button>
 
-            {/* Header Three Dots / More Menu Button - Last on the right side */}
-            <div className="relative shrink-0">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-                onClick={() => setShowMoreHeaderMenu(prev => !prev)}
-                className="p-2 sm:p-2.5 rounded-full bg-background dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border/80 transition-colors cursor-pointer"
-                aria-label="More Options"
-                title="Mehr Optionen"
-              >
-                <MoreHorizontal className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              </motion.button>
+            {/* Peer Sync Button - Always Visible right next to Settings */}
+            <SyncHeaderButton 
+              status={syncStatus}
+              connectedCount={onlineCount}
+              onClick={() => setIsSyncModalOpen(true)}
+              isOpen={isSyncModalOpen}
+            />
 
-              {/* Dropdown Menu */}
-              {showMoreHeaderMenu && (
-                <div className={`absolute top-full mt-2 ${isRtl ? 'left-0' : 'right-0'} w-48 sm:w-52 bg-surface/95 dark:bg-background/95 backdrop-blur-md border border-surface-border/40 dark:border-surface-border/60 rounded-[20px] shadow-xl p-1.5 space-y-1.5 z-50`}>
-                  <button
-                    onClick={() => { setActiveTab('certificates'); setShowMoreHeaderMenu(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start hover:bg-background dark:hover:bg-slate-900 text-text-main"
-                  >
-                    <Award className="w-4 h-4 text-primary shrink-0" />
-                    <span>{t('nav_certificates') || 'Zertifikate'}</span>
-                  </button>
-                  <button
-                    onClick={() => { setActiveTab('freeTime'); setShowMoreHeaderMenu(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start hover:bg-background dark:hover:bg-slate-900 text-text-main"
-                  >
-                    <Clock className="w-4 h-4 text-primary shrink-0" />
-                    <span>{t('nav_free_time') || 'Free Time'}</span>
-                  </button>
-                  <button
-                    onClick={() => { setActiveTab('history'); setShowMoreHeaderMenu(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start hover:bg-background dark:hover:bg-slate-900 text-text-main"
-                  >
-                    <History className="w-4 h-4 text-primary shrink-0" />
-                    <span>{t('nav_history') || 'Sitzungen'}</span>
-                  </button>
-                  <button
-                    onClick={() => { setActiveTab('reports'); setShowMoreHeaderMenu(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start hover:bg-background dark:hover:bg-slate-900 text-text-main"
-                  >
-                    <BarChart2 className="w-4 h-4 text-primary shrink-0" />
-                    <span>{t('nav_reports') || 'Berichte'}</span>
-                  </button>
-                  <button
-                    onClick={() => { setActiveTab('settings'); setShowMoreHeaderMenu(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer text-start hover:bg-background dark:hover:bg-slate-900 text-text-main"
-                  >
-                    <Settings className="w-4 h-4 text-primary shrink-0" />
-                    <span>{t('nav_settings') || 'Einstellungen'}</span>
-                  </button>
-                </div>
+            {/* Direct Settings Button */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+              onClick={() => setActiveTab('settings')}
+              className={`p-2 sm:p-2.5 rounded-full border transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
+                activeTab === 'settings'
+                  ? 'bg-primary text-white border-primary shadow-xs'
+                  : 'bg-background dark:bg-background hover:bg-surface-hover text-text-main border-surface-border/80'
+              }`}
+              aria-label="Settings"
+              title={t('nav_settings') || 'Einstellungen'}
+            >
+              <Settings className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${activeTab === 'settings' ? 'text-white' : 'text-primary'}`} />
+            </motion.button>
+
+            {/* 3-Bars Main Menu Button (Includes Trash / Recently Deleted inside) */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+              onClick={() => setShowMainMenuDrawer(true)}
+              className={`relative p-2 sm:p-2.5 rounded-full border transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
+                showMainMenuDrawer
+                  ? 'bg-primary text-white border-primary shadow-xs'
+                  : 'bg-background dark:bg-background hover:bg-surface-hover text-text-main border-surface-border/80'
+              }`}
+              aria-label="Main Menu"
+              title={_t('القائمة الرئيسية', 'Main Menu', 'Hauptmenü')}
+            >
+              <Menu className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${showMainMenuDrawer ? 'text-white' : 'text-primary'}`} />
+              {deletedCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-blue-500 rounded-full ring-2 ring-white dark:ring-black" />
               )}
-            </div>
+            </motion.button>
           </div>
         </div>
       </header>
+
+      {/* Main Menu Side Drawer (Opened by 3-Bars button) */}
+      <AnimatePresence>
+        {showMainMenuDrawer && (
+          <div id="main-menu-drawer" className="fixed inset-0 z-50 flex">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              onClick={() => setShowMainMenuDrawer(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs cursor-pointer"
+            />
+
+            {/* Drawer Panel - Positioned on the trailing edge where the button is */}
+            <motion.div
+              initial={{ x: isRtl ? '-100%' : '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: isRtl ? '-100%' : '100%' }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className={`relative z-10 w-72 max-w-[80vw] h-full bg-surface border-surface-border p-4 flex flex-col justify-between shadow-2xl ${
+                isRtl ? 'mr-auto border-r' : 'ml-auto border-l'
+              }`}
+            >
+              <div className="space-y-4">
+                {/* Header */}
+                <div className="flex items-center justify-between gap-3 pb-3 border-b border-surface-border">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary via-primary-hover to-primary text-white flex items-center justify-center font-black text-lg shadow-md shadow-primary/20 shrink-0">
+                      G
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="font-black text-base tracking-tight text-text-main">Glück OS</h2>
+                      <p className="text-xs text-text-muted truncate">{profile.displayName || 'Deutschlehrer'}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowMainMenuDrawer(false)}
+                    className="p-1.5 rounded-xl text-text-muted hover:text-text-main hover:bg-surface-hover transition-colors cursor-pointer shrink-0"
+                    aria-label="Close menu"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Navigation Items */}
+                <div className="space-y-1 overflow-y-auto max-h-[calc(100dvh-200px)]">
+                  {[
+                    { id: 'home', label: t('nav_home') || 'Startseite', icon: Sparkles },
+                    { id: 'schedule', label: t('nav_schedule') || 'Termine', icon: Clock },
+                    { id: 'students', label: t('nav_students') || 'Schüler', icon: GlueckBuddyAvatar },
+                    { id: 'payments', label: t('nav_payments') || 'Zahlungen', icon: BarChart2 },
+                    { id: 'history', label: t('nav_history') || 'Sitzungen', icon: History },
+                    { id: 'reports', label: t('nav_reports') || 'Berichte', icon: BarChart2 },
+                    { id: 'certificates', label: t('nav_certificates') || 'Zertifikate', icon: Award },
+                    { id: 'freeTime', label: t('nav_free_time') || 'Free Time', icon: Clock },
+                    { id: 'schoolSchedule', label: _t('جدول المدرسة', 'School Schedule', 'Stundenplan'), icon: BookOpen },
+                    { id: 'hod', label: _t('إدارة القسم (HOD)', 'HOD Hub', 'Fachleiter Hub'), icon: Layers },
+                    { id: 'settings', label: t('nav_settings') || 'Einstellungen', icon: Settings },
+                  ].map(item => {
+                    const Icon = item.icon;
+                    const isActive = activeTab === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setActiveTab(item.id as any);
+                          setShowMainMenuDrawer(false);
+                        }}
+                        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-start ${
+                          isActive
+                            ? 'bg-primary text-white shadow-xs'
+                            : 'text-text-main hover:bg-surface-hover dark:hover:bg-slate-900'
+                        }`}
+                      >
+                        {typeof Icon === 'function' && item.id !== 'students' ? (
+                          <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-primary'}`} />
+                        ) : null}
+                        <span>{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Drawer Footer: Trash & Settings */}
+              <div className="pt-3 border-t border-surface-border space-y-2">
+                <button
+                  onClick={() => {
+                    setIsRecentlyDeletedModalOpen(true);
+                    setShowMainMenuDrawer(false);
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-text-muted hover:text-text-main hover:bg-surface-hover transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <Trash2 className="w-4 h-4 text-blue-500" />
+                    <span>{t('recently_deleted') || 'Papierkorb'}</span>
+                  </div>
+                  {deletedCount > 0 && (
+                    <span className="px-1.5 py-0.2 bg-blue-500 text-white text-[10px] font-black rounded-full">
+                      {deletedCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
  
       {/* Urgent 30-Min Lesson Alert Banner */}
       {urgent30MinLesson && (
@@ -371,20 +433,20 @@ export const Header: React.FC = () => {
       {/* Modals */}
       {showNotifications && <NotificationsModal onClose={() => setShowNotifications(false)} />}
       
-      {isSyncReady && syncState && (
+      {isSyncModalOpen && (
         <SyncCenterModal
           isOpen={isSyncModalOpen}
           onClose={() => setIsSyncModalOpen(false)}
           syncStatus={onlineCount > 0 ? 'connected' : 'offline'}
           lastSyncTime={
-            syncState.pairedPeers && syncState.pairedPeers.length > 0
+            syncState?.pairedPeers && syncState.pairedPeers.length > 0
               ? new Date(Math.max(...syncState.pairedPeers.map(p => p.lastSyncedTimestamp || 0))).toLocaleTimeString()
               : 'Never'
           }
           nextAutoSyncTime="in 5 mins"
-          localDevice={{ name: syncState.localDeviceName, id: syncState.localDeviceId }}
+          localDevice={{ name: syncState?.localDeviceName || 'Mein Gerät', id: syncState?.localDeviceId || 'device-local' }}
           onRenameLocalDevice={onRenameLocalDevice}
-          pairedPeers={syncState.pairedPeers || []}
+          pairedPeers={syncState?.pairedPeers || []}
           onPair={onPair}
           onForceSync={onForceSync}
           onUnpair={onUnpair}
@@ -405,4 +467,5 @@ export const Header: React.FC = () => {
     </>
   );
 };
+
 

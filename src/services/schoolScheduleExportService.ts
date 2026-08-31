@@ -748,16 +748,28 @@ export async function shareSchoolSchedule(
     }
 
     // 2. Web Share API with File
-    if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
-      const blob = dataUrlToBlob(dataUrl);
-      const file = new File([blob], filename, { type: mimeType });
-      if (navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          title: model.title,
-          text: `📖 ${model.title} (${model.stats.summaryLine})`,
-          files: [file]
-        });
-        return { success: true };
+    if (typeof navigator !== 'undefined' && navigator.share && typeof navigator.canShare === 'function') {
+      try {
+        const blob = dataUrlToBlob(dataUrl);
+        const file = new File([blob], filename, { type: mimeType });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            title: model.title,
+            text: `📖 ${model.title} (${model.stats.summaryLine})`,
+            files: [file]
+          });
+          return { success: true };
+        }
+      } catch (shareErr: any) {
+        if (
+          shareErr?.name === 'AbortError' ||
+          shareErr?.message?.includes('cancel') ||
+          shareErr?.message?.includes('canceled') ||
+          shareErr?.message?.includes('cancelled')
+        ) {
+          return { success: true };
+        }
+        console.warn('Web share gesture timed out or unsupported, falling back to download:', shareErr);
       }
     }
 

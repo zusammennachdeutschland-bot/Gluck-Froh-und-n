@@ -3,7 +3,7 @@ import {
   Users, BookOpen, Calendar, CreditCard, Settings, 
   CheckSquare, ChevronDown, ChevronUp, RefreshCw, Send, 
   Database, ArrowUpRight, GraduationCap, AlertCircle, 
-  FileCheck, ClipboardList, Award 
+  FileCheck, ClipboardList, Award, CheckCircle2 
 } from 'lucide-react';
 import { PendingOutboxSummary, PendingEntityItem } from '../../types';
 import { useApp } from '../../context/AppContext';
@@ -48,19 +48,21 @@ export const OutboxInspector: React.FC<OutboxInspectorProps> = ({
   return (
     <div id={id} className="space-y-6">
       {/* Top Summary Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border border-blue-100 dark:border-blue-900/50">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md">
-            <Send className="w-6 h-6" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-surface border border-surface-border shadow-xs">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-primary-soft text-primary border border-primary/20 flex items-center justify-center shadow-xs shrink-0">
+            {totalPending === 0 ? <CheckCircle2 className="w-6 h-6" /> : <Send className="w-6 h-6" />}
           </div>
           <div>
-            <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">
-              {totalPending === 0 ? 'Outbox is Clean' : `${totalPending} Pending Changes`}
-            </h3>
-            <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+            <h3 className="text-base font-black text-text-main">
               {totalPending === 0 
-                ? 'All local additions, updates, and removals are synchronized with paired devices.'
-                : 'Local mutations queued for delta broadcast to paired devices.'}
+                ? _t('صندوق الإرسال فارغ ومحدث بالكامل', 'Outbox is Clean & Up to Date', 'Postausgang ist synchronisiert') 
+                : _t(`${totalPending} تعديل جاهز للبث`, `${totalPending} Pending Changes`, `${totalPending} ausstehende Änderungen`)}
+            </h3>
+            <p className="text-xs text-text-muted mt-0.5">
+              {totalPending === 0 
+                ? _t('جميع التعديلات والحذوفات المحلية متزامنة ومطابقة لجميع أجهزتك الموثوقة.', 'All local additions, updates, and removals are synchronized with paired devices.', 'Alle lokalen Änderungen sind mit verbundenen Geräten synchronisiert.')
+                : _t('تعديلات محلية جديدة تنتظر البث المباشر (Delta Sync) إلى الأجهزة المتصلة.', 'Local mutations queued for delta broadcast to paired devices.', 'Lokale Änderungen in der Warteschlange für die Übertragung.')}
             </p>
           </div>
         </div>
@@ -69,10 +71,10 @@ export const OutboxInspector: React.FC<OutboxInspectorProps> = ({
           type="button"
           onClick={onSyncAll}
           disabled={isSyncing || totalPending === 0}
-          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-sm transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover active:bg-primary text-white font-bold text-xs transition-all shadow-xs disabled:opacity-40 disabled:cursor-not-allowed shrink-0 cursor-pointer"
         >
           <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-          <span>{isSyncing ? 'Syncing Outbox...' : 'Sync All Outbox Deltas'}</span>
+          <span>{isSyncing ? _t('جارٍ بث التعديلات...', 'Syncing Outbox...', 'Wird übertragen...') : _t('بث جميع التعديلات الآن', 'Sync All Outbox Deltas', 'Alle Deltas jetzt senden')}</span>
         </button>
       </div>
 
@@ -86,71 +88,83 @@ export const OutboxInspector: React.FC<OutboxInspectorProps> = ({
           return (
             <div 
               key={key}
-              className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden transition-shadow hover:shadow-sm"
+              className="rounded-2xl border border-surface-border bg-surface overflow-hidden transition-all hover:border-primary/40"
             >
               <button
                 type="button"
                 onClick={() => toggleSection(key)}
-                className="w-full flex items-center justify-between p-4 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                className="w-full flex items-center justify-between p-4 text-left rtl:text-right transition-colors hover:bg-surface-hover cursor-pointer"
               >
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${count > 0 ? 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className={`p-2.5 rounded-xl border shrink-0 ${
+                    count > 0 
+                      ? 'bg-primary-soft text-primary border-primary/30' 
+                      : 'bg-background text-text-muted border-surface-border'
+                  }`}>
                     <Icon className="w-5 h-5" />
                   </div>
-                  <div>
-                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{label}</span>
-                    <span className="block text-xs text-gray-500 dark:text-gray-400">
-                      {count === 0 ? 'No changes' : `${count} record${count > 1 ? 's' : ''} queued`}
+                  <div className="min-w-0">
+                    <span className="text-sm font-bold text-text-main truncate block">{label}</span>
+                    <span className="block text-xs text-text-muted">
+                      {count === 0 
+                        ? _t('لا توجد تعديلات معلقة', 'No changes', 'Keine Änderungen') 
+                        : _t(`${count} سجل معلق`, `${count} record${count > 1 ? 's' : ''} queued`, `${count} Datensätze`)}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-black ${
                     count > 0 
-                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' 
-                      : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                      ? 'bg-primary text-white shadow-xs' 
+                      : 'bg-background text-text-muted border border-surface-border'
                   }`}>
                     {count}
                   </span>
                   {isExpanded ? (
-                    <ChevronUp className="w-4 h-4 text-gray-400" />
+                    <ChevronUp className="w-4 h-4 text-text-muted" />
                   ) : (
-                    <ChevronDown className="w-4 h-4 text-gray-400" />
+                    <ChevronDown className="w-4 h-4 text-text-muted" />
                   )}
                 </div>
               </button>
 
               {isExpanded && (
-                <div className="border-t border-gray-100 dark:border-gray-800 p-4 bg-gray-50/50 dark:bg-gray-950/40">
+                <div className="border-t border-surface-border p-4 bg-background/50 space-y-2">
                   {entityItems.length === 0 ? (
-                    <p className="text-xs text-gray-500 italic">No detailed changes queued for this collection.</p>
+                    <p className="text-xs text-text-muted italic py-1">
+                      {_t('لا توجد سجلات مفصلة معلقة لهذه الفئة.', 'No detailed changes queued for this collection.', 'Keine Einträge in dieser Kategorie.')}
+                    </p>
                   ) : (
                     <div className="space-y-2">
-                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Queued Records</div>
+                      <div className="text-[10px] font-black text-text-muted uppercase tracking-wider mb-2">
+                        {_t('السجلات المعلقة للبث', 'Queued Records', 'Wartende Datensätze')}
+                      </div>
                       {entityItems.map((item: PendingEntityItem) => {
-                        const isCancelledSession = item.entityType === 'lessons' && item.title.includes('Cancelled');
+                        const isCancelledSession一眼 = item.entityType === 'lessons' && item.title.includes('Cancelled');
                         return (
                           <div 
                             key={item.id}
-                            className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-xs"
+                            className="flex items-center justify-between p-3 rounded-xl bg-surface border border-surface-border text-xs"
                           >
-                            <div className="flex items-center gap-2">
-                              <span className={`w-2 h-2 rounded-full ${item.isDeleted || isCancelledSession ? 'bg-red-500' : 'bg-emerald-500'}`} />
-                              <span className="font-medium text-gray-900 dark:text-gray-100">{item.title}</span>
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className={`w-2 h-2 rounded-full shrink-0 ${item.isDeleted || isCancelledSession一眼 ? 'bg-red-500' : 'bg-primary'}`} />
+                              <span className="font-bold text-text-main truncate">{item.title}</span>
                               {item.isDeleted && (
-                                <span className="text-[10px] uppercase font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/50 px-1.5 py-0.5 rounded">
-                                  Deleted
+                                <span className="text-[10px] uppercase font-black text-red-600 dark:text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md shrink-0">
+                                  {_t('محذوف', 'Deleted', 'Gelöscht')}
                                 </span>
                               )}
-                              {isCancelledSession && (
-                                <span className="text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-1.5 py-0.5 rounded">
-                                  Cancelled
+                              {isCancelledSession一眼 && (
+                                <span className="text-[10px] uppercase font-black text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md shrink-0">
+                                  {_t('ملغى', 'Cancelled', 'Storniert')}
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-3 text-gray-500">
-                              <span className="font-mono text-[10px]">Rev #{item.originRevision}</span>
+                            <div className="flex items-center gap-3 text-text-muted shrink-0 text-xs">
+                              <span className="font-mono text-[10px] bg-background px-2 py-0.5 rounded-md border border-surface-border">
+                                Rev #{item.originRevision}
+                              </span>
                               <span>{new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
                           </div>

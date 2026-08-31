@@ -345,6 +345,7 @@ interface AppContextType {
   autoSyncEnabled: boolean;
   setAutoSyncEnabled: (enabled: boolean) => void;
   triggerSync: (peerId: string) => Promise<boolean>;
+  syncAllPeers: () => Promise<{ success: boolean; syncedCount: number }>;
   forceSyncPeer: (peerId: string) => Promise<{ success: boolean; report: SyncCycleReport }>;
   getPendingOutbox: () => PendingOutboxSummary;
   getSyncHistory: () => Promise<SyncHistoryEntry[]>;
@@ -671,13 +672,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
     });
 
+    const seenIds = new Set<string>();
     return filtered.filter(lesson => {
+      if (!lesson || !lesson.id || seenIds.has(lesson.id)) {
+        return false;
+      }
       if (lesson.groupId && lesson.groupId !== 'quick_group') {
         const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
         if (bestLessons.get(key)?.id !== lesson.id) {
           return false;
         }
       }
+      seenIds.add(lesson.id);
       return true;
     });
   };
@@ -686,22 +692,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const saved = initialData['dl_lessons'];
     const raw: Lesson[] = saved !== null && saved !== undefined ? saved : [];
     const seen = new Set<string>();
-    const sanitized = (Array.isArray(raw) ? raw : []).map((item, idx) => {
-      if (seen.has(item.id)) {
-        const newId = `${item.id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
-        return { ...item, id: newId };
-      }
+    const sanitized = (Array.isArray(raw) ? raw : []).filter(item => {
+      if (!item || !item.id || seen.has(item.id)) return false;
       seen.add(item.id);
-      return item;
+      return true;
     });
     return filterActiveLessons(sanitized);
   });
 
-  const fullLessonsRef = useRef<Lesson[]>(
-    Array.isArray(initialData['dl_lessons']) 
-      ? initialData['dl_lessons'] 
-      : []
-  );
+  const fullLessonsRef = useRef<Lesson[]>((() => {
+    const raw = Array.isArray(initialData['dl_lessons']) ? initialData['dl_lessons'] : [];
+    const seen = new Set<string>();
+    return raw.filter(item => {
+      if (!item || !item.id || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  })());
 
   // Memory Optimization: Filter active payments for global RAM state
   const filterActivePayments = (raw: PaymentRecord[]): PaymentRecord[] => {
@@ -709,9 +716,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
     const cutoffStr = formatLocalDate(sixtyDaysAgo);
 
+    const seenIds = new Set<string>();
     return (Array.isArray(raw) ? raw : []).filter(p => {
-      if (!p) return false;
+      if (!p || !p.id || seenIds.has(p.id)) return false;
       if (p.deleted) return false;
+      seenIds.add(p.id);
       const d = p.paidDate || p.dueDate || p.createdAt || '';
       if (!d || typeof d !== 'string') return true;
       if (d.substring(0, 10) >= cutoffStr) return true;
@@ -724,22 +733,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const saved = initialData['dl_payments'];
     const raw: PaymentRecord[] = saved !== null && saved !== undefined ? saved : [];
     const seen = new Set<string>();
-    const sanitized = raw.map((item, idx) => {
-      if (seen.has(item.id)) {
-        const newId = `${item.id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
-        return { ...item, id: newId };
-      }
+    const sanitized = (Array.isArray(raw) ? raw : []).filter(item => {
+      if (!item || !item.id || seen.has(item.id)) return false;
       seen.add(item.id);
-      return item;
+      return true;
     });
     return filterActivePayments(sanitized);
   });
 
-  const fullPaymentsRef = useRef<PaymentRecord[]>(
-    Array.isArray(initialData['dl_payments']) 
-      ? initialData['dl_payments'] 
-      : []
-  );
+  const fullPaymentsRef = useRef<PaymentRecord[]>((() => {
+    const raw = Array.isArray(initialData['dl_payments']) ? initialData['dl_payments'] : [];
+    const seen = new Set<string>();
+    return raw.filter(item => {
+      if (!item || !item.id || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  })());
 
   // Asynchronous Database Query methods for historical views (SessionHistoryView & ReportsView)
   const getHistoricalLessons = useCallback(async (): Promise<Lesson[]> => {
@@ -762,11 +772,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const full = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
             ? fullLessonsRef.current
             : ((await storage.getItem<Lesson[]>('dl_lessons')) || lessons);
-          const updated = updater(full || []);
-          fullLessonsRef.current = updated;
-          await storage.setItem('dl_lessons', updated);
-          setLessons(filterActiveLessons(updated));
-          resolve(updated);
+          const rawUpdated = updater(full || []);
+          
+          // Deduplicate by lesson.id strictly (keeping the latest occurrence)
+          const seen = new Set<string>();
+          const deduped: Lesson[] = [];
+          for (let i = rawUpdated.length - 1; i >= 0; i--) {
+            const item = rawUpdated[i];
+            if (item && item.id && !seen.has(item.id)) {
+              seen.add(item.id);
+              deduped.unshift(item);
+            }
+          }
+          
+          fullLessonsRef.current = deduped;
+          await storage.setItem('dl_lessons', deduped);
+          setLessons(filterActiveLessons(deduped));
+          resolve(deduped);
         } catch (e) {
           reject(e);
         }
@@ -784,11 +806,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const full = (fullPaymentsRef.current && fullPaymentsRef.current.length > 0)
             ? fullPaymentsRef.current
             : ((await storage.getItem<PaymentRecord[]>('dl_payments')) || payments);
-          const updated = updater(full || []);
-          fullPaymentsRef.current = updated;
-          await storage.setItem('dl_payments', updated);
-          setPayments(filterActivePayments(updated));
-          resolve(updated);
+          const rawUpdated = updater(full || []);
+          
+          // Deduplicate by payment.id strictly
+          const seen = new Set<string>();
+          const deduped: PaymentRecord[] = [];
+          for (let i = rawUpdated.length - 1; i >= 0; i--) {
+            const item = rawUpdated[i];
+            if (item && item.id && !seen.has(item.id)) {
+              seen.add(item.id);
+              deduped.unshift(item);
+            }
+          }
+
+          fullPaymentsRef.current = deduped;
+          await storage.setItem('dl_payments', deduped);
+          setPayments(filterActivePayments(deduped));
+          resolve(deduped);
         } catch (e) {
           reject(e);
         }
@@ -1303,8 +1337,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           }
         });
 
-        fullLessonsRef.current = merged;
-        await storage.setItem('dl_lessons', merged);
+        // Strict deduplication by lesson ID (keeping latest occurrence)
+        const seen = new Set<string>();
+        const deduped: Lesson[] = [];
+        for (let i = merged.length - 1; i >= 0; i--) {
+          const item = merged[i];
+          if (item && item.id && !seen.has(item.id)) {
+            seen.add(item.id);
+            deduped.unshift(item);
+          }
+        }
+
+        fullLessonsRef.current = deduped;
+        await storage.setItem('dl_lessons', deduped);
       }).catch(err => console.error('Lesson sync error:', err));
     }
     syncLessons();
@@ -1327,8 +1372,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           }
         });
 
-        fullPaymentsRef.current = merged;
-        await storage.setItem('dl_payments', merged);
+        // Strict deduplication by payment ID (keeping latest occurrence)
+        const seen = new Set<string>();
+        const deduped: PaymentRecord[] = [];
+        for (let i = merged.length - 1; i >= 0; i--) {
+          const item = merged[i];
+          if (item && item.id && !seen.has(item.id)) {
+            seen.add(item.id);
+            deduped.unshift(item);
+          }
+        }
+
+        fullPaymentsRef.current = deduped;
+        await storage.setItem('dl_payments', deduped);
       }).catch(err => console.error('Payment sync error:', err));
     }
     syncPayments();
@@ -1950,12 +2006,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_students', data.students);
       }
       if (data.lessons) {
-        setLessons(data.lessons);
-        await storage.setItem('dl_lessons', data.lessons);
+        const seenL = new Set<string>();
+        const dedupedLessons = (Array.isArray(data.lessons) ? data.lessons : []).filter((l: any) => {
+          if (!l || !l.id || seenL.has(l.id)) return false;
+          seenL.add(l.id);
+          return true;
+        });
+        fullLessonsRef.current = dedupedLessons;
+        setLessons(filterActiveLessons(dedupedLessons));
+        await storage.setItem('dl_lessons', dedupedLessons);
       }
       if (data.payments) {
-        setPayments(data.payments);
-        await storage.setItem('dl_payments', data.payments);
+        const seenP = new Set<string>();
+        const dedupedPayments = (Array.isArray(data.payments) ? data.payments : []).filter((p: any) => {
+          if (!p || !p.id || seenP.has(p.id)) return false;
+          seenP.add(p.id);
+          return true;
+        });
+        fullPaymentsRef.current = dedupedPayments;
+        setPayments(filterActivePayments(dedupedPayments));
+        await storage.setItem('dl_payments', dedupedPayments);
       }
       if (data.notifications) {
         setNotifications(data.notifications);
@@ -2309,9 +2379,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         return l;
       });
 
-      if (fullLessonsRef.current) {
-        fullLessonsRef.current = lessonUpdater(fullLessonsRef.current);
-      }
       updateFullLessonsStorage(lessonUpdater);
 
       const paymentUpdater = (allPayments: PaymentRecord[]) => allPayments.map(p => {
@@ -2846,9 +2913,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return [...allLessons, wrapMutation({ ...target.item, deleted: false } as any)];
         };
 
-        if (fullLessonsRef.current) {
-          fullLessonsRef.current = lessonRestorer(fullLessonsRef.current);
-        }
         updateFullLessonsStorage(lessonRestorer);
 
         setRecentlyDeleted(prev => ({ ...prev, lessons: prev.lessons.filter(d => d.item.id !== id) }));
@@ -2889,14 +2953,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       lessonDate.setDate(baseDate.getDate() + (week * 7));
       const dateStr = formatLocalDate(lessonDate);
 
-      // Check if an active non-deleted lesson already exists on this date/time for this group
-      const exists = activeLessons.some(l => l.groupId === lessonData.groupId && l.date === dateStr && l.time === lessonData.time);
+      // Check if an active non-deleted lesson already exists on this date/time for this group (skip check if explicit custom ID provided)
+      const exists = !lessonData.id && activeLessons.some(l => l.groupId === lessonData.groupId && l.date === dateStr && l.time === lessonData.time);
       if (!exists) {
         const currentSessionNum = ((groupLessons.length + createdLessons.length) % totalSessions) + 1;
 
         createdLessons.push(wrapMutation({
           ...lessonData,
-          id: (week === 0 && lessonData.id) ? lessonData.id : `l_${Date.now()}_${week}_${Math.random().toString(36).substring(2, 5)}`,
+          id: (week === 0 && lessonData.id) ? lessonData.id : `l_${Date.now()}_${week}_${Math.random().toString(36).substring(2, 6)}`,
           date: dateStr,
           sessionNumber: currentSessionNum,
           totalSessionsInPackage: totalSessions,
@@ -2907,10 +2971,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     if (createdLessons.length > 0) {
-      if (fullLessonsRef.current) {
-        fullLessonsRef.current = [...fullLessonsRef.current, ...createdLessons];
-      }
-      updateFullLessonsStorage(prev => [...prev, ...createdLessons]);
+      updateFullLessonsStorage(prev => {
+        const existingIds = new Set(prev.map(l => l.id));
+        const newOnly = createdLessons.filter(cl => !existingIds.has(cl.id));
+        return [...prev, ...newOnly];
+      });
       autoSyncEngine.notifyMutation('lessons', createdLessons[0]?.id || 'new');
     }
     return createdLessons;
@@ -2919,9 +2984,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const updateLesson = (id: string, updates: Partial<Lesson>) => {
     const updater = (allLessons: Lesson[]) =>
       allLessons.map(l => (l.id === id ? wrapMutation({ ...l, ...updates } as Lesson) : l));
-    if (fullLessonsRef.current) {
-      fullLessonsRef.current = updater(fullLessonsRef.current);
-    }
     updateFullLessonsStorage(updater);
     if (selectedLesson && selectedLesson.id === id) {
       setSelectedLesson(prev => prev ? { ...prev, ...updates } : null);
@@ -2939,9 +3001,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
     const updater = (allLessons: Lesson[]) =>
       allLessons.map(l => (l.id === id ? wrapDeletion(l) : l));
-    if (fullLessonsRef.current) {
-      fullLessonsRef.current = updater(fullLessonsRef.current);
-    }
     updateFullLessonsStorage(updater);
     if (selectedLesson?.id === id) {
       closeLessonControl();
@@ -2960,9 +3019,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       return l;
     });
-    if (fullLessonsRef.current) {
-      fullLessonsRef.current = updater(fullLessonsRef.current);
-    }
     updateFullLessonsStorage(updater);
     if (selectedLesson && selectedLesson.groupId === groupId && (selectedLesson.id === currentLessonId || selectedLesson.date >= fromDate)) {
       closeLessonControl();
@@ -2983,9 +3039,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       return l;
     });
-    if (fullLessonsRef.current) {
-      fullLessonsRef.current = updater(fullLessonsRef.current);
-    }
     updateFullLessonsStorage(updater);
     if (selectedLesson && selectedLesson.groupId === groupId) {
       closeLessonControl();
@@ -2994,7 +3047,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const saveLessonReport = (lessonId: string, report: LessonReport, packageCount?: number) => {
-    const targetLesson = lessons.find(l => l.id === lessonId);
+    const targetLesson = (fullLessonsRef.current || []).find(l => l.id === lessonId) || lessons.find(l => l.id === lessonId);
     if (!targetLesson) return;
 
     const updatedTotalSessions = packageCount || targetLesson.totalSessionsInPackage || 4;
@@ -3034,9 +3087,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return l;
     });
 
-    if (fullLessonsRef.current) {
-      fullLessonsRef.current = reportUpdater(fullLessonsRef.current);
-    }
     updateFullLessonsStorage(reportUpdater);
     autoSyncEngine.notifyMutation('lessons', lessonId);
 
@@ -3299,9 +3349,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
     };
 
-    if (fullLessonsRef.current) {
-      fullLessonsRef.current = updater(fullLessonsRef.current);
-    }
     updateFullLessonsStorage(updater);
 
     if (selectedLesson && selectedLesson.id === lessonId) {
@@ -3419,9 +3466,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     if (newLessons.length > 0) {
-      setLessons(prev => {
+      updateFullLessonsStorage(prev => {
+        const existingIds = new Set(prev.map(l => l.id));
         const deduplicated = newLessons.filter(
-          nl => !prev.some(l => !l.deleted && l.groupId === nl.groupId && l.date === nl.date && l.time === nl.time)
+          nl => !existingIds.has(nl.id) && !prev.some(l => !l.deleted && l.groupId === nl.groupId && l.date === nl.date && l.time === nl.time)
         );
         return deduplicated.length > 0 ? [...prev, ...deduplicated] : prev;
       });
@@ -3756,9 +3804,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return l;
     });
 
-    if (fullLessonsRef.current) {
-      fullLessonsRef.current = lessonUpdater(fullLessonsRef.current);
-    }
     updateFullLessonsStorage(lessonUpdater);
     autoSyncEngine.notifyMutation('lessons', lessonId);
 
@@ -3966,7 +4011,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     // Create corresponding payment record so it reflects in Revenue & Reports
     const targetAccountId = financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
     const finalStatus = data.paymentStatus || (data.amountPaid >= data.amountDue ? 'paid' : data.amountPaid > 0 ? 'partial' : 'pending');
-    const newPayId = `p_ql_${Date.now()}`;
+    const newPayId = `p_ql_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const newPayment: PaymentRecord = wrapMutation({
       id: newPayId,
       studentId: `temp_qs_${Date.now()}`,
@@ -3981,7 +4026,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeAccountId: targetAccountId,
       notes: `⚡ Quick Lesson Payment (${data.date}): ${data.quickNotes || ''}`
     } as PaymentRecord);
-    setPayments(prev => [newPayment, ...prev]);
+
+    updateFullLessonsStorage(prev => [newLesson, ...prev.filter(l => l.id !== newLesson.id)]);
+    updateFullPaymentsStorage(prev => [newPayment, ...prev.filter(p => p.id !== newPayment.id)]);
 
     if ((data.amountPaid || 0) > 0) {
       addFinanceTransaction({
@@ -4031,7 +4078,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setStudents(prev => [newStudent, ...prev]);
 
     // Convert all matching quick lessons to permanent student lessons
-    setLessons(prev => prev.map(l => {
+    updateFullLessonsStorage(prev => prev.map(l => {
       if (l.studentName === targetLesson.studentName && (l.isQuickLesson || l.groupId === 'quick_group')) {
         return wrapMutation({
           ...l,
@@ -4046,7 +4093,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }));
 
     // Update payment records
-    setPayments(prev => prev.map(p => {
+    updateFullPaymentsStorage(prev => prev.map(p => {
       if (p.studentName === targetLesson.studentName) {
         return wrapMutation({
           ...p,
@@ -4130,12 +4177,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_students', data.students);
       }
       if (data.lessons) {
-        setLessons(data.lessons);
-        await storage.setItem('dl_lessons', data.lessons);
+        const seenL = new Set<string>();
+        const dedupedLessons = (Array.isArray(data.lessons) ? data.lessons : []).filter((l: any) => {
+          if (!l || !l.id || seenL.has(l.id)) return false;
+          seenL.add(l.id);
+          return true;
+        });
+        fullLessonsRef.current = dedupedLessons;
+        setLessons(filterActiveLessons(dedupedLessons));
+        await storage.setItem('dl_lessons', dedupedLessons);
       }
       if (data.payments) {
-        setPayments(data.payments);
-        await storage.setItem('dl_payments', data.payments);
+        const seenP = new Set<string>();
+        const dedupedPayments = (Array.isArray(data.payments) ? data.payments : []).filter((p: any) => {
+          if (!p || !p.id || seenP.has(p.id)) return false;
+          seenP.add(p.id);
+          return true;
+        });
+        fullPaymentsRef.current = dedupedPayments;
+        setPayments(filterActivePayments(dedupedPayments));
+        await storage.setItem('dl_payments', dedupedPayments);
       }
       if (data.notifications) {
         setNotifications(data.notifications);
@@ -4629,7 +4690,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         data.lessons.forEach((l: any) => {
           if (!fullIds.has(l.id)) fullMerged.unshift(l);
         });
-        data.lessons = fullMerged;
+        
+        // Strict deduplication
+        const seen = new Set<string>();
+        data.lessons = fullMerged.filter((l: any) => {
+          if (!l || !l.id || seen.has(l.id)) return false;
+          seen.add(l.id);
+          return true;
+        });
       }
       
       if (fullPaymentsRef.current && fullPaymentsRef.current.length > 0) {
@@ -4640,7 +4708,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         data.payments.forEach((p: any) => {
           if (!fullIds.has(p.id)) fullMerged.unshift(p);
         });
-        data.payments = fullMerged;
+        
+        // Strict deduplication
+        const seen = new Set<string>();
+        data.payments = fullMerged.filter((p: any) => {
+          if (!p || !p.id || seen.has(p.id)) return false;
+          seen.add(p.id);
+          return true;
+        });
       }
       
       return data;
@@ -4659,15 +4734,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           break;
         }
         case 'lessons': {
-          fullLessonsRef.current = data;
-          setLessons(filterActiveLessons(data));
-          await storage.setItem('dl_lessons', data);
+          const seen = new Set<string>();
+          const deduped = (Array.isArray(data) ? data : []).filter((l: any) => {
+            if (!l || !l.id || seen.has(l.id)) return false;
+            seen.add(l.id);
+            return true;
+          });
+          fullLessonsRef.current = deduped;
+          setLessons(filterActiveLessons(deduped));
+          await storage.setItem('dl_lessons', deduped);
           break;
         }
         case 'payments': {
-          fullPaymentsRef.current = data;
-          setPayments(filterActivePayments(data));
-          await storage.setItem('dl_payments', data);
+          const seen = new Set<string>();
+          const deduped = (Array.isArray(data) ? data : []).filter((p: any) => {
+            if (!p || !p.id || seen.has(p.id)) return false;
+            seen.add(p.id);
+            return true;
+          });
+          fullPaymentsRef.current = deduped;
+          setPayments(filterActivePayments(deduped));
+          await storage.setItem('dl_payments', deduped);
           break;
         }
         case 'notifications': {
@@ -4793,6 +4880,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!syncState) return false;
     const res = await autoSyncEngine.executeSync(peerId, 'Manual Sync', false);
     return res.success;
+  };
+
+  const syncAllPeers = async (): Promise<{ success: boolean; syncedCount: number }> => {
+    if (!syncState) return { success: false, syncedCount: 0 };
+    const onlinePeers = (syncState.pairedPeers || []).filter(p => {
+      const presence = devicePresences?.get(p.deviceId);
+      return presence ? presence.isOnline : false;
+    });
+
+    const peersToSync = onlinePeers.length > 0 ? onlinePeers : (syncState.pairedPeers || []);
+    let successCount = 0;
+    for (const peer of peersToSync) {
+      try {
+        const res = await autoSyncEngine.executeSync(peer.deviceId, 'Manual Sync', false);
+        if (res.success) successCount++;
+      } catch (err) {
+        console.warn(`[SyncAllPeers] Sync failed for peer ${peer.deviceId}:`, err);
+      }
+    }
+    return { success: successCount > 0 || peersToSync.length === 0, syncedCount: successCount };
   };
 
   const forceSyncPeer = async (peerId: string): Promise<{ success: boolean; report: SyncCycleReport }> => {
@@ -5040,6 +5147,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         autoSyncEnabled,
         setAutoSyncEnabled,
         triggerSync,
+        syncAllPeers,
         forceSyncPeer,
         getPendingOutbox,
         getSyncHistory,

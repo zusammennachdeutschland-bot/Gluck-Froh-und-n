@@ -4,12 +4,14 @@ import { useApp } from '../context/AppContext';
 import { Lesson } from '../types';
 import { formatLocalDate } from '../utils/timeUtils';
 import { 
-  CheckCircle2, Clock, PlayCircle, ChevronRight, AlertCircle, XCircle, X, Video, MapPin
+  CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 export const TodaysProgressTimeline: React.FC = () => {
   const { lessons, openLessonControl, dismissedDashboardLessonIds, dismissLessonFromDashboard, t } = useApp();
   const [now, setNow] = useState(new Date());
+  const [isPastPendingExpanded, setIsPastPendingExpanded] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -64,49 +66,78 @@ export const TodaysProgressTimeline: React.FC = () => {
 
   return (
     <div className="space-y-2.5">
-      {/* SECTION 2: PAST PENDING LESSONS */}
+      {/* SECTION 2: PAST PENDING LESSONS (Collapsible by default) */}
       {pendingPastLessons.length > 0 && (
-        <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-xl p-2.5 sm:p-3 shadow-2xs space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-black uppercase text-primary dark:text-primary tracking-wider flex items-center gap-1.5">
-              <AlertCircle className="w-3.5 h-3.5 text-primary dark:text-primary shrink-0" />
-              <span>{t('past_pending_lessons_title')} ({pendingPastLessons.length})</span>
-            </span>
-            <span className="text-[9px] font-extrabold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.5 rounded-md">
-              {t('timeline_requires_action')}
-            </span>
-          </div>
+        <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-xl shadow-2xs overflow-hidden transition-all">
+          <button
+            type="button"
+            onClick={() => setIsPastPendingExpanded(prev => !prev)}
+            aria-expanded={isPastPendingExpanded}
+            className="w-full p-2.5 sm:p-3 flex items-center justify-between gap-2 text-left cursor-pointer hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[11px] font-black uppercase text-primary dark:text-primary tracking-wider flex items-center gap-1.5 truncate">
+                <AlertCircle className="w-3.5 h-3.5 text-primary dark:text-primary shrink-0" />
+                <span className="truncate">{t('past_pending_lessons_title')} ({pendingPastLessons.length})</span>
+              </span>
+              <span className="text-[9px] font-extrabold text-primary dark:text-primary bg-primary/15 dark:bg-primary/20 px-1.5 py-0.5 rounded-md shrink-0">
+                {t('timeline_requires_action')}
+              </span>
+            </div>
 
-          <div className="divide-y divide-primary-border dark:divide-primary-border">
-            {pendingPastLessons.map((pLesson) => (
-              <div
-                key={pLesson.id}
-                onClick={() => openLessonControl(pLesson)}
-                className="py-1.5 flex items-center justify-between gap-2 cursor-pointer group transition-colors first:pt-0 last:pb-0"
+            <div className="flex items-center gap-1 text-primary shrink-0">
+              {isPastPendingExpanded ? (
+                <ChevronUp className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+            </div>
+          </button>
+
+          <AnimatePresence initial={false}>
+            {isPastPendingExpanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.18, ease: 'easeInOut' }}
+                className="overflow-hidden"
               >
-                <div className="space-y-0.5 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[9px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.2 rounded">
-                      {pLesson.date}
-                    </span>
-                    <span className="text-xs font-mono font-bold text-text-main">
-                      {pLesson.time}
-                    </span>
-                  </div>
-                  <h4 className="text-xs font-bold text-text-main group-hover:text-primary dark:group-hover:text-primary truncate">
-                    {pLesson.studentName || pLesson.groupName || pLesson.title}
-                  </h4>
-                </div>
+                <div className="px-2.5 sm:px-3 pb-2.5 sm:pb-3 pt-1 border-t border-primary-border/60 dark:border-primary-border/60">
+                  <div className="max-h-64 overflow-y-auto divide-y divide-primary-border/60 dark:divide-primary-border/60 pr-1">
+                    {pendingPastLessons.map((pLesson) => (
+                      <div
+                        key={pLesson.id}
+                        onClick={() => openLessonControl(pLesson)}
+                        className="py-1.5 flex items-center justify-between gap-2 cursor-pointer group transition-colors first:pt-0.5 last:pb-0"
+                      >
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.2 rounded">
+                              {pLesson.date}
+                            </span>
+                            <span className="text-xs font-mono font-bold text-text-main">
+                              {pLesson.time}
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-bold text-text-main group-hover:text-primary dark:group-hover:text-primary truncate">
+                            {pLesson.studentName || pLesson.groupName || pLesson.title}
+                          </h4>
+                        </div>
 
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="text-[9px] font-bold bg-primary/10 text-primary dark:text-primary px-1.5 py-0.5 rounded transition-colors group-hover:bg-primary/20">
-                    {t('timeline_requires_action')}
-                  </span>
-                  <ChevronRight className="w-3.5 h-3.5 text-primary dark:text-primary shrink-0 transition-transform group-hover:translate-x-0.5" />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[9px] font-bold bg-primary/10 text-primary dark:text-primary px-1.5 py-0.5 rounded transition-colors group-hover:bg-primary/20">
+                            {t('timeline_requires_action')}
+                          </span>
+                          <ChevronRight className="w-3.5 h-3.5 text-primary dark:text-primary shrink-0 transition-transform group-hover:translate-x-0.5" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 

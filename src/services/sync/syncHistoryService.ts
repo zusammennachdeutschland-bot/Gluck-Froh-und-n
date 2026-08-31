@@ -54,9 +54,10 @@ class SyncHistoryService {
     downloadedCount: number = 0
   ): Promise<SyncHistoryEntry> {
     const existing = await this.getHistory();
+    const entryId = report.id || ('hist_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7));
 
     const newEntry: SyncHistoryEntry = {
-      id: report.id || 'hist_' + Date.now(),
+      id: entryId,
       timestamp: report.timestamp || Date.now(),
       trigger,
       peerId: report.peerId,
@@ -73,7 +74,9 @@ class SyncHistoryService {
       report
     };
 
-    const updated = [newEntry, ...existing];
+    // Replace if same ID already exists, otherwise prepend
+    const existingFiltered = existing.filter(item => item.id !== newEntry.id);
+    const updated = [newEntry, ...existingFiltered];
     const pruned = this.pruneRecords(updated);
     this.inMemoryCache = pruned;
 
@@ -95,10 +98,21 @@ class SyncHistoryService {
   private pruneRecords(records: SyncHistoryEntry[]): SyncHistoryEntry[] {
     const now = Date.now();
     const cutoffTime = now - RETENTION_PERIOD_MS;
+    const seenIds = new Set<string>();
 
-    // Filter out records older than 30 days, sort by descending timestamp, and cap at 100 records
+    // Filter valid records, deduplicate by ID, sort by descending timestamp, and cap at MAX_HISTORY_RECORDS
     return records
-      .filter(r => r && typeof r.timestamp === 'number' && r.timestamp >= cutoffTime)
+      .filter(r => {
+        if (!r || typeof r.timestamp !== 'number' || r.timestamp < cutoffTime) {
+          return false;
+        }
+        const recordId = r.id || `hist_${r.timestamp}`;
+        if (seenIds.has(recordId)) {
+          return false;
+        }
+        seenIds.add(recordId);
+        return true;
+      })
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, MAX_HISTORY_RECORDS);
   }

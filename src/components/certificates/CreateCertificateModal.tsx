@@ -8,7 +8,13 @@ import {
   getCertificateDefaultText
 } from '../../data/certificateTypes';
 import { CertificateRenderer } from './templates/CertificateRenderer';
-import { downloadCertificatePDF, downloadCertificateImage, shareCertificateWhatsApp } from '../../utils/certificateExportUtils';
+import { 
+  downloadCertificatePDF, 
+  downloadCertificateImage, 
+  shareCertificateWhatsApp,
+  shareCertificate,
+  saveCertificateToPhoneFolder
+} from '../../utils/certificateExportUtils';
 import { resolveCertificateRecipientName } from '../../utils/certificateUtils';
 import { formatLocalDate } from '../../utils/timeUtils';
 import { getTeacherEnglishName } from '../../utils/teacherUtils';
@@ -26,8 +32,11 @@ import {
   Loader2,
   AlertTriangle,
   Layers,
-  Image as ImageIcon
+  Image as ImageIcon,
+  FolderDown,
+  Send
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import confetti from 'canvas-confetti';
 
 interface CreateCertificateModalProps {
@@ -313,14 +322,18 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
   const handleExportPDF = async () => {
     if (!createdRecord || isExporting) return;
     setIsExporting(true);
-    setExportMessage(_t('جاري إنشاء وتحميل ملف PDF بجودة عالية...', 'Generating high-quality PDF...', 'PDF wird generiert...'));
+    setExportMessage(_t('جاري إنشاء وحفظ ملف PDF...', 'Generating PDF...', 'PDF wird generiert...'));
     try {
-      await downloadCertificatePDF(createdRecord);
-      setExportMessage(_t('تم تحميل ملف PDF بنجاح!', 'PDF downloaded successfully!', 'PDF erfolgreich heruntergeladen!'));
-      setTimeout(() => setExportMessage(''), 3000);
+      const res = await downloadCertificatePDF(createdRecord);
+      const msg = Capacitor.isNativePlatform() 
+        ? _t(`تم حفظ PDF في مجلد: ${res.path}`, `Saved PDF to ${res.path}`, 'PDF gespeichert')
+        : _t('تم تحميل ملف PDF بنجاح!', 'PDF downloaded successfully!', 'PDF erfolgreich heruntergeladen!');
+      setExportMessage(msg);
+      setTimeout(() => setExportMessage(''), 4000);
     } catch (err) {
       console.error('PDF Export error:', err);
-      setExportMessage(_t('حدث خطأ أثناء تصدير PDF. يرجى المحاولة مرة أخرى.', 'Error exporting PDF. Please try again.', 'Fehler beim PDF-Export.'));
+      setExportMessage(_t('حدث خطأ أثناء تصدير PDF.', 'Error exporting PDF.', 'Fehler beim PDF-Export.'));
+      setTimeout(() => setExportMessage(''), 3000);
     } finally {
       setIsExporting(false);
     }
@@ -329,22 +342,66 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
   const handleExportPNG = async () => {
     if (!createdRecord || isExporting) return;
     setIsExporting(true);
-    setExportMessage(_t('جاري إنشاء وتحميل صورة الشهادة بدقة عالية...', 'Generating high-resolution image...', 'Bild wird generiert...'));
+    setExportMessage(_t('جاري إنشاء وحفظ صورة الشهادة...', 'Generating image...', 'Bild wird generiert...'));
     try {
-      await downloadCertificateImage(createdRecord, 'png');
-      setExportMessage(_t('تم تحميل صورة الشهادة بنجاح!', 'Image downloaded successfully!', 'Bild erfolgreich heruntergeladen!'));
-      setTimeout(() => setExportMessage(''), 3000);
+      const res = await downloadCertificateImage(createdRecord, 'png');
+      const msg = Capacitor.isNativePlatform()
+        ? _t(`تم حفظ الصورة في مجلد: ${res.path}`, `Saved image to ${res.path}`, 'Bild gespeichert')
+        : _t('تم تحميل صورة الشهادة بنجاح!', 'Image downloaded successfully!', 'Bild erfolgreich heruntergeladen!');
+      setExportMessage(msg);
+      setTimeout(() => setExportMessage(''), 4000);
     } catch (err) {
       console.error('Image Export error:', err);
-      setExportMessage(_t('حدث خطأ أثناء تصدير الصورة. يرجى المحاولة مرة أخرى.', 'Error exporting image.', 'Fehler beim Bild-Export.'));
+      setExportMessage(_t('حدث خطأ أثناء تصدير الصورة.', 'Error exporting image.', 'Fehler beim Bild-Export.'));
+      setTimeout(() => setExportMessage(''), 3000);
     } finally {
       setIsExporting(false);
     }
   };
 
-  const handleShareWhatsApp = () => {
-    if (!createdRecord || !selectedStudent) return;
-    shareCertificateWhatsApp(createdRecord, selectedStudent.parentPhone || selectedStudent.studentPhone);
+  const handleSaveToPhoneFolder = async (format: 'pdf' | 'png' = 'pdf') => {
+    if (!createdRecord || isExporting) return;
+    setIsExporting(true);
+    setExportMessage(_t('جاري الحفظ في مجلد الهاتف...', 'Saving to phone folder...', 'Wird im Ordner gespeichert...'));
+    try {
+      const res = await saveCertificateToPhoneFolder(createdRecord, format);
+      setExportMessage(_t(`تم الحفظ في: ${res.path}`, `Saved to ${res.path}`, 'Gespeichert'));
+      setTimeout(() => setExportMessage(''), 5000);
+    } catch (err) {
+      console.error('Save to folder error:', err);
+      setExportMessage(_t('فشل الحفظ في المجلد', 'Save failed', 'Fehler beim Speichern'));
+      setTimeout(() => setExportMessage(''), 3000);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleNativeShare = async (format: 'pdf' | 'png' = 'png') => {
+    if (!createdRecord || isExporting) return;
+    setIsExporting(true);
+    setExportMessage(_t('جاري تجهيز المشاركة...', 'Preparing share...', 'Wird geteilt...'));
+    try {
+      await shareCertificate(createdRecord, createdRecord.title, createdRecord.recipientName || createdRecord.studentName, format);
+      setExportMessage('');
+    } catch (err) {
+      console.error('Share error:', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleShareWhatsApp = async () => {
+    if (!createdRecord || !selectedStudent || isExporting) return;
+    setIsExporting(true);
+    setExportMessage(_t('جاري تجهيز الشهادة والمشاركة للواتساب...', 'Preparing certificate for WhatsApp...', 'Wird für WhatsApp vorbereitet...'));
+    try {
+      await shareCertificateWhatsApp(createdRecord, selectedStudent.parentPhone || selectedStudent.studentPhone);
+      setExportMessage('');
+    } catch (err) {
+      console.error('WhatsApp share error:', err);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -398,18 +455,13 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
               )}
             </div>
 
-            {/* Hidden Renderer for export DOM rendering */}
-            <div className="hidden">
-              <CertificateRenderer certificate={createdRecord} elementId={`cert-node-${createdRecord.id}`} />
-            </div>
-
             {/* Actions Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2">
               <button
                 type="button"
                 onClick={handleExportPDF}
                 disabled={isExporting}
-                className="py-3 px-4 bg-primary hover:bg-primary-hover text-white rounded-2xl font-black flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer disabled:opacity-50 text-xs"
+                className="py-2.5 px-3 bg-primary hover:bg-primary-hover text-white rounded-xl font-black flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50 text-xs"
               >
                 {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                 <span>{_t('تحميل PDF', 'Download PDF', 'PDF herunterladen')}</span>
@@ -419,17 +471,38 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                 type="button"
                 onClick={handleExportPNG}
                 disabled={isExporting}
-                className="py-3 px-4 bg-surface dark:bg-slate-800 border border-surface-border dark:border-slate-700 text-text-main hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl font-black flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 text-xs"
+                className="py-2.5 px-3 bg-surface dark:bg-slate-800 border border-surface-border dark:border-slate-700 text-text-main hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 text-xs"
               >
                 {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-                <span>{_t('تحميل صورة PNG', 'Download PNG', 'PNG herunterladen')}</span>
+                <span>{_t('صورة PNG', 'PNG Image', 'PNG-Bild')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSaveToPhoneFolder('pdf')}
+                disabled={isExporting}
+                className="py-2.5 px-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 text-xs col-span-2 sm:col-span-1"
+                title={_t('حفظ في مجلد الهاتف Documents/AGS_Certificates', 'Save to Phone Folder', 'Im Telefonordner speichern')}
+              >
+                <FolderDown className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                <span>{_t('مجلد الهاتف (AGS)', 'Phone Folder', 'Telefonordner')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleNativeShare('png')}
+                disabled={isExporting}
+                className="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-text-main rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 text-xs"
+              >
+                <Send className="w-4 h-4 text-primary" />
+                <span>{_t('مشاركة', 'Share', 'Teilen')}</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleShareWhatsApp}
                 disabled={isExporting}
-                className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer disabled:opacity-50 text-xs"
+                className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50 text-xs col-span-2 sm:col-span-2"
               >
                 <Share2 className="w-4 h-4" />
                 <span>{_t('مشاركة عبر واتساب', 'Share WhatsApp', 'Per WhatsApp teilen')}</span>

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Copy, Check } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
 
 interface CopyableBlockProps {
   content: string;
@@ -16,6 +17,7 @@ export const CopyableBlock: React.FC<CopyableBlockProps> = ({
   className = '',
   id
 }) => {
+  const { _t } = useApp();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -38,32 +40,32 @@ export const CopyableBlock: React.FC<CopyableBlockProps> = ({
   };
 
   return (
-    <div id={id} className={`flex flex-col rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-900 text-gray-100 overflow-hidden shadow-inner ${className}`}>
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-950/80 border-b border-gray-800/80">
-        <span className="text-xs font-mono font-medium text-gray-400">
-          {title || 'Diagnostic Payload & Logs'}
+    <div id={id} className={`flex flex-col rounded-2xl border border-surface-border bg-gray-950 text-gray-100 overflow-hidden shadow-xs ${className}`}>
+      <div className="flex items-center justify-between px-4 py-2.5 bg-gray-900/90 border-b border-gray-800">
+        <span className="text-xs font-mono font-bold text-gray-400">
+          {title || _t('سجل البيانات والتشخيص', 'Diagnostic Payload & Logs', 'Diagnosedaten & Logs')}
         </span>
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 transition-colors focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg bg-gray-800 hover:bg-gray-700 active:bg-gray-800 text-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
           title="Copy log to clipboard"
           aria-label="Copy log to clipboard"
         >
           {copied ? (
             <>
               <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-emerald-400">Copied!</span>
+              <span className="text-emerald-400">{_t('تم النسخ!', 'Copied!', 'Kopiert!')}</span>
             </>
           ) : (
             <>
               <Copy className="w-3.5 h-3.5 text-gray-300" />
-              <span>Copy Log</span>
+              <span>{_t('نسخ السجل', 'Copy Log', 'Log kopieren')}</span>
             </>
           )}
         </button>
       </div>
-      <pre className={`p-3 font-mono text-xs overflow-x-auto overflow-y-auto ${maxHeight} whitespace-pre-wrap break-all text-gray-300 select-all leading-relaxed`}>
+      <pre className={`p-4 font-mono text-xs overflow-x-auto overflow-y-auto ${maxHeight} whitespace-pre-wrap break-all text-gray-300 select-all leading-relaxed`}>
         {content}
       </pre>
     </div>

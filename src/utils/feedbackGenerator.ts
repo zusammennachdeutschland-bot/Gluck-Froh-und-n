@@ -1,6 +1,6 @@
 import { StudentSessionPerformance } from '../types';
 
-const arabicBase = {
+export const arabicBaseMale = {
   excellent: [
     'أظهر مستوى ممتازًا واستيعابًا سريعًا لمحتوى الحصة',
     'كان أداؤه متميزًا طوال السيشن',
@@ -29,37 +29,100 @@ const arabicBase = {
   ]
 };
 
-const arabicParticipation = {
+export const arabicBaseFemale = {
+  excellent: [
+    'أظهرت مستوى ممتازًا واستيعابًا سريعًا لمحتوى الحصة',
+    'كان أداؤها متميزًا طوال السيشن',
+    'أظهرت قدرة ممتازة على تطبيق ما تم شرحه',
+    'كان أداؤها رائعًا ومثمرًا للغاية'
+  ],
+  very_good: [
+    'أظهرت أداءً جيدًا جدًا خلال الحصة',
+    'كان أداؤها ثابتًا ومميزًا خلال السيشن',
+    'تعاملت بشكل جيد جدًا مع تدريبات الحصة'
+  ],
+  good: [
+    'كان أداؤها جيدًا وشاركت بشكل مناسب',
+    'تمكنت من متابعة معظم أنشطة الحصة بشكل جيد',
+    'تعاملت بشكل جيد مع التدريبات المطلوبة'
+  ],
+  developing: [
+    'أظهرت تقدمًا ملحوظًا لكنها لا تزال بحاجة إلى بعض الممارسة',
+    'بدأت في فهم المحتوى بشكل أفضل وتحتاج إلى مزيد من التدريب',
+    'تحسن أداؤها خلال الحصة مع وجود بعض النقاط التي تحتاج إلى المراجعة'
+  ],
+  needs_support: [
+    'تحتاج الطالبة إلى مزيد من الدعم والممارسة لتعزيز فهمها للمحتوى',
+    'تحتاج إلى مزيد من التدريب على المهارات التي تم تناولها خلال الحصة',
+    'ستستفيد من مراجعة بعض النقاط والتدريب عليها بشكل إضافي'
+  ]
+};
+
+export const arabicParticipationMale = {
   active: ['وكان متفاعلًا بشكل واضح مع الأنشطة', 'وشارك بفعالية كبيرة', 'مع مشاركة نشطة وإيجابية'],
   good: ['وكان متفاعلًا بشكل جيد', 'وشارك بشكل مناسب', 'مع تفاعل جيد في الأنشطة'],
   quiet: ['لكنه كان هادئًا بعض الشيء', 'ومشاركته كانت محدودة', 'رغم قلة تفاعله في النقاشات'],
   needs_encouragement: ['ويحتاج لمزيد من التشجيع للمشاركة', 'وننصح بتشجيعه على التفاعل أكثر', 'ونأمل رؤية تفاعل أكبر منه مستقبلًا']
 };
 
-const arabicUnderstanding = {
+export const arabicParticipationFemale = {
+  active: ['وكانت متفاعلة بشكل واضح مع الأنشطة', 'وشاركت بفعالية كبيرة', 'مع مشاركة نشطة وإيجابية'],
+  good: ['وكانت متفاعلة بشكل جيد', 'وشاركت بشكل مناسب', 'مع تفاعل جيد في الأنشطة'],
+  quiet: ['لكنها كانت هادئة بعض الشيء', 'ومشاركتها كانت محدودة', 'رغم قلة تفاعلها في النقاشات'],
+  needs_encouragement: ['وتحتاج لمزيد من التشجيع للمشاركة', 'وننصح بتشجيعها على التفاعل أكثر', 'ونأمل رؤية تفاعل أكبر منها مستقبلًا']
+};
+
+export const arabicUnderstandingMale = {
   excellent: ['كما أظهر فهمًا ممتازًا للمحتوى', 'واستيعابًا كاملًا للمفاهيم'],
   good: ['كما أظهر فهمًا جيدًا للمحتوى', 'واستيعابًا جيدًا للدرس'],
   developing: ['وأظهر استيعابًا مقبولًا مع الحاجة لمراجعة بعض المفاهيم', 'وبدأ في فهم المادة بشكل أفضل'],
   needs_review: ['ويحتاج إلى مراجعة بعض المفاهيم الأساسية', 'وننصح بالتركيز أكثر على استيعاب الدروس']
 };
 
-const arabicSpeaking = {
+export const arabicUnderstandingFemale = {
+  excellent: ['كما أظهرت فهمًا ممتازًا للمحتوى', 'واستيعابًا كاملًا للمفاهيم'],
+  good: ['كما أظهرت فهمًا جيدًا للمحتوى', 'واستيعابًا جيدًا للدرس'],
+  developing: ['وأظهرت استيعابًا مقبولًا مع الحاجة لمراجعة بعض المفاهيم', 'وبدأت في فهم المادة بشكل أفضل'],
+  needs_review: ['وتحتاج إلى مراجعة بعض المفاهيم الأساسية', 'وننصح بالتركيز أكثر على استيعاب الدروس']
+};
+
+export const arabicSpeakingMale = {
   confident: ['وثقة عالية أثناء التحدث', 'ومهارة تحدث بثقة وطلاقة'],
   good: ['ومهارة تحدث جيدة', 'وثقة مناسبة أثناء التحدث'],
   improving: ['مع تحسن ملحوظ في التحدث', 'وبداية جيدة في مهارات المحادثة'],
   needs_practice: ['مع الحاجة لمزيد من الممارسة في التحدث', 'وننصح بزيادة التدريب على المحادثة']
 };
 
-const arabicFocus = {
+export const arabicSpeakingFemale = {
+  confident: ['وثقة عالية أثناء التحدث', 'ومهارة تحدث بثقة وطلاقة'],
+  good: ['ومهارة تحدث جيدة', 'وثقة مناسبة أثناء التحدث'],
+  improving: ['مع تحسن ملحوظ في التحدث', 'وبداية جيدة في مهارات المحادثة'],
+  needs_practice: ['مع الحاجة لمزيد من الممارسة في التحدث', 'وننصح بزيادة التدريب على المحادثة']
+};
+
+export const arabicFocusMale = {
   excellent: ['بتركيز ممتاز طوال الوقت', 'وانتباه كامل خلال الحصة'],
   good: ['بتركيز وانتباه جيدين', 'مع تركيز جيد خلال الدرس'],
   sometimes_distracted: ['رغم بعض التشتت أحيانًا', 'مع ملاحظة قلة التركيز في بعض الأوقات'],
   needs_more_focus: ['ويحتاج إلى تركيز أكبر خلال الشرح', 'وننصح بزيادة التركيز لتجنب التشتت']
 };
 
-const arabicProgress = {
+export const arabicFocusFemale = {
+  excellent: ['بتركيز ممتاز طوال الوقت', 'وانتباه كامل خلال الحصة'],
+  good: ['بتركيز وانتباه جيدين', 'مع تركيز جيد خلال الدرس'],
+  sometimes_distracted: ['رغم بعض التشتت أحيانًا', 'مع ملاحظة قلة التركيز في بعض الأوقات'],
+  needs_more_focus: ['وتحتاج إلى تركيز أكبر خلال الشرح', 'وننصح بزيادة التركيز لتجنب التشتت']
+};
+
+export const arabicProgressMale = {
   improved: ['مع تحسن ملحوظ مقارنة بالحصة السابقة.', 'محققًا تقدمًا رائعًا عن المرة الماضية.', 'ونلاحظ تطورًا إيجابيًا في مستواه.'],
   stable: ['مع الحفاظ على استقرار مستواه.', 'مستمرًا في تقديم أداء ثابت.'],
+  needs_attention: ['ونأمل التركيز أكثر لتحقيق نتائج أفضل مستقبلًا.', 'ونحتاج إلى العمل معًا لتحسين الأداء القادم.']
+};
+
+export const arabicProgressFemale = {
+  improved: ['مع تحسن ملحوظ مقارنة بالحصة السابقة.', 'محققة تقدمًا رائعًا عن المرة الماضية.', 'ونلاحظ تطورًا إيجابيًا في مستواها.'],
+  stable: ['مع الحفاظ على استقرار مستواها.', 'مستمرة في تقديم أداء ثابت.'],
   needs_attention: ['ونأمل التركيز أكثر لتحقيق نتائج أفضل مستقبلًا.', 'ونحتاج إلى العمل معًا لتحسين الأداء القادم.']
 };
 
@@ -80,23 +143,23 @@ const germanParticipation = {
 
 const germanUnderstanding = {
   excellent: ['Das Verständnis der Themen war exzellent', 'Die Konzepte wurden vollständig verstanden'],
-  good: ['Das Verständnis war gut', 'Er/Sie hat die Inhalte gut verstanden'],
+  good: ['Das Verständnis war gut', 'Die Inhalte wurden gut verstanden'],
   developing: ['Das Verständnis entwickelt sich gut', 'Einige Themen sollten noch wiederholt werden'],
   needs_review: ['Einige grundlegende Konzepte müssen noch wiederholt werden', 'Es gibt noch Nachholbedarf beim Verständnis']
 };
 
 const germanSpeaking = {
-  confident: ['Zudem sprach er/sie sehr selbstbewusst', 'Das Sprechen fiel ihm/ihr sehr leicht'],
-  good: ['Das Sprechen war gut', 'Er/Sie drückte sich gut aus'],
+  confident: ['Zudem wurde sehr selbstbewusst gesprochen', 'Das Sprechen fiel leicht und flüssig'],
+  good: ['Das Sprechen war gut', 'Gute Ausdrucksweise beim Sprechen'],
   improving: ['Es gab merkliche Fortschritte beim Sprechen', 'Das Sprechen verbessert sich'],
   needs_practice: ['Beim Sprechen ist noch mehr Übung nötig', 'Das freie Sprechen sollte weiter geübt werden']
 };
 
 const germanFocus = {
-  excellent: ['Die Konzentration war durchgehend hervorragend.', 'Er/Sie war sehr fokussiert.'],
-  good: ['Die Konzentration war gut.', 'Er/Sie war aufmerksam.'],
-  sometimes_distracted: ['Manchmal war er/sie jedoch leicht abgelenkt.', 'Die Konzentration ließ gelegentlich nach.'],
-  needs_more_focus: ['Es wird mehr Fokus während des Unterrichts benötigt.', 'Er/Sie sollte im Unterricht aufmerksamer sein.']
+  excellent: ['Die Konzentration war durchgehend hervorragend.', 'Sehr aufmerksam und fokussiert.'],
+  good: ['Die Konzentration war gut.', 'Aufmerksam während des Unterrichts.'],
+  sometimes_distracted: ['Manchmal gab es leichte Ablenkungen.', 'Die Konzentration ließ gelegentlich nach.'],
+  needs_more_focus: ['Es wird mehr Fokus während des Unterrichts benötigt.', 'Mehr Aufmerksamkeit ist empfehlenswert.']
 };
 
 const germanProgress = {
@@ -147,46 +210,145 @@ const englishProgress = {
   needs_attention: ['We hope to see better focus for improved results next time.', 'Requires a bit more effort moving forward.']
 };
 
-function pick<T>(arr: T[], avoidIndex?: number): { item: T, index: number } {
+function pick<T>(arr: T[], avoidIndex?: number): { item: T; index: number } {
   if (!arr || arr.length === 0) return { item: '' as any, index: -1 };
   let pool = arr;
-  let offset = 0;
   if (avoidIndex !== undefined && avoidIndex >= 0 && avoidIndex < arr.length && arr.length > 1) {
     pool = arr.filter((_, i) => i !== avoidIndex);
-    offset = 1; // to keep track roughly, but let's just return actual index in original arr
   }
   const randomIdx = Math.floor(Math.random() * pool.length);
   const chosen = pool[randomIdx];
   return { item: chosen, index: arr.indexOf(chosen) };
 }
 
+/**
+ * Converts Arabic feedback sentences between masculine and feminine phrasing accurately.
+ */
+export function convertArabicFeedbackGender(text: string, toGender: 'male' | 'female'): string {
+  if (!text) return '';
+  if (toGender === 'female') {
+    return text
+      .replace(/\bأظهر\b/g, 'أظهرت')
+      .replace(/\bكان أداؤه\b/g, 'كان أداؤها')
+      .replace(/\bأداؤه\b/g, 'أداؤها')
+      .replace(/\bتعامل\b/g, 'تعاملت')
+      .replace(/\bوشارك\b/g, 'وشاركت')
+      .replace(/\bشارك\b/g, 'شاركت')
+      .replace(/\bتمكن\b/g, 'تمكنت')
+      .replace(/\bلكنه كان هادئًا\b/g, 'لكنها كانت هادئة')
+      .replace(/\bلكنه كان هادئا\b/g, 'لكنها كانت هادئة')
+      .replace(/\bوكان متفاعلًا\b/g, 'وكانت متفاعلة')
+      .replace(/\bوكان متفاعلا\b/g, 'وكانت متفاعلة')
+      .replace(/\bمتفاعلًا\b/g, 'متفاعلة')
+      .replace(/\bمتفاعلا\b/g, 'متفاعلة')
+      .replace(/\bهادئًا\b/g, 'هادئة')
+      .replace(/\bهادئا\b/g, 'هادئة')
+      .replace(/\bلكنه\b/g, 'لكنها')
+      .replace(/\bبدأ\b/g, 'بدأت')
+      .replace(/\bوبدأ\b/g, 'وبدأت')
+      .replace(/\bيحتاج الطالب\b/g, 'تحتاج الطالبة')
+      .replace(/\bيحتاج\b/g, 'تحتاج')
+      .replace(/\bويحتاج\b/g, 'وتحتاج')
+      .replace(/\bالطالب\b/g, 'الطالبة')
+      .replace(/\bفهمه\b/g, 'فهمها')
+      .replace(/\bسيستفيد\b/g, 'ستستفيد')
+      .replace(/\bمشاركته\b/g, 'مشاركتها')
+      .replace(/\bتفاعله\b/g, 'تفاعلها')
+      .replace(/\bاستيعابه\b/g, 'استيعابها')
+      .replace(/\bبتشجيعه\b/g, 'بتشجيعها')
+      .replace(/\bمنه\b/g, 'منها')
+      .replace(/\bمحققًا\b/g, 'محققة')
+      .replace(/\bمحققا\b/g, 'محققة')
+      .replace(/\bمستواه\b/g, 'مستواها')
+      .replace(/\bمستمرًا\b/g, 'مستمرة')
+      .replace(/\bمستمرا\b/g, 'مستمرة');
+  } else {
+    return text
+      .replace(/\bأظهرت\b/g, 'أظهر')
+      .replace(/\bكان أداؤها\b/g, 'كان أداؤه')
+      .replace(/\bأداؤها\b/g, 'أداؤه')
+      .replace(/\bتعاملت\b/g, 'تعامل')
+      .replace(/\bوشاركت\b/g, 'وشارك')
+      .replace(/\bشاركت\b/g, 'شارك')
+      .replace(/\bتمكنت\b/g, 'تمكن')
+      .replace(/\bلكنها كانت هادئة\b/g, 'لكنه كان هادئًا')
+      .replace(/\bوكانت متفاعلة\b/g, 'وكان متفاعلًا')
+      .replace(/\bمتفاعلة\b/g, 'متفاعلًا')
+      .replace(/\bهادئة\b/g, 'هادئًا')
+      .replace(/\bلكنها\b/g, 'لكنه')
+      .replace(/\bبدأت\b/g, 'بدأ')
+      .replace(/\bوبدأت\b/g, 'وبدأ')
+      .replace(/\bتحتاج الطالبة\b/g, 'يحتاج الطالب')
+      .replace(/\bتحتاج\b/g, 'يحتاج')
+      .replace(/\bوتحتاج\b/g, 'ويحتاج')
+      .replace(/\bالطالبة\b/g, 'الطالب')
+      .replace(/\bفهمها\b/g, 'فهمه')
+      .replace(/\bستستفيد\b/g, 'سيستفيد')
+      .replace(/\bمشاركتها\b/g, 'مشاركته')
+      .replace(/\bتفاعلها\b/g, 'تفاعله')
+      .replace(/\bاستيعابها\b/g, 'استيعابه')
+      .replace(/\bبتشجيعها\b/g, 'بتشجيعه')
+      .replace(/\bمنها\b/g, 'منه')
+      .replace(/\bمحققة\b/g, 'محققًا')
+      .replace(/\bمستواها\b/g, 'مستواه')
+      .replace(/\bمستمرة\b/g, 'مستمرًا');
+  }
+}
+
 export const generateFeedback = (
   performance: StudentSessionPerformance,
   language: 'ar' | 'en' | 'de' = 'ar',
-  avoidVariantId?: string
-): { feedback: { short: string, parent: string, detailed: string }, variantId: string } => {
-  
+  avoidVariantId?: string,
+  gender: 'male' | 'female' = performance.gender || 'male'
+): { feedback: { short: string; parent: string; detailed: string }; variantId: string } => {
   const prevIndices = avoidVariantId ? avoidVariantId.split('-').map(Number) : [];
 
-  let bases, parts, unders, speaks, focus, progs;
-  
+  let bases: Record<string, string[]>;
+  let parts: Record<string, string[]>;
+  let unders: Record<string, string[]>;
+  let speaks: Record<string, string[]>;
+  let focus: Record<string, string[]>;
+  let progs: Record<string, string[]>;
+
   if (language === 'de') {
-    bases = germanBase; parts = germanParticipation; unders = germanUnderstanding;
-    speaks = germanSpeaking; focus = germanFocus; progs = germanProgress;
+    bases = germanBase;
+    parts = germanParticipation;
+    unders = germanUnderstanding;
+    speaks = germanSpeaking;
+    focus = germanFocus;
+    progs = germanProgress;
   } else if (language === 'en') {
-    bases = englishBase; parts = englishParticipation; unders = englishUnderstanding;
-    speaks = englishSpeaking; focus = englishFocus; progs = englishProgress;
+    bases = englishBase;
+    parts = englishParticipation;
+    unders = englishUnderstanding;
+    speaks = englishSpeaking;
+    focus = englishFocus;
+    progs = englishProgress;
   } else {
-    bases = arabicBase; parts = arabicParticipation; unders = arabicUnderstanding;
-    speaks = arabicSpeaking; focus = arabicFocus; progs = arabicProgress;
+    // Arabic: choose gender-specific dictionary
+    if (gender === 'female') {
+      bases = arabicBaseFemale;
+      parts = arabicParticipationFemale;
+      unders = arabicUnderstandingFemale;
+      speaks = arabicSpeakingFemale;
+      focus = arabicFocusFemale;
+      progs = arabicProgressFemale;
+    } else {
+      bases = arabicBaseMale;
+      parts = arabicParticipationMale;
+      unders = arabicUnderstandingMale;
+      speaks = arabicSpeakingMale;
+      focus = arabicFocusMale;
+      progs = arabicProgressMale;
+    }
   }
 
-  const baseOpts = bases[performance.level || 'good'];
-  const partOpts = performance.participation ? parts[performance.participation] : [];
-  const underOpts = performance.understanding ? unders[performance.understanding] : [];
-  const speakOpts = performance.speaking ? speaks[performance.speaking] : [];
-  const focusOpts = performance.focus ? focus[performance.focus] : [];
-  const progOpts = performance.progress ? progs[performance.progress] : [];
+  const baseOpts = bases[performance.level || 'good'] || [];
+  const partOpts = performance.participation ? parts[performance.participation] || [] : [];
+  const underOpts = performance.understanding ? unders[performance.understanding] || [] : [];
+  const speakOpts = performance.speaking ? speaks[performance.speaking] || [] : [];
+  const focusOpts = performance.focus ? focus[performance.focus] || [] : [];
+  const progOpts = performance.progress ? progs[performance.progress] || [] : [];
 
   const b = pick(baseOpts, prevIndices[0]);
   const p = pick(partOpts, prevIndices[1]);
@@ -197,17 +359,17 @@ export const generateFeedback = (
 
   const newVariantId = `${b.index}-${p.index}-${u.index}-${s.index}-${f.index}-${pr.index}`;
 
-  const parentParts = [];
+  const parentParts: string[] = [];
   if (b.item) parentParts.push(b.item);
   if (p.item) parentParts.push(p.item);
   if (u.item) parentParts.push(u.item);
   if (s.item) parentParts.push(s.item);
-  
+
   let parentText = parentParts.join(language === 'ar' ? '، ' : ' ');
   if (pr.item) {
     parentText += ' ' + pr.item;
   }
-  
+
   let detailedText = parentText;
   if (f.item) {
     detailedText += ' ' + f.item;
@@ -215,11 +377,35 @@ export const generateFeedback = (
 
   let shortText = '';
   if (language === 'ar') {
-    shortText = `أداء ${performance.level === 'excellent' ? 'ممتاز' : performance.level === 'very_good' ? 'جيد جداً' : performance.level === 'good' ? 'جيد' : 'بحاجة لتدريب'} اليوم. 👍`;
+    const levelLabel =
+      performance.level === 'excellent'
+        ? 'ممتاز'
+        : performance.level === 'very_good'
+        ? 'جيد جداً'
+        : performance.level === 'good'
+        ? 'جيد'
+        : 'بحاجة لتدريب';
+    shortText = `أداء ${levelLabel} اليوم. 👍`;
   } else if (language === 'de') {
-    shortText = `Heute eine ${performance.level === 'excellent' ? 'hervorragende' : performance.level === 'very_good' ? 'sehr gute' : performance.level === 'good' ? 'gute' : 'entwicklungsfähige'} Leistung! 👍`;
+    shortText = `Heute eine ${
+      performance.level === 'excellent'
+        ? 'hervorragende'
+        : performance.level === 'very_good'
+        ? 'sehr gute'
+        : performance.level === 'good'
+        ? 'gute'
+        : 'entwicklungsfähige'
+    } Leistung! 👍`;
   } else {
-    shortText = `${performance.level === 'excellent' ? 'Excellent' : performance.level === 'very_good' ? 'Very good' : performance.level === 'good' ? 'Good' : 'Developing'} performance today! 👍`;
+    shortText = `${
+      performance.level === 'excellent'
+        ? 'Excellent'
+        : performance.level === 'very_good'
+        ? 'Very good'
+        : performance.level === 'good'
+        ? 'Good'
+        : 'Developing'
+    } performance today! 👍`;
   }
 
   return {

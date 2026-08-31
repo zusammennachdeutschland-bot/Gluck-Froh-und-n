@@ -673,6 +673,7 @@ export interface StudentSessionPerformance {
   speaking?: SpeakingLevel;
   focus?: FocusLevel;
   progress?: ProgressLevel;
+  gender?: 'male' | 'female';
   generatedFeedback?: GeneratedFeedback;
   feedbackLanguage?: 'ar' | 'en' | 'de';
   generatedAt?: string;

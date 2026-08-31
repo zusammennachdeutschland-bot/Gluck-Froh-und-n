@@ -2,6 +2,7 @@ import { App as CapacitorApp } from '@capacitor/app';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/Header';
+import { PullToRefresh } from './components/PullToRefresh';
 import { TodaysProgressTimeline } from './components/TodaysProgressTimeline';
 import { DailyStats } from './components/DailyStats';
 import { PaymentAlertsCard } from './components/PaymentAlertsCard';
@@ -63,7 +64,11 @@ function MainApp() {
     isAddGroupModalOpen, setIsAddGroupModalOpen,
     isBackupModalOpen, setIsBackupModalOpen,
     isGlobalSearchOpen, setIsGlobalSearchOpen,
-    isRecentlyDeletedModalOpen, setIsRecentlyDeletedModalOpen
+    isRecentlyDeletedModalOpen, setIsRecentlyDeletedModalOpen,
+    refreshCalendarAndDashboard,
+    syncAllPeers,
+    t,
+    language
   } = useApp();
 
   const [quickTransactionType, setQuickTransactionType] = useState<'income' | 'expense' | 'transfer' | null>(null);
@@ -322,9 +327,20 @@ function MainApp() {
       <div className="md:hidden max-w-lg mx-auto bg-background h-[100dvh] shadow-2xl relative flex flex-col border-x border-surface-border/80 dark:border-surface-border">
         <Header />
 
-        {/* Tab View Content Area */}
-        <main 
-          className="flex-1 px-2.5 py-2.5 sm:p-3 md:p-4 overflow-y-auto pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] overflow-x-hidden relative"
+        {/* Tab View Content Area with Pull-to-Refresh & Full Multi-Device Sync */}
+        <PullToRefresh
+          onRefresh={async () => {
+            refreshCalendarAndDashboard();
+            try {
+              await syncAllPeers();
+            } catch (err) {
+              console.warn('[PullToRefresh] Sync error:', err);
+            }
+          }}
+          pullText={language === 'ar' ? 'اسحب للأسفل للتحديث والمزامنة...' : language === 'de' ? 'Zum Aktualisieren & Synchronisieren nach unten ziehen...' : 'Pull down to refresh & sync...'}
+          releaseText={language === 'ar' ? 'اترك للتحديث والمزامنة الشاملة الآن' : language === 'de' ? 'Loslassen zum Aktualisieren & Synchronisieren' : 'Release to refresh & sync all'}
+          refreshingText={language === 'ar' ? 'جارٍ تحديث ومزامنة البيانات مع الأجهزة...' : language === 'de' ? 'Daten werden aktualisiert & synchronisiert...' : 'Refreshing & syncing all devices...'}
+          className="flex-1 px-2.5 py-2.5 sm:p-3 md:p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] overflow-x-hidden"
         >
           <div
             key={`mobile-${activeTab}`}
@@ -372,7 +388,7 @@ function MainApp() {
             {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
             {activeTab === 'hod' && <HodHubView />}
           </div>
-        </main>
+        </PullToRefresh>
 
         {/* Bottom Navigation */}
         <BottomNav />

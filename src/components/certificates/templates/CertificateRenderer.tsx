@@ -23,11 +23,12 @@ export const CertificateRenderer: React.FC<CertificateRendererProps> = ({
 }) => {
   const templateId = certificate.template || certificate.templateId || 'classic';
   const isCustomBg = !!certificate.customBackgroundUrl || templateId === 'custom_ai_bg' || String(templateId).startsWith('ai_bg_');
+  const hasCustomMaxWidth = className.includes('max-w-') || className.includes('w-[');
 
   return (
     <div
       id={elementId}
-      className={`w-full max-w-4xl mx-auto overflow-hidden rounded-xl shadow-lg relative ${className}`}
+      className={`w-full ${hasCustomMaxWidth ? '' : 'max-w-4xl'} mx-auto overflow-hidden rounded-xl shadow-lg relative ${className}`}
     >
       {isCustomBg ? (
         <CustomAIBackgroundTemplate certificate={certificate} />

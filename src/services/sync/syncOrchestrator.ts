@@ -46,7 +46,7 @@ export async function runSyncCycle(
   let totalTransferred = 0;
 
   const emptyReport: SyncCycleReport = {
-    id: 'sync_' + Date.now(),
+    id: 'sync_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
     timestamp: startTime,
     peerId,
     peerName: 'Unknown Peer',
@@ -187,7 +187,7 @@ export async function runSyncCycle(
     });
 
     const finalReport: SyncCycleReport = {
-      id: 'sync_' + Date.now(),
+      id: 'sync_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
       timestamp: Date.now(),
       peerId,
       peerName: peer.deviceName,
