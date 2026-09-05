@@ -272,7 +272,7 @@ export type AppLanguage = 'ar' | 'en' | 'de';
 
 export type AccentColor = 'blue' | 'green' | 'purple' | 'orange' | 'red' | 'teal' | 'indigo' | 'rose' | 'amber' | 'emerald' | 'fuchsia' | 'cyan' | 'violet' | 'slate' | 'pink' | 'lime' | 'darkblue';
 
-export type PaymentStatus = 'paid' | 'pending' | 'partial';
+export type PaymentStatus = 'paid' | 'pending' | 'partial' | 'exempted';
 
 export type AttendanceStatus = 'present' | 'absent' | 'late';
 
@@ -1069,7 +1069,7 @@ export interface PaymentRecord extends SyncableRecord {
   dueDate: string;
   paidDate?: string;
   status: PaymentStatus;
-  paymentType?: 'lesson_fee' | 'package_bundle' | 'advance_payment' | 'refund' | 'adjustment';
+  paymentType?: 'lesson_fee' | 'package_bundle' | 'advance_payment' | 'refund' | 'adjustment' | 'exemption';
   financeAccountId?: string;
   paymentMethod?: string; // Kept for legacy
   lessonsIncluded?: string[];

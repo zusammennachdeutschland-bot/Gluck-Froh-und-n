@@ -45,10 +45,10 @@ export const calculateDuePaymentCycles = (
   const activeLessons = lessons.filter(l => !l.deleted);
   const activePayments = payments.filter(p => !p.deleted);
 
-  // Map studentId -> Set of paid lesson IDs for fast lookup
+  // Map studentId -> Set of paid or exempted lesson IDs for fast lookup
   const studentPaidLessons = new Map<string, Set<string>>();
   activePayments.forEach(p => {
-    if (p.status === 'paid' && p.lessonIds && p.lessonIds.length > 0) {
+    if ((p.status === 'paid' || p.status === 'exempted' || p.paymentType === 'exemption') && p.lessonIds && p.lessonIds.length > 0) {
       const stId = p.studentId;
       if (stId) {
         if (!studentPaidLessons.has(stId)) {
@@ -64,9 +64,10 @@ export const calculateDuePaymentCycles = (
     const { cycleLength, amountDue } = getStudentCyclePricing(st, grp);
     const paidIds = studentPaidLessons.get(st.id) || new Set<string>();
 
-    // Collect all completed attended lessons for this student that have NOT been paid for
+    // Collect all completed attended lessons for this student that have NOT been paid or exempted
     const rawCompletedLessons = activeLessons.filter(l => {
       if (l.status !== 'completed') return false;
+      if (l.paymentStatus === 'exempted') return false;
       const matchesGroup = grp ? l.groupId === grp.id : false;
       const matchesStudent = l.studentId ? l.studentId === st.id : (!!l.studentName && l.studentName === st.name);
       if (!matchesGroup && !matchesStudent) return false;
@@ -93,6 +94,20 @@ export const calculateDuePaymentCycles = (
 
     stCompletedLessons.sort((a, b) => a.date.localeCompare(b.date));
 
+    // Handle advance prepaid lessons
+    const advancePayments = activePayments.filter(p => 
+      p.studentId === st.id && 
+      p.status === 'paid' && 
+      (p.paymentType === 'advance_payment' || (p.bundleSize && p.bundleSize > 0 && p.notes?.includes('مقدم')))
+    );
+    const totalAdvanceLessonsCount = advancePayments.reduce((sum, p) => sum + (p.bundleSize || 0), 0);
+    const explicitlyLinkedCount = advancePayments.reduce((sum, p) => sum + (p.lessonIds ? p.lessonIds.filter(id => !id.startsWith('virtual_')).length : 0), 0);
+    const unlinkedAdvanceLessons = Math.max(0, totalAdvanceLessonsCount - explicitlyLinkedCount);
+
+    const billableCompletedLessons = unlinkedAdvanceLessons > 0 
+      ? stCompletedLessons.slice(unlinkedAdvanceLessons) 
+      : stCompletedLessons;
+
     // Determine if we need to apply starting session number offset
     // Offset is applied ONLY for the first cycle if startingSessionNumber > 1, cycleLength > 1, and student has no paid payments
     const hasPaidPayments = activePayments.some(p => p.studentId === st.id && p.status === 'paid');
@@ -116,8 +131,8 @@ export const calculateDuePaymentCycles = (
       });
     }
 
-    // Add actual completed lessons
-    stCompletedLessons.forEach(l => {
+    // Add actual completed lessons that are billable
+    billableCompletedLessons.forEach(l => {
       processedLessons.push({
         id: l.id,
         dateLabel: `${formatDateDisplay(l.date)} (Session ${l.sessionNumber || 1}/${cycleLength})`,
@@ -125,8 +140,13 @@ export const calculateDuePaymentCycles = (
       });
     });
 
-    // Unpaid record in payments
-    const unpaidRec = activePayments.find(p => p.studentId === st.id && p.status !== 'paid');
+    // Unpaid record in payments (excluding exempted or paid)
+    const unpaidRec = activePayments.find(p => 
+      p.studentId === st.id && 
+      p.status !== 'paid' && 
+      p.status !== 'exempted' && 
+      p.paymentType !== 'exemption'
+    );
 
     if (processedLessons.length >= cycleLength) {
       let remaining = [...processedLessons];
@@ -189,10 +209,10 @@ export const calculateDuePaymentCycles = (
     }
   });
 
-  // Also include standalone unpaid payment records from payments table
+  // Also include standalone unpaid payment records from payments table (excluding exempted)
   const addedPaymentRecordIds = new Set(list.map(item => item.existingPaymentRecordId).filter(Boolean));
   activePayments.forEach(p => {
-    if (p.status !== 'paid' && !addedPaymentRecordIds.has(p.id)) {
+    if (p.status !== 'paid' && p.status !== 'exempted' && p.paymentType !== 'exemption' && !addedPaymentRecordIds.has(p.id)) {
       list.push({
         id: p.id,
         studentId: p.studentId || '',
@@ -337,3 +357,35 @@ export const getPaymentsForDay = (payments: PaymentRecord[], dayStr: string) => 
 };
 
 export const sumPayments = (list: PaymentRecord[]) => list.filter(p => !p.deleted).reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
+
+/**
+ * Calculates prepaid/advance lesson counts for a student.
+ */
+export const getStudentAdvanceLessonCredits = (
+  studentId: string,
+  payments: PaymentRecord[],
+  lessons: Lesson[]
+): { totalAdvanceLessons: number; usedLessons: number; remainingAdvanceLessons: number } => {
+  const activePayments = payments.filter(p => !p.deleted && p.studentId === studentId && p.status === 'paid');
+  const advancePayments = activePayments.filter(p => 
+    p.paymentType === 'advance_payment' || (p.bundleSize && p.bundleSize > 0 && p.notes?.includes('مقدم'))
+  );
+  
+  const totalAdvanceLessons = advancePayments.reduce((sum, p) => sum + (p.bundleSize || 0), 0);
+  if (totalAdvanceLessons <= 0) {
+    return { totalAdvanceLessons: 0, usedLessons: 0, remainingAdvanceLessons: 0 };
+  }
+
+  // Count attended completed lessons
+  const completedLessons = lessons.filter(l => 
+    !l.deleted && 
+    l.status === 'completed' && 
+    l.paymentStatus !== 'exempted' &&
+    (l.studentId === studentId || l.studentName)
+  );
+
+  const usedLessons = Math.min(totalAdvanceLessons, completedLessons.length);
+  const remainingAdvanceLessons = Math.max(0, totalAdvanceLessons - usedLessons);
+
+  return { totalAdvanceLessons, usedLessons, remainingAdvanceLessons };
+};

@@ -66,8 +66,73 @@ export const TodaysProgressTimeline: React.FC = () => {
   // Closed lessons include completed and cancelled lessons (all scheduled items resolved for today)
   const closedCount = completedCount + cancelledCount;
   const progressPercent = totalCount > 0 ? Math.round((closedCount / totalCount) * 100) : 0;
-  const completedPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-  const cancelledPercent = totalCount > 0 ? Math.round((cancelledCount / totalCount) * 100) : 0;
+  const filledUnits = completedCount + activeCount + cancelledCount;
+  const filledPercent = totalCount > 0 ? Math.min(100, Math.round((filledUnits / totalCount) * 100)) : 0;
+
+  // Helper to generate a seamless, fluid gradient transition without sharp borders (انسيابي بدون حد)
+  // Palette according to user request:
+  // - Completed (انشرح): الأخضر (Emerald)
+  // - Active / In-progress (جاري): الأزرق (Royal Blue)
+  // - Cancelled (يتكنسل): الأحمر (Rose Red)
+  const getSmoothProgressBarGradient = (
+    cCount: number,
+    aCount: number,
+    xCount: number
+  ): string => {
+    const total = cCount + aCount + xCount;
+    if (total === 0) return 'transparent';
+
+    const cRatio = (cCount / total) * 100;
+    const aRatio = (aCount / total) * 100;
+    const xRatio = (xCount / total) * 100;
+
+    const green = '#10B981';
+    const greenDark = '#059669';
+    const blue = '#3B82F6';
+    const blueDark = '#2563EB';
+    const red = '#F43F5E';
+    const redDark = '#E11D48';
+
+    const segments: { color: string; colorDark: string; pct: number }[] = [];
+    if (cRatio > 0) segments.push({ color: green, colorDark: greenDark, pct: cRatio });
+    if (aRatio > 0) segments.push({ color: blue, colorDark: blueDark, pct: aRatio });
+    if (xRatio > 0) segments.push({ color: red, colorDark: redDark, pct: xRatio });
+
+    if (segments.length === 1) {
+      return `linear-gradient(90deg, ${segments[0].color} 0%, ${segments[0].colorDark} 100%)`;
+    }
+
+    // Build smooth gradient stops with soft, organic blending zones (انسيابي)
+    // to eliminate any sharp cutoff line ("حد") between different states
+    const stops: string[] = [];
+    let currentPos = 0;
+    const blendRadius = segments.length === 2 ? 6.5 : 4.5;
+
+    segments.forEach((seg, idx) => {
+      const isFirst = idx === 0;
+      const isLast = idx === segments.length - 1;
+      const nextPos = currentPos + seg.pct;
+
+      if (isFirst) {
+        stops.push(`${seg.color} 0%`);
+        const solidEnd = Math.max(0, nextPos - blendRadius);
+        stops.push(`${seg.color} ${solidEnd.toFixed(1)}%`);
+      } else if (isLast) {
+        const solidStart = Math.min(100, currentPos + blendRadius);
+        stops.push(`${seg.color} ${solidStart.toFixed(1)}%`);
+        stops.push(`${seg.colorDark} 100%`);
+      } else {
+        const solidStart = Math.min(100, currentPos + blendRadius);
+        const solidEnd = Math.max(solidStart, nextPos - blendRadius);
+        stops.push(`${seg.color} ${solidStart.toFixed(1)}%`);
+        stops.push(`${seg.color} ${solidEnd.toFixed(1)}%`);
+      }
+
+      currentPos = nextPos;
+    });
+
+    return `linear-gradient(90deg, ${stops.join(', ')})`;
+  };
 
   return (
     <div className="space-y-2.5">
@@ -225,58 +290,77 @@ export const TodaysProgressTimeline: React.FC = () => {
           </div>
 
           {/* Progress Bar Visualizer */}
-          <div className="space-y-1.5">
-            <div className="w-full bg-surface-hover h-1.5 rounded-full overflow-hidden flex">
-              {/* Completed portion */}
-              <div 
-                className="bg-primary h-full transition-all duration-500" 
-                style={{ width: `${completedPercent}%` }}
-                title={`${completedCount} ${t('status_completed')}`}
-              />
-              {/* Cancelled portion (concluded for today) */}
-              {cancelledCount > 0 && (
+          <div className="space-y-2">
+            <div className="w-full bg-slate-100 dark:bg-slate-800/80 h-2.5 sm:h-3 rounded-full overflow-hidden p-0.5 border border-slate-200/70 dark:border-slate-700/60 shadow-inner flex relative">
+              {filledUnits > 0 && (
                 <div 
-                  className="bg-primary/40 dark:bg-primary/40 h-full transition-all duration-500" 
-                  style={{ width: `${cancelledPercent}%` }}
-                  title={`${cancelledCount} ${t('status_cancelled')}`}
-                />
-              )}
-              {/* Active portion */}
-              {activeCount > 0 && (
-                <div 
-                  className="bg-emerald-500 h-full transition-all duration-500 animate-pulse" 
-                  style={{ width: `${Math.max(5, Math.round((activeCount / totalCount) * 100))}%` }}
-                  title={`${activeCount} ${t('status_in_progress')}`}
-                />
+                  className="h-full rounded-full transition-all duration-700 ease-out shadow-xs relative overflow-hidden" 
+                  style={{ 
+                    width: `${filledPercent}%`,
+                    background: getSmoothProgressBarGradient(completedCount, activeCount, cancelledCount)
+                  }}
+                  title={`${completedCount} ${t('status_completed')}, ${activeCount} ${t('status_in_progress')}, ${cancelledCount} ${t('status_cancelled')}`}
+                >
+                  {/* Subtle glossy shimmer highlight overlay */}
+                  <div className="absolute inset-0 bg-gradient-to-b from-white/30 via-transparent to-black/10 pointer-events-none rounded-full" />
+                </div>
               )}
             </div>
 
             {/* Status Count Summary Badges */}
-            <div className="grid grid-cols-4 gap-1 text-[9px] font-bold">
-              <div className="flex items-center justify-center gap-0.5 text-primary dark:text-primary whitespace-nowrap overflow-hidden">
-                <CheckCircle2 className="w-2.5 h-2.5 shrink-0" />
+            <div className="grid grid-cols-4 gap-1 sm:gap-1.5 text-[9px] font-bold">
+              {/* Completed (Green) */}
+              <div 
+                className={`flex items-center justify-center gap-1 py-1 px-1 rounded-lg border transition-all whitespace-nowrap overflow-hidden ${
+                  completedCount > 0
+                    ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200/80 dark:border-emerald-800/60 font-black'
+                    : 'text-text-muted/60 bg-surface-hover/50 border-surface-border/40'
+                }`}
+              >
+                <CheckCircle2 className={`w-2.5 h-2.5 shrink-0 ${completedCount > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-text-muted/50'}`} />
                 <span className="truncate">{completedCount} {t('status_completed')}</span>
               </div>
 
-              <div className="flex items-center justify-center gap-0.5 text-primary dark:text-primary whitespace-nowrap overflow-hidden">
-                <PlayCircle className="w-2.5 h-2.5 shrink-0" />
+              {/* In Progress (Blue) */}
+              <div 
+                className={`flex items-center justify-center gap-1 py-1 px-1 rounded-lg border transition-all whitespace-nowrap overflow-hidden ${
+                  activeCount > 0
+                    ? 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 border-blue-200/80 dark:border-blue-800/60 font-black animate-pulse'
+                    : 'text-text-muted/60 bg-surface-hover/50 border-surface-border/40'
+                }`}
+              >
+                <PlayCircle className={`w-2.5 h-2.5 shrink-0 ${activeCount > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-text-muted/50'}`} />
                 <span className="truncate">{activeCount} {t('status_in_progress')}</span>
               </div>
 
-              <div className="flex items-center justify-center gap-0.5 text-text-muted whitespace-nowrap overflow-hidden">
-                <Clock className="w-2.5 h-2.5 shrink-0" />
+              {/* Upcoming (Neutral) */}
+              <div 
+                className={`flex items-center justify-center gap-1 py-1 px-1 rounded-lg border transition-all whitespace-nowrap overflow-hidden ${
+                  upcomingCount > 0
+                    ? 'text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700/60 font-bold'
+                    : 'text-text-muted/60 bg-surface-hover/50 border-surface-border/40'
+                }`}
+              >
+                <Clock className="w-2.5 h-2.5 shrink-0 text-text-muted/70" />
                 <span className="truncate">{upcomingCount} {t('timeline_upcoming')}</span>
               </div>
 
-              <div className="flex items-center justify-center gap-0.5 text-primary dark:text-primary whitespace-nowrap overflow-hidden">
-                <XCircle className="w-2.5 h-2.5 shrink-0" />
+              {/* Cancelled (Red) */}
+              <div 
+                className={`flex items-center justify-center gap-1 py-1 px-1 rounded-lg border transition-all whitespace-nowrap overflow-hidden ${
+                  cancelledCount > 0
+                    ? 'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-rose-200/80 dark:border-rose-800/60 font-black'
+                    : 'text-text-muted/60 bg-surface-hover/50 border-surface-border/40'
+                }`}
+              >
+                <XCircle className={`w-2.5 h-2.5 shrink-0 ${cancelledCount > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-text-muted/50'}`} />
                 <span className="truncate">{cancelledCount} {t('status_cancelled')}</span>
               </div>
             </div>
           </div>
 
           {/* Chronological Timeline Nodes */}
-          <div className="relative pl-3 space-y-2 pt-0.5 border-l border-slate-100 dark:border-surface-border/80">
+          <div className="relative pl-3 space-y-2 pt-0.5 border-l border-slate-200/70 dark:border-surface-border/80">
             {processedLessons.map(({ lesson, state }) => {
               const isGroup = !!lesson.groupId || lesson.groupName.includes('Gruppe') || (lesson.title && lesson.title.includes('Gruppe'));
               const isCompletedState = lesson.status === 'completed';
@@ -288,22 +372,22 @@ export const TodaysProgressTimeline: React.FC = () => {
                   onClick={() => openLessonControl(lesson)}
                   className={`relative pl-3 transition-all cursor-pointer group rounded-lg p-2 sm:p-2.5 border ${
                     isCompletedState
-                      ? 'bg-background/50 dark:bg-slate-800/10 border-surface-border/60 dark:border-surface-border/40 opacity-70'
+                      ? 'bg-emerald-500/[0.03] dark:bg-emerald-950/10 border-emerald-500/20 dark:border-emerald-900/30 opacity-75'
                       : isCancelledState
-                      ? 'bg-primary-soft dark:bg-primary-soft border-primary-border dark:border-primary-border opacity-60'
+                      ? 'bg-rose-500/[0.04] dark:bg-rose-950/15 border-rose-500/25 dark:border-rose-900/35 opacity-75'
                       : state === 'active'
-                      ? 'bg-primary-soft dark:bg-primary-soft/10 border-primary-border/80 dark:border-primary-border/60'
+                      ? 'bg-blue-50/70 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700 shadow-xs shadow-blue-500/10'
                       : 'bg-background/30 dark:bg-slate-800/10 border-slate-100 dark:border-surface-border/60 hover:bg-slate-100/40'
                   }`}
                 >
                   <div 
                     className={`absolute -left-[16.5px] top-3.5 w-2 h-2 rounded-full border bg-surface flex items-center justify-center ${
                       isCompletedState
-                        ? 'border-slate-400 bg-slate-400'
+                        ? 'border-emerald-400 bg-emerald-500 ring-2 ring-emerald-400/20'
                         : isCancelledState
-                        ? 'border-primary-border bg-primary-hover'
+                        ? 'border-rose-400 bg-rose-500 ring-2 ring-rose-400/20'
                         : state === 'active'
-                        ? 'border-primary bg-primary'
+                        ? 'border-blue-500 bg-blue-500 ring-2 ring-blue-500/30 animate-pulse'
                         : 'border-slate-300 dark:border-slate-600 bg-surface'
                     }`}
                   />
@@ -311,26 +395,35 @@ export const TodaysProgressTimeline: React.FC = () => {
                   <div className="flex items-center justify-between gap-2">
                     <div className="space-y-0.5 min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-[11px] font-mono font-bold ${isCompletedState ? 'text-text-muted/70 dark:text-slate-500 line-through' : isCancelledState ? 'text-primary dark:text-primary line-through' : 'text-slate-800 dark:text-slate-200'}`}>
+                        <span className={`text-[11px] font-mono font-bold ${
+                          isCompletedState 
+                            ? 'text-text-muted/70 dark:text-slate-500 line-through' 
+                            : isCancelledState 
+                            ? 'text-rose-600/80 dark:text-rose-400/80 line-through font-semibold' 
+                            : state === 'active'
+                            ? 'text-blue-700 dark:text-blue-300 font-extrabold'
+                            : 'text-slate-800 dark:text-slate-200'
+                        }`}>
                           {lesson.time}
                         </span>
 
                         {state === 'active' && !isCompletedState && !isCancelledState && (
-                          <span className="text-[9px] font-bold bg-primary text-white px-1.5 py-0.2 rounded flex items-center gap-1">
-                            <span className="w-1 h-1 bg-surface rounded-full animate-ping"></span>
+                          <span className="text-[9px] font-bold bg-blue-600 text-white px-1.5 py-0.2 rounded flex items-center gap-1 shadow-xs">
+                            <span className="w-1 h-1 bg-white rounded-full animate-ping"></span>
                             {t('timeline_live_now')}
                           </span>
                         )}
 
                         {isCompletedState && (
-                          <span className="text-[9px] font-bold text-text-muted bg-surface-hover px-1.5 py-0.2 rounded flex items-center gap-0.5">
-                            <CheckCircle2 className="w-2.5 h-2.5 text-text-muted/70" />
+                          <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/60 px-1.5 py-0.2 rounded flex items-center gap-0.5">
+                            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
                             {t('status_completed')}
                           </span>
                         )}
 
                         {isCancelledState && (
-                          <span className="text-[9px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.2 rounded">
+                          <span className="text-[9px] font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 border border-rose-200/80 dark:border-rose-800/60 px-1.5 py-0.2 rounded flex items-center gap-0.5">
+                            <XCircle className="w-2.5 h-2.5 text-rose-600 dark:text-rose-400" />
                             {t('status_cancelled')}
                           </span>
                         )}
@@ -340,7 +433,9 @@ export const TodaysProgressTimeline: React.FC = () => {
                         isCompletedState 
                           ? 'line-through text-text-muted/70 dark:text-slate-500' 
                           : isCancelledState
-                          ? 'line-through text-primary dark:text-primary'
+                          ? 'line-through text-rose-700/80 dark:text-rose-300/80'
+                          : state === 'active'
+                          ? 'text-blue-900 dark:text-blue-100 font-black group-hover:text-blue-700'
                           : 'text-text-main group-hover:text-primary dark:group-hover:text-primary'
                       }`}>
                         {lesson.studentName || lesson.groupName || lesson.title}
@@ -348,16 +443,34 @@ export const TodaysProgressTimeline: React.FC = () => {
                       <div className="flex items-center gap-1.5 text-[10px] text-text-muted flex-wrap font-medium">
                         {lesson.grade && <span>{lesson.grade}</span>}
                         {lesson.grade && <span>•</span>}
-                        <span className="font-semibold text-primary dark:text-primary">
+                        <span className={`font-semibold ${
+                          isCancelledState
+                            ? 'text-rose-600/70 dark:text-rose-400/70'
+                            : state === 'active'
+                            ? 'text-blue-600 dark:text-blue-400'
+                            : 'text-primary dark:text-primary'
+                        }`}>
                           S{lesson.sessionNumber}/{lesson.totalSessionsInPackage}
                         </span>
                         <span>•</span>
                         {lesson.type === 'online' ? (
-                          <span className="flex items-center gap-0.5 text-primary dark:text-primary">
+                          <span className={`flex items-center gap-0.5 ${
+                            isCancelledState
+                              ? 'text-rose-600/70 dark:text-rose-400/70'
+                              : state === 'active'
+                              ? 'text-blue-600 dark:text-blue-400'
+                              : 'text-primary dark:text-primary'
+                          }`}>
                             <Video className="w-2.5 h-2.5" /> {t('next_action_online')}
                           </span>
                         ) : (
-                          <span className="flex items-center gap-0.5 text-primary dark:text-primary">
+                          <span className={`flex items-center gap-0.5 ${
+                            isCancelledState
+                              ? 'text-rose-600/70 dark:text-rose-400/70'
+                              : state === 'active'
+                              ? 'text-blue-600 dark:text-blue-400'
+                              : 'text-primary dark:text-primary'
+                          }`}>
                             <MapPin className="w-2.5 h-2.5" /> {t('next_action_offline')}
                           </span>
                         )}
@@ -373,7 +486,11 @@ export const TodaysProgressTimeline: React.FC = () => {
                             e.stopPropagation();
                             dismissLessonFromDashboard(lesson.id);
                           }}
-                          className="p-1 rounded text-text-muted/70 hover:text-primary hover:bg-primary-soft dark:hover:bg-primary-soft transition-colors cursor-pointer"
+                          className={`p-1 rounded text-text-muted/70 transition-colors cursor-pointer ${
+                            isCancelledState
+                              ? 'hover:text-rose-600 hover:bg-rose-100/60 dark:hover:bg-rose-950/60'
+                              : 'hover:text-emerald-600 hover:bg-emerald-100/60 dark:hover:bg-emerald-950/60'
+                          }`}
                           title={t('dismiss_from_dashboard')}
                           aria-label="Hide from dashboard"
                         >

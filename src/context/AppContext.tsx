@@ -180,6 +180,26 @@ interface AppContextType {
     lessonIds: string[];
     existingPaymentRecordId?: string;
   }) => void;
+  recordAdvancePayment: (data: {
+    studentId: string;
+    studentName: string;
+    groupId: string;
+    groupName: string;
+    numberOfLessons: number;
+    amount: number;
+    accountId?: string;
+    notes?: string;
+  }) => void;
+  exemptCyclePayment: (data: {
+    studentId: string;
+    studentName: string;
+    groupId: string;
+    groupName: string;
+    lessonIds: string[];
+    existingPaymentRecordId?: string;
+    notes?: string;
+  }) => void;
+  exemptSingleLesson: (lessonId: string, notes?: string) => void;
   toggleQuickPaymentStatus: (paymentId: string) => void;
   toggleStudentPaymentStatus: (studentId: string) => void;
   updateStudentPaymentPlan: (
@@ -3695,6 +3715,157 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
   };
 
+  const recordAdvancePayment = (data: {
+    studentId: string;
+    studentName: string;
+    groupId: string;
+    groupName: string;
+    numberOfLessons: number;
+    amount: number;
+    accountId?: string;
+    notes?: string;
+  }) => {
+    const today = formatLocalDate();
+    const targetAccountId = data.accountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+    const finalPaymentId = `pay_adv_${data.studentId}_${Date.now()}`;
+
+    const newRecord: PaymentRecord = wrapMutation({
+      id: finalPaymentId,
+      studentId: data.studentId,
+      studentName: data.studentName,
+      groupId: data.groupId,
+      groupName: data.groupName,
+      amountDue: data.amount,
+      amountPaid: data.amount,
+      remainingBalance: 0,
+      dueDate: today,
+      paidDate: today,
+      status: 'paid',
+      paymentType: 'advance_payment',
+      bundleSize: data.numberOfLessons,
+      financeAccountId: targetAccountId,
+      notes: data.notes || `سداد حصص مقدماً (عدد ${data.numberOfLessons} حصص)`,
+      lessonDates: [`سداد مقدم (${data.numberOfLessons} حصص)`],
+      lessonIds: [],
+      createdAt: new Date().toISOString()
+    } as PaymentRecord);
+
+    updateFullPaymentsStorage(prev => [newRecord, ...prev]);
+
+    if (data.amount > 0) {
+      addFinanceTransaction({
+        type: 'income',
+        amount: data.amount,
+        accountId: targetAccountId,
+        categoryId: 'cat_student_fees',
+        date: today,
+        note: `سداد حصص مقدم: ${data.studentName} (${data.numberOfLessons} حصص - ${data.groupName})` + (data.notes ? ` - ${data.notes}` : ''),
+        relatedStudentId: data.studentId,
+        relatedPaymentId: finalPaymentId
+      });
+    }
+
+    setStudents(prev => prev.map(s => s.id === data.studentId ? wrapMutation({ ...s, paymentStatus: 'paid' } as Student) : s));
+    autoSyncEngine.notifyMutation('payments', finalPaymentId);
+    confetti({ particleCount: 60, spread: 55, origin: { y: 0.6 } });
+  };
+
+  const exemptCyclePayment = (data: {
+    studentId: string;
+    studentName: string;
+    groupId: string;
+    groupName: string;
+    lessonIds: string[];
+    existingPaymentRecordId?: string;
+    notes?: string;
+  }) => {
+    const today = formatLocalDate();
+
+    // 1. Mark lessons as exempted
+    if (data.lessonIds && data.lessonIds.length > 0) {
+      setLessons(prev => prev.map(l => {
+        if (data.lessonIds.includes(l.id)) {
+          return wrapMutation({
+            ...l,
+            paymentStatus: 'exempted' as PaymentStatus,
+            amountDue: 0,
+            amountPaid: 0
+          } as Lesson);
+        }
+        return l;
+      }));
+    }
+
+    // 2. Remove / delete any existing pending payment record, and save exemption record with 0 amount
+    updateFullPaymentsStorage(prev => {
+      const remainingPayments = prev.filter(p => p.id !== data.existingPaymentRecordId);
+      const exemptionRecord: PaymentRecord = wrapMutation({
+        id: `pay_exempt_${data.studentId}_${Date.now()}`,
+        studentId: data.studentId,
+        studentName: data.studentName,
+        groupId: data.groupId,
+        groupName: data.groupName,
+        amountDue: 0,
+        amountPaid: 0,
+        remainingBalance: 0,
+        status: 'exempted',
+        paymentType: 'exemption',
+        dueDate: today,
+        paidDate: today,
+        lessonIds: data.lessonIds || [],
+        notes: data.notes || 'تم الإعفاء من الدفع ومسح الاستحقاق',
+        createdAt: new Date().toISOString()
+      } as PaymentRecord);
+      return [exemptionRecord, ...remainingPayments];
+    });
+
+    autoSyncEngine.notifyMutation('payments', `exempt_${data.studentId}`);
+    autoSyncEngine.notifyMutation('lessons', data.studentId);
+  };
+
+  const exemptSingleLesson = (lessonId: string, notes?: string) => {
+    const today = formatLocalDate();
+    const targetLesson = lessons.find(l => l.id === lessonId);
+    if (!targetLesson) return;
+
+    setLessons(prev => prev.map(l => {
+      if (l.id === lessonId) {
+        return wrapMutation({
+          ...l,
+          paymentStatus: 'exempted' as PaymentStatus,
+          amountDue: 0,
+          amountPaid: 0
+        } as Lesson);
+      }
+      return l;
+    }));
+
+    updateFullPaymentsStorage(prev => {
+      const filtered = prev.filter(p => p.lessonId !== lessonId && !(p.lessonIds && p.lessonIds.includes(lessonId) && p.lessonIds.length === 1));
+      const exemptionRecord: PaymentRecord = wrapMutation({
+        id: `pay_exempt_l_${lessonId}_${Date.now()}`,
+        studentId: targetLesson.studentId || '',
+        studentName: targetLesson.studentName || targetLesson.groupName || targetLesson.title,
+        groupId: targetLesson.groupId || '',
+        groupName: targetLesson.groupName || 'Gruppe',
+        lessonId: targetLesson.id,
+        lessonIds: [targetLesson.id],
+        amountDue: 0,
+        amountPaid: 0,
+        remainingBalance: 0,
+        dueDate: targetLesson.date || today,
+        paidDate: today,
+        status: 'exempted',
+        paymentType: 'exemption',
+        notes: notes || 'تم الإعفاء من الدفع للحصة الفردية ومسح الاستحقاق',
+        createdAt: new Date().toISOString()
+      } as PaymentRecord);
+      return [exemptionRecord, ...filtered];
+    });
+
+    autoSyncEngine.notifyMutation('lessons', lessonId);
+  };
+
   const toggleQuickPaymentStatus = (paymentId: string) => {
     const today = formatLocalDate();
     let targetStId = '';
@@ -5086,6 +5257,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         addPaymentRecord,
         markCyclePaymentPaid,
         markCyclePaymentNotYet,
+        recordAdvancePayment,
+        exemptCyclePayment,
+        exemptSingleLesson,
         toggleQuickPaymentStatus,
         toggleStudentPaymentStatus,
         updateStudentPaymentPlan,
