@@ -431,6 +431,51 @@ export interface StageReportRecord {
   timestamp: number;
 }
 
+export type StaffAttendanceType = 'absence' | 'late_arrival' | 'early_leave';
+export type AbsenceScope = 'full_day' | 'lesson_based';
+export type AbsenceStatus = 'excused' | 'unexcused';
+
+export interface StaffAttendanceRecord extends SyncableRecord {
+  id: string;
+  teacherId: string;
+  teacherName: string;
+  date: string; // YYYY-MM-DD
+  type: StaffAttendanceType;
+  
+  // Absence fields
+  absenceScope?: AbsenceScope;
+  absenceStatus?: AbsenceStatus;
+  periodNumber?: number;
+  lessonClass?: string;
+  replacementTeacherId?: string;
+  replacementTeacherName?: string;
+  replacementAssignments?: Array<{
+    periodNumber: number;
+    className: string;
+    replacementTeacherId?: string;
+    replacementTeacherName?: string;
+  }>;
+
+  // Late arrival fields
+  scheduledArrivalTime?: string;
+  actualArrivalTime?: string;
+  delayMinutes?: number;
+
+  // Early leave fields
+  scheduledLeaveTime?: string;
+  actualLeaveTime?: string;
+  lostMinutes?: number;
+
+  // Shared fields
+  reason: string;
+  notes?: string;
+  stageName?: string; // 'KG' | 'Primary' | 'Prep' | 'Secondary' or Grade Band
+  stageManagerId?: string;
+  stageSecretaryName?: string;
+  notifiedSecretary?: boolean;
+  notifiedAt?: string;
+}
+
 export interface TeacherStageEvaluationItem {
   teacherId: string;
   teacherName: string;
@@ -445,6 +490,11 @@ export interface TeacherStageEvaluationItem {
   punctuality?: string;
   complaintsStatus?: string;
   customNotes?: string;
+  absencesCount?: number;
+  lateArrivalsCount?: number;
+  earlyLeavesCount?: number;
+  delayMinutes?: number;
+  disciplineScore?: number;
 }
 
 export interface StageFollowUpRecord {
@@ -464,6 +514,17 @@ export interface StageFollowUpRecord {
   includeActionPlans?: boolean;
   selectedActionPlanIds?: string[];
   includedActionPlans?: StudentActionPlan[];
+  includeAttendance?: boolean;
+  attendanceSummary?: {
+    totalAbsences: number;
+    totalLateArrivals: number;
+    totalEarlyLeaves: number;
+    totalDelayMinutes: number;
+    totalLostHours: number;
+    mostAbsentTeachers?: { name: string; count: number }[];
+    mostLateTeachers?: { name: string; minutes: number }[];
+    mostEarlyLeaveTeachers?: { name: string; minutes: number }[];
+  };
 }
 
 export interface SchoolSettings {
@@ -488,6 +549,7 @@ export interface SchoolSettings {
   parentComplaints?: ParentComplaint[];
   complaints?: Complaint[];
   actionPlans?: StudentActionPlan[];
+  staffAttendanceRecords?: StaffAttendanceRecord[];
 }
 
 export interface WeeklyPlanLog {
@@ -549,6 +611,7 @@ export interface Teacher {
   phone?: string;
   isActive: boolean;
   isHod?: boolean;
+  stage?: string;
 }
 
 export interface TeacherWorkload {
@@ -773,6 +836,7 @@ export type SyncStatus = 'synced' | 'pending' | 'error';
 
 export type NotificationPriority = 'low' | 'normal' | 'high' | 'max';
 export type NotificationSound = 'default' | 'beep' | 'chime' | 'bell' | 'gentle';
+export type AlarmTone = 'digital' | 'loud_bell' | 'radar' | 'gentle_chime';
 
 export interface CategoryNotificationConfig {
   enabled: boolean;
@@ -793,6 +857,12 @@ export interface NotificationSettings {
 
   // Reminder timing controls
   lessonReminderMinutesBefore: number; // 5, 10, 15, 30, 60 or custom
+
+  // Continuous Alarm Mode for pre-lesson reminders
+  alarmModeEnabled?: boolean; // When true, behaves like an alarm clock with extended sound
+  alarmDurationSeconds?: number; // Duration alarm plays in seconds (e.g. 30, 60, 120)
+  alarmTone?: AlarmTone; // Tone type ('digital' | 'loud_bell' | 'radar' | 'gentle_chime')
+  alarmAutoSnoozeMinutes?: number; // Snooze duration in minutes (e.g. 5)
 
   // Daily summary controls
   dailySummaryTime: string; // e.g. "20:00"

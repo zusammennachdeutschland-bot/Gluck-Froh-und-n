@@ -73,6 +73,7 @@ export interface SmartBackupPayload {
     weeklyPlans?: number;
     stageReports?: number;
     stageFollowUps?: number;
+    staffAttendance?: number;
     complaints?: number;
     actionPlans?: number;
     financeAccounts?: number;
@@ -365,7 +366,8 @@ export function calculateBackupStats(
       (school.teachers?.length || 0) +
       (school.complaints?.length || 0) +
       (school.actionPlans?.length || 0) +
-      (school.parentComplaints?.length || 0)
+      (school.parentComplaints?.length || 0) +
+      (school.staffAttendanceRecords?.length || 0)
     ) : 0;
     schoolRecordCount = schoolBase + hodSt + hodCmp + hodAct + hodVis;
   }
@@ -1239,6 +1241,23 @@ export function sanitizeSchoolSettings(raw: any): SchoolSettings | undefined {
     });
   }
 
+  const staffAttendanceRecords: any[] = [];
+  if (Array.isArray(raw.staffAttendanceRecords)) {
+    raw.staffAttendanceRecords.forEach((a: any, idx: number) => {
+      if (a && typeof a === 'object' && !Array.isArray(a)) {
+        staffAttendanceRecords.push({
+          ...a,
+          id: typeof a.id === 'string' && a.id.trim() ? a.id.trim() : `att_${Date.now()}_${idx}`,
+          teacherId: typeof a.teacherId === 'string' ? a.teacherId : '',
+          teacherName: typeof a.teacherName === 'string' ? a.teacherName : '',
+          date: typeof a.date === 'string' ? a.date : new Date().toISOString().split('T')[0],
+          type: a.type || 'absence',
+          reason: typeof a.reason === 'string' ? a.reason : ''
+        });
+      }
+    });
+  }
+
   return {
     ...raw,
     schoolName: typeof raw.schoolName === 'string' ? raw.schoolName : undefined,
@@ -1261,7 +1280,8 @@ export function sanitizeSchoolSettings(raw: any): SchoolSettings | undefined {
     teacherSchedules: raw.teacherSchedules && typeof raw.teacherSchedules === 'object' ? raw.teacherSchedules : undefined,
     complaints,
     actionPlans,
-    parentComplaints
+    parentComplaints,
+    staffAttendanceRecords
   };
 }
 

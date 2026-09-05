@@ -11,7 +11,7 @@ interface BalanceAdjustmentModalProps {
 }
 
 export const BalanceAdjustmentModal: React.FC<BalanceAdjustmentModalProps> = ({ onClose, account }) => {
-  const { _t, addFinanceTransaction, financeTransactions } = useApp();
+  const { _t, addFinanceTransaction, updateFinanceAccount, financeTransactions } = useApp();
   const currentDerivedBalance = computeAccountBalance(account, financeTransactions);
   
   const [newBalance, setNewBalance] = useState(currentDerivedBalance.toString());
@@ -34,6 +34,14 @@ export const BalanceAdjustmentModal: React.FC<BalanceAdjustmentModalProps> = ({ 
       date: new Date().toISOString(),
       note: _t('تسوية رصيد', 'Balance Adjustment', 'Kontenabstimmung') + ` (${difference > 0 ? '+' : ''}${difference.toLocaleString()} ${account.currency})`
     });
+
+    // If this is an investment account, keep initialCapital updated as well
+    if (account.type === 'investment') {
+      const currentCapital = account.initialCapital !== undefined ? account.initialCapital : (account.initialBalance || 0);
+      updateFinanceAccount(account.id, {
+        initialCapital: Math.max(0, Math.round((currentCapital + difference) * 100) / 100)
+      });
+    }
 
     onClose();
   };

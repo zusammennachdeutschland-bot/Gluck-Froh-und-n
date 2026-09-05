@@ -168,6 +168,96 @@ export function generateStageFollowUpReportHtml(
           '</table>' +
         '</div>'
       ) : '') +
+      ((record.includeAttendance !== false) ? (
+        record.periodType === 'weekly' ? (
+          /* Weekly HOD Report: Teacher Attendance & Discipline Table sorted by violations (Requirement 6) */
+          '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+            '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">انضباط وحضور المعلمين (Teacher Attendance & Discipline):</div>' +
+            '<table>' +
+              '<thead>' +
+                '<tr>' +
+                  '<th style="width: 5%;">#</th>' +
+                  '<th style="width: 27%;">Teacher Name (اسم المعلم)</th>' +
+                  '<th style="width: 14%;">Absences (الغياب)</th>' +
+                  '<th style="width: 14%;">Late Arrivals (التأخير)</th>' +
+                  '<th style="width: 14%;">Early Leaves (الانصراف)</th>' +
+                  '<th style="width: 13%;">Delay Mins (دقائق)</th>' +
+                  '<th style="width: 13%;">Score (الانضباط)</th>' +
+                '</tr>' +
+              '</thead>' +
+              '<tbody>' +
+                [...record.teachersData]
+                  .sort((a, b) => {
+                    const violsA = (a.absencesCount || 0) + (a.lateArrivalsCount || 0) + (a.earlyLeavesCount || 0);
+                    const violsB = (b.absencesCount || 0) + (b.lateArrivalsCount || 0) + (b.earlyLeavesCount || 0);
+                    return violsB - violsA;
+                  })
+                  .map((td, i) => {
+                    const absences = td.absencesCount || 0;
+                    const late = td.lateArrivalsCount || 0;
+                    const early = td.earlyLeavesCount || 0;
+                    const delayMins = td.delayMinutes || 0;
+                    const score = td.disciplineScore !== undefined ? td.disciplineScore : 100;
+                    return '<tr>' +
+                      `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
+                      `<td style="text-align: right; font-weight: bold; padding: 4px 6px;">${td.teacherName}</td>` +
+                      `<td style="text-align: center; color: ${absences > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold;">${absences}</td>` +
+                      `<td style="text-align: center; color: ${late > 0 ? '#d97706' : '#16a34a'}; font-weight: bold;">${late}</td>` +
+                      `<td style="text-align: center; color: ${early > 0 ? '#ea580c' : '#16a34a'}; font-weight: bold;">${early}</td>` +
+                      `<td style="text-align: center; font-weight: bold;">${delayMins}m</td>` +
+                      `<td style="text-align: center; font-weight: bold; color: ${score >= 90 ? '#16a34a' : score >= 75 ? '#d97706' : '#dc2626'};">${score}%</td>` +
+                    '</tr>';
+                  }).join('') +
+              '</tbody>' +
+            '</table>' +
+          '</div>'
+        ) : (
+          /* Monthly HOD Report: Monthly Staff Attendance Summary (Requirement 7) */
+          '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+            '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الحضور والانضباط الشهري (Monthly Staff Attendance Summary):</div>' +
+            '<table style="margin-bottom: 6px;">' +
+              '<thead>' +
+                '<tr>' +
+                  '<th style="width: 20%;">Total Absences (الغياب)</th>' +
+                  '<th style="width: 20%;">Total Late (التأخير)</th>' +
+                  '<th style="width: 20%;">Early Leaves (الانصراف)</th>' +
+                  '<th style="width: 20%;">Delay Mins (دقائق)</th>' +
+                  '<th style="width: 20%;">Lost Hours (ساعات مفقودة)</th>' +
+                '</tr>' +
+              '</thead>' +
+              '<tbody>' +
+                '<tr>' +
+                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #dc2626;">${record.attendanceSummary?.totalAbsences || 0}</td>` +
+                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #d97706;">${record.attendanceSummary?.totalLateArrivals || 0}</td>` +
+                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #ea580c;">${record.attendanceSummary?.totalEarlyLeaves || 0}</td>` +
+                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #2563eb;">${record.attendanceSummary?.totalDelayMinutes || 0}m</td>` +
+                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #4f46e5;">${record.attendanceSummary?.totalLostHours || 0}h</td>` +
+                '</tr>' +
+              '</tbody>' +
+            '</table>' +
+            '<div style="display: flex; gap: 6px; margin-top: 4px;">' +
+              '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
+                '<b style="color: #dc2626;">المعلمون الأكثر غياباً (Most Absent):</b><br/>' +
+                ((record.attendanceSummary?.mostAbsentTeachers && record.attendanceSummary.mostAbsentTeachers.length > 0)
+                  ? record.attendanceSummary.mostAbsentTeachers.map(t => `${t.name} (${t.count} أيام)`).join('، ')
+                  : 'لا توجد حالات غياب') +
+              '</div>' +
+              '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
+                '<b style="color: #d97706;">الأكثر تأخيراً (Most Late):</b><br/>' +
+                ((record.attendanceSummary?.mostLateTeachers && record.attendanceSummary.mostLateTeachers.length > 0)
+                  ? record.attendanceSummary.mostLateTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
+                  : 'لا توجد تأخيرات') +
+              '</div>' +
+              '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
+                '<b style="color: #ea580c;">الأكثر انصرافاً مبكراً (Early Leave):</b><br/>' +
+                ((record.attendanceSummary?.mostEarlyLeaveTeachers && record.attendanceSummary.mostEarlyLeaveTeachers.length > 0)
+                  ? record.attendanceSummary.mostEarlyLeaveTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
+                  : 'لا توجد حالات') +
+              '</div>' +
+            '</div>' +
+          '</div>'
+        )
+      ) : '') +
       (record.overallStageNotes ? (
         '<div class="feedback-section">' +
           '<div class="feedback-title">توصيات وملاحظات رئيس القسم العامة للمرحلة:</div>' +

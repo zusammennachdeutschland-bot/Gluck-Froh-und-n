@@ -11,6 +11,7 @@ import {
   shareStageFollowUpViaWhatsApp, 
   printStageFollowUpReport 
 } from '../utils/printObservationUtils';
+import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
 
 export const StageCommunicationView: React.FC = () => {
   const { profile, updateProfile, language, _t } = useApp();
@@ -49,6 +50,8 @@ export const StageCommunicationView: React.FC = () => {
 
   const [includeActionPlans, setIncludeActionPlans] = useState<boolean>(true);
   const [selectedActionPlanIds, setSelectedActionPlanIds] = useState<string[]>([]);
+
+  const [includeAttendance, setIncludeAttendance] = useState<boolean>(true);
 
   React.useEffect(() => {
     setSelectedComplaintIds(stageComplaints.map(c => c.id));
@@ -287,9 +290,31 @@ export const StageCommunicationView: React.FC = () => {
       return plan;
     });
 
+    const attendanceMetrics = calculateStaffAttendanceMetrics(
+      schoolSettings.staffAttendanceRecords || [],
+      supervisedTeachers,
+      schoolSettings,
+      reportPeriodType === 'monthly' ? 'this_month' : 'this_week',
+      'all'
+    );
+
     const resolvedTeachersData = supervisedTeachers.map(teacher => {
       const existing = teachersEvalData[teacher.id];
-      if (existing) return existing;
+      const attStat = attendanceMetrics.teacherStats.find(s => s.teacherId === teacher.id);
+      const attData = {
+        absencesCount: attStat?.absences || 0,
+        lateArrivalsCount: attStat?.lateArrivals || 0,
+        earlyLeavesCount: attStat?.earlyLeaves || 0,
+        delayMinutes: attStat?.delayMinutes || 0,
+        disciplineScore: attStat ? attStat.disciplineScore : 100
+      };
+
+      if (existing) {
+        return {
+          ...existing,
+          ...attData
+        };
+      }
       const directClasses = teacher.assignedClasses || [];
       const teacherScheduleRecords: any[] = [];
       const ts = schoolSettings.teacherSchedules?.[teacher.id];
@@ -315,7 +340,8 @@ export const StageCommunicationView: React.FC = () => {
         bookletChecking: 'منتظم',
         classroomManagement: 'ممتاز',
         punctuality: 'ملتزم',
-        customNotes: ''
+        customNotes: '',
+        ...attData
       };
     });
 
@@ -335,7 +361,18 @@ export const StageCommunicationView: React.FC = () => {
       includedComplaints: includedComplaintsList,
       includeActionPlans,
       selectedActionPlanIds,
-      includedActionPlans: includedActionPlansList
+      includedActionPlans: includedActionPlansList,
+      includeAttendance,
+      attendanceSummary: {
+        totalAbsences: attendanceMetrics.totalAbsences,
+        totalLateArrivals: attendanceMetrics.totalLateArrivals,
+        totalEarlyLeaves: attendanceMetrics.totalEarlyLeaves,
+        totalDelayMinutes: attendanceMetrics.totalDelayMinutes,
+        totalLostHours: attendanceMetrics.totalLostHours,
+        mostAbsentTeachers: attendanceMetrics.mostAbsentTeachers,
+        mostLateTeachers: attendanceMetrics.mostLateTeachers,
+        mostEarlyLeaveTeachers: attendanceMetrics.mostEarlyLeaveTeachers
+      }
     };
 
     const updatedFollowUps = [newReportRecord, ...stageFollowUps];
@@ -688,6 +725,26 @@ export const StageCommunicationView: React.FC = () => {
                 )}
               </div>
             )}
+          </div>
+
+          {/* TEACHER ATTENDANCE & DISCIPLINE INCLUSION (Requirements 6 & 7) */}
+          <div className="p-3.5 bg-surface-hover/50 border border-surface-border rounded-2xl space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeAttendance}
+                  onChange={(e) => setIncludeAttendance(e.target.checked)}
+                  className="w-4 h-4 text-primary rounded border-surface-border accent-primary"
+                />
+                <span className="text-[11px] font-black text-text-main">
+                  {_t('إدراج حضور وانضباط المعلمين (Teacher Attendance & Discipline)', 'Include Staff Attendance & Discipline', 'Anwesenheit & Disziplin einbeziehen')}
+                </span>
+              </label>
+              <span className="text-[10px] font-bold text-text-muted">
+                {reportPeriodType === 'weekly' ? _t('جدول أسبوعي تفصيلي مرتب حسب المخالفات', 'Weekly Table by Violations', 'Wöchentliche Tabelle') : _t('ملخص شهري إحصائي وساعات مفقودة', 'Monthly Summary & Lost Hours', 'Monatliche Übersicht')}
+              </span>
+            </div>
           </div>
 
           {/* ACTION BUTTONS */}

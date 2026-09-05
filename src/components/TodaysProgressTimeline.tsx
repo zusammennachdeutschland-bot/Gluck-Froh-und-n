@@ -9,9 +9,10 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 
 export const TodaysProgressTimeline: React.FC = () => {
-  const { lessons, openLessonControl, dismissedDashboardLessonIds, dismissLessonFromDashboard, t } = useApp();
+  const { lessons, openLessonControl, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t } = useApp();
   const [now, setNow] = useState(new Date());
   const [isPastPendingExpanded, setIsPastPendingExpanded] = useState(false);
+  const [showAllPastPending, setShowAllPastPending] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -62,7 +63,11 @@ export const TodaysProgressTimeline: React.FC = () => {
   const upcomingCount = processedLessons.filter(p => isPendingStatus(p.lesson.status) && p.state !== 'active').length;
   const totalCount = processedLessons.length;
 
-  const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  // Closed lessons include completed and cancelled lessons (all scheduled items resolved for today)
+  const closedCount = completedCount + cancelledCount;
+  const progressPercent = totalCount > 0 ? Math.round((closedCount / totalCount) * 100) : 0;
+  const completedPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  const cancelledPercent = totalCount > 0 ? Math.round((cancelledCount / totalCount) * 100) : 0;
 
   return (
     <div className="space-y-2.5">
@@ -105,7 +110,7 @@ export const TodaysProgressTimeline: React.FC = () => {
               >
                 <div className="px-2.5 sm:px-3 pb-2.5 sm:pb-3 pt-1 border-t border-primary-border/60 dark:border-primary-border/60">
                   <div className="max-h-64 overflow-y-auto divide-y divide-primary-border/60 dark:divide-primary-border/60 pr-1">
-                    {pendingPastLessons.map((pLesson) => (
+                    {(showAllPastPending ? pendingPastLessons : pendingPastLessons.slice(0, 3)).map((pLesson) => (
                       <div
                         key={pLesson.id}
                         onClick={() => openLessonControl(pLesson)}
@@ -134,6 +139,35 @@ export const TodaysProgressTimeline: React.FC = () => {
                       </div>
                     ))}
                   </div>
+
+                  {pendingPastLessons.length > 3 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowAllPastPending(prev => !prev);
+                      }}
+                      className="w-full mt-2 pt-2 border-t border-primary-border/40 dark:border-primary-border/40 text-[11px] font-extrabold text-primary dark:text-primary flex items-center justify-center gap-1.5 hover:underline cursor-pointer transition-colors"
+                    >
+                      {showAllPastPending ? (
+                        <>
+                          <span>{_t('إظهار أول 3 حصص فقط', 'Show first 3 lessons only', 'Nur erste 3 Lektionen anzeigen')}</span>
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        </>
+                      ) : (
+                        <>
+                          <span>
+                            {_t(
+                              `عرض باقي الحصص (${pendingPastLessons.length - 3} إضافية)`,
+                              `Show remaining ${pendingPastLessons.length - 3} lessons`,
+                              `Weitere ${pendingPastLessons.length - 3} Lektionen anzeigen`
+                            )}
+                          </span>
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -166,23 +200,53 @@ export const TodaysProgressTimeline: React.FC = () => {
                 <Clock className="w-3.5 h-3.5 text-primary dark:text-primary" />
                 <span>{t('todays_lessons_title')}</span>
               </h3>
-              <span className="text-[10px] bg-surface-hover/80 text-text-muted px-1.5 py-0.2 rounded border border-surface-border/60 dark:border-surface-border-soft/60">
-                {completedCount}/{totalCount} ({progressPercent}%)
+              <span 
+                className={`text-[10px] px-1.5 py-0.2 rounded border transition-colors ${
+                  progressPercent === 100
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 font-bold'
+                    : 'bg-surface-hover/80 text-text-muted border-surface-border/60 dark:border-surface-border-soft/60 font-medium'
+                }`}
+                title={
+                  cancelledCount > 0
+                    ? `${completedCount} ${t('status_completed')} + ${cancelledCount} ${t('status_cancelled')}`
+                    : undefined
+                }
+              >
+                {closedCount}/{totalCount} ({progressPercent}%)
               </span>
             </div>
+
+            {progressPercent === 100 && totalCount > 0 && (
+              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-900/50 flex items-center gap-1 animate-in fade-in duration-300">
+                <span>✓</span>
+                <span>{_t('اكتمل جدول اليوم', 'Day Completed', 'Tag abgeschlossen')}</span>
+              </span>
+            )}
           </div>
 
           {/* Progress Bar Visualizer */}
           <div className="space-y-1.5">
             <div className="w-full bg-surface-hover h-1.5 rounded-full overflow-hidden flex">
+              {/* Completed portion */}
               <div 
                 className="bg-primary h-full transition-all duration-500" 
-                style={{ width: `${progressPercent}%` }}
+                style={{ width: `${completedPercent}%` }}
+                title={`${completedCount} ${t('status_completed')}`}
               />
+              {/* Cancelled portion (concluded for today) */}
+              {cancelledCount > 0 && (
+                <div 
+                  className="bg-primary/40 dark:bg-primary/40 h-full transition-all duration-500" 
+                  style={{ width: `${cancelledPercent}%` }}
+                  title={`${cancelledCount} ${t('status_cancelled')}`}
+                />
+              )}
+              {/* Active portion */}
               {activeCount > 0 && (
                 <div 
-                  className="bg-primary h-full transition-all duration-500" 
-                  style={{ width: `${Math.max(10, Math.round((activeCount / totalCount) * 100))}%` }}
+                  className="bg-emerald-500 h-full transition-all duration-500 animate-pulse" 
+                  style={{ width: `${Math.max(5, Math.round((activeCount / totalCount) * 100))}%` }}
+                  title={`${activeCount} ${t('status_in_progress')}`}
                 />
               )}
             </div>

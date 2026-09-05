@@ -106,10 +106,10 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   useEffect(() => {
-    if (!selectedPrintStageManager && schoolSettings.stageManagers && schoolSettings.stageManagers.length > 0) {
-      setSelectedPrintStageManager(schoolSettings.stageManagers[0]?.name || '');
+    if (!selectedPrintStageManager && schoolSettings?.stageManagers && schoolSettings.stageManagers.length > 0) {
+      setSelectedPrintStageManager(schoolSettings.stageManagers?.[0]?.name || '');
     }
-  }, [schoolSettings.stageManagers, selectedPrintStageManager]);
+  }, [schoolSettings?.stageManagers, selectedPrintStageManager]);
 
   // Form State for Plan Creation / Editing
   const [formClass, setFormClass] = useState('');

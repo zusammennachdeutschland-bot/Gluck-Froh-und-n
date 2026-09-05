@@ -62,6 +62,8 @@ export const AddFinanceAccountModal: React.FC<AddFinanceAccountModalProps> = ({ 
     if (existingAccount) {
       updateFinanceAccount(existingAccount.id, {
         ...baseData,
+        initialCapital: type === 'investment' ? balanceNum : existingAccount.initialCapital,
+        initialBalance: type === 'investment' ? balanceNum : existingAccount.initialBalance,
         creditLimit: type === 'credit' ? limitNum : undefined,
         annualInterestRate: type === 'investment' ? returnRateNum : undefined,
         compoundingFrequency: type === 'investment' ? compoundingFrequency : undefined,

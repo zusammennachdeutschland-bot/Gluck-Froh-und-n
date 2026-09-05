@@ -11,6 +11,12 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
 
   lessonReminderMinutesBefore: 15,
 
+  // Alarm Mode Defaults
+  alarmModeEnabled: true,
+  alarmDurationSeconds: 60,
+  alarmTone: 'digital',
+  alarmAutoSnoozeMinutes: 5,
+
   dailySummaryTime: '20:00',
   dailySummaryIncludeLessons: true,
   dailySummaryIncludeIncome: true,

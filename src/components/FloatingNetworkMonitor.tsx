@@ -240,13 +240,23 @@ export const FloatingNetworkMonitor: React.FC = () => {
                 <Activity className="w-3.5 h-3.5 text-primary" />
                 <span>{isArabic ? 'جودة الشبكة المباشرة' : 'Network Diagnostics'}</span>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowPopover(false)}
-                className="p-1 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => networkMonitorService.pingNow()}
+                  title={isArabic ? 'إعادة الفحص الآن' : 'Test Ping Now'}
+                  className="p-1 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPopover(false)}
+                  className="p-1 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
             {/* Main Stats Grid */}

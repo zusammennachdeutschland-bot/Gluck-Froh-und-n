@@ -28,6 +28,8 @@ export function analyzeBuddyWorkload(
   for (const l of todaysLessons) {
     if (l.status === 'completed') {
       completedLessonsToday++;
+    } else if (l.status === 'cancelled') {
+      // Cancelled lesson is resolved, not remaining
     } else {
       // check time if not marked completed
       if (l.startTime && l.endTime) {

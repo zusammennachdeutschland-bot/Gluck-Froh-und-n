@@ -11,6 +11,20 @@ import { HodGermanStudent, Complaint, StudentActionPlan } from '../types';
 import { storage } from '../services/storageService';
 import { ActionPlansView } from './ActionPlansView';
 
+// Helper to extract grade identifier (e.g., "5A" -> "5", "12B" -> "12", "Grade 3" -> "3", "KG2" -> "KG2")
+const extractGradeFromClass = (cls: string): string => {
+  if (!cls) return '';
+  const trimmed = cls.trim();
+  const leadNum = trimmed.match(/^(\d+)/);
+  if (leadNum) return leadNum[1];
+  const gNum = trimmed.match(/(?:grade|g)[\s\-_]*(\d+)/i);
+  if (gNum) return gNum[1];
+  const anyNum = trimmed.match(/\d+/);
+  if (anyNum) return anyNum[0];
+  const word = trimmed.match(/^[A-Za-z0-9]+/);
+  return word ? word[0].toUpperCase() : trimmed.toUpperCase();
+};
+
 export const EXTERNAL_AI_PROMPT_TEXT = `Analyze this class roster image. Extract ONLY students studying German as a second language (EXCLUDE French students completely). Return a valid JSON array where each student object has: nameAr (Arabic name if available), nameEn (English name if available), gender ('Boy' or 'Girl'), gradeClass (class name from top header), and busLine (bus number/line or 'N/A').`;
 
 export const HodStudentsView: React.FC = () => {
@@ -23,6 +37,8 @@ export const HodStudentsView: React.FC = () => {
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [classFilter, setClassFilter] = useState<string>('all');
+  const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
+  const [selectedClass, setSelectedClass] = useState<string>('all');
   const [genderFilter, setGenderFilter] = useState<'all' | 'Boy' | 'Girl'>('all');
   const [busFilter, setBusFilter] = useState<'all' | 'bus' | 'nobus'>('all');
 
@@ -166,16 +182,124 @@ export const HodStudentsView: React.FC = () => {
     const set = new Set<string>();
     students.forEach(s => {
       if (s.gradeClass) {
-        const match = s.gradeClass.trim().match(/^(\d+|[A-Za-z]+)/);
-        if (match) {
-          set.add(match[1].toUpperCase());
-        } else {
-          set.add(s.gradeClass.trim().toUpperCase());
-        }
+        const gr = extractGradeFromClass(s.gradeClass);
+        if (gr) set.add(gr);
       }
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return Array.from(set).sort((a, b) => {
+      const numA = parseInt(a, 10);
+      const numB = parseInt(b, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
   }, [students]);
+
+  // Complete grades 1-12 list plus any existing grades in student records
+  const allSchoolGrades = useMemo(() => {
+    const set = new Set<string>();
+    for (let i = 1; i <= 12; i++) {
+      set.add(String(i));
+    }
+    uniqueGrades.forEach(g => set.add(g));
+    return Array.from(set).sort((a, b) => {
+      const numA = parseInt(a, 10);
+      const numB = parseInt(b, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+  }, [uniqueGrades]);
+
+  // Student counts per grade
+  const studentCountsByGrade = useMemo(() => {
+    const counts: Record<string, number> = {};
+    students.forEach(s => {
+      if (s.secondLanguage === 'German' && s.gradeClass) {
+        const gr = extractGradeFromClass(s.gradeClass);
+        if (gr) counts[gr] = (counts[gr] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [students]);
+
+  // Student counts per class
+  const studentCountsByClass = useMemo(() => {
+    const counts: Record<string, number> = {};
+    students.forEach(s => {
+      if (s.secondLanguage === 'German' && s.gradeClass) {
+        const cls = s.gradeClass.trim().toUpperCase();
+        counts[cls] = (counts[cls] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [students]);
+
+  // Classes for the currently selected grade in the grid
+  const classesForSelectedGrade = useMemo(() => {
+    if (!selectedGrade) return [];
+    const existing = uniqueClasses.filter(c => extractGradeFromClass(c) === selectedGrade);
+    const set = new Set<string>(existing);
+    
+    // Provide standard 5 sections (A, B, C, D, E) for numeric grades
+    if (/^\d+$/.test(selectedGrade)) {
+      ['A', 'B', 'C', 'D', 'E'].forEach(letter => {
+        set.add(`${selectedGrade}${letter}`);
+      });
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [selectedGrade, uniqueClasses]);
+
+  // Grade & Class Selection Matrix Handlers
+  const handleSelectGrade = (grade: string) => {
+    if (selectedGrade === grade && selectedClass === 'all') {
+      // Toggle off
+      setSelectedGrade(null);
+      setSelectedClass('all');
+      setClassFilter('all');
+    } else {
+      setSelectedGrade(grade);
+      setSelectedClass('all');
+      setClassFilter(`grade:${grade}`);
+    }
+  };
+
+  const handleSelectClass = (cls: string) => {
+    if (cls === 'all') {
+      setSelectedClass('all');
+      if (selectedGrade) {
+        setClassFilter(`grade:${selectedGrade}`);
+      } else {
+        setClassFilter('all');
+      }
+    } else {
+      setSelectedClass(cls);
+      setClassFilter(cls);
+    }
+  };
+
+  const handleClearAllFilters = () => {
+    setSelectedGrade(null);
+    setSelectedClass('all');
+    setClassFilter('all');
+    setGenderFilter('all');
+    setBusFilter('all');
+    setSearchQuery('');
+  };
+
+  const applyGradeClassFilter = (filterVal: string) => {
+    setClassFilter(filterVal);
+    if (filterVal === 'all') {
+      setSelectedGrade(null);
+      setSelectedClass('all');
+    } else if (filterVal.startsWith('grade:')) {
+      const gr = filterVal.replace('grade:', '');
+      setSelectedGrade(gr);
+      setSelectedClass('all');
+    } else {
+      const gr = extractGradeFromClass(filterVal);
+      setSelectedGrade(gr);
+      setSelectedClass(filterVal);
+    }
+  };
 
   // Set default target class/grade when bulk modal opens
   useEffect(() => {
@@ -187,15 +311,30 @@ export const HodStudentsView: React.FC = () => {
     }
   }, [uniqueClasses, uniqueGrades, targetDeleteClass, targetDeleteGrade]);
 
+  const isAnyFilterActive = Boolean(
+    (classFilter && classFilter !== 'all') ||
+    (genderFilter && genderFilter !== 'all') ||
+    (busFilter && busFilter !== 'all') ||
+    searchQuery.trim().length > 0
+  );
+
   // INSTANT SEARCH ENGINE (Filtering dynamically across: nameAr, nameEn, busLine, gradeClass)
   const filteredStudents = useMemo(() => {
+    if (!isAnyFilterActive) return [];
+
     return students.filter(s => {
       // German language rule strictly enforced
       if (s.secondLanguage !== 'German') return false;
 
-      // Class Filter
-      if (classFilter !== 'all' && s.gradeClass.toUpperCase() !== classFilter.toUpperCase()) {
-        return false;
+      // Class or Grade Filter
+      if (classFilter !== 'all') {
+        if (classFilter.startsWith('grade:')) {
+          const targetGrade = classFilter.replace('grade:', '').toUpperCase();
+          const studentGrade = extractGradeFromClass(s.gradeClass || '').toUpperCase();
+          if (studentGrade !== targetGrade) return false;
+        } else if ((s.gradeClass || '').toUpperCase() !== classFilter.toUpperCase()) {
+          return false;
+        }
       }
 
       // Gender Filter
@@ -234,7 +373,7 @@ export const HodStudentsView: React.FC = () => {
       }
       return sortOrder === 'asc' ? comp : -comp;
     });
-  }, [students, classFilter, genderFilter, busFilter, searchQuery, sortField, sortOrder]);
+  }, [students, classFilter, genderFilter, busFilter, searchQuery, sortField, sortOrder, isAnyFilterActive]);
 
   // Checkbox Selection Logic
   const isAllFilteredSelected = useMemo(() => {
@@ -679,10 +818,10 @@ export const HodStudentsView: React.FC = () => {
       )}
 
       {/* INSTANT SEARCH ENGINE & FILTERS BAR */}
-      <div className="bg-surface border border-surface-border rounded-xl p-3 shadow-2xs space-y-2.5">
+      <div className="bg-surface border border-surface-border rounded-xl p-3 sm:p-4 shadow-2xs space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
           {/* PROMINENT TOP INSTANT SEARCH BAR */}
-          <div className="relative sm:col-span-5">
+          <div className="relative sm:col-span-6">
             <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-primary" />
             <input
               type="text"
@@ -701,24 +840,8 @@ export const HodStudentsView: React.FC = () => {
             )}
           </div>
 
-          {/* Class Dropdown Filter */}
-          <div className="sm:col-span-3">
-            <select
-              value={classFilter}
-              onChange={e => setClassFilter(e.target.value)}
-              className="w-full px-2.5 py-2 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
-            >
-              <option value="all">{_t('جميع الفصول (All Classes)', 'All Classes', 'Alle Klassen')}</option>
-              {uniqueClasses.map(c => (
-                <option key={c} value={c}>
-                  🏫 الفصل: {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
           {/* Gender Filter */}
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-3">
             <select
               value={genderFilter}
               onChange={e => setGenderFilter(e.target.value as any)}
@@ -731,7 +854,7 @@ export const HodStudentsView: React.FC = () => {
           </div>
 
           {/* Bus Filter */}
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-3">
             <select
               value={busFilter}
               onChange={e => setBusFilter(e.target.value as any)}
@@ -744,13 +867,161 @@ export const HodStudentsView: React.FC = () => {
           </div>
         </div>
 
+        {/* 2-TIER GRADE & CLASS MATRIX (شبكة اختيار المرحلة ثم الفصل) */}
+        <div className="pt-2 border-t border-surface-border/70 space-y-2">
+          {/* Step 1: Grade Selection Header & Controls */}
+          <div className="flex items-center justify-between flex-wrap gap-1">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+              <span className="text-[11px] font-black text-text-main flex items-center gap-1">
+                <GraduationCap className="w-3.5 h-3.5 text-primary" />
+                <span>{_t('1️⃣ شبكة المراحل الدراسية (Grades 1 - 12):', '1️⃣ Grades Grid (1 - 12):', '1️⃣ Klassenstufen (1 - 12):')}</span>
+              </span>
+            </div>
+
+            {selectedGrade && (
+              <button
+                type="button"
+                onClick={handleClearAllFilters}
+                className="text-[10px] text-text-muted hover:text-rose-500 font-bold transition-colors cursor-pointer flex items-center gap-0.5"
+              >
+                <X className="w-3 h-3" />
+                <span>{_t('إلغاء تحديد المرحلة', 'Clear Grade', 'Stufe abwählen')}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Grades Matrix Buttons (Grades 1 to 12) */}
+          <div className="grid grid-cols-6 sm:grid-cols-6 md:grid-cols-12 gap-1.5">
+            {allSchoolGrades.map(g => {
+              const isSelected = selectedGrade === g;
+              const count = studentCountsByGrade[g] || 0;
+              return (
+                <button
+                  type="button"
+                  key={`grade-btn-${g}`}
+                  onClick={() => handleSelectGrade(g)}
+                  className={`py-1.5 px-1 rounded-xl text-center border transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
+                    isSelected
+                      ? 'bg-primary text-white border-primary shadow-sm ring-2 ring-primary/30 font-black'
+                      : count > 0
+                        ? 'bg-surface-hover hover:border-primary/50 text-text-main border-surface-border font-bold'
+                        : 'bg-surface/60 hover:bg-surface-hover text-text-muted/60 hover:text-text-main border-surface-border/50 font-medium'
+                  }`}
+                  title={_t(`الصف ${g} (${count} طالب)`, `Grade ${g} (${count} students)`, `Stufe ${g} (${count} Schüler)`)}
+                >
+                  <span className="text-[11px] leading-none">
+                    {/^\d+$/.test(g) ? `G${g}` : g}
+                  </span>
+                  {count > 0 ? (
+                    <span className={`text-[9px] leading-tight px-1 rounded-full font-black ${
+                      isSelected ? 'bg-white/25 text-white' : 'bg-primary/10 text-primary'
+                    }`}>
+                      {count}
+                    </span>
+                  ) : (
+                    <span className="text-[8.5px] leading-tight opacity-40">-</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Step 2: Classes of Selected Grade (Appears immediately when a grade is chosen) */}
+          {selectedGrade && (
+            <div className="mt-2.5 p-2.5 bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-xl space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="flex items-center justify-between flex-wrap gap-1">
+                <span className="text-[11px] font-black text-primary flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>
+                    {_t(
+                      `2️⃣ فصول المرحلة / الصف ${selectedGrade} (حدد فصلاً أو اعرض الكل):`,
+                      `2️⃣ Classes for Grade ${selectedGrade} (Select class or all):`,
+                      `2️⃣ Klassen für Stufe ${selectedGrade}:`
+                    )}
+                  </span>
+                </span>
+                <span className="text-[10px] font-bold text-text-muted bg-surface px-2 py-0.5 rounded-md border border-surface-border">
+                  {_t(`طلاب الصف: ${studentCountsByGrade[selectedGrade] || 0}`, `Grade Total: ${studentCountsByGrade[selectedGrade] || 0}`, `Gesamt: ${studentCountsByGrade[selectedGrade] || 0}`)}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {/* All Classes of this Grade button */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectClass('all')}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black border transition-all cursor-pointer shadow-2xs flex items-center gap-1 active:scale-95 ${
+                    selectedClass === 'all'
+                      ? 'bg-primary text-white border-primary shadow-xs ring-1 ring-primary/30'
+                      : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border'
+                  }`}
+                >
+                  <span>✨</span>
+                  <span>{_t(`جميع فصول الصف ${selectedGrade} (الكل)`, `All Grade ${selectedGrade} Classes`, `Alle Klassen Stufe ${selectedGrade}`)}</span>
+                  {studentCountsByGrade[selectedGrade] !== undefined && (
+                    <span className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-black ${
+                      selectedClass === 'all' ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                    }`}>
+                      {studentCountsByGrade[selectedGrade]}
+                    </span>
+                  )}
+                </button>
+
+                {/* Individual Classes (e.g. 5A, 5B, 5C, 5D, 5E) */}
+                {classesForSelectedGrade.map(cls => {
+                  const isClsActive = selectedClass === cls;
+                  const count = studentCountsByClass[cls] || 0;
+                  return (
+                    <button
+                      type="button"
+                      key={`class-pill-${cls}`}
+                      onClick={() => handleSelectClass(cls)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer shadow-2xs flex items-center gap-1 active:scale-95 ${
+                        isClsActive
+                          ? 'bg-primary text-white border-primary shadow-xs ring-1 ring-primary/30 font-black'
+                          : count > 0
+                            ? 'bg-surface hover:bg-surface-hover text-text-main border-surface-border font-bold'
+                            : 'bg-surface/70 hover:bg-surface text-text-muted border-surface-border/60'
+                      }`}
+                    >
+                      <span>🏫</span>
+                      <span>{cls}</span>
+                      {count > 0 && (
+                        <span className={`text-[9.5px] px-1 rounded-full font-black ${
+                          isClsActive ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                        }`}>
+                          {count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Export & Action Tools */}
         <div className="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-surface-border/60 text-[11px]">
-          <div className="text-[11px] font-bold text-text-muted flex items-center gap-1.5">
-            <span>{_t('النتائج المطابقة للبحث السريع:', 'Search Results:', 'Ergebnisse:')}</span>
+          <div className="text-[11px] font-bold text-text-muted flex items-center gap-1.5 flex-wrap">
+            <span>{_t('النتائج المعروضة:', 'Displayed Results:', 'Ergebnisse:')}</span>
             <span className="text-primary font-black bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20">
-              {filteredStudents.length} / {students.length}
+              {isAnyFilterActive ? `${filteredStudents.length} / ${students.length}` : `0 / ${students.length}`}
             </span>
+            {!isAnyFilterActive ? (
+              <span className="text-[10.5px] text-amber-600 dark:text-amber-400 font-bold">
+                ({_t('اختر مرحلة أو فصلاً من الشبكة أعلاه', 'Select a grade/class above', 'Stufe/Klasse wählen')})
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleClearAllFilters}
+                className="text-[10.5px] text-text-muted hover:text-rose-500 font-bold underline cursor-pointer transition-colors mx-1"
+              >
+                {_t('إلغاء الفلتر', 'Clear Filter', 'Zurücksetzen')}
+              </button>
+            )}
             {searchQuery && (
               <span className="text-[10px] text-primary italic font-medium">
                 (تصفية فورية بـ: "{searchQuery}")
@@ -761,7 +1032,8 @@ export const HodStudentsView: React.FC = () => {
           <div className="flex items-center gap-1.5">
             <button
               onClick={handleCopyFullRosterText}
-              className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-lg text-[11px] font-bold border border-surface-border flex items-center gap-1 transition-all cursor-pointer"
+              disabled={!isAnyFilterActive || filteredStudents.length === 0}
+              className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-text-main rounded-lg text-[11px] font-bold border border-surface-border flex items-center gap-1 transition-all cursor-pointer"
               title={_t('نسخ القائمة ثنائية اللغة للواتساب', 'Copy for WhatsApp', 'Für WhatsApp kopieren')}
             >
               <Copy className="w-3 h-3 text-emerald-600" />
@@ -770,7 +1042,8 @@ export const HodStudentsView: React.FC = () => {
 
             <button
               onClick={handleExportCsv}
-              className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-lg text-[11px] font-bold border border-surface-border flex items-center gap-1 transition-all cursor-pointer"
+              disabled={!isAnyFilterActive || filteredStudents.length === 0}
+              className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-text-main rounded-lg text-[11px] font-bold border border-surface-border flex items-center gap-1 transition-all cursor-pointer"
               title={_t('تصدير CSV ثنائي اللغة', 'Export CSV', 'CSV exportieren')}
             >
               <FileSpreadsheet className="w-3 h-3 text-blue-600" />
@@ -786,16 +1059,14 @@ export const HodStudentsView: React.FC = () => {
           <div className="p-8 text-center text-text-muted text-[11px] animate-pulse">
             {_t('جاري تحميل قائمة الطلاب ثنائية اللغة...', 'Loading roster...', 'Schülerliste wird geladen...')}
           </div>
-        ) : filteredStudents.length === 0 ? (
+        ) : students.length === 0 ? (
           <div className="p-8 text-center space-y-3">
             <div className="w-12 h-12 rounded-full bg-surface-hover flex items-center justify-center mx-auto text-text-muted">
               <Users className="w-4 h-4" />
             </div>
             <div>
               <p className="text-[11px] font-bold text-text-main">
-                {searchQuery 
-                  ? _t(`لم نجد نتائج تطابق شريط البحث: "${searchQuery}"`, `No students matched search: "${searchQuery}"`, `Keine Ergebnisse für "${searchQuery}"`)
-                  : _t('قائمة الطلاب فارغة حالياً', 'No German students found', 'Keine Deutschschüler gefunden')}
+                {_t('قائمة الطلاب فارغة حالياً', 'No German students found', 'Keine Deutschschüler gefunden')}
               </p>
               <p className="text-[11px] text-text-muted mt-0.5">
                 {_t('يمكنك البدء بإضافة طالب جديد أو استيراد الطلاب.', 'You can add a student or import records.', 'Sie können Schüler hinzufügen oder importieren.')}
@@ -816,6 +1087,82 @@ export const HodStudentsView: React.FC = () => {
                 <Code2 className="w-3.5 h-3.5" />
                 <span>{_t('استيراد بالـ AI Prompt', 'Import via AI Prompt', 'Per KI importieren')}</span>
               </button>
+            </div>
+          </div>
+        ) : !isAnyFilterActive ? (
+          <div className="p-8 sm:p-12 text-center space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto shadow-2xs">
+              <Filter className="w-6 h-6" />
+            </div>
+            <div className="max-w-md mx-auto space-y-1.5">
+              <h3 className="text-sm sm:text-base font-black text-text-main">
+                {_t('اختر مرحلة أو فصلاً لعرض الطلاب', 'Select a Grade or Class to view students', 'Wählen Sie eine Klasse oder Stufe')}
+              </h3>
+              <p className="text-[11.5px] text-text-muted font-medium leading-relaxed">
+                {_t(
+                  `مسجل بالمدرسة ${students.length} طالب. للحفاظ على خفة وسرعة التطبيق، اختر المرحلة، الفصل أو ابحث بالاسم لعرض الطلاب المطلوبين.`,
+                  `${students.length} students registered. To keep the app blazing fast, select a grade, class, or search by name to view students.`,
+                  `${students.length} Schüler registriert. Bitte wählen Sie eine Klasse oder suchen Sie nach Schülern.`
+                )}
+              </p>
+            </div>
+
+            {/* Quick Filter Badges for 1-click selection */}
+            {(uniqueGrades.length > 0 || uniqueClasses.length > 0) && (
+              <div className="pt-2 space-y-2.5 max-w-lg mx-auto">
+                {uniqueGrades.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-bold text-text-muted">
+                      {_t('المراحل الدراسية:', 'Grades:', 'Klassenstufen:')}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-1.5">
+                      {uniqueGrades.map(g => (
+                        <button
+                          key={`quick-grade-${g}`}
+                          type="button"
+                          onClick={() => applyGradeClassFilter(`grade:${g}`)}
+                          className="px-3 py-1 bg-primary/10 hover:bg-primary hover:text-white text-primary border border-primary/20 rounded-lg text-[11px] font-bold transition-all cursor-pointer shadow-2xs active:scale-95"
+                        >
+                          📚 {_t(`الصف ${g} (الكل)`, `Grade ${g}`, `Stufe ${g}`)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {uniqueClasses.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-[11px] font-bold text-text-muted">
+                      {_t('الفصول المباشرة:', 'Direct Classes:', 'Klassen:')}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-1.5">
+                      {uniqueClasses.slice(0, 10).map(c => (
+                        <button
+                          key={`quick-class-${c}`}
+                          type="button"
+                          onClick={() => applyGradeClassFilter(c)}
+                          className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 border border-surface-border rounded-lg text-[11px] font-bold text-text-main transition-all cursor-pointer shadow-2xs active:scale-95"
+                        >
+                          🏫 {c}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : filteredStudents.length === 0 ? (
+          <div className="p-8 text-center space-y-3">
+            <div className="w-12 h-12 rounded-full bg-surface-hover flex items-center justify-center mx-auto text-text-muted">
+              <Users className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-text-main">
+                {searchQuery 
+                  ? _t(`لم نجد نتائج تطابق شريط البحث: "${searchQuery}"`, `No students matched search: "${searchQuery}"`, `Keine Ergebnisse für "${searchQuery}"`)
+                  : _t('لا توجد نتائج تطابق الفلتر المختار', 'No students match the selected filter', 'Keine Treffer für gewählten Filter')}
+              </p>
             </div>
           </div>
         ) : (

@@ -45,21 +45,24 @@ export const SchoolSettingsSection: React.FC<Props> = ({ onBack }) => {
   const [stageSecretaries, setStageSecretaries] = useState<StageSecretary[]>(currentSettings.stageSecretaries || []);
   const [newSecName, setNewSecName] = useState('');
   const [newSecPhone, setNewSecPhone] = useState('');
-  const [newSecManagerId, setNewSecManagerId] = useState(stageManagers[0]?.id || '');
+  const [newSecManagerId, setNewSecManagerId] = useState(stageManagers?.[0]?.id || '');
 
   // Presence State
   const [generalArrival, setGeneralArrival] = useState<string>(() => {
-    const firstActive = Object.values(currentSettings.presence).find(p => p.active);
+    const presenceObj = currentSettings?.presence || {};
+    const firstActive = Object.values(presenceObj).find(p => p?.active);
     return firstActive?.arrivalTime || '07:30';
   });
   const [generalDeparture, setGeneralDeparture] = useState<string>(() => {
-    const firstActive = Object.values(currentSettings.presence).find(p => p.active);
+    const presenceObj = currentSettings?.presence || {};
+    const firstActive = Object.values(presenceObj).find(p => p?.active);
     return firstActive?.departureTime || '14:30';
   });
   const [activeDays, setActiveDays] = useState<Record<string, boolean>>(() => {
     const res: Record<string, boolean> = {};
-    Object.keys(currentSettings.presence).forEach(k => {
-      res[k] = currentSettings.presence[k].active;
+    const presenceObj = currentSettings?.presence || {};
+    Object.keys(presenceObj).forEach(k => {
+      res[k] = !!presenceObj[k]?.active;
     });
     return res;
   });

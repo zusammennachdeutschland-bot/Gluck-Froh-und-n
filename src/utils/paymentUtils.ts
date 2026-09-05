@@ -1,4 +1,5 @@
 import { Student, Group, Lesson, PaymentRecord } from '../types';
+import { areDuplicateLessons } from './lessonUtils';
 
 export interface CyclePricingResult {
   cycleLength: number;
@@ -64,7 +65,7 @@ export const calculateDuePaymentCycles = (
     const paidIds = studentPaidLessons.get(st.id) || new Set<string>();
 
     // Collect all completed attended lessons for this student that have NOT been paid for
-    const stCompletedLessons = activeLessons.filter(l => {
+    const rawCompletedLessons = activeLessons.filter(l => {
       if (l.status !== 'completed') return false;
       const matchesGroup = grp ? l.groupId === grp.id : false;
       const matchesStudent = l.studentId ? l.studentId === st.id : (!!l.studentName && l.studentName === st.name);
@@ -76,6 +77,18 @@ export const calculateDuePaymentCycles = (
       if (paidIds.has(l.id)) return false;
 
       return true;
+    });
+
+    // Strictly deduplicate lessons: a student cannot take two lessons on the same day at the same time
+    const stCompletedLessons: Lesson[] = [];
+    rawCompletedLessons.forEach(l => {
+      const isDupe = stCompletedLessons.some(existing => 
+        areDuplicateLessons(existing, l) ||
+        (existing.date === l.date && (existing.time === l.time || (existing.sessionNumber && existing.sessionNumber === l.sessionNumber)))
+      );
+      if (!isDupe) {
+        stCompletedLessons.push(l);
+      }
     });
 
     stCompletedLessons.sort((a, b) => a.date.localeCompare(b.date));
@@ -197,7 +210,20 @@ export const calculateDuePaymentCycles = (
     }
   });
 
-  return list;
+  // Deduplicate list by studentId and lessonDates / amount to prevent duplicate cards
+  const uniqueList: DuePaymentCycle[] = [];
+  const seenCycleSignatures = new Set<string>();
+
+  list.forEach(cycle => {
+    const datesSig = (cycle.lessonDates || []).sort().join('|');
+    const sig = `${cycle.studentId}_${datesSig || cycle.amountDue}`;
+    if (!seenCycleSignatures.has(sig)) {
+      seenCycleSignatures.add(sig);
+      uniqueList.push(cycle);
+    }
+  });
+
+  return uniqueList;
 };
 
 /**

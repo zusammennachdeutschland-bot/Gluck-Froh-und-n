@@ -1,7 +1,7 @@
 /**
  * Network Diagnostics & Real-Time RTT (Ping) Monitor Service
- * Optimized for React, Vite, PWA, Capacitor & Android WebView.
- * Provides high-frequency (1s) accurate round-trip time latency diagnostics
+ * Optimized for React, Vite, PWA, Electron (Linux/Mac/Windows), Capacitor & Android WebView.
+ * Provides high-frequency (~1s) accurate round-trip time latency diagnostics
  * without causing full-app re-renders, IndexedDB churn, or memory leaks.
  */
 
@@ -26,12 +26,23 @@ export interface NetworkMetrics {
 
 type MetricsListener = (metrics: NetworkMetrics) => void;
 
+// High-speed, high-availability Anycast endpoints designed specifically for network latency checks
+// Mode: 'no-cors' allows opaque responses across any protocol (http, https, file:// in Linux Electron, capacitor://)
+const GLOBAL_PING_ENDPOINTS = [
+  'https://www.gstatic.com/generate_204',
+  'https://connectivitycheck.gstatic.com/generate_204',
+  'https://1.1.1.1/cdn-cgi/trace',
+  'https://dns.google/resolve?name=example.com&type=A'
+];
+
 class NetworkMonitorService {
-  private intervalId: any = null;
+  private timerId: any = null;
   private activeAbortController: AbortController | null = null;
   private listeners: Set<MetricsListener> = new Set();
-  private pingHistory: number[] = [];
   private totalPingSum = 0;
+  private isRunning = false;
+  private isPinging = false;
+  private endpointIndex = 0;
 
   private metrics: NetworkMetrics = {
     currentPing: null,
@@ -46,6 +57,25 @@ class NetworkMonitorService {
     status: 'checking',
     isMeasuring: false
   };
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        this.metrics.status = 'online';
+        if (this.isRunning) {
+          this.performPing();
+        } else {
+          this.notify();
+        }
+      });
+      window.addEventListener('offline', () => {
+        this.metrics.status = 'offline';
+        this.metrics.connectionQuality = 'offline';
+        this.metrics.currentPing = null;
+        this.notify();
+      });
+    }
+  }
 
   /**
    * Returns a snapshot of current in-memory diagnostics metrics.
@@ -107,9 +137,31 @@ class NetworkMonitorService {
   }
 
   /**
+   * Selects candidate endpoints appropriate for current runtime environment.
+   * On Linux Electron or file:// protocol, avoid relative paths like /api/health which resolve
+   * to non-existent Linux root filesystem files (file:///api/health).
+   */
+  private getCandidateEndpoints(): string[] {
+    const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:';
+    const isHttpProtocol = typeof window !== 'undefined' && (window.location.protocol === 'http:' || window.location.protocol === 'https:');
+
+    const endpoints = [...GLOBAL_PING_ENDPOINTS];
+
+    // If served via HTTP/HTTPS (e.g. web dev/prod server), include local health check as a secondary fallback
+    if (isHttpProtocol && !isFileProtocol) {
+      endpoints.push(`${window.location.origin}/api/health`);
+    }
+
+    return endpoints;
+  }
+
+  /**
    * Performs a single real round-trip-time latency test.
    */
-  private async performPing() {
+  public async performPing() {
+    if (this.isPinging) return;
+    this.isPinging = true;
+
     // 1. Check browser-level offline status
     const isBrowserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
     if (isBrowserOffline) {
@@ -123,107 +175,125 @@ class NetworkMonitorService {
         lastCheckedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         ...this.getNetworkInfo()
       };
+      this.isPinging = false;
       this.notify();
       return;
     }
 
-    // Abort previous in-flight request if still hanging
-    if (this.activeAbortController) {
-      try {
-        this.activeAbortController.abort();
-      } catch {}
-      this.activeAbortController = null;
-    }
-
     const controller = new AbortController();
     this.activeAbortController = controller;
+
+    // Generous 3000ms timeout so slower 3G/4G connections (e.g. 0.35 Mbps) don't get killed prematurely
     const timeoutId = setTimeout(() => {
       try {
         controller.abort();
       } catch {}
-    }, 1800);
+    }, 3000);
 
-    const startTime = performance.now();
+    const endpoints = this.getCandidateEndpoints();
+    const primaryEndpoint = endpoints[this.endpointIndex % endpoints.length];
     const cacheBuster = `_t=${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const startTime = performance.now();
+
+    let success = false;
+    let measuredPing: number | null = null;
 
     try {
-      // Choose ping endpoint: test health API, fallback to current origin or favicon if static AppImage / offline
-      const endpoints = [
-        `/api/health?${cacheBuster}`,
-        `./?${cacheBuster}`,
-        `/favicon.ico?${cacheBuster}`
-      ];
+      const pingUrl = primaryEndpoint.includes('?') 
+        ? `${primaryEndpoint}&${cacheBuster}` 
+        : `${primaryEndpoint}?${cacheBuster}`;
 
-      let success = false;
-      let lastStatus = 200;
-
-      for (const pingUrl of endpoints) {
-        if (controller.signal.aborted) break;
-        try {
-          const response = await fetch(pingUrl, {
-            method: 'HEAD',
-            cache: 'no-store',
-            signal: controller.signal,
-            headers: {
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
-              'Pragma': 'no-cache'
-            }
-          });
-          lastStatus = response.status;
-          if (response.ok || response.status === 404 || response.status === 304 || response.status < 500) {
-            success = true;
-            break;
-          }
-        } catch {
-          // Try next endpoint fallback
-        }
-      }
-
-      // If HEAD failed across all, try a lightweight GET on origin or index
-      if (!success && !controller.signal.aborted) {
-        try {
-          const response = await fetch(`./?${cacheBuster}`, {
-            method: 'GET',
-            cache: 'no-store',
-            signal: controller.signal
-          });
-          if (response.status < 500) {
-            success = true;
-            lastStatus = response.status;
-          }
-        } catch {}
-      }
+      // In Linux Electron (file://) or standard web, mode: 'no-cors' succeeds without CORS restrictions
+      const response = await fetch(pingUrl, {
+        method: 'GET',
+        mode: 'no-cors',
+        cache: 'no-store',
+        signal: controller.signal
+      });
 
       clearTimeout(timeoutId);
       const endTime = performance.now();
       const rawPing = Math.round(endTime - startTime);
-      const measuredPing = Math.max(1, rawPing);
 
-      if (success) {
-        this.totalPingSum += measuredPing;
-        const newSuccessCount = this.metrics.successfulChecks + 1;
-        const newAverage = Math.round(this.totalPingSum / newSuccessCount);
-        const newMin = this.metrics.minPing === null ? measuredPing : Math.min(this.metrics.minPing, measuredPing);
-        const newMax = this.metrics.maxPing === null ? measuredPing : Math.max(this.metrics.maxPing, measuredPing);
-
-        this.metrics = {
-          ...this.metrics,
-          currentPing: measuredPing,
-          averagePing: newAverage,
-          minPing: newMin,
-          maxPing: newMax,
-          successfulChecks: newSuccessCount,
-          totalChecks: this.metrics.totalChecks + 1,
-          status: 'online',
-          connectionQuality: this.computeQuality(measuredPing, false),
-          lastCheckedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          ...this.getNetworkInfo()
-        };
-      } else {
-        throw new Error(`Ping failed with status: ${lastStatus}`);
+      // In no-cors mode, opaque responses (type === 'opaque' with status 0) mean the request successfully completed!
+      if (
+        response.type === 'opaque' ||
+        response.status === 204 ||
+        response.ok ||
+        (response.status >= 200 && response.status < 500)
+      ) {
+        measuredPing = Math.max(1, rawPing);
+        success = true;
       }
-    } catch (err: any) {
+    } catch {
+      // Primary candidate failed or timed out; try immediate fallback from the candidate pool
+      if (!controller.signal.aborted) {
+        this.endpointIndex = (this.endpointIndex + 1) % endpoints.length;
+        const fallbackEndpoint = endpoints[this.endpointIndex];
+        const fbUrl = fallbackEndpoint.includes('?') ? `${fallbackEndpoint}&${cacheBuster}` : `${fallbackEndpoint}?${cacheBuster}`;
+        const fbStartTime = performance.now();
+
+        try {
+          const fbResponse = await fetch(fbUrl, {
+            method: 'GET',
+            mode: 'no-cors',
+            cache: 'no-store',
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+          const fbEndTime = performance.now();
+          const fbRawPing = Math.round(fbEndTime - fbStartTime);
+
+          if (
+            fbResponse.type === 'opaque' ||
+            fbResponse.status === 204 ||
+            fbResponse.ok ||
+            (fbResponse.status >= 200 && fbResponse.status < 500)
+          ) {
+            measuredPing = Math.max(1, fbRawPing);
+            success = true;
+          }
+        } catch {
+          // Secondary attempt also failed
+        }
+      }
+    } finally {
       clearTimeout(timeoutId);
+      if (this.activeAbortController === controller) {
+        this.activeAbortController = null;
+      }
+    }
+
+    // Fallback: If HTTP probes were blocked by a strict local firewall, but the browser has an estimated RTT
+    const networkInfo = this.getNetworkInfo();
+    if (!success && typeof networkInfo.rttEstimated === 'number' && networkInfo.rttEstimated > 0 && !isBrowserOffline) {
+      measuredPing = Math.round(networkInfo.rttEstimated);
+      success = true;
+    }
+
+    if (success && measuredPing !== null) {
+      this.totalPingSum += measuredPing;
+      const newSuccessCount = this.metrics.successfulChecks + 1;
+      const newAverage = Math.round(this.totalPingSum / newSuccessCount);
+      const newMin = this.metrics.minPing === null ? measuredPing : Math.min(this.metrics.minPing, measuredPing);
+      const newMax = this.metrics.maxPing === null ? measuredPing : Math.max(this.metrics.maxPing, measuredPing);
+
+      this.metrics = {
+        ...this.metrics,
+        currentPing: measuredPing,
+        averagePing: newAverage,
+        minPing: newMin,
+        maxPing: newMax,
+        successfulChecks: newSuccessCount,
+        totalChecks: this.metrics.totalChecks + 1,
+        status: 'online',
+        connectionQuality: this.computeQuality(measuredPing, false),
+        lastCheckedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        ...networkInfo
+      };
+    } else {
+      this.endpointIndex = (this.endpointIndex + 1) % endpoints.length;
       const isOfflineNow = typeof navigator !== 'undefined' && navigator.onLine === false;
 
       this.metrics = {
@@ -234,25 +304,37 @@ class NetworkMonitorService {
         failedChecks: this.metrics.failedChecks + 1,
         totalChecks: this.metrics.totalChecks + 1,
         lastCheckedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        ...this.getNetworkInfo()
+        ...networkInfo
       };
-    } finally {
-      if (this.activeAbortController === controller) {
-        this.activeAbortController = null;
-      }
-      this.notify();
     }
+
+    this.isPinging = false;
+    this.notify();
   }
 
   /**
-   * Start 1-second interval diagnostics measurement.
+   * Run a single measurement cycle and self-schedule next probe with ~1s delay.
+   * This eliminates the race condition where rigid setInterval aborts in-flight pings on slower networks.
+   */
+  private async runPingCycle() {
+    if (!this.isRunning) return;
+    await this.performPing();
+    if (!this.isRunning) return;
+
+    this.timerId = setTimeout(() => {
+      this.runPingCycle();
+    }, 1000);
+  }
+
+  /**
+   * Start diagnostics measurement cycle.
    */
   public start() {
-    if (this.intervalId) return; // Already running, prevent duplicate intervals
+    if (this.isRunning) return; // Already running
+    this.isRunning = true;
 
     // Reset session metrics
     this.totalPingSum = 0;
-    this.pingHistory = [];
     this.metrics = {
       currentPing: null,
       averagePing: null,
@@ -263,28 +345,34 @@ class NetworkMonitorService {
       totalChecks: 0,
       connectionQuality: 'unavailable',
       lastCheckedAt: null,
-      status: 'checking',
+      status: typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'checking',
       isMeasuring: true,
       ...this.getNetworkInfo()
     };
     this.notify();
 
-    // Run first measurement immediately
-    this.performPing();
+    // Start self-scheduling loop
+    this.runPingCycle();
+  }
 
-    // Schedule high-precision 1-second heartbeat
-    this.intervalId = setInterval(() => {
-      this.performPing();
-    }, 1000);
+  /**
+   * Triggers an immediate ping test on demand.
+   */
+  public async pingNow() {
+    if (this.isPinging) return;
+    await this.performPing();
   }
 
   /**
    * Immediately stops diagnostics and cleans up resources.
    */
   public stop() {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+    this.isRunning = false;
+    this.isPinging = false;
+
+    if (this.timerId) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
     }
 
     if (this.activeAbortController) {
@@ -303,3 +391,4 @@ class NetworkMonitorService {
 }
 
 export const networkMonitorService = new NetworkMonitorService();
+

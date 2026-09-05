@@ -8,6 +8,7 @@ interface PullToRefreshProps {
   pullText?: string;
   releaseText?: string;
   refreshingText?: string;
+  disabled?: boolean;
 }
 
 export const PullToRefresh: React.FC<PullToRefreshProps> = ({
@@ -16,7 +17,8 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({
   className = '',
   pullText = 'اسحب للتحديث...',
   releaseText = 'اترك للتحديث الآن',
-  refreshingText = 'جارٍ تحديث البيانات...'
+  refreshingText = 'جارٍ تحديث البيانات...',
+  disabled = false,
 }) => {
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -27,12 +29,47 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({
   const THRESHOLD = 70; // px required to trigger refresh
   const MAX_PULL = 110;  // max visual displacement
 
+  // Helper to check if touch is inside a modal/card/dialog or if any modal is currently open
+  const isModalOrCardActive = (target: HTMLElement | null): boolean => {
+    if (disabled) return true;
+    
+    // Check if target is inside any modal, card, dialog, sheet, or fixed overlay
+    if (target?.closest('[role="dialog"], [data-modal], [data-no-pull], [data-prevent-pull], .fixed, .modal-overlay, .modal-content, select, input, textarea')) {
+      return true;
+    }
+
+    // Check if any modal is open in the DOM
+    if (document.querySelector('[role="dialog"], [data-modal="true"], .fixed.inset-0')) {
+      return true;
+    }
+
+    return false;
+  };
+
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (isRefreshing) return;
+    if (disabled || isRefreshing) return;
     const container = containerRef.current;
     if (!container) return;
 
-    // Only allow pulling if scrolled to top
+    const target = e.target as HTMLElement | null;
+    if (isModalOrCardActive(target)) {
+      startYRef.current = null;
+      isPullingRef.current = false;
+      return;
+    }
+
+    // Check if touch target has an inner scrollable parent with scrollTop > 0
+    let cur: HTMLElement | null = target;
+    while (cur && cur !== container) {
+      if (cur.scrollTop > 0) {
+        startYRef.current = null;
+        isPullingRef.current = false;
+        return;
+      }
+      cur = cur.parentElement;
+    }
+
+    // Only allow pulling if the root container is scrolled to top
     if (container.scrollTop <= 0) {
       startYRef.current = e.touches[0].clientY;
       isPullingRef.current = true;
@@ -43,9 +80,17 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isPullingRef.current || startYRef.current === null || isRefreshing) return;
+    if (disabled || !isPullingRef.current || startYRef.current === null || isRefreshing) return;
     const container = containerRef.current;
     if (!container) return;
+
+    const target = e.target as HTMLElement | null;
+    if (isModalOrCardActive(target)) {
+      isPullingRef.current = false;
+      startYRef.current = null;
+      setPullDistance(0);
+      return;
+    }
 
     if (container.scrollTop > 0) {
       // User scrolled down inside the element, cancel pull
@@ -67,7 +112,12 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({
   };
 
   const handleTouchEnd = async () => {
-    if (!isPullingRef.current || isRefreshing) return;
+    if (disabled || !isPullingRef.current || isRefreshing) {
+      isPullingRef.current = false;
+      startYRef.current = null;
+      setPullDistance(0);
+      return;
+    }
     isPullingRef.current = false;
     startYRef.current = null;
 

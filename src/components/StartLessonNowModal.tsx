@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { Group, Student, LessonType, AttendanceStatus, HomeworkStatus, PaymentStatus } from '../types';
 import { getDayNumber } from '../utils/scheduleUtils';
 import { formatLocalDate } from '../utils/timeUtils';
+import { areDuplicateLessons } from '../utils/lessonUtils';
 import { 
   X, Play, Users, User, Clock, Calendar as CalendarIcon, Video, MapPin, 
   CheckCircle2, Sparkles, BookOpen, Award, FileText, Zap, ChevronRight, ArrowLeft
@@ -14,7 +15,7 @@ interface StartLessonNowModalProps {
 }
 
 export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClose }) => {
-  const { groups, students, profile, addLesson, openLessonControl, saveLessonReport, startActiveLessonTimer, t } = useApp();
+  const { groups, students, profile, lessons, addLesson, updateLesson, openLessonControl, saveLessonReport, startActiveLessonTimer, t } = useApp();
 
   const now = new Date();
   const todayStr = formatLocalDate(now);
@@ -128,7 +129,52 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
       amountDue = grp?.pricePerSession || grp?.monthlyPackagePrice || 200;
     }
 
-    // 1. Create new Lesson object in context with a robust collision-proof ID
+    // 1. Check if a lesson already exists on this date & time for the same group/student
+    const candidateProbe = {
+      id: 'candidate_check',
+      groupId: targetGroupId,
+      studentId: targetStudentId || undefined,
+      studentName: targetStudentName || undefined,
+      title: targetTitle,
+      date: lessonDate,
+      time: startTime,
+      durationMinutes: Number(durationMinutes)
+    };
+
+    const existingLesson = lessons.find(l => !l.deleted && l.status !== 'cancelled' && areDuplicateLessons(l, candidateProbe, students));
+
+    if (existingLesson) {
+      if (mode === 'start_live') {
+        confetti({ particleCount: 60, spread: 50 });
+        updateLesson(existingLesson.id, { status: 'in_progress' });
+        startActiveLessonTimer(existingLesson);
+        openLessonControl(existingLesson);
+        onClose();
+        return;
+      } else {
+        // Save report to the existing lesson instead of creating duplicate
+        saveLessonReport(existingLesson.id, {
+          attendanceStatus: 'present',
+          studentAttendance,
+          homeworkStatus,
+          homeworkTitle,
+          homeworkDescription,
+          quizScore,
+          examScore,
+          participationScore: 95,
+          paymentStatus: 'pending',
+          amountPaid: 0,
+          teacherNotes,
+          savedAt: new Date().toISOString()
+        });
+        updateLesson(existingLesson.id, { status: 'completed' });
+        confetti({ particleCount: 80, spread: 60 });
+        onClose();
+        return;
+      }
+    }
+
+    // 2. No duplicate exists, create new Lesson object in context with a collision-proof ID
     const randomSuffix = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).substring(2, 8);
     const newLessonId = `l_spont_${Date.now()}_${randomSuffix}`;
     const newLessonData = {

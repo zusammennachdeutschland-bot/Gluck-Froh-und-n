@@ -192,7 +192,10 @@ export const BankCard: React.FC<BankCardProps> = ({
   const initialCapital = account.initialCapital || account.initialBalance || 0;
   const contributions = account.totalContributions || 0;
   const returns = account.accumulatedReturns || 0;
-  const totalValue = isInvestment ? (initialCapital + contributions + returns || account.currentBalance || 0) : (account.currentBalance || 0);
+  // Always prioritize authoritative currentBalance if defined, otherwise fallback to component sum
+  const totalValue = typeof account.currentBalance === 'number' 
+    ? account.currentBalance 
+    : (isInvestment ? (initialCapital + contributions + returns) : (account.initialBalance || 0));
 
   return (
     <div

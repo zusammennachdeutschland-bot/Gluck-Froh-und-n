@@ -1,42 +1,57 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" fill="#ffffff" />
-  <g transform="translate(15, 180) scale(0.55)">
+  <rect width="512" height="512" fill="#ffffff" rx="40" />
+  <g transform="translate(256, 170)" text-anchor="middle">
     <style>
       .brand-title {
-        font-family: 'Arial Black', Impact, sans-serif;
-        font-size: 140px;
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 82px;
         fill: #eb5e45;
         font-weight: 900;
-        letter-spacing: 5px;
+        letter-spacing: 4px;
       }
       .brand-title-shadow {
-        font-family: 'Arial Black', Impact, sans-serif;
-        font-size: 140px;
-        fill: #f5b7b1;
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 82px;
+        fill: #fcdcd7;
         font-weight: 900;
-        letter-spacing: 5px;
+        letter-spacing: 4px;
       }
       .umlaut {
         fill: #eb5e45;
       }
-      .subtitle {
-        font-family: 'Arial', sans-serif;
-        font-size: 40px;
-        fill: #3b5978;
-        font-weight: bold;
+      .user-title {
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 20px;
+        fill: #334155;
+        font-weight: 700;
+        letter-spacing: 1.5px;
       }
-      .line {
-        stroke: #f3a968;
-        stroke-width: 4;
+      .phone-title {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 15px;
+        fill: #64748b;
+        font-weight: 500;
+        letter-spacing: 1px;
+      }
+      .divider-line {
+        stroke: #eb5e45;
+        stroke-opacity: 0.3;
+        stroke-width: 3;
         stroke-linecap: round;
       }
     </style>
-    <text x="30" y="210" class="brand-title-shadow">GLUCK</text>
-    <text x="25" y="205" class="brand-title">GLUCK</text>
-    <circle cx="210" cy="65" r="12" class="umlaut" />
-    <circle cx="250" cy="65" r="12" class="umlaut" />
-    <text x="680" y="150" class="subtitle" text-anchor="middle">HERR ABDUL RHMAN</text>
-    <text x="680" y="200" class="subtitle" text-anchor="middle">01156435802</text>
-    <line x1="25" y1="240" x2="850" y2="240" class="line" />
+
+    <!-- Main Title "GLÜCK" centered -->
+    <text x="2" y="52" class="brand-title-shadow">GLÜCK</text>
+    <text x="0" y="50" class="brand-title">GLÜCK</text>
+
+    <!-- Minimal Divider -->
+    <line x1="-30" y1="90" x2="30" y2="90" class="divider-line" />
+
+    <!-- User Name centered below -->
+    <text x="0" y="140" class="user-title">HERR ABDUL-RAHMAN</text>
+
+    <!-- Phone Number subtle below -->
+    <text x="0" y="175" class="phone-title">01156435802</text>
   </g>
 </svg>

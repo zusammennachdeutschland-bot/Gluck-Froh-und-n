@@ -99,10 +99,12 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
   const totalAssets = activeAccounts.reduce((sum, acc) => {
     if (acc.type === 'credit') return sum;
     if (acc.type === 'investment') {
+      const current = typeof acc.currentBalance === 'number' ? acc.currentBalance : null;
+      if (current !== null) return sum + current;
       const init = acc.initialCapital || acc.initialBalance || 0;
       const contrib = acc.totalContributions || 0;
       const ret = acc.accumulatedReturns || 0;
-      return sum + (init + contrib + ret || acc.currentBalance || 0);
+      return sum + (init + contrib + ret);
     }
     return sum + (acc.currentBalance || 0);
   }, 0);

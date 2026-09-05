@@ -20,7 +20,7 @@ import { storage } from '../services/storageService';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
 import { formatLocalDate } from '../utils/timeUtils';
-import { isPendingStatus } from '../utils/lessonUtils';
+import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import LiveTimer from '../services/liveTimerPlugin';
@@ -46,6 +46,7 @@ import {
   INITIAL_HOD_STUDENTS, INITIAL_HOD_VISITS, INITIAL_HOD_ACTION_PLANS, INITIAL_HOD_COMPLAINTS,
   INITIAL_FINANCE_TRANSACTIONS, INITIAL_FINANCE_ACCOUNTS, INITIAL_FINANCE_RECURRING, INITIAL_FINANCE_INSTALLMENTS, INITIAL_FINANCE_NOTIFICATIONS
 } from '../data/initialData';
+import { alarmAudioService } from '../services/alarmAudioService';
 import confetti from 'canvas-confetti';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
@@ -204,6 +205,13 @@ interface AppContextType {
   cancelSingleScheduledNotification: (id: number) => Promise<void>;
   cancelAllPendingScheduledNotifications: () => Promise<void>;
   rebuildNotificationSchedules: () => Promise<{ count: number; nextScheduledTime: string | null }>;
+
+  // Pre-Lesson Alarm Controls
+  activeAlarmLesson: Lesson | null;
+  triggerLessonAlarm: (lesson: Lesson) => void;
+  dismissLessonAlarm: () => void;
+  snoozeLessonAlarm: (minutes?: number) => void;
+  snoozedLessonAlarmMap: Record<string, number>;
 
   // Active Lesson Control Modal & Central Timer Engine
   selectedLesson: Lesson | null;
@@ -688,27 +696,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     });
   };
 
-  const [lessons, setLessons] = useState<Lesson[]>(() => {
+  // One-time startup deduplication across all existing lessons & payments (students is already initialized above)
+  const initialLessonDeduplication = useMemo(() => {
     const saved = initialData['dl_lessons'];
-    const raw: Lesson[] = saved !== null && saved !== undefined ? saved : [];
-    const seen = new Set<string>();
-    const sanitized = (Array.isArray(raw) ? raw : []).filter(item => {
-      if (!item || !item.id || seen.has(item.id)) return false;
-      seen.add(item.id);
-      return true;
-    });
-    return filterActiveLessons(sanitized);
+    const raw: Lesson[] = Array.isArray(saved) ? saved : [];
+    return deduplicateLessonList(raw, students);
+  }, []);
+
+  const initialPaymentDeduplication = useMemo(() => {
+    const saved = initialData['dl_payments'];
+    const raw: PaymentRecord[] = Array.isArray(saved) ? saved : [];
+    return deduplicatePaymentsList(raw, initialLessonDeduplication.idMap);
+  }, [initialLessonDeduplication]);
+
+  const [lessons, setLessons] = useState<Lesson[]>(() => {
+    return filterActiveLessons(initialLessonDeduplication.deduplicated);
   });
 
-  const fullLessonsRef = useRef<Lesson[]>((() => {
-    const raw = Array.isArray(initialData['dl_lessons']) ? initialData['dl_lessons'] : [];
-    const seen = new Set<string>();
-    return raw.filter(item => {
-      if (!item || !item.id || seen.has(item.id)) return false;
-      seen.add(item.id);
-      return true;
-    });
-  })());
+  const fullLessonsRef = useRef<Lesson[]>(initialLessonDeduplication.deduplicated);
 
   // Memory Optimization: Filter active payments for global RAM state
   const filterActivePayments = (raw: PaymentRecord[]): PaymentRecord[] => {
@@ -730,26 +735,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const [payments, setPayments] = useState<PaymentRecord[]>(() => {
-    const saved = initialData['dl_payments'];
-    const raw: PaymentRecord[] = saved !== null && saved !== undefined ? saved : [];
-    const seen = new Set<string>();
-    const sanitized = (Array.isArray(raw) ? raw : []).filter(item => {
-      if (!item || !item.id || seen.has(item.id)) return false;
-      seen.add(item.id);
-      return true;
-    });
-    return filterActivePayments(sanitized);
+    return filterActivePayments(initialPaymentDeduplication.deduplicated);
   });
 
-  const fullPaymentsRef = useRef<PaymentRecord[]>((() => {
-    const raw = Array.isArray(initialData['dl_payments']) ? initialData['dl_payments'] : [];
-    const seen = new Set<string>();
-    return raw.filter(item => {
-      if (!item || !item.id || seen.has(item.id)) return false;
-      seen.add(item.id);
-      return true;
-    });
-  })());
+  const fullPaymentsRef = useRef<PaymentRecord[]>(initialPaymentDeduplication.deduplicated);
+
+  // Persist cleaned deduplicated records on startup if duplicates were found
+  useEffect(() => {
+    if (initialLessonDeduplication.hasChanges) {
+      storage.setItem('dl_lessons', initialLessonDeduplication.deduplicated);
+    }
+    if (initialPaymentDeduplication.hasChanges) {
+      storage.setItem('dl_payments', initialPaymentDeduplication.deduplicated);
+    }
+  }, [initialLessonDeduplication, initialPaymentDeduplication]);
 
   // Asynchronous Database Query methods for historical views (SessionHistoryView & ReportsView)
   const getHistoricalLessons = useCallback(async (): Promise<Lesson[]> => {
@@ -776,15 +775,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           
           // Deduplicate by lesson.id strictly (keeping the latest occurrence)
           const seen = new Set<string>();
-          const deduped: Lesson[] = [];
+          const dedupedById: Lesson[] = [];
           for (let i = rawUpdated.length - 1; i >= 0; i--) {
             const item = rawUpdated[i];
             if (item && item.id && !seen.has(item.id)) {
               seen.add(item.id);
-              deduped.unshift(item);
+              dedupedById.unshift(item);
             }
           }
           
+          // Comprehensive lesson deduplication
+          const { deduplicated: deduped } = deduplicateLessonList(dedupedById, students);
+
           fullLessonsRef.current = deduped;
           await storage.setItem('dl_lessons', deduped);
           setLessons(filterActiveLessons(deduped));
@@ -797,7 +799,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         reject(err);
       });
     });
-  }, [lessons]);
+  }, [lessons, students]);
 
   const updateFullPaymentsStorage = useCallback(async (updater: (allPayments: PaymentRecord[]) => PaymentRecord[]): Promise<PaymentRecord[]> => {
     return new Promise<PaymentRecord[]>((resolve, reject) => {
@@ -810,14 +812,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           
           // Deduplicate by payment.id strictly
           const seen = new Set<string>();
-          const deduped: PaymentRecord[] = [];
+          const dedupedById: PaymentRecord[] = [];
           for (let i = rawUpdated.length - 1; i >= 0; i--) {
             const item = rawUpdated[i];
             if (item && item.id && !seen.has(item.id)) {
               seen.add(item.id);
-              deduped.unshift(item);
+              dedupedById.unshift(item);
             }
           }
+
+          // Comprehensive payment deduplication
+          const { deduplicated: deduped } = deduplicatePaymentsList(dedupedById);
 
           fullPaymentsRef.current = deduped;
           await storage.setItem('dl_payments', deduped);
@@ -1186,6 +1191,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     await refreshPendingScheduledNotifications();
     return res;
   };
+
+  // Pre-Lesson Alarm State & Controls
+  const [activeAlarmLesson, setActiveAlarmLesson] = useState<Lesson | null>(null);
+  const [snoozedLessonAlarmMap, setSnoozedLessonAlarmMap] = useState<Record<string, number>>({});
+
+  const triggerLessonAlarm = useCallback((lesson: Lesson) => {
+    setActiveAlarmLesson(lesson);
+    if (notificationSettings.alarmModeEnabled !== false) {
+      alarmAudioService.startAlarm(
+        notificationSettings.alarmTone || 'digital',
+        notificationSettings.alarmDurationSeconds || 60
+      );
+    }
+  }, [notificationSettings.alarmModeEnabled, notificationSettings.alarmTone, notificationSettings.alarmDurationSeconds]);
+
+  const dismissLessonAlarm = useCallback(() => {
+    alarmAudioService.stopAlarm();
+    setActiveAlarmLesson(null);
+  }, []);
+
+  const snoozeLessonAlarm = useCallback((minutes: number = 5) => {
+    alarmAudioService.stopAlarm();
+    if (activeAlarmLesson) {
+      const snoozeUntil = Date.now() + minutes * 60 * 1000;
+      setSnoozedLessonAlarmMap(prev => ({ ...prev, [activeAlarmLesson.id]: snoozeUntil }));
+    }
+    setActiveAlarmLesson(null);
+  }, [activeAlarmLesson]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -2953,9 +2986,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       lessonDate.setDate(baseDate.getDate() + (week * 7));
       const dateStr = formatLocalDate(lessonDate);
 
-      // Check if an active non-deleted lesson already exists on this date/time for this group (skip check if explicit custom ID provided)
-      const exists = !lessonData.id && activeLessons.some(l => l.groupId === lessonData.groupId && l.date === dateStr && l.time === lessonData.time);
-      if (!exists) {
+      // Check if an active non-deleted lesson already exists on this date/time for this target
+      const candidate = {
+        ...lessonData,
+        id: lessonData.id || `probe_${Date.now()}`,
+        date: dateStr
+      };
+
+      const existingMatch = activeLessons.find(l => areDuplicateLessons(l, candidate, students));
+      if (!existingMatch) {
         const currentSessionNum = ((groupLessons.length + createdLessons.length) % totalSessions) + 1;
 
         createdLessons.push(wrapMutation({
@@ -2967,6 +3006,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           meetingLink: lessonData.type === 'online' ? (targetGroup?.zoomLink || profile.defaultZoomLink) : undefined,
           locationAddress: lessonData.type === 'offline' ? (targetGroup?.address || 'Hauptstraße 45, Cairo') : undefined
         } as Lesson));
+      } else {
+        // Return existing lesson instead of creating duplicate
+        createdLessons.push(existingMatch);
       }
     }
 
@@ -3313,6 +3355,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         totalSessionsInPackage: updatedTotalSessions,
         report
       } : null);
+    }
+
+    if (activeLessonSession && activeLessonSession.lessonId === lessonId) {
+      setActiveLessonSession(null);
+      clearActiveLessonNotification();
+      storage.removeItem('dl_active_lesson_session');
     }
 
     confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
@@ -3989,6 +4037,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     quickParentPhone?: string;
     quickNotes?: string;
   }): Lesson => {
+    // Check if an active lesson on this date & time already exists for this student
+    const existing = lessons.find(l => !l.deleted && l.status !== 'cancelled' && areDuplicateLessons(l, {
+      id: 'quick_check',
+      studentName: data.studentName,
+      date: data.date,
+      time: data.time,
+      durationMinutes: data.durationMinutes
+    }, students));
+
+    if (existing) {
+      return existing;
+    }
+
     const newLesson: Lesson = wrapMutation({
       ...data,
       id: `ql_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
@@ -4444,7 +4505,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Active Running Lesson Timer Engine State
   const [activeLessonSession, setActiveLessonSession] = useState<ActiveLessonSession | null>(() => {
     const saved = initialData['dl_active_lesson_session'];
-    return saved !== null && saved !== undefined ? saved : null;
+    if (!saved || typeof saved !== 'object' || !saved.lessonId) return null;
+    const allL = initialLessonDeduplication.deduplicated;
+    const existing = allL.find(l => l && l.id === saved.lessonId);
+    if (!existing || existing.status === 'completed' || existing.status === 'cancelled' || existing.deleted) {
+      storage.removeItem('dl_active_lesson_session');
+      return null;
+    }
+    return saved;
   });
 
   useEffect(() => {
@@ -4538,6 +4606,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const endActiveLessonTimer = () => {
     setActiveLessonSession(null);
     clearActiveLessonNotification();
+    storage.removeItem('dl_active_lesson_session');
     // LiveTimer.stopTimer().catch(err => console.warn('LiveTimer stop error:', err));
   };
 
@@ -4547,6 +4616,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
     setActiveLessonSession(null);
     clearActiveLessonNotification();
+    storage.removeItem('dl_active_lesson_session');
     // LiveTimer.stopTimer().catch(err => console.warn('LiveTimer stop error:', err));
   };
 
@@ -5039,6 +5109,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         cancelSingleScheduledNotification,
         cancelAllPendingScheduledNotifications,
         rebuildNotificationSchedules,
+        activeAlarmLesson,
+        triggerLessonAlarm,
+        dismissLessonAlarm,
+        snoozeLessonAlarm,
+        snoozedLessonAlarmMap,
         clearAllData,
         selectedLesson,
         setSelectedLesson,

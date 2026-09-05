@@ -5,14 +5,17 @@ import {
 } from '../types';
 import { 
   getNotificationPermission, requestNotificationPermission, 
-  openAndroidNotificationSettings 
+  openAndroidNotificationSettings, checkExactAlarmPermission,
+  openExactAlarmSettings, sendTestOutsideNotification
 } from '../services/notificationService';
 import { 
   Bell, BellOff, Volume2, Shield, Clock, Calendar, DollarSign, 
   UserCheck, FileText, RefreshCw, Trash2, CheckCircle2, AlertCircle, 
-  Smartphone, Settings, Sliders, Check, X, ArrowLeft, ArrowRight
+  Smartphone, Settings, Sliders, Check, X, ArrowLeft, ArrowRight,
+  BellRing, AlarmClock, Play, Square, VolumeX, ExternalLink
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { alarmAudioService, AlarmTone } from '../services/alarmAudioService';
 
 interface Props {
   onBack: () => void;
@@ -26,14 +29,11 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
     language, t, _t 
   } = useApp();
 
-  // Helper for inline translations
-  
-
-
   const isRtl = language === 'ar';
   const BackIcon = isRtl ? ArrowRight : ArrowLeft;
 
   const [permissionStatus, setPermissionStatus] = useState<string>('checking');
+  const [exactAlarmGranted, setExactAlarmGranted] = useState<boolean>(true);
   const [isRebuilding, setIsRebuilding] = useState<boolean>(false);
   const [rebuildFeedback, setRebuildFeedback] = useState<string | null>(null);
   const [customMinutesInput, setCustomMinutesInput] = useState<string>(
@@ -42,14 +42,57 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
   const [showCustomMinutes, setShowCustomMinutes] = useState<boolean>(
     ![5, 10, 15, 30, 60].includes(notificationSettings.lessonReminderMinutesBefore)
   );
+  const [isTestingAlarm, setIsTestingAlarm] = useState<boolean>(false);
+  const [countdownOutsideTest, setCountdownOutsideTest] = useState<number | null>(null);
 
   useEffect(() => {
     checkPermissions();
+    const unsub = alarmAudioService.onStop(() => {
+      setIsTestingAlarm(false);
+    });
+    return () => {
+      unsub();
+      alarmAudioService.stopAlarm();
+    };
   }, []);
 
   const checkPermissions = async () => {
     const status = await getNotificationPermission();
     setPermissionStatus(status);
+    const exactStatus = await checkExactAlarmPermission();
+    setExactAlarmGranted(exactStatus);
+  };
+
+  const handleTestOutsideNotification = () => {
+    setCountdownOutsideTest(3);
+    let counter = 3;
+    const timer = setInterval(() => {
+      counter -= 1;
+      if (counter <= 0) {
+        clearInterval(timer);
+        setCountdownOutsideTest(null);
+        sendTestOutsideNotification();
+        alarmAudioService.startAlarm(
+          notificationSettings.alarmTone || 'digital',
+          15
+        );
+      } else {
+        setCountdownOutsideTest(counter);
+      }
+    }, 1000);
+  };
+
+  const handleToggleTestAlarm = () => {
+    if (isTestingAlarm) {
+      alarmAudioService.stopAlarm();
+      setIsTestingAlarm(false);
+    } else {
+      setIsTestingAlarm(true);
+      alarmAudioService.startAlarm(
+        notificationSettings.alarmTone || 'digital',
+        notificationSettings.alarmDurationSeconds || 60
+      );
+    }
   };
 
   const handleRequestPermission = async () => {
@@ -218,6 +261,16 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                 تفعيل الإذن الآن
               </button>
             )}
+            {!exactAlarmGranted && (
+              <button
+                type="button"
+                onClick={openExactAlarmSettings}
+                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
+              >
+                <AlarmClock className="w-3.5 h-3.5" />
+                إذن المنبهات الدقيقة (Android)
+              </button>
+            )}
             <button
               type="button"
               onClick={openAndroidNotificationSettings}
@@ -227,6 +280,23 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
               إعدادات التطبيق في Android
             </button>
           </div>
+        </div>
+
+        {/* Heads-up outside the app info */}
+        <div className="pt-2 border-t border-surface-border/60 flex items-center justify-between text-xs text-text-muted">
+          <span className="flex items-center gap-1.5">
+            <Smartphone className="w-3.5 h-3.5 text-primary" />
+            <span>الظهور كإشعار منبثق فوق الشاشة وقفل الهاتف:</span>
+            <strong className="text-emerald-500 font-bold">مُفعل بأعلى أولوية (Heads-Up Banner)</strong>
+          </span>
+          <button
+            type="button"
+            onClick={openExactAlarmSettings}
+            className="text-[11px] text-primary hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            <span>ضبط المنبهات في النظام</span>
+            <ExternalLink className="w-3 h-3" />
+          </button>
         </div>
       </div>
 
@@ -356,6 +426,180 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
               >
                 حفظ
               </button>
+            </div>
+          )}
+        </div>
+
+        {/* CONTINUOUS ALARM MODE (وضع المنبه المستمر للحصص) */}
+        <div className="p-5 rounded-2xl bg-surface border-2 border-primary/20 dark:border-primary/30 space-y-4 shadow-sm relative overflow-hidden">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-black text-text-main flex items-center gap-2">
+                  <AlarmClock className="w-5 h-5 text-primary" />
+                  <span>{_t('وضع المنبه المستمر للتذكير بالحصص', 'Continuous Alarm Mode', 'Dauerhafter Lektions-Wecker')}</span>
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider">
+                  {_t('منبه حقيقي', 'Real Alarm', 'Echter Wecker')}
+                </span>
+              </div>
+              <p className="text-xs text-text-muted leading-relaxed">
+                {_t(
+                  'عند تفعيله، يرن التنبيه قبل موعد الحصة بصوت متواصل واهتزاز مثل منبه الهاتف الحقيقي تماماً حتى تقوم بإيقافه أو طلب غفوة، لتفادي تفويت الحصة.',
+                  'When enabled, the pre-lesson alert rings continuously with vibration like a real alarm clock until dismissed or snoozed.',
+                  'Läutet vor Lektionsbeginn durchgehend mit Vibration wie ein echter Wecker, bis er gestoppt oder geschlummert wird.'
+                )}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => updateNotificationSettings({ alarmModeEnabled: notificationSettings.alarmModeEnabled === false ? true : false })}
+              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                notificationSettings.alarmModeEnabled !== false ? 'bg-primary' : 'bg-slate-300 dark:bg-slate-700'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-surface shadow ring-0 transition duration-200 ease-in-out ${
+                  notificationSettings.alarmModeEnabled !== false ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {notificationSettings.alarmModeEnabled !== false && (
+            <div className="pt-3 border-t border-surface-border/60 space-y-4 animate-in fade-in duration-200">
+              {/* Tone Selection */}
+              <div>
+                <label className="text-xs font-bold text-text-main flex items-center gap-1.5 mb-2">
+                  <Volume2 className="w-3.5 h-3.5 text-primary" />
+                  <span>{_t('نغمة وصوت المنبه', 'Alarm Tone', 'Weckerton')}</span>
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'digital', label: _t('منبه رقمي (Beep)', 'Digital Alarm', 'Digital-Wecker') },
+                    { id: 'loud_bell', label: _t('جرس قوي', 'Loud Bell', 'Laute Glocke') },
+                    { id: 'radar', label: _t('إنذار رادار', 'Radar Alert', 'Radar-Signal') },
+                    { id: 'gentle_chime', label: _t('نغمة هادئة', 'Gentle Chime', 'Sanfter Gong') }
+                  ].map(toneItem => {
+                    const isSelected = (notificationSettings.alarmTone || 'digital') === toneItem.id;
+                    return (
+                      <button
+                        key={toneItem.id}
+                        type="button"
+                        onClick={() => updateNotificationSettings({ alarmTone: toneItem.id as AlarmTone })}
+                        className={`p-2.5 rounded-xl border text-xs font-bold text-center transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-primary/10 border-primary text-primary shadow-xs font-black'
+                            : 'bg-surface-hover/70 border-surface-border text-text-muted hover:bg-surface-hover'
+                        }`}
+                      >
+                        {toneItem.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Duration Selection */}
+              <div>
+                <label className="text-xs font-bold text-text-main flex items-center gap-1.5 mb-2">
+                  <Clock className="w-3.5 h-3.5 text-primary" />
+                  <span>{_t('مدة رنين المنبه المستمر', 'Alarm Duration', 'Weckdauer')}</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { sec: 30, label: _t('30 ثانية', '30 seconds', '30 Sekunden') },
+                    { sec: 60, label: _t('دقيقة واحدة (مستحسن)', '1 minute (Recommended)', '1 Minute (Empfohlen)') },
+                    { sec: 120, label: _t('دقيقتان', '2 minutes', '2 Minuten') }
+                  ].map(dur => {
+                    const isSelected = (notificationSettings.alarmDurationSeconds || 60) === dur.sec;
+                    return (
+                      <button
+                        key={dur.sec}
+                        type="button"
+                        onClick={() => updateNotificationSettings({ alarmDurationSeconds: dur.sec })}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-primary text-white shadow-xs'
+                            : 'bg-surface-hover text-text-main hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {dur.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Test Alarm Ringing Button */}
+              <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-surface-hover/40 p-3 rounded-xl border border-surface-border/50">
+                <div className="text-xs text-text-muted flex items-center gap-2">
+                  <BellRing className={`w-4 h-4 ${isTestingAlarm ? 'text-rose-500 animate-wiggle' : 'text-primary'}`} />
+                  <span>
+                    {isTestingAlarm
+                      ? _t('المنبه يرن الآن بصوت متواصل...', 'Alarm is ringing continuously now...', 'Wecker klingelt jetzt...')
+                      : _t('جرّب سماع المنبه وقوته للتأكد من ملاءمته لك', 'Preview the continuous alarm sound & volume', 'Weckerton probehören')}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleToggleTestAlarm}
+                  className={`px-4 py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95 ${
+                    isTestingAlarm
+                      ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-md shadow-rose-500/25 animate-pulse'
+                      : 'bg-primary hover:bg-primary-hover text-white shadow-xs'
+                  }`}
+                >
+                  {isTestingAlarm ? (
+                    <>
+                      <Square className="w-3.5 h-3.5 fill-current" />
+                      <span>{_t('إيقاف تجربة المنبه', 'Stop Preview', 'Stoppen')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>{_t('تجربة صوت المنبه', 'Test Alarm Ringing', 'Wecker testen')}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Test Outside The App Notification Button */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/20 p-3.5 rounded-xl">
+                <div className="text-xs text-text-main flex items-start sm:items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
+                  <div>
+                    <span className="font-bold block text-text-main">
+                      {_t('تجربة ظهور المنبه كإشعار خارجي (خارج البرنامج)', 'Test Alarm Outside App (Heads-Up)', 'Außerhalb der App testen')}
+                    </span>
+                    <span className="text-[11px] text-text-muted">
+                      {countdownOutsideTest !== null
+                        ? `⏳ قم بتصغير التطبيق أو قفل الهاتف الآن! سيظهر المنبه بعد (${countdownOutsideTest}) ثوانٍ...`
+                        : _t('يمنحك مهلة 3 ثوانٍ لتصغير التطبيق أو قفل الشاشة لمشاهدة ظهور المنبه فوق كل التطبيقات مع أزرار التحكم.', 'Gives you 3 seconds to minimize or lock device to see heads-up notification outside app.', 'Gibt 3 Sekunden Zeit zum Minimieren.')}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleTestOutsideNotification}
+                  disabled={countdownOutsideTest !== null}
+                  className={`px-4 py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0 ${
+                    countdownOutsideTest !== null
+                      ? 'bg-amber-500 text-white animate-pulse'
+                      : 'bg-amber-500 hover:bg-amber-600 text-white shadow-xs'
+                  }`}
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>
+                    {countdownOutsideTest !== null
+                      ? `⏳ انتظر (${countdownOutsideTest}) ثوانٍ...`
+                      : _t('اختبر الظهور بالخارج الآن', 'Test Outside Now', 'Jetzt testen')}
+                  </span>
+                </button>
+              </div>
             </div>
           )}
         </div>

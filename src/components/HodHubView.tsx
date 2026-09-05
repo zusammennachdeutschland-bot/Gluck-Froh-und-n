@@ -10,16 +10,19 @@ import {
   shareStageFollowUpViaWhatsApp,
   printStageFollowUpReport
 } from '../utils/printObservationUtils';
-import { StageFollowUpRecord, TeacherStageEvaluationItem } from '../types';
+import { StageFollowUpRecord, TeacherStageEvaluationItem, StaffAttendanceRecord } from '../types';
 import { SchoolScheduleExportModal } from './SchoolScheduleExportModal';
 import { ObservationFormModal } from './ObservationFormModal';
 import { HodStudentsView } from './HodStudentsView';
 import { ComplaintsSystemView } from './ComplaintsSystemView';
 import { ActionPlansView } from './ActionPlansView';
 import { StageCommunicationView } from './StageCommunicationView';
+import { TeacherAttendanceModal } from './TeacherAttendanceModal';
+import { DetailedStaffAttendanceModal } from './DetailedStaffAttendanceModal';
+import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
 
 export const HodHubView: React.FC = () => {
-  const { profile, updateProfile, groups, students, lessons, language, _t, t } = useApp();
+  const { profile, updateProfile, groups, students, lessons, language, _t, t, addAppNotification } = useApp();
   const schoolSettings = profile?.schoolSettings || {} as any;
 
   const [activeTab, setActiveTab] = useState<'overview' | 'timetables' | 'stage_managers' | 'plans' | 'action_plans' | 'staff' | 'students' | 'complaints'>('overview');
@@ -219,6 +222,128 @@ export const HodHubView: React.FC = () => {
     status: 'new'
   });
 
+  // Staff Attendance & Discipline State (Requirements 1, 2, 3, 4, 5)
+  const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
+  const [selectedTeacherForAttendance, setSelectedTeacherForAttendance] = useState<any | null>(null);
+  const [editingAttendanceRecord, setEditingAttendanceRecord] = useState<StaffAttendanceRecord | null>(null);
+  const [isDetailedAttendanceModalOpen, setIsDetailedAttendanceModalOpen] = useState(false);
+
+  const staffAttendanceRecords: StaffAttendanceRecord[] = schoolSettings.staffAttendanceRecords || [];
+
+  const weeklyAttendanceMetrics = React.useMemo(() => {
+    return calculateStaffAttendanceMetrics(
+      staffAttendanceRecords,
+      teachers,
+      schoolSettings,
+      'this_week',
+      'all'
+    );
+  }, [staffAttendanceRecords, teachers, schoolSettings]);
+
+  const handleSaveAttendanceRecord = (recordData: Partial<StaffAttendanceRecord>) => {
+    const existingRecords: StaffAttendanceRecord[] = schoolSettings.staffAttendanceRecords || [];
+    let updatedRecords: StaffAttendanceRecord[];
+    const nowTime = Date.now();
+
+    if (recordData.id && existingRecords.some(r => r.id === recordData.id)) {
+      updatedRecords = existingRecords.map(r => {
+        if (r.id === recordData.id) {
+          return {
+            ...r,
+            ...recordData,
+            updatedAt: nowTime,
+            version: (r.version || 1) + 1,
+            deleted: false
+          } as StaffAttendanceRecord;
+        }
+        return r;
+      });
+    } else {
+      const newRec: StaffAttendanceRecord = {
+        id: recordData.id || `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        teacherId: recordData.teacherId!,
+        teacherName: recordData.teacherName!,
+        stageManagerId: recordData.stageManagerId,
+        stageName: recordData.stageName,
+        stageSecretaryName: recordData.stageSecretaryName,
+        type: recordData.type || 'absence',
+        date: recordData.date || new Date().toISOString().split('T')[0],
+        absenceScope: recordData.absenceScope,
+        absenceStatus: recordData.absenceStatus,
+        periodNumber: recordData.periodNumber,
+        lessonClass: recordData.lessonClass,
+        replacementTeacherId: recordData.replacementTeacherId,
+        replacementTeacherName: recordData.replacementTeacherName,
+        replacementAssignments: recordData.replacementAssignments,
+        reason: recordData.reason || '',
+        notes: recordData.notes,
+        scheduledArrivalTime: recordData.scheduledArrivalTime,
+        actualArrivalTime: recordData.actualArrivalTime,
+        delayMinutes: recordData.delayMinutes,
+        scheduledLeaveTime: recordData.scheduledLeaveTime,
+        actualLeaveTime: recordData.actualLeaveTime,
+        lostMinutes: recordData.lostMinutes,
+        updatedAt: nowTime,
+        originRevision: Date.now(),
+        deleted: false,
+        version: 1
+      };
+      updatedRecords = [newRec, ...existingRecords];
+    }
+
+    const updatedSettings = {
+      ...schoolSettings,
+      staffAttendanceRecords: updatedRecords
+    };
+    updateProfile({ schoolSettings: updatedSettings });
+
+    // Notification (Requirement 5)
+    const teacherName = recordData.teacherName || 'المعلم';
+    let notifTitle = 'سجل الحضور والانضباط';
+    let notifMsg = '';
+    if (recordData.type === 'absence') {
+      const scopeLabel = recordData.absenceScope === 'lesson_based' ? 'غياب حصص' : 'غياب يوم كامل';
+      const excLabel = recordData.absenceStatus === 'excused' ? 'بعذر' : 'بدون عذر';
+      notifTitle = `⚠️ تسجيل غياب: ${teacherName}`;
+      notifMsg = `تم رصد ${scopeLabel} (${excLabel}) للمعلم ${teacherName} بتاريخ ${recordData.date || ''}.`;
+    } else if (recordData.type === 'late_arrival') {
+      notifTitle = `⏰ تسجيل تأخير صباحي: ${teacherName}`;
+      notifMsg = `تم رصد تأخير للمعلم ${teacherName} بمقدار ${recordData.delayMinutes || 0} دقيقة (الوصول: ${recordData.actualArrivalTime || ''}).`;
+    } else if (recordData.type === 'early_leave') {
+      notifTitle = `🚪 تسجيل انصراف مبكر: ${teacherName}`;
+      notifMsg = `تم رصد خروج مبكر للمعلم ${teacherName} بمقدار ${recordData.lostMinutes || 0} دقيقة مفقودة (الانصراف: ${recordData.actualLeaveTime || ''}).`;
+    }
+
+    if (addAppNotification) {
+      addAppNotification(notifTitle, notifMsg, 'system');
+    }
+
+    triggerToast(_t('تم تسجيل وحفظ واقعة الحضور بنجاح ✅', 'Attendance record saved successfully ✅', 'Erfolgreich gespeichert'));
+  };
+
+  const handleDeleteAttendanceRecord = (recordId: string) => {
+    const existingRecords: StaffAttendanceRecord[] = schoolSettings.staffAttendanceRecords || [];
+    const nowTime = Date.now();
+    const updatedRecords = existingRecords.map(r => {
+      if (r.id === recordId) {
+        return {
+          ...r,
+          deleted: true,
+          updatedAt: nowTime,
+          version: (r.version || 1) + 1
+        };
+      }
+      return r;
+    });
+    updateProfile({
+      schoolSettings: {
+        ...schoolSettings,
+        staffAttendanceRecords: updatedRecords
+      }
+    });
+    triggerToast(_t('تم حذف السجل بنجاح', 'Record deleted successfully', 'Gelöscht'));
+  };
+
   // AI Import State
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importText, setImportText] = useState('');
@@ -239,6 +364,7 @@ export const HodHubView: React.FC = () => {
   const [matrixDayFilter, setMatrixDayFilter] = useState<'all' | '0' | '1' | '2' | '3' | '4'>('all');
   const [selectedSingleTeacher, setSelectedSingleTeacher] = useState<string>('');
   const [selectedCellDetails, setSelectedCellDetails] = useState<{
+    teacherId?: string;
     teacherName: string;
     className: string;
     subjectName?: string;
@@ -249,11 +375,134 @@ export const HodHubView: React.FC = () => {
     room?: string;
   } | null>(null);
 
+  // Period Editing in Unified Matrix
+  const [editingPeriod, setEditingPeriod] = useState<{
+    teacherId: string;
+    teacherName: string;
+    dayKey: string;
+    periodNumber: number;
+    startTime: string;
+    endTime: string;
+  } | null>(null);
+  const [periodClassName, setPeriodClassName] = useState('');
+  const [periodSubjectName, setPeriodSubjectName] = useState('');
+  const [periodNotes, setPeriodNotes] = useState('');
+
   const timings = calculatePeriodsTimings(schoolSettings.periodSettings || {
     periodsCount: 8,
     firstPeriodStart: '07:30',
     defaultDuration: 45
   });
+
+  const startEditPeriod = (teacherId: string, dayKey: string, periodNumber: number) => {
+    const teacher = teachers.find(t => t.id === teacherId);
+    const teacherName = teacher?.name || (teacherId === 'hod' ? (schoolSettings.hodName || _t('رئيس القسم', 'HOD', 'Fachleiter')) : teacherId);
+    const timing = timings.find(t => t.periodNumber === periodNumber) || { startTime: '', endTime: '' };
+    const lesson = getLessonForTeacher(teacherId, dayKey, periodNumber);
+
+    setPeriodClassName(lesson?.className || '');
+    setPeriodSubjectName(lesson?.subjectName || '');
+    setPeriodNotes(lesson?.notes || '');
+    setEditingPeriod({
+      teacherId,
+      teacherName,
+      dayKey,
+      periodNumber,
+      startTime: timing.startTime,
+      endTime: timing.endTime
+    });
+  };
+
+  const handleSavePeriod = (
+    teacherId: string,
+    dayKey: string,
+    periodNumber: number,
+    data: { className: string; subjectName: string; notes?: string }
+  ) => {
+    const currentTeacherSchedules = schoolSettings.teacherSchedules || {};
+    const currentTeacherSchedule = currentTeacherSchedules[teacherId] || (teacherId === 'hod' ? (schoolSettings.schedule || {}) : {});
+    const daySchedule = [...(currentTeacherSchedule[dayKey] || (teacherId === 'hod' ? (schoolSettings.schedule?.[dayKey] || []) : []))];
+    const existingIndex = daySchedule.findIndex((p: any) => p.periodNumber === periodNumber);
+
+    const updatedPeriod: any = {
+      ...(existingIndex >= 0 ? daySchedule[existingIndex] : {}),
+      periodNumber,
+      className: data.className.trim(),
+      subjectName: data.subjectName.trim(),
+      notes: data.notes?.trim() || '',
+      source: 'school_schedule'
+    };
+
+    if (existingIndex >= 0) {
+      daySchedule[existingIndex] = updatedPeriod;
+    } else {
+      daySchedule.push(updatedPeriod);
+    }
+    daySchedule.sort((a: any, b: any) => a.periodNumber - b.periodNumber);
+
+    const updatedTeacherSchedule = {
+      ...currentTeacherSchedule,
+      [dayKey]: daySchedule
+    };
+
+    const updatedTeacherSchedules = {
+      ...currentTeacherSchedules,
+      [teacherId]: updatedTeacherSchedule
+    };
+
+    const updates: any = {
+      teacherSchedules: updatedTeacherSchedules
+    };
+
+    if (teacherId === 'hod') {
+      const mainSchedule = schoolSettings.schedule || {};
+      const mainDaySchedule = [...(mainSchedule[dayKey] || [])];
+      const mainIdx = mainDaySchedule.findIndex((p: any) => p.periodNumber === periodNumber);
+      if (mainIdx >= 0) {
+        mainDaySchedule[mainIdx] = updatedPeriod;
+      } else {
+        mainDaySchedule.push(updatedPeriod);
+      }
+      mainDaySchedule.sort((a: any, b: any) => a.periodNumber - b.periodNumber);
+      updates.schedule = {
+        ...mainSchedule,
+        [dayKey]: mainDaySchedule
+      };
+    }
+
+    persistHodData(updates);
+  };
+
+  const handleClearPeriod = (teacherId: string, dayKey: string, periodNumber: number) => {
+    const currentTeacherSchedules = schoolSettings.teacherSchedules || {};
+    const currentTeacherSchedule = currentTeacherSchedules[teacherId] || (teacherId === 'hod' ? (schoolSettings.schedule || {}) : {});
+    const daySchedule = (currentTeacherSchedule[dayKey] || (teacherId === 'hod' ? (schoolSettings.schedule?.[dayKey] || []) : [])).filter((p: any) => p.periodNumber !== periodNumber);
+
+    const updatedTeacherSchedule = {
+      ...currentTeacherSchedule,
+      [dayKey]: daySchedule
+    };
+
+    const updatedTeacherSchedules = {
+      ...currentTeacherSchedules,
+      [teacherId]: updatedTeacherSchedule
+    };
+
+    const updates: any = {
+      teacherSchedules: updatedTeacherSchedules
+    };
+
+    if (teacherId === 'hod') {
+      const mainSchedule = schoolSettings.schedule || {};
+      const mainDaySchedule = (mainSchedule[dayKey] || []).filter((p: any) => p.periodNumber !== periodNumber);
+      updates.schedule = {
+        ...mainSchedule,
+        [dayKey]: mainDaySchedule
+      };
+    }
+
+    persistHodData(updates);
+  };
 
   // Workload Calculator
   const getWorkload = (teacherId: string) => {
@@ -1685,6 +1934,180 @@ export const HodHubView: React.FC = () => {
             </div>
           </div>
 
+          {/* STAFF ATTENDANCE OVERVIEW (HOD DASHBOARD OVERVIEW TAB - Requirement 3) */}
+          <div className="bg-surface border border-surface-border rounded-2xl p-3 sm:p-4 shadow-2xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-surface-border/60 pb-2.5">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs sm:text-sm font-black text-text-main">
+                      {_t('موجز حضور وانضباط المعلمين', 'Staff Attendance Overview', 'Anwesenheitsübersicht')}
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold border border-surface-border">
+                      {_t('الأسبوع الحالي', 'Current Week', 'Diese Woche')}
+                    </span>
+                  </div>
+                  <p className="text-[10.5px] text-text-muted font-medium">
+                    {_t('رصد الغياب، التأخير، الانصراف المبكر ومعدل الالتزام الأسبوعي', 'Weekly tracking of absences, delays, early leaves and discipline', 'Wöchentliche Erfassung von Abwesenheiten und Verspätungen')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTeacherForAttendance(null);
+                    setEditingAttendanceRecord(null);
+                    setIsAttendanceModalOpen(true);
+                  }}
+                  className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-[10.5px] font-bold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{_t('تسجيل واقعة', 'Log Event', 'Erfassen')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDetailedAttendanceModalOpen(true)}
+                  className="px-2.5 py-1.5 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-[10.5px] font-bold border border-surface-border flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <FileText className="w-3.5 h-3.5 text-primary" />
+                  <span>{_t('عرض السجل التفصيلي', 'View Details', 'Details')}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 5 Compact Metrics Tiles */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+              {/* Absences */}
+              <div className="p-2.5 rounded-xl bg-rose-500/5 border border-rose-500/20 flex flex-col justify-between">
+                <span className="text-[10px] font-bold text-rose-700 dark:text-rose-400">
+                  {_t('الغياب هذا الأسبوع', 'Absences This Week', 'Fehlzeiten')}
+                </span>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-xl font-black text-rose-600 dark:text-rose-400">
+                    {weeklyAttendanceMetrics.totalAbsences}
+                  </span>
+                  <span className="text-[10px] text-text-muted font-bold">
+                    {_t('يوم/حصة', 'days/lessons', 'Tage')}
+                  </span>
+                </div>
+                <span className="text-[9.5px] text-text-muted font-medium mt-0.5">
+                  {weeklyAttendanceMetrics.totalUnexcusedAbsences > 0 ? (
+                    <span className="text-rose-600 font-bold">{weeklyAttendanceMetrics.totalUnexcusedAbsences} {_t('بدون عذر', 'unexcused', 'unentsch.')}</span>
+                  ) : (
+                    _t('لا غياب غير مبرر', 'No unexcused', 'Keine')
+                  )}
+                </span>
+              </div>
+
+              {/* Late Arrivals */}
+              <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20 flex flex-col justify-between">
+                <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                  {_t('التأخير الصباحي', 'Late Arrivals', 'Verspätungen')}
+                </span>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-xl font-black text-amber-600 dark:text-amber-400">
+                    {weeklyAttendanceMetrics.totalLateArrivals}
+                  </span>
+                  <span className="text-[10px] text-text-muted font-bold">
+                    {_t('مرات', 'times', 'Mal')}
+                  </span>
+                </div>
+                <span className="text-[9.5px] text-amber-600 dark:text-amber-400 font-bold mt-0.5">
+                  {weeklyAttendanceMetrics.totalDelayMinutes} {_t('دقيقة تأخير', 'delay mins', 'Min. Verspätung')}
+                </span>
+              </div>
+
+              {/* Early Leaves */}
+              <div className="p-2.5 rounded-xl bg-orange-500/5 border border-orange-500/20 flex flex-col justify-between">
+                <span className="text-[10px] font-bold text-orange-700 dark:text-orange-400">
+                  {_t('الانصراف المبكر', 'Early Leaves', 'Frühzeitiges Gehen')}
+                </span>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-xl font-black text-orange-600 dark:text-orange-400">
+                    {weeklyAttendanceMetrics.totalEarlyLeaves}
+                  </span>
+                  <span className="text-[10px] text-text-muted font-bold">
+                    {_t('مرات', 'times', 'Mal')}
+                  </span>
+                </div>
+                <span className="text-[9.5px] text-orange-600 dark:text-orange-400 font-bold mt-0.5">
+                  {weeklyAttendanceMetrics.totalLostHours} {_t('ساعة مفقودة', 'lost hrs', 'Std. Verlust')}
+                </span>
+              </div>
+
+              {/* Teachers With Violations */}
+              <div className="p-2.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20 flex flex-col justify-between">
+                <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-400">
+                  {_t('معلمين بمخالفات', 'Teachers With Violations', 'Lehrer mit Verstößen')}
+                </span>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-xl font-black text-indigo-600 dark:text-indigo-400">
+                    {weeklyAttendanceMetrics.teachersWithViolationsCount}
+                  </span>
+                  <span className="text-[10px] text-text-muted font-bold">
+                    / {teachers.length}
+                  </span>
+                </div>
+                <span className="text-[9.5px] text-text-muted font-medium mt-0.5">
+                  {weeklyAttendanceMetrics.teachersWithViolationsCount === 0 ? (
+                    <span className="text-emerald-600 font-bold">{_t('انضباط تام 100%', 'Full compliance', 'Vollständig')}</span>
+                  ) : (
+                    _t('بحاجة لمتابعة', 'Needs follow-up', 'Nachverfolgung')
+                  )}
+                </span>
+              </div>
+
+              {/* Average Attendance Rate */}
+              <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 flex flex-col justify-between col-span-2 sm:col-span-1">
+                <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                  {_t('معدل الانضباط العام', 'Average Discipline Rate', 'Disziplinrate')}
+                </span>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-xl font-black text-emerald-600 dark:text-emerald-400">
+                    {weeklyAttendanceMetrics.averageAttendanceRate}%
+                  </span>
+                </div>
+                <div className="w-full bg-surface-border rounded-full h-1.5 mt-1 overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-500 ${
+                      weeklyAttendanceMetrics.averageAttendanceRate >= 90
+                        ? 'bg-emerald-500'
+                        : weeklyAttendanceMetrics.averageAttendanceRate >= 75
+                        ? 'bg-amber-500'
+                        : 'bg-rose-500'
+                    }`}
+                    style={{ width: `${weeklyAttendanceMetrics.averageAttendanceRate}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Quick summary strip if there are infractions */}
+            {weeklyAttendanceMetrics.teachersWithViolationsCount > 0 && (
+              <div className="p-2 rounded-xl bg-surface-hover/60 border border-surface-border/80 flex flex-wrap items-center justify-between gap-1.5 text-[10.5px]">
+                <div className="flex items-center gap-1.5 text-text-muted">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="font-bold text-text-main">{_t('المعلمين الأكثر تسجيلاً للمخالفات هذا الأسبوع:', 'Teachers with infractions this week:', 'Auffällige Lehrer:')}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {weeklyAttendanceMetrics.teacherStats
+                    .filter(s => (s.absences + s.lateArrivals + s.earlyLeaves) > 0)
+                    .slice(0, 3)
+                    .map(s => (
+                      <span key={s.teacherId} className="px-2 py-0.5 rounded-lg bg-surface border border-surface-border font-bold text-text-main">
+                        {s.teacherName}: <span className="text-rose-600">{s.absences} غياب</span> • <span className="text-amber-600">{s.lateArrivals} تأخير</span>
+                      </span>
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Floating Speed-Dial FAB (+) - Raised above bottom navigation bar */}
           <div className="fixed bottom-28 sm:bottom-8 right-4 sm:right-8 z-45 flex flex-col items-end gap-2">
             {isFabOpen && (
@@ -1873,28 +2296,26 @@ export const HodHubView: React.FC = () => {
                               return (
                                 <td 
                                   key={t.id} 
-                                  onClick={() => {
-                                    if (lesson) {
-                                      setSelectedCellDetails({
-                                        teacherName: t.name,
-                                        className: lesson.className,
-                                        subjectName: lesson.subjectName,
-                                        periodNumber: period.periodNumber,
-                                        startTime: period.startTime,
-                                        endTime: period.endTime,
-                                        dayKey,
-                                        room: lesson.roomName
-                                      });
-                                    }
-                                  }}
-                                  className={`p-0.5 sm:p-1 border-b border-l border-surface-border text-center h-full align-middle overflow-hidden ${lesson ? 'cursor-pointer hover:bg-primary-soft/30 transition-colors' : ''}`}
+                                  onClick={() => startEditPeriod(t.id, dayKey, period.periodNumber)}
+                                  className="p-0.5 sm:p-1 border-b border-l border-surface-border text-center h-full align-middle overflow-hidden cursor-pointer hover:bg-primary-soft/20 transition-colors group/cell"
+                                  title={lesson 
+                                    ? `${t.name}: ${lesson.className}${lesson.subjectName ? ` - ${lesson.subjectName}` : ''} (${_t('انقر للتعديل', 'Click to edit', 'Klicken zum Bearbeiten')})` 
+                                    : `${t.name}: ${_t('انقر لإضافة حصة', 'Click to add period', 'Klicken zum Hinzufügen')}`
+                                  }
                                 >
                                   {lesson ? (
-                                    <div className="flex flex-col items-center justify-center bg-primary/10 border border-primary/20 rounded-[4px] py-1 px-0.5 sm:px-1 w-full overflow-hidden">
+                                    <div className="flex flex-col items-center justify-center bg-primary/10 hover:bg-primary/20 border border-primary/20 hover:border-primary/40 rounded-[4px] py-1 px-0.5 sm:px-1 w-full overflow-hidden transition-all">
                                       <span className="font-bold text-text-main text-[9px] sm:text-[11px] leading-none truncate w-full">{lesson.className}</span>
+                                      {lesson.subjectName && (
+                                        <span className="text-[7.5px] sm:text-[9px] text-primary font-bold truncate w-full leading-none mt-0.5 hidden sm:block">
+                                          {lesson.subjectName}
+                                        </span>
+                                      )}
                                     </div>
                                   ) : (
-                                    <span className="text-text-muted/20 text-[11px] sm:text-[11px] leading-none">-</span>
+                                    <div className="flex items-center justify-center w-full py-1 text-slate-300 dark:text-slate-600 group-hover/cell:text-primary transition-colors">
+                                      <span className="text-[11px] font-black leading-none select-none">+</span>
+                                    </div>
                                   )}
                                 </td>
                               );
@@ -1931,16 +2352,7 @@ export const HodHubView: React.FC = () => {
                                   key={period.periodNumber} 
                                   className="p-3 flex items-center justify-between hover:bg-surface-hover/30 cursor-pointer transition-colors"
                                   onClick={() => {
-                                    setSelectedCellDetails({
-                                      teacherName: teachers.find(t => t.id === selectedSingleTeacher)?.name || '',
-                                      className: lesson.className,
-                                      subjectName: lesson.subjectName,
-                                      periodNumber: period.periodNumber,
-                                      startTime: period.startTime,
-                                      endTime: period.endTime,
-                                      dayKey,
-                                      room: lesson.roomName
-                                    });
+                                    startEditPeriod(selectedSingleTeacher, dayKey, period.periodNumber);
                                   }}
                                 >
                                   <div className="flex items-center gap-1.5">
@@ -2321,7 +2733,25 @@ export const HodHubView: React.FC = () => {
                     className="w-full px-2 py-1.5 sm:py-2 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-1.5 w-full sm:w-auto sm:flex sm:items-center sm:gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 w-full sm:w-auto sm:flex sm:items-center sm:gap-2">
+                  <button
+                    onClick={() => {
+                      setSelectedTeacherForAttendance(null);
+                      setEditingAttendanceRecord(null);
+                      setIsAttendanceModalOpen(true);
+                    }}
+                    className="px-2 sm:px-2.5 py-1.5 sm:py-2 bg-amber-600 hover:bg-amber-700 text-white text-[10.5px] sm:text-[11px] font-bold rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap"
+                  >
+                    <Clock className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{_t('تسجيل حضور / غياب', 'Attendance', 'Anwesenheit')}</span>
+                  </button>
+                  <button
+                    onClick={() => setIsDetailedAttendanceModalOpen(true)}
+                    className="px-2 sm:px-2.5 py-1.5 sm:py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-[10.5px] sm:text-[11px] font-bold rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap"
+                  >
+                    <FileText className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                    <span className="truncate">{_t('تقرير الانضباط', 'Discipline Report', 'Disziplin')}</span>
+                  </button>
                   <button
                     onClick={() => {
                       setObsInitialTeacherId(undefined);
@@ -2432,6 +2862,18 @@ export const HodHubView: React.FC = () => {
 
                         {/* Right/End: Actions */}
                         <div className="flex items-center gap-1 md:w-auto shrink-0 justify-end mt-2 md:mt-0 pt-3 md:pt-0 border-t border-surface-border md:border-t-0" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => {
+                              setSelectedTeacherForAttendance(teacher);
+                              setEditingAttendanceRecord(null);
+                              setIsAttendanceModalOpen(true);
+                            }}
+                            className="p-2 sm:p-1.5 text-amber-600 hover:bg-amber-500/10 rounded-lg transition-colors cursor-pointer"
+                            title={_t('تسجيل حضور / غياب للمعلم', 'Log Teacher Attendance', 'Anwesenheit erfassen')}
+                          >
+                            <Clock className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                          </button>
+
                           <button
                             onClick={() => {
                               setEditingTeacher(teacher);
@@ -2553,6 +2995,144 @@ export const HodHubView: React.FC = () => {
                     </div>
                   </div>
                 )}
+
+                {/* Teacher Attendance Summary Card (Requirement 2) */}
+                {(() => {
+                  const teacherRecords = (schoolSettings.staffAttendanceRecords || []).filter(
+                    (r: any) => !r.deleted && (r.teacherId === t.id || r.teacherName === t.name)
+                  );
+                  const absences = teacherRecords.filter((r: any) => r.type === 'absence' || r.type === 'ABSENCE').length;
+                  const lateArrivals = teacherRecords.filter((r: any) => r.type === 'late_arrival' || r.type === 'LATE_ARRIVAL').length;
+                  const earlyLeaves = teacherRecords.filter((r: any) => r.type === 'early_leave' || r.type === 'EARLY_LEAVE').length;
+                  const delayMinutes = teacherRecords
+                    .filter((r: any) => r.type === 'late_arrival' || r.type === 'LATE_ARRIVAL')
+                    .reduce((sum: number, r: any) => sum + (r.delayMinutes || 0), 0);
+
+                  let score = 100;
+                  teacherRecords.forEach((r: any) => {
+                    const isAbsence = r.type === 'absence' || r.type === 'ABSENCE';
+                    const isLate = r.type === 'late_arrival' || r.type === 'LATE_ARRIVAL';
+                    const isEarly = r.type === 'early_leave' || r.type === 'EARLY_LEAVE';
+                    const isUnexcused = r.absenceStatus === 'unexcused' || r.absenceReasonType === 'UNEXCUSED';
+                    const isLesson = r.absenceScope === 'lesson_based' || r.absenceScope === 'LESSON_BASED';
+
+                    if (isAbsence) {
+                      if (isUnexcused) score -= (isLesson ? 10 : 20);
+                      else score -= (isLesson ? 3 : 7);
+                    } else if (isLate) {
+                      const mins = r.delayMinutes || 0;
+                      if (mins > 30) score -= 10;
+                      else if (mins > 15) score -= 5;
+                      else if (mins > 0) score -= 2;
+                    } else if (isEarly) {
+                      const lost = r.lostMinutes || 0;
+                      if (lost > 30) score -= 10;
+                      else if (lost > 0) score -= 5;
+                    }
+                  });
+                  score = Math.max(0, Math.min(100, Math.round(score)));
+
+                  return (
+                    <div className="p-3 rounded-xl bg-surface-hover/80 border border-surface-border space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center">
+                            <Clock className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-[11px] font-black text-text-main">
+                              {_t('ملخص الحضور والانضباط (Attendance Summary)', 'Attendance Summary', 'Anwesenheitsübersicht')}
+                            </h4>
+                            <span className="text-[10px] text-text-muted">
+                              {teacherRecords.length} {_t('وقائع مسجلة', 'events recorded', 'Vorfälle erfasst')}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedTeacherForAttendance(t);
+                            setEditingAttendanceRecord(null);
+                            setIsAttendanceModalOpen(true);
+                          }}
+                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10.5px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs active:scale-95"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>{_t('تسجيل حدث جديد', 'Log Event', 'Erfassen')}</span>
+                        </button>
+                      </div>
+
+                      {/* 5 Stats Grid */}
+                      <div className="grid grid-cols-5 gap-1.5 text-center">
+                        <div className="p-2 rounded-lg bg-surface border border-surface-border">
+                          <span className="text-[9.5px] font-bold text-rose-600 block truncate">
+                            {_t('الغياب', 'Absences', 'Fehltage')}
+                          </span>
+                          <span className="text-sm font-black text-text-main">{absences}</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-surface border border-surface-border">
+                          <span className="text-[9.5px] font-bold text-amber-600 block truncate">
+                            {_t('التأخير', 'Late', 'Verspätet')}
+                          </span>
+                          <span className="text-sm font-black text-text-main">{lateArrivals}</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-surface border border-surface-border">
+                          <span className="text-[9.5px] font-bold text-orange-600 block truncate">
+                            {_t('الانصراف', 'Early', 'Früh')}
+                          </span>
+                          <span className="text-sm font-black text-text-main">{earlyLeaves}</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-surface border border-surface-border">
+                          <span className="text-[9.5px] font-bold text-blue-600 block truncate">
+                            {_t('دقائق تأخير', 'Delay Min', 'Minuten')}
+                          </span>
+                          <span className="text-sm font-black text-text-main">{delayMinutes}m</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-surface border border-surface-border">
+                          <span className="text-[9.5px] font-bold text-emerald-600 block truncate">
+                            {_t('الانضباط', 'Discipline', 'Score')}
+                          </span>
+                          <span className={`text-sm font-black ${score >= 90 ? 'text-emerald-600' : score >= 75 ? 'text-amber-600' : 'text-rose-600'}`}>
+                            {score}%
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Recent Attendance Events list for this teacher */}
+                      {teacherRecords.length > 0 && (
+                        <div className="space-y-1 pt-1.5 border-t border-surface-border/60">
+                          <span className="text-[10px] font-bold text-text-muted">
+                            {_t('سجل الوقائع الأخيرة للمعلم:', 'Recent Incidents for Teacher:', 'Letzte Vorfälle:')}
+                          </span>
+                          <div className="max-h-28 overflow-y-auto space-y-1">
+                            {teacherRecords.slice(0, 4).map((rec: any) => (
+                              <div key={rec.id} className="p-1.5 rounded-lg bg-surface border border-surface-border flex items-center justify-between text-[10px]">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`px-1.5 py-0.5 rounded font-bold text-[9px] ${
+                                    (rec.type === 'absence' || rec.type === 'ABSENCE') ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                                    (rec.type === 'late_arrival' || rec.type === 'LATE_ARRIVAL') ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                                    'bg-orange-50 text-orange-700 border border-orange-200'
+                                  }`}>
+                                    {(rec.type === 'absence' || rec.type === 'ABSENCE') ? _t('غياب', 'Absence', 'Abwesend') :
+                                     (rec.type === 'late_arrival' || rec.type === 'LATE_ARRIVAL') ? _t('تأخير', 'Late', 'Verspätet') :
+                                     _t('انصراف مبكر', 'Early Leave', 'Früh')}
+                                  </span>
+                                  <span className="font-bold text-text-main">{rec.date}</span>
+                                  {rec.delayMinutes ? <span className="text-amber-600 font-bold">({rec.delayMinutes} د)</span> : null}
+                                  {rec.lostMinutes ? <span className="text-orange-600 font-bold">({rec.lostMinutes} د)</span> : null}
+                                </div>
+                                <span className="text-text-muted truncate max-w-[160px]">
+                                  {rec.reason || (rec.absenceStatus === 'unexcused' || rec.absenceReasonType === 'UNEXCUSED' ? 'بدون عذر' : 'بعذر')}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Complaints History */}
                 <div className="space-y-2">
@@ -3038,9 +3618,165 @@ export const HodHubView: React.FC = () => {
                 </div>
               )}
             </div>
+
+            {selectedCellDetails.teacherId && (
+              <div className="p-3 pt-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cell = selectedCellDetails;
+                    setSelectedCellDetails(null);
+                    startEditPeriod(cell.teacherId!, cell.dayKey, cell.periodNumber);
+                  }}
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>{_t('تعديل بيانات الحصة', 'Edit Period Details', 'Stundendetails bearbeiten')}</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
+
+      {/* MODAL: Edit / Add Period Dialog in Unified Matrix */}
+      {editingPeriod && (() => {
+        const existingLesson = getLessonForTeacher(editingPeriod.teacherId, editingPeriod.dayKey, editingPeriod.periodNumber);
+        const hasExistingLesson = Boolean(existingLesson && (existingLesson.className || existingLesson.subjectName));
+
+        return (
+          <div 
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[110] animate-fade-in" 
+            onClick={() => setEditingPeriod(null)}
+          >
+            <div 
+              className="bg-surface rounded-3xl border border-surface-border w-full max-w-md p-5 space-y-4 animate-scale-up shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-surface-border">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-primary-soft text-primary flex items-center justify-center font-bold shrink-0">
+                    <Edit3 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5">
+                      <span>
+                        {hasExistingLesson 
+                          ? _t(`تعديل بيانات الحصة ${editingPeriod.periodNumber}`, `Edit Period ${editingPeriod.periodNumber} Details`, `Bearbeite Stunde ${editingPeriod.periodNumber}`)
+                          : _t(`إضافة حصة جديدة (الحصة ${editingPeriod.periodNumber})`, `Add New Period (${editingPeriod.periodNumber})`, `Neue Stunde (${editingPeriod.periodNumber})`)
+                        }
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-text-muted font-bold mt-0.5">
+                      <span className="text-primary">{editingPeriod.teacherName}</span> • {WEEKDAY_NAMES[editingPeriod.dayKey as keyof typeof WEEKDAY_NAMES]} {editingPeriod.startTime ? `(${editingPeriod.startTime} - ${editingPeriod.endTime})` : ''}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingPeriod(null)}
+                  className="p-1.5 hover:bg-surface-hover rounded-full text-text-muted cursor-pointer transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-black text-text-main">
+                    {_t('المادة أو النشاط', 'Subject / Activity', 'Fach / Aktivität')}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={_t('مثال: لغة ألمانية، رياضيات...', 'e.g. German, Math...', 'z.B. Deutsch, Mathe...')}
+                    value={periodSubjectName}
+                    onChange={(e) => setPeriodSubjectName(e.target.value)}
+                    className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary text-text-main font-bold"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-black text-text-main">
+                    {_t('الفصل أو المجموعة', 'Class / Group', 'Klasse / Gruppe')} <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={_t('مثال: 1/أ، مجموعة التقوية...', 'e.g. Class 10A, Group B...', 'z.B. Klasse 10A, Gruppe B...')}
+                    value={periodClassName}
+                    onChange={(e) => setPeriodClassName(e.target.value)}
+                    className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary text-text-main font-bold"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-black text-text-main">
+                    {_t('ملاحظات إضافية', 'Additional Notes', 'Zusätzliche Notizen')}
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder={_t('أي ملاحظات أو تنبيهات لهذه الحصة...', 'Any notes regarding this school period...', 'Notizen zu dieser Stunde...')}
+                    value={periodNotes}
+                    onChange={(e) => setPeriodNotes(e.target.value)}
+                    className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary text-text-main font-medium resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-surface-border gap-2">
+                {hasExistingLesson ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleClearPeriod(editingPeriod.teacherId, editingPeriod.dayKey, editingPeriod.periodNumber);
+                      setEditingPeriod(null);
+                      triggerToast(_t('تم مسح الحصة بنجاح', 'Period cleared successfully', 'Stunde gelöscht'));
+                    }}
+                    className="px-3 py-2 text-xs font-bold text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{_t('مسح الحصة', 'Clear Period', 'Entfernen')}</span>
+                  </button>
+                ) : <div />}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingPeriod(null)}
+                    className="px-4 py-2 bg-surface hover:bg-surface-hover text-text-muted rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!periodClassName.trim() && !periodSubjectName.trim()) {
+                        triggerToast(_t('يرجى إدخال اسم الفصل أو المادة', 'Please enter class or subject name', 'Bitte Klasse oder Fach eingeben'));
+                        return;
+                      }
+                      handleSavePeriod(
+                        editingPeriod.teacherId,
+                        editingPeriod.dayKey,
+                        editingPeriod.periodNumber,
+                        {
+                          className: periodClassName,
+                          subjectName: periodSubjectName,
+                          notes: periodNotes
+                        }
+                      );
+                      setEditingPeriod(null);
+                      triggerToast(_t('تم حفظ بيانات الحصة بنجاح', 'Period saved successfully', 'Stunde gespeichert'));
+                    }}
+                    className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold focus:outline-none shadow-xs cursor-pointer active:scale-95 transition-all"
+                  >
+                    {_t('حفظ البيانات', 'Save', 'Speichern')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Teacher Add/Edit Modal */}
       {isTeacherModalOpen && (
@@ -3947,6 +4683,62 @@ export const HodHubView: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* TEACHER ATTENDANCE LOG MODAL (Requirements 1, 2) */}
+      {isAttendanceModalOpen && (
+        <TeacherAttendanceModal
+          isOpen={isAttendanceModalOpen}
+          onClose={() => {
+            setIsAttendanceModalOpen(false);
+            setSelectedTeacherForAttendance(null);
+            setEditingAttendanceRecord(null);
+          }}
+          onSave={(data) => {
+            handleSaveAttendanceRecord(data);
+          }}
+          initialTeacher={selectedTeacherForAttendance}
+          teachers={teachers}
+          availableTeachers={teachers}
+          schoolSettings={schoolSettings}
+          stageManagers={schoolSettings.stageManagers || []}
+          editingRecord={editingAttendanceRecord}
+          _t={_t}
+          isRtl={language === 'ar'}
+        />
+      )}
+
+      {/* DETAILED STAFF ATTENDANCE & DISCIPLINE REPORT MODAL (Requirements 1, 3, 4) */}
+      {isDetailedAttendanceModalOpen && (
+        <DetailedStaffAttendanceModal
+          isOpen={isDetailedAttendanceModalOpen}
+          onClose={() => setIsDetailedAttendanceModalOpen(false)}
+          attendanceRecords={staffAttendanceRecords}
+          records={staffAttendanceRecords}
+          teachers={teachers}
+          schoolSettings={schoolSettings}
+          onOpenNewRecordModal={(teacherId) => {
+            const t = teachers.find(item => item.id === teacherId);
+            setSelectedTeacherForAttendance(t || null);
+            setEditingAttendanceRecord(null);
+            setIsAttendanceModalOpen(true);
+          }}
+          onAddRecord={(teacher) => {
+            setSelectedTeacherForAttendance(teacher || null);
+            setEditingAttendanceRecord(null);
+            setIsAttendanceModalOpen(true);
+          }}
+          onEditRecord={(record) => {
+            setEditingAttendanceRecord(record);
+            setSelectedTeacherForAttendance(null);
+            setIsAttendanceModalOpen(true);
+          }}
+          onDeleteRecord={(recordId) => {
+            handleDeleteAttendanceRecord(recordId);
+          }}
+          _t={_t}
+          language={language}
+        />
       )}
     </div>
   );

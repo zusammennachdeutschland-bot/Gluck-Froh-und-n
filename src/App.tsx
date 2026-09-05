@@ -44,8 +44,11 @@ import { SetupWizard } from './components/SetupWizard';
 import { BackupModal } from './components/BackupModal';
 import { FloatingNetworkMonitor } from './components/FloatingNetworkMonitor';
 import { AddFinanceTransactionModal } from './components/finance/modals/AddFinanceTransactionModal';
+import { LoadingScreen } from './components/LoadingScreen';
+import { LessonAlarmModal } from './components/LessonAlarmModal';
 
 import { useLessonReminders } from './hooks/useLessonReminders';
+import { setupNotificationActionListener } from './services/notificationService';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 
@@ -68,7 +71,10 @@ function MainApp() {
     refreshCalendarAndDashboard,
     syncAllPeers,
     t,
-    language
+    language,
+    activeAlarmLesson,
+    dismissLessonAlarm,
+    snoozeLessonAlarm
   } = useApp();
 
   const [quickTransactionType, setQuickTransactionType] = useState<'income' | 'expense' | 'transfer' | null>(null);
@@ -181,6 +187,29 @@ function MainApp() {
       }
     }
   }, [pendingLessonId, lessons, openLessonControl]);
+
+  // Handle outside-the-app notification actions and clicks (Start lesson, Snooze, Dismiss)
+  useEffect(() => {
+    const unsub = setupNotificationActionListener(({ actionId, lessonId }) => {
+      if (actionId === 'START_LESSON' || actionId === 'tap') {
+        dismissLessonAlarm();
+        if (lessonId) {
+          const target = lessons.find(l => l.id === lessonId);
+          if (target) {
+            openLessonControl(target);
+          }
+        }
+      } else if (actionId === 'SNOOZE_ALARM') {
+        snoozeLessonAlarm(5);
+      } else if (actionId === 'DISMISS_ALARM') {
+        dismissLessonAlarm();
+      }
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [lessons, openLessonControl, dismissLessonAlarm, snoozeLessonAlarm]);
 
   // Native Widget Deep-Link Router & Cold Start listener
   useEffect(() => {
@@ -329,6 +358,7 @@ function MainApp() {
 
         {/* Tab View Content Area with Pull-to-Refresh & Full Multi-Device Sync */}
         <PullToRefresh
+          disabled={activeTab !== 'home' || isControlModalOpen || isAddLessonModalOpen || isAddQuickLessonModalOpen || isStartLessonNowModalOpen || isAddStudentModalOpen || isAddGroupModalOpen || isBackupModalOpen || !!quickTransactionType}
           onRefresh={async () => {
             refreshCalendarAndDashboard();
             try {
@@ -451,6 +481,17 @@ function MainApp() {
           onClose={() => setQuickTransactionType(null)}
         />
       )}
+      {activeAlarmLesson && (
+        <LessonAlarmModal
+          lesson={activeAlarmLesson}
+          onDismiss={dismissLessonAlarm}
+          onSnooze={snoozeLessonAlarm}
+          onStartNow={(lesson) => {
+            dismissLessonAlarm();
+            openLessonControl(lesson);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -514,7 +555,7 @@ export default function App() {
   }
 
   if (!initialData) {
-    return <div className="h-[100dvh] w-screen flex items-center justify-center bg-background"><div className="animate-pulse text-slate-500">Lade Daten...</div></div>;
+    return <LoadingScreen message="Lade Daten..." />;
   }
 
   return (

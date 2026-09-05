@@ -123,8 +123,23 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
     : (student.name || '').split(' ').map(n => n ? n.charAt(0).toUpperCase() + n.slice(1) : '').join(' '));
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl sm:rounded-[32px] w-full max-w-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col my-2 sm:my-4 max-h-[96vh] sm:max-h-none">
+    <div
+      role="dialog"
+      data-modal="true"
+      onClick={onClose}
+      onTouchStart={(e) => e.stopPropagation()}
+      onTouchMove={(e) => e.stopPropagation()}
+      onTouchEnd={(e) => e.stopPropagation()}
+      style={{ overscrollBehaviorY: 'contain' }}
+      className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto overscroll-contain"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+        onTouchEnd={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl sm:rounded-[32px] w-full max-w-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col my-2 sm:my-4 max-h-[96vh] sm:max-h-none overscroll-contain"
+      >
         
         {/* Top Control Header */}
         <div className="flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-5 pb-1 sm:pb-2 shrink-0">

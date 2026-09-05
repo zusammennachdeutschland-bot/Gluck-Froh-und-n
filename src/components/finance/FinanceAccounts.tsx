@@ -27,10 +27,12 @@ export const FinanceAccounts: React.FC = () => {
   const totalAssets = activeAccounts.reduce((sum, acc) => {
     if (acc.type === 'credit') return sum; // don't count credit limit as asset
     if (acc.type === 'investment') {
+      const current = typeof acc.currentBalance === 'number' ? acc.currentBalance : null;
+      if (current !== null) return sum + current;
       const init = acc.initialCapital || acc.initialBalance || 0;
       const contrib = acc.totalContributions || 0;
       const ret = acc.accumulatedReturns || 0;
-      return sum + (init + contrib + ret || acc.currentBalance || 0);
+      return sum + (init + contrib + ret);
     }
     return sum + (acc.currentBalance || 0);
   }, 0);
@@ -42,10 +44,12 @@ export const FinanceAccounts: React.FC = () => {
   const totalInvestments = activeAccounts
     .filter(a => a.type === 'investment')
     .reduce((sum, acc) => {
+      const current = typeof acc.currentBalance === 'number' ? acc.currentBalance : null;
+      if (current !== null) return sum + current;
       const init = acc.initialCapital || acc.initialBalance || 0;
       const contrib = acc.totalContributions || 0;
       const ret = acc.accumulatedReturns || 0;
-      return sum + (init + contrib + ret || acc.currentBalance || 0);
+      return sum + (init + contrib + ret);
     }, 0);
 
   const netBalance = totalAssets - totalCreditDebt;
@@ -265,7 +269,11 @@ export const FinanceAccounts: React.FC = () => {
               <div>
                 <span className="block text-[10px] text-text-muted uppercase">{_t('رأس المال', 'Capital', 'Kapital')}</span>
                 <span className="font-black text-xs text-text-main">
-                  {(selectedAccount.initialCapital || selectedAccount.initialBalance || 0).toLocaleString()} {selectedAccount.currency}
+                  {(
+                    selectedAccount.currentBalance !== undefined && selectedAccount.accumulatedReturns !== undefined
+                      ? Math.max(0, Math.round((selectedAccount.currentBalance - (selectedAccount.totalContributions || 0) - (selectedAccount.accumulatedReturns || 0)) * 100) / 100)
+                      : (selectedAccount.initialCapital || selectedAccount.initialBalance || 0)
+                  ).toLocaleString()} {selectedAccount.currency}
                 </span>
               </div>
               <div>

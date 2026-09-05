@@ -9,8 +9,9 @@ async function startServer() {
   app.use(express.json());
 
   // API Routes
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+  app.all("/api/health", (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.status(200).json({ status: "ok" });
   });
 
   app.get("/api/hod/dashboard/kpis", (req, res) => {

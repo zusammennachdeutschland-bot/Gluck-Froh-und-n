@@ -73,15 +73,30 @@ const getSoundFilename = (sound: NotificationSound): string | undefined => {
 export const initNotificationChannels = async (settings?: NotificationSettings) => {
   if (Capacitor.isNativePlatform() && !isChannelCreated) {
     try {
+      // 0. High-Priority Pre-Lesson Alarm Channel (Heads-up banner outside app + Lock screen)
+      await LocalNotifications.createChannel({
+        id: 'lesson_alarm',
+        name: 'منبه مواعيد الحصص المسبقة (Lesson Alarms)',
+        description: 'منبهات بارزة ورنين عالي لمواعيد الحصص القادمة تظهر فوق التطبيقات وعلى شاشة القفل',
+        importance: 5 as Importance, // IMPORTANCE_MAX -> Heads-up banner outside app!
+        visibility: 1 as any, // VISIBILITY_PUBLIC -> On lock screen
+        vibration: true,
+        lights: true,
+        lightColor: '#EF4444',
+        sound: settings ? getSoundFilename(settings.alarmTone === 'loud_bell' ? 'bell' : settings.alarmTone === 'gentle_chime' ? 'chime' : 'beep') : 'beep.wav',
+      });
+
       // 1. Lesson Reminders Channel
       await LocalNotifications.createChannel({
         id: 'lessons_reminders',
         name: 'Lesson Reminders & Active Timers',
         description: 'Notifications for class reminders and running lesson timer',
-        importance: settings ? getImportanceFromPriority(settings.lessonReminder.priority) : 4,
-        visibility: 1,
+        importance: 5 as Importance, // Elevated to MAX for outside app visibility
+        visibility: 1 as any,
         sound: settings ? getSoundFilename(settings.lessonReminder.sound) : 'beep.wav',
         vibration: true,
+        lights: true,
+        lightColor: '#3B82F6',
       });
 
       // 2. Lesson Start Channel
@@ -89,10 +104,12 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
         id: 'lesson_start',
         name: 'Lesson Start Alerts',
         description: 'Notifications when a lesson time arrives',
-        importance: settings ? getImportanceFromPriority(settings.lessonStart.priority) : 5,
-        visibility: 1,
+        importance: 5 as Importance,
+        visibility: 1 as any,
         sound: settings ? getSoundFilename(settings.lessonStart.sound) : 'default',
         vibration: true,
+        lights: true,
+        lightColor: '#10B981',
       });
 
       // 3. Payment Due Channel
@@ -101,7 +118,7 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
         name: 'Payment Due Reminders',
         description: 'Notifications for student pending payments and package renewals',
         importance: settings ? getImportanceFromPriority(settings.paymentDue.priority) : 3,
-        visibility: 1,
+        visibility: 1 as any,
         sound: settings ? getSoundFilename(settings.paymentDue.sound) : 'default',
         vibration: true,
       });
@@ -112,7 +129,7 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
         name: 'Daily Summary Reports',
         description: 'Notifications for daily teacher schedule and earnings summary',
         importance: settings ? getImportanceFromPriority(settings.dailySummary.priority) : 3,
-        visibility: 1,
+        visibility: 1 as any,
         sound: settings ? getSoundFilename(settings.dailySummary.sound) : 'gentle.wav',
         vibration: true,
       });
@@ -123,14 +140,73 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
         name: 'Attendance Reminders',
         description: 'Reminders to log student attendance after class',
         importance: settings ? getImportanceFromPriority(settings.attendanceReminder.priority) : 3,
-        visibility: 1,
+        visibility: 1 as any,
         sound: settings ? getSoundFilename(settings.attendanceReminder.sound) : 'chime.wav',
         vibration: true,
       });
 
+      // Register interactive action buttons for notifications appearing outside the app
+      try {
+        await LocalNotifications.registerActionTypes({
+          types: [
+            {
+              id: 'LESSON_ALARM_ACTIONS',
+              actions: [
+                {
+                  id: 'START_LESSON',
+                  title: '▶️ بدء الحصة',
+                  foreground: true,
+                },
+                {
+                  id: 'SNOOZE_ALARM',
+                  title: '⏰ غفوة 5 د',
+                  foreground: false,
+                },
+                {
+                  id: 'DISMISS_ALARM',
+                  title: '✖️ إيقاف',
+                  destructive: true,
+                  foreground: false,
+                }
+              ]
+            }
+          ]
+        });
+      } catch (e) {
+        console.warn('registerActionTypes notice:', e);
+      }
+
       isChannelCreated = true;
     } catch (err) {
       console.warn('Failed to create notification channels:', err);
+    }
+  }
+};
+
+/**
+ * Checks if exact alarm permission is granted on Android (for reliable alarms outside the app).
+ */
+export const checkExactAlarmPermission = async (): Promise<boolean> => {
+  if (Capacitor.isNativePlatform() && typeof (LocalNotifications as any).checkExactNotificationSetting === 'function') {
+    try {
+      const res = await (LocalNotifications as any).checkExactNotificationSetting();
+      return res?.exact_alarm === 'granted';
+    } catch {
+      return true;
+    }
+  }
+  return true;
+};
+
+/**
+ * Opens the Android system settings screen to allow setting exact alarms.
+ */
+export const openExactAlarmSettings = async () => {
+  if (Capacitor.isNativePlatform() && typeof (LocalNotifications as any).changeExactNotificationSetting === 'function') {
+    try {
+      await (LocalNotifications as any).changeExactNotificationSetting();
+    } catch (err) {
+      console.warn('Failed to open exact alarm settings:', err);
     }
   }
 };
@@ -340,7 +416,13 @@ export const clearActiveLessonNotification = async () => {
 /**
  * System notification helpers for alerts and reminders
  */
-export const sendSystemNotification = async (title: string, body: string, tag: string = 'general') => {
+export const sendSystemNotification = async (
+  title: string, 
+  body: string, 
+  tag: string = 'general',
+  extra?: Record<string, any>,
+  actionTypeId?: string
+) => {
   if (Capacitor.isNativePlatform()) {
     try {
       await initNotificationChannels();
@@ -350,6 +432,7 @@ export const sendSystemNotification = async (title: string, body: string, tag: s
       if (tag === 'payment') channelId = 'payment_due';
       if (tag === 'lessonStart') channelId = 'lesson_start';
       if (tag === 'attendance') channelId = 'attendance_reminder';
+      if (tag.startsWith('upcoming-') || tag === 'lesson_alarm') channelId = 'lesson_alarm';
       
       await LocalNotifications.schedule({
         notifications: [
@@ -358,7 +441,9 @@ export const sendSystemNotification = async (title: string, body: string, tag: s
             title,
             body,
             channelId,
-            schedule: { at: new Date(Date.now() + 100) },
+            schedule: { at: new Date(Date.now() + 100), allowWhileIdle: true },
+            actionTypeId: actionTypeId || (tag.startsWith('upcoming-') || tag === 'lesson_alarm' ? 'LESSON_ALARM_ACTIONS' : undefined),
+            extra: extra || {}
           }
         ]
       });
@@ -370,11 +455,52 @@ export const sendSystemNotification = async (title: string, body: string, tag: s
       const perm = await getNotificationPermission();
       if (perm !== 'granted') return;
 
-      new Notification(title, {
+      // Check for ServiceWorker showNotification to present system-level OS banner outside browser tab
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        try {
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg && reg.showNotification) {
+            const swOptions: any = {
+              body,
+              tag,
+              icon: '/icon.png',
+              badge: '/icon.png',
+              requireInteraction: true, // Crucial: forces notification to stay on screen outside browser
+              silent: false,
+              vibrate: [500, 200, 500, 200, 500, 200, 800],
+              data: { ...extra, url: window.location.href },
+              actions: (tag.startsWith('upcoming-') || tag === 'lesson_alarm') ? [
+                { action: 'start', title: '▶️ بدء الحصة' },
+                { action: 'snooze', title: '⏰ غفوة 5 دقائق' },
+                { action: 'dismiss', title: '✖️ إيقاف' }
+              ] : undefined
+            };
+            await reg.showNotification(title, swOptions);
+            return;
+          }
+        } catch {}
+      }
+
+      const notif = new Notification(title, {
         body,
         tag,
-        icon: '/pwa-192x192.png'
+        icon: '/icon.png',
+        badge: '/icon.png',
+        requireInteraction: true
       });
+
+      notif.onclick = () => {
+        try {
+          window.focus();
+          notif.close();
+        } catch {}
+      };
+
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate([500, 200, 500, 200, 500]);
+        } catch {}
+      }
     } catch (err) {
       console.warn('Browser notification error:', err);
     }
@@ -382,13 +508,16 @@ export const sendSystemNotification = async (title: string, body: string, tag: s
 };
 
 /**
- * Schedule future local notification (e.g. for upcoming lesson reminders)
+ * Schedule future local notification (e.g. for upcoming lesson reminders) with allowWhileIdle: true
  */
 export const scheduleLocalNotification = async (
   id: number,
   title: string,
   body: string,
-  scheduleDate: Date
+  scheduleDate: Date,
+  channelId: string = 'lesson_alarm',
+  actionTypeId?: string,
+  extra?: Record<string, any>
 ) => {
   if (Capacitor.isNativePlatform()) {
     try {
@@ -399,8 +528,10 @@ export const scheduleLocalNotification = async (
             id,
             title,
             body,
-            channelId: 'lessons_reminders',
-            schedule: { at: scheduleDate },
+            channelId,
+            schedule: { at: scheduleDate, allowWhileIdle: true },
+            actionTypeId: actionTypeId || 'LESSON_ALARM_ACTIONS',
+            extra: extra || {}
           }
         ]
       });
@@ -587,7 +718,8 @@ export const rebuildAllNotificationSchedules = async (
     scheduleDate: Date,
     channelId: string,
     category: 'lessonReminder' | 'lessonStart' | 'paymentDue' | 'dailySummary' | 'attendanceReminder' | 'schoolLessonReminder',
-    extraData: Record<string, any> = {}
+    extraData: Record<string, any> = {},
+    actionTypeId?: string
   ) => {
     const atEpoch = scheduleDate.getTime();
     if (atEpoch <= now) return; // Ignore past dates
@@ -601,7 +733,8 @@ export const rebuildAllNotificationSchedules = async (
       title,
       body,
       channelId,
-      schedule: { at: scheduleDate },
+      schedule: { at: scheduleDate, allowWhileIdle: true },
+      actionTypeId,
       extra: { ...extraData, category, atEpoch }
     });
 
@@ -642,14 +775,16 @@ export const rebuildAllNotificationSchedules = async (
       const minutesBefore = settings.lessonReminderMinutesBefore || 15;
       const reminderEpoch = lessonStartEpoch - minutesBefore * 60 * 1000;
       if (reminderEpoch > now) {
+        const isAlarm = settings.alarmModeEnabled !== false;
         addNotification(
           generateDeterministicId(`rem_${lesson.id}`, 10000),
-          `⏰ تذكير بموعد الحصّة: ${lessonDisplayName}`,
+          isAlarm ? `⏰ منبه موعد الحصّة: ${lessonDisplayName}` : `⏰ تذكير بموعد الحصّة: ${lessonDisplayName}`,
           `حصّة ${lessonDisplayName} تبدأ بعد ${minutesBefore} دقيقة (الساعة ${lesson.time})`,
           new Date(reminderEpoch),
-          'lessons_reminders',
+          isAlarm ? 'lesson_alarm' : 'lessons_reminders',
           'lessonReminder',
-          { lessonId: lesson.id, groupName: lessonDisplayName }
+          { lessonId: lesson.id, groupName: lessonDisplayName, isAlarm },
+          'LESSON_ALARM_ACTIONS'
         );
       }
     }
@@ -659,12 +794,13 @@ export const rebuildAllNotificationSchedules = async (
       if (lessonStartEpoch > now) {
         addNotification(
           generateDeterministicId(`start_${lesson.id}`, 20000),
-          `🔔 حان موعد الحصّة الآن: ${lessonDisplayName}`,
-          `بدأت الآن حصّة ${lessonDisplayName} (${lesson.title || lessonDisplayName})`,
+          `🔔 حان موعد حصّة: ${lessonDisplayName}`,
+          `بدأت الآن حصّة ${lessonDisplayName} (الساعة ${lesson.time})`,
           new Date(lessonStartEpoch),
           'lesson_start',
           'lessonStart',
-          { lessonId: lesson.id, groupName: lessonDisplayName }
+          { lessonId: lesson.id, groupName: lessonDisplayName },
+          'LESSON_ALARM_ACTIONS'
         );
       }
     }
@@ -836,3 +972,51 @@ export const rebuildAllNotificationSchedules = async (
     nextScheduledTime: nextScheduledTimeStr
   };
 };
+
+/**
+ * Setup listeners for notification clicks and action buttons when user interacts from outside the app
+ */
+export const setupNotificationActionListener = (
+  onAction: (action: { actionId: string; lessonId?: string; extra?: any }) => void
+) => {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const perfSub = LocalNotifications.addListener('localNotificationActionPerformed', (notificationAction) => {
+        const actionId = notificationAction.actionId; // 'tap', 'START_LESSON', 'SNOOZE_ALARM', 'DISMISS_ALARM'
+        const extra = notificationAction.notification.extra || {};
+        const lessonId = extra.lessonId;
+        onAction({ actionId, lessonId, extra });
+      });
+
+      const recSub = LocalNotifications.addListener('localNotificationReceived', (notification) => {
+        const extra = notification.extra || {};
+        // If an alarm notification is received
+        if (extra.isAlarm || notification.channelId === 'lesson_alarm') {
+          onAction({ actionId: 'ALARM_RECEIVED', lessonId: extra.lessonId, extra });
+        }
+      });
+
+      return () => {
+        perfSub.then(sub => sub.remove()).catch(() => {});
+        recSub.then(sub => sub.remove()).catch(() => {});
+      };
+    } catch (e) {
+      console.warn('Failed to register notification action listener:', e);
+    }
+  }
+  return () => {};
+};
+
+/**
+ * Triggers a test notification designed to pop up outside the app (Heads-Up Banner + Sound + Actions)
+ */
+export const sendTestOutsideNotification = async () => {
+  await sendSystemNotification(
+    '⏰ تجربة منبه موعد الحصة خارج البرنامج',
+    'هكذا يظهر منبه الحصة في أعلى الشاشة وعلى شاشة القفل عند تصغير التطبيق أو قفل الهاتف.',
+    'lesson_alarm',
+    { isTest: true },
+    'LESSON_ALARM_ACTIONS'
+  );
+};
+
