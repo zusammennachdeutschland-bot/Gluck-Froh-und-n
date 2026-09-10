@@ -1,3 +1,118 @@
+import { Group, Lesson } from '../types';
+
+export interface GroupCycleInfo {
+  sessionCount: number;
+  currentSessionNumber: number;
+  completedInCycle: number;
+  totalCompletedAllTime: number;
+  isPerLesson: boolean;
+  progressPercent: number;
+  cycleNumber: number;
+  label: string;
+}
+
+/**
+ * Single source of truth for group cycle session calculations across the application.
+ */
+export const getGroupCycleInfo = (
+  group: Partial<Group> | null | undefined,
+  lessons?: Lesson[],
+  language: 'ar' | 'en' | 'de' = 'ar'
+): GroupCycleInfo => {
+  if (!group) {
+    return {
+      sessionCount: 4,
+      currentSessionNumber: 1,
+      completedInCycle: 0,
+      totalCompletedAllTime: 0,
+      isPerLesson: false,
+      progressPercent: 0,
+      cycleNumber: 1,
+      label: language === 'ar' ? 'الحصة 1 من 4' : language === 'de' ? 'Sitzung 1 von 4' : 'Session 1 of 4'
+    };
+  }
+
+  const isPerLesson = Boolean(
+    group.paymentCycle === 'per_lesson' || 
+    group.paymentModel === 'per_session' || 
+    (group.sessionCount !== undefined && group.sessionCount <= 1)
+  );
+
+  if (isPerLesson) {
+    const label = language === 'ar' 
+      ? 'محاسبة بالحصة' 
+      : language === 'de' 
+        ? 'Pro Sitzung' 
+        : 'Per Session';
+    const totalCompleted = (lessons || []).filter(l => l.groupId === group.id && !l.deleted && l.status === 'completed').length;
+    return {
+      sessionCount: 1,
+      currentSessionNumber: 1,
+      completedInCycle: 0,
+      totalCompletedAllTime: totalCompleted,
+      isPerLesson: true,
+      progressPercent: 100,
+      cycleNumber: 1,
+      label
+    };
+  }
+
+  const sessionCount = (group.sessionCount && group.sessionCount > 1) ? group.sessionCount : 4;
+  const startingSessionNumber = Math.min(
+    sessionCount,
+    Math.max(1, group.startingSessionNumber || 1)
+  );
+
+  const groupLessons = (lessons || []).filter(l => l.groupId === group.id && !l.deleted);
+
+  const completedLessons = groupLessons
+    .filter(l => l.status === 'completed')
+    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+
+  const inProgressLesson = groupLessons.find(l => l.status === 'in_progress');
+
+  const upcomingScheduled = groupLessons
+    .filter(l => l.status === 'scheduled')
+    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+
+  let currentSessionNumber = startingSessionNumber;
+
+  if (inProgressLesson && inProgressLesson.sessionNumber && inProgressLesson.sessionNumber >= 1) {
+    currentSessionNumber = ((inProgressLesson.sessionNumber - 1) % sessionCount) + 1;
+  } else if (upcomingScheduled.length > 0 && upcomingScheduled[0].sessionNumber && upcomingScheduled[0].sessionNumber >= 1) {
+    currentSessionNumber = ((upcomingScheduled[0].sessionNumber - 1) % sessionCount) + 1;
+  } else if (completedLessons.length > 0) {
+    const lastCompleted = completedLessons[completedLessons.length - 1];
+    if (lastCompleted.sessionNumber && lastCompleted.sessionNumber >= 1) {
+      const lastNum = ((lastCompleted.sessionNumber - 1) % sessionCount) + 1;
+      currentSessionNumber = (lastNum % sessionCount) + 1;
+    } else {
+      currentSessionNumber = ((startingSessionNumber - 1 + completedLessons.length) % sessionCount) + 1;
+    }
+  }
+
+  const completedInCycle = currentSessionNumber - 1;
+  const progressPercent = Math.min(100, Math.round((completedInCycle / sessionCount) * 100));
+  const cycleNumber = Math.floor(completedLessons.length / sessionCount) + 1;
+
+  const label = language === 'ar'
+    ? `الحصة ${currentSessionNumber} من ${sessionCount}`
+    : language === 'de'
+      ? `Sitzung ${currentSessionNumber} von ${sessionCount}`
+      : `Session ${currentSessionNumber} of ${sessionCount}`;
+
+  return {
+    sessionCount,
+    currentSessionNumber,
+    completedInCycle,
+    totalCompletedAllTime: completedLessons.length,
+    isPerLesson: false,
+    progressPercent,
+    cycleNumber,
+    label
+  };
+};
+
 export const isPendingStatus = (status: string) => {
   return status !== 'completed' && status !== 'cancelled';
 };

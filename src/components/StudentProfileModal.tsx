@@ -66,7 +66,10 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
     }
   });
 
-  const unbilledCompletedCount = lessons.filter(l => {
+  // One source of truth for cycle progress
+  const openPaymentRecord = studentPayments.find(p => !p.deleted && (p.status === 'pending' || p.status === 'partial' || p.status === 'due' || (p.lessonDates && p.lessonDates.length > 0)));
+
+  const unbilledCompletedLessons = lessons.filter(l => {
     if (l.status !== 'completed') return false;
     const matchesGroup = assignedGroup ? l.groupId === assignedGroup.id : false;
     const matchesStudent = l.studentId === student.id || l.studentName === student.name;
@@ -74,9 +77,24 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
     const att = l.report?.studentAttendance?.[student.id] || l.report?.attendanceStatus || 'present';
     if (att === 'absent') return false;
     return !paidLessonIds.has(l.id);
-  }).length;
+  });
 
-  const currentCycleProgress = unbilledCompletedCount === 0 ? 0 : (unbilledCompletedCount % cycleLength || cycleLength);
+  const maxCompletedSessionNum = Math.max(0, ...unbilledCompletedLessons.map(l => l.sessionNumber || 0));
+  const virtualOffset = (assignedGroup?.startingSessionNumber && assignedGroup.startingSessionNumber > 1 && paidLessonIds.size === 0)
+    ? (assignedGroup.startingSessionNumber - 1)
+    : 0;
+
+  let currentCycleProgress = 0;
+  if (openPaymentRecord && openPaymentRecord.lessonDates && openPaymentRecord.lessonDates.length > 0) {
+    currentCycleProgress = Math.min(cycleLength, openPaymentRecord.lessonDates.length);
+  } else if (maxCompletedSessionNum >= cycleLength) {
+    currentCycleProgress = cycleLength;
+  } else if (maxCompletedSessionNum > 0) {
+    currentCycleProgress = (maxCompletedSessionNum % cycleLength) || cycleLength;
+  } else if (unbilledCompletedLessons.length + virtualOffset > 0) {
+    const totalCount = unbilledCompletedLessons.length + virtualOffset;
+    currentCycleProgress = totalCount >= cycleLength ? cycleLength : ((totalCount % cycleLength) || cycleLength);
+  }
 
   // Attendance stats
   const presentCount = studentLessons.filter(l => l.status === 'completed' && l.report && (l.report.studentAttendance?.[student.id] || l.report.attendanceStatus || 'present') === 'present').length;

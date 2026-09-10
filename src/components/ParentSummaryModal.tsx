@@ -40,14 +40,16 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
     const perfFeedback = report?.studentPerformance?.[activeStudent?.id || '']?.generatedFeedback?.detailed || '';
     const attendance = report?.attendanceStatus === 'present' ? 'Anwesend (Present) ✅' : report?.attendanceStatus === 'late' ? 'Verspätet (Late) ⚠️' : 'Abwesend (Absent) ❌';
     const homework = report?.homeworkStatus === 'completed' ? 'Vollständig erledigt (Completed) ✅' : report?.homeworkStatus === 'assigned' ? 'Neu aufgegeben (Assigned) 📝' : 'Nicht erledigt ❌';
+    const sessionLine = (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) 
+      ? `⏱️ Sitzung: Session ${lesson.sessionNumber} von ${lesson.totalSessionsInPackage}\n` 
+      : '';
     
     return `Guten Tag ${parentName}! 🇩🇪
 
 Hier ist der Unterrichtsbericht für ${lesson.studentName || lesson.title} vom ${lesson.date}:
 
 📚 Kurs: ${lesson.title} (${lesson.grade})
-⏱️ Sitzung: Session ${lesson.sessionNumber} von ${lesson.totalSessionsInPackage}
-✅ Anwesenheit: ${attendance}
+${sessionLine}✅ Anwesenheit: ${attendance}
 📖 Hausaufgabe: ${homework} ${report?.homeworkTitle ? `("${report.homeworkTitle}")` : ''}
 📊 Bewertung:
   • Quiz: ${report?.quizScore ?? 'N/A'}/100

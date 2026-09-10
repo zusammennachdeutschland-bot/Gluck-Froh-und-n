@@ -33,6 +33,15 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const associatedGroup = groups.find(g => g.id === lesson.groupId);
   const groupWhatsAppLink = associatedGroup?.whatsAppGroupLink || '';
 
+  // Check if the lesson/group operates on a cycle package (not per-lesson / single session)
+  const hasCycle = !lesson.isQuickLesson && (
+    associatedGroup 
+      ? (associatedGroup.paymentCycle !== 'per_lesson' && associatedGroup.paymentModel !== 'per_session' && (associatedGroup.sessionCount || 8) > 1)
+      : ((lesson.totalSessionsInPackage || 1) > 1)
+  );
+  const totalCycleSessions = associatedGroup?.sessionCount || lesson.totalSessionsInPackage || 8;
+  const currentSessionNumber = lesson.sessionNumber || 1;
+
   // Find students associated with this lesson or group
   const groupStudents = lesson.groupId 
     ? students.filter(s => s.groupId === lesson.groupId) 
@@ -80,10 +89,11 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const getBulkReportText = () => {
     const taughtToday = lesson.report?.teacherNotes || 'لم يحدد بعد';
     const nextHomework = lesson.report?.homeworkDescription || 'لا يوجد واجب';
+    const cycleLine = hasCycle ? `\n🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
     
     let text = `السلام عليكم ورحمة الله وبركاته 👋
 📊 تقرير الحصة المجمع لمجموعة: ${associatedGroup?.name || 'مجموعة اللغة الألمانية'}
-📅 الدرس: ${lesson.title}
+📅 الدرس: ${lesson.title}${cycleLine}
 
 تم اليوم شرح:
 ${taughtToday}
@@ -173,10 +183,11 @@ ${nextHomework}
     const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
 
     const notesSection = cleanStudentNote ? `\n\nملاحظات المعلم:\n• ${cleanStudentNote}` : '';
+    const cycleSection = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})\n\n` : '';
 
     const generated = `السلام عليكم ورحمة الله وبركاته 👋
 
-تم اليوم شرح:
+${cycleSection}تم اليوم شرح:
 ${taughtToday}
 
 الواجب:
@@ -201,6 +212,11 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
   }, [
     selectedStudentId,
     lesson.report,
+    lesson.sessionNumber,
+    lesson.totalSessionsInPackage,
+    hasCycle,
+    currentSessionNumber,
+    totalCycleSessions,
     activeStudent,
     isManualEdited,
     activeTab,
@@ -287,7 +303,7 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                 {t('auto_share_session_report')}
               </h2>
               <p className="text-xs text-text-muted">
-                {lesson.title} {lesson.grade ? `• ${lesson.grade}` : ''} {lesson.date ? `• ${lesson.date}` : ''}
+                {lesson.title} {lesson.grade ? `• ${lesson.grade}` : ''} {hasCycle ? `• الحصة ${currentSessionNumber}/${totalCycleSessions}` : ''} {lesson.date ? `• ${lesson.date}` : ''}
               </p>
             </div>
           </div>

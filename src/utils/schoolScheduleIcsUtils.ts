@@ -25,16 +25,6 @@ export const DAY_KEY_TO_RRULE_BYDAY: Record<string, string> = {
   '6': 'SA',
 };
 
-export const DAY_KEY_TO_NAME: Record<string, { ar: string; en: string; de: string }> = {
-  '0': { ar: 'الأحد', en: 'Sunday', de: 'Sonntag' },
-  '1': { ar: 'الإثنين', en: 'Monday', de: 'Montag' },
-  '2': { ar: 'الثلاثاء', en: 'Tuesday', de: 'Dienstag' },
-  '3': { ar: 'الأربعاء', en: 'Wednesday', de: 'Mittwoch' },
-  '4': { ar: 'الخميس', en: 'Thursday', de: 'Donnerstag' },
-  '5': { ar: 'الجمعة', en: 'Friday', de: 'Freitag' },
-  '6': { ar: 'السبت', en: 'Saturday', de: 'Samstag' },
-};
-
 function escapeIcsText(text: string): string {
   if (!text) return '';
   return text

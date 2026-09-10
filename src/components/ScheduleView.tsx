@@ -793,10 +793,14 @@ export const ScheduleView: React.FC = () => {
                           className="flex items-center gap-2 text-xs text-text-muted font-medium cursor-pointer whitespace-nowrap overflow-x-auto no-scrollbar pt-0.5"
                         >
                           <span>{lesson.grade}</span>
-                          <span className="text-text-muted/40 text-[10px]">•</span>
-                          <span className="font-semibold text-primary">
-                            Session {lesson.sessionNumber}/{lesson.totalSessionsInPackage}
-                          </span>
+                          {(lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) ? (
+                            <>
+                              <span className="text-text-muted/40 text-[10px]">•</span>
+                              <span className="font-semibold text-primary">
+                                Session {lesson.sessionNumber}/{lesson.totalSessionsInPackage}
+                              </span>
+                            </>
+                          ) : null}
                           <span className="text-text-muted/40 text-[10px]">•</span>
                           <span className="font-semibold text-primary">
                             {t('schedule_weekly')}

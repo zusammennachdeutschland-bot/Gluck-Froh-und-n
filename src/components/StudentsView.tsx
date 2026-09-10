@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Student, Group } from '../types';
 import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
-import { Users, UserPlus, Search, Phone, Send, ChevronRight, Plus, MapPin, Video, FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, FileText, Award, DollarSign, Bot, ChevronDown, Filter } from 'lucide-react';
+import { Users, UserPlus, Search, Phone, Send, ChevronRight, Plus, MapPin, Video, FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, FileText, Award, DollarSign, Bot, ChevronDown, Filter, Sparkles } from 'lucide-react';
 import { StudentProfileModal } from './StudentProfileModal';
 import { GroupProfileModal } from './GroupProfileModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
@@ -12,6 +12,7 @@ import { formatGroupScheduleDisplay, getDayNumber } from '../utils/scheduleUtils
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
+import { getGroupCycleInfo } from '../utils/lessonUtils';
 
 export const StudentsView: React.FC = () => {
   const { 
@@ -566,6 +567,21 @@ export const StudentsView: React.FC = () => {
           ) : (
             filteredGroups.map((group, idx) => {
             const count = students.filter(s => s.groupId === group.id).length;
+            const cycleInfo = getGroupCycleInfo(group, lessons, language);
+            const isPerLessonGroup = Boolean(
+              cycleInfo.isPerLesson ||
+              group.paymentCycle === 'per_lesson' || 
+              group.paymentModel === 'per_session' || 
+              (group.sessionCount !== undefined && group.sessionCount <= 1)
+            );
+
+            const perSessionPrice = group.pricePerSession 
+              ? group.pricePerSession 
+              : (group.monthlyPackagePrice && group.sessionCount && group.sessionCount > 1 
+                  ? Math.round(group.monthlyPackagePrice / group.sessionCount) 
+                  : (group.monthlyPackagePrice || 0));
+
+            const packageSessionsCount = (group.sessionCount && group.sessionCount > 1) ? group.sessionCount : (cycleInfo.sessionCount || 4);
 
             return (
               <div
@@ -582,8 +598,8 @@ export const StudentsView: React.FC = () => {
                     {group.type === 'online' ? <Video className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
                   </div>
 
-                  <div className="flex-1 min-w-0 space-y-0.5">
-                    <h3 className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors break-words leading-snug">
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <h3 className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors truncate leading-tight">
                       {group.name}
                     </h3>
 
@@ -593,14 +609,21 @@ export const StudentsView: React.FC = () => {
                           {group.grade}
                         </span>
                       )}
-                      <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1 py-0.2 rounded text-[9px]">
+                      <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1 py-0.2 rounded text-[9px] shrink-0">
                         {count} {t('daily_stats_students')}
                       </span>
-                      <span className="font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft border border-primary-border/30 dark:border-primary-border px-1 py-0.2 rounded text-[9px] font-mono">
-                        {group.paymentModel === 'per_session'
-                          ? `${group.pricePerSession || Math.round(group.monthlyPackagePrice / (group.sessionCount || 8))} ${profile.currency} / Sitzung`
-                          : `${group.monthlyPackagePrice} ${profile.currency} / ${group.sessionCount} Sessions`}
+                      <span className="font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft border border-primary-border/30 dark:border-primary-border px-1 py-0.2 rounded text-[9px] font-mono shrink-0">
+                        {isPerLessonGroup
+                          ? `${perSessionPrice} ${profile.currency} / ${_t('حصة', 'Session', 'Sitzung')}`
+                          : `${group.monthlyPackagePrice} ${profile.currency} / ${packageSessionsCount} ${_t('حصص', 'Sessions', 'Sitzungen')}`}
                       </span>
+
+                      <span className={`text-[10px] font-bold shrink-0 ${isPerLessonGroup ? 'text-amber-600 dark:text-amber-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                        • {isPerLessonGroup
+                            ? _t('محاسبة بالحصة', 'Per Session', 'Pro Sitzung')
+                            : _t(`الحصة ${cycleInfo.currentSessionNumber} من ${cycleInfo.sessionCount}`, `Session ${cycleInfo.currentSessionNumber} of ${cycleInfo.sessionCount}`, `Sitzung ${cycleInfo.currentSessionNumber} von ${cycleInfo.sessionCount}`)}
+                      </span>
+
                       <span className="text-text-muted/70 text-[10px] truncate max-w-[130px] sm:max-w-[200px]" title={formatGroupScheduleDisplay(group, language)}>
                         • {formatGroupScheduleDisplay(group, language)}
                       </span>

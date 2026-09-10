@@ -42,10 +42,10 @@ export const BoysChampionTemplate: React.FC<TemplateProps> = ({ certificate }) =
         <Zap className="w-8 h-8 rotate-12" />
       </div>
       <div className="absolute top-4 right-4 pointer-events-none" style={{ color: '#facc15' }}>
-        <Star className="w-8 h-8 fill-amber-400" />
+        <Star className="w-8 h-8" style={{ fill: '#facc15', color: '#facc15' }} />
       </div>
       <div className="absolute bottom-4 left-4 pointer-events-none" style={{ color: '#facc15' }}>
-        <Star className="w-7 h-7 fill-amber-400" />
+        <Star className="w-7 h-7" style={{ fill: '#facc15', color: '#facc15' }} />
       </div>
       <div className="absolute bottom-4 right-4 pointer-events-none" style={{ color: '#22d3ee' }}>
         <Zap className="w-8 h-8 -rotate-12" />

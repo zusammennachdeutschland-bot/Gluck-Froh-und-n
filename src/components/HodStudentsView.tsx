@@ -4,7 +4,7 @@ import {
   X, Copy, RefreshCw, CheckCircle2, Bus, GraduationCap, 
   ShieldCheck, FileSpreadsheet, ArrowUpDown, ClipboardCheck, 
   FileCode, ExternalLink, Code2, AlertCircle, CheckSquare, 
-  Square, Filter, Layers, AlertTriangle, Target
+  Square, Filter, Layers, AlertTriangle, Target, Download
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { HodGermanStudent, Complaint, StudentActionPlan } from '../types';

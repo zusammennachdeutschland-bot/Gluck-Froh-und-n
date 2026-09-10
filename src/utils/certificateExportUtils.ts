@@ -228,7 +228,7 @@ export function convertColorToStandard(colorStr: string, fallback = 'rgba(255, 2
 }
 
 /**
- * Replaces all occurrences of oklab(...), oklch(...), and color-mix(...) in a CSS string with standard rgba/rgb.
+ * Replaces all occurrences of oklab(...), oklch(...), color-mix(...), color(...), and light-dark(...) in a CSS string with standard rgba/rgb.
  */
 export function sanitizeModernCssColors(cssValue: string): string {
   if (!cssValue || typeof cssValue !== 'string') return cssValue;
@@ -236,7 +236,8 @@ export function sanitizeModernCssColors(cssValue: string): string {
     !cssValue.includes('oklab') &&
     !cssValue.includes('oklch') &&
     !cssValue.includes('color-mix') &&
-    !cssValue.includes('color(')
+    !cssValue.includes('color(') &&
+    !cssValue.includes('light-dark')
   ) {
     return cssValue;
   }
@@ -244,15 +245,26 @@ export function sanitizeModernCssColors(cssValue: string): string {
   let result = cssValue;
 
   // 1. Replace oklch(...)
-  result = result.replace(/oklch\([^)]+\)/gi, match => oklchToRgb(match));
+  if (result.includes('oklch')) {
+    result = result.replace(/oklch\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\)/gi, match => oklchToRgb(match));
+  }
 
   // 2. Replace oklab(...)
-  result = result.replace(/oklab\([^)]+\)/gi, match => oklabToRgb(match));
+  if (result.includes('oklab')) {
+    result = result.replace(/oklab\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\)/gi, match => oklabToRgb(match));
+  }
 
   // 3. Replace color-mix(...) or color(...)
   if (result.includes('color-mix') || result.includes('color(')) {
     result = result.replace(/(?:color-mix|color)\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\)/gi, match => {
       return convertColorToStandard(match, 'transparent');
+    });
+  }
+
+  // 4. Replace light-dark(...)
+  if (result.includes('light-dark')) {
+    result = result.replace(/light-dark\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)/gi, (_, light) => {
+      return sanitizeModernCssColors(light.trim());
     });
   }
 
@@ -465,6 +477,11 @@ function sanitizeClonedDocument(clonedDoc: Document, targetEl?: HTMLElement | nu
     const styleElem = clonedDoc.createElement('style');
     styleElem.id = 'cloned-cert-fonts-and-shaping';
     styleElem.textContent = `
+      *, *::before, *::after {
+        --tw-shadow-color: rgba(0, 0, 0, 0.1) !important;
+        --tw-ring-color: rgba(59, 130, 246, 0.5) !important;
+        --tw-ring-offset-color: #ffffff !important;
+      }
       .font-arabic-serif {
         font-family: 'Amiri', 'Traditional Arabic', 'Scheherazade New', 'Cairo', serif !important;
         font-feature-settings: "liga" 1, "calt" 1, "dlig" 1 !important;
@@ -503,15 +520,17 @@ function sanitizeClonedDocument(clonedDoc: Document, targetEl?: HTMLElement | nu
     }
   }
 
+  const iframeWin = clonedDoc.defaultView || (typeof window !== 'undefined' ? window : null);
+
   // 1. Sanitize all <style> tags in the cloned document
   const styleTags = clonedDoc.querySelectorAll('style');
   styleTags.forEach(style => {
-    if (style.textContent && (style.textContent.includes('oklch') || style.textContent.includes('oklab') || style.textContent.includes('color-mix') || style.textContent.includes('color('))) {
+    if (style.textContent && (style.textContent.includes('oklch') || style.textContent.includes('oklab') || style.textContent.includes('color-mix') || style.textContent.includes('color(') || style.textContent.includes('light-dark'))) {
       style.textContent = sanitizeModernCssColors(style.textContent);
     }
   });
 
-  // 2. Sanitize inline attributes on target elements
+  // 2. Sanitize inline attributes and computed styles on target elements
   const root = targetEl || clonedDoc.body || clonedDoc.documentElement;
   if (!root) return;
 
@@ -523,25 +542,53 @@ function sanitizeClonedDocument(clonedDoc: Document, targetEl?: HTMLElement | nu
       node.style.transition = 'none';
 
       const rawStyle = node.getAttribute('style');
-      if (rawStyle && (rawStyle.includes('oklch') || rawStyle.includes('oklab') || rawStyle.includes('color-mix') || rawStyle.includes('color('))) {
+      if (rawStyle && (rawStyle.includes('oklch') || rawStyle.includes('oklab') || rawStyle.includes('color-mix') || rawStyle.includes('color(') || rawStyle.includes('light-dark'))) {
         node.setAttribute('style', sanitizeModernCssColors(rawStyle));
+      }
+
+      // Explicitly bake sanitized color values into inline styles so html2canvas never relies on unparsed CSS variables
+      if (iframeWin && typeof iframeWin.getComputedStyle === 'function') {
+        try {
+          const comp = iframeWin.getComputedStyle(node);
+          if (comp) {
+            const propsToCheck = [
+              'color',
+              'background-color',
+              'border-top-color',
+              'border-right-color',
+              'border-bottom-color',
+              'border-left-color',
+              'outline-color',
+              'box-shadow',
+              'text-shadow'
+            ];
+            for (const p of propsToCheck) {
+              const val = comp.getPropertyValue(p);
+              if (val && (val.includes('oklch') || val.includes('oklab') || val.includes('color-mix') || val.includes('color(') || val.includes('light-dark'))) {
+                node.style.setProperty(p, sanitizeModernCssColors(val), 'important');
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
       }
 
       if (node.hasAttribute('fill')) {
         const fill = node.getAttribute('fill');
-        if (fill && (fill.includes('oklch') || fill.includes('oklab') || fill.includes('color-mix'))) {
+        if (fill && (fill.includes('oklch') || fill.includes('oklab') || fill.includes('color-mix') || fill.includes('color('))) {
           node.setAttribute('fill', sanitizeModernCssColors(fill));
         }
       }
       if (node.hasAttribute('stroke')) {
         const stroke = node.getAttribute('stroke');
-        if (stroke && (stroke.includes('oklch') || stroke.includes('oklab') || stroke.includes('color-mix'))) {
+        if (stroke && (stroke.includes('oklch') || stroke.includes('oklab') || stroke.includes('color-mix') || stroke.includes('color('))) {
           node.setAttribute('stroke', sanitizeModernCssColors(stroke));
         }
       }
       if (node.hasAttribute('stop-color')) {
         const stopColor = node.getAttribute('stop-color');
-        if (stopColor && (stopColor.includes('oklch') || stopColor.includes('oklab') || stopColor.includes('color-mix'))) {
+        if (stopColor && (stopColor.includes('oklch') || stopColor.includes('oklab') || stopColor.includes('color-mix') || stopColor.includes('color('))) {
           node.setAttribute('stop-color', sanitizeModernCssColors(stopColor));
         }
       }
@@ -648,53 +695,11 @@ export async function renderCertificateToCanvas(
         const isElementUsable =
           elementToCapture &&
           document.body.contains(elementToCapture) &&
-          elementToCapture.offsetWidth >= 1000 &&
-          elementToCapture.offsetHeight >= 700 &&
-          window.getComputedStyle(elementToCapture).display !== 'none' &&
-          window.getComputedStyle(elementToCapture).visibility !== 'hidden';
+          elementToCapture.offsetWidth > 0 &&
+          elementToCapture.offsetHeight > 0;
 
-        if (!isElementUsable) {
-          // If on-screen element is smaller than master size (e.g. inside a modal/preview), fallback to clean master render
-          const fallbackCert: Partial<CertificateRecord> = {
-            studentName: 'Student',
-            recipientName: 'Student',
-            title: 'Certificate of Excellence',
-            language: 'de' as const,
-            template: 'classic' as const
-          };
-
-          tempContainer = document.createElement('div');
-          tempContainer.id = `temp-cert-export-${Date.now()}`;
-          tempContainer.style.position = 'fixed';
-          tempContainer.style.top = '0';
-          tempContainer.style.left = '0';
-          tempContainer.style.width = '1200px';
-          tempContainer.style.height = '848px';
-          tempContainer.style.zIndex = '-9999';
-          tempContainer.style.opacity = '0.01';
-          tempContainer.style.pointerEvents = 'none';
-          tempContainer.style.backgroundColor = '#ffffff';
-
-          document.body.appendChild(tempContainer);
-
-          rootToUnmount = createRoot(tempContainer);
-          rootToUnmount.render(
-            React.createElement(
-              'div',
-              { 
-                className: 'w-[1200px] h-[848px] bg-white p-0 m-0 overflow-hidden box-border',
-                style: { width: '1200px', height: '848px', boxSizing: 'border-box' }
-              },
-              React.createElement(CertificateRenderer, {
-                certificate: fallbackCert,
-                elementId: `inner-render-${Date.now()}`,
-                className: 'w-[1200px] h-[848px] max-w-none shadow-none rounded-none'
-              })
-            )
-          );
-
-          await new Promise(resolve => setTimeout(resolve, 250));
-          elementToCapture = (tempContainer.firstElementChild as HTMLElement) || tempContainer;
+        if (!isElementUsable || !elementToCapture) {
+          throw new Error('عنصر الشهادة غير متوفر في الصفحة للمعالجة (Certificate element not found in DOM)');
         }
       }
 
@@ -712,19 +717,43 @@ export async function renderCertificateToCanvas(
       const captureWidth = elementToCapture.offsetWidth || 1200;
       const captureHeight = elementToCapture.offsetHeight || 848;
 
-      const canvas = await html2canvas(elementToCapture, {
-        scale: chosenScale,
-        useCORS: true,
-        allowTaint: false,
-        imageTimeout: 10000,
-        logging: false,
-        backgroundColor: '#ffffff',
-        width: captureWidth,
-        height: captureHeight,
-        onclone: (clonedDoc, clonedElement) => {
-          sanitizeClonedDocument(clonedDoc, clonedElement as HTMLElement);
+      let canvas: HTMLCanvasElement;
+      try {
+        canvas = await html2canvas(elementToCapture, {
+          scale: chosenScale,
+          useCORS: true,
+          allowTaint: false,
+          imageTimeout: 10000,
+          logging: false,
+          backgroundColor: '#ffffff',
+          width: captureWidth,
+          height: captureHeight,
+          onclone: (clonedDoc, clonedElement) => {
+            sanitizeClonedDocument(clonedDoc, clonedElement as HTMLElement);
+          }
+        });
+      } catch (firstErr) {
+        console.warn('Initial html2canvas render encountered an issue, running safety fallback pass:', firstErr);
+        try {
+          sanitizeClonedDocument(document, elementToCapture);
+          canvas = await html2canvas(elementToCapture, {
+            scale: Math.min(chosenScale, 1.5),
+            useCORS: true,
+            allowTaint: true,
+            imageTimeout: 15000,
+            logging: false,
+            backgroundColor: '#ffffff',
+            width: captureWidth,
+            height: captureHeight,
+            onclone: (clonedDoc, clonedElement) => {
+              sanitizeClonedDocument(clonedDoc, clonedElement as HTMLElement);
+            }
+          });
+        } catch (secondErr) {
+          console.error('All html2canvas render attempts failed:', secondErr);
+          throw secondErr;
         }
-      });
+      }
 
       return canvas;
     } finally {

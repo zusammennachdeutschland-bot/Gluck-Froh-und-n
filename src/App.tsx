@@ -48,7 +48,12 @@ import { LoadingScreen } from './components/LoadingScreen';
 import { LessonAlarmModal } from './components/LessonAlarmModal';
 
 import { useLessonReminders } from './hooks/useLessonReminders';
-import { setupNotificationActionListener } from './services/notificationService';
+import { 
+  setupNotificationActionListener, 
+  initNotificationChannels, 
+  getNotificationPermission, 
+  requestNotificationPermission 
+} from './services/notificationService';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 
@@ -74,8 +79,25 @@ function MainApp() {
     language,
     activeAlarmLesson,
     dismissLessonAlarm,
-    snoozeLessonAlarm
+    snoozeLessonAlarm,
+    notificationSettings
   } = useApp();
+
+  // Ensure notification channels and system permissions are properly configured for outside-the-app alerts
+  useEffect(() => {
+    const initAlarmPermissions = async () => {
+      try {
+        await initNotificationChannels(notificationSettings);
+        const perm = await getNotificationPermission();
+        if (notificationSettings?.masterEnabled !== false && (perm === 'prompt' || perm === 'default')) {
+          await requestNotificationPermission();
+        }
+      } catch (err) {
+        console.warn('Initial notification permissions setup notice:', err);
+      }
+    };
+    initAlarmPermissions();
+  }, [notificationSettings?.masterEnabled]);
 
   const [quickTransactionType, setQuickTransactionType] = useState<'income' | 'expense' | 'transfer' | null>(null);
   const [pendingLessonId, setPendingLessonId] = useState<string | null>(null);

@@ -11,18 +11,6 @@ export type BuddyMood =
 
 export type BuddyBriefMode = 'morning' | 'day' | 'evening';
 
-export type BuddyActivityType =
-  | 'lesson_started'
-  | 'lesson_completed'
-  | 'attendance_recorded'
-  | 'homework_added'
-  | 'payment_received'
-  | 'payment_added'
-  | 'message_sent'
-  | 'task_completed'
-  | 'student_added'
-  | 'notification_sent';
-
 export type BuddySkinTone = 'fair' | 'tan' | 'warm' | 'bronze' | 'deep';
 export type BuddyGender = 'male' | 'female' | 'neutral';
 export type BuddyHairStyle = 'short' | 'fluffy' | 'curly' | 'long' | 'hijab' | 'bald';
@@ -47,14 +35,6 @@ export const DEFAULT_BUDDY_CUSTOMIZATION: BuddyCustomization = {
   glasses: 'round',
   outfitColor: 'blue'
 };
-
-export interface BuddyActivity {
-  id: string;
-  type: BuddyActivityType;
-  timestamp: number;
-  entityId?: string;
-  metadata?: Record<string, unknown>;
-}
 
 export interface BuddyWorkloadResult {
   score: number; // 0-100

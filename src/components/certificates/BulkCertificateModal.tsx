@@ -11,6 +11,7 @@ import { formatLocalDate } from '../../utils/timeUtils';
 import { getTeacherEnglishName } from '../../utils/teacherUtils';
 import { resolveCertificateRecipientName } from '../../utils/certificateUtils';
 import { getSavedAIBackgrounds } from '../../utils/aiBackgroundUtils';
+import { CertificateTemplateThumbnail } from './CertificateTemplateThumbnail';
 import { X, Check, Sparkles, CheckCircle2, Layers, AlertTriangle, Image as ImageIcon } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -454,33 +455,21 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
               </div>
 
               {templateTab === 'standard' ? (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
                   {PRIMARY_CERTIFICATE_TEMPLATES.map(tmpl => {
                     const isSelected = templateId === tmpl.id;
                     return (
-                      <button
+                      <CertificateTemplateThumbnail
                         key={tmpl.id}
-                        type="button"
+                        templateId={tmpl.id}
+                        name={tmpl.name[language] || tmpl.name.de}
+                        isSelected={isSelected}
                         onClick={() => {
                           setTemplateId(tmpl.id);
                           setSelectedCustomBg(null);
                         }}
-                        className={`p-2 rounded-xl border text-start transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-primary/10 border-primary ring-1 ring-primary'
-                            : 'bg-surface dark:bg-slate-900 border-surface-border dark:border-slate-700 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <div
-                            className="w-2.5 h-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: tmpl.previewColor || '#4f46e5' }}
-                          />
-                          <span className="block font-black text-xs text-text-main truncate">
-                            {tmpl.name[language] || tmpl.name.de}
-                          </span>
-                        </div>
-                      </button>
+                        language={language}
+                      />
                     );
                   })}
                 </div>

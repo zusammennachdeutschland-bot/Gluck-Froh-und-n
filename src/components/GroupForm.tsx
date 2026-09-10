@@ -83,15 +83,16 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
       return;
     }
 
+    const isPerLesson = paymentCycle === 'per_lesson';
     onSubmit({
       name,
       grade,
       type,
       paymentCycle,
-      monthlyPackagePrice: Number(monthlyPackagePrice),
+      monthlyPackagePrice: isPerLesson ? Number(pricePerSession) : Number(monthlyPackagePrice),
       pricePerSession: Number(pricePerSession),
-      sessionCount: Number(sessionCount),
-      startingSessionNumber: Number(startingSessionNumber),
+      sessionCount: isPerLesson ? 1 : Number(sessionCount),
+      startingSessionNumber: isPerLesson ? 1 : Number(startingSessionNumber),
       defaultFinanceAccountId,
       scheduleDays,
       scheduleTime,
@@ -260,39 +261,60 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-surface-border dark:border-surface-border-soft">
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main">
-              Erste Sitzungsnummer
-            </label>
-            <select
-              value={startingSessionNumber}
-              onChange={(e) => setStartingSessionNumber(Number(e.target.value))}
-              className="w-full px-3 py-1.5 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold"
-            >
-              <option value={1}>1 (Start)</option>
-              <option value={3}>3</option>
-              <option value={5}>5</option>
-              <option value={8}>8</option>
-            </select>
-          </div>
+        {paymentCycle === 'monthly' ? (
+          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-surface-border dark:border-surface-border-soft">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-text-main">
+                {_t('رقم الحصة في السايكل (البداية)', 'Starting Session in Cycle', 'Erste Sitzungsnummer')}
+              </label>
+              <select
+                value={Math.min(startingSessionNumber, Math.max(1, sessionCount || 4))}
+                onChange={(e) => setStartingSessionNumber(Number(e.target.value))}
+                className="w-full px-3 py-1.5 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold"
+              >
+                {Array.from({ length: Math.max(1, sessionCount || 4) }, (_, i) => i + 1).map((num) => (
+                  <option key={num} value={num}>
+                    {num === 1 ? `${num} (${_t('بداية السايكل', 'Start of Cycle', 'Start')})` : `${_t('الحصة', 'Session', 'Sitzung')} ${num}`}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main">
-              Standard Konto (Default Account):
-            </label>
-            <select
-              value={defaultFinanceAccountId}
-              onChange={(e) => setDefaultFinanceAccountId(e.target.value)}
-              className="w-full px-3 py-1.5 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold"
-            >
-              <option value="">{t('choose', 'Choose...', 'Wählen...')}</option>
-              {financeAccounts.filter(a => !a.deleted).map(acc => (
-                <option key={acc.id} value={acc.id}>{acc.name}</option>
-              ))}
-            </select>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-text-main">
+                Standard Konto (Default Account):
+              </label>
+              <select
+                value={defaultFinanceAccountId}
+                onChange={(e) => setDefaultFinanceAccountId(e.target.value)}
+                className="w-full px-3 py-1.5 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold"
+              >
+                <option value="">{t('choose', 'Choose...', 'Wählen...')}</option>
+                {financeAccounts.filter(a => !a.deleted).map(acc => (
+                  <option key={acc.id} value={acc.id}>{acc.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="pt-2 border-t border-surface-border dark:border-surface-border-soft">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-text-main">
+                Standard Konto (Default Account):
+              </label>
+              <select
+                value={defaultFinanceAccountId}
+                onChange={(e) => setDefaultFinanceAccountId(e.target.value)}
+                className="w-full px-3 py-1.5 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold"
+              >
+                <option value="">{t('choose', 'Choose...', 'Wählen...')}</option>
+                {financeAccounts.filter(a => !a.deleted).map(acc => (
+                  <option key={acc.id} value={acc.id}>{acc.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Schedule & Calendar Sync Settings */}

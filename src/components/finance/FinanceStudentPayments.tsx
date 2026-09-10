@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { PaymentRecord, Student, Group, Lesson } from '../../types';
-import { getStudentCyclePricing, calculateDuePaymentCycles, DuePaymentCycle, getStudentAdvanceLessonCredits } from '../../utils/paymentUtils';
+import { getStudentCyclePricing, calculateDuePaymentCycles, DuePaymentCycle, getStudentAdvanceLessonCredits, calculateEstimatedPastDate } from '../../utils/paymentUtils';
 import { formatLocalDate } from '../../utils/timeUtils';
 import { buildWhatsAppUrl } from '../../utils/phoneUtils';
 import { 
   DollarSign, CheckCircle2, Clock, Send, Search, 
   Check, X, Sparkles, History, Calendar, AlertCircle, TrendingUp, ChevronRight,
-  Landmark, Wallet, CreditCard, Layers, BookOpen, ChevronDown, Coins, ShieldX, ShieldCheck, Minus, Plus
+  Landmark, Wallet, CreditCard, Layers, BookOpen, ChevronDown, Coins, ShieldX, ShieldCheck, Minus, Plus,
+  Users, Filter
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -19,8 +20,7 @@ export const FinanceStudentPayments: React.FC = () => {
     t, _t, financeAccounts
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'due' | 'history'>('due');
-  const [dueSubTab, setDueSubTab] = useState<'cycles' | 'single_lessons'>('cycles');
+  const [activeTab, setActiveTab] = useState<'cycles' | 'single_lessons' | 'in_progress' | 'history'>('cycles');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
@@ -87,6 +87,55 @@ export const FinanceStudentPayments: React.FC = () => {
       return `${parts[2]}/${parts[1]}/${parts[0]}`;
     }
     return dateStr;
+  };
+
+  // Helper to extract clean date DD/MM/YYYY
+  const extractCleanDate = (dateInput?: string | string[]) => {
+    const list = Array.isArray(dateInput) ? dateInput : (dateInput ? [dateInput] : []);
+    // Find the latest valid entry containing real date digits (DD/MM/YYYY or YYYY-MM-DD)
+    const validWithDigits = [...list].reverse().find(d => /\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2}/.test(d));
+    if (validWithDigits) {
+      const match = validWithDigits.match(/\d{2}\/\d{2}\/\d{4}/);
+      if (match) return match[0];
+      const isoMatch = validWithDigits.match(/\d{4}-\d{2}-\d{2}/);
+      if (isoMatch) return formatDateDisplay(isoMatch[0]);
+    }
+    return formatDateDisplay(todayStr);
+  };
+
+  const formatLessonDateChip = (dateStr: string, baseDueDate?: string, bundleSize: number = 8) => {
+    if (!dateStr) return '';
+    if (/\d{2}\/\d{2}\/\d{4}/.test(dateStr)) {
+      return dateStr;
+    }
+    const match = dateStr.match(/Session (\d+)\/(\d+)/i);
+    if (match) {
+      const sessNum = parseInt(match[1], 10);
+      const totalSess = parseInt(match[2], 10) || bundleSize;
+      const pastDate = calculateEstimatedPastDate(baseDueDate || todayStr, sessNum, totalSess);
+      return `${formatDateDisplay(pastDate)} (Session ${sessNum}/${totalSess})`;
+    }
+    return dateStr.replace('Offline', _t('حصة سابقة', 'Prior Session', 'Vorherige Sitzung'));
+  };
+
+  const handleSingleLessonWhatsApp = (lesson: Lesson) => {
+    const student = students.find(s => s.id === lesson.studentId || s.name === lesson.studentName);
+    const phone = student?.parentPhone || student?.studentPhone || '';
+    const due = Math.max(0, (lesson.amountDue || 200) - (lesson.amountPaid || 0));
+    const dummyCycle: DuePaymentCycle = {
+      id: `lesson_${lesson.id}`,
+      studentId: lesson.studentId || student?.id || '',
+      studentName: lesson.studentName || student?.name || lesson.title,
+      groupId: lesson.groupId || '',
+      groupName: lesson.groupName || '',
+      cycleLength: 1,
+      amountDue: due,
+      lessonDates: [formatDateDisplay(lesson.date)],
+      lessonIds: [lesson.id],
+      status: 'due',
+      parentPhone: phone,
+    };
+    setSelectedCycleForWhatsApp(dummyCycle);
   };
 
   // --------------------------------------------------------------------------
@@ -200,26 +249,71 @@ export const FinanceStudentPayments: React.FC = () => {
       const startSess = grp?.startingSessionNumber || 1;
       const virtualOffset = !hasPaidPayments && startSess > 1 ? (startSess - 1) : 0;
 
-      const totalCompletedCount = stCompletedLessons.length + virtualOffset;
+      // Advance prepaid lessons check
+      const studentAdvance = getStudentAdvanceLessonCredits(st.id, payments, lessons, st.name);
+      const remainingPrepaid = studentAdvance.remainingAdvanceLessons;
 
-      // If they have completed some lessons but less than cycle length, and they do NOT have an unpaid record already
-      if (totalCompletedCount > 0 && totalCompletedCount < cycleLength && !hasUnpaidRec) {
+      // Slice out the lessons covered by prepaid credit
+      const billableLessons = remainingPrepaid > 0
+        ? stCompletedLessons.slice(remainingPrepaid)
+        : stCompletedLessons;
+
+      const totalCompletedCount = billableLessons.length + virtualOffset;
+      const maxCompletedSessionNum = Math.max(0, ...billableLessons.map(l => l.sessionNumber || 0));
+      const reachedCycleBySessionNum = maxCompletedSessionNum > 0 && cycleLength > 1 && (maxCompletedSessionNum >= cycleLength || maxCompletedSessionNum % cycleLength === 0);
+      const isCycleFinished = totalCompletedCount >= cycleLength || reachedCycleBySessionNum;
+
+      // If they have completed some lessons but cycle is NOT finished and they do NOT have an unpaid record already
+      if (totalCompletedCount > 0 && !isCycleFinished && !hasUnpaidRec) {
         const lessonDates: string[] = [];
         for (let i = 1; i <= virtualOffset; i++) {
-          lessonDates.push(`Offline (Session ${i}/${cycleLength})`);
+          const matched = lessons.find(l => 
+            ((st.groupId && l.groupId === st.groupId) || (l.studentId && l.studentId === st.id)) && 
+            l.sessionNumber === i
+          );
+          lessonDates.push(matched 
+            ? `${formatDateDisplay(matched.date)} (Session ${i}/${cycleLength})`
+            : `حصة سابقة (Session ${i}/${cycleLength})`
+          );
         }
-        stCompletedLessons.forEach(l => {
+        billableLessons.forEach(l => {
           lessonDates.push(`${formatDateDisplay(l.date)} (Session ${l.sessionNumber || 1}/${cycleLength})`);
         });
 
-        const lessonIds = stCompletedLessons.map(l => l.id);
+        // If teacher set session number higher, fill missing offline sessions
+        if (maxCompletedSessionNum > 1 && lessonDates.length < maxCompletedSessionNum) {
+          const existingNums = new Set<number>();
+          lessonDates.forEach(d => {
+            const m = d.match(/Session (\d+)\//);
+            if (m) existingNums.add(parseInt(m[1], 10));
+          });
+          for (let i = 1; i <= maxCompletedSessionNum; i++) {
+            if (!existingNums.has(i)) {
+              const matched = lessons.find(l => 
+                ((st.groupId && l.groupId === st.groupId) || (l.studentId && l.studentId === st.id)) && 
+                l.sessionNumber === i
+              );
+              lessonDates.push(matched 
+                ? `${formatDateDisplay(matched.date)} (Session ${i}/${cycleLength})`
+                : `حصة سابقة (Session ${i}/${cycleLength})`
+              );
+            }
+          }
+          lessonDates.sort((a, b) => {
+            const na = parseInt(a.match(/Session (\d+)\//)?.[1] || '0', 10);
+            const nb = parseInt(b.match(/Session (\d+)\//)?.[1] || '0', 10);
+            return na - nb;
+          });
+        }
 
-        // Prorated calculations based on actual completed lessons in the app
+        const lessonIds = billableLessons.map(l => l.id);
+
+        // Prorated calculations based on actual billable completed lessons in the app
         const pricePerSession = amountDue / cycleLength;
-        const proratedAmount = Math.round(pricePerSession * stCompletedLessons.length);
+        const proratedAmount = Math.round(pricePerSession * billableLessons.length);
 
         list.push({
-          id: `in_progress_cycle_${st.id}_${stCompletedLessons[0]?.id || Date.now()}_st_${st.name.replace(/\s+/g, '_')}`,
+          id: `in_progress_cycle_${st.id}_${billableLessons[0]?.id || Date.now()}_st_${st.name.replace(/\s+/g, '_')}`,
           studentId: st.id,
           studentName: st.name,
           groupId: st.groupId || grp?.id || '',
@@ -288,14 +382,22 @@ export const FinanceStudentPayments: React.FC = () => {
       const due = l.amountDue || 200;
       const paid = l.amountPaid || 0;
       const hasRemaining = (due - paid) > 0;
+      if (!hasRemaining || (l.status !== 'completed' && !isUnpaid)) return false;
+
+      // If student has advance prepaid lessons remaining, this lesson is covered!
+      if (l.studentId) {
+        const studentAdvance = getStudentAdvanceLessonCredits(l.studentId, payments, lessons, l.studentName);
+        if (studentAdvance.remainingAdvanceLessons > 0) return false;
+      }
+
       const matchesSearch = !searchTerm || 
         (l.studentName || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
         (l.groupName || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
         (l.title || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchesGroup = selectedGroupId === 'all' || l.groupId === selectedGroupId;
-      return hasRemaining && (l.status === 'completed' || isUnpaid) && matchesSearch && matchesGroup;
+      return matchesSearch && matchesGroup;
     }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  }, [lessons, searchTerm, selectedGroupId]);
+  }, [lessons, payments, searchTerm, selectedGroupId]);
 
   const filteredPaidHistory = useMemo(() => {
     return paidHistory.filter(p => {
@@ -430,7 +532,7 @@ export const FinanceStudentPayments: React.FC = () => {
   // WhatsApp Parent Message Generator
   const generateWhatsAppMessage = (item: DuePaymentCycle) => {
     const datesFormatted = item.lessonDates.length > 0 
-      ? item.lessonDates.map(d => `• ${d}`).join('\n')
+      ? item.lessonDates.map(d => `• ${formatLessonDateChip(d)}`).join('\n')
       : t('auto_completed_lesson_dates');
 
     if (profile.language === 'en') {
@@ -489,634 +591,585 @@ ${datesFormatted}
   };
 
   return (
-    <div className="space-y-3 font-sans w-full">
-      {/* FINANCIAL DASHBOARD */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-0.5">
-        <div className="bg-surface hover:bg-surface-hover transition-colors p-2.5 sm:p-3 rounded-xl border border-surface-border flex flex-col justify-center relative overflow-hidden shadow-2xs">
-          <div className="absolute -right-2 -top-2 w-10 h-10 bg-primary/5 rounded-full blur-lg pointer-events-none" />
-          <span className="text-[9px] font-black text-text-muted uppercase tracking-wider mb-0.5 flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3 text-primary" />
-            {t('payments_total_collected') || 'Collected'}
-          </span>
-          <span className="text-base font-black text-primary font-mono">{monthlyTotal} <span className="text-[10px] text-primary/70">{currency}</span></span>
-        </div>
-        <div className="bg-surface hover:bg-surface-hover transition-colors p-2.5 sm:p-3 rounded-xl border border-surface-border flex flex-col justify-center relative overflow-hidden shadow-2xs">
-          <div className="absolute -right-2 -top-2 w-10 h-10 bg-amber-500/5 rounded-full blur-lg pointer-events-none" />
-          <span className="text-[9px] font-black text-text-muted uppercase tracking-wider mb-0.5 flex items-center gap-1">
-            <Clock className="w-3 h-3 text-amber-500" />
-            {t('payments_total_pending') || 'Pending'}
-          </span>
-          <span className="text-base font-black text-amber-500 font-mono">{totalAmountDue} <span className="text-[10px] text-amber-500/70">{currency}</span></span>
-        </div>
-        <div className="bg-surface hover:bg-surface-hover transition-colors p-2.5 sm:p-3 rounded-xl border border-surface-border flex flex-col justify-center relative overflow-hidden shadow-2xs">
-          <div className="absolute -right-2 -top-2 w-10 h-10 bg-primary-soft rounded-full blur-lg pointer-events-none" />
-          <span className="text-[9px] font-black text-text-muted uppercase tracking-wider mb-0.5 flex items-center gap-1">
-            <AlertCircle className="w-3 h-3 text-primary" />
-            {t('payments_overdue')}
-          </span>
-          <span className="text-base font-black text-text-main font-mono">{overdueTotal} <span className="text-[10px] text-text-muted/70">{currency}</span></span>
-        </div>
-        <div className="bg-surface hover:bg-surface-hover transition-colors p-2.5 sm:p-3 rounded-xl border border-surface-border flex flex-col justify-center relative overflow-hidden shadow-2xs">
-          <div className="absolute -right-2 -top-2 w-10 h-10 bg-primary/5 rounded-full blur-lg pointer-events-none" />
-          <span className="text-[9px] font-black text-text-muted uppercase tracking-wider mb-0.5 flex items-center gap-1">
-            <DollarSign className="w-3 h-3 text-primary" />
-            {t('payments_expected')}
-          </span>
-          <span className="text-base font-black text-text-main font-mono">{totalAmountDue + monthlyTotal} <span className="text-[10px] text-text-muted/70">{currency}</span></span>
-        </div>
-      </div>
-
-      {/* REVENUE OVERVIEW CARD */}
-      <div className="bg-gradient-to-br from-primary/5 via-surface to-surface border border-primary-border/20 p-2.5 sm:p-3 rounded-xl shadow-2xs mb-2.5 relative overflow-hidden">
-        <div className="flex items-center justify-between mb-2 relative z-10">
-          <div className="flex items-center gap-1.5">
-            <div className="p-1 bg-primary/10 rounded-md">
-              <TrendingUp className="w-3.5 h-3.5 text-primary" />
-            </div>
-            <h3 className="text-xs font-bold text-text-main uppercase tracking-wider">{t('payments_revenue_overview')}</h3>
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-3 gap-1.5 relative z-10">
-          <button 
-            type="button"
-            onClick={() => setSelectedGainPeriod('daily')} 
-            className="flex flex-col items-center p-2 bg-surface hover:bg-primary-soft transition-colors rounded-lg border border-surface-border cursor-pointer group"
-          >
-            <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider mb-0.5 group-hover:text-primary transition-colors">{t('payments_daily_gain_title') || 'Today'}</span>
-            <span className="text-sm sm:text-base font-black text-text-main font-mono">{dailyTotal}</span>
-            <div className="mt-0.5 flex items-center justify-center text-[8px] text-emerald-500 font-bold bg-emerald-500/10 px-1 py-0.2 rounded-full"><TrendingUp className="w-2 h-2 mr-0.5"/> +0%</div>
-          </button>
-          
-          <button 
-            type="button"
-            onClick={() => setSelectedGainPeriod('weekly')} 
-            className="flex flex-col items-center p-2 bg-surface hover:bg-primary-soft transition-colors rounded-lg border border-surface-border cursor-pointer group"
-          >
-            <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider mb-0.5 group-hover:text-primary transition-colors">{t('payments_weekly_gain_title') || 'Weekly'}</span>
-            <span className="text-sm sm:text-base font-black text-text-main font-mono">{weeklyTotal}</span>
-            <div className="mt-0.5 flex items-center justify-center text-[8px] text-emerald-500 font-bold bg-emerald-500/10 px-1 py-0.2 rounded-full"><TrendingUp className="w-2 h-2 mr-0.5"/> +0%</div>
-          </button>
-
-          <button 
-            type="button"
-            onClick={() => setSelectedGainPeriod('monthly')} 
-            className="flex flex-col items-center p-2 bg-surface hover:bg-primary-soft transition-colors rounded-lg border border-surface-border cursor-pointer group"
-          >
-            <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider mb-0.5 group-hover:text-primary transition-colors">{t('payments_monthly_gain_title') || 'Monthly'}</span>
-            <span className="text-sm sm:text-base font-black text-text-main font-mono">{monthlyTotal}</span>
-            <div className="mt-0.5 flex items-center justify-center text-[8px] text-emerald-500 font-bold bg-emerald-500/10 px-1 py-0.2 rounded-full"><TrendingUp className="w-2 h-2 mr-0.5"/> +0%</div>
-          </button>
-        </div>
-      </div>
-
-      {/* SEGMENT TABS */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-1.5 border-b border-surface-border pb-1.5">
-        <div className="grid grid-cols-2 gap-1.5 flex-1 max-w-lg">
-          <button
-            onClick={() => setActiveTab('due')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'due'
-                ? 'bg-primary text-white shadow-xs'
-                : 'bg-surface-hover text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{t('payments_due_tab')} ({dueCycles.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'history'
-                ? 'bg-primary text-white shadow-xs'
-                : 'bg-surface-hover text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-          >
-            <History className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{t('payments_history_tab')} ({paidHistory.length})</span>
-          </button>
-        </div>
-
-        {/* GROUP & ACCOUNT FILTERS */}
-        <div className="flex items-center gap-2">
-          {financeAccounts.length > 0 && (
-            <select
-              value={selectedAccountId}
-              onChange={e => setSelectedAccountId(e.target.value)}
-              className="px-2.5 py-1 bg-surface border border-surface-border rounded-lg text-xs font-bold focus:outline-none max-w-[120px]"
-            >
-              {financeAccounts.map(a => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          )}
-
-          {groups.length > 0 && (
-            <select
-              value={selectedGroupId}
-              onChange={e => setSelectedGroupId(e.target.value)}
-              className="px-2.5 py-1 bg-surface border border-surface-border rounded-lg text-xs font-bold focus:outline-none max-w-[120px]"
-            >
-              <option value="all">{t('students_all_groups')}</option>
-              {groups.map(g => (
-                <option key={g.id} value={g.id}>{g.name}</option>
-              ))}
-            </select>
-          )}
-        </div>
-      </div>
-
-      {/* TAB 1: OFFENE ZAHLUNGEN (DUE NOW) */}
-      {activeTab === 'due' && (
-        <div className="space-y-3.5">
-          {/* Sub-tab navigation: Cycles vs Single Lessons + Advance Payment Action */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 p-1 bg-surface-hover/70 dark:bg-surface-hover/40 rounded-xl border border-surface-border w-fit max-w-full overflow-x-auto">
+    <div className="space-y-2 sm:space-y-2.5 font-sans w-full">
+      {/* 1. TABS STRIP (HOD HUB STYLE) + COMPACT PREPAID BUTTON */}
+      <div className="flex w-full items-center justify-between gap-1 sm:gap-1.5 bg-surface p-1 rounded-xl border border-surface-border shadow-2xs">
+        {/* Tabs */}
+        <div className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto no-scrollbar">
+          {[
+            {
+              id: 'cycles' as const,
+              title: _t('الدورات', 'Due Cycles', 'Fällige Zyklen'),
+              icon: Clock,
+            },
+            {
+              id: 'single_lessons' as const,
+              title: _t('فردية', 'Single Lessons', 'Einzellektionen'),
+              icon: BookOpen,
+            },
+            {
+              id: 'in_progress' as const,
+              title: _t('مرنة', 'In-Progress', 'Laufend'),
+              icon: Sparkles,
+            },
+            {
+              id: 'history' as const,
+              title: _t('السجل', 'History', 'Historie'),
+              icon: History,
+            },
+          ].map((tab) => {
+            const isActive = activeTab === tab.id;
+            const Icon = tab.icon;
+            return (
               <button
+                key={tab.id}
                 type="button"
-                onClick={() => setDueSubTab('cycles')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                  dueSubTab === 'cycles'
-                    ? 'bg-surface text-primary shadow-xs border border-surface-border/80'
-                    : 'text-text-muted hover:text-text-main'
+                onClick={() => setActiveTab(tab.id)}
+                className={`relative h-8 sm:h-9 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer select-none ${
+                  isActive
+                    ? 'bg-primary text-white px-2.5 sm:px-3 gap-1.5 shadow-xs font-black shrink-0'
+                    : 'w-8 sm:w-9 text-text-muted hover:bg-surface-hover hover:text-text-main shrink-0'
                 }`}
+                title={tab.title}
               >
-                <Layers className="w-3.5 h-3.5" />
-                <span>{_t('دورات الاشتراكات المكتملة', 'Completed Cycles', 'Abgeschlossene Zyklen')}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${dueSubTab === 'cycles' ? 'bg-primary text-white' : 'bg-surface-hover text-text-muted'}`}>
-                  {filteredDueCycles.length}
-                </span>
+                <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                {isActive && (
+                  <span className="text-[11px] font-bold whitespace-nowrap overflow-hidden">
+                    {tab.title}
+                  </span>
+                )}
               </button>
+            );
+          })}
+        </div>
 
-              <button
-                type="button"
-                onClick={() => setDueSubTab('single_lessons')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                  dueSubTab === 'single_lessons'
-                    ? 'bg-surface text-primary shadow-xs border border-surface-border/80'
-                    : 'text-text-muted hover:text-text-main'
-                }`}
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>{_t('الحصص الفردية والمستحقة', 'Individual Due Lessons', 'Fällige Einzellektionen')}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${dueSubTab === 'single_lessons' ? 'bg-primary text-white' : 'bg-surface-hover text-text-muted'}`}>
-                  {unpaidSingleLessons.length}
-                </span>
-              </button>
-            </div>
+        {/* Small Prepaid Button */}
+        <button
+          type="button"
+          onClick={() => openAdvanceModal()}
+          className="h-8 sm:h-9 px-2.5 sm:px-3 bg-primary-soft hover:bg-primary/20 active:scale-95 text-primary border border-primary-border rounded-lg text-xs font-black flex items-center gap-1.5 shrink-0 transition-all cursor-pointer"
+          title={_t('سداد حصص مقدماً (Prepaid)', 'Prepaid Lessons', 'Vorauszahlung')}
+        >
+          <Coins className="w-3.5 h-3.5 text-primary shrink-0" />
+          <span className="text-[11px] font-bold hidden xs:inline whitespace-nowrap">
+            {_t('دفع مقدم', 'Prepaid', 'Voraus')}
+          </span>
+        </button>
+      </div>
 
-            {/* Quick Advance Payment Button */}
+      {/* 2. COMPACT SEARCH & FILTER BAR (SINGLE ULTRA-SLIM ROW) */}
+      <div className="flex items-center gap-1.5 p-1 bg-surface rounded-xl border border-surface-border shadow-2xs text-xs">
+        {/* Live Search */}
+        <div className="relative flex-1 min-w-0">
+          <Search className="w-3.5 h-3.5 text-text-muted absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder={_t('بحث...', 'Search...', 'Suchen...')}
+            className="w-full h-7 sm:h-8 pr-7 pl-6 bg-background border border-surface-border rounded-lg text-[11px] font-bold text-text-main placeholder:text-text-muted/60 focus:outline-none focus:ring-1 focus:ring-primary transition-all"
+          />
+          {searchTerm && (
             <button
               type="button"
-              onClick={() => openAdvanceModal()}
-              className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:scale-95 text-white rounded-xl text-xs font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+              onClick={() => setSearchTerm('')}
+              className="absolute left-1.5 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-main rounded cursor-pointer"
             >
-              <Coins className="w-4 h-4" />
-              <span>{_t('دفع حصص مقدماً', 'Advance Lessons Payment', 'Vorauszahlung')}</span>
+              <X className="w-3 h-3" />
             </button>
-          </div>
-
-          {/* SUB-VIEW 1: DUE CYCLES */}
-          {dueSubTab === 'cycles' && (
-            <div className="space-y-3">
-              {filteredDueCycles.length === 0 ? (
-                <div className="py-8 sm:py-14 text-center flex flex-col items-center justify-center space-y-3">
-                  <div className="relative mb-1">
-                    <div className="absolute inset-0 bg-primary/20 rounded-full blur-xl pointer-events-none" />
-                    <div className="w-14 h-14 bg-primary-soft dark:bg-primary-soft text-primary rounded-2xl flex items-center justify-center mx-auto relative z-10 shadow-2xs border border-primary-border/30 rotate-2">
-                      <CheckCircle2 className="w-7 h-7 -rotate-2" />
-                    </div>
-                  </div>
-                  <div className="space-y-1 relative z-10">
-                    <h3 className="text-sm sm:text-base font-black text-text-main tracking-tight">
-                      {t('payments_no_due_title') || t('payments_no_due')}
-                    </h3>
-                    <p className="text-xs text-text-muted max-w-md mx-auto leading-relaxed">
-                      {t('payments_no_due_desc') || t('payments_no_due_sub')}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-                  {filteredDueCycles.map((item, idx) => {
-                    const studentAdvanceInfo = getStudentAdvanceLessonCredits(item.studentId, payments, lessons);
-
-                    return (
-                      <div
-                        key={`${item.id}_${idx}`}
-                        className="bg-surface p-3.5 sm:p-4 rounded-xl border border-primary-border/70 dark:border-primary-border/50 shadow-2xs space-y-3 relative overflow-hidden flex flex-col justify-between"
-                      >
-                        {/* TOP ROW: STUDENT INFO & AMOUNT DUE */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-surface-border pb-2.5">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <h3 className="text-sm font-black text-text-main">
-                                {item.studentName}
-                              </h3>
-                              <span className="px-2 py-0.2 rounded-full bg-surface-hover text-text-main text-[10px] font-bold">
-                                {item.groupName}
-                              </span>
-                              {studentAdvanceInfo.remainingAdvanceLessons > 0 && (
-                                <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold text-[10px] border border-amber-400/30 flex items-center gap-1">
-                                  <Coins className="w-3 h-3 text-amber-500" />
-                                  <span>{_t('رصيد مقدم:', 'Prepaid credit:', 'Vorausguthaben:')} {studentAdvanceInfo.remainingAdvanceLessons} {_t('حصص', 'lessons', 'Lekt.')}</span>
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="px-1.5 py-0.2 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary text-[10px] font-black">
-                                {t('payments_completed_cycle')}: {item.cycleLength} / {item.cycleLength} {t('payment_plan_lessons')}
-                              </span>
-                              {item.status === 'not_yet' && (
-                                <span className="text-[10px] font-bold text-text-muted/70">
-                                  ({t('payments_pending_tag')} ⏳)
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="text-right shrink-0">
-                            <span className="text-[9px] font-extrabold text-text-muted/70 uppercase tracking-wider block">{t('payments_amount_due')}</span>
-                            <div className="text-base font-black text-primary dark:text-primary font-mono">
-                              {item.amountDue} <span className="text-[10px] font-normal text-text-muted/70">{currency}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* LESSON DATES INCLUDED IN THIS CYCLE */}
-                        <div className="space-y-1">
-                          <span className="text-[10px] font-bold text-text-muted flex items-center gap-1">
-                            <Calendar className="w-3 h-3 text-text-muted/70" />
-                            <span>{t('payments_completed_dates')}:</span>
-                          </span>
-
-                          <div className="flex flex-wrap items-center gap-1">
-                            {item.lessonDates.length > 0 ? (
-                              item.lessonDates.map((d, idx) => (
-                                <span
-                                  key={idx}
-                                  className="px-1.5 py-0.5 bg-surface-hover text-slate-800 dark:text-slate-200 rounded text-[10px] font-mono font-bold border border-surface-border dark:border-surface-border-soft"
-                                >
-                                  🗓️ {d}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-[10px] text-text-muted/70 italic">
-                                {item.cycleLength} {t('payment_plan_lessons')}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* RECEIVING ACCOUNT SELECTOR */}
-                        {financeAccounts.length > 0 && (
-                          <div className="bg-surface-hover/70 dark:bg-surface-hover/30 px-2.5 py-1.5 rounded-lg border border-surface-border flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5 text-xs text-text-muted shrink-0">
-                              <Landmark className="w-3.5 h-3.5 text-primary shrink-0" />
-                              <span className="font-bold text-[11px] text-text-main">
-                                {_t('حساب الإيداع:', 'Deposit Account:', 'Einzahlen auf:')}
-                              </span>
-                            </div>
-                            <select
-                              value={getCardAccountId(item.id, item.groupId)}
-                              onChange={(e) => setCardAccountMap(prev => ({ ...prev, [item.id]: e.target.value }))}
-                              className="px-2 py-1 bg-surface border border-surface-border rounded-md text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary flex-1 max-w-[200px] cursor-pointer"
-                            >
-                              {financeAccounts.filter(a => !a.deleted).map(acc => (
-                                <option key={acc.id} value={acc.id}>
-                                  {acc.type === 'cash' ? '💵 ' : acc.type === 'wallet' ? '📱 ' : acc.type === 'bank' ? '🏦 ' : '💳 '}
-                                  {acc.name} ({acc.currentBalance.toLocaleString()} {acc.currency || currency})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-
-                        {/* BOTTOM ACTION BUTTONS */}
-                        <div className="pt-1 flex flex-wrap items-center justify-between gap-1.5">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {/* PAID BUTTON */}
-                            <button
-                              type="button"
-                              onClick={() => handleMarkPaid(item)}
-                              className="px-3.5 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-black rounded-lg transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
-                            >
-                              <Check className="w-3.5 h-3.5 stroke-[3]" />
-                              <span>{t('payments_paid_btn')}</span>
-                            </button>
-
-                            {/* NOT YET BUTTON */}
-                            <button
-                              type="button"
-                              onClick={() => handleMarkNotYet(item)}
-                              className="px-2.5 py-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1"
-                            >
-                              <Clock className="w-3 h-3 text-text-muted/70" />
-                              <span>{t('payments_not_yet_btn')}</span>
-                            </button>
-
-                            {/* EXEMPTION BUTTON */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setExemptModalCycle(item);
-                                setExemptNotes('');
-                              }}
-                              title={_t('إعفاء الطالب من سداد هذه الدورة ومسحها دون تسجيل إيراد', 'Exempt and clear from due payments', 'Von Zahlung befreien und löschen')}
-                              className="px-2.5 py-1.5 bg-surface-hover hover:bg-rose-500/10 text-text-muted hover:text-rose-600 dark:hover:text-rose-400 text-xs font-bold rounded-lg transition-all border border-surface-border hover:border-rose-300 dark:hover:border-rose-800 cursor-pointer flex items-center gap-1"
-                            >
-                              <ShieldX className="w-3.5 h-3.5 text-rose-500" />
-                              <span>{_t('إعفاء من الدفع', 'Exempt', 'Befreien')}</span>
-                            </button>
-
-                            {/* ADVANCE PAYMENT BUTTON */}
-                            <button
-                              type="button"
-                              onClick={() => openAdvanceModal(item.studentId)}
-                              title={_t('تسجيل حصص مدفوعة مقدماً لهذا الطالب', 'Pay lessons in advance', 'Vorauszahlung')}
-                              className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 text-xs font-bold rounded-lg transition-all border border-amber-300/40 dark:border-amber-700/40 cursor-pointer flex items-center gap-1"
-                            >
-                              <Coins className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                              <span>{_t('دفع مقدم', 'Advance Pay', 'Vorauszahlung')}</span>
-                            </button>
-                          </div>
-
-                          {/* WHATSAPP MESSAGE BUTTON */}
-                          <button
-                            type="button"
-                            onClick={() => setSelectedCycleForWhatsApp(item)}
-                            className="px-3 py-1.5 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft/80 text-primary dark:text-primary text-xs font-bold rounded-lg transition-all border border-primary-border dark:border-primary-border cursor-pointer flex items-center gap-1.5"
-                          >
-                            <Send className="w-3.5 h-3.5 text-primary" />
-                            <span>{t('payments_parent_notice')}</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           )}
-
-          {/* SUB-VIEW 2: INDIVIDUAL DUE LESSONS */}
-          {dueSubTab === 'single_lessons' && (
-            <div className="space-y-3">
-              {unpaidSingleLessons.length === 0 ? (
-                <div className="py-8 sm:py-14 text-center flex flex-col items-center justify-center space-y-3 bg-surface border border-surface-border rounded-xl">
-                  <div className="w-12 h-12 bg-primary-soft text-primary rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
-                    <CheckCircle2 className="w-6 h-6" />
-                  </div>
-                  <div className="space-y-1">
-                    <h3 className="text-sm sm:text-base font-black text-text-main">
-                      {_t('لا توجد حصص فردية مستحقة السداد', 'No individual lessons due for payment', 'Keine fälligen Einzellektionen')}
-                    </h3>
-                    <p className="text-xs text-text-muted max-w-md mx-auto">
-                      {_t('جميع الحصص الفردية مسددة بالكامل أو مضافة للدورات.', 'All individual lessons are fully settled or tracked in cycles.', 'Alle Einzellektionen sind bezahlt.')}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-                  {unpaidSingleLessons.map((lesson) => {
-                    const due = lesson.amountDue || 200;
-                    const paid = lesson.amountPaid || 0;
-                    const remaining = Math.max(0, due - paid);
-                    const cardKey = `lesson_${lesson.id}`;
-
-                    return (
-                      <div
-                        key={lesson.id}
-                        className="bg-surface p-3.5 sm:p-4 rounded-xl border border-surface-border shadow-2xs space-y-3 relative overflow-hidden flex flex-col justify-between"
-                      >
-                        {/* TOP ROW: LESSON INFO & DUE AMOUNT */}
-                        <div className="flex items-start justify-between gap-2 border-b border-surface-border pb-2.5">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <h4 className="text-sm font-black text-text-main">
-                                {lesson.studentName || lesson.groupName || lesson.title}
-                              </h4>
-                              {lesson.isQuickLesson && (
-                                <span className="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[9.5px] font-black">
-                                  ⚡ {_t('حصة سريعة', 'Quick Lesson', 'Schnelle Lektion')}
-                                </span>
-                              )}
-                              {lesson.groupName && (
-                                <span className="px-2 py-0.2 rounded-full bg-surface-hover text-text-main text-[10px] font-bold">
-                                  {lesson.groupName}
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-2 text-[11px] text-text-muted font-medium">
-                              <span className="flex items-center gap-1">
-                                <Calendar className="w-3 h-3 text-primary" />
-                                {formatDateDisplay(lesson.date)}
-                              </span>
-                              {lesson.time && (
-                                <span className="flex items-center gap-1 font-mono">
-                                  <Clock className="w-3 h-3 text-primary" />
-                                  {lesson.time}
-                                </span>
-                              )}
-                              <span className="px-1.5 py-0.2 rounded bg-surface-hover text-[10px] font-bold">
-                                {lesson.type === 'online' ? '🌐 أونلاين' : '📍 حضوري'}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="text-right shrink-0">
-                            <span className="text-[9px] font-extrabold text-text-muted/70 uppercase tracking-wider block">
-                              {_t('المتبقي للسداد', 'Remaining Due', 'Restbetrag')}
-                            </span>
-                            <div className="text-base font-black text-primary font-mono">
-                              {remaining} <span className="text-[10px] font-normal text-text-muted/70">{currency}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* RECEIVING ACCOUNT SELECTOR */}
-                        {financeAccounts.length > 0 && (
-                          <div className="bg-surface-hover/70 dark:bg-surface-hover/30 px-2.5 py-1.5 rounded-lg border border-surface-border flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5 text-xs text-text-muted shrink-0">
-                              <Landmark className="w-3.5 h-3.5 text-primary shrink-0" />
-                              <span className="font-bold text-[11px] text-text-main">
-                                {_t('حساب الإيداع:', 'Deposit Account:', 'Einzahlen auf:')}
-                              </span>
-                            </div>
-                            <select
-                              value={getCardAccountId(cardKey, lesson.groupId)}
-                              onChange={(e) => setCardAccountMap(prev => ({ ...prev, [cardKey]: e.target.value }))}
-                              className="px-2 py-1 bg-surface border border-surface-border rounded-md text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary flex-1 max-w-[200px] cursor-pointer"
-                            >
-                              {financeAccounts.filter(a => !a.deleted).map(acc => (
-                                <option key={acc.id} value={acc.id}>
-                                  {acc.type === 'cash' ? '💵 ' : acc.type === 'wallet' ? '📱 ' : acc.type === 'bank' ? '🏦 ' : '💳 '}
-                                  {acc.name} ({acc.currentBalance.toLocaleString()} {acc.currency || currency})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-
-                        {/* ACTION BUTTON */}
-                        <div className="pt-1 flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-[11px] text-text-muted font-medium">
-                            {_t('إجمالي الحصة:', 'Lesson Total:', 'Gesamt:')} {due} {currency}
-                          </span>
-
-                          <div className="flex items-center gap-1.5">
-                            {/* EXEMPTION BUTTON */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setExemptModalLesson(lesson);
-                                setExemptNotes('');
-                              }}
-                              title={_t('إعفاء الطالب من سداد هذه الحصة ومسحها', 'Exempt and clear lesson', 'Lektion befreien und löschen')}
-                              className="px-2.5 py-1.5 bg-surface-hover hover:bg-rose-500/10 text-text-muted hover:text-rose-600 dark:hover:text-rose-400 text-xs font-bold rounded-lg transition-all border border-surface-border hover:border-rose-300 dark:hover:border-rose-800 cursor-pointer flex items-center gap-1"
-                            >
-                              <ShieldX className="w-3.5 h-3.5 text-rose-500" />
-                              <span>{_t('إعفاء من الدفع', 'Exempt', 'Befreien')}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleMarkSingleLessonPaid(lesson)}
-                              className="px-3.5 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-black rounded-lg transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
-                            >
-                              <Check className="w-3.5 h-3.5 stroke-[3]" />
-                              <span>{_t('سداد الحصة في الحساب المختار', 'Mark Lesson as Paid', 'Als bezahlt markieren')}</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Section: Flexible & Prorated Billing */}
-          <div className="pt-4 border-t border-surface-border space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-black text-text-main flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-primary" />
-                  <span>{t('auto_flexible_prorated_billing')}</span>
-                </h3>
-                <p className="text-[11px] text-text-muted mt-1">
-                  {t('auto_you_can_end_the_current_cycle')}
-                </p>
-              </div>
-            </div>
-
-            {filteredInProgressCycles.length === 0 ? (
-              <div className="bg-surface-hover/30 p-4 rounded-lg text-center border border-slate-100 dark:border-surface-border/50">
-                <p className="text-xs text-text-muted/70 font-medium">
-                  {t('auto_there_are_currently_no_student')}
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                {filteredInProgressCycles.map((item, idx) => (
-                  <div key={`${item.id}_${idx}`} className="bg-surface border border-surface-border p-4 rounded-lg space-y-3 shadow-xs relative">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h4 className="text-xs font-black text-text-main">{item.studentName}</h4>
-                        <span className="text-[10px] bg-surface-hover text-slate-600 dark:text-slate-300 font-bold px-1.5 py-0.5 rounded-md inline-block mt-0.5">{item.groupName}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-[9px] font-extrabold text-text-muted/70 uppercase tracking-wider block">{t('auto_prorated_amount')}</span>
-                        <span className="text-sm font-bold text-primary dark:text-primary font-mono">{item.amountDue} {currency}</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-surface-hover/40 p-2.5 rounded-xl border border-slate-100 dark:border-surface-border/50 text-[11px] space-y-1">
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">{t('auto_attended_lessons')}</span>
-                        <span className="font-bold text-primary dark:text-primary">{item.lessonDates.length} / {item.cycleLength} {t('auto_lessons')}</span>
-                      </div>
-                      <div className="text-[10px] text-text-muted/70 font-mono flex flex-wrap gap-1 mt-1">
-                        {item.lessonDates.map((d, idx) => (
-                          <span key={idx} className="bg-surface px-1.5 py-0.5 rounded border border-surface-border">🗓️ {d}</span>
-                        ))}
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProrateModalItem(item);
-                        setCustomProrateAmount(item.amountDue);
-                        setProrateAccountId(getCardAccountId(item.id, item.groupId));
-                      }}
-                      className="w-full py-1.5 bg-primary-soft dark:bg-primary-soft/40 text-primary dark:text-primary hover:bg-primary-soft dark:hover:bg-primary-soft active:scale-95 transition-all text-xs font-black rounded-xl border border-primary-border/50 dark:border-primary-border flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-primary" />
-                      <span>{t('auto_force_cycle_bill')}</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
-      )}
 
-      {/* TAB 2: ZAHLUNGSHISTORIE (PAID HISTORY) */}
-      {activeTab === 'history' && (
-        <div className="space-y-3">
-          {/* History Account Filter */}
-          <div className="flex items-center justify-between gap-2 p-2 bg-surface rounded-xl border border-surface-border">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-text-main">
-              <Landmark className="w-3.5 h-3.5 text-primary" />
-              <span>{_t('تصفية حسب الخزينة / الحساب:', 'Filter by Account:', 'Nach Konto filtern:')}</span>
-            </div>
+        {/* Filter by Group */}
+        {groups.length > 0 && (
+          <select
+            value={selectedGroupId}
+            onChange={(e) => setSelectedGroupId(e.target.value)}
+            className="h-7 sm:h-8 px-1.5 bg-background border border-surface-border rounded-lg text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer max-w-[85px] xs:max-w-[110px] sm:max-w-[140px] truncate"
+            title={_t('تصفية حسب المجموعة', 'Filter by group', 'Nach Gruppe filtern')}
+          >
+            <option value="all">{_t('كل المجموعات', 'All Groups', 'Alle')}</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {/* Filter / Destination Account */}
+        {activeTab === 'history' ? (
+          <select
+            value={historyAccountId}
+            onChange={(e) => setHistoryAccountId(e.target.value)}
+            className="h-7 sm:h-8 px-1.5 bg-background border border-surface-border rounded-lg text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer max-w-[90px] xs:max-w-[115px] sm:max-w-[150px] truncate"
+            title={_t('تصفية حسب الخزينة', 'Filter by account', 'Nach Konto filtern')}
+          >
+            <option value="all">{_t('كل الحسابات', 'All Accounts', 'Alle Konten')}</option>
+            {financeAccounts.filter((a) => !a.deleted).map((acc) => (
+              <option key={acc.id} value={acc.id}>
+                {acc.type === 'cash' ? '💵 ' : acc.type === 'wallet' ? '📱 ' : acc.type === 'bank' ? '🏦 ' : '💳 '}
+                {acc.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          financeAccounts.length > 0 && (
             <select
-              value={historyAccountId}
-              onChange={(e) => setHistoryAccountId(e.target.value)}
-              className="px-2.5 py-1 bg-surface-hover border border-surface-border rounded-lg text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+              value={selectedAccountId}
+              onChange={(e) => setSelectedAccountId(e.target.value)}
+              className="h-7 sm:h-8 px-1.5 bg-background border border-surface-border rounded-lg text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer max-w-[90px] xs:max-w-[115px] sm:max-w-[150px] truncate"
+              title={_t('الحساب الافتراضي للتحصيل', 'Default collection account', 'Standard-Konto')}
             >
-              <option value="all">{_t('جميع الحسابات والتحصيلات', 'All Accounts', 'Alle Konten')}</option>
-              {financeAccounts.filter(a => !a.deleted).map(acc => (
+              {financeAccounts.filter((a) => !a.deleted).map((acc) => (
                 <option key={acc.id} value={acc.id}>
                   {acc.type === 'cash' ? '💵 ' : acc.type === 'wallet' ? '📱 ' : acc.type === 'bank' ? '🏦 ' : '💳 '}
                   {acc.name}
                 </option>
               ))}
             </select>
+          )
+        )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* PAYMENT CARDS SECTION (ON TOP)                                            */}
+      {/* ========================================================================= */}
+
+      {/* TAB 1: DUE PAYMENT CYCLES */}
+      {activeTab === 'cycles' && (
+        <div className="space-y-3">
+          {filteredDueCycles.length === 0 ? (
+            <div className="py-10 sm:py-16 text-center flex flex-col items-center justify-center space-y-3 bg-surface border border-surface-border rounded-2xl">
+              <div className="relative mb-1">
+                <div className="absolute inset-0 bg-primary/20 rounded-full blur-xl pointer-events-none" />
+                <div className="w-14 h-14 bg-primary-soft text-primary rounded-2xl flex items-center justify-center mx-auto relative z-10 shadow-2xs border border-primary-border/30 rotate-2">
+                  <CheckCircle2 className="w-7 h-7 -rotate-2" />
+                </div>
+              </div>
+              <div className="space-y-1 relative z-10">
+                <h3 className="text-sm sm:text-base font-black text-text-main tracking-tight">
+                  {t('payments_no_due_title') || t('payments_no_due')}
+                </h3>
+                <p className="text-xs text-text-muted max-w-md mx-auto leading-relaxed">
+                  {t('payments_no_due_desc') || t('payments_no_due_sub')}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-3">
+              {filteredDueCycles.map((item, idx) => {
+                const studentAdvanceInfo = getStudentAdvanceLessonCredits(item.studentId, payments, lessons);
+                const targetAccountId = getCardAccountId(item.id, item.groupId);
+                const grp = groups.find(g => g.id === item.groupId);
+                const duration = grp?.duration || 60;
+                const rawDate = item.lessonDates[item.lessonDates.length - 1] || item.lessonDates[0] || todayStr;
+                const cleanDate = extractCleanDate(item.lessonDates.length > 0 ? item.lessonDates : rawDate);
+                const sessionText = item.cycleLength > 1 
+                  ? `${item.cycleLength}/${item.cycleLength}`
+                  : '1/1';
+
+                return (
+                  <div
+                    key={`${item.id}_${idx}`}
+                    className="bg-surface p-3 rounded-[16px] border border-surface-border hover:border-primary/40 transition-all shadow-2xs space-y-2 flex flex-col justify-between"
+                  >
+                    {/* 1. CARD HEADER */}
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <h3 className="text-sm font-black text-text-main truncate">
+                          {item.studentName}
+                        </h3>
+                        <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[120px] border border-surface-border/40">
+                          {item.groupName}
+                        </span>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-base sm:text-lg font-black text-primary font-mono leading-none">
+                          {item.amountDue}
+                        </span>
+                        <span className="text-[10.5px] font-bold text-text-muted ml-1">
+                          {currency}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 2. ACCOUNT & CREDITS ROW */}
+                    {(studentAdvanceInfo.remainingAdvanceLessons > 0 || financeAccounts.length > 0) && (
+                      <div className="flex items-center justify-between gap-2 h-6">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {studentAdvanceInfo.remainingAdvanceLessons > 0 && (
+                            <span className="h-6 px-1.5 rounded-md bg-primary-soft text-primary font-bold text-[9.5px] border border-primary-border flex items-center gap-1 shrink-0">
+                              <Coins className="w-2.5 h-2.5 text-primary shrink-0" />
+                              <span>{studentAdvanceInfo.remainingAdvanceLessons} {_t('حصص رصيد', 'credits', 'Guthaben')}</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 6. ACCOUNT INLINE CHIP */}
+                        {financeAccounts.length > 0 && (
+                          <div className="relative inline-flex items-center shrink-0">
+                            <select
+                              value={targetAccountId}
+                              onChange={(e) => setCardAccountMap(prev => ({ ...prev, [item.id]: e.target.value }))}
+                              className="h-6 pl-1.5 pr-4 bg-surface-hover/80 hover:bg-surface-hover border border-surface-border rounded-lg text-[10.5px] font-bold text-text-muted hover:text-text-main appearance-none cursor-pointer focus:outline-none transition-colors max-w-[130px] truncate"
+                              title={_t('تغيير حساب الإيداع', 'Change deposit account', 'Konto ändern')}
+                            >
+                              {financeAccounts.filter(a => !a.deleted).map(acc => (
+                                <option key={acc.id} value={acc.id}>
+                                  {acc.type === 'cash' ? '💵' : acc.type === 'wallet' ? '📱' : acc.type === 'bank' ? '🏦' : '💳'} {acc.name}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown className="w-2.5 h-2.5 text-text-muted absolute right-1 pointer-events-none" />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 3. LESSON INFO ROW */}
+                    <div className="flex items-center gap-3 text-[11px] font-mono text-text-muted">
+                      <span className="flex items-center gap-1 shrink-0">
+                        <span>📅</span>
+                        <span>{cleanDate}</span>
+                      </span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        <span>📖</span>
+                        <span>Session {sessionText}</span>
+                      </span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        <span>⏱</span>
+                        <span>{duration}m</span>
+                      </span>
+                    </div>
+
+                    {/* 5. PROGRESS BAR (SHOW ONLY IF TOTAL LESSONS > 1) */}
+                    {item.cycleLength > 1 && (
+                      <div className="w-full h-1 bg-surface-hover rounded-full overflow-hidden">
+                        <div className="h-full bg-primary rounded-full w-full" />
+                      </div>
+                    )}
+
+                    {/* 7. ACTION BUTTONS: [ PAID ] + [ Parent Icon ] [ Advance Icon ] [ Exempt Icon ] */}
+                    <div className="flex items-center gap-1.5 pt-1">
+                      {/* PAID button (Primary, full width) */}
+                      <button
+                        type="button"
+                        onClick={() => handleMarkPaid(item)}
+                        className="flex-1 h-9 px-3 bg-primary hover:bg-primary-hover active:scale-95 text-white rounded-xl font-black text-xs shadow-2xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        title={t('payments_paid_btn')}
+                      >
+                        <Check className="w-4 h-4 stroke-[3] shrink-0" />
+                        <span>{_t('تم السداد', 'PAID', 'Bezahlt')}</span>
+                      </button>
+
+                      {/* Parent WhatsApp button (Icon only) */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCycleForWhatsApp(item)}
+                        className="w-9 h-9 shrink-0 bg-surface hover:bg-primary-soft text-text-muted hover:text-primary active:scale-95 border border-surface-border hover:border-primary-border rounded-xl transition-all cursor-pointer flex items-center justify-center"
+                        title={t('payments_parent_notice')}
+                      >
+                        <Send className="w-4 h-4 shrink-0" />
+                      </button>
+
+                      {/* Advance button (Icon only) */}
+                      <button
+                        type="button"
+                        onClick={() => openAdvanceModal(item.studentId)}
+                        className="w-9 h-9 shrink-0 bg-surface hover:bg-primary-soft text-text-muted hover:text-primary active:scale-95 border border-surface-border hover:border-primary-border rounded-xl transition-all cursor-pointer flex items-center justify-center"
+                        title={_t('تسجيل حصص مدفوعة مقدماً', 'Pay lessons in advance', 'Vorauszahlung')}
+                      >
+                        <Coins className="w-4 h-4 shrink-0" />
+                      </button>
+
+                      {/* Exempt button (Icon only) */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExemptModalCycle(item);
+                          setExemptNotes('');
+                        }}
+                        className="w-9 h-9 shrink-0 bg-surface hover:bg-primary-soft text-text-muted hover:text-primary active:scale-95 border border-surface-border hover:border-primary-border rounded-xl transition-all cursor-pointer flex items-center justify-center"
+                        title={_t('إعفاء من الدفع ومسح الاستحقاق', 'Exempt and clear due', 'Von Zahlung befreien')}
+                      >
+                        <ShieldX className="w-4 h-4 shrink-0" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: INDIVIDUAL DUE LESSONS */}
+      {activeTab === 'single_lessons' && (
+        <div className="space-y-3">
+          {unpaidSingleLessons.length === 0 ? (
+            <div className="py-10 sm:py-16 text-center flex flex-col items-center justify-center space-y-3 bg-surface border border-surface-border rounded-2xl">
+              <div className="w-12 h-12 bg-primary-soft text-primary rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm sm:text-base font-black text-text-main">
+                  {_t('لا توجد حصص فردية مستحقة السداد', 'No individual lessons due for payment', 'Keine fälligen Einzellektionen')}
+                </h3>
+                <p className="text-xs text-text-muted max-w-md mx-auto">
+                  {_t('جميع الحصص الفردية مسددة بالكامل أو مضافة للدورات المستحقة.', 'All individual lessons are settled or tracked in cycles.', 'Alle Einzellektionen sind bezahlt.')}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-3">
+              {unpaidSingleLessons.map((lesson) => {
+                const due = lesson.amountDue || 200;
+                const paid = lesson.amountPaid || 0;
+                const remaining = Math.max(0, due - paid);
+                const cardKey = `lesson_${lesson.id}`;
+                const targetAccountId = getCardAccountId(cardKey, lesson.groupId);
+                const student = students.find(s => s.id === lesson.studentId || s.name === lesson.studentName);
+                const studentAdvanceInfo = getStudentAdvanceLessonCredits(lesson.studentId || student?.id, payments, lessons);
+                const cleanDate = extractCleanDate(formatDateDisplay(lesson.date));
+                const duration = lesson.duration || 60;
+                const displayName = lesson.studentName || student?.name || lesson.groupName || lesson.title;
+                const groupLabel = lesson.groupName || (lesson.isQuickLesson ? _t('سريعة', 'Quick', 'Schnell') : _t('فردية', 'Private', 'Einzel'));
+
+                return (
+                  <div
+                    key={lesson.id}
+                    className="bg-surface p-3 rounded-[16px] border border-surface-border hover:border-primary/40 transition-all shadow-2xs space-y-2 flex flex-col justify-between"
+                  >
+                    {/* 1. CARD HEADER */}
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <h4 className="text-sm font-black text-text-main truncate">
+                          {displayName}
+                        </h4>
+                        <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[120px] border border-surface-border/40">
+                          {groupLabel}
+                        </span>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-base sm:text-lg font-black text-primary font-mono leading-none">
+                          {remaining}
+                        </span>
+                        <span className="text-[10.5px] font-bold text-text-muted ml-1">
+                          {currency}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 2. ACCOUNT & CREDITS ROW */}
+                    {(studentAdvanceInfo.remainingAdvanceLessons > 0 || financeAccounts.length > 0) && (
+                      <div className="flex items-center justify-between gap-2 h-6">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {studentAdvanceInfo.remainingAdvanceLessons > 0 && (
+                            <span className="h-6 px-1.5 rounded-md bg-primary-soft text-primary font-bold text-[9.5px] border border-primary-border flex items-center gap-1 shrink-0">
+                              <Coins className="w-2.5 h-2.5 text-primary shrink-0" />
+                              <span>{studentAdvanceInfo.remainingAdvanceLessons} {_t('حصص رصيد', 'credits', 'Guthaben')}</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 6. ACCOUNT INLINE CHIP */}
+                        {financeAccounts.length > 0 && (
+                          <div className="relative inline-flex items-center shrink-0">
+                            <select
+                              value={targetAccountId}
+                              onChange={(e) => setCardAccountMap(prev => ({ ...prev, [cardKey]: e.target.value }))}
+                              className="h-6 pl-1.5 pr-4 bg-surface-hover/80 hover:bg-surface-hover border border-surface-border rounded-lg text-[10.5px] font-bold text-text-muted hover:text-text-main appearance-none cursor-pointer focus:outline-none transition-colors max-w-[130px] truncate"
+                              title={_t('تغيير حساب الإيداع', 'Change deposit account', 'Konto ändern')}
+                            >
+                              {financeAccounts.filter(a => !a.deleted).map(acc => (
+                                <option key={acc.id} value={acc.id}>
+                                  {acc.type === 'cash' ? '💵' : acc.type === 'wallet' ? '📱' : acc.type === 'bank' ? '🏦' : '💳'} {acc.name}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown className="w-2.5 h-2.5 text-text-muted absolute right-1 pointer-events-none" />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 3. LESSON INFO ROW */}
+                    <div className="flex items-center gap-3 text-[11px] font-mono text-text-muted">
+                      <span className="flex items-center gap-1 shrink-0">
+                        <span>📅</span>
+                        <span>{cleanDate}</span>
+                      </span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        <span>📖</span>
+                        <span>Session 1/1</span>
+                      </span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        <span>⏱</span>
+                        <span>{duration}m</span>
+                      </span>
+                    </div>
+
+                    {/* 5. PROGRESS BAR: HIDE COMPLETELY FOR 1 LESSON (RULE 5) */}
+
+                    {/* 7. ACTION BUTTONS: [ PAID ] + [ Parent Icon ] [ Advance Icon ] [ Exempt Icon ] */}
+                    <div className="flex items-center gap-1.5 pt-1">
+                      {/* PAID button (Primary, full width) */}
+                      <button
+                        type="button"
+                        onClick={() => handleMarkSingleLessonPaid(lesson)}
+                        className="flex-1 h-9 px-3 bg-primary hover:bg-primary-hover active:scale-95 text-white rounded-xl font-black text-xs shadow-2xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        title={_t('سداد الحصة الآن', 'Mark Lesson as Paid', 'Als bezahlt markieren')}
+                      >
+                        <Check className="w-4 h-4 stroke-[3] shrink-0" />
+                        <span>{_t('تم السداد', 'PAID', 'Bezahlt')}</span>
+                      </button>
+
+                      {/* Parent WhatsApp button (Icon only) */}
+                      <button
+                        type="button"
+                        onClick={() => handleSingleLessonWhatsApp(lesson)}
+                        className="w-9 h-9 shrink-0 bg-surface hover:bg-primary-soft text-text-muted hover:text-primary active:scale-95 border border-surface-border hover:border-primary-border rounded-xl transition-all cursor-pointer flex items-center justify-center"
+                        title={t('payments_parent_notice')}
+                      >
+                        <Send className="w-4 h-4 shrink-0" />
+                      </button>
+
+                      {/* Advance button (Icon only) */}
+                      <button
+                        type="button"
+                        onClick={() => openAdvanceModal(lesson.studentId || student?.id || '')}
+                        className="w-9 h-9 shrink-0 bg-surface hover:bg-primary-soft text-text-muted hover:text-primary active:scale-95 border border-surface-border hover:border-primary-border rounded-xl transition-all cursor-pointer flex items-center justify-center"
+                        title={_t('تسجيل حصص مدفوعة مقدماً', 'Pay lessons in advance', 'Vorauszahlung')}
+                      >
+                        <Coins className="w-4 h-4 shrink-0" />
+                      </button>
+
+                      {/* Exempt button (Icon only) */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExemptModalLesson(lesson);
+                          setExemptNotes('');
+                        }}
+                        className="w-9 h-9 shrink-0 bg-surface hover:bg-primary-soft text-text-muted hover:text-primary active:scale-95 border border-surface-border hover:border-primary-border rounded-xl transition-all cursor-pointer flex items-center justify-center"
+                        title={_t('إعفاء من الدفع ومسح الحصة', 'Exempt and clear lesson', 'Lektion befreien')}
+                      >
+                        <ShieldX className="w-4 h-4 shrink-0" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: IN-PROGRESS / PRORATED BILLING */}
+      {activeTab === 'in_progress' && (
+        <div className="space-y-3">
+          <div className="bg-surface-hover/30 p-3 rounded-xl border border-surface-border flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-primary shrink-0" />
+            <p className="text-xs text-text-muted">
+              {_t('يمكنك إنهاء الدورة الحالية للطالب قبل موعدها وإصدار فاتورة نسبية حسب عدد الحصص المحضورة بالفعل.', 'End current cycle early and bill proportionally based on attended lessons.', 'Zyklus vorzeitig beenden und anteilig abrechnen.')}
+            </p>
           </div>
 
+          {filteredInProgressCycles.length === 0 ? (
+            <div className="bg-surface p-8 rounded-2xl text-center border border-surface-border">
+              <p className="text-xs text-text-muted font-bold">
+                {t('auto_there_are_currently_no_student')}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-3">
+              {filteredInProgressCycles.map((item, idx) => (
+                <div key={`${item.id}_${idx}`} className="bg-surface border border-surface-border hover:border-primary/40 transition-all p-3 rounded-[16px] space-y-2 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <h4 className="text-sm font-black text-text-main truncate">{item.studentName}</h4>
+                      <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[120px] border border-surface-border/40">
+                        {item.groupName}
+                      </span>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-base sm:text-lg font-black text-primary font-mono leading-none">
+                        {item.amountDue}
+                      </span>
+                      <span className="text-[10.5px] font-bold text-text-muted ml-1">
+                        {currency}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] font-mono text-text-muted">
+                    <span className="flex items-center gap-1">
+                      <span>📖</span>
+                      <span>{item.lessonDates.length} / {item.cycleLength} {t('auto_lessons')}</span>
+                    </span>
+                    <span className="text-[10px] text-text-muted font-bold">
+                      {Math.round((item.lessonDates.length / Math.max(1, item.cycleLength)) * 100)}%
+                    </span>
+                  </div>
+
+                  {item.cycleLength > 1 && (
+                    <div className="w-full h-1 bg-surface-hover rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-primary rounded-full" 
+                        style={{ width: `${Math.min(100, Math.round((item.lessonDates.length / Math.max(1, item.cycleLength)) * 100))}%` }}
+                      />
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProrateModalItem(item);
+                      setCustomProrateAmount(item.amountDue);
+                      setProrateAccountId(getCardAccountId(item.id, item.groupId));
+                    }}
+                    className="w-full h-[42px] bg-primary-soft text-primary hover:bg-primary/20 active:scale-95 transition-all text-xs font-black rounded-xl border border-primary-border flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-primary" />
+                    <span>{t('auto_force_cycle_bill')}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 4: PAYMENT HISTORY */}
+      {activeTab === 'history' && (
+        <div className="space-y-3">
           {filteredPaidHistory.length === 0 ? (
-            <div className="bg-surface p-5 rounded-xl border border-surface-border text-center space-y-1">
+            <div className="bg-surface p-10 rounded-2xl border border-surface-border text-center space-y-1">
               <p className="text-sm font-bold text-text-main">{t('payments_no_history')}</p>
               <p className="text-xs text-text-muted/70">{t('payments_history_sub')}</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
               {filteredPaidHistory.map(p => {
                 const targetAcc = financeAccounts.find(a => a.id === p.financeAccountId);
 
                 return (
                   <div
                     key={p.id}
-                    className="bg-surface p-4 rounded-xl border border-surface-border flex flex-col justify-between gap-3 shadow-2xs hover:shadow-xs transition-shadow"
+                    className="bg-surface p-4 sm:p-5 rounded-2xl border border-surface-border hover:border-primary/40 flex flex-col justify-between gap-3 shadow-2xs hover:shadow-xs transition-all"
                   >
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <h4 className="text-sm font-black text-text-main truncate">{p.studentName}</h4>
                         <div className="flex items-center gap-1 shrink-0">
                           {p.paymentType === 'advance_payment' && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-300/40 dark:border-amber-700/40 flex items-center gap-1">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-300/40 flex items-center gap-1">
                               <Coins className="w-3 h-3 text-amber-500" />
                               <span>{_t('سداد مقدم', 'Advance', 'Voraus')} ({p.bundleSize || 1} {_t('حصص', 'lessons', 'Lekt.')})</span>
                             </span>
                           )}
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-surface-hover text-slate-600 dark:text-slate-300">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-surface-hover text-text-muted">
                             {p.groupName}
                           </span>
                         </div>
@@ -1125,31 +1178,32 @@ ${datesFormatted}
                       {p.lessonDates && p.lessonDates.length > 0 && (
                         <div className="flex flex-wrap items-center gap-1 pt-0.5">
                           {p.lessonDates.map((d, i) => (
-                            <span key={i} className="text-[10px] font-mono bg-surface-hover/60 px-2 py-0.5 rounded border border-surface-border/60 dark:border-surface-border-soft text-slate-600 dark:text-slate-300">
-                              {d}
+                            <span key={i} className="text-[10px] font-mono bg-surface-hover/80 px-2 py-0.5 rounded border border-surface-border text-text-main">
+                              {formatLessonDateChip(d)}
                             </span>
                           ))}
                         </div>
                       )}
 
                       {/* Account Paid Into Badge */}
-                      <div className="flex items-center gap-1.5 text-[11px] text-text-muted pt-1">
+                      <div className="flex items-center gap-1.5 text-xs text-text-muted pt-1">
                         <Landmark className="w-3.5 h-3.5 text-primary shrink-0" />
                         <span className="font-bold text-text-main">
                           {_t('أودع في:', 'Deposited into:', 'Eingezahlt in:')}
                         </span>
-                        <span className="px-1.5 py-0.2 rounded bg-primary-soft dark:bg-primary-soft text-primary font-bold text-[10.5px]">
+                        <span className="px-2 py-0.5 rounded-md bg-primary-soft text-primary font-bold text-[11px]">
                           {targetAcc?.name || _t('الخزينة الرئيسية (كاش)', 'Main Cash', 'Hauptkasse')}
                         </span>
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-2 border-t border-surface-border/50">
-                      <span className="text-[10px] text-text-muted/70">
+                    <div className="flex items-center justify-between pt-2.5 border-t border-surface-border">
+                      <span className="text-[11px] text-text-muted">
                         {t('payments_paid_on')}: {p.paidDate || p.dueDate}
                       </span>
-                      <span className="text-xs font-black text-primary dark:text-primary font-mono">
-                        ✓ {p.amountPaid} {currency}
+                      <span className="text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        <span>{p.amountPaid} {currency}</span>
                       </span>
                     </div>
                   </div>
@@ -1159,6 +1213,152 @@ ${datesFormatted}
           )}
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* FINANCIAL SUMMARY & STATISTICS SECTION (ON BOTTOM)                        */}
+      {/* ========================================================================= */}
+      <div className="pt-6 border-t border-surface-border space-y-3.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-primary-soft text-primary flex items-center justify-center">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-text-main">
+                {_t('الملخص المالي ومؤشرات التحصيل', 'Financial Summary & Collection Metrics', 'Finanzübersicht & Kennzahlen')}
+              </h3>
+              <p className="text-[11px] text-text-muted">
+                {_t('إجمالي التحصيلات والمستحقات ومعدلات الإيراد اليومية والأسبوعية والشهرية', 'Totals of collections, pending dues, and revenue gains', 'Einnahmen, fällige Beträge und Ertragsraten')}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* 4 Metric Cards Grid */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+          {/* Collected */}
+          <div className="bg-surface hover:bg-surface-hover transition-colors p-3.5 rounded-2xl border border-surface-border flex flex-col justify-between relative overflow-hidden shadow-2xs">
+            <div className="absolute -right-2 -top-2 w-12 h-12 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+            <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+              {t('payments_total_collected') || 'Collected'}
+            </span>
+            <div>
+              <span className="text-lg sm:text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">{monthlyTotal}</span>
+              <span className="text-xs text-emerald-600/70 dark:text-emerald-400/70 font-normal mr-1">{currency}</span>
+            </div>
+          </div>
+
+          {/* Pending Due */}
+          <div className="bg-surface hover:bg-surface-hover transition-colors p-3.5 rounded-2xl border border-surface-border flex flex-col justify-between relative overflow-hidden shadow-2xs">
+            <div className="absolute -right-2 -top-2 w-12 h-12 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
+            <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5 text-amber-500" />
+              {t('payments_total_pending') || 'Pending'}
+            </span>
+            <div>
+              <span className="text-lg sm:text-xl font-black text-amber-600 dark:text-amber-400 font-mono">{totalAmountDue}</span>
+              <span className="text-xs text-amber-600/70 dark:text-amber-400/70 font-normal mr-1">{currency}</span>
+            </div>
+          </div>
+
+          {/* Overdue / Postponed */}
+          <div className="bg-surface hover:bg-surface-hover transition-colors p-3.5 rounded-2xl border border-surface-border flex flex-col justify-between relative overflow-hidden shadow-2xs">
+            <div className="absolute -right-2 -top-2 w-12 h-12 bg-rose-500/10 rounded-full blur-xl pointer-events-none" />
+            <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
+              {t('payments_overdue')}
+            </span>
+            <div>
+              <span className="text-lg sm:text-xl font-black text-rose-600 dark:text-rose-400 font-mono">{overdueTotal}</span>
+              <span className="text-xs text-rose-600/70 dark:text-rose-400/70 font-normal mr-1">{currency}</span>
+            </div>
+          </div>
+
+          {/* Expected Total */}
+          <div className="bg-surface hover:bg-surface-hover transition-colors p-3.5 rounded-2xl border border-surface-border flex flex-col justify-between relative overflow-hidden shadow-2xs">
+            <div className="absolute -right-2 -top-2 w-12 h-12 bg-primary/10 rounded-full blur-xl pointer-events-none" />
+            <span className="text-[10px] font-black text-primary uppercase tracking-wider mb-1 flex items-center gap-1">
+              <DollarSign className="w-3.5 h-3.5 text-primary" />
+              {t('payments_expected')}
+            </span>
+            <div>
+              <span className="text-lg sm:text-xl font-black text-primary font-mono">{totalAmountDue + monthlyTotal}</span>
+              <span className="text-xs text-primary/70 font-normal mr-1">{currency}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Interactive Revenue Overview Breakdown Card */}
+        <div className="bg-surface border border-surface-border p-3.5 sm:p-4 rounded-2xl shadow-2xs relative overflow-hidden">
+          <div className="flex items-center justify-between mb-2.5">
+            <div className="flex items-center gap-1.5">
+              <div className="p-1 bg-primary/10 rounded-lg">
+                <TrendingUp className="w-4 h-4 text-primary" />
+              </div>
+              <h4 className="text-xs font-black text-text-main uppercase tracking-wider">
+                {t('payments_revenue_overview')}
+              </h4>
+            </div>
+            <span className="text-[11px] text-text-muted">
+              {_t('انقر على أي فترة لعرض تفاصيل المعاملات المسددة', 'Click any period for detailed breakdown', 'Klicken für Details')}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedGainPeriod('daily')}
+              className="flex flex-col items-center p-2.5 bg-surface-hover/60 hover:bg-primary-soft transition-all rounded-xl border border-surface-border cursor-pointer group active:scale-95"
+            >
+              <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1 group-hover:text-primary transition-colors">
+                {t('payments_daily_gain_title') || 'Today'}
+              </span>
+              <span className="text-base sm:text-lg font-black text-text-main font-mono">
+                {dailyTotal} <span className="text-xs font-normal text-text-muted">{currency}</span>
+              </span>
+              <div className="mt-1 flex items-center justify-center text-[9px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                <TrendingUp className="w-2.5 h-2.5 mr-0.5" />
+                <span>{dailyPayments.length} {_t('دفعات', 'payments', 'Zahl.')}</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedGainPeriod('weekly')}
+              className="flex flex-col items-center p-2.5 bg-surface-hover/60 hover:bg-primary-soft transition-all rounded-xl border border-surface-border cursor-pointer group active:scale-95"
+            >
+              <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1 group-hover:text-primary transition-colors">
+                {t('payments_weekly_gain_title') || 'Weekly'}
+              </span>
+              <span className="text-base sm:text-lg font-black text-text-main font-mono">
+                {weeklyTotal} <span className="text-xs font-normal text-text-muted">{currency}</span>
+              </span>
+              <div className="mt-1 flex items-center justify-center text-[9px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                <TrendingUp className="w-2.5 h-2.5 mr-0.5" />
+                <span>{weeklyPayments.length} {_t('دفعات', 'payments', 'Zahl.')}</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedGainPeriod('monthly')}
+              className="flex flex-col items-center p-2.5 bg-surface-hover/60 hover:bg-primary-soft transition-all rounded-xl border border-surface-border cursor-pointer group active:scale-95"
+            >
+              <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1 group-hover:text-primary transition-colors">
+                {t('payments_monthly_gain_title') || 'Monthly'}
+              </span>
+              <span className="text-base sm:text-lg font-black text-text-main font-mono">
+                {monthlyTotal} <span className="text-xs font-normal text-text-muted">{currency}</span>
+              </span>
+              <div className="mt-1 flex items-center justify-center text-[9px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                <TrendingUp className="w-2.5 h-2.5 mr-0.5" />
+                <span>{monthlyPayments.length} {_t('دفعات', 'payments', 'Zahl.')}</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* WHATSAPP RECEIPT / NOTICE MODAL */}
       {selectedCycleForWhatsApp && (
@@ -1332,7 +1532,7 @@ ${datesFormatted}
                   <span className="text-xs text-text-muted/70 font-bold block">{t('auto_completed_lesson_dates_17')}</span>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {prorateModalItem.lessonDates.map((d, idx) => (
-                      <span key={idx} className="bg-surface text-[10px] font-mono px-2 py-0.5 rounded border border-surface-border dark:border-surface-border-soft">🗓️ {d}</span>
+                      <span key={idx} className="bg-surface text-[10px] font-mono px-2 py-0.5 rounded border border-surface-border dark:border-surface-border-soft">🗓️ {formatLessonDateChip(d)}</span>
                     ))}
                   </div>
                 </div>
@@ -1719,7 +1919,7 @@ ${datesFormatted}
               </div>
               {exemptModalCycle && exemptModalCycle.lessonDates.length > 0 && (
                 <div className="pt-1 border-t border-surface-border/50 text-[10px] text-text-muted">
-                  <span>{_t('الحصص المشمولة:', 'Lessons:', 'Lektionen:')} {exemptModalCycle.lessonDates.join('، ')}</span>
+                  <span>{_t('الحصص المشمولة:', 'Lessons:', 'Lektionen:')} {exemptModalCycle.lessonDates.map(formatLessonDateChip).join('، ')}</span>
                 </div>
               )}
             </div>

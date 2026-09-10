@@ -19,16 +19,30 @@ export const KidsTemplate: React.FC<TemplateProps> = ({ certificate }) => {
     <div
       dir={isRtl ? 'rtl' : 'ltr'}
       lang={isRtl ? 'ar' : 'de'}
-      className={`relative w-full aspect-[1.414/1] bg-gradient-to-br from-amber-50 via-sky-50 to-indigo-50 text-slate-800 p-6 sm:p-10 flex flex-col justify-between select-none overflow-hidden border-[12px] border-amber-400 rounded-3xl shadow-2xl ${isRtl ? 'font-arabic-sans' : 'font-cert-sans'}`}
+      className={`relative w-full aspect-[1.414/1] text-slate-800 p-6 sm:p-10 flex flex-col justify-between select-none overflow-hidden rounded-3xl shadow-2xl ${isRtl ? 'font-arabic-sans' : 'font-cert-sans'}`}
+      style={{
+        boxSizing: 'border-box',
+        backgroundColor: '#fffbeb',
+        backgroundImage: 'linear-gradient(135deg, #fffbeb 0%, #f0f9ff 50%, #eef2ff 100%)',
+        border: '12px solid #fbbf24'
+      }}
     >
       {/* Playful Inner Dashed Ring */}
       <div className="absolute inset-2 sm:inset-3 border-4 border-dashed border-sky-400 rounded-2xl pointer-events-none opacity-80" />
 
       {/* Floating Star Decors */}
-      <div className="absolute top-4 left-6 text-amber-400 animate-bounce"><Star className="w-7 h-7 fill-amber-400" /></div>
-      <div className="absolute top-8 right-8 text-sky-400"><Star className="w-8 h-8 fill-sky-400" /></div>
-      <div className="absolute bottom-6 left-10 text-pink-400"><Star className="w-6 h-6 fill-pink-400" /></div>
-      <div className="absolute bottom-10 right-8 text-indigo-400"><Star className="w-7 h-7 fill-indigo-400" /></div>
+      <div className="absolute top-4 left-6 animate-bounce" style={{ color: '#fbbf24' }}>
+        <Star className="w-7 h-7" style={{ fill: '#fbbf24', color: '#fbbf24' }} />
+      </div>
+      <div className="absolute top-8 right-8" style={{ color: '#38bdf8' }}>
+        <Star className="w-8 h-8" style={{ fill: '#38bdf8', color: '#38bdf8' }} />
+      </div>
+      <div className="absolute bottom-6 left-10" style={{ color: '#f472b6' }}>
+        <Star className="w-6 h-6" style={{ fill: '#f472b6', color: '#f472b6' }} />
+      </div>
+      <div className="absolute bottom-10 right-8" style={{ color: '#818cf8' }}>
+        <Star className="w-7 h-7" style={{ fill: '#818cf8', color: '#818cf8' }} />
+      </div>
 
       {/* Header */}
       <div className="text-center relative z-10 pt-2">

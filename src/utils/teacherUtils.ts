@@ -37,21 +37,3 @@ export function getTeacherArabicName(
   }
   return base || fallback;
 }
-
-/**
- * Returns a localized signature text for reports or messages based on target language.
- */
-export function getTeacherSignature(
-  profile?: TeacherProfile | null,
-  language: 'ar' | 'en' | 'de' = 'ar'
-): string {
-  if (language === 'ar') {
-    const arName = getTeacherArabicName(profile, 'المعلم');
-    return arName.startsWith('أ.') || arName.startsWith('الأستاذ') ? arName : `أ. ${arName}`;
-  } else if (language === 'de') {
-    const enName = getTeacherEnglishName(profile, 'Lehrkraft');
-    return enName.startsWith('Herr ') || enName.startsWith('Frau ') ? enName : `Herr ${enName}`;
-  } else {
-    return getTeacherEnglishName(profile, 'Instructor');
-  }
-}

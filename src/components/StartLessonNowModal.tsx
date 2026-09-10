@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { Group, Student, LessonType, AttendanceStatus, HomeworkStatus, PaymentStatus } from '../types';
 import { getDayNumber } from '../utils/scheduleUtils';
 import { formatLocalDate } from '../utils/timeUtils';
-import { areDuplicateLessons } from '../utils/lessonUtils';
+import { areDuplicateLessons, getGroupCycleInfo } from '../utils/lessonUtils';
 import { 
   X, Play, Users, User, Clock, Calendar as CalendarIcon, Video, MapPin, 
   CheckCircle2, Sparkles, BookOpen, Award, FileText, Zap, ChevronRight, ArrowLeft
@@ -15,7 +15,7 @@ interface StartLessonNowModalProps {
 }
 
 export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClose }) => {
-  const { groups, students, profile, lessons, addLesson, updateLesson, openLessonControl, saveLessonReport, startActiveLessonTimer, t } = useApp();
+  const { groups, students, profile, lessons, addLesson, updateLesson, openLessonControl, saveLessonReport, startActiveLessonTimer, t, language, _t } = useApp();
 
   const now = new Date();
   const todayStr = formatLocalDate(now);
@@ -177,6 +177,8 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
     // 2. No duplicate exists, create new Lesson object in context with a collision-proof ID
     const randomSuffix = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).substring(2, 8);
     const newLessonId = `l_spont_${Date.now()}_${randomSuffix}`;
+    const selectedGroupCycle = selectedGroup ? getGroupCycleInfo(selectedGroup, lessons, language) : null;
+
     const newLessonData = {
       id: newLessonId,
       groupId: targetGroupId,
@@ -189,8 +191,8 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
       durationMinutes: Number(durationMinutes),
       type: lessonType,
       grade,
-      sessionNumber: 1,
-      totalSessionsInPackage: selectedGroup?.sessionCount || 4,
+      sessionNumber: selectedGroupCycle ? selectedGroupCycle.currentSessionNumber : 1,
+      totalSessionsInPackage: selectedGroupCycle ? selectedGroupCycle.sessionCount : (selectedGroup?.sessionCount || 4),
       status: (mode === 'start_live' ? 'in_progress' : 'completed') as any,
       paymentStatus: 'unpaid' as PaymentStatus,
       amountDue,
@@ -367,6 +369,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
                   filteredGroups.map((g) => {
                     const isSelected = selectedGroupId === g.id;
                     const groupStsCount = activeStudents.filter(s => s.groupId === g.id).length;
+                    const cycleInfo = getGroupCycleInfo(g, lessons, language);
 
                     return (
                       <button
@@ -379,12 +382,13 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
                             : 'bg-surface-hover/60 border-surface-border dark:border-slate-750 hover:border-violet-300'
                         }`}
                       >
-                        <div>
-                          <span className="text-xs font-black text-text-main block">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-xs font-black text-text-main block truncate">
                             {g.name}
                           </span>
-                          <span className="text-[10px] text-text-muted font-bold block">
-                            {g.grade} • {groupStsCount} Schüler
+                          <span className="text-[10px] text-text-muted font-bold block mt-0.5 truncate">
+                            {g.grade} • {groupStsCount} {language === 'ar' ? 'طلاب' : language === 'de' ? 'Schüler' : 'Students'}
+                            {!cycleInfo.isPerLesson ? ` • ${cycleInfo.label}` : ` • ${_t('محاسبة بالحصة', 'Per Session', 'Pro Sitzung')}`}
                           </span>
                         </div>
 

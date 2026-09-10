@@ -30,14 +30,6 @@ export const GlueckBuddyAvatar: React.FC = () => {
           <div className="relative w-13 h-13 sm:w-14 sm:h-14 flex items-center justify-center overflow-visible z-10">
             <BuddyAnimation mood={workload.mood} size="md" popOut={true} interactive={false} />
           </div>
-
-          {/* Fully Visible Modern Pill Score Badge */}
-          <div 
-            className="absolute -bottom-1 -right-1 ltr:-right-1 rtl:-left-1 min-w-[22px] h-[19px] px-1.5 rounded-full bg-linear-to-r from-primary to-indigo-600 text-white text-[10px] font-black tracking-tight flex items-center justify-center shadow-md ring-2 ring-surface dark:ring-slate-900 z-20 pointer-events-none"
-            title={`Score: ${workload.score}`}
-          >
-            {workload.score}
-          </div>
         </motion.button>
 
         {/* Speech Bubble Popup on Hover or Morning Auto Greeting */}

@@ -63,10 +63,10 @@ const getImportanceFromPriority = (priority: NotificationPriority): Importance =
   }
 };
 
-// Helper to convert sound option to sound filename or default
-const getSoundFilename = (sound: NotificationSound): string | undefined => {
-  if (sound === 'default') return undefined;
-  return `${sound}.wav`;
+// Helper to convert sound option to sound filename or default.
+// Returning undefined instructs Android to use the device's default system sound reliably.
+const getSoundFilename = (_sound: NotificationSound): string | undefined => {
+  return undefined;
 };
 
 // Initialize Notification Channels for Android 8.0+
@@ -82,8 +82,7 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
         visibility: 1 as any, // VISIBILITY_PUBLIC -> On lock screen
         vibration: true,
         lights: true,
-        lightColor: '#EF4444',
-        sound: settings ? getSoundFilename(settings.alarmTone === 'loud_bell' ? 'bell' : settings.alarmTone === 'gentle_chime' ? 'chime' : 'beep') : 'beep.wav',
+        lightColor: '#EF4444'
       });
 
       // 1. Lesson Reminders Channel
@@ -93,10 +92,9 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
         description: 'Notifications for class reminders and running lesson timer',
         importance: 5 as Importance, // Elevated to MAX for outside app visibility
         visibility: 1 as any,
-        sound: settings ? getSoundFilename(settings.lessonReminder.sound) : 'beep.wav',
         vibration: true,
         lights: true,
-        lightColor: '#3B82F6',
+        lightColor: '#3B82F6'
       });
 
       // 2. Lesson Start Channel
@@ -106,10 +104,9 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
         description: 'Notifications when a lesson time arrives',
         importance: 5 as Importance,
         visibility: 1 as any,
-        sound: settings ? getSoundFilename(settings.lessonStart.sound) : 'default',
         vibration: true,
         lights: true,
-        lightColor: '#10B981',
+        lightColor: '#10B981'
       });
 
       // 3. Payment Due Channel
@@ -119,8 +116,7 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
         description: 'Notifications for student pending payments and package renewals',
         importance: settings ? getImportanceFromPriority(settings.paymentDue.priority) : 3,
         visibility: 1 as any,
-        sound: settings ? getSoundFilename(settings.paymentDue.sound) : 'default',
-        vibration: true,
+        vibration: true
       });
 
       // 4. Daily Summary Channel
@@ -130,8 +126,7 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
         description: 'Notifications for daily teacher schedule and earnings summary',
         importance: settings ? getImportanceFromPriority(settings.dailySummary.priority) : 3,
         visibility: 1 as any,
-        sound: settings ? getSoundFilename(settings.dailySummary.sound) : 'gentle.wav',
-        vibration: true,
+        vibration: true
       });
 
       // 5. Attendance Reminder Channel
@@ -141,8 +136,7 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
         description: 'Reminders to log student attendance after class',
         importance: settings ? getImportanceFromPriority(settings.attendanceReminder.priority) : 3,
         visibility: 1 as any,
-        sound: settings ? getSoundFilename(settings.attendanceReminder.sound) : 'chime.wav',
-        vibration: true,
+        vibration: true
       });
 
       // Register interactive action buttons for notifications appearing outside the app
@@ -252,8 +246,17 @@ export const requestNotificationPermission = async (): Promise<boolean> => {
 
   try {
     if (!isNotificationSupported()) return false;
-    if (Notification.permission === 'granted') return true;
+    if (Notification.permission === 'granted') {
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      }
+      return true;
+    }
     if (Notification.permission === 'denied') return false;
+
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
 
     const result = await Notification.requestPermission();
     return result === 'granted';
@@ -270,111 +273,6 @@ export const openAndroidNotificationSettings = async () => {
     } catch (e) {
       console.warn('Could not open Android settings:', e);
     }
-  }
-};
-
-/**
- * Updates the persistent notification for a running lesson session.
- */
-export const updateActiveLessonNotification = async (data: {
-  groupName: string;
-  grade?: string;
-  elapsedMinutes: number;
-  remainingMinutes?: number;
-  startTimeStr: string;
-  lessonTitle: string;
-  handlers?: NotificationActionHandler;
-}) => {
-  const { groupName, grade, elapsedMinutes, remainingMinutes, startTimeStr, lessonTitle, handlers } = data;
-  const title = `📚 ${groupName}${grade ? ` (${grade})` : ''}`;
-  const remText = remainingMinutes !== undefined && remainingMinutes >= 0 ? ` • ${remainingMinutes} min left` : '';
-  const body = `⏱ ${elapsedMinutes} min elapsed${remText}\n🕒 Started ${startTimeStr}`;
-
-  if (Capacitor.isNativePlatform()) {
-    try {
-      await initNotificationChannels();
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: 9999, // Constant ID for active lesson so it gets overwritten
-            title,
-            body,
-            channelId: 'lessons_reminders',
-            schedule: { at: new Date(Date.now() + 100) },
-            extra: { lessonTitle, groupName },
-            ongoing: true, // Keep notification persistent on Android
-            autoCancel: false,
-          }
-        ]
-      });
-    } catch (err) {
-      console.warn('Native notification update failed:', err);
-    }
-  } else {
-    try {
-      const perm = await getNotificationPermission();
-      if (perm !== 'granted') return;
-
-      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.ready.then(reg => {
-          reg.showNotification(title, {
-            body,
-            icon: '/pwa-192x192.png',
-            badge: '/badge-72x72.png',
-            tag: 'active-lesson-timer',
-            renotify: false,
-            requireInteraction: true,
-            actions: [
-              { action: 'end_lesson', title: '⏹ End' },
-              { action: 'open_lesson', title: '📱 Open' },
-              { action: 'cancel_lesson', title: '✕ Cancel' }
-            ],
-            data: { lessonTitle, groupName }
-          } as any);
-        }).catch(() => {
-          fallbackStandardNotification(title, body, handlers);
-        });
-      } else {
-        fallbackStandardNotification(title, body, handlers);
-      }
-    } catch (err) {
-      console.warn('Could not update active notification:', err);
-    }
-  }
-
-  // Also sync with MediaSession API for lock screen timer display
-  updateMediaSessionLockscreen(groupName, `⏱ ${elapsedMinutes} min elapsed`, handlers);
-};
-
-const fallbackStandardNotification = (
-  title: string, 
-  body: string, 
-  handlers?: NotificationActionHandler
-) => {
-  try {
-    if (activeNotification) {
-      try {
-        activeNotification.close();
-      } catch {}
-    }
-
-    activeNotification = new Notification(title, {
-      body,
-      tag: 'active-lesson-timer',
-      icon: '/pwa-192x192.png',
-      requireInteraction: true,
-      silent: true
-    });
-
-    activeNotification.onclick = (e: any) => {
-      try {
-        if (e && e.preventDefault) e.preventDefault();
-        window.focus();
-        if (handlers?.onOpenLesson) handlers.onOpenLesson();
-      } catch {}
-    };
-  } catch (err) {
-    console.warn('Standard notification fallback error:', err);
   }
 };
 
@@ -443,7 +341,9 @@ export const sendSystemNotification = async (
             channelId,
             schedule: { at: new Date(Date.now() + 100), allowWhileIdle: true },
             actionTypeId: actionTypeId || (tag.startsWith('upcoming-') || tag === 'lesson_alarm' ? 'LESSON_ALARM_ACTIONS' : undefined),
-            extra: extra || {}
+            extra: extra || {},
+            autoCancel: true,
+            ongoing: false
           }
         ]
       });
@@ -452,24 +352,33 @@ export const sendSystemNotification = async (
     }
   } else {
     try {
-      const perm = await getNotificationPermission();
-      if (perm !== 'granted') return;
+      let perm = await getNotificationPermission();
+      if (perm !== 'granted') {
+        const granted = await requestNotificationPermission();
+        if (!granted) return;
+        perm = 'granted';
+      }
 
       // Check for ServiceWorker showNotification to present system-level OS banner outside browser tab
       if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
         try {
-          const reg = await navigator.serviceWorker.getRegistration();
+          let reg = await navigator.serviceWorker.getRegistration();
+          if (!reg) {
+            reg = await navigator.serviceWorker.ready;
+          }
           if (reg && reg.showNotification) {
+            const isAlarm = tag.startsWith('upcoming-') || tag === 'lesson_alarm';
             const swOptions: any = {
               body,
-              tag,
+              tag: tag || 'lesson_alarm',
               icon: '/icon.png',
               badge: '/icon.png',
               requireInteraction: true, // Crucial: forces notification to stay on screen outside browser
               silent: false,
+              renotify: true,
               vibrate: [500, 200, 500, 200, 500, 200, 800],
-              data: { ...extra, url: window.location.href },
-              actions: (tag.startsWith('upcoming-') || tag === 'lesson_alarm') ? [
+              data: { ...extra, lessonId: extra?.lessonId, url: window.location.href, tag },
+              actions: isAlarm ? [
                 { action: 'start', title: '▶️ بدء الحصة' },
                 { action: 'snooze', title: '⏰ غفوة 5 دقائق' },
                 { action: 'dismiss', title: '✖️ إيقاف' }
@@ -478,23 +387,31 @@ export const sendSystemNotification = async (
             await reg.showNotification(title, swOptions);
             return;
           }
-        } catch {}
+        } catch (swErr) {
+          console.warn('ServiceWorker showNotification failed, trying fallback:', swErr);
+        }
       }
 
-      const notif = new Notification(title, {
-        body,
-        tag,
-        icon: '/icon.png',
-        badge: '/icon.png',
-        requireInteraction: true
-      });
-
-      notif.onclick = () => {
+      if (typeof Notification !== 'undefined') {
         try {
-          window.focus();
-          notif.close();
-        } catch {}
-      };
+          const notif = new Notification(title, {
+            body,
+            tag,
+            icon: '/icon.png',
+            badge: '/icon.png',
+            requireInteraction: true
+          });
+
+          notif.onclick = () => {
+            try {
+              window.focus();
+              notif.close();
+            } catch {}
+          };
+        } catch (notifErr) {
+          console.warn('Direct Notification constructor failed:', notifErr);
+        }
+      }
 
       if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
         try {
@@ -503,40 +420,6 @@ export const sendSystemNotification = async (
       }
     } catch (err) {
       console.warn('Browser notification error:', err);
-    }
-  }
-};
-
-/**
- * Schedule future local notification (e.g. for upcoming lesson reminders) with allowWhileIdle: true
- */
-export const scheduleLocalNotification = async (
-  id: number,
-  title: string,
-  body: string,
-  scheduleDate: Date,
-  channelId: string = 'lesson_alarm',
-  actionTypeId?: string,
-  extra?: Record<string, any>
-) => {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      await initNotificationChannels();
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            id,
-            title,
-            body,
-            channelId,
-            schedule: { at: scheduleDate, allowWhileIdle: true },
-            actionTypeId: actionTypeId || 'LESSON_ALARM_ACTIONS',
-            extra: extra || {}
-          }
-        ]
-      });
-    } catch (err) {
-      console.warn('Failed to schedule native local notification:', err);
     }
   }
 };
@@ -979,6 +862,8 @@ export const rebuildAllNotificationSchedules = async (
 export const setupNotificationActionListener = (
   onAction: (action: { actionId: string; lessonId?: string; extra?: any }) => void
 ) => {
+  const cleanups: (() => void)[] = [];
+
   if (Capacitor.isNativePlatform()) {
     try {
       const perfSub = LocalNotifications.addListener('localNotificationActionPerformed', (notificationAction) => {
@@ -996,15 +881,41 @@ export const setupNotificationActionListener = (
         }
       });
 
-      return () => {
+      cleanups.push(() => {
         perfSub.then(sub => sub.remove()).catch(() => {});
         recSub.then(sub => sub.remove()).catch(() => {});
-      };
+      });
     } catch (e) {
       console.warn('Failed to register notification action listener:', e);
     }
   }
-  return () => {};
+
+  // Web / PWA Service Worker message listener for outside-the-app clicks
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    const messageHandler = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'NOTIFICATION_ACTION') {
+        const actionMap: Record<string, string> = {
+          start: 'START_LESSON',
+          snooze: 'SNOOZE_ALARM',
+          dismiss: 'DISMISS_ALARM'
+        };
+        const mappedAction = actionMap[event.data.action] || event.data.action || 'tap';
+        onAction({
+          actionId: mappedAction,
+          lessonId: event.data.lessonId,
+          extra: event.data.extra
+        });
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', messageHandler);
+    cleanups.push(() => {
+      navigator.serviceWorker.removeEventListener('message', messageHandler);
+    });
+  }
+
+  return () => {
+    cleanups.forEach(fn => fn());
+  };
 };
 
 /**

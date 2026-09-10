@@ -5,7 +5,7 @@ import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, Lesso
 import { 
   X, Play, Pause, Square, Video, MapPin, Send, Phone, CheckCircle2, 
   Clock, AlertCircle, Sparkles, FileText, Award, DollarSign, ExternalLink, Navigation,
-  Zap, UserPlus, XCircle, Ban
+  Zap, UserPlus, XCircle, Ban, Edit2, Plus, Minus
 } from 'lucide-react';
 import { ParentSummaryModal } from './ParentSummaryModal';
 import { StudentSessionPerformanceSelector } from './StudentSessionPerformanceSelector';
@@ -79,6 +79,16 @@ export const LessonControlModal: React.FC = () => {
   const [showLessonReminderModal, setShowLessonReminderModal] = useState(false);
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [dismissFollowUpBanner, setDismissFollowUpBanner] = useState(false);
+
+  // Cycle session override state
+  const [isEditingSessionNumber, setIsEditingSessionNumber] = useState(false);
+  const [customSessionNumber, setCustomSessionNumber] = useState<number>(selectedLesson?.sessionNumber || 1);
+
+  useEffect(() => {
+    if (selectedLesson) {
+      setCustomSessionNumber(selectedLesson.sessionNumber || 1);
+    }
+  }, [selectedLesson?.id, selectedLesson?.sessionNumber]);
 
   // Check pending follow-ups for this group
   const pendingFollowUps = getPendingHomeworkFollowUps(lessons, groups);
@@ -338,6 +348,46 @@ export const LessonControlModal: React.FC = () => {
         : (targetStudent ? [targetStudent] : []));
   
   const targetGroup = groups.find(g => g.id === selectedLesson.groupId);
+  const isPerLessonGroup = Boolean(targetGroup && (targetGroup.paymentCycle === 'per_lesson' || targetGroup.paymentModel === 'per_session'));
+  // Each group already has its cycle session count recorded in its settings!
+  const cycleTotalSessions = targetGroup?.sessionCount || selectedLesson?.totalSessionsInPackage || 4;
+  const hasCycle = Boolean(selectedLesson && !selectedLesson.isQuickLesson && !isPerLessonGroup && cycleTotalSessions > 1);
+  
+  // Normalize session number strictly within 1 .. cycleTotalSessions
+  const rawSessionNumber = customSessionNumber || selectedLesson?.sessionNumber || 1;
+  const currentSessionNumber = rawSessionNumber > cycleTotalSessions
+    ? (((rawSessionNumber - 1) % cycleTotalSessions) + 1)
+    : Math.max(1, rawSessionNumber);
+
+  const handleUpdateSessionNumber = (newNumber: number) => {
+    if (!selectedLesson || newNumber < 1) return;
+    const clampedNumber = Math.min(newNumber, cycleTotalSessions);
+    setCustomSessionNumber(clampedNumber);
+    updateLesson(selectedLesson.id, { 
+      sessionNumber: clampedNumber,
+      totalSessionsInPackage: cycleTotalSessions 
+    });
+
+    // Synchronize subsequent scheduled lessons for this group so the sequence remains continuous
+    if (selectedLesson.groupId) {
+      const upcoming = lessons
+        .filter(l => l.groupId === selectedLesson.groupId && !l.deleted && l.status === 'scheduled' && l.id !== selectedLesson.id)
+        .filter(l => (l.date + (l.time || '')).localeCompare(selectedLesson.date + (selectedLesson.time || '')) > 0)
+        .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+      
+      upcoming.forEach((upLesson, idx) => {
+        const nextSeqNum = (((clampedNumber - 1 + idx + 1) % cycleTotalSessions) + 1);
+        if (upLesson.sessionNumber !== nextSeqNum) {
+          updateLesson(upLesson.id, {
+            sessionNumber: nextSeqNum,
+            totalSessionsInPackage: cycleTotalSessions
+          });
+        }
+      });
+    }
+
+    setIsEditingSessionNumber(false);
+  };
 
   // Recipient Phone Resolution (Parent Phone > Student Phone > Quick Lesson Phone)
   const rawRecipientPhone = (
@@ -425,8 +475,12 @@ export const LessonControlModal: React.FC = () => {
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    saveLessonReport(selectedLesson.id, reportData, packageChoice);
-    updateLesson(selectedLesson.id, { status: 'completed' });
+    saveLessonReport(selectedLesson.id, reportData, cycleTotalSessions, currentSessionNumber);
+    updateLesson(selectedLesson.id, { 
+      status: 'completed',
+      sessionNumber: currentSessionNumber,
+      totalSessionsInPackage: cycleTotalSessions
+    });
     endActiveLessonTimer();
     storage.removeItem(`dl_draft_report_${selectedLesson.id}`);
     setIsEditingReport(false);
@@ -502,12 +556,26 @@ export const LessonControlModal: React.FC = () => {
             </div>
 
             <div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="bg-primary-soft text-primary font-mono text-[10px] font-black px-1.5 py-0.5 rounded border border-primary-border">
                   {(selectedLesson.type || '').toUpperCase()}
                 </span>
                 {selectedLesson.grade && (
                   <span className="text-[11px] text-text-muted font-bold">{selectedLesson.grade}</span>
+                )}
+                {hasCycle && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowReportForm(true);
+                      setIsEditingSessionNumber(prev => !prev);
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-primary bg-primary-soft hover:bg-primary/20 px-2 py-0.5 rounded-md border border-primary-border transition-colors cursor-pointer"
+                    title={_t('انقر لتعديل رقم الحصة في السايكل', 'Click to edit cycle session number', 'Klicken zum Ändern der Sitzungsnummer')}
+                  >
+                    <span>{_t(`الحصة ${currentSessionNumber} من ${cycleTotalSessions}`, `Session ${currentSessionNumber} of ${cycleTotalSessions}`, `Sitzung ${currentSessionNumber}/${cycleTotalSessions}`)}</span>
+                    <Edit2 className="w-2.5 h-2.5 opacity-70" />
+                  </button>
                 )}
               </div>
               <h2 className="text-base sm:text-lg font-black tracking-tight text-text-main mt-0.5">{selectedLesson.title}</h2>
@@ -637,6 +705,34 @@ export const LessonControlModal: React.FC = () => {
                   <p className="text-[11px] font-medium text-text-main italic">
                     "{selectedLesson.report.teacherNotes}"
                   </p>
+                </div>
+              )}
+
+              {/* Cycle Session Number Summary Row */}
+              {hasCycle && (
+                <div className="p-2.5 bg-surface rounded-lg border border-surface-border/80 dark:border-surface-border flex items-center justify-between text-xs">
+                  <div className="space-y-0.5">
+                    <span className="block text-[9.5px] font-black uppercase text-text-muted/70">
+                      {_t('رقم الحصة في السايكل', 'Session in Cycle', 'Sitzungsnummer')}
+                    </span>
+                    <span className="font-extrabold text-primary flex items-center gap-1.5">
+                      <span className="w-5 h-5 rounded-md bg-primary text-white flex items-center justify-center text-[10px] font-black">
+                        {currentSessionNumber}
+                      </span>
+                      <span>{_t(`الحصة ${currentSessionNumber} من إجمالي ${cycleTotalSessions} حصص`, `Session ${currentSessionNumber} of ${cycleTotalSessions}`, `Sitzung ${currentSessionNumber} von ${cycleTotalSessions}`)}</span>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowReportForm(true);
+                      setIsEditingSessionNumber(true);
+                    }}
+                    className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 border border-surface-border rounded-lg text-xs font-bold text-primary flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                  >
+                    <Edit2 className="w-3 h-3" />
+                    <span>{_t('تعديل', 'Edit', 'Bearbeiten')}</span>
+                  </button>
                 </div>
               )}
 
@@ -952,6 +1048,103 @@ export const LessonControlModal: React.FC = () => {
                         </div>
                       )}
                     </div>
+
+                    {/* Cycle Session Number Banner & Edit Button */}
+                    {hasCycle && (
+                      <div className="space-y-2">
+                        <div className="bg-primary-soft/30 dark:bg-primary-soft/10 border border-primary-border/60 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center font-black text-sm shadow-2xs shrink-0">
+                              {currentSessionNumber}
+                            </div>
+                            <div>
+                              <div className="text-[10px] font-black uppercase tracking-wider text-text-muted">
+                                {_t('رقم الحصة في السايكل', 'Session in Cycle', 'Sitzungsnummer')}
+                              </div>
+                              <div className="text-xs font-bold text-text-main">
+                                {_t(`الحصة ${currentSessionNumber} من إجمالي ${cycleTotalSessions} حصص`, `Session ${currentSessionNumber} of ${cycleTotalSessions} total`, `Sitzung ${currentSessionNumber} von ${cycleTotalSessions}`)}
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingSessionNumber(prev => !prev)}
+                            className="px-3 py-1.5 bg-surface hover:bg-surface-hover border border-primary-border text-primary font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs active:scale-95 shrink-0"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>{isEditingSessionNumber ? _t('إخفاء خيارات التعديل', 'Hide Edit', 'Ausblenden') : _t('تعديل رقم الحصة', 'Edit Session Number', 'Sitzungsnummer bearbeiten')}</span>
+                          </button>
+                        </div>
+
+                        {/* Inline Session Number Editor */}
+                        {isEditingSessionNumber && (
+                          <div className="p-3 bg-surface border border-primary-border rounded-xl space-y-2.5 animate-fade-in shadow-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black text-text-main flex items-center gap-1.5">
+                                <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                                <span>{_t('اختر رقم الحصة في السايكل:', 'Select session in cycle:', 'Sitzung wählen:')}</span>
+                              </span>
+                              <span className="text-[11px] text-text-muted font-bold">
+                                {_t(`سايكل المجموعة: ${cycleTotalSessions} حصص`, `Group cycle: ${cycleTotalSessions} sessions`, `Gruppenzyklus: ${cycleTotalSessions}`)}
+                              </span>
+                            </div>
+
+                            {/* Dynamic Quick Number Pills strictly matching cycleTotalSessions */}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {Array.from({ length: cycleTotalSessions }, (_, i) => i + 1).map(num => (
+                                <button
+                                  key={num}
+                                  type="button"
+                                  onClick={() => handleUpdateSessionNumber(num)}
+                                  className={`min-w-[38px] h-8 px-2.5 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                                    currentSessionNumber === num
+                                      ? 'bg-primary text-white shadow-2xs scale-105 ring-2 ring-primary/30'
+                                      : 'bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main border border-surface-border'
+                                  }`}
+                                >
+                                  {num}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Manual Stepper & Input */}
+                            <div className="flex items-center gap-2 pt-1.5 border-t border-surface-border/60">
+                              <span className="text-xs text-text-muted font-bold">{_t('أو اكتب الرقم:', 'Or enter number:', 'Oder Eingabe:')}</span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateSessionNumber(Math.max(1, currentSessionNumber - 1))}
+                                  className="w-7 h-7 rounded-md bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 border border-surface-border flex items-center justify-center text-xs font-black cursor-pointer"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </button>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={cycleTotalSessions}
+                                  value={currentSessionNumber}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value, 10);
+                                    if (!isNaN(val) && val >= 1 && val <= cycleTotalSessions) {
+                                      handleUpdateSessionNumber(val);
+                                    }
+                                  }}
+                                  className="w-14 text-center py-1 bg-surface border border-surface-border rounded-md text-xs font-black focus:ring-2 focus:ring-primary/20 outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateSessionNumber(Math.min(cycleTotalSessions, currentSessionNumber + 1))}
+                                  className="w-7 h-7 rounded-md bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 border border-surface-border flex items-center justify-center text-xs font-black cursor-pointer"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Subject Taught */}
                     <div className="space-y-1">
@@ -1292,8 +1485,8 @@ export const LessonControlModal: React.FC = () => {
         <ParentSummaryModal
           lesson={{
             ...selectedLesson,
-            sessionNumber: selectedLesson.sessionNumber || 1,
-            totalSessionsInPackage: packageChoice || selectedLesson.totalSessionsInPackage || 4,
+            sessionNumber: currentSessionNumber || selectedLesson.sessionNumber || 1,
+            totalSessionsInPackage: cycleTotalSessions || packageChoice || selectedLesson.totalSessionsInPackage || 4,
             report: {
               ...(selectedLesson.report || {}),
               attendanceStatus: attendance,
@@ -1322,8 +1515,8 @@ export const LessonControlModal: React.FC = () => {
         <ArabicParentReportModal
           lesson={{
             ...selectedLesson,
-            sessionNumber: selectedLesson.sessionNumber || 1,
-            totalSessionsInPackage: packageChoice || selectedLesson.totalSessionsInPackage || 8,
+            sessionNumber: currentSessionNumber || selectedLesson.sessionNumber || 1,
+            totalSessionsInPackage: cycleTotalSessions || selectedLesson.totalSessionsInPackage || 4,
             report: {
               ...(selectedLesson.report || {}),
               attendanceStatus: attendance,

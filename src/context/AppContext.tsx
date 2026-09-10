@@ -17,10 +17,10 @@ import {
 } from '../services/notificationService';
 import { App as CapacitorApp } from '@capacitor/app';
 import { storage } from '../services/storageService';
-import { getStudentCyclePricing } from '../utils/paymentUtils';
+import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
 import { formatLocalDate } from '../utils/timeUtils';
-import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap } from '../utils/lessonUtils';
+import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import LiveTimer from '../services/liveTimerPlugin';
@@ -134,7 +134,7 @@ interface AppContextType {
   deleteLesson: (id: string) => void;
   deleteFutureGroupLessons: (groupId: string, fromDate: string, currentLessonId?: string) => void;
   deleteAllGroupLessons: (groupId: string, onlyScheduled?: boolean) => void;
-  saveLessonReport: (lessonId: string, report: LessonReport, packageCount?: number) => void;
+  saveLessonReport: (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number) => void;
   cancelLesson: (lessonId: string, notes?: string) => void;
   generateGroupScheduleLessons: (groupId: string, days: string[], time: string, numWeeks?: number, customDayTimes?: Record<string, string>, groupOverride?: Group) => void;
 
@@ -345,8 +345,6 @@ interface AppContextType {
   markAllFinanceNotificationsAsRead: () => void;
   deleteFinanceNotification: (id: string) => void;
 
-  backupToDrive: () => void | Promise<void>;
-  restoreFromDrive: (jsonString: string) => boolean;
   addAppNotification: (title: string, message: string, type: 'system' | 'reminder' | 'payment', extraFields?: any) => void;
   getHistoricalLessons: () => Promise<Lesson[]>;
   getHistoricalPayments: () => Promise<PaymentRecord[]>;
@@ -742,16 +740,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const cutoffStr = formatLocalDate(sixtyDaysAgo);
 
     const seenIds = new Set<string>();
-    return (Array.isArray(raw) ? raw : []).filter(p => {
-      if (!p || !p.id || seenIds.has(p.id)) return false;
-      if (p.deleted) return false;
-      seenIds.add(p.id);
-      const d = p.paidDate || p.dueDate || p.createdAt || '';
-      if (!d || typeof d !== 'string') return true;
-      if (d.substring(0, 10) >= cutoffStr) return true;
-      if (p.status === 'pending' || p.status === 'partial') return true;
-      return false;
-    });
+    return (Array.isArray(raw) ? raw : [])
+      .map(p => {
+        if (!p) return p;
+        if (p.lessonDates && p.lessonDates.some((d: string) => !/\d{2}\/\d{2}\/\d{4}/.test(d))) {
+          const fallbackBaseDate = p.dueDate || p.paidDate || formatLocalDate(new Date());
+          return {
+            ...p,
+            lessonDates: sanitizePaymentLessonDates(p.lessonDates, fallbackBaseDate, p.bundleSize || 8)
+          };
+        }
+        return p;
+      })
+      .filter(p => {
+        if (!p || !p.id || seenIds.has(p.id)) return false;
+        if (p.deleted) return false;
+        seenIds.add(p.id);
+        const d = p.paidDate || p.dueDate || p.createdAt || '';
+        if (!d || typeof d !== 'string') return true;
+        if (d.substring(0, 10) >= cutoffStr) return true;
+        if (p.status === 'pending' || p.status === 'partial') return true;
+        return false;
+      });
   };
 
   const [payments, setPayments] = useState<PaymentRecord[]>(() => {
@@ -1708,8 +1718,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               durationMinutes: group.lessonDurationMinutes || 60,
               type: group.type,
               grade: group.grade,
-              sessionNumber: ((lessons.filter(l => l.groupId === group.id && !l.deleted).length + newAutoLessons.length) % (group.sessionCount || 8)) + 1,
-              totalSessionsInPackage: group.sessionCount || 8,
+              sessionNumber: (((group.startingSessionNumber || 1) - 1 + lessons.filter(l => l.groupId === group.id && !l.deleted).length + newAutoLessons.length) % (group.sessionCount || 4)) + 1,
+              totalSessionsInPackage: group.sessionCount || 4,
               status: 'scheduled',
               paymentStatus: 'pending',
               amountDue: perSessionPrice,
@@ -1961,211 +1971,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     };
   }, [groups, updateFullStudentsStorage, updateFullLessonsStorage, updateFullPaymentsStorage, refreshCalendarAndDashboard]);
 
-  // Drive Backup export
-  const backupToDrive = async () => {
-    const data = {
-      profile,
-      schoolSettings: profile.schoolSettings,
-      groups,
-      students,
-      lessons,
-      payments,
-      notifications,
-      certificates,
-      todos,
-      theme,
-      accentColor,
-      notificationSettings,
-      inspirationSettings,
-      inspirationMessages,
-      hodStudents,
-      hodComplaints,
-      hodActionPlans,
-      hodVisits,
-      schoolNotes,
-      financeAccounts,
-      financeCategories,
-      financeTransactions,
-      financeRecurring,
-      financeInstallments,
-      financeNotifications,
-      exportedAt: new Date().toISOString()
-    };
-    const jsonStr = JSON.stringify(data, null, 2);
-    const fileName = `Glueck_Backup_${formatLocalDate()}.json`;
-
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const savedFile = await Filesystem.writeFile({
-          path: fileName,
-          data: jsonStr,
-          directory: Directory.Cache,
-          encoding: Encoding.UTF8
-        });
-        await Share.share({
-          title: 'Glück Backup',
-          text: 'Backup Export Data (Glück)',
-          url: savedFile.uri,
-          dialogTitle: 'Export Backup JSON'
-        });
-      } catch (err) {
-        console.warn('Native export via Filesystem failed, falling back to download blob:', err);
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-    } else {
-      const blob = new Blob([jsonStr], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }
-
-    const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    updateProfile({ lastSyncedAt: timeNow });
-  };
-
-  // Drive Restore import
-  const restoreFromDrive = async (jsonString: string): Promise<boolean> => {
-    try {
-      const parsed = JSON.parse(jsonString);
-      const validation = validateAndSanitizeBackupPayload(parsed);
-      const data = validation.isValid ? validation.data : parsed;
-
-      if (data.profile || data.schoolSettings) {
-        const baseProfile = data.profile || profile;
-        const mergedSchool = data.schoolSettings || baseProfile.schoolSettings;
-        const mergedProfile = { ...baseProfile, schoolSettings: mergedSchool };
-        setProfile(mergedProfile);
-        await storage.setItem('dl_profile', mergedProfile);
-      }
-      if (data.groups) {
-        setGroups(data.groups);
-        await storage.setItem('dl_groups', data.groups);
-      }
-      if (data.students) {
-        setStudents(data.students);
-        await storage.setItem('dl_students', data.students);
-      }
-      if (data.lessons) {
-        const seenL = new Set<string>();
-        const dedupedLessons = (Array.isArray(data.lessons) ? data.lessons : []).filter((l: any) => {
-          if (!l || !l.id || seenL.has(l.id)) return false;
-          seenL.add(l.id);
-          return true;
-        });
-        fullLessonsRef.current = dedupedLessons;
-        setLessons(filterActiveLessons(dedupedLessons));
-        await storage.setItem('dl_lessons', dedupedLessons);
-      }
-      if (data.payments) {
-        const seenP = new Set<string>();
-        const dedupedPayments = (Array.isArray(data.payments) ? data.payments : []).filter((p: any) => {
-          if (!p || !p.id || seenP.has(p.id)) return false;
-          seenP.add(p.id);
-          return true;
-        });
-        fullPaymentsRef.current = dedupedPayments;
-        setPayments(filterActivePayments(dedupedPayments));
-        await storage.setItem('dl_payments', dedupedPayments);
-      }
-      if (data.notifications) {
-        setNotifications(data.notifications);
-        await storage.setItem('dl_notifications', data.notifications);
-      }
-      if (data.certificates) {
-        setCertificates(data.certificates);
-        await storage.setItem('dl_certificates', data.certificates);
-      }
-      if (data.todos) {
-        setTodos(data.todos);
-        await storage.setItem('dl_quick_todos', data.todos);
-      }
-      if (data.theme) {
-        setTheme(data.theme);
-        await storage.setItem('dl_theme', data.theme);
-      }
-      if (data.accentColor) {
-        setAccentColor(data.accentColor);
-      }
-      if (data.notificationSettings) {
-        setNotificationSettings(data.notificationSettings);
-        await storage.setItem('dl_notification_settings', data.notificationSettings);
-      }
-      if (data.inspirationSettings) {
-        setInspirationSettings(data.inspirationSettings);
-        await storage.setItem('dl_inspiration_settings', data.inspirationSettings);
-      }
-      if (data.inspirationMessages) {
-        setInspirationMessages(data.inspirationMessages);
-        await storage.setItem('dl_inspiration_messages', data.inspirationMessages);
-      }
-      if (data.hodStudents) {
-        setHodStudents(data.hodStudents);
-        await storage.setItem('hod_german_students', data.hodStudents);
-      }
-      if (data.hodComplaints) {
-        setHodComplaints(data.hodComplaints);
-        await storage.setItem('hod_complaints', data.hodComplaints);
-      }
-      if (data.hodActionPlans) {
-        setHodActionPlans(data.hodActionPlans);
-        await storage.setItem('hod_student_action_plans', data.hodActionPlans);
-      }
-      if (data.hodVisits) {
-        setHodVisits(data.hodVisits);
-        await storage.setItem('hod_visit_records', data.hodVisits);
-      }
-      if (data.schoolNotes) {
-        setSchoolNotes(data.schoolNotes);
-        await storage.setItem('dl_school_notes', data.schoolNotes);
-      }
-      if (data.financeAccounts) {
-        setFinanceAccounts(data.financeAccounts);
-        await storage.setItem('dl_finance_accounts', data.financeAccounts);
-      }
-      if (data.financeCategories) {
-        setFinanceCategories(data.financeCategories);
-        await storage.setItem('dl_finance_categories', data.financeCategories);
-      }
-      if (data.financeTransactions) {
-        setFinanceTransactions(data.financeTransactions);
-        await storage.setItem('dl_finance_transactions', data.financeTransactions);
-      }
-      if (data.financeRecurring) {
-        setFinanceRecurring(data.financeRecurring);
-        await storage.setItem('dl_finance_recurring', data.financeRecurring);
-      }
-      if (data.financeInstallments) {
-        setFinanceInstallments(data.financeInstallments);
-        await storage.setItem('dl_finance_installments', data.financeInstallments);
-      }
-      if (data.financeNotifications) {
-        setFinanceNotifications(data.financeNotifications);
-        await storage.setItem('dl_finance_notifications', data.financeNotifications);
-      }
-
-      const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      setProfile(prev => ({ ...prev, lastSyncedAt: timeNow }));
-      confetti({ particleCount: 70, spread: 60 });
-      return true;
-    } catch (err) {
-      console.error('Failed to restore backup', err);
-      return false;
-    }
-  };
-
   // Synchronized notification handler (app state + phone system)
   const addAppNotification = (title: string, message: string, type: 'system' | 'reminder' | 'payment', extraFields?: any) => {
     const newNotif: NotificationItem = {
@@ -2188,8 +1993,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Group operations
   const addGroup = (groupData: Omit<Group, 'id'>): Group => {
-    const newGroup: Group = wrapMutation({
+    const isPerLesson = groupData.paymentCycle === 'per_lesson' || groupData.paymentModel === 'per_session';
+    const effectivePrice = isPerLesson
+      ? (groupData.pricePerSession ?? groupData.monthlyPackagePrice ?? 0)
+      : groupData.monthlyPackagePrice;
+
+    const sanitizedGroupData = {
       ...groupData,
+      paymentCycle: isPerLesson ? 'per_lesson' : (groupData.paymentCycle || 'monthly'),
+      paymentModel: isPerLesson ? 'per_session' : (groupData.paymentModel || 'package'),
+      sessionCount: isPerLesson ? 1 : (groupData.sessionCount || 4),
+      startingSessionNumber: isPerLesson ? 1 : (groupData.startingSessionNumber || 1),
+      pricePerSession: isPerLesson ? effectivePrice : groupData.pricePerSession,
+      monthlyPackagePrice: isPerLesson ? effectivePrice : (groupData.monthlyPackagePrice || 1200),
+    };
+
+    const newGroup: Group = wrapMutation({
+      ...sanitizedGroupData,
       id: `g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
     } as Group);
     setGroups(prev => [...prev, newGroup]);
@@ -2216,11 +2036,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const existingGroup = groups.find(g => g.id === id);
     if (!existingGroup) return;
 
-    const updatedGroup: Group = wrapMutation({
+    const isPerLesson = (updates.paymentCycle ?? existingGroup.paymentCycle) === 'per_lesson' ||
+                        (updates.paymentModel ?? existingGroup.paymentModel) === 'per_session';
+
+    const effectivePrice = isPerLesson
+      ? (updates.pricePerSession ?? existingGroup.pricePerSession ?? updates.monthlyPackagePrice ?? existingGroup.monthlyPackagePrice ?? 0)
+      : (updates.monthlyPackagePrice ?? existingGroup.monthlyPackagePrice ?? 1200);
+
+    const mergedGroup: Group = {
       ...existingGroup,
       ...updates,
-      id // Immutable Group Identity
-    } as Group);
+      id,
+      paymentCycle: isPerLesson ? 'per_lesson' : ((updates.paymentCycle ?? existingGroup.paymentCycle) || 'monthly'),
+      paymentModel: isPerLesson ? 'per_session' : ((updates.paymentModel ?? existingGroup.paymentModel) || 'package'),
+      sessionCount: isPerLesson ? 1 : (updates.sessionCount ?? existingGroup.sessionCount ?? 4),
+      startingSessionNumber: isPerLesson ? 1 : (updates.startingSessionNumber ?? existingGroup.startingSessionNumber ?? 1),
+      pricePerSession: isPerLesson ? effectivePrice : (updates.pricePerSession ?? existingGroup.pricePerSession),
+      monthlyPackagePrice: effectivePrice,
+    };
+
+    const updatedGroup: Group = wrapMutation(mergedGroup as Group);
 
     const oldSlots = getGroupScheduleSlots(existingGroup);
     const newSlots = getGroupScheduleSlots(updatedGroup);
@@ -2289,7 +2124,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
         const pastGroupLessonsCount = reconciledLessons.filter(l => l.groupId === id && !l.deleted).length;
         const startingNum = updatedGroup.startingSessionNumber || 1;
-        const sessionCount = updatedGroup.sessionCount || 8;
+        const sessionCount = updatedGroup.sessionCount || 4;
 
         const isPerLesson = updatedGroup.paymentCycle === 'per_lesson' || updatedGroup.paymentModel === 'per_session';
         const perSessionPrice = isPerLesson && updatedGroup.pricePerSession
@@ -3015,7 +2850,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
       const existingMatch = activeLessons.find(l => areDuplicateLessons(l, candidate, students));
       if (!existingMatch) {
-        const currentSessionNum = ((groupLessons.length + createdLessons.length) % totalSessions) + 1;
+        const baseSessionNum = (lessonData as any).sessionNumber && (lessonData as any).sessionNumber >= 1
+          ? (lessonData as any).sessionNumber
+          : (targetGroup ? getGroupCycleInfo(targetGroup, activeLessons).currentSessionNumber : (((groupLessons.length + createdLessons.length) % totalSessions) + 1));
+        const currentSessionNum = ((baseSessionNum - 1 + week) % totalSessions) + 1;
 
         createdLessons.push(wrapMutation({
           ...lessonData,
@@ -3108,11 +2946,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     autoSyncEngine.notifyMutation('lessons', groupId);
   };
 
-  const saveLessonReport = (lessonId: string, report: LessonReport, packageCount?: number) => {
+  const saveLessonReport = (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number) => {
     const targetLesson = (fullLessonsRef.current || []).find(l => l.id === lessonId) || lessons.find(l => l.id === lessonId);
     if (!targetLesson) return;
 
-    const updatedTotalSessions = packageCount || targetLesson.totalSessionsInPackage || 4;
+    const finalSessionNumber = sessionNumber !== undefined && sessionNumber > 0
+      ? sessionNumber
+      : (targetLesson.sessionNumber || 1);
+    const targetGroup = groups.find(g => g.id === targetLesson.groupId);
+    const updatedTotalSessions = targetGroup?.sessionCount || packageCount || targetLesson.totalSessionsInPackage || 4;
     const finalAmountPaid = report.amountPaid ?? targetLesson.amountPaid;
     const finalAmountDue = targetLesson.amountDue || 200;
     const today = formatLocalDate();
@@ -3139,9 +2981,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         return wrapMutation({
           ...l,
           status: 'completed',
+          sessionNumber: finalSessionNumber,
+          totalSessionsInPackage: updatedTotalSessions,
           paymentStatus: report.paymentStatus,
           amountPaid: finalAmountPaid,
-          totalSessionsInPackage: updatedTotalSessions,
           studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : l.studentPayments,
           report
         } as Lesson);
@@ -3213,7 +3056,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
              return true;
           });
           
-          const reachedBundleSize = (unbilledCompletedLessons.length + virtualOffset) >= bundleSize;
+          const reachedBundleSize = 
+            (bundleSize > 1 && (finalSessionNumber >= bundleSize || finalSessionNumber % bundleSize === 0)) ||
+            ((unbilledCompletedLessons.length + virtualOffset) >= bundleSize) ||
+            unbilledCompletedLessons.some(l => l.sessionNumber && bundleSize > 1 && (l.sessionNumber >= bundleSize || l.sessionNumber % bundleSize === 0));
           const isPayingNow = stPayChoice?.amount !== undefined && stPayChoice.amount > 0;
 
           if (!reachedBundleSize && !isPayingNow) {
@@ -3221,7 +3067,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             return;
           }
 
-          const formattedDateWithSession = `${formattedDate} (Session ${targetLesson.sessionNumber || 1}/${bundleSize})`;
+          const formattedDateWithSession = `${formattedDate} (Session ${finalSessionNumber}/${bundleSize})`;
+
+          // Helper to format date
+          const formatSingleDate = (d: string) => {
+            const pts = d.split('-');
+            return pts.length === 3 ? `${pts[2]}/${pts[1]}/${pts[0]}` : d;
+          };
 
           if (openCycleIndex >= 0) {
             // Update existing open payment cycle
@@ -3239,7 +3091,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             // Generate virtual dates for the first cycle if needed
             if (virtualOffset > 0) {
               for (let i = 1; i <= virtualOffset; i++) {
-                const vLabel = `Offline (Session ${i}/${bundleSize})`;
+                const matchedLesson = lessons.find(l => 
+                  ((targetLesson.groupId && l.groupId === targetLesson.groupId) || (st.id && l.studentId === st.id)) && 
+                  l.sessionNumber === i
+                );
+                const pastDate = matchedLesson?.date || calculateEstimatedPastDate(targetLesson.date, i, finalSessionNumber, grp?.scheduleDays);
+                const vLabel = `${formatSingleDate(pastDate)} (Session ${i}/${bundleSize})`;
                 if (!updatedDates.includes(vLabel)) {
                   updatedDates.push(vLabel);
                 }
@@ -3250,10 +3107,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             if (reachedBundleSize) {
               unbilledCompletedLessons.forEach(l => {
                 const lDate = l.date.split('-').length === 3 ? `${l.date.split('-')[2]}/${l.date.split('-')[1]}/${l.date.split('-')[0]}` : l.date;
-                const formattedLDate = `${lDate} (Session ${l.sessionNumber || 1}/${bundleSize})`;
+                const sess = l.id === targetLesson.id ? finalSessionNumber : (l.sessionNumber || 1);
+                const formattedLDate = `${lDate} (Session ${sess}/${bundleSize})`;
                 if (!updatedIds.includes(l.id)) updatedIds.push(l.id);
                 if (!updatedDates.includes(formattedLDate)) updatedDates.push(formattedLDate);
               });
+              if (!updatedDates.includes(formattedDateWithSession)) {
+                updatedDates.push(formattedDateWithSession);
+              }
+
+              // Fill missing sessions so the record has all bundleSize sessions with real past dates
+              if (updatedDates.length < bundleSize) {
+                const existingNums = new Set<number>();
+                updatedDates.forEach(d => {
+                  const m = d.match(/Session (\d+)\//);
+                  if (m) existingNums.add(parseInt(m[1], 10));
+                });
+                for (let i = 1; i <= bundleSize; i++) {
+                  if (!existingNums.has(i)) {
+                    const matchedLesson = lessons.find(l => 
+                      ((targetLesson.groupId && l.groupId === targetLesson.groupId) || (st.id && l.studentId === st.id)) && 
+                      l.sessionNumber === i
+                    );
+                    const pastDate = matchedLesson?.date || calculateEstimatedPastDate(targetLesson.date, i, finalSessionNumber, grp?.scheduleDays);
+                    const vLabel = `${formatSingleDate(pastDate)} (Session ${i}/${bundleSize})`;
+                    updatedDates.push(vLabel);
+                  }
+                }
+                updatedDates.sort((a, b) => {
+                  const na = parseInt(a.match(/Session (\d+)\//)?.[1] || '0', 10);
+                  const nb = parseInt(b.match(/Session (\d+)\//)?.[1] || '0', 10);
+                  return na - nb;
+                });
+              }
             } else {
               if (!updatedDates.includes(formattedDateWithSession)) {
                 updatedDates.push(formattedDateWithSession);
@@ -3271,6 +3157,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               amountDue: currentRec.amountDue || bundlePrice,
               amountPaid: curPaid,
               remainingBalance: Math.max(0, (currentRec.amountDue || bundlePrice) - curPaid - (currentRec.discountAmount || 0)),
+              dueDate: targetLesson.date,
               lessonIds: updatedIds,
               lessonDates: updatedDates,
               status: curStatus,
@@ -3289,19 +3176,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
             if (virtualOffset > 0) {
               for (let i = 1; i <= virtualOffset; i++) {
-                initialDates.push(`Offline (Session ${i}/${bundleSize})`);
+                const matchedLesson = lessons.find(l => 
+                  ((targetLesson.groupId && l.groupId === targetLesson.groupId) || (st.id && l.studentId === st.id)) && 
+                  l.sessionNumber === i
+                );
+                const pastDate = matchedLesson?.date || calculateEstimatedPastDate(targetLesson.date, i, finalSessionNumber, grp?.scheduleDays);
+                const vLabel = `${formatSingleDate(pastDate)} (Session ${i}/${bundleSize})`;
+                initialDates.push(vLabel);
               }
             }
 
             if (reachedBundleSize) {
               unbilledCompletedLessons.forEach(l => {
                 const lDate = l.date.split('-').length === 3 ? `${l.date.split('-')[2]}/${l.date.split('-')[1]}/${l.date.split('-')[0]}` : l.date;
-                const formattedLDate = `${lDate} (Session ${l.sessionNumber || 1}/${bundleSize})`;
+                const sess = l.id === targetLesson.id ? finalSessionNumber : (l.sessionNumber || 1);
+                const formattedLDate = `${lDate} (Session ${sess}/${bundleSize})`;
                 if (!initialIds.includes(l.id)) initialIds.push(l.id);
                 if (!initialDates.includes(formattedLDate)) {
                   initialDates.push(formattedLDate);
                 }
               });
+              if (!initialDates.includes(formattedDateWithSession)) {
+                initialDates.push(formattedDateWithSession);
+              }
+
+              if (initialDates.length < bundleSize) {
+                const existingNums = new Set<number>();
+                initialDates.forEach(d => {
+                  const m = d.match(/Session (\d+)\//);
+                  if (m) existingNums.add(parseInt(m[1], 10));
+                });
+                for (let i = 1; i <= bundleSize; i++) {
+                  if (!existingNums.has(i)) {
+                    const matchedLesson = lessons.find(l => 
+                      ((targetLesson.groupId && l.groupId === targetLesson.groupId) || (st.id && l.studentId === st.id)) && 
+                      l.sessionNumber === i
+                    );
+                    const pastDate = matchedLesson?.date || calculateEstimatedPastDate(targetLesson.date, i, finalSessionNumber, grp?.scheduleDays);
+                    const vLabel = `${formatSingleDate(pastDate)} (Session ${i}/${bundleSize})`;
+                    initialDates.push(vLabel);
+                  }
+                }
+                initialDates.sort((a, b) => {
+                  const na = parseInt(a.match(/Session (\d+)\//)?.[1] || '0', 10);
+                  const nb = parseInt(b.match(/Session (\d+)\//)?.[1] || '0', 10);
+                  return na - nb;
+                });
+              }
             } else {
               initialDates.push(formattedDateWithSession);
             }
@@ -3309,7 +3230,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             // Prorated amount if partially virtual
             const pricePerSession = bundlePrice / bundleSize;
             const actualCount = initialIds.length;
-            const adjustedAmountDue = virtualOffset > 0 ? Math.round(pricePerSession * actualCount) : bundlePrice;
+            const adjustedAmountDue = reachedBundleSize ? bundlePrice : (virtualOffset > 0 ? Math.round(pricePerSession * actualCount) : bundlePrice);
 
             const newRecord: PaymentRecord = wrapMutation({
               id: `pay_cycle_${st.id}_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
@@ -3359,20 +3280,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return s;
     }));
 
-    if (targetLesson.sessionNumber === updatedTotalSessions) {
+    const isCycleEnd = (updatedTotalSessions > 1 && (finalSessionNumber >= updatedTotalSessions || finalSessionNumber % updatedTotalSessions === 0));
+    if (isCycleEnd) {
       const packageTitle = targetLesson.groupName || targetLesson.studentName || targetLesson.title;
-      const notifMsg = `Paket beendet: ${targetLesson.sessionNumber} von ${updatedTotalSessions} Sitzungen abgeschlossen für ${packageTitle}. Zahlung erforderlich.`;
+      const notifMsg = `اكتملت دورة الحصص (السايكل): الحصة ${finalSessionNumber} من ${updatedTotalSessions} اكتملت لـ ${packageTitle}. السايكل اكتمل ومطلوب السداد.`;
       
-      addAppNotification('⚠️ Paket beendet & Zahlung fällig', notifMsg, 'payment', { lessonId });
+      addAppNotification('⚠️ السايكل اكتملت ومستحق السداد', notifMsg, 'payment', { 
+        lessonId,
+        groupId: targetLesson.groupId,
+        studentId: targetLesson.studentId
+      });
     }
 
     if (selectedLesson && selectedLesson.id === lessonId) {
       setSelectedLesson(prev => prev ? {
         ...prev,
         status: 'completed',
+        sessionNumber: finalSessionNumber,
+        totalSessionsInPackage: updatedTotalSessions,
         paymentStatus: report.paymentStatus,
         amountPaid: finalAmountPaid,
-        totalSessionsInPackage: updatedTotalSessions,
         report
       } : null);
     }
@@ -3519,8 +3446,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               durationMinutes: targetGroup.lessonDurationMinutes || 60,
               type: targetGroup.type,
               grade: targetGroup.grade,
-              sessionNumber: (((targetGroup.startingSessionNumber || 1) - 1 + activeLessons.filter(l => l.groupId === groupId).length + newLessons.length) % (targetGroup.sessionCount || 8)) + 1,
-              totalSessionsInPackage: targetGroup.sessionCount || 8,
+              sessionNumber: (((targetGroup.startingSessionNumber || 1) - 1 + activeLessons.filter(l => l.groupId === groupId).length + newLessons.length) % (targetGroup.sessionCount || 4)) + 1,
+              totalSessionsInPackage: targetGroup.sessionCount || 4,
               status: 'scheduled',
               paymentStatus: 'pending',
               amountDue: perSessionPrice,
@@ -3750,7 +3677,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       createdAt: new Date().toISOString()
     } as PaymentRecord);
 
-    updateFullPaymentsStorage(prev => [newRecord, ...prev]);
+    updateFullPaymentsStorage(prev => {
+      // Settle and resolve any existing unpaid or pending payment records for this student so they don't linger as debts
+      const cleanedPrev = prev.map(p => {
+        if (p.studentId === data.studentId && (p.status === 'not_yet' || p.status === 'pending' || p.status === 'unpaid')) {
+          return wrapMutation({
+            ...p,
+            status: 'paid',
+            amountPaid: p.amountDue,
+            remainingBalance: 0,
+            paidDate: today,
+            notes: `${p.notes || ''} (تمت التسوية بسداد مقدم)`.trim()
+          } as PaymentRecord);
+        }
+        return p;
+      });
+      return [newRecord, ...cleanedPrev];
+    });
 
     if (data.amount > 0) {
       addFinanceTransaction({
@@ -5214,8 +5157,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         registerFinanceActivity,
         
         refreshCalendarAndDashboard,
-        backupToDrive,
-        restoreFromDrive,
         lastBackupTime,
         
         performBackup,

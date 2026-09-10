@@ -8,6 +8,12 @@ import { ElegantTemplate } from './ElegantTemplate';
 import { KidsTemplate } from './KidsTemplate';
 import { GermanThemedTemplate } from './GermanThemedTemplate';
 import { ModernTemplate } from './ModernTemplate';
+import { RoyalEmeraldTemplate } from './RoyalEmeraldTemplate';
+import { SpaceExplorerTemplate } from './SpaceExplorerTemplate';
+import { GoldenOlympicTemplate } from './GoldenOlympicTemplate';
+import { IslamicHeritageTemplate } from './IslamicHeritageTemplate';
+import { FutureTechTemplate } from './FutureTechTemplate';
+import { VintageScrollTemplate } from './VintageScrollTemplate';
 import { CustomAIBackgroundTemplate } from './CustomAIBackgroundTemplate';
 
 interface CertificateRendererProps {
@@ -40,14 +46,35 @@ export const CertificateRenderer: React.FC<CertificateRendererProps> = ({
           {(templateId === 'girls' || templateId === 'girls_princess') && (
             <GirlsPrincessTemplate certificate={certificate} />
           )}
+          {templateId === 'royal_emerald' && <RoyalEmeraldTemplate certificate={certificate} />}
+          {templateId === 'golden_olympic' && <GoldenOlympicTemplate certificate={certificate} />}
+          {templateId === 'space_explorer' && <SpaceExplorerTemplate certificate={certificate} />}
+          {templateId === 'islamic_heritage' && <IslamicHeritageTemplate certificate={certificate} />}
+          {templateId === 'future_tech' && <FutureTechTemplate certificate={certificate} />}
+          {templateId === 'vintage_scroll' && <VintageScrollTemplate certificate={certificate} />}
           {templateId === 'elegant' && <ElegantTemplate certificate={certificate} />}
           {templateId === 'kids' && <KidsTemplate certificate={certificate} />}
           {templateId === 'german_themed' && <GermanThemedTemplate certificate={certificate} />}
           {templateId === 'modern' && <ModernTemplate certificate={certificate} />}
           {templateId === 'classic' && <ClassicTemplate certificate={certificate} />}
-          {(templateId === 'neutral' || !['boys', 'boys_champion', 'girls', 'girls_princess', 'elegant', 'kids', 'german_themed', 'modern', 'classic'].includes(templateId)) && (
-            <NeutralTemplate certificate={certificate} />
-          )}
+          {(templateId === 'neutral' ||
+            ![
+              'boys',
+              'boys_champion',
+              'girls',
+              'girls_princess',
+              'royal_emerald',
+              'golden_olympic',
+              'space_explorer',
+              'islamic_heritage',
+              'future_tech',
+              'vintage_scroll',
+              'elegant',
+              'kids',
+              'german_themed',
+              'modern',
+              'classic'
+            ].includes(templateId)) && <NeutralTemplate certificate={certificate} />}
         </>
       )}
     </div>

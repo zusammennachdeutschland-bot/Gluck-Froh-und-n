@@ -1,7 +1,7 @@
 import { isPendingStatus } from "../utils/lessonUtils";
 import { useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { sendSystemNotification, getNotificationPermission } from '../services/notificationService';
+import { sendSystemNotification, getNotificationPermission, requestNotificationPermission } from '../services/notificationService';
 import { formatLocalDate } from '../utils/timeUtils';
 
 export const useLessonReminders = () => {
@@ -49,9 +49,13 @@ export const useLessonReminders = () => {
               }
             }
 
-            // Send system/browser notification
+            // Send system/browser notification to pop up outside the app (Heads-up / Lockscreen)
             if (!isNotified) {
-              const perm = await getNotificationPermission();
+              let perm = await getNotificationPermission();
+              if (perm !== 'granted' && perm !== 'denied') {
+                const granted = await requestNotificationPermission();
+                perm = granted ? 'granted' : 'denied';
+              }
               if (perm === 'granted') {
                 const displayName = upcoming.groupName || upcoming.studentName || upcoming.title || 'Lektion';
                 const title = language === 'ar'
@@ -61,13 +65,17 @@ export const useLessonReminders = () => {
                   ? `تبدأ الساعة ${upcoming.time} (${upcoming.type === 'online' ? 'أونلاين' : 'حضوري'}). المنبه جاهز!`
                   : `Startet um ${upcoming.time} Uhr (${upcoming.type === 'online' ? 'Online' : 'Präsenz'}).`;
 
-                sendSystemNotification(
+                await sendSystemNotification(
                   title,
                   body,
-                  `upcoming-${upcoming.id}`
+                  `upcoming-${upcoming.id}`,
+                  { lessonId: upcoming.id, groupName: displayName, isAlarm: true },
+                  'LESSON_ALARM_ACTIONS'
                 );
+                sessionStorage.setItem(notifKey, '1');
+              } else if (perm === 'denied') {
+                sessionStorage.setItem(notifKey, '1');
               }
-              sessionStorage.setItem(notifKey, '1');
             }
           }
 

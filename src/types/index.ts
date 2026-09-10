@@ -42,23 +42,6 @@ export interface ProtocolHeader {
   timestamp?: number;
 }
 
-export interface PeerHandshakeRequest {
-  pin?: string;
-  deviceId: string;
-  deviceName: string;
-  header?: ProtocolHeader;
-}
-
-export interface PeerHandshakeResponse {
-  pairingToken: string;
-  peerId: string;
-  deviceName: string;
-  header?: ProtocolHeader;
-  negotiatedVersion: number;
-  agreedCapabilities: SyncCapability[];
-  status: 'compatible' | 'upgrade_required' | 'incompatible';
-}
-
 export interface SyncableRecord {
   id: string;
   updatedAt?: number; // strictly for Last-Write-Wins (LWW) conflict resolution
@@ -614,13 +597,6 @@ export interface Teacher {
   stage?: string;
 }
 
-export interface TeacherWorkload {
-  totalSessions: number;
-  assignedClasses: string[];
-  gradeBands: string[];
-}
-
-
 export type DayWorkingHours = {
   isOff: boolean;
   startTime: string;
@@ -1103,6 +1079,8 @@ export type CertificateCategoryKey =
   | 'progress'
   | 'german'
   | 'learning'
+  | 'creativity'
+  | 'leadership'
   | 'commitment'
   | 'recognition'
   | 'custom';
@@ -1124,12 +1102,24 @@ export type CertificateTypeKey =
   | 'german_vocabulary'
   | 'german_pronunciation'
   | 'german_excellence'
+  | 'german_reading_fluency'
+  | 'german_grammar_master'
   // Learning
   | 'homework_excellence'
   | 'excellent_participation'
   | 'exam_result'
   | 'outstanding_learning'
   | 'excellent_effort'
+  | 'fast_learner'
+  | 'moral_excellence'
+  // Creativity & Innovation
+  | 'creative_genius'
+  | 'problem_solver'
+  | 'inspirational_project'
+  // Leadership & Team Spirit
+  | 'team_leader'
+  | 'presentation_mastery'
+  | 'positive_energy'
   // Behavior / Commitment
   | 'perfect_attendance'
   | 'excellent_attendance'
@@ -1151,6 +1141,12 @@ export type CertificateTemplateId =
   | 'neutral'
   | 'classic'
   | 'elegant'
+  | 'royal_emerald'
+  | 'golden_olympic'
+  | 'space_explorer'
+  | 'islamic_heritage'
+  | 'future_tech'
+  | 'vintage_scroll'
   | 'kids'
   | 'german_themed'
   | 'modern'
@@ -1202,14 +1198,6 @@ export interface CertificateRecord extends SyncableRecord {
   customBackgroundUrl?: string;
   customBackgroundTextColor?: 'dark' | 'light' | 'gold_on_dark';
   createdAt: number; // timestamp
-}
-
-export interface StudentHonoredSummary {
-  student: Student;
-  certificateCount: number;
-  lastCertificate?: CertificateRecord;
-  lastCertificateDate?: string;
-  isHonoredInPeriod: boolean;
 }
 
 export interface HodGermanStudent extends SyncableRecord {

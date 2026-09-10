@@ -40,16 +40,16 @@ export const GirlsPrincessTemplate: React.FC<TemplateProps> = ({ certificate }) 
 
       {/* Floating Sparkles & Crowns */}
       <div className="absolute top-4 left-4 pointer-events-none" style={{ color: '#f472b6' }}>
-        <Sparkles className="w-8 h-8 fill-pink-300" />
+        <Sparkles className="w-8 h-8" style={{ fill: '#f9a8d4', color: '#f472b6' }} />
       </div>
       <div className="absolute top-4 right-4 pointer-events-none" style={{ color: '#fbbf24' }}>
-        <Crown className="w-8 h-8 fill-amber-300" />
+        <Crown className="w-8 h-8" style={{ fill: '#fde047', color: '#fbbf24' }} />
       </div>
       <div className="absolute bottom-4 left-4 pointer-events-none" style={{ color: '#fb7185' }}>
-        <Heart className="w-7 h-7 fill-rose-300" />
+        <Heart className="w-7 h-7" style={{ fill: '#fda4af', color: '#fb7185' }} />
       </div>
       <div className="absolute bottom-4 right-4 pointer-events-none" style={{ color: '#c084fc' }}>
-        <Sparkles className="w-8 h-8 fill-purple-300" />
+        <Sparkles className="w-8 h-8" style={{ fill: '#d8b4fe', color: '#c084fc' }} />
       </div>
 
       {/* Header Section */}

@@ -227,26 +227,26 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
           <div className="flex items-center gap-3">
             <div className={`p-2.5 rounded-xl ${
               permissionStatus === 'granted' 
-                ? 'bg-primary/10 text-primary dark:text-primary' 
-                : 'bg-primary/10 text-primary dark:text-primary'
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' 
+                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
             }`}>
               <Smartphone className="w-5 h-5" />
             </div>
             <div>
               <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
-                حالة إذن إشعارات نظام Android
+                حالة إذن إشعارات النظام (خارج البرنامج)
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
                   permissionStatus === 'granted'
-                    ? 'bg-primary/20 text-primary dark:text-primary'
-                    : 'bg-primary/20 text-primary dark:text-primary'
+                    ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
                 }`}>
-                  {permissionStatus === 'granted' ? 'مسموح بها ✓' : permissionStatus === 'denied' ? 'محظورة ✕' : 'يتطلب الإذن'}
+                  {permissionStatus === 'granted' ? 'مسموح بها ✓ (تظهر خارج البرنامج)' : permissionStatus === 'denied' ? 'محظورة ✕' : 'يتطلب الإذن'}
                 </span>
               </h3>
               <p className="text-xs text-text-muted mt-0.5">
                 {permissionStatus === 'granted'
-                  ? 'الإشعارات مفعلة ومصرح لها بالعمل في الخلفية وعلى الشاشة الرئيسية.'
-                  : 'الإشعارات محظورة من النظام. قد لا تصلك التنبيهات في موعدها بدون منح الإذن.'}
+                  ? 'صلاحيات الإشعارات مفعلة ومصرح لها بالظهور خارج التطبيق، أعلى الشاشة (Heads-Up) وعلى شاشة القفل.'
+                  : 'الإشعارات غير مفعلة في النظام حالياً. اضغط على الزر لمنح الإذن كي تظهر التنبيهات خارج البرنامج.'}
               </p>
             </div>
           </div>

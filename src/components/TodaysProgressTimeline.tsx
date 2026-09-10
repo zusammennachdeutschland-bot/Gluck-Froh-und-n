@@ -259,17 +259,17 @@ export const TodaysProgressTimeline: React.FC = () => {
       ) : (
         <div className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs space-y-2.5">
           {/* Timeline Header */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-primary dark:text-primary" />
-                <span>{t('todays_lessons_title')}</span>
+          <div className="flex items-center justify-between gap-1.5 sm:gap-2 whitespace-nowrap">
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              <Clock className="w-3.5 h-3.5 text-primary dark:text-primary shrink-0" />
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                {t('todays_lessons_title')}
               </h3>
               <span 
-                className={`text-[10px] px-1.5 py-0.2 rounded border transition-colors ${
+                className={`text-[11px] font-bold font-mono transition-colors whitespace-nowrap ${
                   progressPercent === 100
-                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 font-bold'
-                    : 'bg-surface-hover/80 text-text-muted border-surface-border/60 dark:border-surface-border-soft/60 font-medium'
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-text-muted'
                 }`}
                 title={
                   cancelledCount > 0
@@ -282,16 +282,16 @@ export const TodaysProgressTimeline: React.FC = () => {
             </div>
 
             {progressPercent === 100 && totalCount > 0 && (
-              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-900/50 flex items-center gap-1 animate-in fade-in duration-300">
-                <span>✓</span>
-                <span>{_t('اكتمل جدول اليوم', 'Day Completed', 'Tag abgeschlossen')}</span>
+              <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 shrink-0 whitespace-nowrap animate-in fade-in duration-300">
+                <span className="font-bold">✓</span>
+                <span>{_t('اكتمل اليوم', 'Day Completed', 'Tag abgeschlossen')}</span>
               </span>
             )}
           </div>
 
           {/* Progress Bar Visualizer */}
-          <div className="space-y-2">
-            <div className="w-full bg-slate-100 dark:bg-slate-800/80 h-2.5 sm:h-3 rounded-full overflow-hidden p-0.5 border border-slate-200/70 dark:border-slate-700/60 shadow-inner flex relative">
+          <div className="space-y-1.5">
+            <div className="w-full bg-slate-100 dark:bg-slate-800/80 h-1.5 sm:h-2 rounded-full overflow-hidden flex relative">
               {filledUnits > 0 && (
                 <div 
                   className="h-full rounded-full transition-all duration-700 ease-out shadow-xs relative overflow-hidden" 
@@ -300,61 +300,58 @@ export const TodaysProgressTimeline: React.FC = () => {
                     background: getSmoothProgressBarGradient(completedCount, activeCount, cancelledCount)
                   }}
                   title={`${completedCount} ${t('status_completed')}, ${activeCount} ${t('status_in_progress')}, ${cancelledCount} ${t('status_cancelled')}`}
-                >
-                  {/* Subtle glossy shimmer highlight overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-b from-white/30 via-transparent to-black/10 pointer-events-none rounded-full" />
-                </div>
+                />
               )}
             </div>
 
-            {/* Status Count Summary Badges */}
-            <div className="grid grid-cols-4 gap-1 sm:gap-1.5 text-[9px] font-bold">
+            {/* Status Count Summary Inline (Compact original size with new colors) */}
+            <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-bold px-0.5 pt-0.5">
               {/* Completed (Green) */}
               <div 
-                className={`flex items-center justify-center gap-1 py-1 px-1 rounded-lg border transition-all whitespace-nowrap overflow-hidden ${
+                className={`flex items-center gap-1 transition-colors ${
                   completedCount > 0
-                    ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200/80 dark:border-emerald-800/60 font-black'
-                    : 'text-text-muted/60 bg-surface-hover/50 border-surface-border/40'
+                    ? 'text-emerald-600 dark:text-emerald-400 font-bold'
+                    : 'text-text-muted/60 font-medium'
                 }`}
               >
-                <CheckCircle2 className={`w-2.5 h-2.5 shrink-0 ${completedCount > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-text-muted/50'}`} />
-                <span className="truncate">{completedCount} {t('status_completed')}</span>
+                <CheckCircle2 className="w-3 h-3 shrink-0" />
+                <span>{completedCount} {t('status_completed')}</span>
               </div>
 
               {/* In Progress (Blue) */}
               <div 
-                className={`flex items-center justify-center gap-1 py-1 px-1 rounded-lg border transition-all whitespace-nowrap overflow-hidden ${
+                className={`flex items-center gap-1 transition-colors ${
                   activeCount > 0
-                    ? 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 border-blue-200/80 dark:border-blue-800/60 font-black animate-pulse'
-                    : 'text-text-muted/60 bg-surface-hover/50 border-surface-border/40'
+                    ? 'text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-text-muted/60 font-medium'
                 }`}
               >
-                <PlayCircle className={`w-2.5 h-2.5 shrink-0 ${activeCount > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-text-muted/50'}`} />
-                <span className="truncate">{activeCount} {t('status_in_progress')}</span>
+                <PlayCircle className="w-3 h-3 shrink-0" />
+                <span>{activeCount} {t('status_in_progress')}</span>
               </div>
 
               {/* Upcoming (Neutral) */}
               <div 
-                className={`flex items-center justify-center gap-1 py-1 px-1 rounded-lg border transition-all whitespace-nowrap overflow-hidden ${
+                className={`flex items-center gap-1 transition-colors ${
                   upcomingCount > 0
-                    ? 'text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700/60 font-bold'
-                    : 'text-text-muted/60 bg-surface-hover/50 border-surface-border/40'
+                    ? 'text-slate-600 dark:text-slate-400 font-semibold'
+                    : 'text-text-muted/60 font-medium'
                 }`}
               >
-                <Clock className="w-2.5 h-2.5 shrink-0 text-text-muted/70" />
-                <span className="truncate">{upcomingCount} {t('timeline_upcoming')}</span>
+                <Clock className="w-3 h-3 shrink-0" />
+                <span>{upcomingCount} {t('timeline_upcoming')}</span>
               </div>
 
               {/* Cancelled (Red) */}
               <div 
-                className={`flex items-center justify-center gap-1 py-1 px-1 rounded-lg border transition-all whitespace-nowrap overflow-hidden ${
+                className={`flex items-center gap-1 transition-colors ${
                   cancelledCount > 0
-                    ? 'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-rose-200/80 dark:border-rose-800/60 font-black'
-                    : 'text-text-muted/60 bg-surface-hover/50 border-surface-border/40'
+                    ? 'text-rose-600 dark:text-rose-400 font-bold'
+                    : 'text-text-muted/60 font-medium'
                 }`}
               >
-                <XCircle className={`w-2.5 h-2.5 shrink-0 ${cancelledCount > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-text-muted/50'}`} />
-                <span className="truncate">{cancelledCount} {t('status_cancelled')}</span>
+                <XCircle className="w-3 h-3 shrink-0" />
+                <span>{cancelledCount} {t('status_cancelled')}</span>
               </div>
             </div>
           </div>
@@ -443,16 +440,20 @@ export const TodaysProgressTimeline: React.FC = () => {
                       <div className="flex items-center gap-1.5 text-[10px] text-text-muted flex-wrap font-medium">
                         {lesson.grade && <span>{lesson.grade}</span>}
                         {lesson.grade && <span>•</span>}
-                        <span className={`font-semibold ${
-                          isCancelledState
-                            ? 'text-rose-600/70 dark:text-rose-400/70'
-                            : state === 'active'
-                            ? 'text-blue-600 dark:text-blue-400'
-                            : 'text-primary dark:text-primary'
-                        }`}>
-                          S{lesson.sessionNumber}/{lesson.totalSessionsInPackage}
-                        </span>
-                        <span>•</span>
+                        {(lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) ? (
+                          <>
+                            <span className={`font-semibold ${
+                              isCancelledState
+                                ? 'text-rose-600/70 dark:text-rose-400/70'
+                                : state === 'active'
+                                ? 'text-blue-600 dark:text-blue-400'
+                                : 'text-primary dark:text-primary'
+                            }`}>
+                              S{lesson.sessionNumber}/{lesson.totalSessionsInPackage}
+                            </span>
+                            <span>•</span>
+                          </>
+                        ) : null}
                         {lesson.type === 'online' ? (
                           <span className={`flex items-center gap-0.5 ${
                             isCancelledState

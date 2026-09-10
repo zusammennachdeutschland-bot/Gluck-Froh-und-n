@@ -51,7 +51,15 @@ export const CERTIFICATE_CATEGORIES_CONFIG: Record<CertificateCategoryKey, Certi
       de: 'Deutsche Sprache',
       ar: 'اللغة الألمانية'
     },
-    typeKeys: ['german_achievement', 'german_speaking', 'german_vocabulary', 'german_pronunciation', 'german_excellence']
+    typeKeys: [
+      'german_achievement',
+      'german_speaking',
+      'german_vocabulary',
+      'german_pronunciation',
+      'german_excellence',
+      'german_reading_fluency',
+      'german_grammar_master'
+    ]
   },
   learning: {
     key: 'learning',
@@ -62,7 +70,37 @@ export const CERTIFICATE_CATEGORIES_CONFIG: Record<CertificateCategoryKey, Certi
       de: 'Lernen & Unterricht',
       ar: 'التحصيل والتعلم'
     },
-    typeKeys: ['homework_excellence', 'excellent_participation', 'exam_result', 'outstanding_learning', 'excellent_effort']
+    typeKeys: [
+      'homework_excellence',
+      'excellent_participation',
+      'exam_result',
+      'outstanding_learning',
+      'excellent_effort',
+      'fast_learner',
+      'moral_excellence'
+    ]
+  },
+  creativity: {
+    key: 'creativity',
+    iconName: 'Lightbulb',
+    emoji: '💡',
+    names: {
+      en: 'Creativity & Innovation',
+      de: 'Kreativität & Innovation',
+      ar: 'الإبداع والابتكار'
+    },
+    typeKeys: ['creative_genius', 'problem_solver', 'inspirational_project']
+  },
+  leadership: {
+    key: 'leadership',
+    iconName: 'Crown',
+    emoji: '🌟',
+    names: {
+      en: 'Leadership & Spirit',
+      de: 'Führung & Teamgeist',
+      ar: 'القيادة وروح الفريق'
+    },
+    typeKeys: ['team_leader', 'presentation_mastery', 'positive_energy']
   },
   commitment: {
     key: 'commitment',
@@ -906,6 +944,266 @@ export const CERTIFICATE_TYPES_CONFIG: Record<CertificateTypeKey, CertificateTyp
       de: 'Überreicht in Anerkennung aktiver Teilnahme und wertvoller Mitarbeit im Unterricht.',
       ar: 'تُمنح تقديرًا للمشاركة الفعالة والحضور المستمر في دروس اللغة الألمانية.'
     }
+  },
+  german_reading_fluency: {
+    key: 'german_reading_fluency',
+    category: 'german',
+    iconName: 'BookOpen',
+    badgeEmoji: '📖',
+    defaultBadgeText: {
+      en: 'FLUENT READER',
+      de: 'LESEKOMPETENZ',
+      ar: 'طلاقة القراءة'
+    },
+    titles: {
+      en: 'German Reading Fluency Award',
+      de: 'Urkunde für herausragende Lesekompetenz',
+      ar: 'وسام الطلاقة في القراءة بالألمانية'
+    },
+    subtitles: {
+      en: 'For exceptional fluency, pronunciation, and reading comprehension',
+      de: 'Für hervorragende Aussprache, Lesefluss und Textverständnis',
+      ar: 'للقراءة السليمة والطلاقة المعبرة وفهم النصوص الألمانية'
+    },
+    descriptions: {
+      en: 'Awarded in recognition of remarkable skill, accurate intonation, and fluent articulation in reading German texts.',
+      de: 'Verliehen für vorbildliche Artikulation, präzise Aussprache und flüssiges Lesen deutscher Texte.',
+      ar: 'تُمنح هذه الشهادة تقديرًا للأداء الرائع والطلاقة المعبرة وحسن النطق في قراءة النصوص باللغة الألمانية.'
+    }
+  },
+  german_grammar_master: {
+    key: 'german_grammar_master',
+    category: 'german',
+    iconName: 'CheckCircle2',
+    badgeEmoji: '🧠',
+    defaultBadgeText: {
+      en: 'GRAMMAR MASTER',
+      de: 'GRAMMATIK-MEISTER',
+      ar: 'إتقان القواعد'
+    },
+    titles: {
+      en: 'German Grammar Mastery Award',
+      de: 'Urkunde für deutsche Grammatik-Meisterschaft',
+      ar: 'وسام إتقان وتفوق القواعد الألمانية'
+    },
+    subtitles: {
+      en: 'For stellar command of German grammatical structures and sentence building',
+      de: 'Für hervorragendes Verständnis der deutschen Satzstrukturen und Grammatik',
+      ar: 'للتمكن الفائق من تراكيب الجمل والقواعد اللغوية الألمانية'
+    },
+    descriptions: {
+      en: 'Presented with distinction for high accuracy and superior mastery of complex German grammar rules.',
+      de: 'Überreicht mit besonderer Anerkennung für präzise Anwendung und tiefes Verständnis der deutschen Grammatik.',
+      ar: 'تُهدى هذه الشهادة تكريماً للضبط الدقيق والبراعة العالية في تطبيق واستيعاب قواعد اللغة الألمانية.'
+    }
+  },
+  fast_learner: {
+    key: 'fast_learner',
+    category: 'learning',
+    iconName: 'Zap',
+    badgeEmoji: '⚡',
+    defaultBadgeText: {
+      en: 'FAST LEARNER',
+      de: 'SCHNELLER LERNER',
+      ar: 'سرعة البديهة'
+    },
+    titles: {
+      en: 'Fast Learner & Quick Mind Award',
+      de: 'Urkunde für schnelle Auffassungsgabe',
+      ar: 'وسام سرعة البديهة والتعلم السريع'
+    },
+    subtitles: {
+      en: 'For rapid understanding and swift assimilation of new concepts',
+      de: 'Für zügiges Begreifen und erfolgreiches Umsetzen neuer Lerninhalte',
+      ar: 'لسرعة الاستيعاب والتفاعل الذكي مع المفاهيم والدروس الجديدة'
+    },
+    descriptions: {
+      en: 'Celebrated for an exceptionally sharp mind, quick comprehension, and immediate grasp of German lessons.',
+      de: 'Ausgezeichnet für scharfen Verstand, rasche Auffassungsgabe und schnellen Lernerfolg.',
+      ar: 'تُمنح تقديرًا للذكاء المتوقد والقدرة الفائقة على استيعاب المعلومات والمهارات اللغوية بسرعة واقتدار.'
+    }
+  },
+  moral_excellence: {
+    key: 'moral_excellence',
+    category: 'learning',
+    iconName: 'Heart',
+    badgeEmoji: '🌟',
+    defaultBadgeText: {
+      en: 'ROLE MODEL',
+      de: 'VORBILD',
+      ar: 'الخلق الرفيع'
+    },
+    titles: {
+      en: 'Exemplary Manners & Ethics Award',
+      de: 'Urkunde für vorbildliches Benehmen',
+      ar: 'وسام حسن الخلق والأدب الرفيع'
+    },
+    subtitles: {
+      en: 'For outstanding character, polite demeanor, and inspiring respect',
+      de: 'Für respektvollen Umgang, Höflichkeit und vorbildliche Haltung',
+      ar: 'لحسن التعامل والأخلاق الفاضلة والاحترام المتبادل في الحصة'
+    },
+    descriptions: {
+      en: 'Presented to an exemplary student whose high morals, courtesy, and respect illuminate the learning space.',
+      de: 'Überreicht an eine vorbildliche Persönlichkeit mit herausragendem Respekt und freundlichem Auftreten.',
+      ar: 'تُهدى تقديراً للأخلاق الكريمة والتهذيب الجم وكون الطالب قدوة حسنة لزملائه في الانضباط والمحبة.'
+    }
+  },
+  creative_genius: {
+    key: 'creative_genius',
+    category: 'creativity',
+    iconName: 'Sparkles',
+    badgeEmoji: '💡',
+    defaultBadgeText: {
+      en: 'CREATIVE MIND',
+      de: 'KREATIV-GENIE',
+      ar: 'العقل المبتكر'
+    },
+    titles: {
+      en: 'Creative Mind & Innovation Award',
+      de: 'Urkunde für kreative Exzellenz & Innovation',
+      ar: 'وسام العقل المبتكر والإبداع الفكري'
+    },
+    subtitles: {
+      en: 'For out-of-the-box thinking and unique creative solutions',
+      de: 'Für originelles Denken, Einfallsreichtum und kreative Ideen',
+      ar: 'للتفكير خارج الصندوق وتقديم حلول وأفكار إبداعية متميزة'
+    },
+    descriptions: {
+      en: 'Conferred in celebration of radiant originality, creative expression, and inventive thinking during studies.',
+      de: 'Verliehen für außergewöhnliche Kreativität, originelle Lösungsansätze und inspirierende Denkweise.',
+      ar: 'تُمنح هذه الشهادة احتفاءً بالموهبة الفذة والأفكار الابتكارية الخلابة التي أثرت بيئة التعلم.'
+    }
+  },
+  problem_solver: {
+    key: 'problem_solver',
+    category: 'creativity',
+    iconName: 'Award',
+    badgeEmoji: '🧩',
+    defaultBadgeText: {
+      en: 'PROBLEM SOLVER',
+      de: 'PROBLEMLÖSER',
+      ar: 'حل المشكلات'
+    },
+    titles: {
+      en: 'Analytical Mind & Problem Solver Award',
+      de: 'Urkunde für analytisches Denken & Problemlösung',
+      ar: 'وسام التفكير التحليلي وحل المشكلات'
+    },
+    subtitles: {
+      en: 'For perseverance and logical brilliance in overcoming academic challenges',
+      de: 'Für logische Schärfe und Beharrlichkeit bei anspruchsvollen Aufgaben',
+      ar: 'للمنطق السليم والقدرة الفائقة على تفكيك وتجاوز التحديات التعليمية'
+    },
+    descriptions: {
+      en: 'Awarded with high distinction for analytical clarity, tenacious curiosity, and sharp deductive skills.',
+      de: 'Ausgezeichnet für meisterhafte Analysefähigkeiten und erfolgreiche Bewältigung komplexer Herausforderungen.',
+      ar: 'تُهدى تقديراً للبراعة الذهنية والنظرة التحليلية الثاقبة في إيجاد الحلول الذكية والتفوق في التمارين.'
+    }
+  },
+  inspirational_project: {
+    key: 'inspirational_project',
+    category: 'creativity',
+    iconName: 'Trophy',
+    badgeEmoji: '🎨',
+    defaultBadgeText: {
+      en: 'BEST PROJECT',
+      de: 'BESTES PROJEKT',
+      ar: 'مشروع متميز'
+    },
+    titles: {
+      en: 'Outstanding & Inspirational Project Award',
+      de: 'Auszeichnung für herausragende Projektarbeit',
+      ar: 'وسام المشروع الإبداعي الاستثنائي'
+    },
+    subtitles: {
+      en: 'For crafting an extraordinary, well-researched, and engaging project',
+      de: 'Für eine exzellente, detailreiche und inspirierende Präsentationsleistung',
+      ar: 'لإعداد وتنفيذ مشروع دراسي استثنائي يعكس الجهد والابتكار'
+    },
+    descriptions: {
+      en: 'Honoring exceptional initiative, meticulous research, and brilliant presentation in language project work.',
+      de: 'In Anerkennung meisterhafter Projektgestaltung, fundierter Ausarbeitung und erstklassiger Ausführung.',
+      ar: 'تشهد هذه الجائزة بالتميز الفائق في إخراج وإتقان المشروع التعليمي وتقديمه بأسلوب راقٍ ومؤثر.'
+    }
+  },
+  team_leader: {
+    key: 'team_leader',
+    category: 'leadership',
+    iconName: 'Award',
+    badgeEmoji: '👑',
+    defaultBadgeText: {
+      en: 'INSPIRING LEADER',
+      de: 'FÜHRUNGSTALENT',
+      ar: 'القائد الملهم'
+    },
+    titles: {
+      en: 'Inspiring Leader & Team Player Award',
+      de: 'Urkunde für Führungskraft & Teamgeist',
+      ar: 'وسام القائد الملهم وروح الفريق'
+    },
+    subtitles: {
+      en: 'For encouraging peers, fostering teamwork, and leading by example',
+      de: 'Für vorbildliche Motivation der Mitschüler und starken Gemeinschaftssinn',
+      ar: 'لتشجيع الزملاء وبث روح التعاون والقيادة الإيجابية الحكيمة'
+    },
+    descriptions: {
+      en: 'Bestowed upon an outstanding student whose supportive spirit and leadership inspire their fellow learners.',
+      de: 'Verliehen an eine herausragende Persönlichkeit, die durch Hilfsbereitschaft und Führungsstärke glänzt.',
+      ar: 'تُمنح تكريماً للدور القيادي البنّاء والأثر الطيب في مساعدة الزملاء وخلق جو تعليمي مفعم بالحماس.'
+    }
+  },
+  presentation_mastery: {
+    key: 'presentation_mastery',
+    category: 'leadership',
+    iconName: 'Star',
+    badgeEmoji: '🎙️',
+    defaultBadgeText: {
+      en: 'GREAT SPEAKER',
+      de: 'REDEGANDTHEIT',
+      ar: 'الإلقاء البارع'
+    },
+    titles: {
+      en: 'Eloquent Presentation & Delivery Award',
+      de: 'Urkunde für meisterhafte Präsentation & Vortrag',
+      ar: 'وسام الإلقاء والعرض التقديمي المتميز'
+    },
+    subtitles: {
+      en: 'For confident public speaking, clear articulation, and persuasive delivery',
+      de: 'Für selbstbewusstes Auftreten, klare Sprache und überzeugenden Vortrag',
+      ar: 'للثقة العالية بالنفس والبيان الواضح والإلقاء الشيق والمقنع'
+    },
+    descriptions: {
+      en: 'Presented in celebration of captivating presentation skills, confident stage presence, and fluent expression.',
+      de: 'Überreicht für souveräne Präsentationsfähigkeiten, mitreißende Redekunst und exzellenten sprachlichen Ausdruck.',
+      ar: 'تُهدى تقديراً للإلقاء الساحر والشجاعة الأدبية في التحدث وعرض الأفكار باللغة الألمانية بثقة وإبهار.'
+    }
+  },
+  positive_energy: {
+    key: 'positive_energy',
+    category: 'leadership',
+    iconName: 'Sparkles',
+    badgeEmoji: '☀️',
+    defaultBadgeText: {
+      en: 'POSITIVE SPIRIT',
+      de: 'SONNENSCHEIN',
+      ar: 'طاقة إيجابية'
+    },
+    titles: {
+      en: 'Positive Energy & Sunshine Award',
+      de: 'Urkunde für positive Ausstrahlung & Motivation',
+      ar: 'وسام الروح الإيجابية والبهجة الدائمة'
+    },
+    subtitles: {
+      en: 'For bringing warmth, enthusiasm, and joy into every lesson',
+      de: 'Für Fröhlichkeit, Optimismus und ansteckende Begeisterung im Unterricht',
+      ar: 'لنشر التفاؤل والابتسامة والحماس الصادق في كل حصة دراسية'
+    },
+    descriptions: {
+      en: 'Awarded with affection to a student whose radiant smile and enthusiastic attitude brighten our learning days.',
+      de: 'Herzlich verliehen für eine herzerwärmende, stets motivierende und optimistische Unterrichtsbeteiligung.',
+      ar: 'تُمنح محبةً وتقديرًا للطاقة الإيجابية الرائعة والابتسامة المشرقة التي تضيء القاعة وتلهم الجميع.'
+    }
   }
 };
 
@@ -1070,11 +1368,101 @@ export const CERTIFICATE_TEMPLATES_CONFIG: Record<CertificateTemplateId, Templat
       ar: 'خلفية مصممة بواسطة الذكاء الاصطناعي مع تطبيق بيانات الطالب والأختام ديناميكياً'
     },
     previewColor: '#6366f1'
+  },
+  royal_emerald: {
+    id: 'royal_emerald',
+    name: {
+      en: 'Royal Emerald Luxury (Gold & Deep Green)',
+      de: 'Königliches Smaragd-Diplom (Gold & Grün)',
+      ar: 'الزمرد الملكي الفاخر (ذهبي وأخضر ملكي)'
+    },
+    description: {
+      en: 'Regal deep emerald canvas with ornate gold filigree and imperial laurel medallion',
+      de: 'Königlicher Smaragd-Hintergrund mit goldenen Ornamenten und imperialem Lorbeer-Medaillon',
+      ar: 'تصميم فخم باللون الأخضر الزمردي الداكن مع زخارف مذهبة وإكليل الغار الإمبراطوري'
+    },
+    previewColor: '#064e3b'
+  },
+  space_explorer: {
+    id: 'space_explorer',
+    name: {
+      en: 'Cosmic Star Explorer (Galaxy Theme)',
+      de: 'Kosmischer Sternenforscher (Galaxie-Design)',
+      ar: 'مستكشف الفضاء والنجوم (طابع المجرات)'
+    },
+    description: {
+      en: 'Midnight blue celestial sky with shining constellations, golden planets, and star medal',
+      de: 'Mitternachtsblauer Sternenhimmel mit leuchtenden Sternbildern, goldenen Planeten und Sternmedaille',
+      ar: 'سماء ليلية كونية مرصعة بالنجوم اللامعة والمدارات الذهبية وشارة النجم المتلألئ'
+    },
+    previewColor: '#0a0e27'
+  },
+  golden_olympic: {
+    id: 'golden_olympic',
+    name: {
+      en: 'Olympic Gold (Radiant Laurel & Trophy)',
+      de: 'Olympisches Gold (Lorbeer & Trophäe)',
+      ar: 'الذهب الأولمبي (إكليل الغار والكأس الذهبي)'
+    },
+    description: {
+      en: 'Prestigious radiant golden aura with double gold foil borders and championship trophy medallion',
+      de: 'Edles strahlendes Gold-Design mit doppeltem Goldrahmen und Meisterschafts-Medaillon',
+      ar: 'إشعاع ذهبي فاخر مع إطار مذهب مزدوج وكأس البطولة المخصص للمتفوقين الأوائل'
+    },
+    previewColor: '#d4af37'
+  },
+  islamic_heritage: {
+    id: 'islamic_heritage',
+    name: {
+      en: 'Islamic Heritage (Arabesque & Gold)',
+      de: 'Islamisches Kulturerbe (Arabeske & Gold)',
+      ar: 'الأصالة والتراث الإسلامي (أرابيسك وذهب)'
+    },
+    description: {
+      en: 'Deep royal sapphire navy with intricate Arabesque geometric stars and ornate Mashrabiya patterns',
+      de: 'Tiefblaues Design mit kunstvollen arabesken Sternmustern und traditionellen Ornamenten',
+      ar: 'كحلي ملكي عميق مرصع بزخارف هندسية إسلامية وأرابيسك ذهبي أصيل'
+    },
+    previewColor: '#0c1b33'
+  },
+  future_tech: {
+    id: 'future_tech',
+    name: {
+      en: 'Cyber & Future Tech (Digital Innovation)',
+      de: 'Cyber & Zukunftstechnologie (Innovation)',
+      ar: 'المستقبل والذكاء الاصطناعي (سيبراني حديث)'
+    },
+    description: {
+      en: 'Sleek dark cyan theme with futuristic circuit traces, digital grid, and verified hologram badge',
+      de: 'Futuristisches Cyber-Design mit leuchtenden Leiterbahnen und verifiziertem Hologramm-Siegel',
+      ar: 'تصميم تقني مستقبلي بخطوط سيبرانية وشارة هولوجرام رقمية للمهارات الحديثة'
+    },
+    previewColor: '#0284c7'
+  },
+  vintage_scroll: {
+    id: 'vintage_scroll',
+    name: {
+      en: 'Vintage Royal Scroll (Antique Parchment)',
+      de: 'Historische Schriftrolle (Pergament & Siegel)',
+      ar: 'المخطوطة الأثرية الملكية (رق تاريخي وختم شمعي)'
+    },
+    description: {
+      en: 'Warm aged parchment paper with classical baroque corners and a ruby-red wax seal with ribbon',
+      de: 'Klassisches warmes Pergament-Design mit barocken Ornamenten und rubinrotem Wachssiegel',
+      ar: 'خلفية رق أثري دافئ بزخارف باروكية راقية وختم شمعي قرمزي كلاسيكي'
+    },
+    previewColor: '#8c5835'
   }
 };
 
 export const PRIMARY_CERTIFICATE_TEMPLATES: TemplateConfig[] = [
   CERTIFICATE_TEMPLATES_CONFIG.classic,
+  CERTIFICATE_TEMPLATES_CONFIG.golden_olympic,
+  CERTIFICATE_TEMPLATES_CONFIG.royal_emerald,
+  CERTIFICATE_TEMPLATES_CONFIG.islamic_heritage,
+  CERTIFICATE_TEMPLATES_CONFIG.space_explorer,
+  CERTIFICATE_TEMPLATES_CONFIG.future_tech,
+  CERTIFICATE_TEMPLATES_CONFIG.vintage_scroll,
   CERTIFICATE_TEMPLATES_CONFIG.elegant,
   CERTIFICATE_TEMPLATES_CONFIG.kids,
   CERTIFICATE_TEMPLATES_CONFIG.german_themed,
@@ -1083,9 +1471,7 @@ export const PRIMARY_CERTIFICATE_TEMPLATES: TemplateConfig[] = [
   CERTIFICATE_TEMPLATES_CONFIG.girls_princess
 ];
 
-export const CERTIFICATE_CATEGORIES = Object.values(CERTIFICATE_CATEGORIES_CONFIG);
 export const CERTIFICATE_TYPES = Object.values(CERTIFICATE_TYPES_CONFIG);
-export const CERTIFICATE_TEMPLATES = PRIMARY_CERTIFICATE_TEMPLATES;
 
 export function getCertificateDefaultText(typeKey: CertificateTypeKey, lang: CertificateLanguage = 'de') {
   const config = CERTIFICATE_TYPES_CONFIG[typeKey] || CERTIFICATE_TYPES_CONFIG.achievement;

@@ -37,8 +37,10 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       }
     }
 
-    const calcMonthlyPrice = data.paymentCycle === 'per_lesson' 
-      ? Number(data.pricePerSession) * (data.sessionCount || 8)
+    const isPerLesson = data.paymentCycle === 'per_lesson';
+    const pricePerSession = Number(data.pricePerSession) || 0;
+    const calcMonthlyPrice = isPerLesson 
+      ? pricePerSession
       : Number(data.monthlyPackagePrice);
 
     const schedules = data.scheduleDays.map(day => ({
@@ -51,10 +53,11 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       grade: data.grade,
       type: data.type,
       paymentCycle: data.paymentCycle,
+      paymentModel: isPerLesson ? 'per_session' : 'package',
       monthlyPackagePrice: calcMonthlyPrice,
-      pricePerSession: data.paymentCycle === 'per_lesson' ? Number(data.pricePerSession) : undefined,
-      sessionCount: Number(data.sessionCount),
-      startingSessionNumber: Number(data.startingSessionNumber),
+      pricePerSession: isPerLesson ? pricePerSession : undefined,
+      sessionCount: isPerLesson ? 1 : Number(data.sessionCount),
+      startingSessionNumber: isPerLesson ? 1 : Number(data.startingSessionNumber),
       defaultFinanceAccountId: data.defaultFinanceAccountId,
       scheduleDays: data.scheduleDays,
       scheduleTime: data.scheduleTime,

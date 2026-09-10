@@ -1,11 +1,9 @@
-// Unregister any active service workers on startup to prevent stale asset caching
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then((registrations) => {
-    for (const registration of registrations) {
-      registration.unregister();
-    }
-  }).catch((err) => {
-    console.warn('Service worker unregistration failed:', err);
+// Register notification service worker for background and outside-the-app alerts
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('Notification Service Worker registration failed:', err);
+    });
   });
 }
 

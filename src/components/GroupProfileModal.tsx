@@ -7,6 +7,7 @@ import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { CascadeDeleteGroupModal } from './CascadeDeleteGroupModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { GroupForm, GroupFormData } from './GroupForm';
+import { getGroupCycleInfo } from '../utils/lessonUtils';
 
 interface GroupProfileModalProps {
   group: Group;
@@ -14,17 +15,20 @@ interface GroupProfileModalProps {
 }
 
 export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onClose }) => {
-  const { updateGroup, deleteGroup, archiveGroup, generateGroupScheduleLessons, students, lessons, payments, language, t } = useApp();
+  const { updateGroup, deleteGroup, archiveGroup, generateGroupScheduleLessons, students, lessons, payments, language, t, _t } = useApp();
 
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isConfirmingCascade, setIsConfirmingCascade] = useState(false);
   const [showReminderModal, setShowReminderModal] = useState(false);
 
   const groupStudents = students.filter(s => s.groupId === group.id);
+  const cycleInfo = getGroupCycleInfo(group, lessons, language);
 
   const handleSubmit = (data: GroupFormData) => {
-    const calcMonthlyPrice = data.paymentCycle === 'per_lesson' 
-      ? Number(data.pricePerSession) * (data.sessionCount || 8)
+    const isPerLesson = data.paymentCycle === 'per_lesson';
+    const pricePerSession = Number(data.pricePerSession) || 0;
+    const calcMonthlyPrice = isPerLesson 
+      ? pricePerSession 
       : Number(data.monthlyPackagePrice);
 
     const schedules = data.scheduleDays.map(day => ({
@@ -38,10 +42,11 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       grade: data.grade,
       type: data.type,
       paymentCycle: data.paymentCycle,
+      paymentModel: isPerLesson ? 'per_session' : 'package',
       monthlyPackagePrice: calcMonthlyPrice,
-      pricePerSession: data.paymentCycle === 'per_lesson' ? Number(data.pricePerSession) : undefined,
-      sessionCount: data.paymentCycle === 'monthly' ? Number(data.sessionCount) : 8,
-      startingSessionNumber: Number(data.startingSessionNumber),
+      pricePerSession: isPerLesson ? pricePerSession : undefined,
+      sessionCount: isPerLesson ? 1 : Number(data.sessionCount),
+      startingSessionNumber: isPerLesson ? 1 : Number(data.startingSessionNumber),
       defaultFinanceAccountId: data.defaultFinanceAccountId,
       scheduleDays: data.scheduleDays,
       scheduleTime: data.scheduleTime,
@@ -85,9 +90,11 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
             <div className="p-2 bg-surface/20 rounded-xl">
               <Users className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <h2 className="text-base font-bold">{group.name}</h2>
-              <p className="text-xs text-primary-soft">{group.grade} • {groupStudents.length} Schüler</p>
+            <div className="min-w-0">
+              <h2 className="text-base font-bold truncate">{group.name}</h2>
+              <p className="text-xs text-primary-soft truncate mt-0.5 font-medium">
+                {group.grade} • {groupStudents.length} {language === 'ar' ? 'طلاب' : language === 'de' ? 'Schüler' : 'Students'} • {!cycleInfo.isPerLesson ? cycleInfo.label : _t('محاسبة بالحصة', 'Per Session', 'Pro Sitzung')}
+              </p>
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-surface/20 rounded-full transition-colors cursor-pointer">

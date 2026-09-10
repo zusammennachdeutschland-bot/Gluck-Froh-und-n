@@ -10,6 +10,12 @@ import {
   shareStageFollowUpViaWhatsApp,
   printStageFollowUpReport
 } from '../utils/printObservationUtils';
+import {
+  downloadSingleWeeklyPlanPdf,
+  downloadAllWeeklyPlansCombinedPdf,
+  printSingleWeeklyPlan,
+  printAllWeeklyPlansCombinedTable
+} from '../utils/weeklyPlanPrintUtils';
 import { StageFollowUpRecord, TeacherStageEvaluationItem, StaffAttendanceRecord } from '../types';
 import { SchoolScheduleExportModal } from './SchoolScheduleExportModal';
 import { ObservationFormModal } from './ObservationFormModal';
@@ -30,6 +36,8 @@ export const HodHubView: React.FC = () => {
   const [showToast, setShowToast] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [activeLoadingAction, setActiveLoadingAction] = useState<{ id: string; type: 'download' | 'share' } | null>(null);
+  const [downloadingPlanId, setDownloadingPlanId] = useState<string | null>(null);
+  const [isDownloadingAllPlans, setIsDownloadingAllPlans] = useState(false);
 
   const handleDownloadPdf = async (v: any) => {
     if (!v || activeLoadingAction) return;
@@ -76,12 +84,11 @@ export const HodHubView: React.FC = () => {
       // the 'live database' is the browser's local storage (IndexedDB wrapper).
       const { storage } = await import('../services/storageService');
       
-      const [storedStudents, storedComplaints, storedPlans, storedVisits, teacherStudents] = await Promise.all([
+      const [storedStudents, storedComplaints, storedPlans, storedVisits] = await Promise.all([
         storage.getItem<any[]>('hod_german_students'),
         storage.getItem<any[]>('hod_complaints'),
         storage.getItem<any[]>('hod_student_action_plans'),
-        storage.getItem<any[]>('hod_visit_records'),
-        storage.getItem<any[]>('dl_students')
+        storage.getItem<any[]>('hod_visit_records')
       ]);
 
       // Calculate true KPIs
@@ -92,8 +99,8 @@ export const HodHubView: React.FC = () => {
       };
 
       // Calculate exact true student counts by grade
-      // Fallback to teacher's generic students if the HOD-specific table is empty
-      const realStudents = (storedStudents && storedStudents.length > 0) ? storedStudents : (teacherStudents || []);
+      // Use HOD German Department students roster
+      const realStudents = storedStudents && Array.isArray(storedStudents) ? storedStudents : [];
       const gradeCounts: Record<string, number> = {};
       realStudents.forEach(s => {
         // Handle both HodGermanStudent (gradeClass: "5A") and Student (grade: "Grade 5")
@@ -957,6 +964,117 @@ export const HodHubView: React.FC = () => {
     return cleaned || schoolSettings.hodName || profile?.displayName || '';
   };
 
+  const WEEKLY_SECRETARY_APPRECIATIONS = [
+    {
+      emoji: '🌹',
+      de: (sec: string) => sec ? `🌹 *Vielen Dank für Ihre wertvolle Unterstützung zum Start der Schulwoche, Frau ${sec}!*` : `🌹 *Vielen Dank für Ihre wertvolle Unterstützung zum Start der Schulwoche!*`,
+      en: (sec: string) => sec ? `_(Thank you so much for your valuable support at the start of this school week, Ms. ${sec})_` : `_(Thank you so much for your valuable support at the start of this school week)_`
+    },
+    {
+      emoji: '🌷',
+      de: (sec: string) => sec ? `🌷 *Herzlichen Dank für Ihre kontinuierliche Mühe und tatkräftige Hilfe, Frau ${sec}!*` : `🌷 *Herzlichen Dank für Ihre kontinuierliche Mühe und tatkräftige Hilfe!*`,
+      en: (sec: string) => sec ? `_(Warm thanks for your ongoing dedication and active assistance, Ms. ${sec})_` : `_(Warm thanks for your ongoing dedication and active assistance)_`
+    },
+    {
+      emoji: '🌸',
+      de: (sec: string) => sec ? `🌸 *Ein großes Dankeschön für Ihre hervorragende Zusammenarbeit und Organisation, Frau ${sec}!*` : `🌸 *Ein großes Dankeschön für Ihre hervorragende Zusammenarbeit und Organisation!*`,
+      en: (sec: string) => sec ? `_(A big thank you for your outstanding cooperation and organization, Ms. ${sec})_` : `_(A big thank you for your outstanding cooperation and organization)_`
+    },
+    {
+      emoji: '🌺',
+      de: (sec: string) => sec ? `🌺 *Vielen Dank für Ihren unermüdlichen Einsatz und Ihre verlässliche Betreuung, Frau ${sec}!*` : `🌺 *Vielen Dank für Ihren unermüdlichen Einsatz und Ihre verlässliche Betreuung!*`,
+      en: (sec: string) => sec ? `_(Thank you for your tireless effort and reliable coordination, Ms. ${sec})_` : `_(Thank you for your tireless effort and reliable coordination)_`
+    },
+    {
+      emoji: '🌻',
+      de: (sec: string) => sec ? `🌻 *Herzlichen Dank für Ihre wunderbare Unterstützung und Freundlichkeit, Frau ${sec}!*` : `🌻 *Herzlichen Dank für Ihre wunderbare Unterstützung und Freundlichkeit!*`,
+      en: (sec: string) => sec ? `_(Warm thanks for your wonderful support and kindness, Ms. ${sec})_` : `_(Warm thanks for your wonderful support and kindness)_`
+    },
+    {
+      emoji: '🌼',
+      de: (sec: string) => sec ? `🌼 *Vielen Dank für Ihre wertvolle Begleitung und professionelle Arbeit, Frau ${sec}!*` : `🌼 *Vielen Dank für Ihre wertvolle Begleitung und professionelle Arbeit!*`,
+      en: (sec: string) => sec ? `_(Thank you for your valuable guidance and professional work, Ms. ${sec})_` : `_(Thank you for your valuable guidance and professional work)_`
+    },
+    {
+      emoji: '💐',
+      de: (sec: string) => sec ? `💐 *Ein herzliches Dankeschön für Ihre stetige Hilfe und Ihr großes Engagement, Frau ${sec}!*` : `💐 *Ein herzliches Dankeschön für Ihre stetige Hilfe und Ihr großes Engagement!*`,
+      en: (sec: string) => sec ? `_(Sincere thanks for your continuous assistance and great commitment, Ms. ${sec})_` : `_(Sincere thanks for your continuous assistance and great commitment)_`
+    },
+    {
+      emoji: '🪷',
+      de: (sec: string) => sec ? `🪷 *Vielen Dank für Ihren erstklassigen Beitrag zum reibungslosen Ablauf, Frau ${sec}!*` : `🪷 *Vielen Dank für Ihren erstklassigen Beitrag zum reibungslosen Ablauf!*`,
+      en: (sec: string) => sec ? `_(Thank you for your first-class contribution to smooth school operations, Ms. ${sec})_` : `_(Thank you for your first-class contribution to smooth school operations)_`
+    },
+    {
+      emoji: '💮',
+      de: (sec: string) => sec ? `💮 *Herzlichen Dank für Ihre geschätzte Geduld und tatkräftige Unterstützung, Frau ${sec}!*` : `💮 *Herzlichen Dank für Ihre geschätzte Geduld und tatkräftige Unterstützung!*`,
+      en: (sec: string) => sec ? `_(Warm thanks for your appreciated patience and effective support, Ms. ${sec})_` : `_(Warm thanks for your appreciated patience and effective support)_`
+    },
+    {
+      emoji: '🏵️',
+      de: (sec: string) => sec ? `🏵️ *Vielen Dank für die stets vorbildliche und angenehme Zusammenarbeit, Frau ${sec}!*` : `🏵️ *Vielen Dank für die stets vorbildliche und angenehme Zusammenarbeit!*`,
+      en: (sec: string) => sec ? `_(Thank you for the always exemplary and pleasant collaboration, Ms. ${sec})_` : `_(Thank you for the always exemplary and pleasant collaboration)_`
+    },
+    {
+      emoji: '🌷',
+      de: (sec: string) => sec ? `🌷 *Ein großes Dankeschön für Ihren täglichen Einsatz und Ihre Verlässlichkeit, Frau ${sec}!*` : `🌷 *Ein großes Dankeschön für Ihren täglichen Einsatz und Ihre Verlässlichkeit!*`,
+      en: (sec: string) => sec ? `_(A huge thank you for your daily dedication and dependability, Ms. ${sec})_` : `_(A huge thank you for your daily dedication and dependability)_`
+    },
+    {
+      emoji: '🌹',
+      de: (sec: string) => sec ? `🌹 *Herzlichen Dank für Ihre unverzichtbare Unterstützung und Fürsorge, Frau ${sec}!*` : `🌹 *Herzlichen Dank für Ihre unverzichtbare Unterstützung und Fürsorge!*`,
+      en: (sec: string) => sec ? `_(Warm thanks for your indispensable support and care, Ms. ${sec})_` : `_(Warm thanks for your indispensable support and care)_`
+    },
+    {
+      emoji: '🌸',
+      de: (sec: string) => sec ? `🌸 *Vielen Dank für Ihren stetigen Fleiß und Ihre positive Energie, Frau ${sec}!*` : `🌸 *Vielen Dank für Ihren stetigen Fleiß und Ihre positive Energie!*`,
+      en: (sec: string) => sec ? `_(Thank you for your constant diligence and positive energy, Ms. ${sec})_` : `_(Thank you for your constant diligence and positive energy)_`
+    },
+    {
+      emoji: '🌺',
+      de: (sec: string) => sec ? `🌺 *Ein herzliches Dankeschön für die exzellente Unterstützung und Koordination, Frau ${sec}!*` : `🌺 *Ein herzliches Dankeschön für die exzellente Unterstützung und Koordination!*`,
+      en: (sec: string) => sec ? `_(Sincere thanks for the excellent support and coordination, Ms. ${sec})_` : `_(Sincere thanks for the excellent support and coordination)_`
+    },
+    {
+      emoji: '🌻',
+      de: (sec: string) => sec ? `🌻 *Vielen Dank für Ihre großartige Hilfsbereitschaft und Ihren Einsatz, Frau ${sec}!*` : `🌻 *Vielen Dank für Ihre großartige Hilfsbereitschaft und Ihren Einsatz!*`,
+      en: (sec: string) => sec ? `_(Thank you for your great readiness to help and dedication, Ms. ${sec})_` : `_(Thank you for your great readiness to help and dedication)_`
+    },
+    {
+      emoji: '🌼',
+      de: (sec: string) => sec ? `🌼 *Herzlichen Dank für Ihre wertvolle Arbeit und beste Organisation, Frau ${sec}!*` : `🌼 *Herzlichen Dank für Ihre wertvolle Arbeit und beste Organisation!*`,
+      en: (sec: string) => sec ? `_(Warm thanks for your valuable work and top-tier organization, Ms. ${sec})_` : `_(Warm thanks for your valuable work and top-tier organization)_`
+    },
+    {
+      emoji: '🪷',
+      de: (sec: string) => sec ? `🪷 *Vielen Dank für Ihre tatkräftige Unterstützung in dieser Schulwoche, Frau ${sec}!*` : `🪷 *Vielen Dank für Ihre tatkräftige Unterstützung in dieser Schulwoche!*`,
+      en: (sec: string) => sec ? `_(Thank you for your energetic support during this school week, Ms. ${sec})_` : `_(Thank you for your energetic support during this school week)_`
+    },
+    {
+      emoji: '💐',
+      de: (sec: string) => sec ? `💐 *Ein herzliches Dankeschön für Ihre kontinuierliche und verlässliche Hilfe, Frau ${sec}!*` : `💐 *Ein herzliches Dankeschön für Ihre kontinuierliche und verlässliche Hilfe!*`,
+      en: (sec: string) => sec ? `_(Sincere thanks for your continuous and reliable help, Ms. ${sec})_` : `_(Sincere thanks for your continuous and reliable help)_`
+    },
+    {
+      emoji: '💮',
+      de: (sec: string) => sec ? `💮 *Vielen Dank für Ihren bewundernswerten Einsatz und die tolle Zusammenarbeit, Frau ${sec}!*` : `💮 *Vielen Dank für Ihren bewundernswerten Einsatz und die tolle Zusammenarbeit!*`,
+      en: (sec: string) => sec ? `_(Thank you for your admirable effort and great collaboration, Ms. ${sec})_` : `_(Thank you for your admirable effort and great collaboration)_`
+    },
+    {
+      emoji: '🏵️',
+      de: (sec: string) => sec ? `🏵️ *Herzlichen Dank für Ihre hervorragende Unterstützung über das gesamte Semester hinweg, Frau ${sec}!*` : `🏵️ *Herzlichen Dank für Ihre hervorragende Unterstützung über das gesamte Semester hinweg!*`,
+      en: (sec: string) => sec ? `_(Warm thanks for your outstanding support throughout the semester, Ms. ${sec})_` : `_(Warm thanks for your outstanding support throughout the semester)_`
+    }
+  ];
+
+  const getWeeklySecretaryThankYou = (weekNum: number | string, secName?: string) => {
+    const numericWeek = Math.max(1, parseInt(String(weekNum).replace(/\D/g, ''), 10) || 1);
+    const index = (numericWeek - 1) % WEEKLY_SECRETARY_APPRECIATIONS.length;
+    const template = WEEKLY_SECRETARY_APPRECIATIONS[index];
+    const cleanName = cleanSecretaryName(secName);
+    return `${template.de(cleanName)}\n${template.en(cleanName)}`;
+  };
+
   const generateWeeklyPlanMessage = (
     plan: any,
     weekNum: number | string,
@@ -989,17 +1107,49 @@ export const HodHubView: React.FC = () => {
     });
 
     text += `\n──────────────────────────────────\n`;
-    if (formattedSecName) {
-      text += `🌹 *Vielen Dank für Ihre Unterstützung, Frau ${formattedSecName}*\n\n`;
-    } else {
-      text += `🌹 *Vielen Dank für Ihre Unterstützung*\n\n`;
-    }
+    text += `${getWeeklySecretaryThankYou(weekNum, formattedSecName)}\n\n`;
+
     if (formattedHodName) {
-      text += `✍️ *Mit freundlichen Grüßen, Herr ${formattedHodName} (Fachleiter für Deutsch)*`;
+      text += `✍️ *Mit freundlichen Grüßen, Herr ${formattedHodName} (Fachleiter für Deutsch)*\n`;
+      text += `_(Best regards, Mr. ${formattedHodName} - Head of German Department)_`;
     } else {
-      text += `✍️ *Mit freundlichen Grüßen (Fachleiter für Deutsch)*`;
+      text += `✍️ *Mit freundlichen Grüßen (Fachleiter für Deutsch)*\n`;
+      text += `_(Best regards - Head of German Department)_`;
     }
 
+    return text;
+  };
+
+  const generateAllWeeklyPlansCombinedMessage = (
+    plans: any[],
+    weekNum: number | string
+  ) => {
+    let text = `📌 *Wochenplan - Deutschabteilung*\n`;
+    text += `🗓️ *Schulwoche: Woche ${weekNum}*\n`;
+    text += `──────────────────────────────────\n\n`;
+
+    const allGradesText: string[] = [];
+
+    plans.forEach((plan: any) => {
+      const grades = (plan.gradesContent && plan.gradesContent.length > 0)
+        ? sanitizeGradesContent(plan.gradesContent, plan.gradeBand)
+        : getEmptyGradesForBand(plan.gradeBand);
+
+      grades.forEach((g: any, idx: number) => {
+        const gName = getGermanGradeName(g.gradeName, plan.gradeBand, idx);
+        let gradeBlock = `📚 *${gName}*\n`;
+        gradeBlock += `• *S.1:* ${g.s1 || '-'}\n`;
+        gradeBlock += `• *S.2:* ${g.s2 || '-'}\n`;
+        gradeBlock += `• *H.A:* ${g.ha || '-'}`;
+        const note = g.quiz || g.hinweis;
+        if (note && note !== 'Kein Quiz / Hinweis' && note !== 'Kein Quiz' && note.trim() !== '') {
+          gradeBlock += `\n• *Quiz / Hinweis:* ${note}`;
+        }
+        allGradesText.push(gradeBlock);
+      });
+    });
+
+    text += allGradesText.join('\n\n');
     return text;
   };
 
@@ -1461,97 +1611,43 @@ export const HodHubView: React.FC = () => {
     triggerToast(_t('جاري فتح واتساب ومشاركة الخطة 🚀', 'Opening WhatsApp 🚀', 'WhatsApp wird geöffnet 🚀'));
   };
 
-  const handlePrintWeeklyPlan = (plan: any) => {
+  const handleDownloadWeeklyPlan = async (plan: any) => {
+    if (downloadingPlanId) return;
     const weekNum = plan.weekNumber || selectedPlanWeekNumber;
-    const secName = cleanSecretaryName(plan.secretaryName);
-    const hodName = cleanHodName(schoolSettings.hodName);
-    const grades = (plan.gradesContent && plan.gradesContent.length > 0)
-      ? plan.gradesContent
-      : getEmptyGradesForBand(plan.gradeBand);
+    setDownloadingPlanId(plan.id);
+    triggerToast(_t('جاري إنشاء وتحميل ملف الـ PDF 📄...', 'Generating and downloading PDF 📄...', 'PDF wird generiert und heruntergeladen 📄...'));
+    try {
+      const res = await downloadSingleWeeklyPlanPdf(plan, schoolSettings, weekNum);
+      if (res.success) {
+        triggerToast(_t(`تم تحميل ملف الخطة (${res.filename}) بنجاح 📥`, `Downloaded ${res.filename} successfully 📥`, `Wochenplan heruntergeladen 📥`));
+      } else {
+        triggerToast(_t('تعذر تحميل الملف، يرجى إعادة المحاولة', 'Download failed, please try again', 'Fehler beim Download'));
+      }
+    } catch (err) {
+      console.error('Error downloading weekly plan:', err);
+      triggerToast(_t('حدث خطأ أثناء تحميل الملف', 'Error downloading file', 'Fehler beim Download'));
+    } finally {
+      setDownloadingPlanId(null);
+    }
+  };
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    const html = `
-      <!DOCTYPE html>
-      <html dir="ltr" lang="de">
-      <head>
-        <meta charset="utf-8">
-        <title>Wochenplan - Deutschabteilung - Woche ${weekNum}</title>
-        <style>
-          @page { size: A4; margin: 12mm; }
-          * { box-sizing: border-box; }
-          body { font-family: "Segoe UI", Arial, sans-serif; color: #0f172a; margin: 0; padding: 0; direction: ltr; background: #fff; }
-          .header { text-align: center; border-bottom: 2.5px solid #0284c7; padding-bottom: 10px; margin-bottom: 14px; }
-          .header h1 { margin: 0; font-size: 17pt; color: #0369a1; font-weight: bold; }
-          .header p { margin: 4px 0 0; font-size: 11pt; color: #475569; font-weight: bold; }
-          .meta-bar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; background: #f0f9ff; border: 1px solid #bae6fd; padding: 8px 12px; border-radius: 8px; margin-bottom: 16px; font-weight: bold; font-size: 9.5pt; text-align: center; }
-          .grade-card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; background: #fff; }
-          .grade-title { font-size: 11.5pt; font-weight: bold; color: #0284c7; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 8px; }
-          .item-row { display: flex; margin-bottom: 5px; font-size: 9.5pt; line-height: 1.3; }
-          .item-label { font-weight: bold; width: 140px; color: #334155; shrink: 0; }
-          .item-value { flex: 1; color: #0f172a; font-weight: 500; }
-          .appreciation { background: #fefce8; border: 1px solid #fef08a; padding: 10px 14px; border-radius: 8px; color: #854d0e; font-weight: bold; font-size: 10pt; margin-top: 16px; margin-bottom: 16px; text-align: center; }
-          .footer { border-top: 1.5px solid #cbd5e1; padding-top: 10px; font-size: 9.5pt; display: flex; justify-content: space-between; align-items: flex-end; margin-top: 20px; }
-        </style>
-      </head>
-      <body onload="window.print(); window.onafterprint = function(){ window.close(); }">
-        <div class="header">
-          <h1>📌 Wochenplan - Deutschabteilung</h1>
-          <p>${getGermanGradeBandLabel(plan.gradeBand)}</p>
-        </div>
-
-        <div class="meta-bar">
-          <span>🗓️ Schulwoche: Woche ${weekNum}</span>
-          <span>👩‍💼 Sekretärin: Frau ${secName}</span>
-          <span>👨‍🏫 Fachleiter: Herr ${hodName}</span>
-        </div>
-
-        ${grades.map((g: any, idx: number) => {
-          const note = g.quiz || g.hinweis;
-          return `
-          <div class="grade-card">
-            <div class="grade-title">📚 ${getGermanGradeName(g.gradeName, plan.gradeBand, idx)}</div>
-            <div class="item-row">
-              <span class="item-label">S.1:</span>
-              <span class="item-value">${g.s1 || 'Wiederholung'}</span>
-            </div>
-            <div class="item-row">
-              <span class="item-label">S.2:</span>
-              <span class="item-value">${g.s2 || 'Aktivität'}</span>
-            </div>
-            <div class="item-row">
-              <span class="item-label">H.A:</span>
-              <span class="item-value">${g.ha || 'Keine Hausaufgaben'}</span>
-            </div>
-            ${note && note !== 'Kein Quiz / Hinweis' && note !== 'Kein Quiz' ? `
-              <div class="item-row">
-                <span class="item-label">Quiz / Hinweis:</span>
-                <span class="item-value">${note}</span>
-              </div>
-            ` : ''}
-          </div>
-        `}).join('')}
-
-        <div class="appreciation">
-          🌹 Vielen Dank für Ihre Unterstützung, Frau ${secName}
-        </div>
-
-        <div class="footer">
-          <div>
-            <strong>Deutschabteilung / Department of German</strong>
-          </div>
-          <div style="text-align: right; font-weight: bold;">
-            Mit freundlichen Grüßen,<br/>
-            Herr ${hodName} (Fachleiter für Deutsch)
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
-
-    printWindow.document.write(html);
-    printWindow.document.close();
+  const handleDownloadAllWeeklyPlansCombined = async () => {
+    if (isDownloadingAllPlans) return;
+    setIsDownloadingAllPlans(true);
+    triggerToast(_t('جاري إنشاء وتحميل الجدول المجمع لكافة المراحل PDF 📊...', 'Generating Master Combined Table PDF 📊...', 'Gesamttabelle PDF wird generiert 📊...'));
+    try {
+      const res = await downloadAllWeeklyPlansCombinedPdf(currentWeekPlans, schoolSettings, selectedPlanWeekNumber);
+      if (res.success) {
+        triggerToast(_t(`تم تحميل الجدول المجمع (${res.filename}) بنجاح 📥`, `Downloaded master table successfully 📥`, `Gesamttabelle heruntergeladen 📥`));
+      } else {
+        triggerToast(_t('تعذر تحميل الجدول المجمع، يرجى إعادة المحاولة', 'Download failed, please try again', 'Fehler beim Download'));
+      }
+    } catch (err) {
+      console.error('Error downloading master weekly plan:', err);
+      triggerToast(_t('حدث خطأ أثناء تحميل الملف', 'Error downloading file', 'Fehler beim Download'));
+    } finally {
+      setIsDownloadingAllPlans(false);
+    }
   };
 
   const handleSaveEditedPlan = (updatedRecord: any) => {
@@ -2527,10 +2623,24 @@ export const HodHubView: React.FC = () => {
               </span>
               <div className="flex flex-wrap items-center gap-2">
                 <button
+                  onClick={handleDownloadAllWeeklyPlansCombined}
+                  disabled={isDownloadingAllPlans}
+                  className="px-2.5 py-1 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-[11px] font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                  title={_t('تحميل ملف PDF مجمع لكافة المراحل والصفوف الأربعة في ورقة واحدة A4', 'Download master combined table PDF for all stages', 'Gesamttabelle als PDF herunterladen')}
+                >
+                  {isDownloadingAllPlans ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isDownloadingAllPlans ? _t('جاري التحميل...', 'Downloading...', 'Wird geladen...') : _t('تحميل الجدول المجمع (All Stages PDF)', 'Download Master Table PDF', 'Gesamttabelle PDF herunterladen')}</span>
+                </button>
+
+                <button
                   onClick={() => {
-                    const allTexts = currentWeekPlans.map(p => generateWeeklyPlanMessage(p, selectedPlanWeekNumber, p.secretaryName, schoolSettings.hodName)).join('\n\n══════════════════════════════════\n\n');
+                    const allTexts = generateAllWeeklyPlansCombinedMessage(currentWeekPlans, selectedPlanWeekNumber);
                     navigator.clipboard.writeText(allTexts);
-                    triggerToast(_t('تم نسخ جميع الخطط الأسبوعية بنسق الواتساب 📋', 'Copied all plans 📋', 'Alle Pläne kopiert 📋'));
+                    triggerToast(_t('تم نسخ كافة خطط الصفوف مجمعة بنسق الواتساب 📋', 'Copied all grades weekly plans 📋', 'Alle Klassen-Pläne kopiert 📋'));
                   }}
                   className="px-2 py-1 bg-surface-hover hover:bg-surface border border-surface-border text-text-main text-[11px] font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
                 >
@@ -2674,12 +2784,17 @@ export const HodHubView: React.FC = () => {
                       </button>
 
                       <button
-                        onClick={() => handlePrintWeeklyPlan(plan)}
-                        className="px-2.5 py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-[11px] font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1"
-                        title={_t('طباعة الخطة كأنها مستند محضر', 'Print formal plan', 'Drucken')}
+                        onClick={() => handleDownloadWeeklyPlan(plan)}
+                        disabled={downloadingPlanId === plan.id}
+                        className="px-2.5 py-2 bg-sky-500/10 hover:bg-sky-500/20 disabled:opacity-50 text-sky-700 dark:text-sky-400 border border-sky-500/30 text-[11px] font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1"
+                        title={_t('تحميل الخطة كمستند PDF رسمي ومنسق مع رسالة التقدير والتوقيع', 'Download official weekly plan PDF with appreciation and signature', 'Als PDF herunterladen')}
                       >
-                        <Printer className="w-3.5 h-3.5 text-sky-500" />
-                        <span>{_t('طباعة', 'Print', 'Drucken')}</span>
+                        {downloadingPlanId === plan.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600" />
+                        ) : (
+                          <Download className="w-3.5 h-3.5 text-sky-600" />
+                        )}
+                        <span>{downloadingPlanId === plan.id ? _t('تحميل...', 'Loading...', 'Laden...') : _t('تحميل PDF', 'Download PDF', 'PDF laden')}</span>
                       </button>
 
                       <button

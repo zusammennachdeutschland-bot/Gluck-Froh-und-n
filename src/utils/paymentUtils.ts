@@ -23,13 +23,91 @@ export interface DuePaymentCycle {
   existingPaymentRecordId?: string;
 }
 
-const formatDateDisplay = (dateStr: string) => {
+export const formatDateDisplay = (dateStr: string) => {
   if (!dateStr) return '';
   const parts = dateStr.split('-');
   if (parts.length === 3) {
     return `${parts[2]}/${parts[1]}/${parts[0]}`;
   }
   return dateStr;
+};
+
+/**
+ * Computes realistic past calendar dates for earlier sessions in a package cycle.
+ * Walks backwards from baseDate using scheduleDays if available, or 3-4 day / weekly intervals.
+ */
+export const calculateEstimatedPastDate = (
+  baseDateStr: string,
+  targetSessionNum: number,
+  currentSessionNum: number,
+  scheduleDays?: string[]
+): string => {
+  if (targetSessionNum === currentSessionNum) {
+    return baseDateStr;
+  }
+  
+  const baseParts = (baseDateStr || '').split('-');
+  const baseDate = baseParts.length === 3 
+    ? new Date(parseInt(baseParts[0], 10), parseInt(baseParts[1], 10) - 1, parseInt(baseParts[2], 10))
+    : new Date();
+
+  const sessionsDiff = currentSessionNum - targetSessionNum;
+  if (sessionsDiff <= 0) return baseDateStr;
+
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const validScheduleDays = (scheduleDays || []).map(d => d.toLowerCase());
+
+  if (validScheduleDays.length > 0) {
+    let foundCount = 0;
+    const cursor = new Date(baseDate.getTime());
+    for (let dayOffset = 1; dayOffset <= 120; dayOffset++) {
+      cursor.setDate(cursor.getDate() - 1);
+      const dayName = dayNames[cursor.getDay()].toLowerCase();
+      if (validScheduleDays.includes(dayName)) {
+        foundCount++;
+        if (foundCount === sessionsDiff) {
+          const y = cursor.getFullYear();
+          const m = String(cursor.getMonth() + 1).padStart(2, '0');
+          const d = String(cursor.getDate()).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        }
+      }
+    }
+  }
+
+  // Fallback: step backwards by ~3.5 days (average 2 sessions per week)
+  const daysToSubtract = Math.max(1, Math.round(sessionsDiff * 3.5));
+  const targetDate = new Date(baseDate.getTime() - daysToSubtract * 24 * 60 * 60 * 1000);
+  const y = targetDate.getFullYear();
+  const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+  const d = String(targetDate.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+/**
+ * Sanitizes an array of lesson date strings so any placeholder ("Offline", "حصة سابقة")
+ * is replaced with a real estimated past date.
+ */
+export const sanitizePaymentLessonDates = (
+  lessonDates: string[] | undefined,
+  baseDateStr: string,
+  bundleSize: number,
+  scheduleDays?: string[]
+): string[] => {
+  if (!lessonDates || lessonDates.length === 0) return [];
+  return lessonDates.map(item => {
+    if (/\d{2}\/\d{2}\/\d{4}/.test(item)) {
+      return item;
+    }
+    const match = item.match(/Session (\d+)\/(\d+)/i);
+    if (match) {
+      const sessNum = parseInt(match[1], 10);
+      const totalSess = parseInt(match[2], 10) || bundleSize;
+      const pastDate = calculateEstimatedPastDate(baseDateStr, sessNum, totalSess, scheduleDays);
+      return `${formatDateDisplay(pastDate)} (Session ${sessNum}/${totalSess})`;
+    }
+    return item;
+  });
 };
 
 export const calculateDuePaymentCycles = (
@@ -121,13 +199,22 @@ export const calculateDuePaymentCycles = (
     }
 
     const processedLessons: ProcessedLesson[] = [];
+    const latestLessonDate = billableCompletedLessons[billableCompletedLessons.length - 1]?.date || new Date().toISOString().split('T')[0];
+    const maxCompletedSessionNum = Math.max(0, ...billableCompletedLessons.map(l => l.sessionNumber || 0));
+    const anchorSessionNum = maxCompletedSessionNum > 0 ? maxCompletedSessionNum : cycleLength;
     
-    // Add virtual lessons
+    // Add virtual lessons with estimated past dates
     for (let i = 1; i <= virtualOffset; i++) {
+      const matched = (activeLessons || []).find(l => 
+        ((st.groupId && l.groupId === st.groupId) || (l.studentId && l.studentId === st.id)) && 
+        l.sessionNumber === i
+      );
+      const pastDate = matched?.date || calculateEstimatedPastDate(latestLessonDate, i, anchorSessionNum, grp?.scheduleDays);
+      const dLabel = `${formatDateDisplay(pastDate)} (Session ${i}/${cycleLength})`;
       processedLessons.push({
-        id: `virtual_${st.id}_sess_${i}`,
-        dateLabel: `Offline (Session ${i}/${cycleLength})`,
-        isVirtual: true
+        id: matched ? matched.id : `virtual_${st.id}_sess_${i}`,
+        dateLabel: dLabel,
+        isVirtual: !matched
       });
     }
 
@@ -139,6 +226,40 @@ export const calculateDuePaymentCycles = (
         isVirtual: false
       });
     });
+
+    // Check if any billable completed lesson has reached the cycle limit or cycle boundary (e.g. session 8 of 8)
+    const reachedCycleBySessionNum = maxCompletedSessionNum > 0 && cycleLength > 1 && (maxCompletedSessionNum >= cycleLength || maxCompletedSessionNum % cycleLength === 0);
+
+    // If reachedCycleBySessionNum is true but processedLessons.length < cycleLength (e.g. teacher completed session 8 directly)
+    if (reachedCycleBySessionNum && processedLessons.length < cycleLength) {
+      const existingSessionNums = new Set<number>();
+      processedLessons.forEach(pl => {
+        const match = pl.dateLabel.match(/Session (\d+)\//);
+        if (match) existingSessionNums.add(parseInt(match[1], 10));
+      });
+      const cycleStart = Math.floor((maxCompletedSessionNum - 1) / cycleLength) * cycleLength + 1;
+      const cycleEnd = cycleStart + cycleLength - 1;
+      for (let s = cycleStart; s <= cycleEnd; s++) {
+        if (!existingSessionNums.has(s)) {
+          const matched = (activeLessons || []).find(l => 
+            ((st.groupId && l.groupId === st.groupId) || (l.studentId && l.studentId === st.id)) && 
+            l.sessionNumber === s
+          );
+          const pastDate = matched?.date || calculateEstimatedPastDate(latestLessonDate, s, anchorSessionNum, grp?.scheduleDays);
+          const dLabel = `${formatDateDisplay(pastDate)} (Session ${s}/${cycleLength})`;
+          processedLessons.push({
+            id: matched ? matched.id : `virtual_${st.id}_sess_${s}`,
+            dateLabel: dLabel,
+            isVirtual: !matched
+          });
+        }
+      }
+      processedLessons.sort((a, b) => {
+        const na = parseInt(a.dateLabel.match(/Session (\d+)\//)?.[1] || '0', 10);
+        const nb = parseInt(b.dateLabel.match(/Session (\d+)\//)?.[1] || '0', 10);
+        return na - nb;
+      });
+    }
 
     // Unpaid record in payments (excluding exempted or paid)
     const unpaidRec = activePayments.find(p => 
@@ -185,7 +306,7 @@ export const calculateDuePaymentCycles = (
         remaining = remaining.slice(cycleLength);
         chunkIndex++;
       }
-    } else if (unpaidRec) {
+    } else if (unpaidRec && unlinkedAdvanceLessons === 0) {
       // Format unpaid rec lesson dates if they don't have session numbers yet
       const lessonDates = (unpaidRec.lessonDates || []).map((d, idx) => {
         if (d.includes('Session')) return d;
@@ -209,10 +330,20 @@ export const calculateDuePaymentCycles = (
     }
   });
 
-  // Also include standalone unpaid payment records from payments table (excluding exempted)
+  // Also include standalone unpaid payment records from payments table (excluding exempted and students with advance credit)
   const addedPaymentRecordIds = new Set(list.map(item => item.existingPaymentRecordId).filter(Boolean));
   activePayments.forEach(p => {
     if (p.status !== 'paid' && p.status !== 'exempted' && p.paymentType !== 'exemption' && !addedPaymentRecordIds.has(p.id)) {
+      // If this student has prepaid advance lessons, do not create an unpaid card
+      const hasAdvanceCredit = activePayments.some(adv => 
+        adv.studentId === p.studentId && 
+        adv.status === 'paid' && 
+        (adv.paymentType === 'advance_payment' || (adv.bundleSize && adv.bundleSize > 0 && adv.notes?.includes('مقدم')))
+      );
+      if (hasAdvanceCredit) {
+        return;
+      }
+
       list.push({
         id: p.id,
         studentId: p.studentId || '',
@@ -325,48 +456,20 @@ export const getStudentCyclePricing = (
   return { cycleLength, amountDue, pricePerSession, isCustomOverride: false };
 };
 
-
-
-export const getPaymentsForPeriod = (payments: PaymentRecord[], startDateStr: string, endDateStr: string) => {
-  return payments.filter(p => {
-    if (p.deleted) return false;
-    const dStr = p.paidDate || p.dueDate;
-    if (!dStr) return false;
-    // Extract YYYY-MM-DD
-    const d = dStr.substring(0, 10);
-    return d >= startDateStr && d <= endDateStr;
-  });
-};
-
-export const getPaymentsForMonth = (payments: PaymentRecord[], monthPrefix: string) => {
-  return payments.filter(p => {
-    if (p.deleted) return false;
-    const dStr = p.paidDate || p.dueDate;
-    if (!dStr) return false;
-    return dStr.startsWith(monthPrefix);
-  });
-};
-
-export const getPaymentsForDay = (payments: PaymentRecord[], dayStr: string) => {
-  return payments.filter(p => {
-    if (p.deleted) return false;
-    const dStr = p.paidDate || p.dueDate;
-    if (!dStr) return false;
-    return dStr.startsWith(dayStr);
-  });
-};
-
-export const sumPayments = (list: PaymentRecord[]) => list.filter(p => !p.deleted).reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
-
 /**
- * Calculates prepaid/advance lesson counts for a student.
+ * Calculates prepaid/advance lesson credits for a student.
  */
 export const getStudentAdvanceLessonCredits = (
   studentId: string,
   payments: PaymentRecord[],
-  lessons: Lesson[]
+  lessons: Lesson[],
+  studentName?: string
 ): { totalAdvanceLessons: number; usedLessons: number; remainingAdvanceLessons: number } => {
-  const activePayments = payments.filter(p => !p.deleted && p.studentId === studentId && p.status === 'paid');
+  const activePayments = payments.filter(p => 
+    !p.deleted && 
+    (p.studentId === studentId || (!!studentName && p.studentName === studentName)) && 
+    p.status === 'paid'
+  );
   const advancePayments = activePayments.filter(p => 
     p.paymentType === 'advance_payment' || (p.bundleSize && p.bundleSize > 0 && p.notes?.includes('مقدم'))
   );
@@ -376,13 +479,27 @@ export const getStudentAdvanceLessonCredits = (
     return { totalAdvanceLessons: 0, usedLessons: 0, remainingAdvanceLessons: 0 };
   }
 
-  // Count attended completed lessons
-  const completedLessons = lessons.filter(l => 
-    !l.deleted && 
-    l.status === 'completed' && 
-    l.paymentStatus !== 'exempted' &&
-    (l.studentId === studentId || l.studentName)
-  );
+  // Find the earliest advance payment date/timestamp
+  const earliestAdvancePayment = advancePayments.reduce((earliest, p) => {
+    const pDate = p.paidDate || p.createdAt || '';
+    if (!earliest || (pDate && pDate < earliest)) return pDate;
+    return earliest;
+  }, '');
+
+  // Count attended completed lessons strictly for THIS student on or after the advance payment date
+  const completedLessons = lessons.filter(l => {
+    if (l.deleted) return false;
+    if (l.status !== 'completed') return false;
+    if (l.paymentStatus === 'exempted') return false;
+    const matchesStudent = l.studentId === studentId || (!!studentName && l.studentName === studentName);
+    if (!matchesStudent) return false;
+    const att = l.report?.studentAttendance?.[studentId] || l.report?.attendanceStatus || 'present';
+    if (att === 'absent') return false;
+    if (earliestAdvancePayment && l.date && l.date < earliestAdvancePayment.substring(0, 10)) {
+      return false;
+    }
+    return true;
+  });
 
   const usedLessons = Math.min(totalAdvanceLessons, completedLessons.length);
   const remainingAdvanceLessons = Math.max(0, totalAdvanceLessons - usedLessons);

@@ -8,6 +8,7 @@ import {
   getCertificateDefaultText
 } from '../../data/certificateTypes';
 import { CertificateRenderer } from './templates/CertificateRenderer';
+import { CertificateTemplateThumbnail } from './CertificateTemplateThumbnail';
 import { 
   downloadCertificatePDF, 
   downloadCertificateImage, 
@@ -682,45 +683,23 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                 </div>
               </div>
 
-              {/* Standard Templates Grid */}
+              {/* Standard Templates Grid with Miniature Certificate Thumbnails */}
               {templateTab === 'standard' ? (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
                   {PRIMARY_CERTIFICATE_TEMPLATES.map(tmpl => {
                     const isSelected = templateId === tmpl.id;
                     return (
-                      <button
+                      <CertificateTemplateThumbnail
                         key={tmpl.id}
-                        type="button"
+                        templateId={tmpl.id}
+                        name={tmpl.name[language] || tmpl.name.de}
+                        isSelected={isSelected}
                         onClick={() => {
                           setTemplateId(tmpl.id);
                           setSelectedCustomBg(null);
                         }}
-                        className={`p-2.5 rounded-2xl border text-start transition-all cursor-pointer relative flex flex-col justify-between ${
-                          isSelected
-                            ? 'bg-primary/5 dark:bg-primary-soft border-primary ring-2 ring-primary/20 shadow-xs'
-                            : 'bg-surface dark:bg-slate-900 border-surface-border dark:border-slate-700 hover:border-slate-300'
-                        }`}
-                      >
-                        <div>
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <div
-                              className="w-3 h-3 rounded-full shrink-0"
-                              style={{ backgroundColor: tmpl.previewColor || '#4f46e5' }}
-                            />
-                            <span className="font-black text-xs text-text-main truncate">
-                              {tmpl.name[language] || tmpl.name.de}
-                            </span>
-                          </div>
-                          <span className="block text-[10px] text-text-muted leading-tight line-clamp-2">
-                            {tmpl.description[language] || tmpl.description.de}
-                          </span>
-                        </div>
-                        {isSelected && (
-                          <div className="mt-2 self-end">
-                            <Check className="w-3.5 h-3.5 text-primary" />
-                          </div>
-                        )}
-                      </button>
+                        language={language}
+                      />
                     );
                   })}
                 </div>
