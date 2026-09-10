@@ -1,42 +1,239 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" fill="#ffffff" />
-  <g transform="translate(15, 180) scale(0.55)">
-    <style>
-      .brand-title {
-        font-family: 'Arial Black', Impact, sans-serif;
-        font-size: 140px;
-        fill: #eb5e45;
-        font-weight: 900;
-        letter-spacing: 5px;
-      }
-      .brand-title-shadow {
-        font-family: 'Arial Black', Impact, sans-serif;
-        font-size: 140px;
-        fill: #f5b7b1;
-        font-weight: 900;
-        letter-spacing: 5px;
-      }
-      .umlaut {
-        fill: #eb5e45;
-      }
-      .subtitle {
-        font-family: 'Arial', sans-serif;
-        font-size: 40px;
-        fill: #3b5978;
-        font-weight: bold;
-      }
-      .line {
-        stroke: #f3a968;
-        stroke-width: 4;
-        stroke-linecap: round;
-      }
-    </style>
-    <text x="30" y="210" class="brand-title-shadow">GLUCK</text>
-    <text x="25" y="205" class="brand-title">GLUCK</text>
-    <circle cx="210" cy="65" r="12" class="umlaut" />
-    <circle cx="250" cy="65" r="12" class="umlaut" />
-    <text x="680" y="150" class="subtitle" text-anchor="middle">HERR ABDUL RHMAN</text>
-    <text x="680" y="200" class="subtitle" text-anchor="middle">01156435802</text>
-    <line x1="25" y1="240" x2="850" y2="240" class="line" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900" width="100%" height="100%">
+  <defs>
+    <!-- Background Radial Glow -->
+    <radialGradient id="centerGlow" cx="50%" cy="45%" r="50%">
+      <stop offset="0%" stop-color="#ECFDF5" stop-opacity="0.8" />
+      <stop offset="60%" stop-color="#F0FDFA" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Clover Leaf 1: Top (Cyan to Royal Sky Blue) -->
+    <linearGradient id="leafTop" x1="0%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#0284C7" />
+      <stop offset="50%" stop-color="#0EA5E9" />
+      <stop offset="100%" stop-color="#38BDF8" />
+    </linearGradient>
+
+    <!-- Clover Leaf 2: Right (Warm Gold to Solar Amber) -->
+    <linearGradient id="leafRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE047" />
+      <stop offset="45%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+
+    <!-- Clover Leaf 3: Bottom (Deep Turquoise to Teal) -->
+    <linearGradient id="leafBottom" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14B8A6" />
+      <stop offset="50%" stop-color="#0D9488" />
+      <stop offset="100%" stop-color="#0F766E" />
+    </linearGradient>
+
+    <!-- Clover Leaf 4: Left (Lush Emerald to Mint) -->
+    <linearGradient id="leafLeft" x1="100%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#047857" />
+      <stop offset="50%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+
+    <!-- Center Star & Gem Gradient -->
+    <linearGradient id="gemGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="50%" stop-color="#F8FAFC" />
+      <stop offset="100%" stop-color="#E2E8F0" />
+    </linearGradient>
+
+    <!-- Text Master Gradient -->
+    <linearGradient id="textBrandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#065F46" />
+      <stop offset="35%" stop-color="#0D9488" />
+      <stop offset="70%" stop-color="#0284C7" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+
+    <!-- Smile Gradient -->
+    <linearGradient id="smileGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="30%" stop-color="#0D9488" />
+      <stop offset="70%" stop-color="#0284C7" />
+      <stop offset="100%" stop-color="#F59E0B" />
+    </linearGradient>
+
+    <!-- Drop Shadows -->
+    <filter id="premiumShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#0F172A" flood-opacity="0.12" />
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0D9488" flood-opacity="0.08" />
+    </filter>
+
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Ambient background glow -->
+  <circle cx="450" cy="380" r="360" fill="url(#centerGlow)" />
+
+  <!-- ================= MASTER CLOVER EMBLEM ================= -->
+  <g filter="url(#premiumShadow)" transform="translate(450, 310)">
+
+    <!-- BACK LAYER: 4 Interlocking Heart Petals forming a Lucky Clover -->
+    
+    <!-- Top Petal (Sky Blue) -->
+    <g transform="rotate(0)">
+      <path d="M 0 0 
+               C -75 -40, -110 -115, -65 -165 
+               C -20 -215, 0 -185, 0 -130 
+               C 0 -185, 20 -215, 65 -165 
+               C 110 -115, 75 -40, 0 0 Z" 
+            fill="url(#leafTop)" />
+      <!-- Subtle Glass Highlight -->
+      <path d="M 0 -130 C 15 -175, 50 -150, 45 -120 C 35 -75, 10 -30, 0 0 Z" 
+            fill="#FFFFFF" opacity="0.22" />
+    </g>
+
+    <!-- Right Petal (Solar Amber Gold) -->
+    <g transform="rotate(90)">
+      <path d="M 0 0 
+               C -75 -40, -110 -115, -65 -165 
+               C -20 -215, 0 -185, 0 -130 
+               C 0 -185, 20 -215, 65 -165 
+               C 110 -115, 75 -40, 0 0 Z" 
+            fill="url(#leafRight)" />
+      <!-- Glass Highlight -->
+      <path d="M 0 -130 C 15 -175, 50 -150, 45 -120 C 35 -75, 10 -30, 0 0 Z" 
+            fill="#FFFFFF" opacity="0.25" />
+    </g>
+
+    <!-- Bottom Petal (Turquoise / Ocean Teal) -->
+    <g transform="rotate(180)">
+      <path d="M 0 0 
+               C -75 -40, -110 -115, -65 -165 
+               C -20 -215, 0 -185, 0 -130 
+               C 0 -185, 20 -215, 65 -165 
+               C 110 -115, 75 -40, 0 0 Z" 
+            fill="url(#leafBottom)" />
+      <!-- Glass Highlight -->
+      <path d="M 0 -130 C 15 -175, 50 -150, 45 -120 C 35 -75, 10 -30, 0 0 Z" 
+            fill="#FFFFFF" opacity="0.2" />
+    </g>
+
+    <!-- Left Petal (Lush Emerald) -->
+    <g transform="rotate(270)">
+      <path d="M 0 0 
+               C -75 -40, -110 -115, -65 -165 
+               C -20 -215, 0 -185, 0 -130 
+               C 0 -185, 20 -215, 65 -165 
+               C 110 -115, 75 -40, 0 0 Z" 
+            fill="url(#leafLeft)" />
+      <!-- Glass Highlight -->
+      <path d="M 0 -130 C 15 -175, 50 -150, 45 -120 C 35 -75, 10 -30, 0 0 Z" 
+            fill="#FFFFFF" opacity="0.22" />
+    </g>
+
+    <!-- CENTER OVERLAY: 4-Point German Precision Sparkle / Joy Diamond -->
+    <circle cx="0" cy="0" r="38" fill="#FFFFFF" opacity="0.95" />
+    <path d="M 0 -45 Q 0 0, 45 0 Q 0 0, 0 45 Q 0 0, -45 0 Q 0 0, 0 -45 Z" fill="url(#textBrandGrad)" />
+    <circle cx="0" cy="0" r="10" fill="#FFFFFF" />
+
+    <!-- DYNAMIC HAPPY SMILE ARC framing the lower clover -->
+    <path d="M -160 90 
+             C -90 190, 90 190, 160 90 
+             C 172 75, 192 88, 180 105 
+             C 100 220, -100 220, -180 105 
+             C -192 88, -172 75, -160 90 Z" 
+          fill="url(#smileGrad)" 
+          filter="url(#softGlow)" />
+
+    <!-- Left Joy Accent Point -->
+    <circle cx="-168" cy="85" r="7" fill="#10B981" />
+    <!-- Right Joy Accent Point -->
+    <circle cx="168" cy="85" r="7" fill="#F59E0B" />
+  </g>
+
+  <!-- ================= TYPOGRAPHY: GLÜCK ================= -->
+  <g transform="translate(450, 595)" text-anchor="middle">
+    <!-- Brand Title Shadow / Glow -->
+    <text x="0" y="0" 
+          font-family="'Montserrat', 'Poppins', 'Inter', system-ui, -apple-system, sans-serif" 
+          font-size="124px" 
+          font-weight="900" 
+          letter-spacing="12px" 
+          fill="#047857" 
+          opacity="0.08" 
+          transform="translate(0, 6)">
+      GLÜCK
+    </text>
+
+    <!-- Main Title -->
+    <text x="0" y="0" 
+          font-family="'Montserrat', 'Poppins', 'Inter', system-ui, -apple-system, sans-serif" 
+          font-size="124px" 
+          font-weight="900" 
+          letter-spacing="12px" 
+          fill="url(#textBrandGrad)">
+      GLÜCK
+    </text>
+
+    <!-- Cheerful Sparkle Dots for the Ü (Umlaut) -->
+    <!-- Positioned precisely over the Ü -->
+    <g transform="translate(-14, -135)">
+      <!-- Left Dot Sparkle -->
+      <circle cx="-24" cy="0" r="13" fill="#0EA5E9" />
+      <circle cx="-24" cy="0" r="6" fill="#FFFFFF" />
+      
+      <!-- Right Dot Sparkle -->
+      <circle cx="24" cy="0" r="13" fill="#10B981" />
+      <circle cx="24" cy="0" r="6" fill="#FFFFFF" />
+    </g>
+
+    <!-- Tagline: German Teacher Management Platform -->
+    <text x="0" y="65" 
+          font-family="'Inter', 'Montserrat', system-ui, sans-serif" 
+          font-size="22px" 
+          font-weight="800" 
+          letter-spacing="6px" 
+          fill="#0D9488">
+      DEUTSCHLEHRER MANAGER
+    </text>
+
+    <!-- Divider Ribbon Line with Center Star -->
+    <g transform="translate(0, 95)">
+      <line x1="-220" y1="0" x2="-40" y2="0" stroke="#CBD5E1" stroke-width="2" stroke-linecap="round" />
+      <polygon points="0,-8 6,-2 14,-2 8,4 10,12 0,6 -10,12 -8,4 -14,-2 -6,-2" fill="#F59E0B" />
+      <line x1="40" y1="0" x2="220" y2="0" stroke="#CBD5E1" stroke-width="2" stroke-linecap="round" />
+    </g>
+
+    <!-- Creator Signature Pill Badge: Created by Mr. Abdul Rahman -->
+    <g transform="translate(0, 160)">
+      <!-- Pill Container -->
+      <rect x="-240" y="-30" width="480" height="60" rx="30" fill="#047857" />
+      <rect x="-238" y="-28" width="476" height="56" rx="28" fill="#064E3B" />
+      
+      <!-- Inner Border Glow -->
+      <rect x="-238" y="-28" width="476" height="56" rx="28" stroke="url(#smileGrad)" stroke-width="2" fill="none" opacity="0.8" />
+      
+      <!-- Crown / Star Icon -->
+      <g transform="translate(-195, 0)">
+        <circle cx="0" cy="0" r="16" fill="#F59E0B" opacity="0.25" />
+        <path d="M -8 6 L -10 -4 L -4 0 L 0 -8 L 4 0 L 10 -4 L 8 6 Z" fill="#FBBF24" />
+      </g>
+
+      <!-- Signature Text -->
+      <text x="18" y="7" 
+            text-anchor="middle" 
+            font-family="'Poppins', 'Inter', system-ui, -apple-system, sans-serif" 
+            font-size="22px" 
+            font-weight="700" 
+            letter-spacing="1px" 
+            fill="#FFFFFF">
+        Created by Mr. Abdul Rahman
+      </text>
+
+      <!-- Right Sparkle -->
+      <g transform="translate(195, 0)">
+        <circle cx="0" cy="0" r="16" fill="#10B981" opacity="0.25" />
+        <circle cx="0" cy="0" r="5" fill="#34D399" />
+      </g>
+    </g>
   </g>
 </svg>

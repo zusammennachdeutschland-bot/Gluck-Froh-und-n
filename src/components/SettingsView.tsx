@@ -6,7 +6,7 @@ import {
   HardDrive, Download, Upload, Trash2, AlertTriangle, MessageSquare, ChevronRight,
   ArrowLeft, ArrowRight, Calendar, ShieldAlert, ShieldCheck, Info, Copy, Save, Phone, ExternalLink,
   BookOpen, FileText, Bell, CheckSquare, XCircle, Award, Sparkles, Star, Plus, Pencil, RotateCcw, Heart,
-  Target
+  Target, Zap, Smartphone, Lock, Shield, Share2, Layers, CheckCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
@@ -88,6 +88,8 @@ export const SettingsView: React.FC = () => {
   const [bankAccount, setBankAccount] = useState(profile.bankAccount || '');
   const [paymentLink, setPaymentLink] = useState(profile.paymentLink || '');
   const [whatsappNumber, setWhatsappNumber] = useState(profile.whatsappNumber || '');
+  const [copiedDevPhone, setCopiedDevPhone] = useState(false);
+  const [copiedBuildInfo, setCopiedBuildInfo] = useState(false);
 
   // Financial Goals States
   const [weeklyIncomeGoal, setWeeklyIncomeGoal] = useState<string>(
@@ -312,7 +314,7 @@ export const SettingsView: React.FC = () => {
       description: t('auto_application_information_and_ve'),
       icon: Info,
       color: 'bg-primary/10 text-primary dark:text-primary border-primary-border dark:border-primary-border',
-      badge: 'v2.5.0'
+      badge: 'v1.0.2 • Pro'
     }
   ];
 
@@ -1650,93 +1652,187 @@ export const SettingsView: React.FC = () => {
             Info
           )}
 
-          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 shadow-2xs space-y-3 text-center sm:text-start">
-            {/* App Hero Branding Header */}
-            <div className="flex flex-col sm:flex-row items-center gap-3 pb-3 border-b border-slate-100 dark:border-surface-border">
-              <img
-                src="/logo.svg"
-                alt="Glück fröhlich und froh Logo"
-                className="w-12 h-12 rounded-lg object-contain bg-surface p-1 shadow-2xs border border-surface-border/80 dark:border-surface-border shrink-0"
-              />
-              <div>
-                <h1 className="text-base font-black text-text-main">
-                  Glück fröhlich und froh
-                </h1>
-                <p className="text-[11px] text-primary dark:text-primary font-extrabold mt-0.5">
+          {/* 1. APP BRAND & IDENTITY CARD */}
+          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 sm:p-4 shadow-2xs space-y-3 text-center sm:text-start">
+            <div className="flex flex-col sm:flex-row items-center gap-3.5 pb-3 border-b border-surface-border/80 dark:border-surface-border">
+              <div className="w-14 h-14 rounded-xl bg-surface-hover border border-surface-border p-2 shrink-0 flex items-center justify-center shadow-2xs">
+                <img
+                  src="/logo.svg"
+                  alt="GLÜCK Logo"
+                  className="w-full h-full object-contain"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-1.5">
+                  <h1 className="text-base sm:text-lg font-black text-text-main">
+                    Glück fröhlich und froh
+                  </h1>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-soft text-primary border border-primary-border">
+                    v1.0.2 Pro
+                  </span>
+                </div>
+                <p className="text-xs text-primary font-bold">
                   {t('auto_german_teacher_management_syst')}
                 </p>
               </div>
             </div>
 
-            {/* App Description */}
+            {/* Description Box */}
             <div className="space-y-1">
-              <h3 className="text-[10px] font-extrabold uppercase tracking-wider text-text-muted/70">
+              <h3 className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
                 {t('auto_description')}
               </h3>
-              <p className="text-xs text-text-main font-medium leading-relaxed bg-surface-hover/60 p-2.5 rounded-lg border border-surface-border/60 dark:border-surface-border-soft">
-                Glück fröhlich und froh helps private teachers manage students, groups, lessons, attendance, payments, reports, parent communication, and scheduling from one place.
+              <p className="text-xs text-text-main font-medium leading-relaxed bg-surface-hover/70 p-2.5 rounded-lg border border-surface-border/80 dark:border-surface-border-soft">
+                {_t(
+                  'منصة إلكترونية متكاملة وشاملة صممت خصيصاً لمساعدة معلمي اللغة الألمانية في تنظيم الطلاب، المجموعات، الحصص، الحضور والغياب، الحسابات المالية، والشهادات بكفاءة وسرعة، مع حفظ وتشفير كامل للبيانات محلياً.',
+                  'A comprehensive management platform designed specifically for German language teachers to manage students, groups, lessons, attendance, payments, reports, parent communication, and scheduling in one place with full offline privacy.',
+                  'Eine umfassende Plattform für Deutschlehrer zur Verwaltung von Schülern, Gruppen, Unterricht, Anwesenheit, Zahlungen und Berichten an einem Ort mit voller Offline-Datensicherheit.'
+                )}
               </p>
             </div>
 
-            {/* Features List */}
-            <div className="space-y-1.5">
-              <h3 className="text-[10px] font-extrabold uppercase tracking-wider text-text-muted/70">
-                {t('auto_features')}
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-slate-800 dark:text-slate-200">
-                {[
-                  'Student Management',
-                  'Group Management',
-                  'Attendance Tracking',
-                  'Lesson History',
-                  'Payment Tracking',
-                  'Parent Communication',
-                  'Reports & Statistics',
-                  'Calendar & Scheduling'
-                ].map((feat, idx) => (
-                  <div key={idx} className="p-2 bg-surface dark:bg-slate-800/80 rounded-lg border border-surface-border/80 dark:border-surface-border-soft/80 flex items-center gap-2 font-bold shadow-2xs text-xs">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />
-                    <span>{feat}</span>
+            {/* Rerun Setup Wizard & Copy Info Buttons */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  confetti({ particleCount: 40, spread: 50 });
+                  window.dispatchEvent(new CustomEvent('open-setup-wizard'));
+                }}
+                className="w-full py-2.5 px-3 bg-primary-soft hover:bg-primary/15 text-primary border border-primary-border rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-primary" />
+                <span>{_t('تشغيل معالج الإعداد الترحيبي', 'Rerun Welcome Setup Wizard', 'Setup-Assistenten ausführen')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const info = `Glück fröhlich und froh v1.0.2 • Mr. Abdul Rahman • Offline-First`;
+                  navigator.clipboard.writeText(info);
+                  setCopiedBuildInfo(true);
+                  setTimeout(() => setCopiedBuildInfo(false), 2000);
+                }}
+                className="w-full py-2.5 px-3 bg-surface-hover hover:bg-slate-100 dark:hover:bg-slate-700/60 text-text-main border border-surface-border dark:border-surface-border-soft rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+              >
+                {copiedBuildInfo ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-primary">{_t('تم النسخ بنجاح', 'Copied Successfully', 'Kopiert')}</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-400" />
+                    <span>{_t('نسخ معلومات الإصدار', 'Copy Build Info', 'Build-Info kopieren')}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* 2. CORE FEATURES GRID */}
+          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 sm:p-4 shadow-2xs space-y-2.5">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
+              <span>{t('auto_features')}</span>
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              {[
+                {
+                  title: _t('إدارة الطلاب والمستويات', 'Student & Level Tracking', 'Schüler- & Niveaustufen'),
+                  desc: _t('سجلات تفصيلية وتتبع مستويات A1–C2 والحضور والغياب.', 'Student profiles, A1–C2 progression, attendance tracking.', 'Schülerakten, A1–C2 Stufen und Anwesenheit.')
+                },
+                {
+                  title: _t('الجدول والتقويم الذكي', 'Intelligent Schedule', 'Stundenplan & Kalender'),
+                  desc: _t('منظّم حصص ذكي يمنع التعارض مع منبه مواعيد فوري.', 'Conflict-free schedule planner with smart lesson alarms.', 'Konfliktfreier Stundenplan mit Erinnerungswecker.')
+                },
+                {
+                  title: _t('الإدارة المالية والسندات', 'Finances & Receipts', 'Finanzen & Belege'),
+                  desc: _t('تتبع الاشتراكات الشهرية، الحصص الفردية وتقارير الدخل.', 'Track subscriptions, private sessions, receipts, and revenue.', 'Monatsbeiträge, Einzelsitzungen und Einnahmenberichte.')
+                },
+                {
+                  title: _t('تواصل أولياء الأمور', 'Parent Communication', 'Eltern-Kommunikation'),
+                  desc: _t('قوالب رسائل واتساب ذكية مجهزة بنقرة واحدة.', 'One-click WhatsApp templates for homework and scores.', 'Ein-Klick WhatsApp-Vorlagen für Hausaufgaben.')
+                },
+                {
+                  title: _t('إصدار الشهادات والتحفيز', 'Certificate Generator', 'Zertifikate & Urkunden'),
+                  desc: _t('توليد وطباعة شهادات تقدير ألمانية مع كتابة ونطق صوتي.', 'German certificate printing with phonetics and styling.', 'Deutsche Urkunden mit Lautschrift und Druckformat.')
+                },
+                {
+                  title: _t('المزامنة والنسخ الاحتياطي', 'Smart Sync & Backup', 'Datensicherung & Sync'),
+                  desc: _t('مزامنة مشفرة بين الأجهزة ونسخ احتياطي محلي فوري.', 'P2P encrypted device sync and instant local backups.', 'Verschlüsselte Gerätesynchronisation und Backups.')
+                }
+              ].map((feat, idx) => (
+                <div
+                  key={idx}
+                  className="p-2.5 bg-surface-hover/60 dark:bg-slate-800/60 rounded-lg border border-surface-border/80 dark:border-surface-border-soft/80 flex items-start gap-2 shadow-2xs"
+                >
+                  <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0 mt-0.5">
+                    <Check className="w-3 h-3" />
                   </div>
-                ))}
-              </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-text-main">{feat.title}</h4>
+                    <p className="text-[11px] text-text-muted mt-0.5 leading-snug">{feat.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. DEVELOPER CONTACT CARD */}
+          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 sm:p-4 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-primary" />
+                <span>{t('auto_developer')}</span>
+              </h3>
+              <span className="text-[11px] font-bold text-primary bg-primary-soft px-2 py-0.5 rounded-md border border-primary-border">
+                Mr. Abdul Rahman
+              </span>
             </div>
 
-            {/* Rerun Welcome Setup Wizard */}
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-setup-wizard'))}
-              className="w-full py-2.5 px-4 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/25 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
-            >
-              <Sparkles className="w-4 h-4 text-primary" />
-              <span>{_t('تشغيل معالج الإعداد الترحيبي مجدداً', 'Rerun Welcome Setup Wizard', 'Setup-Assistenten erneut ausführen')}</span>
-            </button>
-
-            {/* Developer Contact Section */}
-            <div className="p-3 bg-gradient-to-r from-slate-900 to-primary-hover text-white rounded-lg space-y-2 shadow-2xs">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-primary">
-                    {t('auto_developer')}
-                  </p>
-                  <p className="text-sm font-black">Abdul-rahman Ghareeb</p>
+            <div className="p-3 bg-surface-hover/70 dark:bg-slate-800/70 border border-surface-border/80 dark:border-surface-border-soft rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-3 text-center sm:text-start">
+                <div className="w-10 h-10 rounded-lg bg-primary-soft text-primary border border-primary-border flex items-center justify-center font-black text-sm shrink-0">
+                  AR
                 </div>
-                <div className="p-1.5 bg-surface/10 rounded-lg shrink-0">
-                  <User className="w-4 h-4 text-primary" />
+                <div>
+                  <h4 className="text-xs sm:text-sm font-black text-text-main">
+                    Mr. Abdul Rahman (عبد الرحمن غريب)
+                  </h4>
+                  <p className="text-[11px] text-text-muted">
+                    Deutschlehrer & Software Architect
+                  </p>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-1.5 border-t border-white/10 text-xs">
-                <div className="flex items-center gap-1.5 font-mono font-bold text-[11px]">
-                  <Phone className="w-3.5 h-3.5 text-primary shrink-0" />
-                  <span>WhatsApp: 01156435802</span>
-                </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText('01156435802');
+                    setCopiedDevPhone(true);
+                    setTimeout(() => setCopiedDevPhone(false), 2000);
+                  }}
+                  className="px-2.5 py-1.5 bg-surface border border-surface-border hover:border-primary/50 text-text-main font-mono font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                  title={_t('نسخ رقم الواتساب', 'Copy WhatsApp number', 'Nummer kopieren')}
+                >
+                  <Phone className="w-3 h-3 text-primary" />
+                  <span>01156435802</span>
+                  {copiedDevPhone ? (
+                    <Check className="w-3 h-3 text-primary" />
+                  ) : (
+                    <Copy className="w-3 h-3 text-slate-400" />
+                  )}
+                </button>
 
                 <a
-                  href="https://wa.me/201156435802"
+                  href="https://wa.me/201156435802?text=Hallo%20Mr.%20Abdul%20Rahman,%20ich%20nutze%20die%20GLÜCK%20App!"
                   target="_blank"
                   rel="noreferrer"
-                  className="px-2.5 py-1 bg-primary hover:bg-primary text-white font-bold text-[11px] rounded-lg transition-all shadow-2xs flex items-center gap-1 shrink-0"
+                  className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-white font-bold text-xs rounded-lg transition-all shadow-2xs flex items-center gap-1.5 shrink-0 active:scale-95"
                 >
                   <span>WhatsApp</span>
                   <ExternalLink className="w-3 h-3" />
@@ -1744,10 +1840,18 @@ export const SettingsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Application Version */}
-            <div className="text-center pt-1 text-[11px] font-mono font-bold text-text-muted/70">
-              Glück fröhlich und froh • Version 2.5.0
-            </div>
+            <p className="text-[11px] text-text-muted text-center sm:text-start leading-relaxed">
+              {_t(
+                '✨ صُممت هذه المنصة خصيصاً لدعم معلمي وأساتذة اللغة الألمانية لتيسير إدارة الحصص وتوفير الوقت والمجهود.',
+                '✨ Designed specifically to empower German language teachers and streamline daily classroom management.',
+                '✨ Entwickelt zur Unterstützung von Deutschlehrern bei der täglichen Unterrichtsorganisation.'
+              )}
+            </p>
+          </div>
+
+          {/* 4. FOOTER INFO */}
+          <div className="text-center pt-1 text-[11px] font-mono font-bold text-slate-500">
+            Glück fröhlich und froh • Version 1.0.2 Pro • Offline-First
           </div>
         </div>
       )}
