@@ -1747,7 +1747,7 @@ export const HodStudentsView: React.FC = () => {
                 <button
                   onClick={handleParseAndImportPastedJson}
                   disabled={!pastedAiJsonText.trim()}
-                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="px-2.5 py-1 bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
                 >
                   <FileCode className="w-3.5 h-3.5" />
                   <span>{_t('استيراد البيانات الملصقة الآن', 'Import Pasted Data Now', 'Daten jetzt importieren')}</span>

@@ -428,7 +428,7 @@ export const ScheduleView: React.FC = () => {
 
       {/* EXPORT TOAST BANNER */}
       {exportToastMessage && (
-        <div className="bg-emerald-600 text-white text-xs font-bold p-2.5 rounded-lg flex items-center justify-center gap-2 shadow-md animate-scale-up">
+        <div className="bg-primary text-white text-xs font-bold p-2.5 rounded-lg flex items-center justify-center gap-2 shadow-md animate-scale-up">
           <CheckCircle2 className="w-4 h-4" />
           <span>{exportToastMessage}</span>
         </div>

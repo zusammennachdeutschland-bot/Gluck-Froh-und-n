@@ -3,19 +3,21 @@ import { useApp } from '../context/AppContext';
 import { Student, GradeLevel, CertificateRecord } from '../types';
 import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
-import { buildWhatsAppUrl } from '../utils/phoneUtils';
+import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { CARTOON_AVATARS, DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
 import { 
   X, Phone, Send, FileText, Upload, Trash2, Calendar, Award, DollarSign, 
   BookOpen, CheckCircle2, AlertCircle, Download, FileCheck, User, Camera, Edit3, Save, Check, Sparkles,
-  RefreshCw, Shield, Lock, MoreHorizontal, MessageSquare, Info, Star, GraduationCap, Users, Plus, Eye, Share2
+  RefreshCw, Shield, Lock, MoreHorizontal, MessageSquare, Info, Star, GraduationCap, Users, Plus, Eye, Share2,
+  AtSign
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { CreateCertificateModal } from './certificates/CreateCertificateModal';
 import { CertificatePreviewModal } from './certificates/CertificatePreviewModal';
 import { downloadCertificatePDF, shareCertificateWhatsApp } from '../utils/certificateExportUtils';
+import { isLikelyFemaleStudent } from '../utils/genderUtils';
 
 interface StudentProfileModalProps {
   student: Student;
@@ -37,10 +39,15 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   // Editable Student Fields
   const [editName, setEditName] = useState(student.name);
   const [editCertificateName, setEditCertificateName] = useState(student.certificateName || '');
+  const [editGender, setEditGender] = useState<'male' | 'female'>(student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male'));
   const [editGroupId, setEditGroupId] = useState(student.groupId);
   const [editGrade, setEditGrade] = useState<GradeLevel>(student.grade);
   const [editParentName, setEditParentName] = useState(student.parentName);
+  const isInitialParentUser = isWhatsAppUsername(student.parentPhone) || student.parentContactType === 'username';
+  const isInitialStudentUser = isWhatsAppUsername(student.studentPhone) || student.studentContactType === 'username';
+  const [editParentContactType, setEditParentContactType] = useState<'phone' | 'username'>(isInitialParentUser ? 'username' : 'phone');
   const [editParentPhone, setEditParentPhone] = useState(student.parentPhone);
+  const [editStudentContactType, setEditStudentContactType] = useState<'phone' | 'username'>(isInitialStudentUser ? 'username' : 'phone');
   const [editStudentPhone, setEditStudentPhone] = useState(student.studentPhone);
   const [editNotes, setEditNotes] = useState(student.notes || '');
   const [editStatus, setEditStatus] = useState<'active' | 'archived'>(student.status || 'active');
@@ -103,14 +110,28 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
   const handleSaveStudent = (e: React.FormEvent) => {
     e.preventDefault();
+    const isParentUser = editParentContactType === 'username' || isWhatsAppUsername(editParentPhone);
+    const cleanParentUser = cleanWhatsAppUsername(editParentPhone);
+    const finalParentPhone = isParentUser ? `@${cleanParentUser}` : editParentPhone.trim();
+
+    const hasStudentVal = !!editStudentPhone.trim();
+    const isStudentUser = hasStudentVal && (editStudentContactType === 'username' || isWhatsAppUsername(editStudentPhone));
+    const cleanStudentUser = hasStudentVal ? cleanWhatsAppUsername(editStudentPhone) : '';
+    const finalStudentPhone = hasStudentVal ? (isStudentUser ? `@${cleanStudentUser}` : editStudentPhone.trim()) : '';
+
     updateStudent(student.id, {
       name: editName,
       certificateName: editCertificateName,
+      gender: editGender,
       groupId: editGroupId,
       grade: editGrade,
       parentName: editParentName,
-      parentPhone: editParentPhone,
-      studentPhone: editStudentPhone,
+      parentPhone: finalParentPhone,
+      parentUsername: isParentUser ? cleanParentUser : undefined,
+      parentContactType: isParentUser ? 'username' : 'phone',
+      studentPhone: finalStudentPhone,
+      studentUsername: isStudentUser ? cleanStudentUser : undefined,
+      studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
       notes: editNotes,
       status: editStatus
     });
@@ -188,9 +209,18 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
               </div>
 
               <div className="space-y-1 text-right flex-1 min-w-0" dir="rtl">
-                <span className="bg-sky-100 dark:bg-sky-950/40 text-sky-600 dark:text-sky-300 text-[10px] font-black px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full border border-sky-200/50 dark:border-sky-950/30 inline-block">
-                  {student.grade}
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="bg-sky-100 dark:bg-sky-950/40 text-sky-600 dark:text-sky-300 text-[10px] font-black px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full border border-sky-200/50 dark:border-sky-950/30 inline-block">
+                    {student.grade}
+                  </span>
+                  <span className={`text-[10px] font-black px-2.5 py-0.5 sm:py-1 rounded-full border ${
+                    (student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female'
+                      ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900'
+                      : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900'
+                  }`}>
+                    {(student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female' ? '👧 طالبة' : '👦 طالب'}
+                  </span>
+                </div>
                 
                 <h2 className="text-lg sm:text-2xl font-black tracking-tight text-slate-800 dark:text-white pt-0.5 truncate">
                   {student.name}
@@ -201,9 +231,16 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                 </p>
 
                 {student.parentPhone && (
-                  <div className="inline-flex items-center gap-1 bg-blue-50/50 dark:bg-blue-950/20 text-primary px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-bold border border-blue-100/50 dark:border-blue-950/30 max-w-full truncate" dir="ltr">
+                  <div className="inline-flex items-center gap-1.5 bg-blue-50/50 dark:bg-blue-950/20 text-primary px-2.5 py-1 rounded-full text-[10px] sm:text-[11px] font-bold border border-blue-100/50 dark:border-blue-950/30 max-w-full truncate" dir="ltr">
                     <span className="text-slate-500 dark:text-slate-400 shrink-0">Eltern:</span>
-                    <span className="font-mono truncate">{student.parentPhone}</span>
+                    {isWhatsAppUsername(student.parentPhone) ? (
+                      <span className="font-mono text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 font-bold">
+                        <AtSign className="w-3 h-3 shrink-0" />
+                        {cleanWhatsAppUsername(student.parentPhone)}
+                      </span>
+                    ) : (
+                      <span className="font-mono truncate">{student.parentPhone}</span>
+                    )}
                   </div>
                 )}
               </div>
@@ -239,41 +276,55 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
           </div>
 
           {/* Quick Communication Actions (Responsive Grid) */}
-          <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
-            <a
-              href={buildWhatsAppUrl(student.parentPhone)}
-              target="_blank"
-              rel="noreferrer"
-              className="bg-primary hover:bg-primary-hover active:scale-[0.98] text-white font-extrabold text-[10px] sm:text-xs py-2 sm:py-3 px-1 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm shadow-primary/20 min-w-0"
-            >
-              <Send className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">WhatsApp</span>
-            </a>
+          {(() => {
+            const resolvedWhatsApp = resolveStudentWhatsAppContact(student);
+            const parentHasCallNumber = !!(student.parentPhone && !isWhatsAppUsername(student.parentPhone));
+            const studentHasCallNumber = !!(student.studentPhone && !isWhatsAppUsername(student.studentPhone));
 
-            <a
-              href={student.parentPhone ? `tel:${student.parentPhone}` : '#'}
-              className={`font-extrabold text-[10px] sm:text-xs py-2 sm:py-3 px-1 rounded-xl transition-all flex items-center justify-center gap-1 text-center shadow-sm min-w-0 ${
-                student.parentPhone 
-                  ? 'bg-primary hover:bg-primary-hover active:scale-[0.98] text-white cursor-pointer shadow-primary/20' 
-                  : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
-              }`}
-            >
-              <Phone className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">{_t('اتصال بالأب', 'Call Parent', 'Eltern anrufen')}</span>
-            </a>
+            return (
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
+                <a
+                  href={resolvedWhatsApp.hasContact ? buildWhatsAppUrl(resolvedWhatsApp.contact) : '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`font-extrabold text-[10px] sm:text-xs py-2 sm:py-3 px-1 rounded-xl transition-all flex items-center justify-center gap-1 min-w-0 ${
+                    resolvedWhatsApp.hasContact
+                      ? 'bg-primary hover:bg-primary-hover active:scale-[0.98] text-white cursor-pointer shadow-sm shadow-primary/20'
+                      : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
+                  }`}
+                >
+                  <Send className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">
+                    {resolvedWhatsApp.isUsername ? `واتساب (@${cleanWhatsAppUsername(resolvedWhatsApp.contact)})` : 'WhatsApp'}
+                  </span>
+                </a>
 
-            <a
-              href={student.studentPhone ? `tel:${student.studentPhone}` : '#'}
-              className={`font-extrabold text-[10px] sm:text-xs py-2 sm:py-3 px-1 rounded-xl transition-all flex items-center justify-center gap-1 text-center shadow-sm min-w-0 ${
-                student.studentPhone 
-                  ? 'bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-white cursor-pointer shadow-slate-800/20' 
-                  : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
-              }`}
-            >
-              <Phone className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">{_t('اتصال بالطالب', 'Call Student', 'Schüler anrufen')}</span>
-            </a>
-          </div>
+                <a
+                  href={parentHasCallNumber ? `tel:${student.parentPhone}` : '#'}
+                  className={`font-extrabold text-[10px] sm:text-xs py-2 sm:py-3 px-1 rounded-xl transition-all flex items-center justify-center gap-1 text-center shadow-sm min-w-0 ${
+                    parentHasCallNumber 
+                      ? 'bg-primary hover:bg-primary-hover active:scale-[0.98] text-white cursor-pointer shadow-primary/20' 
+                      : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
+                  }`}
+                >
+                  <Phone className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{_t('اتصال بالأب', 'Call Parent', 'Eltern anrufen')}</span>
+                </a>
+
+                <a
+                  href={studentHasCallNumber ? `tel:${student.studentPhone}` : '#'}
+                  className={`font-extrabold text-[10px] sm:text-xs py-2 sm:py-3 px-1 rounded-xl transition-all flex items-center justify-center gap-1 text-center shadow-sm min-w-0 ${
+                    studentHasCallNumber 
+                      ? 'bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-white cursor-pointer shadow-slate-800/20' 
+                      : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
+                  }`}
+                >
+                  <Phone className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{_t('اتصال بالطالب', 'Call Student', 'Schüler anrufen')}</span>
+                </a>
+              </div>
+            );
+          })()}
 
           {/* Stat Cards - Responsive Grid */}
           <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-right" dir="ltr">
@@ -841,6 +892,39 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   </div>
                 </div>
 
+                {/* Gender Toggle */}
+                <div className="space-y-1">
+                  <label className="text-xs font-black text-slate-700 dark:text-slate-300">
+                    {_t('جنس الطالب (Gender)', 'Gender', 'Geschlecht')}
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditGender('male')}
+                      className={`py-2 px-3 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        editGender === 'male'
+                          ? 'bg-blue-600 text-white border-blue-500 shadow-xs'
+                          : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <span>👦</span>
+                      <span>{_t('ولد (طالب)', 'Boy', 'Junge')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditGender('female')}
+                      className={`py-2 px-3 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        editGender === 'female'
+                          ? 'bg-rose-600 text-white border-rose-500 shadow-xs'
+                          : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <span>👧</span>
+                      <span>{_t('بنت (طالبة)', 'Girl', 'Mädchen')}</span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Group & Grade */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
@@ -900,33 +984,135 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                     />
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                      Eltern Telefon / WhatsApp
-                    </label>
-                    <input
-                      type="tel"
-                      value={editParentPhone}
-                      onChange={(e) => setEditParentPhone(e.target.value)}
-                      placeholder="+20 10..."
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
-                    />
+                  <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300">
+                        {_t('هاتف / يوزر نيم ولي الأمر', 'Parent Phone / WhatsApp Username', 'Eltern Telefon / WhatsApp-User')}
+                      </label>
+                      <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-0.5 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditParentContactType('phone');
+                            if (editParentPhone.startsWith('@')) setEditParentPhone(editParentPhone.replace(/^@/, ''));
+                          }}
+                          className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                            editParentContactType === 'phone'
+                              ? 'bg-primary text-white shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                        >
+                          <Phone className="w-2.5 h-2.5" />
+                          <span>{_t('هاتف', 'Phone', 'Tel')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditParentContactType('username');
+                            if (editParentPhone && !editParentPhone.startsWith('@')) setEditParentPhone(`@${editParentPhone}`);
+                          }}
+                          className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                            editParentContactType === 'username'
+                              ? 'bg-emerald-600 text-white shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                        >
+                          <AtSign className="w-2.5 h-2.5" />
+                          <span>{_t('يوزر نيم', 'Username', 'User')}</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none text-slate-400">
+                        {editParentContactType === 'username' ? (
+                          <AtSign className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : (
+                          <Phone className="w-3.5 h-3.5 text-primary" />
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        inputMode={editParentContactType === 'phone' ? 'tel' : 'text'}
+                        dir="ltr"
+                        value={editParentPhone}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditParentPhone(val);
+                          if (val.startsWith('@') || (val.length > 2 && /[a-zA-Z]/.test(val))) {
+                            setEditParentContactType('username');
+                          }
+                        }}
+                        placeholder={editParentContactType === 'username' ? '@username (e.g. @ahmed_ali)' : '+20 10...'}
+                        className="w-full ps-9 pe-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
+                      />
+                    </div>
                   </div>
                 </div>
 
                 {/* Student Phone & Status */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                      Schüler Telefon (Student Direct Phone)
-                    </label>
-                    <input
-                      type="tel"
-                      value={editStudentPhone}
-                      onChange={(e) => setEditStudentPhone(e.target.value)}
-                      placeholder="+20 11..."
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
-                    />
+                  <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300">
+                        {_t('هاتف / يوزر نيم الطالب (اختياري)', 'Student Direct Phone / Username (Optional)', 'Schüler Telefon / User')}
+                      </label>
+                      <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-0.5 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditStudentContactType('phone');
+                            if (editStudentPhone.startsWith('@')) setEditStudentPhone(editStudentPhone.replace(/^@/, ''));
+                          }}
+                          className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                            editStudentContactType === 'phone'
+                              ? 'bg-primary text-white shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                        >
+                          <Phone className="w-2.5 h-2.5" />
+                          <span>{_t('هاتف', 'Phone', 'Tel')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditStudentContactType('username');
+                            if (editStudentPhone && !editStudentPhone.startsWith('@')) setEditStudentPhone(`@${editStudentPhone}`);
+                          }}
+                          className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                            editStudentContactType === 'username'
+                              ? 'bg-emerald-600 text-white shadow-2xs'
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                        >
+                          <AtSign className="w-2.5 h-2.5" />
+                          <span>{_t('يوزر نيم', 'Username', 'User')}</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none text-slate-400">
+                        {editStudentContactType === 'username' ? (
+                          <AtSign className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : (
+                          <Phone className="w-3.5 h-3.5 text-primary" />
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        inputMode={editStudentContactType === 'phone' ? 'tel' : 'text'}
+                        dir="ltr"
+                        value={editStudentPhone}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditStudentPhone(val);
+                          if (val.startsWith('@') || (val.length > 2 && /[a-zA-Z]/.test(val))) {
+                            setEditStudentContactType('username');
+                          }
+                        }}
+                        placeholder={editStudentContactType === 'username' ? '@student_user' : '+20 11...'}
+                        className="w-full ps-9 pe-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
+                      />
+                    </div>
                   </div>
 
                   <div className="space-y-1">

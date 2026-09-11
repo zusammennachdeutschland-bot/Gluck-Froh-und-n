@@ -306,7 +306,10 @@ export function calculateBackupStats(
     hodVisits?: VisitRecord[];
     schoolNotes?: SchoolNote[];
     financeAccounts?: FinanceAccount[];
+    financeCategories?: FinanceCategory[];
     financeTransactions?: FinanceTransaction[];
+    financeRecurring?: FinanceRecurring[];
+    financeInstallments?: FinanceInstallment[];
   }
 ) {
   let studentCount = 0;
@@ -328,7 +331,11 @@ export function calculateBackupStats(
   if (selectedCategories.includes('schedule')) lessonCount = appState.lessons.length;
   if (selectedCategories.includes('financial')) {
     paymentCount = appState.payments.length;
-    financeCount = (appState.financeAccounts?.length || 0) + (appState.financeTransactions?.length || 0);
+    financeCount = (appState.financeAccounts?.length || 0) + 
+      (appState.financeCategories?.length || 0) + 
+      (appState.financeTransactions?.length || 0) + 
+      (appState.financeRecurring?.length || 0) + 
+      (appState.financeInstallments?.length || 0);
   }
   if (selectedCategories.includes('notifications')) notificationCount = appState.notifications.length;
   if (selectedCategories.includes('certificates') && appState.certificates) certificateCount = appState.certificates.length;
@@ -372,12 +379,12 @@ export function calculateBackupStats(
     schoolRecordCount = schoolBase + hodSt + hodCmp + hodAct + hodVis;
   }
 
-  const totalRecords = studentCount + groupCount + lessonCount + paymentCount + notificationCount + schoolRecordCount + certificateCount + schoolNotesCount;
+  const totalRecords = studentCount + groupCount + lessonCount + paymentCount + financeCount + notificationCount + schoolRecordCount + certificateCount + schoolNotesCount;
   
   // Estimate size KB (~150 bytes per student, 200 per lesson, 180 per payment, 250 per school/HOD record)
   const estimatedSizeBytes = Math.max(
     1024,
-    (studentCount * 180) + (groupCount * 250) + (lessonCount * 320) + (paymentCount * 220) + (schoolRecordCount * 250) + (certificateCount * 300) + 1500
+    (studentCount * 180) + (groupCount * 250) + (lessonCount * 320) + (paymentCount * 220) + (financeCount * 200) + (schoolRecordCount * 250) + (certificateCount * 300) + (schoolNotesCount * 220) + 1500
   );
   
   const estimatedSizeKb = Math.round(estimatedSizeBytes / 1024);
@@ -1439,6 +1446,12 @@ export function analyzeBackupPayload(
         schoolSettings.schoolName || schoolSettings.hodName
       )) {
         categories.push('school_hod');
+      }
+      if (data.certificates && data.certificates.length > 0) {
+        categories.push('certificates');
+      }
+      if (data.schoolNotes && data.schoolNotes.length > 0) {
+        categories.push('school_notes');
       }
       if (data.profile) {
         categories.push('settings', 'availability', 'templates', 'meeting_links');

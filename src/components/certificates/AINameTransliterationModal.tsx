@@ -353,7 +353,7 @@ ${JSON.stringify(listToTransliterate, null, 2)}`;
                   <div key={idx} className="flex items-center justify-between p-2 bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-800 rounded-xl text-xs">
                     <span className="font-bold text-text-muted truncate max-w-[40%]">{item.originalName}</span>
                     <ArrowRight className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                    <span className="font-black text-emerald-600 dark:text-emerald-400 truncate max-w-[45%] text-left" dir="ltr">
+                    <span className="font-black text-primary truncate max-w-[45%] text-left" dir="ltr">
                       {item.certificateName}
                     </span>
                   </div>
@@ -362,7 +362,7 @@ ${JSON.stringify(listToTransliterate, null, 2)}`;
 
               <button
                 onClick={handleApplyImportedNames}
-                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                className="w-full py-3 px-4 bg-primary hover:bg-primary-hover text-white rounded-xl font-black flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-[0.99]"
               >
                 <Check className="w-4 h-4" />
                 <span>{_t('حفظ وتطبيق هذه الأسماء على ملفات الطلاب', 'Apply & Save to Student Profiles', 'Speichern & auf Schüler anwenden')}</span>

@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
-import { buildWhatsAppUrl, formatWhatsAppPhone } from '../utils/phoneUtils';
+import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getUpcomingGroupSchedule } from '../utils/scheduleUtils';
 import { 
   X, Send, Copy, Check, MessageSquare, AlertTriangle, Clock, Link as LinkIcon, 
-  MapPin, Video, Sparkles, Phone, Users, CheckCircle2 
+  MapPin, Video, Sparkles, Phone, Users, CheckCircle2, AtSign 
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -66,13 +66,16 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     ? groupStudents[0] 
     : (lesson?.studentId ? students.find(s => s.id === lesson.studentId) : null);
 
-  // Resolve target student / parent phone for 1-on-1 lessons (including groups with only 1 student)
+  // Resolve target student / parent contact for 1-on-1 lessons (including groups with only 1 student)
   const targetStudent = lesson?.studentId 
     ? students.find(s => s.id === lesson.studentId)
     : (groupStudents.length === 1 ? groupStudents[0] : (targetGroup && !isGroupLesson ? groupStudents[0] : null));
 
-  const rawPhone = recipientPhone || targetStudent?.parentPhone || targetStudent?.studentPhone || lesson?.quickParentPhone || '';
-  const initialPhone = formatWhatsAppPhone(rawPhone);
+  const resolvedContact = resolveStudentWhatsAppContact(targetStudent, {
+    quickParentPhone: recipientPhone || lesson?.quickParentPhone,
+    quickStudentPhone: lesson?.quickStudentPhone
+  });
+  const initialPhone = resolvedContact.contact;
 
   // States
   const [phone, setPhone] = useState(initialPhone);
@@ -169,20 +172,25 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
 
     if (isGroupLesson) {
       const activeLink = whatsAppGroupLinkInput.trim() || groupWhatsAppLink;
-      if (activeLink) {
+      try {
         navigator.clipboard.writeText(activeMessage);
-        alert('تم نسخ التذكير. سيتم فتح الجروب الآن لتلصق الرسالة.');
-        window.open(activeLink, '_blank');
-        try {
-          confetti({ particleCount: 60, spread: 60 });
-        } catch (e) {
-          // ignore
-        }
-        return;
-      } else {
-        alert('يرجى إضافة رابط جروب الواتساب لهذه المجموعة أولاً لتتمكن من إرسال التذكير للجروب مباشرة.');
-        return;
+      } catch (e) {
+        console.warn('Clipboard write failed:', e);
       }
+
+      if (activeLink) {
+        window.open(activeLink, '_blank');
+      } else {
+        // Copy text and open WhatsApp so user can choose chat
+        const url = buildWhatsAppUrl('', activeMessage);
+        window.open(url, '_blank');
+      }
+      try {
+        confetti({ particleCount: 60, spread: 60 });
+      } catch (e) {
+        // ignore
+      }
+      return;
     }
 
     const url = buildWhatsAppUrl(phone, activeMessage);
@@ -199,9 +207,9 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       alert('لا يوجد طلاب مسجلين في هذه المجموعة.');
       return;
     }
-    const parentPhone = formatWhatsAppPhone(studentToTarget.parentPhone || studentToTarget.studentPhone || '');
-    if (!parentPhone) {
-      alert(`رقم هاتف ولي أمر الطالب (${studentToTarget.name}) غير مسجل في بيانات الطالب.`);
+    const resolved = resolveStudentWhatsAppContact(studentToTarget);
+    if (!resolved.hasContact) {
+      alert(`بيانات التواصل (رقم هاتف أو يوزر نيم واتساب) لولي أمر الطالب (${studentToTarget.name}) غير مسجلة في بيانات الطالب.`);
       return;
     }
     if (isOnline && !zoomLink.trim()) {
@@ -214,7 +222,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       : `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${selectedArrivalTime} إن شاء الله.`;
 
     const finalMsg = customMessage !== null ? customMessage : parentMsg;
-    const url = buildWhatsAppUrl(parentPhone, finalMsg);
+    const url = buildWhatsAppUrl(resolved.contact, finalMsg);
     window.open(url, '_blank');
     try {
       confetti({ particleCount: 60, spread: 60 });
@@ -353,8 +361,12 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-text-muted flex items-center gap-1.5">
-                  <Phone className="w-3.5 h-3.5 text-primary" />
-                  <span>رقم الواتساب المستلم:</span>
+                  {isWhatsAppUsername(phone) ? (
+                    <AtSign className="w-3.5 h-3.5 text-primary" />
+                  ) : (
+                    <Phone className="w-3.5 h-3.5 text-primary" />
+                  )}
+                  <span>رقم أو يوزر نيم الواتساب المستلم:</span>
                 </label>
                 {targetStudent && (
                   <span className="text-[11px] font-bold text-text-muted">
@@ -363,10 +375,10 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                 )}
               </div>
               <input
-                type="tel"
+                type="text"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                placeholder="010xxxxxxxx أو 2010xxxxxxxx"
+                placeholder="010xxxxxxxx أو @username"
                 className="w-full bg-background border border-surface-border rounded-xl px-3.5 py-2 sm:py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary/40"
                 dir="ltr"
               />
@@ -532,29 +544,42 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
               e.stopPropagation();
               handleSendWhatsApp();
             }}
-            className={`w-full ${isGroupLesson && !whatsAppGroupLinkInput.trim() ? 'bg-slate-500 hover:bg-slate-600 shadow-slate-500/30' : 'bg-primary hover:bg-primary-hover shadow-primary/25'} active:scale-98 text-white font-black text-xs sm:text-sm py-2.5 sm:py-3 px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[44px]`}
+            className="w-full bg-primary hover:bg-primary-hover shadow-primary/25 active:scale-98 text-white font-black text-xs sm:text-sm py-2.5 sm:py-3 px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
           >
             <Send className="w-4 h-4 fill-white" />
-            <span>{isGroupLesson ? `إرسال لجروب الواتساب (${targetGroup?.name || 'الجروب'})` : 'إرسال عبر واتساب (WhatsApp)'}</span>
+            <span>
+              {isGroupLesson 
+                ? ((whatsAppGroupLinkInput.trim() || groupWhatsAppLink) 
+                    ? `إرسال لجروب الواتساب (${targetGroup?.name || 'الجروب'})` 
+                    : `نسخ وفتح واتساب (${targetGroup?.name || 'الجروب'})`)
+                : 'إرسال عبر واتساب (WhatsApp)'}
+            </span>
           </button>
 
           {/* Send directly to First Parent in the Group (Under Send to Group) */}
-          {isGroupLesson && firstStudent && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSendToFirstParent(firstStudent);
-              }}
-              className="w-full bg-primary-soft/70 hover:bg-primary-soft border border-primary-border text-primary font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[40px]"
-            >
-              <Phone className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span>
-                إرسال لولي أمر ({firstStudent.name})
-                {(firstStudent.parentPhone || firstStudent.studentPhone) ? ` - ${firstStudent.parentPhone || firstStudent.studentPhone}` : ' (غير مسجل)'}
-              </span>
-            </button>
-          )}
+          {isGroupLesson && firstStudent && (() => {
+            const firstResolved = resolveStudentWhatsAppContact(firstStudent);
+            return (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSendToFirstParent(firstStudent);
+                }}
+                className="w-full bg-primary-soft/70 hover:bg-primary-soft border border-primary-border text-primary font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[40px]"
+              >
+                {firstResolved.isUsername ? (
+                  <AtSign className="w-3.5 h-3.5 text-primary shrink-0" />
+                ) : (
+                  <Phone className="w-3.5 h-3.5 text-primary shrink-0" />
+                )}
+                <span>
+                  إرسال لولي أمر ({firstStudent.name})
+                  {firstResolved.hasContact ? ` - ${firstResolved.display}` : ' (غير مسجل)'}
+                </span>
+              </button>
+            );
+          })()}
 
           {/* Secondary Actions (Copy & Cancel) */}
           <div className="flex items-center gap-2 w-full">

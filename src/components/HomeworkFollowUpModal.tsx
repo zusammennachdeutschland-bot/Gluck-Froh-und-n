@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { PendingFollowUp } from '../utils/homeworkFollowUpUtils';
-import { X, Check, Send, BookOpen, User, Sparkles } from 'lucide-react';
-import { buildWhatsAppUrl, formatWhatsAppPhone } from '../utils/phoneUtils';
+import { X, Check, Send, BookOpen, User, Sparkles, AtSign, Phone } from 'lucide-react';
+import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
+import { getStudentRoleLabel, isLikelyFemaleStudent } from '../utils/genderUtils';
 import confetti from 'canvas-confetti';
 
 interface HomeworkFollowUpModalProps {
@@ -25,9 +26,8 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
     }
   };
 
-  const handleSendWhatsApp = (parentPhone: string, message: string, lessonId: string) => {
-    const formattedPhone = formatWhatsAppPhone(parentPhone);
-    const url = buildWhatsAppUrl(formattedPhone, message);
+  const handleSendWhatsApp = (contact: string, message: string, lessonId: string) => {
+    const url = buildWhatsAppUrl(contact, message);
     window.open(url, '_blank');
     
     // Mark as done after opening WhatsApp
@@ -98,26 +98,37 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
 
     const groupStudents = students.filter(s => s.groupId === selectedGroup.groupId);
     
-    // Group students by parent phone
-    const byPhone: Record<string, string[]> = {};
+    // Group students by parent contact (phone or username)
+    const byContact: Record<string, { names: string[]; isUsername: boolean; display: string }> = {};
     groupStudents.forEach(s => {
-      const phone = (s.parentPhone || s.studentPhone)?.trim();
-      if (phone) {
-        if (!byPhone[phone]) byPhone[phone] = [];
-        byPhone[phone].push(s.name);
+      const resolved = resolveStudentWhatsAppContact(s);
+      if (resolved.hasContact) {
+        const key = resolved.contact;
+        if (!byContact[key]) {
+          byContact[key] = {
+            names: [],
+            isUsername: resolved.isUsername,
+            display: resolved.display
+          };
+        }
+        byContact[key].names.push(s.name);
       }
     });
 
-    const messages = Object.entries(byPhone).map(([phone, names]) => {
+    const messages = Object.entries(byContact).map(([contact, { names, isUsername, display }]) => {
       const isMultiple = names.length > 1;
       let message = `السلام عليكم ورحمة الله وبركاته،\n\n`;
       if (isMultiple) {
-        message += `تذكير بمتابعة واجب الطلاب:\n`;
+        const targetStudents = groupStudents.filter(s => names.includes(s.name));
+        const allFemale = targetStudents.length > 0 && targetStudents.every(s => (s.gender === 'female' || (!s.gender && isLikelyFemaleStudent(s.name))));
+        message += allFemale ? `تذكير بمتابعة واجب الطالبات:\n` : `تذكير بمتابعة واجب الطلاب:\n`;
         names.forEach(name => {
           message += `• ${name}\n`;
         });
       } else {
-        message += `تذكير بمتابعة واجب الطالب/ـة: *${names[0]}*\n`;
+        const singleStudent = groupStudents.find(s => s.name === names[0]);
+        const role = singleStudent ? getStudentRoleLabel(singleStudent) : 'الطالب';
+        message += `تذكير بمتابعة واجب ${role}: *${names[0]}*\n`;
       }
       
       message += `\n📖 *عنوان الدرس:* ${lessonTitle}\n📝 *الواجب:* ${homeworkText}\n\nبرجاء التأكد من حل الواجب قبل موعد الحصة القادمة.\nشكراً لحضراتكم.`;
@@ -125,7 +136,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
       if (teacherSign) {
         message += `\n\nمع تحيات: *${teacherSign}*`;
       }
-      return { phone, message, names };
+      return { contact, isUsername, display, message, names };
     });
 
     return (
@@ -187,13 +198,28 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
               <h3 className="text-sm font-black text-text-main">رسائل المتابعة لأولياء الأمور</h3>
               
               {messages.length === 0 ? (
-                <p className="text-sm text-text-muted">لا توجد أرقام هواتف مسجلة للطلاب أو أولياء الأمور في هذه المجموعة.</p>
+                <p className="text-sm text-text-muted">لا توجد أرقام هواتف أو يوزرات واتساب مسجلة للطلاب أو أولياء الأمور في هذه المجموعة.</p>
               ) : (
                 messages.map((m, idx) => (
                   <div key={idx} className="border border-surface-border rounded-xl p-4 space-y-3 bg-surface">
-                    <div className="flex items-center gap-2 text-sm font-bold text-emerald-700 dark:text-emerald-400">
-                      <User className="w-4 h-4" />
-                      {m.names.join(' و ')}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-sm font-bold text-emerald-700 dark:text-emerald-400">
+                        <User className="w-4 h-4" />
+                        <span>{m.names.join(' و ')}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-xs font-mono text-text-muted bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md" dir="ltr">
+                        {m.isUsername ? (
+                          <>
+                            <AtSign className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                            <span className="font-bold text-emerald-700 dark:text-emerald-400">{m.display}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Phone className="w-3 h-3 text-primary" />
+                            <span>{m.display}</span>
+                          </>
+                        )}
+                      </div>
                     </div>
                     
                     <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg text-xs text-text-main whitespace-pre-wrap border border-slate-200 dark:border-slate-800 font-medium leading-relaxed">
@@ -201,11 +227,11 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
                     </div>
 
                     <button
-                      onClick={() => handleSendWhatsApp(m.phone, m.message, selectedGroup.latestCompletedLesson.id)}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
+                      onClick={() => handleSendWhatsApp(m.contact, m.message, selectedGroup.latestCompletedLesson.id)}
+                      className="w-full bg-primary hover:bg-primary-hover text-white font-black text-xs sm:text-sm py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
                     >
                       <Send className="w-4 h-4" />
-                      إرسال عبر WhatsApp
+                      إرسال عبر WhatsApp ({m.display})
                     </button>
                   </div>
                 ))

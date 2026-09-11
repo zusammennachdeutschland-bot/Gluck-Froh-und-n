@@ -1142,7 +1142,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-emerald-600 text-white rounded-xl text-[11px] font-bold shadow-2xs hover:bg-emerald-700 transition-all cursor-pointer"
+                  className="px-4 py-1.5 bg-primary text-white rounded-xl text-[11px] font-bold shadow-2xs hover:bg-primary-hover transition-all cursor-pointer"
                 >
                   {_t('تسجيل المتابعة الآن', 'Save Log', 'Speichern')}
                 </button>

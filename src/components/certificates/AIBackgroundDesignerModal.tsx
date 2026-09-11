@@ -376,7 +376,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                   <div className="flex items-center justify-center gap-2 pt-2">
                     <button
                       onClick={() => setActiveTab('generator')}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                      className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
                     >
                       <Sparkles className="w-4 h-4" />
                       <span>{_t('بدء توليد البرومبت الآن', 'Start Prompt Generator', 'Prompt-Generator starten')}</span>
@@ -657,7 +657,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
 
                 <button
                   onClick={() => setActiveTab('import')}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                  className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
                 >
                   <span>{_t('الانتقال للاستيراد والتجربة', 'Go to Import Step', 'Weiter zum Import')}</span>
                   <ArrowRight className="w-4 h-4" />

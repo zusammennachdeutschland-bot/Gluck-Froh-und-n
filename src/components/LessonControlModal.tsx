@@ -13,7 +13,7 @@ import { ArabicParentReportModal } from './ArabicParentReportModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { HomeworkFollowUpModal } from './HomeworkFollowUpModal';
 import { getPendingHomeworkFollowUps } from '../utils/homeworkFollowUpUtils';
-import { buildWhatsAppUrl, formatWhatsAppPhone } from '../utils/phoneUtils';
+import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUtils';
 import confetti from 'canvas-confetti';
 
@@ -389,32 +389,37 @@ export const LessonControlModal: React.FC = () => {
     setIsEditingSessionNumber(false);
   };
 
-  // Recipient Phone Resolution (Parent Phone > Student Phone > Quick Lesson Phone)
-  const rawRecipientPhone = (
-    targetStudent?.parentPhone || 
-    selectedLesson?.quickParentPhone || 
-    targetStudent?.studentPhone || 
-    selectedLesson?.quickStudentPhone || 
-    ''
-  );
-  const recipientPhone = formatWhatsAppPhone(rawRecipientPhone);
+  // Recipient Contact Resolution (Parent Phone/Username > Student Phone/Username > Quick Lesson Contact)
+  const resolvedRecipient = resolveStudentWhatsAppContact(targetStudent, {
+    quickParentPhone: selectedLesson?.quickParentPhone,
+    quickStudentPhone: selectedLesson?.quickStudentPhone
+  });
+  const recipientPhone = resolvedRecipient.contact;
 
   const isGroupLesson = targetGroup && students.filter(s => s.groupId === targetGroup.id).length > 1;
   const groupWhatsAppLink = targetGroup?.whatsAppGroupLink || '';
 
   const sendWhatsAppWithGroupCheck = (text: string) => {
     if (isGroupLesson) {
-      if (groupWhatsAppLink) {
+      try {
         navigator.clipboard.writeText(text);
-        alert('تم نسخ الرسالة. سيتم فتح الجروب الآن لتلصق الرسالة.');
+      } catch (e) {
+        console.warn('Clipboard write failed:', e);
+      }
+
+      if (groupWhatsAppLink) {
         window.open(groupWhatsAppLink, '_blank');
         return;
       } else {
-        alert('هذا الجروب غير مسجل له رابط واتساب. يرجى إضافة رابط الجروب من إعدادات الجروب أولاً لتتمكن من الإرسال.');
+        // Even if no group WhatsApp link is registered:
+        // Text is copied, and open WhatsApp so teacher can select the chat manually!
+        const url = buildWhatsAppUrl('', text);
+        window.open(url, '_blank');
         return;
       }
     }
-    sendWhatsAppWithGroupCheck(text);
+    const url = buildWhatsAppUrl(recipientPhone, text);
+    window.open(url, '_blank');
   };
 
   const formatTimer = (totalSecs: number) => {

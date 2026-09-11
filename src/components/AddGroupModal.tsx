@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { GradeLevel, LessonType, PaymentCycle } from '../types';
-import { Users, Bot, Sparkles } from 'lucide-react';
+import { Users, Bot, Sparkles, Phone, AtSign } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { AiImportModal } from './AiImportModal';
 import { GroupForm, GroupFormData } from './GroupForm';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
+import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 
 interface AddGroupModalProps {
   onClose: () => void;
@@ -21,6 +22,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
   const [createStudentWithGroup, setCreateStudentWithGroup] = useState(false);
   const [studentName, setStudentName] = useState('');
   const [studentParentName, setStudentParentName] = useState('');
+  const [studentContactType, setStudentContactType] = useState<'phone' | 'username'>('phone');
   const [studentParentPhone, setStudentParentPhone] = useState('');
   const [studentGrade, setStudentGrade] = useState<GradeLevel>('Grade 9');
   const [studentNotes, setStudentNotes] = useState('');
@@ -32,7 +34,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
         return;
       }
       if (!studentParentPhone.trim()) {
-        alert(t('auto_parent_phone_number_is_require'));
+        alert(language === 'ar' ? 'رقم الهاتف أو اليوزر نيم لولي الأمر مطلوب' : 'Parent phone number or WhatsApp username is required');
         return;
       }
     }
@@ -73,12 +75,18 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
     });
 
     if (createStudentWithGroup && studentName.trim()) {
+      const isUser = studentContactType === 'username' || isWhatsAppUsername(studentParentPhone);
+      const cleanUser = cleanWhatsAppUsername(studentParentPhone);
+      const finalPhone = isUser ? `@${cleanUser}` : studentParentPhone.trim();
+
       addStudent({
         name: studentName.trim(),
         groupId: createdGroup.id,
         grade: studentGrade || data.grade,
         parentName: studentParentName.trim(),
-        parentPhone: studentParentPhone.trim(),
+        parentPhone: finalPhone,
+        parentUsername: isUser ? cleanUser : undefined,
+        parentContactType: isUser ? 'username' : 'phone',
         notes: studentNotes.trim()
       });
     }
@@ -195,41 +203,91 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
                   />
                 </div>
 
-                {/* Parent Phone */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="space-y-1">
+                {/* Parent Phone / Username */}
+                <div className="space-y-1.5 bg-surface p-2.5 rounded-xl border border-surface-border">
+                  <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-text-main">
-                      {t('auto_parent_phone')}
+                      {language === 'ar' ? 'هاتف / يوزر نيم ولي الأمر' : 'Parent Phone / Username'}
                     </label>
+                    <div className="flex items-center bg-surface-hover border border-surface-border rounded-lg p-0.5 text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStudentContactType('phone');
+                          if (studentParentPhone.startsWith('@')) setStudentParentPhone(studentParentPhone.replace(/^@/, ''));
+                        }}
+                        className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                          studentContactType === 'phone'
+                            ? 'bg-primary text-white shadow-2xs'
+                            : 'text-text-muted hover:text-text-main'
+                        }`}
+                      >
+                        <Phone className="w-2.5 h-2.5" />
+                        <span>{language === 'ar' ? 'هاتف' : 'Phone'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStudentContactType('username');
+                          if (studentParentPhone && !studentParentPhone.startsWith('@')) setStudentParentPhone(`@${studentParentPhone}`);
+                        }}
+                        className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                          studentContactType === 'username'
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'text-text-muted hover:text-text-main'
+                        }`}
+                      >
+                        <AtSign className="w-2.5 h-2.5" />
+                        <span>{language === 'ar' ? 'يوزر نيم' : 'Username'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none text-text-muted">
+                      {studentContactType === 'username' ? (
+                        <AtSign className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <Phone className="w-3.5 h-3.5 text-primary" />
+                      )}
+                    </div>
                     <input
-                      type="tel"
+                      type="text"
+                      inputMode={studentContactType === 'phone' ? 'tel' : 'text'}
+                      dir="ltr"
                       value={studentParentPhone}
-                      onChange={(e) => setStudentParentPhone(e.target.value)}
-                      placeholder="+20 123 456 789"
-                      className="w-full px-3 py-2 bg-surface border border-surface-border rounded-xl text-xs font-mono"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setStudentParentPhone(val);
+                        if (val.startsWith('@') || (val.length > 2 && /[a-zA-Z]/.test(val))) {
+                          setStudentContactType('username');
+                        }
+                      }}
+                      placeholder={studentContactType === 'username' ? '@username (e.g. @ahmed_parent)' : '+20 123 456 789'}
+                      className="w-full ps-9 pe-3 py-2 bg-background border border-surface-border rounded-xl text-xs font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-text-main">
-                      {t('auto_grade')}
-                    </label>
-                    <select
-                      value={studentGrade}
-                      onChange={(e) => setStudentGrade(e.target.value as GradeLevel)}
-                      className="w-full px-3 py-2 bg-surface border border-surface-border rounded-xl text-xs font-bold"
-                    >
-                      <optgroup label="مستويات الكورسات (Course Levels)">
-                        {COURSE_LEVELS.map(g => (
-                          <option key={g} value={g}>{g}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="الصفوف المدرسية (School Grades)">
-                        {SCHOOL_GRADES.map(g => (
-                          <option key={g} value={g}>{g}</option>
-                        ))}
-                      </optgroup>
-                    </select>
-                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-text-main">
+                    {t('auto_grade')}
+                  </label>
+                  <select
+                    value={studentGrade}
+                    onChange={(e) => setStudentGrade(e.target.value as GradeLevel)}
+                    className="w-full px-3 py-2 bg-surface border border-surface-border rounded-xl text-xs font-bold"
+                  >
+                    <optgroup label="مستويات الكورسات (Course Levels)">
+                      {COURSE_LEVELS.map(g => (
+                        <option key={g} value={g}>{g}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="الصفوف المدرسية (School Grades)">
+                      {SCHOOL_GRADES.map(g => (
+                        <option key={g} value={g}>{g}</option>
+                      ))}
+                    </optgroup>
+                  </select>
                 </div>
 
                 {/* Notes */}

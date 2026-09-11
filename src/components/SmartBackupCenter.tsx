@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   Student, Group, Lesson, PaymentRecord, CertificateRecord, NotificationItem,
-  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment
+  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment,
+  SchoolNote
 } from '../types';
 import { formatLocalDate } from '../utils/timeUtils';
 import { storage } from '../services/storageService';
@@ -20,7 +21,8 @@ import {
   BookOpen, Award, DollarSign, Calendar, Clock, Settings, 
   MessageSquare, Video, FileText, Layout, Bell, AlertTriangle, 
   CheckCircle2, Share2, Save, HardDrive, Sparkles, History, 
-  Eye, Sliders, ArrowRight, ShieldAlert, FileCode, Check, Building, School
+  Eye, Sliders, ArrowRight, ShieldAlert, FileCode, Check, Building, School,
+  GraduationCap, Trophy
 } from 'lucide-react';
 
 interface SmartBackupCenterProps {
@@ -33,11 +35,13 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
     profile, notificationSettings, inspirationSettings, 
     inspirationMessages, todos, certificates,
     hodStudents, hodComplaints, hodActionPlans, hodVisits,
+    schoolNotes,
     financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments,
     setStudents, setGroups, setLessons, setPayments, setNotifications, setProfile, 
     setNotificationSettings, setInspirationSettings, setInspirationMessages,
     setTodos, setCertificates,
     setHodStudents, setHodComplaints, setHodActionPlans, setHodVisits,
+    setSchoolNotes,
     setFinanceAccounts, setFinanceCategories, setFinanceTransactions, setFinanceRecurring, setFinanceInstallments,
     lastBackupTime, performBackup, exportBackupFile, importBackupFile,
     t, _t
@@ -142,6 +146,8 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       case 'FileText': return <FileText className="w-4 h-4 text-primary" />;
       case 'Layout': return <Layout className="w-4 h-4 text-primary" />;
       case 'Bell': return <Bell className="w-4 h-4 text-primary" />;
+      case 'GraduationCap': return <GraduationCap className="w-4 h-4 text-primary" />;
+      case 'Trophy': return <Trophy className="w-4 h-4 text-primary" />;
       default: return <CheckSquare className="w-4 h-4 text-primary" />;
     }
   };
@@ -167,7 +173,8 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
     students, groups, lessons, payments, notifications, profile,
     notificationSettings, inspirationSettings, inspirationMessages, todos,
     certificates, hodStudents, hodComplaints, hodActionPlans, hodVisits,
-    financeAccounts, financeTransactions
+    schoolNotes,
+    financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments
   });
 
   const isFullBackup = selectedCategories.length === ALL_BACKUP_CATEGORIES.length;
@@ -205,6 +212,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           payloadData.notificationSettings = notificationSettings;
         }
         if (selectedCategories.includes('certificates')) payloadData.certificates = certificates;
+        if (selectedCategories.includes('school_notes')) payloadData.schoolNotes = schoolNotes;
         if (selectedCategories.includes('settings')) {
           payloadData.profile = profile;
           payloadData.schoolSettings = profile.schoolSettings;
@@ -252,6 +260,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             payments: payloadData.payments?.length || 0,
             notifications: payloadData.notifications?.length || 0,
             certificates: payloadData.certificates?.length || 0,
+            school_notes: payloadData.schoolNotes?.length || 0,
             todos: todos?.length || 0,
             school_hod: stats.schoolRecordCount || 0
           },
@@ -350,6 +359,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           hodComplaints,
           hodActionPlans,
           hodVisits,
+          schoolNotes,
           financeAccounts,
           financeCategories,
           financeTransactions,
@@ -371,17 +381,21 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             payments: payments?.length || 0,
             notifications: notifications?.length || 0,
             certificates: certificates?.length || 0,
+            school_notes: schoolNotes?.length || 0,
             todos: todos?.length || 0,
             hodStudents: hodStudents?.length || 0,
             hodComplaints: hodComplaints?.length || 0,
             hodActionPlans: hodActionPlans?.length || 0,
             hodVisits: hodVisits?.length || 0,
             financeAccounts: financeAccounts?.length || 0,
-            financeTransactions: financeTransactions?.length || 0
+            financeCategories: financeCategories?.length || 0,
+            financeTransactions: financeTransactions?.length || 0,
+            financeRecurring: financeRecurring?.length || 0,
+            financeInstallments: financeInstallments?.length || 0
           },
           metadata: {
             teacherName: profile.displayName || 'Teacher',
-            totalRecords: (students?.length || 0) + (groups?.length || 0) + (lessons?.length || 0) + (payments?.length || 0) + (certificates?.length || 0) + (hodStudents?.length || 0) + (financeAccounts?.length || 0) + (financeTransactions?.length || 0),
+            totalRecords: (students?.length || 0) + (groups?.length || 0) + (lessons?.length || 0) + (payments?.length || 0) + (certificates?.length || 0) + (schoolNotes?.length || 0) + (hodStudents?.length || 0) + (hodComplaints?.length || 0) + (hodActionPlans?.length || 0) + (hodVisits?.length || 0) + (financeAccounts?.length || 0) + (financeCategories?.length || 0) + (financeTransactions?.length || 0) + (financeRecurring?.length || 0) + (financeInstallments?.length || 0),
             estimatedSizeKb: Math.round(JSON.stringify(payloadData).length / 1024)
           },
           data: payloadData
@@ -460,6 +474,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         hodComplaints,
         hodActionPlans,
         hodVisits,
+        schoolNotes,
         financeAccounts,
         financeCategories,
         financeTransactions,
@@ -487,6 +502,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           let finalProfile = profile;
           let finalTodos = todos;
           let finalCertificates = certificates;
+          let finalSchoolNotes = schoolNotes;
           let finalNotifications = notifications;
           let finalNotificationSettings = notificationSettings;
           let finalInspirationSettings = inspirationSettings;
@@ -511,6 +527,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           }
           if (data.todos) finalTodos = data.todos;
           if (data.certificates) finalCertificates = data.certificates;
+          if (data.schoolNotes) finalSchoolNotes = data.schoolNotes;
           if (data.notifications) finalNotifications = data.notifications;
           if (data.notificationSettings) finalNotificationSettings = data.notificationSettings;
           if (data.inspirationSettings) finalInspirationSettings = data.inspirationSettings;
@@ -551,6 +568,11 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             await storage.setItem('dl_certificates', finalCertificates);
           }
 
+          if (data.schoolNotes) {
+            setSchoolNotes(finalSchoolNotes);
+            await storage.setItem('dl_school_notes', finalSchoolNotes);
+          }
+
           if (data.notifications) {
             setNotifications(finalNotifications);
             await storage.setItem('dl_notifications', finalNotifications);
@@ -573,22 +595,22 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
 
           if (data.hodStudents) {
             setHodStudents(finalHodStudents);
-            await storage.setItem('dl_hod_students', finalHodStudents);
+            await storage.setItem('hod_german_students', finalHodStudents);
           }
 
           if (data.hodComplaints) {
             setHodComplaints(finalHodComplaints);
-            await storage.setItem('dl_hod_complaints', finalHodComplaints);
+            await storage.setItem('hod_complaints', finalHodComplaints);
           }
 
           if (data.hodActionPlans) {
             setHodActionPlans(finalHodActionPlans);
-            await storage.setItem('dl_hod_action_plans', finalHodActionPlans);
+            await storage.setItem('hod_student_action_plans', finalHodActionPlans);
           }
 
           if (data.hodVisits) {
             setHodVisits(finalHodVisits);
-            await storage.setItem('dl_hod_visits', finalHodVisits);
+            await storage.setItem('hod_visit_records', finalHodVisits);
           }
 
           if (data.financeAccounts) {
@@ -615,7 +637,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           setSimpleSuccessMsg(t('auto_all_data_restored_successful'));
           
           // Log to history
-          const totalRecs = (data.students?.length || 0) + (data.groups?.length || 0) + (data.lessons?.length || 0) + (data.payments?.length || 0) + (data.certificates?.length || 0) + (data.hodStudents?.length || 0);
+          const totalRecs = (data.students?.length || 0) + (data.groups?.length || 0) + (data.lessons?.length || 0) + (data.payments?.length || 0) + (data.certificates?.length || 0) + (data.schoolNotes?.length || 0) + (data.hodStudents?.length || 0);
           const newLog: RestoreHistoryEntry = {
             id: 'hist_' + Date.now(),
             timestamp: new Date().toISOString(),
@@ -734,6 +756,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       hodComplaints,
       hodActionPlans,
       hodVisits,
+      schoolNotes,
       financeAccounts,
       financeCategories,
       financeTransactions,
@@ -772,6 +795,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         let finalPayments = [...payments];
         let finalProfile = profile ? { ...profile } : undefined;
         let finalCertificates = [...certificates];
+        let finalSchoolNotes = [...schoolNotes];
         let finalNotifications = [...notifications];
         let finalNotificationSettings = notificationSettings ? { ...notificationSettings } : undefined;
         let finalInspirationSettings = inspirationSettings ? { ...inspirationSettings } : undefined;
@@ -983,6 +1007,20 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           }
         }
 
+        // Process School Notes
+        if (selectedRestoreCategories.includes('school_notes') && data.schoolNotes) {
+          if (restoreMode === 'smart' || restoreMode === 'merge') {
+            const noteMap = new Map<string, SchoolNote>(schoolNotes.map(n => [n.id, n]));
+            data.schoolNotes.forEach((n: SchoolNote) => {
+              const existing = noteMap.get(n.id);
+              noteMap.set(n.id, existing ? { ...existing, ...n } : n);
+            });
+            finalSchoolNotes = Array.from(noteMap.values());
+          } else if (restoreMode === 'replace') {
+            finalSchoolNotes = data.schoolNotes;
+          }
+        }
+
         // Process Notifications
         if (selectedRestoreCategories.includes('notifications')) {
           if (data.notifications) {
@@ -1108,6 +1146,10 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           setCertificates(finalCertificates);
           await storage.setItem('dl_certificates', finalCertificates);
         }
+        if (selectedRestoreCategories.includes('school_notes') && data.schoolNotes) {
+          setSchoolNotes(finalSchoolNotes);
+          await storage.setItem('dl_school_notes', finalSchoolNotes);
+        }
         if (selectedRestoreCategories.includes('notifications')) {
           if (data.notifications) {
             setNotifications(finalNotifications);
@@ -1135,19 +1177,19 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         if (selectedRestoreCategories.includes('school_hod')) {
           if (data.hodStudents) {
             setHodStudents(finalHodStudents);
-            await storage.setItem('dl_hod_students', finalHodStudents);
+            await storage.setItem('hod_german_students', finalHodStudents);
           }
           if (data.hodComplaints) {
             setHodComplaints(finalHodComplaints);
-            await storage.setItem('dl_hod_complaints', finalHodComplaints);
+            await storage.setItem('hod_complaints', finalHodComplaints);
           }
           if (data.hodActionPlans) {
             setHodActionPlans(finalHodActionPlans);
-            await storage.setItem('dl_hod_action_plans', finalHodActionPlans);
+            await storage.setItem('hod_student_action_plans', finalHodActionPlans);
           }
           if (data.hodVisits) {
             setHodVisits(finalHodVisits);
-            await storage.setItem('dl_hod_visits', finalHodVisits);
+            await storage.setItem('hod_visit_records', finalHodVisits);
           }
         }
         if ((selectedRestoreCategories.includes('settings') || selectedRestoreCategories.includes('school_hod')) && finalProfile) {
@@ -1218,6 +1260,10 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           setCertificates(rp.certificates);
           await storage.setItem('dl_certificates', rp.certificates);
         }
+        if (rp.schoolNotes) {
+          setSchoolNotes(rp.schoolNotes);
+          await storage.setItem('dl_school_notes', rp.schoolNotes);
+        }
         if (rp.profile) {
           setProfile(rp.profile);
           await storage.setItem('dl_profile', rp.profile);
@@ -1240,19 +1286,19 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         }
         if (rp.hodStudents) {
           setHodStudents(rp.hodStudents);
-          await storage.setItem('dl_hod_students', rp.hodStudents);
+          await storage.setItem('hod_german_students', rp.hodStudents);
         }
         if (rp.hodComplaints) {
           setHodComplaints(rp.hodComplaints);
-          await storage.setItem('dl_hod_complaints', rp.hodComplaints);
+          await storage.setItem('hod_complaints', rp.hodComplaints);
         }
         if (rp.hodActionPlans) {
           setHodActionPlans(rp.hodActionPlans);
-          await storage.setItem('dl_hod_action_plans', rp.hodActionPlans);
+          await storage.setItem('hod_student_action_plans', rp.hodActionPlans);
         }
         if (rp.hodVisits) {
           setHodVisits(rp.hodVisits);
-          await storage.setItem('dl_hod_visits', rp.hodVisits);
+          await storage.setItem('hod_visit_records', rp.hodVisits);
         }
         if (rp.financeAccounts) {
           setFinanceAccounts(rp.financeAccounts);

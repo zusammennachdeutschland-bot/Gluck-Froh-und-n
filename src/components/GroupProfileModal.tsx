@@ -124,7 +124,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
               <button
                 type="button"
                 onClick={() => setShowReminderModal(true)}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-3 rounded-lg transition-all flex items-center gap-2 cursor-pointer shadow-sm shadow-emerald-600/20 shrink-0"
+                className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-4 py-3 rounded-lg transition-all flex items-center gap-2 cursor-pointer shadow-sm shadow-primary/20 shrink-0"
               >
                 <Send className="w-4 h-4 fill-white" />
                 <span>إرسال تذكير الحصة</span>

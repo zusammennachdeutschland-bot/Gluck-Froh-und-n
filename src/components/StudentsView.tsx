@@ -2,14 +2,16 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Student, Group } from '../types';
 import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
-import { Users, UserPlus, Search, Phone, Send, ChevronRight, Plus, MapPin, Video, FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, FileText, Award, DollarSign, Bot, ChevronDown, Filter, Sparkles } from 'lucide-react';
+import { Users, UserPlus, Search, Phone, Send, ChevronRight, Plus, MapPin, Video, FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, FileText, Award, DollarSign, Bot, ChevronDown, Filter, Sparkles, AtSign, Mars, Venus, CircleHelp } from 'lucide-react';
 import { StudentProfileModal } from './StudentProfileModal';
 import { GroupProfileModal } from './GroupProfileModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { AiImportModal } from './AiImportModal';
 import { CascadeDeleteGroupModal } from './CascadeDeleteGroupModal';
+import { QuickGenderAssignModal } from './QuickGenderAssignModal';
 import { formatGroupScheduleDisplay, getDayNumber } from '../utils/scheduleUtils';
-import { buildWhatsAppUrl } from '../utils/phoneUtils';
+import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
+import { isLikelyFemaleStudent } from '../utils/genderUtils';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
 import { getGroupCycleInfo } from '../utils/lessonUtils';
@@ -35,6 +37,7 @@ export const StudentsView: React.FC = () => {
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [isAiImportModalOpen, setIsAiImportModalOpen] = useState(false);
+  const [isGenderAssignModalOpen, setIsGenderAssignModalOpen] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<{
     type: 'student' | 'group';
@@ -302,6 +305,25 @@ export const StudentsView: React.FC = () => {
             </select>
           )}
 
+          {/* Quick Gender Classification Button */}
+          {activeSegment === 'students' && (
+            <button
+              type="button"
+              id="quick-gender-assign-trigger-btn"
+              onClick={() => setIsGenderAssignModalOpen(true)}
+              className="px-2.5 py-1.5 bg-surface hover:bg-surface-hover active:scale-95 border border-surface-border text-text-main font-black text-xs rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
+              title={_t('تحديد جنس الطلاب سريعاً (ولد / بنت)', 'Quick gender classification (boy / girl)', 'Schnelle Geschlechtsbestimmung')}
+            >
+              <span className="text-xs">👦👧</span>
+              <span className="truncate">{_t('تحديد الجنس', 'Assign Gender', 'Geschlecht')}</span>
+              {students.filter(s => s.status !== 'archived' && !s.gender).length > 0 && (
+                <span className="px-1.5 py-0.2 bg-rose-500 text-white text-[9.5px] font-black rounded-full animate-pulse">
+                  {students.filter(s => s.status !== 'archived' && !s.gender).length}
+                </span>
+              )}
+            </button>
+          )}
+
           {(searchTerm || selectedGrade !== 'all' || selectedGroupDay !== 'all') && (
             <button
               onClick={() => {
@@ -369,44 +391,103 @@ export const StudentsView: React.FC = () => {
               return (
                 <div
                   key={`${student.id}_${idx}`}
-                  className="bg-surface border border-surface-border/60 dark:border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs hover:shadow-xs active:scale-[0.99] active:bg-surface-hover transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative"
+                  className={`bg-surface border border-surface-border/60 dark:border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative ${
+                    activeMenuId === `student_${student.id}`
+                      ? 'z-50'
+                      : 'hover:shadow-xs active:scale-[0.99] active:bg-surface-hover z-0'
+                  }`}
                   onClick={() => {
                     setSelectedStudent(student);
                     setSelectedStudentTab('overview');
                   }}
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <AvatarImage
                       name={student.name}
                       className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg text-xs font-black border border-slate-100 dark:border-surface-border shrink-0"
                     />
 
-                    <div className="min-w-0 space-y-0.5">
-                      {/* PROMINENT STUDENT NAME */}
-                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                        <h3 className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors tracking-tight truncate">
+                    <div className="min-w-0 space-y-1 flex-1">
+                      {/* LINE 1: Name + Gender + Grade + English Name in ONE single row */}
+                      <div className="flex items-center gap-1.5 min-w-0 flex-nowrap">
+                        <h3 className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors tracking-tight truncate shrink-0 max-w-[125px] sm:max-w-[200px]">
                           {student.name}
                         </h3>
-                        {student.certificateName && (
-                          <span className="text-[10px] font-bold text-text-muted/80 font-mono tracking-wide bg-slate-50 dark:bg-slate-800/60 px-1 py-0.2 rounded border border-surface-border-soft dark:border-slate-800 shrink-0" title={_t('الاسم بالإنجليزية للشهادات', 'English Name for Certificates', 'Englischer Name für Zertifikate')}>
-                            {student.certificateName}
-                          </span>
+
+                        {/* Student Gender Icon - right next to the name */}
+                        {student.gender ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              updateStudent(student.id, { gender: student.gender === 'female' ? 'male' : 'female' });
+                            }}
+                            className="inline-flex items-center justify-center p-0.5 hover:scale-125 active:scale-95 transition-transform cursor-pointer bg-transparent border-0 shrink-0"
+                            title={
+                              student.gender === 'female'
+                                ? _t('طالبة (بنت) - اضغط للتبديل إلى ولد', 'Female student (Girl) - Click to toggle', 'Schülerin (Mädchen) - Klicken zum Umschalten')
+                                : _t('طالب (ولد) - اضغط للتبديل إلى بنت', 'Male student (Boy) - Click to toggle', 'Schüler (Junge) - Klicken zum Umschalten')
+                            }
+                          >
+                            {student.gender === 'female' ? (
+                              <Venus className="w-3.5 h-3.5 text-rose-500 dark:text-rose-400 stroke-[2.2]" />
+                            ) : (
+                              <Mars className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400 stroke-[2.2]" />
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const predicted = isLikelyFemaleStudent(student.name) ? 'female' : 'male';
+                              updateStudent(student.id, { gender: predicted });
+                            }}
+                            className="inline-flex items-center justify-center p-0.5 hover:scale-125 active:scale-95 transition-transform cursor-pointer bg-transparent border-0 shrink-0 text-text-muted/40 hover:text-primary"
+                            title={_t('تحديد جنس الطالب - اضغط للتحديد السريع', 'Set student gender - Click for quick set', 'Geschlecht festlegen - Klicken für Schnellauswahl')}
+                          >
+                            <CircleHelp className="w-3.5 h-3.5 stroke-[1.8]" />
+                          </button>
                         )}
+
+                        {/* Grade Badge right next to name & gender */}
                         <span className="text-[9px] font-black text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft/40 border border-primary-border/50 dark:border-primary-border/30 px-1.5 py-0.2 rounded shrink-0">
                           {student.grade}
                         </span>
+
+                        {/* English/Certificate Name (compact & truncated to prevent line break) */}
+                        {student.certificateName && (
+                          <span className="text-[9.5px] font-bold text-text-muted/70 font-mono tracking-wide bg-slate-50 dark:bg-slate-800/60 px-1 py-0.2 rounded border border-surface-border-soft dark:border-slate-800 truncate max-w-[80px] sm:max-w-[140px] shrink-0" title={_t('الاسم بالإنجليزية للشهادات', 'English Name for Certificates', 'Englischer Name für Zertifikate')}>
+                            {student.certificateName}
+                          </span>
+                        )}
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-text-muted">
-                        <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1 py-0.2 rounded text-[9px]">
+                      {/* LINE 2: Group + Contacts */}
+                      <div className="flex items-center gap-1.5 text-xs text-text-muted min-w-0 flex-nowrap overflow-hidden">
+                        <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1.5 py-0.2 rounded text-[9px] truncate max-w-[130px] sm:max-w-[220px] shrink-0">
                           {studentGroup?.name || 'Gruppe A1'}
                         </span>
-                        <span className="text-[10px] text-text-muted/70">
-                          • <span className="font-semibold text-slate-600 dark:text-slate-300">{student.parentPhone}</span>
+                        <span className="text-[10px] text-text-muted/70 inline-flex items-center gap-0.5 shrink-0">
+                          • {isWhatsAppUsername(student.parentPhone) ? (
+                            <span className="inline-flex items-center gap-0.5 font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                              <AtSign className="w-2.5 h-2.5" />
+                              {formatContactDisplay(student.parentPhone)}
+                            </span>
+                          ) : (
+                            <span className="font-semibold text-slate-600 dark:text-slate-300 font-mono">{student.parentPhone}</span>
+                          )}
                         </span>
                         {student.studentPhone && (
-                          <span className="text-[10px] text-text-muted/70">
-                            • <span className="font-semibold text-slate-600 dark:text-slate-300">{student.studentPhone}</span>
+                          <span className="text-[10px] text-text-muted/70 hidden sm:inline-flex items-center gap-0.5 shrink-0">
+                            • {isWhatsAppUsername(student.studentPhone) ? (
+                              <span className="inline-flex items-center gap-0.5 font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                                <AtSign className="w-2.5 h-2.5" />
+                                {formatContactDisplay(student.studentPhone)}
+                              </span>
+                            ) : (
+                              <span className="font-semibold text-slate-600 dark:text-slate-300 font-mono">{student.studentPhone}</span>
+                            )}
                           </span>
                         )}
                       </div>
@@ -418,7 +499,10 @@ export const StudentsView: React.FC = () => {
                     <div className="relative">
                       <button
                         type="button"
-                        onClick={() => setActiveMenuId(activeMenuId === `student_${student.id}` ? null : `student_${student.id}`)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMenuId(activeMenuId === `student_${student.id}` ? null : `student_${student.id}`);
+                        }}
                         className={`p-2 rounded-lg text-text-muted/70 hover:text-slate-800 dark:hover:text-primary transition-all hover:bg-background dark:hover:bg-slate-800 cursor-pointer ${
                           activeMenuId === `student_${student.id}` ? 'bg-surface-hover text-text-main' : ''
                         }`}
@@ -429,13 +513,23 @@ export const StudentsView: React.FC = () => {
 
                       {activeMenuId === `student_${student.id}` && (
                         <>
-                          <div className="fixed inset-0 z-20" onClick={() => setActiveMenuId(null)} />
+                          <div
+                            className="fixed inset-0 z-40 bg-transparent"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenuId(null);
+                            }}
+                          />
                           
-                          <div className="absolute ltr:right-0 ltr:left-auto rtl:left-0 rtl:right-auto mt-1 w-52 bg-surface border border-surface-border/80 dark:border-surface-border/80 rounded-xl shadow-xl z-30 py-1.5 animate-scale-up text-left rtl:text-right">
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="absolute ltr:right-0 ltr:left-auto rtl:left-0 rtl:right-auto mt-1 w-52 bg-surface border border-surface-border/80 dark:border-surface-border/80 rounded-xl shadow-xl z-50 py-1.5 animate-scale-up text-left rtl:text-right"
+                          >
                             {/* View Profile link */}
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setSelectedStudent(student);
                                 setSelectedStudentTab('overview');
                                 setActiveMenuId(null);
@@ -449,7 +543,8 @@ export const StudentsView: React.FC = () => {
                             {/* Attendance tracking */}
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setSelectedStudent(student);
                                 setSelectedStudentTab('attendance');
                                 setActiveMenuId(null);
@@ -463,7 +558,8 @@ export const StudentsView: React.FC = () => {
                             {/* Scores & grades */}
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setSelectedStudent(student);
                                 setSelectedStudentTab('scores');
                                 setActiveMenuId(null);
@@ -477,7 +573,8 @@ export const StudentsView: React.FC = () => {
                             {/* Payments and finances */}
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setSelectedStudent(student);
                                 setSelectedStudentTab('payments');
                                 setActiveMenuId(null);
@@ -490,34 +587,57 @@ export const StudentsView: React.FC = () => {
 
                             <div className="border-t border-slate-100 dark:border-surface-border/80 my-1.5" />
 
-                            {/* Send WhatsApp message */}
-                            <a
-                              href={buildWhatsAppUrl(student.parentPhone)}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={() => setActiveMenuId(null)}
-                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
-                            >
-                              <Send className="w-4 h-4 text-primary" />
-                              <span>{t('auto_send_whatsapp')}</span>
-                            </a>
+                            {/* Send WhatsApp message & Phone Call */}
+                            {(() => {
+                              const resolvedContact = resolveStudentWhatsAppContact(student);
+                              const hasCallNumber = !!(student.parentPhone && !isWhatsAppUsername(student.parentPhone));
 
-                            {/* Phone Call Parent */}
-                            <a
-                              href={`tel:${student.parentPhone}`}
-                              onClick={() => setActiveMenuId(null)}
-                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
-                            >
-                              <Phone className="w-4 h-4 text-primary" />
-                              <span>{t('auto_call_phone')}</span>
-                            </a>
+                              return (
+                                <>
+                                  {resolvedContact.hasContact && (
+                                    <a
+                                      href={buildWhatsAppUrl(resolvedContact.contact)}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveMenuId(null);
+                                      }}
+                                      className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                                    >
+                                      <Send className="w-4 h-4 text-primary" />
+                                      <span>
+                                        {t('auto_send_whatsapp')}
+                                        {resolvedContact.isUsername ? ` (@${cleanWhatsAppUsername(resolvedContact.contact)})` : ''}
+                                      </span>
+                                    </a>
+                                  )}
+
+                                  {/* Phone Call Parent (if phone number available) */}
+                                  {hasCallNumber && (
+                                    <a
+                                      href={`tel:${student.parentPhone}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveMenuId(null);
+                                      }}
+                                      className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                                    >
+                                      <Phone className="w-4 h-4 text-primary" />
+                                      <span>{t('auto_call_phone')}</span>
+                                    </a>
+                                  )}
+                                </>
+                              );
+                            })()}
 
                             <div className="border-t border-slate-100 dark:border-surface-border/80 my-1.5" />
 
                             {/* Delete Student */}
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setDeleteTarget({
                                   type: 'student',
                                   id: student.id,
@@ -534,8 +654,6 @@ export const StudentsView: React.FC = () => {
                         </>
                       )}
                     </div>
-
-                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-primary transition-colors ml-0.5" />
                   </div>
                 </div>
               );
@@ -587,7 +705,11 @@ export const StudentsView: React.FC = () => {
               <div
                 key={`${group.id}_${idx}`}
                 onClick={() => setSelectedGroup(group)}
-                className="bg-surface border border-surface-border/60 dark:border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs hover:shadow-xs active:scale-[0.99] active:bg-surface-hover transition-all flex items-center justify-between gap-2.5 cursor-pointer group"
+                className={`bg-surface border border-surface-border/60 dark:border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative ${
+                  activeMenuId === `group_${group.id}`
+                    ? 'z-50'
+                    : 'hover:shadow-xs active:scale-[0.99] active:bg-surface-hover z-0'
+                }`}
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center shrink-0 border transition-all ${
@@ -636,7 +758,10 @@ export const StudentsView: React.FC = () => {
                   <div className="relative">
                     <button
                       type="button"
-                      onClick={() => setActiveMenuId(activeMenuId === `group_${group.id}` ? null : `group_${group.id}`)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenuId(activeMenuId === `group_${group.id}` ? null : `group_${group.id}`);
+                      }}
                       className={`p-2 rounded-lg text-text-muted/70 hover:text-slate-800 dark:hover:text-primary transition-all hover:bg-background dark:hover:bg-slate-800 cursor-pointer ${
                         activeMenuId === `group_${group.id}` ? 'bg-surface-hover text-text-main' : ''
                       }`}
@@ -647,12 +772,22 @@ export const StudentsView: React.FC = () => {
 
                     {activeMenuId === `group_${group.id}` && (
                       <>
-                        <div className="fixed inset-0 z-20" onClick={() => setActiveMenuId(null)} />
+                        <div
+                          className="fixed inset-0 z-40 bg-transparent"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuId(null);
+                          }}
+                        />
                         
-                        <div className="absolute ltr:right-0 ltr:left-auto rtl:left-0 rtl:right-auto mt-1 w-48 bg-surface border border-surface-border/80 dark:border-surface-border/80 rounded-xl shadow-xl z-30 py-1.5 animate-scale-up text-left rtl:text-right">
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute ltr:right-0 ltr:left-auto rtl:left-0 rtl:right-auto mt-1 w-48 bg-surface border border-surface-border/80 dark:border-surface-border/80 rounded-xl shadow-xl z-50 py-1.5 animate-scale-up text-left rtl:text-right"
+                        >
                           <button
                             type="button"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setSelectedGroup(group);
                               setActiveMenuId(null);
                             }}
@@ -666,7 +801,8 @@ export const StudentsView: React.FC = () => {
 
                           <button
                             type="button"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setDeleteTarget({
                                   type: 'group',
                                   id: group.id,
@@ -683,8 +819,6 @@ export const StudentsView: React.FC = () => {
                       </>
                     )}
                   </div>
-
-                  <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-primary transition-colors ml-0.5" />
                 </div>
               </div>
             );
@@ -914,6 +1048,12 @@ export const StudentsView: React.FC = () => {
           }}
         />
       )}
+
+      {/* Quick Gender Assign Modal */}
+      <QuickGenderAssignModal
+        isOpen={isGenderAssignModalOpen}
+        onClose={() => setIsGenderAssignModalOpen(false)}
+      />
     </div>
   );
 };

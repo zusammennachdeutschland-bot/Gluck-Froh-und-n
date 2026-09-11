@@ -845,7 +845,7 @@ export const StageCommunicationView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => window.print()}
-                  className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                  className="px-2 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main text-[11px] font-bold rounded-xl border border-surface-border transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   <Printer className="w-4 h-4" />
                   <span>طباعة A4</span>
@@ -854,7 +854,7 @@ export const StageCommunicationView: React.FC = () => {
                 <button
                   onClick={handleDispatchReport}
                   disabled={activeLoadingAction?.type === 'dispatch'}
-                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white text-[11px] font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   {activeLoadingAction?.type === 'dispatch' ? (
                     <Loader2 className="w-4 h-4 animate-spin" />

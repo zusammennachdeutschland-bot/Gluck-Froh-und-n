@@ -4,15 +4,17 @@ import {
   parseAiImportText, 
   SAMPLE_IMPORT_TEMPLATE, 
   SAMPLE_MULTI_SCHEDULE_TEMPLATE, 
-  AI_PROMPT_TEMPLATE_AR,
-  AI_PROMPT_TEMPLATE_EN,
+  AI_PROMPT_TEMPLATE_AR, 
+  AI_PROMPT_TEMPLATE_EN, 
   AiImportResult 
 } from '../utils/aiImportParser';
 import { formatGroupScheduleDisplay } from '../utils/scheduleUtils';
 import { 
   Bot, Sparkles, Copy, Check, CheckCircle2, AlertTriangle, X, 
-  Users, Calendar, Clock, DollarSign, ArrowRight, ShieldCheck, FileText, ChevronRight, MessageSquareCode
+  Users, Calendar, Clock, DollarSign, ArrowRight, ShieldCheck, FileText, ChevronRight, MessageSquareCode,
+  AtSign, Phone
 } from 'lucide-react';
+import { isWhatsAppUsername, formatContactDisplay } from '../utils/phoneUtils';
 import { Group } from '../types';
 
 interface AiImportModalProps {
@@ -104,11 +106,22 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
 
     // 2. Create Students atomically associated with group
     students.forEach((st) => {
+      const isParentUser = st.parentContactType === 'username' || isWhatsAppUsername(st.parentPhone);
+      const cleanParentUser = st.parentUsername || (isParentUser ? (st.parentPhone || '').replace(/^@/, '') : undefined);
+
+      const hasStudentVal = !!st.studentPhone;
+      const isStudentUser = hasStudentVal && (st.studentContactType === 'username' || isWhatsAppUsername(st.studentPhone));
+      const cleanStudentUser = st.studentUsername || (isStudentUser && st.studentPhone ? st.studentPhone.replace(/^@/, '') : undefined);
+
       addStudent({
         name: st.name,
         certificateName: st.certificateName || '',
         studentPhone: st.studentPhone || '',
+        studentUsername: cleanStudentUser,
+        studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
         parentPhone: st.parentPhone,
+        parentUsername: cleanParentUser,
+        parentContactType: isParentUser ? 'username' : 'phone',
         parentName: '',
         groupId: newGroup.id,
         grade: group.grade
@@ -398,19 +411,56 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
                               <tr>
                                 <th className="p-2.5 w-10 text-center">#</th>
                                 <th className="p-2.5">{t('auto_student_name_6')}</th>
-                                <th className="p-2.5">{t('auto_parent_phone_req')}</th>
-                                <th className="p-2.5">{t('auto_student_phone_opt')}</th>
+                                <th className="p-2.5">{language === 'ar' ? 'هاتف / يوزر نيم ولي الأمر' : 'Parent Phone / Username'}</th>
+                                <th className="p-2.5">{language === 'ar' ? 'هاتف / يوزر نيم الطالب' : 'Student Phone / Username'}</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200 bg-surface">
-                              {parseResult.students.map((st, i) => (
-                                <tr key={i} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
-                                  <td className="p-2 text-center text-text-muted/70 text-[11px]">{i + 1}</td>
-                                  <td className="p-2 font-extrabold">{st.name}</td>
-                                  <td className="p-2 font-mono font-bold text-primary">{st.parentPhone}</td>
-                                  <td className="p-2 font-mono text-text-muted">{st.studentPhone || '—'}</td>
-                                </tr>
-                              ))}
+                              {parseResult.students.map((st, i) => {
+                                const isParentUser = isWhatsAppUsername(st.parentPhone);
+                                const isStudentUser = st.studentPhone ? isWhatsAppUsername(st.studentPhone) : false;
+                                return (
+                                  <tr key={i} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
+                                    <td className="p-2 text-center text-text-muted/70 text-[11px]">{i + 1}</td>
+                                    <td className="p-2 font-extrabold">
+                                      <div>{st.name}</div>
+                                      {st.certificateName && (
+                                        <div className="text-[10px] text-text-muted font-normal">{st.certificateName}</div>
+                                      )}
+                                    </td>
+                                    <td className="p-2">
+                                      {isParentUser ? (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 text-[11px] font-mono font-bold">
+                                          <AtSign className="w-2.5 h-2.5 shrink-0" />
+                                          {formatContactDisplay(st.parentPhone)}
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 font-mono font-bold text-primary text-xs">
+                                          <Phone className="w-2.5 h-2.5 shrink-0 text-text-muted" />
+                                          {st.parentPhone}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="p-2">
+                                      {st.studentPhone ? (
+                                        isStudentUser ? (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 text-[11px] font-mono font-bold">
+                                            <AtSign className="w-2.5 h-2.5 shrink-0" />
+                                            {formatContactDisplay(st.studentPhone)}
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1 font-mono text-text-muted text-xs">
+                                            <Phone className="w-2.5 h-2.5 shrink-0" />
+                                            {st.studentPhone}
+                                          </span>
+                                        )
+                                      ) : (
+                                        <span className="text-text-muted text-xs">—</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>

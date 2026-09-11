@@ -660,12 +660,18 @@ export type PaymentPlanType = 'per_lesson' | '4_lessons' | '8_lessons' | '12_les
 export interface Student extends SyncableRecord {
   name: string;
   certificateName?: string; // Transliterated/custom name used on certificates (e.g. "Rital Tarek" for "ريتال طارق")
+  gender?: 'male' | 'female';
   groupId: string;
   grade: GradeLevel;
   parentName: string;
   parentPhone: string;
+  parentUsername?: string;
+  parentContactType?: 'phone' | 'username';
   studentPhone: string;
+  studentUsername?: string;
+  studentContactType?: 'phone' | 'username';
   phone?: string;
+  username?: string;
   notes?: string;
   avatarUrl?: string;
   documents: StudentDocument[];

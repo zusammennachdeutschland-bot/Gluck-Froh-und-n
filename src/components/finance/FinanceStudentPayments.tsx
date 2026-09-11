@@ -3,12 +3,12 @@ import { useApp } from '../../context/AppContext';
 import { PaymentRecord, Student, Group, Lesson } from '../../types';
 import { getStudentCyclePricing, calculateDuePaymentCycles, DuePaymentCycle, getStudentAdvanceLessonCredits, calculateEstimatedPastDate } from '../../utils/paymentUtils';
 import { formatLocalDate } from '../../utils/timeUtils';
-import { buildWhatsAppUrl } from '../../utils/phoneUtils';
+import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../../utils/phoneUtils';
 import { 
   DollarSign, CheckCircle2, Clock, Send, Search, 
   Check, X, Sparkles, History, Calendar, AlertCircle, TrendingUp, ChevronRight,
   Landmark, Wallet, CreditCard, Layers, BookOpen, ChevronDown, Coins, ShieldX, ShieldCheck, Minus, Plus,
-  Users, Filter
+  Users, Filter, AtSign
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -1394,15 +1394,28 @@ ${datesFormatted}
               <button
                 type="button"
                 onClick={() => {
+                  const student = students.find(s => s.id === selectedCycleForWhatsApp.studentId);
+                  const resolved = resolveStudentWhatsAppContact(student, {
+                    quickParentPhone: selectedCycleForWhatsApp.parentPhone
+                  });
                   handleOpenWhatsApp(
-                    selectedCycleForWhatsApp.parentPhone || '',
+                    resolved.contact || selectedCycleForWhatsApp.parentPhone || '',
                     generateWhatsAppMessage(selectedCycleForWhatsApp)
                   );
                 }}
                 className="flex-1 py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-bold text-xs cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
               >
                 <Send className="w-4 h-4" />
-                <span>{t('payments_open_whatsapp')}</span>
+                <span>
+                  {t('payments_open_whatsapp')}
+                  {(() => {
+                    const student = students.find(s => s.id === selectedCycleForWhatsApp.studentId);
+                    const resolved = resolveStudentWhatsAppContact(student, {
+                      quickParentPhone: selectedCycleForWhatsApp.parentPhone
+                    });
+                    return resolved.isUsername ? ` (${resolved.display})` : '';
+                  })()}
+                </span>
               </button>
             </div>
           </div>

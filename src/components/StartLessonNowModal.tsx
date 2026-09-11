@@ -592,7 +592,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
           {/* Action Button */}
           <button
             type="submit"
-            className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-900 text-white dark:bg-slate-100 dark:hover:bg-slate-200 dark:border-slate-100 dark:text-slate-900 font-black text-xs rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full py-2.5 bg-primary hover:bg-primary-hover border border-primary-border text-white font-black text-xs rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
           >
             <Zap className="w-3.5 h-3.5 fill-current" />
             <span>

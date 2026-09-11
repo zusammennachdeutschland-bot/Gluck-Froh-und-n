@@ -26,7 +26,11 @@ export interface ParsedStudentData {
   name: string;
   certificateName: string;
   parentPhone: string;
+  parentUsername?: string;
+  parentContactType?: 'phone' | 'username';
   studentPhone?: string;
+  studentUsername?: string;
+  studentContactType?: 'phone' | 'username';
 }
 
 export interface AiImportResult {
@@ -111,13 +115,14 @@ export const AI_PROMPT_TEMPLATE_AR = `أنت مساعد إدخال بيانات 
 - طالب واحد على الأقل.
 - اسم الطالب بالعربية (مطلوب).
 - اسم الطالب بالإنجليزية للشهادات (مطلوب - يرجى نقحرة وترجمة الاسم العربي بدقة واحترافية وبشكل أنيق مناسب لشهادات التقدير الأكاديمية بالإنجليزية/الألمانية، مثلاً: "أحمد علي" -> "Ahmed Ali").
-- رقم هاتف ولي الأمر (Parent Phone - مطلوب إجبارياً).
-- رقم هاتف الطالب (Student Phone - اختياري، يخزن عند توفره).
+- رقم هاتف أو يوزر نيم واتساب لولي الأمر (Parent Phone or WhatsApp Username - إجباري، يقبل إما رقم هاتف دولي/محلي أو يوزر نيم واتساب مسبوقاً بـ @، مثل: 201200005170 أو @parent_username).
+- رقم هاتف أو يوزر نيم واتساب للطالب (Student Phone or WhatsApp Username - اختياري، مثل: 201100000000 أو @student_user).
 - تنسيق سطر الطالب:
-  الاسم بالعربية|الاسم بالإنجليزية للشهادات|رقم ولي الأمر|رقم الطالب(اختياري)
-  مثال:
+  الاسم بالعربية|الاسم بالإنجليزية للشهادات|رقم أو يوزر نيم ولي الأمر|رقم أو يوزر نيم الطالب(اختياري)
+  أمثلة:
   كندا|Kinda|201200005170|201100000000
-  جودي|Judy|201200005170|
+  جودي|Judy|@judy_parent|@judy_student
+  عمر فاروق|Omar Farouk|01098765432|@omar_farouk
 
 ==================== التعامل مع البيانات المفقودة ====================
 - إذا كانت هناك بيانات مطلوبة مفقودة (مثل رابط زووم للأونلاين، عنوان للأوفلاين، أو رابط جروب الواتساب لمجموعة بها أكثر من طالب)، **لا تولد كود الاستيراد [GROUP]**.
@@ -194,13 +199,14 @@ LOCATION / VIRTUAL LINK / WHATSAPP RULES:
 - At least one student record.
 - Student Name in Arabic or Native language (Required)
 - Student English/Latin Name for Certificates (Required - precise and prestigious transliteration of the native/Arabic name, e.g. "أحمد محمد" -> "Ahmed Mohamed")
-- Parent Phone Number (Required)
-- Student Phone Number (Optional - store if provided)
+- Parent Phone Number or WhatsApp Username (Required - can be international/local phone number e.g. +201012345678 or a WhatsApp username prefixed with @ e.g. @parent_username)
+- Student Phone Number or WhatsApp Username (Optional - e.g. 01011112222 or @student_username)
 - Student Line Format:
-  NativeName|EnglishName|ParentPhone|StudentPhone(Optional)
+  NativeName|EnglishName|ParentPhoneOrUsername|StudentPhoneOrUsername(Optional)
   Examples:
   كندا|Kinda|201200005170|201100000000
-  جودي|Judy|201200005170|
+  جودي|Judy|@judy_parent|@judy_student
+  عمر فاروق|Omar Farouk|01098765432|@omar_farouk
 
 ==================== MISSING INFORMATION BEHAVIOR ====================
 - If any required field is missing (e.g., missing Zoom link for online group, missing address for offline group, missing WhatsApp link for a group with >1 student, or missing parent phone for a student), DO NOT generate the [GROUP] import block.
@@ -687,11 +693,11 @@ export function parseAiImportText(text: string): AiImportResult {
         studentPhone = parts.slice(2).join('\t').trim();
       }
     } else {
-      // Try regex match for trailing phone number
-      const phoneMatch = trimmedLine.match(/(.*?)\s+([+0-9\s-]{7,15})$/);
-      if (phoneMatch) {
-        studentName = phoneMatch[1].trim();
-        parentPhone = phoneMatch[2].trim();
+      // Try regex match for trailing phone number or WhatsApp username
+      const contactMatch = trimmedLine.match(/(.*?)\s+([@a-zA-Z0-9._+-]{3,30})$/);
+      if (contactMatch) {
+        studentName = contactMatch[1].trim();
+        parentPhone = contactMatch[2].trim();
       } else {
         studentName = trimmedLine;
         parentPhone = '';
@@ -705,25 +711,37 @@ export function parseAiImportText(text: string): AiImportResult {
     }
 
     if (!certificateName) {
-      errors.push(`English/Latin Certificate Name is required for student "${studentName || `Line ${studentLineCount}`}". Format: ArabicName|EnglishName|ParentPhone`);
+      errors.push(`English/Latin Certificate Name is required for student "${studentName || `Line ${studentLineCount}`}". Format: ArabicName|EnglishName|ParentPhoneOrUsername`);
     }
 
     if (!parentPhone) {
-      errors.push(`Parent Phone Number is required for student "${studentName || `Line ${studentLineCount}`}".`);
+      errors.push(`Parent Phone Number or WhatsApp Username is required for student "${studentName || `Line ${studentLineCount}`}".`);
     } else {
-      // Normalize international +20 10 ... -> 2010... or local 010 123 4567 -> 0101234567
-      if (parentPhone.startsWith('+')) {
-        parentPhone = parentPhone.replace(/[^\d]/g, '');
-      } else if (/^[\d\s-]{8,20}$/.test(parentPhone)) {
-        parentPhone = parentPhone.replace(/[\s-]/g, '');
+      const isParentUser = parentPhone.startsWith('@') || /[a-zA-Z]/.test(parentPhone);
+      if (isParentUser) {
+        const clean = parentPhone.trim().replace(/^@/, '').replace(/[^a-zA-Z0-9._]/g, '');
+        parentPhone = clean ? `@${clean}` : parentPhone.trim();
+      } else {
+        // Normalize international +20 10 ... -> 2010... or local 010 123 4567 -> 0101234567
+        if (parentPhone.startsWith('+')) {
+          parentPhone = parentPhone.replace(/[^\d]/g, '');
+        } else if (/^[\d\s-]{8,20}$/.test(parentPhone)) {
+          parentPhone = parentPhone.replace(/[\s-]/g, '');
+        }
       }
     }
 
     if (studentPhone) {
-      if (studentPhone.startsWith('+')) {
-        studentPhone = studentPhone.replace(/[^\d]/g, '');
-      } else if (/^[\d\s-]{8,20}$/.test(studentPhone)) {
-        studentPhone = studentPhone.replace(/[\s-]/g, '');
+      const isStudentUser = studentPhone.startsWith('@') || /[a-zA-Z]/.test(studentPhone);
+      if (isStudentUser) {
+        const clean = studentPhone.trim().replace(/^@/, '').replace(/[^a-zA-Z0-9._]/g, '');
+        studentPhone = clean ? `@${clean}` : studentPhone.trim();
+      } else {
+        if (studentPhone.startsWith('+')) {
+          studentPhone = studentPhone.replace(/[^\d]/g, '');
+        } else if (/^[\d\s-]{8,20}$/.test(studentPhone)) {
+          studentPhone = studentPhone.replace(/[\s-]/g, '');
+        }
       }
     }
 
@@ -733,7 +751,7 @@ export function parseAiImportText(text: string): AiImportResult {
 
       if (seenPhones.has(lowerPhone) && lowerPhone !== '') {
         warnings.push(
-          `Note: Duplicate parent phone number "${parentPhone}" for student "${studentName}".`
+          `Note: Duplicate parent contact "${parentPhone}" for student "${studentName}".`
         );
       } else if (lowerPhone) {
         seenPhones.add(lowerPhone);
@@ -747,11 +765,18 @@ export function parseAiImportText(text: string): AiImportResult {
         seenNames.add(lowerName);
       }
 
+      const isParentUser = parentPhone.startsWith('@') || /[a-zA-Z]/.test(parentPhone);
+      const isStudentUser = studentPhone ? (studentPhone.startsWith('@') || /[a-zA-Z]/.test(studentPhone)) : false;
+
       parsedStudents.push({
         name: studentName,
         certificateName: certificateName,
         parentPhone: parentPhone,
+        parentUsername: isParentUser ? parentPhone.replace(/^@/, '') : undefined,
+        parentContactType: isParentUser ? 'username' : 'phone',
         studentPhone: studentPhone || undefined,
+        studentUsername: isStudentUser && studentPhone ? studentPhone.replace(/^@/, '') : undefined,
+        studentContactType: isStudentUser ? 'username' : (studentPhone ? 'phone' : undefined),
       });
     }
   }

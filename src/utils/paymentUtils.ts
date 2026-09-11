@@ -1,5 +1,6 @@
 import { Student, Group, Lesson, PaymentRecord } from '../types';
 import { areDuplicateLessons } from './lessonUtils';
+import { resolveStudentWhatsAppContact } from './phoneUtils';
 
 export interface CyclePricingResult {
   cycleLength: number;
@@ -298,7 +299,7 @@ export const calculateDuePaymentCycles = (
             lessonDates,
             lessonIds,
             status: (chunkIndex === 0 && unpaidRec) ? 'not_yet' : 'due',
-            parentPhone: st.parentPhone || st.studentPhone || '',
+            parentPhone: resolveStudentWhatsAppContact(st).contact || '',
             existingPaymentRecordId: chunkIndex === 0 ? unpaidRec?.id : undefined
           });
         }
@@ -324,7 +325,7 @@ export const calculateDuePaymentCycles = (
         lessonDates,
         lessonIds: unpaidRec.lessonIds || [],
         status: 'not_yet',
-        parentPhone: st.parentPhone || st.studentPhone || '',
+        parentPhone: resolveStudentWhatsAppContact(st).contact || '',
         existingPaymentRecordId: unpaidRec.id
       });
     }
@@ -344,6 +345,8 @@ export const calculateDuePaymentCycles = (
         return;
       }
 
+      const st = students.find(s => s.id === p.studentId);
+
       list.push({
         id: p.id,
         studentId: p.studentId || '',
@@ -355,7 +358,7 @@ export const calculateDuePaymentCycles = (
         lessonDates: p.lessonDates || [],
         lessonIds: p.lessonIds || [],
         status: 'not_yet',
-        parentPhone: '',
+        parentPhone: st ? resolveStudentWhatsAppContact(st).contact : '',
         existingPaymentRecordId: p.id
       });
     }

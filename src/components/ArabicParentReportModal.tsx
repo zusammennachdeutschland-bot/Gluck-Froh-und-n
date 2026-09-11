@@ -2,12 +2,70 @@ import { App as CapacitorApp } from '@capacitor/app';
 import React, { useState, useEffect } from 'react';
 import { Lesson, Student, TeacherProfile } from '../types';
 import { useApp } from '../context/AppContext';
-import { buildWhatsAppUrl } from '../utils/phoneUtils';
+import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay } from '../utils/phoneUtils';
 import { getTeacherArabicName } from '../utils/teacherUtils';
+import { formatTimeDisplay, parseLocalDate } from '../utils/timeUtils';
+import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString } from '../utils/genderUtils';
 import { 
-  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home
+  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+
+export { isLikelyFemaleStudent } from '../utils/genderUtils';
+
+const ARABIC_DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
+const getLessonArabicDay = (dateStr?: string, fallbackDay?: string): string => {
+  if (dateStr) {
+    try {
+      const d = parseLocalDate(dateStr);
+      const dayIdx = d.getDay();
+      if (dayIdx >= 0 && dayIdx < 7) {
+        return ARABIC_DAYS[dayIdx];
+      }
+    } catch (e) {}
+  }
+  if (fallbackDay) {
+    const map: Record<string, string> = {
+      sunday: 'الأحد',
+      monday: 'الإثنين',
+      tuesday: 'الثلاثاء',
+      wednesday: 'الأربعاء',
+      thursday: 'الخميس',
+      friday: 'الجمعة',
+      saturday: 'السبت',
+      sonntag: 'الأحد',
+      montag: 'الإثنين',
+      dienstag: 'الثلاثاء',
+      mittwoch: 'الأربعاء',
+      donnerstag: 'الخميس',
+      freitag: 'الجمعة',
+      samstag: 'السبت'
+    };
+    const clean = fallbackDay.toLowerCase().trim();
+    if (map[clean]) return map[clean];
+  }
+  return '';
+};
+
+const formatArabicDate = (dateStr?: string): string => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`; // DD/MM/YYYY
+  }
+  return dateStr;
+};
+
+const formatArabicTime = (timeStr?: string): string => {
+  if (!timeStr) return '';
+  if (timeStr.includes('م') || timeStr.includes('ص')) return timeStr;
+  if (timeStr.includes('-')) {
+    const parts = timeStr.split('-').map(s => s.trim());
+    return parts.map(p => formatTimeDisplay(p, 'ar')).join(' - ');
+  }
+  return formatTimeDisplay(timeStr, 'ar');
+};
 
 interface ArabicParentReportModalProps {
   lesson: Lesson;
@@ -34,11 +92,17 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const groupWhatsAppLink = associatedGroup?.whatsAppGroupLink || '';
 
   // Check if the lesson/group operates on a cycle package (not per-lesson / single session)
-  const hasCycle = !lesson.isQuickLesson && (
-    associatedGroup 
-      ? (associatedGroup.paymentCycle !== 'per_lesson' && associatedGroup.paymentModel !== 'per_session' && (associatedGroup.sessionCount || 8) > 1)
-      : ((lesson.totalSessionsInPackage || 1) > 1)
+  const isPerLesson = Boolean(
+    lesson.isQuickLesson || 
+    (associatedGroup && (
+      associatedGroup.paymentCycle === 'per_lesson' || 
+      associatedGroup.paymentModel === 'per_session' || 
+      (associatedGroup.sessionCount || 0) <= 1
+    )) ||
+    (!associatedGroup && (!lesson.totalSessionsInPackage || lesson.totalSessionsInPackage <= 1))
   );
+
+  const hasCycle = !isPerLesson;
   const totalCycleSessions = associatedGroup?.sessionCount || lesson.totalSessionsInPackage || 8;
   const currentSessionNumber = lesson.sessionNumber || 1;
 
@@ -78,8 +142,13 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const activeStudent = students.find(s => s.id === selectedStudentId) || initialResolvedStudent;
 
   const parentName = activeStudent?.parentName || lesson.quickParentName || activeStudent?.name || lesson.studentName || 'ولي الأمر المحترم';
-  const rawParentPhone = activeStudent?.parentPhone || lesson.quickParentPhone || activeStudent?.studentPhone || lesson.quickStudentPhone || '';
-  const parentPhone = rawParentPhone.trim();
+  
+  // Resolve contact with smart fallback: phone or username
+  const resolvedContact = resolveStudentWhatsAppContact(activeStudent, {
+    quickParentPhone: lesson.quickParentPhone,
+    quickStudentPhone: lesson.quickStudentPhone
+  });
+  const parentPhone = resolvedContact.contact;
 
   // Editable generated report
   const [finalGeneratedText, setFinalGeneratedText] = useState<string>('');
@@ -87,54 +156,61 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
   // Generate Bulk Group Report Text
   const getBulkReportText = () => {
-    const taughtToday = lesson.report?.teacherNotes || 'لم يحدد بعد';
-    const nextHomework = lesson.report?.homeworkDescription || 'لا يوجد واجب';
-    const cycleLine = hasCycle ? `\n🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
+    const taughtToday = lesson.report?.arabicTopicsExplained || lesson.report?.teacherNotes || lesson.topic || 'لم يحدد بعد';
+    const nextHomework = lesson.report?.arabicHomeworkRequired || lesson.report?.homeworkDescription || (lesson.report?.homeworkTitle ? `${lesson.report.homeworkTitle}` : 'لا يوجد واجب');
     
-    let text = `السلام عليكم ورحمة الله وبركاته 👋
-📊 تقرير الحصة المجمع لمجموعة: ${associatedGroup?.name || 'مجموعة اللغة الألمانية'}
-📅 الدرس: ${lesson.title}${cycleLine}
+    const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
+    const dateFormatted = formatArabicDate(lesson.date);
+    const timeFormatted = formatArabicTime(lesson.time);
 
-تم اليوم شرح:
+    const dayDateLine = dayName && dateFormatted 
+      ? `📅 اليوم: ${dayName} (${dateFormatted})`
+      : dayName 
+        ? `📅 اليوم: ${dayName}`
+        : dateFormatted 
+          ? `📅 التاريخ: ${dateFormatted}` 
+          : '';
+
+    const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
+    // رقم الحصة في السايكل لو هو 4 حصص أو 8 أو 12، ولو بالحصة مبكتبش حاجة
+    const cycleLine = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
+
+    const headerParts = [
+      `السلام عليكم ورحمة الله وبركاته 👋`,
+      `📊 تقرير الحصة لمجموعة: ${associatedGroup?.name || lesson.title || 'مجموعة اللغة الألمانية'}`,
+      dayDateLine,
+      timeLine,
+      cycleLine
+    ].filter(Boolean).join('\n');
+
+    let text = `${headerParts}
+
+📖 تم اليوم شرح:
 ${taughtToday}
 
-الواجب لجميع الطلاب:
+📝 الواجب لجميع الطلاب:
 ${nextHomework}
 
 ----------------------------------
-👥 تفاصيل حضور وأداء الطلاب اليوم:
+👥 حضور الطلاب:
 `;
 
-    groupStudents.forEach((st, idx) => {
-      const stAtt = lesson.report?.studentAttendance?.[st.id] || lesson.report?.attendanceStatus || 'present';
-      const attendanceArabic = stAtt === 'present' ? 'حاضر ✅' : stAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
-
-      const hwDone = lesson.report?.studentHomeworkDone?.[st.id];
-      const homeworkOption = hwDone === 'yes' ? 'تم الحل 👍' : hwDone === 'no' ? 'لم يتم الحل 👎' : 'غير محدد';
-
-      const dictationGrade = lesson.report?.studentDictationGrade?.[st.id];
-      const dictationScore = dictationGrade !== undefined ? `${dictationGrade} / 10` : 'لا يوجد';
-
-      const examGrade = lesson.report?.studentExamGrade?.[st.id];
-      const examScore = examGrade !== undefined ? `${examGrade} / 10` : 'لا يوجد';
-
-      const studentNote = lesson.report?.studentNotes?.[st.id] || '';
-      const perfFeedback = lesson.report?.studentPerformance?.[st.id]?.generatedFeedback?.parent;
-
-      const noteText = studentNote.trim() ? `\n• ملاحظات: ${studentNote.trim()}` : '';
-
-      text += `
-👤 [${idx + 1}] الطالب: ${st.name}
-• الحضور: ${attendanceArabic}
-• الواجب السابق: ${homeworkOption}
-• درجة الإملاء: ${dictationScore}
-• درجة الامتحان: ${examScore}${noteText}${perfFeedback ? `\n• أداء الحصة: ${perfFeedback}` : ''}\n----------------------------------`;
-    });
+    if (groupStudents.length > 0) {
+      groupStudents.forEach((st) => {
+        const stAtt = lesson.report?.studentAttendance?.[st.id] || lesson.report?.attendanceStatus || 'present';
+        const attendanceArabic = stAtt === 'present' ? 'حاضر ✅' : stAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
+        text += `• ${st.name}: ${attendanceArabic}\n`;
+      });
+    } else {
+      const rawAtt = lesson.report?.attendanceStatus || 'present';
+      const attendanceArabic = rawAtt === 'present' ? 'حاضر ✅' : rawAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
+      text += `• ${lesson.studentName || 'الطالب'}: ${attendanceArabic}\n`;
+    }
 
     const teacherArName = getTeacherArabicName(profile, 'المعلم');
     const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
     const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
-    text += `\n\nشكراً لكم،\n${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
+    text += `\nشكراً لكم،\n${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
     return text;
   };
 
@@ -154,9 +230,14 @@ ${nextHomework}
     let studentNote = '';
     let perfFeedback = '';
 
+    const studentDisplayName = activeStudent?.name || lesson.studentName || 'الطالب';
+    const explicitGender = activeStudent ? (activeStudent.gender || lesson.report?.studentPerformance?.[activeStudent.id]?.gender) : undefined;
+    const isFemale = isLikelyFemaleStudent(studentDisplayName, explicitGender);
+    const studentRoleLabel = isFemale ? 'الطالبة' : 'الطالب';
+
     if (activeStudent) {
       const stAtt = lesson.report?.studentAttendance?.[activeStudent.id] || lesson.report?.attendanceStatus || 'present';
-      attendanceArabic = stAtt === 'present' ? 'حاضر ✅' : stAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
+      attendanceArabic = getArabicAttendanceString(stAtt, isFemale ? 'female' : 'male');
 
       const hwDone = lesson.report?.studentHomeworkDone?.[activeStudent.id];
       homeworkOption = hwDone === 'yes' ? 'تم الحل بالكامل 👍' : hwDone === 'no' ? 'لم يتم الحل 👎' : 'غير محدد';
@@ -171,39 +252,62 @@ ${nextHomework}
       perfFeedback = lesson.report?.studentPerformance?.[activeStudent.id]?.generatedFeedback?.parent || '';
     } else {
       const rawAtt = lesson.report?.attendanceStatus || 'present';
-      attendanceArabic = rawAtt === 'present' ? 'حاضر ✅' : rawAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
+      attendanceArabic = getArabicAttendanceString(rawAtt, isFemale ? 'female' : 'male');
     }
 
-    const taughtToday = lesson.report?.teacherNotes || 'لم يحدد بعد';
-    const nextHomework = lesson.report?.homeworkDescription || 'لا يوجد واجب';
+    const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
+    const dateFormatted = formatArabicDate(lesson.date);
+    const timeFormatted = formatArabicTime(lesson.time);
+
+    const dayDateLine = dayName && dateFormatted 
+      ? `📅 اليوم: ${dayName} (${dateFormatted})`
+      : dayName 
+        ? `📅 اليوم: ${dayName}`
+        : dateFormatted 
+          ? `📅 التاريخ: ${dateFormatted}` 
+          : '';
+
+    const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
+    const cycleLine = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
+
+    const headerParts = [
+      `السلام عليكم ورحمة الله وبركاته 👋`,
+      `📊 تقرير متابعة الحصة:`,
+      `👤 ${studentRoleLabel}: ${studentDisplayName}`,
+      dayDateLine,
+      timeLine,
+      cycleLine
+    ].filter(Boolean).join('\n');
+
+    const taughtToday = lesson.report?.arabicTopicsExplained || lesson.report?.teacherNotes || lesson.topic || 'لم يحدد بعد';
+    const nextHomework = lesson.report?.arabicHomeworkRequired || lesson.report?.homeworkDescription || (lesson.report?.homeworkTitle ? `${lesson.report.homeworkTitle}` : 'لا يوجد واجب');
     const cleanStudentNote = studentNote.trim();
 
     const teacherArName = getTeacherArabicName(profile, 'المعلم');
     const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
     const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
 
-    const notesSection = cleanStudentNote ? `\n\nملاحظات المعلم:\n• ${cleanStudentNote}` : '';
-    const cycleSection = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})\n\n` : '';
+    const notesSection = cleanStudentNote ? `\n\n📌 ملاحظات المعلم:\n• ${cleanStudentNote}` : '';
 
-    const generated = `السلام عليكم ورحمة الله وبركاته 👋
+    const generated = `${headerParts}
 
-${cycleSection}تم اليوم شرح:
+📖 تم اليوم شرح:
 ${taughtToday}
 
-الواجب:
+📝 الواجب:
 ${nextHomework}
 
-الحضور:
+✅ الحضور:
 ${attendanceArabic}
 
-الواجب السابق:
+📋 الواجب السابق:
 ${homeworkOption}
 
-درجة الإملاء:
+✍️ درجة الإملاء:
 ${dictationScore}
 
-درجة الامتحان (Quiz):
-${examScore}${notesSection}${perfFeedback ? `\n\nأداء الحصة:\n• ${perfFeedback}` : ''}
+🎯 درجة الامتحان (Quiz):
+${examScore}${notesSection}${perfFeedback ? `\n\n🌟 أداء الحصة:\n• ${perfFeedback}` : ''}
 
 شكراً لكم،
 ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
@@ -234,15 +338,25 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
 
   const handleWhatsAppSend = async () => {
     if (activeTab === 'bulk') {
-      if (groupWhatsAppLink) {
-        navigator.clipboard.writeText(finalGeneratedText);
-        alert('تم نسخ النص. سيتم فتح الجروب الآن لتلصق الرسالة.');
-        window.open(groupWhatsAppLink, '_blank');
-        return;
-      } else {
-        alert('هذا الجروب غير مسجل له رابط واتساب. يرجى إضافة رابط الجروب من إعدادات الجروب أولاً لتتمكن من الإرسال.');
-        return;
+      try {
+        await navigator.clipboard.writeText(finalGeneratedText);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      } catch (err) {
+        console.warn('Clipboard write failed:', err);
       }
+
+      if (groupWhatsAppLink) {
+        window.open(groupWhatsAppLink, '_blank');
+      } else {
+        // Even if no group link registered: copy text and open WhatsApp so user can pick chat
+        const url = buildWhatsAppUrl('', finalGeneratedText);
+        window.open(url, '_blank');
+      }
+      try {
+        confetti({ particleCount: 40, spread: 60, origin: { y: 0.8 } });
+      } catch (e) {}
+      return;
     }
 
     const fallbackUrl = buildWhatsAppUrl(parentPhone, finalGeneratedText);
@@ -417,10 +531,25 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                 </span>
               </div>
               <div>
-                <span className="text-text-muted font-bold block mb-0.5">{t('auto_parent_phone_7')}</span>
-                <span className="font-extrabold text-text-main text-xs sm:text-[13px] truncate block" dir="ltr">
-                  {parentPhone || t('auto_not_registered')}
+                <span className="text-text-muted font-bold block mb-0.5">
+                  {resolvedContact.isUsername 
+                    ? (language === 'ar' ? 'يوزر نيم ولي الأمر' : 'Parent Username') 
+                    : t('auto_parent_phone_7')}
                 </span>
+                <div className="font-extrabold text-text-main text-xs sm:text-[13px] truncate" dir="ltr">
+                  {resolvedContact.hasContact ? (
+                    resolvedContact.isUsername ? (
+                      <span className="inline-flex items-center gap-0.5 font-mono font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 text-xs">
+                        <AtSign className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        {cleanWhatsAppUsername(resolvedContact.contact)}
+                      </span>
+                    ) : (
+                      <span className="font-mono text-slate-700 dark:text-slate-200">{resolvedContact.contact}</span>
+                    )
+                  ) : (
+                    <span className="text-text-muted font-normal text-xs">{t('auto_not_registered')}</span>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
@@ -438,16 +567,11 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                     <span>{t('auto_whatsapp_group_connected')}</span>
                   </span>
                 ) : (
-                  <span className="bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 px-2 py-1 rounded-md text-[10px] font-black">
-                    {t('auto_group_link_not_linked_yet')}
+                  <span className="bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 px-2 py-1 rounded-md text-[10px] font-black">
+                    {_t('سيتم نسخ التقرير وفتح واتساب لاختيار الشات', 'Text copied & WhatsApp opens to pick chat', 'Text kopiert & WhatsApp öffnet')}
                   </span>
                 )}
               </div>
-              {!groupWhatsAppLink && (
-                <p className="text-[10px] text-text-muted leading-normal font-bold">
-                  {t('auto_tip_you_can_edit_the_group_to')}
-                </p>
-              )}
             </div>
           )}
 
@@ -488,15 +612,20 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
           <div className="flex items-center gap-2 flex-1">
             {activeTab === 'bulk' ? (
               <button
+                id="send-whatsapp-group-btn"
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleWhatsAppSend();
                 }}
-                className={`flex-1 sm:flex-initial ${groupWhatsAppLink ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-500 hover:bg-slate-600'} active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]`}
+                className="flex-1 sm:flex-initial bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
               >
                 <Send className="w-4 h-4" />
-                <span>{t('auto_send_to_whatsapp_group')}</span>
+                <span>
+                  {groupWhatsAppLink
+                    ? t('auto_send_to_whatsapp_group')
+                    : _t('نسخ وفتح واتساب (اختر الشات)', 'Copy & Open WhatsApp', 'Kopieren & WhatsApp öffnen')}
+                </span>
               </button>
             ) : (
               <button
@@ -508,7 +637,10 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                 className="flex-1 sm:flex-initial bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
               >
                 <Send className="w-4 h-4" />
-                <span>{t('auto_send_via_whatsapp')} ({activeStudent?.name || 'الطالب'})</span>
+                <span>
+                  {t('auto_send_via_whatsapp')} ({activeStudent?.name || 'الطالب'})
+                  {resolvedContact.isUsername ? ` (${resolvedContact.display})` : ''}
+                </span>
               </button>
             )}
 
@@ -526,9 +658,9 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
           </div>
 
           <div className="flex items-center gap-2">
-            {activeTab === 'individual' && parentPhone && (
+            {activeTab === 'individual' && resolvedContact.hasContact && !resolvedContact.isUsername && (
               <a
-                href={`tel:${parentPhone}`}
+                href={`tel:${resolvedContact.contact}`}
                 onClick={(e) => e.stopPropagation()}
                 className="bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 font-bold text-xs py-2.5 sm:py-3 px-3 sm:px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[42px]"
               >

@@ -1046,9 +1046,7 @@ export const TeacherAttendanceModal: React.FC<TeacherAttendanceModalProps> = ({
             </button>
             <button
               type="submit"
-              className={`px-5 py-2 text-white rounded-xl font-black flex items-center gap-2 cursor-pointer shadow-md active:scale-95 transition-all ${
-                attendanceType === 'absence' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-primary hover:bg-primary-hover'
-              }`}
+              className="px-5 py-2 text-white bg-primary hover:bg-primary-hover rounded-xl font-black flex items-center gap-2 cursor-pointer shadow-md active:scale-95 transition-all"
             >
               {attendanceType === 'absence' ? <MessageCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
               <span>

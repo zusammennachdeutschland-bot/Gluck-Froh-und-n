@@ -3,8 +3,10 @@ import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { GradeLevel } from '../types';
-import { X, UserPlus, Info } from 'lucide-react';
+import { X, UserPlus, Info, Phone, AtSign, Sparkles } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
+import { isLikelyFemaleStudent } from '../utils/genderUtils';
 
 interface AddStudentModalProps {
   onClose: () => void;
@@ -16,11 +18,15 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
   // Helper for inline translations
   
   const [name, setName] = useState('');
+  const [gender, setGender] = useState<'male' | 'female'>('male');
+  const [hasManualGender, setHasManualGender] = useState(false);
   const [certificateName, setCertificateName] = useState('');
   const [groupId, setGroupId] = useState(groups[0]?.id || '');
   const [grade, setGrade] = useState<GradeLevel>('Grade 7');
   const [parentName, setParentName] = useState('');
+  const [parentContactType, setParentContactType] = useState<'phone' | 'username'>('phone');
   const [parentPhone, setParentPhone] = useState('');
+  const [studentContactType, setStudentContactType] = useState<'phone' | 'username'>('phone');
   const [studentPhone, setStudentPhone] = useState('');
   const [notes, setNotes] = useState('');
 
@@ -36,8 +42,20 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
         if (draft.groupId) setGroupId(draft.groupId);
         if (draft.grade) setGrade(draft.grade);
         if (draft.parentName) setParentName(draft.parentName);
-        if (draft.parentPhone) setParentPhone(draft.parentPhone);
-        if (draft.studentPhone) setStudentPhone(draft.studentPhone);
+        if (draft.parentContactType) setParentContactType(draft.parentContactType);
+        if (draft.parentPhone) {
+          setParentPhone(draft.parentPhone);
+          if (isWhatsAppUsername(draft.parentPhone) || draft.parentPhone.startsWith('@')) {
+            setParentContactType('username');
+          }
+        }
+        if (draft.studentContactType) setStudentContactType(draft.studentContactType);
+        if (draft.studentPhone) {
+          setStudentPhone(draft.studentPhone);
+          if (isWhatsAppUsername(draft.studentPhone) || draft.studentPhone.startsWith('@')) {
+            setStudentContactType('username');
+          }
+        }
         if (draft.notes) setNotes(draft.notes);
       }
     }
@@ -48,10 +66,24 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
   useEffect(() => {
     if (name || certificateName || parentName || parentPhone || studentPhone || notes) {
       storage.setItem('dl_draft_add_student', {
-        name, certificateName, groupId, grade, parentName, parentPhone, studentPhone, notes
+        name, certificateName, groupId, grade, parentName, parentContactType, parentPhone, studentContactType, studentPhone, notes
       });
     }
-  }, [name, certificateName, groupId, grade, parentName, parentPhone, studentPhone, notes]);
+  }, [name, certificateName, groupId, grade, parentName, parentContactType, parentPhone, studentContactType, studentPhone, notes]);
+
+  const handleParentPhoneChange = (val: string) => {
+    setParentPhone(val);
+    if (val.startsWith('@') || (val.length > 2 && /[a-zA-Z]/.test(val))) {
+      setParentContactType('username');
+    }
+  };
+
+  const handleStudentPhoneChange = (val: string) => {
+    setStudentPhone(val);
+    if (val.startsWith('@') || (val.length > 2 && /[a-zA-Z]/.test(val))) {
+      setStudentContactType('username');
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,7 +93,11 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
       return;
     }
     if (!parentPhone.trim()) {
-      alert(t('auto_parent_phone_number_is_require_1'));
+      alert(_t(
+        'رقم هاتف أو يوزر نيم ولي الأمر مطلوب!', 
+        'Parent phone number or WhatsApp username is required!', 
+        'Telefonnummer oder WhatsApp-Benutzername der Eltern ist erforderlich!'
+      ));
       return;
     }
     const isDuplicate = students.some(s => (s.name || '').toLowerCase() === (name || '').toLowerCase() && s.groupId === groupId);
@@ -69,14 +105,28 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
       if (!window.confirm(t('duplicate_student_warning') || 'طالب بنفس الاسم موجود بالفعل. هل تريد المتابعة؟ / A student with the same name already exists in this group. Do you want to continue?')) return;
     }
 
+    const isParentUser = parentContactType === 'username' || isWhatsAppUsername(parentPhone);
+    const cleanParentUser = cleanWhatsAppUsername(parentPhone);
+    const finalParentPhone = isParentUser ? `@${cleanParentUser}` : parentPhone.trim();
+
+    const hasStudentVal = !!studentPhone.trim();
+    const isStudentUser = hasStudentVal && (studentContactType === 'username' || isWhatsAppUsername(studentPhone));
+    const cleanStudentUser = hasStudentVal ? cleanWhatsAppUsername(studentPhone) : '';
+    const finalStudentPhone = hasStudentVal ? (isStudentUser ? `@${cleanStudentUser}` : studentPhone.trim()) : '';
+
     addStudent({
       name,
       certificateName: certificateName.trim(),
+      gender,
       groupId,
       grade: grade || selectedGroup?.grade || 'Grade 7',
       parentName,
-      parentPhone,
-      studentPhone,
+      parentPhone: finalParentPhone,
+      parentUsername: isParentUser ? cleanParentUser : undefined,
+      parentContactType: isParentUser ? 'username' : 'phone',
+      studentPhone: finalStudentPhone,
+      studentUsername: isStudentUser ? cleanStudentUser : undefined,
+      studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
       notes,
       avatarUrl: ''
     });
@@ -124,9 +174,65 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
               required
               placeholder={t('auto_e_g_ahmed_ali')}
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setName(val);
+                if (!hasManualGender && val.trim()) {
+                  const predicted = isLikelyFemaleStudent(val) ? 'female' : 'male';
+                  setGender(predicted);
+                }
+              }}
               className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
             />
+
+            {/* Gender Selector with AI suggestion */}
+            <div className="pt-1 flex items-center justify-between gap-2 bg-surface p-2 rounded-xl border border-surface-border">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-bold text-text-muted">
+                  {_t('جنس الطالب:', 'Gender:', 'Geschlecht:')}
+                </span>
+                {!hasManualGender && name.trim() && (
+                  <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded flex items-center gap-1">
+                    <Sparkles className="w-2.5 h-2.5" />
+                    <span>{_t('اقتراح ذكي من الاسم', 'AI Suggested', 'KI-Vorschlag')}</span>
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGender('male');
+                    setHasManualGender(true);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1 border ${
+                    gender === 'male'
+                      ? 'bg-blue-600 text-white border-blue-500 shadow-2xs'
+                      : 'bg-surface hover:bg-surface-hover text-text-muted border-surface-border'
+                  }`}
+                >
+                  <span>👦</span>
+                  <span>{_t('ولد (طالب)', 'Boy', 'Junge')}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGender('female');
+                    setHasManualGender(true);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1 border ${
+                    gender === 'female'
+                      ? 'bg-rose-600 text-white border-rose-500 shadow-2xs'
+                      : 'bg-surface hover:bg-surface-hover text-text-muted border-surface-border'
+                  }`}
+                >
+                  <span>👧</span>
+                  <span>{_t('بنت (طالبة)', 'Girl', 'Mädchen')}</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* English/Latin Name for Certificates */}
@@ -221,33 +327,127 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
             />
           </div>
 
-          {/* Phone Numbers */}
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-text-main">
-                {t('auto_parent_phone_2')}
-              </label>
-              <input
-                type="tel"
-                required
-                placeholder="+20 100 123 4567"
-                value={parentPhone}
-                onChange={(e) => setParentPhone(e.target.value)}
-                className="w-full px-3 py-2 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-mono"
-              />
+          {/* Phone Numbers / WhatsApp Usernames */}
+          <div className="space-y-3">
+            {/* Parent Contact */}
+            <div className="space-y-1.5 bg-slate-50/50 dark:bg-slate-800/30 p-2.5 rounded-xl border border-surface-border-soft">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-text-main flex items-center gap-1">
+                  <span>{_t('هاتف أو يوزر نيم ولي الأمر *', 'Parent Phone or WhatsApp Username *', 'Eltern Telefon / WhatsApp-User *')}</span>
+                </label>
+                <div className="flex items-center bg-surface border border-surface-border rounded-lg p-0.5 text-[10px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setParentContactType('phone');
+                      if (parentPhone.startsWith('@')) setParentPhone(parentPhone.replace(/^@/, ''));
+                    }}
+                    className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                      parentContactType === 'phone'
+                        ? 'bg-primary text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    <Phone className="w-2.5 h-2.5" />
+                    <span>{_t('هاتف', 'Phone', 'Tel')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setParentContactType('username');
+                      if (parentPhone && !parentPhone.startsWith('@')) setParentPhone(`@${parentPhone}`);
+                    }}
+                    className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                      parentContactType === 'username'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    <AtSign className="w-2.5 h-2.5" />
+                    <span>{_t('يوزر نيم', 'Username', 'User')}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative">
+                <div className="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none text-text-muted">
+                  {parentContactType === 'username' ? (
+                    <AtSign className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <Phone className="w-3.5 h-3.5 text-primary" />
+                  )}
+                </div>
+                <input
+                  type="text"
+                  required
+                  inputMode={parentContactType === 'phone' ? 'tel' : 'text'}
+                  dir="ltr"
+                  placeholder={parentContactType === 'username' ? '@username (e.g. @ahmed_ali)' : '+20 100 123 4567'}
+                  value={parentPhone}
+                  onChange={(e) => handleParentPhoneChange(e.target.value)}
+                  className="w-full ps-9 pe-3 py-2 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-mono font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-text-main">
-                {t('auto_student_phone_optional')}
-              </label>
-              <input
-                type="tel"
-                placeholder="+20 101 123 4567"
-                value={studentPhone}
-                onChange={(e) => setStudentPhone(e.target.value)}
-                className="w-full px-3 py-2 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-mono"
-              />
+            {/* Student Contact (Optional) */}
+            <div className="space-y-1.5 bg-slate-50/50 dark:bg-slate-800/30 p-2.5 rounded-xl border border-surface-border-soft">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-text-muted flex items-center gap-1">
+                  <span>{_t('هاتف أو يوزر نيم الطالب (اختياري)', 'Student Phone or WhatsApp Username (Optional)', 'Schüler Telefon / User (Optional)')}</span>
+                </label>
+                <div className="flex items-center bg-surface border border-surface-border rounded-lg p-0.5 text-[10px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStudentContactType('phone');
+                      if (studentPhone.startsWith('@')) setStudentPhone(studentPhone.replace(/^@/, ''));
+                    }}
+                    className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                      studentContactType === 'phone'
+                        ? 'bg-primary text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    <Phone className="w-2.5 h-2.5" />
+                    <span>{_t('هاتف', 'Phone', 'Tel')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStudentContactType('username');
+                      if (studentPhone && !studentPhone.startsWith('@')) setStudentPhone(`@${studentPhone}`);
+                    }}
+                    className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                      studentContactType === 'username'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    <AtSign className="w-2.5 h-2.5" />
+                    <span>{_t('يوزر نيم', 'Username', 'User')}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative">
+                <div className="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none text-text-muted">
+                  {studentContactType === 'username' ? (
+                    <AtSign className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <Phone className="w-3.5 h-3.5 text-primary" />
+                  )}
+                </div>
+                <input
+                  type="text"
+                  inputMode={studentContactType === 'phone' ? 'tel' : 'text'}
+                  dir="ltr"
+                  placeholder={studentContactType === 'username' ? '@student_username' : '+20 101 123 4567'}
+                  value={studentPhone}
+                  onChange={(e) => handleStudentPhoneChange(e.target.value)}
+                  className="w-full ps-9 pe-3 py-2 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-mono font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
             </div>
           </div>
 

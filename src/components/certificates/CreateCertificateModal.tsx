@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { CertificateRecord, CertificateTypeKey, CertificateTemplateId, CertificateLanguage, AICertificateBackground } from '../../types';
 import {
@@ -20,6 +20,7 @@ import { resolveCertificateRecipientName } from '../../utils/certificateUtils';
 import { formatLocalDate } from '../../utils/timeUtils';
 import { getTeacherEnglishName } from '../../utils/teacherUtils';
 import { getSavedAIBackgrounds } from '../../utils/aiBackgroundUtils';
+import { getDayNumber } from '../../utils/scheduleUtils';
 import {
   X,
   Award,
@@ -35,7 +36,9 @@ import {
   Layers,
   Image as ImageIcon,
   FolderDown,
-  Send
+  Send,
+  Users,
+  Calendar
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import confetti from 'canvas-confetti';
@@ -62,6 +65,49 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
   const [studentId, setStudentId] = useState<string>(
     initialCertificate?.studentId || initialStudentId || (students[0]?.id || '')
   );
+
+  // Quick filters for student selection
+  const [filterGroupId, setFilterGroupId] = useState<string>('all');
+  const [filterDay, setFilterDay] = useState<string>('all');
+
+  const activeStudents = useMemo(() => students.filter(s => s.status !== 'archived'), [students]);
+  const activeGroups = useMemo(() => groups.filter(g => g.status !== 'archived'), [groups]);
+
+  const filteredStudents = useMemo(() => {
+    return activeStudents
+      .filter(s => {
+        // Group filter
+        if (filterGroupId !== 'all' && s.groupId !== filterGroupId) {
+          return false;
+        }
+        // Day filter
+        if (filterDay !== 'all') {
+          const studentGrp = groups.find(g => g.id === s.groupId);
+          if (!studentGrp) return false;
+          const targetDayNum = filterDay === 'today' ? new Date().getDay() : getDayNumber(filterDay);
+          if (targetDayNum === -1) return true;
+          const groupDays: string[] = [
+            ...(studentGrp.scheduleDays || []),
+            ...(studentGrp.schedules || []).map(slot => slot.day)
+          ];
+          if (groupDays.length === 0) return false;
+          const matchesDay = groupDays.some(d => getDayNumber(d) === targetDayNum);
+          if (!matchesDay) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  }, [activeStudents, groups, filterGroupId, filterDay]);
+
+  // Keep studentId synchronized when filtered list changes
+  useEffect(() => {
+    if (filteredStudents.length > 0) {
+      const isCurrentInFiltered = filteredStudents.some(s => s.id === studentId);
+      if (!isCurrentInFiltered) {
+        setStudentId(filteredStudents[0].id);
+      }
+    }
+  }, [filteredStudents, studentId]);
 
   const selectedStudent = students.find(s => s.id === studentId);
   const selectedGroup = selectedStudent ? groups.find(g => g.id === selectedStudent.groupId) : undefined;
@@ -503,7 +549,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                 type="button"
                 onClick={handleShareWhatsApp}
                 disabled={isExporting}
-                className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50 text-xs col-span-2 sm:col-span-2"
+                className="py-2.5 px-3 bg-primary hover:bg-primary-hover text-white rounded-xl font-black flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50 text-xs col-span-2 sm:col-span-2"
               >
                 <Share2 className="w-4 h-4" />
                 <span>{_t('مشاركة عبر واتساب', 'Share WhatsApp', 'Per WhatsApp teilen')}</span>
@@ -533,23 +579,101 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
             {/* Student Picker & Recipient Name */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5">
-                <label className="block text-xs font-black text-text-main">
-                  {_t('اختر الطالب المكرم *', 'Select Student *', 'Schüler auswählen *')}
-                </label>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <label className="block text-xs font-black text-text-main">
+                      {_t('اختر الطالب المكرم *', 'Select Student *', 'Schüler auswählen *')}
+                    </label>
+                    <span className="text-[10px] font-bold text-text-muted bg-surface-hover dark:bg-slate-800 px-1.5 py-0.5 rounded-md border border-surface-border-soft dark:border-slate-800">
+                      {filteredStudents.length} {_t('طالب', 'students', 'Schüler')}
+                    </span>
+                  </div>
+
+                  {(filterGroupId !== 'all' || filterDay !== 'all') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilterGroupId('all');
+                        setFilterDay('all');
+                      }}
+                      className="text-[10.5px] font-black text-primary hover:text-primary-hover hover:underline flex items-center gap-0.5 cursor-pointer"
+                      title={_t('إلغاء الفلتر وعرض جميع الطلاب', 'Reset filters to show all students', 'Filter zurücksetzen')}
+                    >
+                      <X className="w-3 h-3" />
+                      <span>{_t('عرض الكل', 'Show all', 'Alle anzeigen')}</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Compact Mini Filters: Group & Day */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  {/* Group Filter */}
+                  <div className="relative">
+                    <select
+                      value={filterGroupId}
+                      onChange={e => setFilterGroupId(e.target.value)}
+                      className={`w-full text-[11px] font-bold py-1.5 px-2 rounded-lg border appearance-none truncate cursor-pointer transition-colors focus:outline-none focus:ring-1 focus:ring-primary ${
+                        filterGroupId !== 'all'
+                          ? 'bg-primary-soft/60 dark:bg-primary-soft/40 border-primary/50 text-primary font-black shadow-2xs'
+                          : 'bg-surface-hover/80 dark:bg-slate-800/90 border-surface-border-soft dark:border-slate-700 text-text-muted hover:text-text-main'
+                      }`}
+                      title={_t('فلترة حسب المجموعة', 'Filter by Group', 'Nach Gruppe filtern')}
+                    >
+                      <option value="all">👥 {_t('كل المجموعات', 'All Groups', 'Alle Gruppen')}</option>
+                      {activeGroups.map(g => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Day Filter */}
+                  <div className="relative">
+                    <select
+                      value={filterDay}
+                      onChange={e => setFilterDay(e.target.value)}
+                      className={`w-full text-[11px] font-bold py-1.5 px-2 rounded-lg border appearance-none truncate cursor-pointer transition-colors focus:outline-none focus:ring-1 focus:ring-primary ${
+                        filterDay !== 'all'
+                          ? 'bg-primary-soft/60 dark:bg-primary-soft/40 border-primary/50 text-primary font-black shadow-2xs'
+                          : 'bg-surface-hover/80 dark:bg-slate-800/90 border-surface-border-soft dark:border-slate-700 text-text-muted hover:text-text-main'
+                      }`}
+                      title={_t('فلترة حسب اليوم', 'Filter by Day', 'Nach Tag filtern')}
+                    >
+                      <option value="all">📅 {_t('كل الأيام', 'All Days', 'Alle Tage')}</option>
+                      <option value="today">⚡ {_t('اليوم (مجموعات اليوم)', 'Today (Today\'s Groups)', 'Heute')}</option>
+                      <option value="Saturday">{_t('السبت', 'Saturday', 'Samstag')}</option>
+                      <option value="Sunday">{_t('الأحد', 'Sunday', 'Sonntag')}</option>
+                      <option value="Monday">{_t('الإثنين', 'Monday', 'Montag')}</option>
+                      <option value="Tuesday">{_t('الثلاثاء', 'Tuesday', 'Dienstag')}</option>
+                      <option value="Wednesday">{_t('الأربعاء', 'Wednesday', 'Mittwoch')}</option>
+                      <option value="Thursday">{_t('الخميس', 'Thursday', 'Donnerstag')}</option>
+                      <option value="Friday">{_t('الجمعة', 'Friday', 'Freitag')}</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Main Student Select */}
                 <select
                   value={studentId}
                   onChange={e => setStudentId(e.target.value)}
                   className="w-full bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary"
                   required
                 >
-                  {students.filter(s => s.status !== 'archived').map(s => {
-                    const grp = groups.find(g => g.id === s.groupId);
-                    return (
-                      <option key={s.id} value={s.id}>
-                        {s.name} {grp ? `(${grp.name})` : ''}
-                      </option>
-                    );
-                  })}
+                  {filteredStudents.length === 0 ? (
+                    <option value="" disabled>
+                      {_t('لا يوجد طلاب يطابقون الفلتر المختار', 'No students match selected filter', 'Keine Schüler gefunden')}
+                    </option>
+                  ) : (
+                    filteredStudents.map(s => {
+                      const grp = groups.find(g => g.id === s.groupId);
+                      return (
+                        <option key={s.id} value={s.id}>
+                          {s.name} {grp ? `(${grp.name})` : ''}
+                        </option>
+                      );
+                    })
+                  )}
                 </select>
               </div>
 
@@ -718,7 +842,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                         <button
                           type="button"
                           onClick={onOpenAIDesigner}
-                          className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+                          className="px-3.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
                         >
                           <Sparkles className="w-3.5 h-3.5" />
                           <span>{_t('فتح مصمم خلفيات AI الآن', 'Open AI Background Designer', 'KI-Designer öffnen')}</span>

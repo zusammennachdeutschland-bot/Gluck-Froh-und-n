@@ -556,7 +556,7 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
                 type="button"
                 onClick={handleGenerateBulk}
                 disabled={selectedStudentIds.size === 0}
-                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-black rounded-xl text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+                className="px-6 py-2.5 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-black rounded-xl text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer"
               >
                 <Sparkles className="w-4 h-4" />
                 <span>{_t(`إصدار ${selectedStudentIds.size} شهادة للمجموعة`, `Generate ${selectedStudentIds.size} Certificates`, `${selectedStudentIds.size} Zertifikate generieren`)}</span>

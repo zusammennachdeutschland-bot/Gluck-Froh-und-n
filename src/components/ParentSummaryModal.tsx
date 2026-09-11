@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Lesson, Student, TeacherProfile } from '../types';
 import { useApp } from '../context/AppContext';
-import { X, Copy, Check, MessageSquare, Phone, Send, Share2, Sparkles, Home } from 'lucide-react';
+import { X, Copy, Check, MessageSquare, Phone, Send, Share2, Sparkles, Home, AtSign } from 'lucide-react';
 import { ArabicParentReportModal } from './ArabicParentReportModal';
-import { buildWhatsAppUrl } from '../utils/phoneUtils';
+import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getTeacherEnglishName } from '../utils/teacherUtils';
 import confetti from 'canvas-confetti';
 
@@ -32,8 +32,15 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
 
   const report = lesson.report;
   const parentName = activeStudent?.parentName || lesson.quickParentName || (lesson.studentName ? `${lesson.studentName}'s Eltern` : 'Sehr geehrte Eltern');
-  const parentPhone = activeStudent?.parentPhone || lesson.quickParentPhone || activeStudent?.studentPhone || lesson.quickStudentPhone || '';
-  const studentPhone = activeStudent?.studentPhone || lesson.quickStudentPhone || parentPhone;
+  
+  const resolvedParentContact = resolveStudentWhatsAppContact(activeStudent, {
+    quickParentPhone: lesson.quickParentPhone
+  });
+  const parentPhone = resolvedParentContact.contact;
+
+  const rawStudentPhone = activeStudent?.studentPhone || activeStudent?.studentUsername || lesson.quickStudentPhone || '';
+  const isStudentUsername = isWhatsAppUsername(rawStudentPhone);
+  const studentPhone = rawStudentPhone.trim();
 
   // Generate German educational lesson summary message
   const generateSummaryText = () => {
@@ -72,7 +79,7 @@ Glück fröhlich und froh 🇩🇪`;
   };
 
   const handleWhatsAppSend = () => {
-    const url = buildWhatsAppUrl(parentPhone, summaryText);
+    const url = buildWhatsAppUrl(resolvedParentContact.contact, summaryText);
     window.open(url, '_blank');
     confetti({ particleCount: 50, spread: 40 });
   };
@@ -147,24 +154,30 @@ Glück fröhlich und froh 🇩🇪`;
                 className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
               >
                 <Send className="w-4 h-4" />
-                <span>WhatsApp</span>
+                <span>
+                  WhatsApp {resolvedParentContact.isUsername ? `(${resolvedParentContact.display})` : ''}
+                </span>
               </button>
 
-              <a
-                href={`tel:${parentPhone}`}
-                className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center active:scale-95 hover:shadow-lg hover:shadow-primary/30"
-              >
-                <Phone className="w-4 h-4" />
-                <span>Call Parent</span>
-              </a>
+              {resolvedParentContact.hasContact && !resolvedParentContact.isUsername && (
+                <a
+                  href={`tel:${resolvedParentContact.contact}`}
+                  className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center active:scale-95 hover:shadow-lg hover:shadow-primary/30"
+                >
+                  <Phone className="w-4 h-4" />
+                  <span>Call Parent</span>
+                </a>
+              )}
 
-              <a
-                href={`tel:${studentPhone}`}
-                className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center"
-              >
-                <Phone className="w-4 h-4" />
-                <span>Call Student</span>
-              </a>
+              {studentPhone && !isStudentUsername && (
+                <a
+                  href={`tel:${studentPhone}`}
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center"
+                >
+                  <Phone className="w-4 h-4" />
+                  <span>Call Student</span>
+                </a>
+              )}
             </div>
           </div>
         </div>
