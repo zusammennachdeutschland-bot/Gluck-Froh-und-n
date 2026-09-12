@@ -7,7 +7,7 @@ import { getTeacherArabicName } from '../utils/teacherUtils';
 import { formatTimeDisplay, parseLocalDate } from '../utils/timeUtils';
 import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString } from '../utils/genderUtils';
 import { 
-  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign
+  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -153,6 +153,33 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   // Editable generated report
   const [finalGeneratedText, setFinalGeneratedText] = useState<string>('');
   const [isManualEdited, setIsManualEdited] = useState<boolean>(false);
+  const [reportStyle, setReportStyle] = useState<'egyptian' | 'standard' | 'concise'>('egyptian');
+  const [styleSeed, setStyleSeed] = useState<number>(0);
+  const [recordingLink, setRecordingLink] = useState<string>(
+    lesson.report?.recordingLink || lesson.recordingLink || ''
+  );
+  const [recordingLink2, setRecordingLink2] = useState<string>(
+    lesson.report?.recordingLink2 || lesson.recordingLink2 || ''
+  );
+  const [showRecordingLink2, setShowRecordingLink2] = useState<boolean>(
+    Boolean(lesson.report?.recordingLink2 || lesson.recordingLink2)
+  );
+
+  // Helper to format recording link(s) for the Arabic report
+  const formatRecordingsArabic = (link1: string, link2: string): string => {
+    const l1 = link1.trim();
+    const l2 = link2.trim();
+    if (l1 && l2) {
+      return `\n\n🎥 تسجيلات الحصة (جزئين):\n• الجزء الأول: ${l1}\n• الجزء الثاني: ${l2}`;
+    }
+    if (l1) {
+      return `\n\n🎥 رابط تسجيل الحصة:\n${l1}`;
+    }
+    if (l2) {
+      return `\n\n🎥 رابط تسجيل الحصة:\n${l2}`;
+    }
+    return '';
+  };
 
   // Generate Bulk Group Report Text
   const getBulkReportText = () => {
@@ -172,9 +199,74 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
           : '';
 
     const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
-    // رقم الحصة في السايكل لو هو 4 حصص أو 8 أو 12، ولو بالحصة مبكتبش حاجة
     const cycleLine = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
 
+    const recordingSection = formatRecordingsArabic(recordingLink, recordingLink2);
+
+    const teacherArName = getTeacherArabicName(profile, 'المعلم');
+    const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
+    const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
+
+    if (reportStyle === 'egyptian') {
+      const egyptianGreetings = [
+        'مساء الخير يا فندم / أهلاً بحضراتكم 👋',
+        'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+        'أهلاً بحضراتكم جميعاً 👋'
+      ];
+      const selectedGreeting = egyptianGreetings[styleSeed % egyptianGreetings.length];
+      const groupTitle = associatedGroup?.name || lesson.title || 'مجموعة الألماني';
+
+      let text = `${selectedGreeting}
+📊 تقرير حصة الألماني لمجموعة: *${groupTitle}* 🇩🇪
+${[dayDateLine, timeLine, cycleLine].filter(Boolean).join('\n')}
+
+📖 اللي اتشرح النهاردة في الحصة:
+${taughtToday}
+
+📝 الواجب المطلوب من كل الطلاب:
+${nextHomework}${recordingSection}
+
+----------------------------------
+👥 كشف حضور الطلاب:
+`;
+
+      if (groupStudents.length > 0) {
+        groupStudents.forEach((st) => {
+          const stAtt = lesson.report?.studentAttendance?.[st.id] || lesson.report?.attendanceStatus || 'present';
+          const attendanceArabic = stAtt === 'present' ? 'حاضر ✅' : stAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
+          text += `• ${st.name}: ${attendanceArabic}\n`;
+        });
+      } else {
+        const rawAtt = lesson.report?.attendanceStatus || 'present';
+        const attendanceArabic = rawAtt === 'present' ? 'حاضر ✅' : rawAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
+        text += `• ${lesson.studentName || 'الطالب'}: ${attendanceArabic}\n`;
+      }
+
+      text += `\nشكراً لمتابعتكم الكريمة واهتمامكم المستمر 🌸\nمع تحيات: *${teacherSig}* 🇩🇪`;
+      return text;
+    }
+
+    if (reportStyle === 'concise') {
+      let text = `⚡ تقرير سريع - ${associatedGroup?.name || lesson.title || 'حصة ألماني'} 🇩🇪
+${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
+
+📌 ما تم شرحه: ${taughtToday}
+📝 الواجب المقرر: ${nextHomework}${recordingSection}
+
+👥 الحضور:
+`;
+      if (groupStudents.length > 0) {
+        groupStudents.forEach((st) => {
+          const stAtt = lesson.report?.studentAttendance?.[st.id] || lesson.report?.attendanceStatus || 'present';
+          const attendanceArabic = stAtt === 'present' ? 'حاضر ✅' : stAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
+          text += `• ${st.name}: ${attendanceArabic}\n`;
+        });
+      }
+      text += `\nتحياتي، *${teacherSig}*`;
+      return text;
+    }
+
+    // Standard Arabic
     const headerParts = [
       `السلام عليكم ورحمة الله وبركاته 👋`,
       `📊 تقرير الحصة لمجموعة: ${associatedGroup?.name || lesson.title || 'مجموعة اللغة الألمانية'}`,
@@ -189,7 +281,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 ${taughtToday}
 
 📝 الواجب لجميع الطلاب:
-${nextHomework}
+${nextHomework}${recordingSection}
 
 ----------------------------------
 👥 حضور الطلاب:
@@ -207,9 +299,6 @@ ${nextHomework}
       text += `• ${lesson.studentName || 'الطالب'}: ${attendanceArabic}\n`;
     }
 
-    const teacherArName = getTeacherArabicName(profile, 'المعلم');
-    const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
-    const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
     text += `\nشكراً لكم،\n${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
     return text;
   };
@@ -270,15 +359,6 @@ ${nextHomework}
     const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
     const cycleLine = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
 
-    const headerParts = [
-      `السلام عليكم ورحمة الله وبركاته 👋`,
-      `📊 تقرير متابعة الحصة:`,
-      `👤 ${studentRoleLabel}: ${studentDisplayName}`,
-      dayDateLine,
-      timeLine,
-      cycleLine
-    ].filter(Boolean).join('\n');
-
     const taughtToday = lesson.report?.arabicTopicsExplained || lesson.report?.teacherNotes || lesson.topic || 'لم يحدد بعد';
     const nextHomework = lesson.report?.arabicHomeworkRequired || lesson.report?.homeworkDescription || (lesson.report?.homeworkTitle ? `${lesson.report.homeworkTitle}` : 'لا يوجد واجب');
     const cleanStudentNote = studentNote.trim();
@@ -288,6 +368,93 @@ ${nextHomework}
     const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
 
     const notesSection = cleanStudentNote ? `\n\n📌 ملاحظات المعلم:\n• ${cleanStudentNote}` : '';
+    const recordingSection = formatRecordingsArabic(recordingLink, recordingLink2);
+
+    // EGYPTIAN DIALECT FORMULA (صيغة مصرية راقية ومحبوبة لأولياء الأمور)
+    if (reportStyle === 'egyptian') {
+      const egyptianGreetings = [
+        'مساء الخير يا فندم 👋',
+        'أهلاً بحضرتك يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+        'تحياتي لحضرتك يا فندم 👋',
+        'أهلاً بولي أمر الطالبة/الطالب العزيز 👋'
+      ];
+      const selectedGreeting = egyptianGreetings[styleSeed % egyptianGreetings.length];
+      
+      const egyptianIntros = [
+        `حبينا نبلغ حضرتك بتقرير حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* اليوم 🇩🇪:`,
+        `تقرير حصة الألماني اليوم لـ ${studentRoleLabel} *${studentDisplayName}* 🇩🇪:`,
+        `ملخص حصة الألماني ومستوى ${studentRoleLabel} *${studentDisplayName}* اليوم 🇩🇪:`,
+        `تفاصيل ومتابعة حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* النهارده 🇩🇪:`,
+        `تقرير ومتابعة أداء ${studentRoleLabel} *${studentDisplayName}* في حصة الألماني 🇩🇪:`
+      ];
+      const selectedIntro = egyptianIntros[styleSeed % egyptianIntros.length];
+
+      const egyptianOutros = [
+        `شكراً لمتابعة حضرتك واهتمامك الدائم 🌸\nمع تحيات: *${teacherSig}* 🇩🇪`,
+        `شكراً جزيلاً لتعاونكم ومتابعتكم المستمرة 🌸\nمع أطيب التحيات: *${teacherSig}* 🇩🇪`,
+        `خالص الشكر والتقدير لحضرتك على المتابعة والحرص 🌸\nمع تحيات: *${teacherSig}* 🇩🇪`,
+        `ربنا يبارك فيه/فيها وتمنياتنا بدوام التميز والتفوق 🌸\nمع تحيات: *${teacherSig}* 🇩🇪`
+      ];
+      const selectedOutro = egyptianOutros[styleSeed % egyptianOutros.length];
+
+      const generated = `${selectedGreeting}
+${selectedIntro}
+${[dayDateLine, timeLine, cycleLine].filter(Boolean).join('\n')}
+
+📖 اللي اتشرح النهاردة في الحصة:
+${taughtToday}
+
+📝 الواجب المطلوب للمرة الجاية:
+${nextHomework}${recordingSection}
+
+✅ الحضور:
+${attendanceArabic}
+
+📋 حل الواجب السابق:
+${homeworkOption}
+
+✍️ درجة الإملاء:
+${dictationScore}
+
+🎯 درجة الكويز (Quiz):
+${examScore}${notesSection}${perfFeedback ? `\n\n🌟 مستوى وأداء الطالب اليوم:\n• ${perfFeedback}` : ''}
+
+${selectedOutro}`;
+
+      setFinalGeneratedText(generated);
+      return;
+    }
+
+    // CONCISE FORMULA (صيغة كبسولة سريعة ومختصرة)
+    if (reportStyle === 'concise') {
+      const generated = `🇩🇪 كبسولة تقرير حصة الألماني:
+👤 ${studentRoleLabel}: *${studentDisplayName}*
+${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
+
+📖 ما تم شرحه: ${taughtToday}
+📝 الواجب: ${nextHomework}${recordingSection}
+📊 التقييم:
+• الحضور: ${attendanceArabic}
+• الواجب السابق: ${homeworkOption}
+• الكويز: ${examScore} | الإملاء: ${dictationScore}
+${perfFeedback ? `🌟 التقييم: ${perfFeedback}` : ''}${cleanStudentNote ? `📌 ملاحظة: ${cleanStudentNote}` : ''}
+
+تحياتي، *${teacherSig}*`;
+
+      setFinalGeneratedText(generated);
+      return;
+    }
+
+    // STANDARD ARABIC FORMULA (الصيغة الفصحى المنظمة)
+    const headerParts = [
+      `السلام عليكم ورحمة الله وبركاته 👋`,
+      `📊 تقرير متابعة الحصة:`,
+      `👤 ${studentRoleLabel}: ${studentDisplayName}`,
+      dayDateLine,
+      timeLine,
+      cycleLine
+    ].filter(Boolean).join('\n');
 
     const generated = `${headerParts}
 
@@ -295,7 +462,7 @@ ${nextHomework}
 ${taughtToday}
 
 📝 الواجب:
-${nextHomework}
+${nextHomework}${recordingSection}
 
 ✅ الحضور:
 ${attendanceArabic}
@@ -324,6 +491,10 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
     activeStudent,
     isManualEdited,
     activeTab,
+    recordingLink,
+    recordingLink2,
+    reportStyle,
+    styleSeed,
     profile.displayName,
     profile.displayNameAr,
     profile.nameAr
@@ -575,24 +746,222 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
             </div>
           )}
 
+          {/* Lecture / Session Recording Links */}
+          <div className="space-y-2 bg-surface p-3 sm:p-3.5 rounded-xl border border-surface-border">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-1.5">
+                <Video className="w-4 h-4 text-primary" />
+                <span className="text-xs font-black text-text-main">
+                  {_t('روابط تسجيل الحصة', 'Session Recordings', 'Aufnahmelinks der Lektion')}
+                </span>
+              </div>
+
+              {/* Open Grain Button */}
+              <a
+                href="https://grain.com/app/meetings"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:hover:bg-purple-900/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 transition-all shadow-2xs active:scale-95 cursor-pointer"
+                title="Open Grain Meetings"
+              >
+                <ExternalLink className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                <span>Open Grain</span>
+              </a>
+            </div>
+
+            {/* Part 1 Recording Input */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[11px] font-bold text-text-muted">
+                <span>{_t('التسجيل الأول (الجزء 1)', 'Recording 1 (Part 1)', 'Aufnahme 1 (Teil 1)')}</span>
+                {!showRecordingLink2 && !recordingLink2 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRecordingLink2(true)}
+                    className="text-[10px] font-black text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{_t('+ إضافة تسجيل ثانٍ للحصة', '+ Add Part 2 Recording', '+ Teil 2 hinzufügen')}</span>
+                  </button>
+                )}
+              </div>
+              <div className="relative flex items-center">
+                <input
+                  type="url"
+                  value={recordingLink}
+                  onChange={(e) => {
+                    setRecordingLink(e.target.value);
+                    setIsManualEdited(false);
+                  }}
+                  className="w-full pl-3 pr-16 py-2 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/50 font-mono text-left"
+                  placeholder="https://... (Grain, Zoom, YouTube, Drive)"
+                  dir="ltr"
+                />
+                {recordingLink.trim() && (
+                  <div className="absolute right-2 flex items-center gap-1">
+                    <a
+                      href={recordingLink.trim()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1 text-primary hover:text-primary-hover hover:bg-primary-soft rounded transition-colors"
+                      title={_t('فتح الرابط والتأكد منه', 'Open & Test Link', 'Link testen')}
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecordingLink('');
+                        setIsManualEdited(false);
+                      }}
+                      className="p-1 text-text-muted hover:text-red-500 rounded transition-colors"
+                      title={_t('مسح', 'Clear', 'Löschen')}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Part 2 Recording Input */}
+            {(showRecordingLink2 || recordingLink2.trim()) && (
+              <div className="space-y-1 pt-1.5 border-t border-slate-100 dark:border-surface-border">
+                <div className="flex items-center justify-between text-[11px] font-bold text-text-muted">
+                  <span>{_t('التسجيل الثاني (الجزء 2)', 'Recording 2 (Part 2)', 'Aufnahme 2 (Teil 2)')}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecordingLink2('');
+                      setShowRecordingLink2(false);
+                      setIsManualEdited(false);
+                    }}
+                    className="text-[10px] font-bold text-red-500 hover:underline flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>{_t('إلغاء الجزء الثاني', 'Remove Part 2', 'Teil 2 entfernen')}</span>
+                  </button>
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    type="url"
+                    value={recordingLink2}
+                    onChange={(e) => {
+                      setRecordingLink2(e.target.value);
+                      setIsManualEdited(false);
+                    }}
+                    className="w-full pl-3 pr-16 py-2 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/50 font-mono text-left"
+                    placeholder="https://... (Grain, Zoom, YouTube, Drive - Part 2)"
+                    dir="ltr"
+                  />
+                  {recordingLink2.trim() && (
+                    <div className="absolute right-2 flex items-center gap-1">
+                      <a
+                        href={recordingLink2.trim()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1 text-primary hover:text-primary-hover hover:bg-primary-soft rounded transition-colors"
+                        title={_t('فتح الرابط والتأكد منه', 'Open & Test Link', 'Link testen')}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRecordingLink2('');
+                          setIsManualEdited(false);
+                        }}
+                        className="p-1 text-text-muted hover:text-red-500 rounded transition-colors"
+                        title={_t('مسح', 'Clear', 'Löschen')}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Preview & Editor Textarea */}
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-1.5">
               <label className="text-xs font-black text-text-main flex items-center gap-1.5">
                 <MessageSquare className="w-4 h-4 text-primary" />
                 <span>{t('auto_preview_edit_message')}</span>
               </label>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCopyText();
-                }}
-                className="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-primary" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copied ? t('auto_copied') : t('auto_copy_text')}</span>
-              </button>
+
+              {/* Style selector and re-roll button */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="inline-flex items-center p-0.5 bg-surface border border-surface-border rounded-lg shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportStyle('egyptian');
+                      setIsManualEdited(false);
+                    }}
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${
+                      reportStyle === 'egyptian'
+                        ? 'bg-amber-500 text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    🇪🇬 مصري راقي
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportStyle('standard');
+                      setIsManualEdited(false);
+                    }}
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${
+                      reportStyle === 'standard'
+                        ? 'bg-primary text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    📜 فصحى
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportStyle('concise');
+                      setIsManualEdited(false);
+                    }}
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${
+                      reportStyle === 'concise'
+                        ? 'bg-indigo-600 text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    ⚡ مختصر
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStyleSeed(prev => prev + 1);
+                    setIsManualEdited(false);
+                  }}
+                  className="px-2 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-primary border border-surface-border rounded-lg text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer"
+                  title="تغيير صياغة التقرير"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>صيغة أخرى</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCopyText();
+                  }}
+                  className="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer ml-1"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 text-primary" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copied ? t('auto_copied') : t('auto_copy_text')}</span>
+                </button>
+              </div>
             </div>
 
             <textarea
@@ -673,12 +1042,15 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                if (onSaveReport) {
+                  onSaveReport(finalGeneratedText, { 
+                    recordingLink: recordingLink.trim() || undefined,
+                    recordingLink2: recordingLink2.trim() || undefined
+                  });
+                }
                 if (onGoToHomeScreen) {
                   onGoToHomeScreen();
                 } else {
-                  if (onSaveReport) {
-                    onSaveReport(finalGeneratedText);
-                  }
                   onClose();
                 }
               }}

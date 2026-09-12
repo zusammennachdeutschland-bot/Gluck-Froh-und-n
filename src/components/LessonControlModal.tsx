@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
 import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, LessonReport, StudentSessionPerformance } from '../types';
 import { 
-  X, Play, Pause, Square, Video, MapPin, Send, Phone, CheckCircle2, 
+  X, Play, Pause, Square, Video, MapPin, Send, Phone, CheckCircle2, Check,
   Clock, AlertCircle, Sparkles, FileText, Award, DollarSign, ExternalLink, Navigation,
   Zap, UserPlus, XCircle, Ban, Edit2, Plus, Minus
 } from 'lucide-react';
@@ -58,6 +58,9 @@ export const LessonControlModal: React.FC = () => {
   // Brand new Session Report Fields (Unifying lesson & student details)
   const [lessonWhatWasTaught, setLessonWhatWasTaught] = useState('');
   const [lessonNextHomework, setLessonNextHomework] = useState('');
+  const [lessonRecordingLink, setLessonRecordingLink] = useState('');
+  const [lessonRecordingLink2, setLessonRecordingLink2] = useState('');
+  const [showRecordingLink2, setShowRecordingLink2] = useState(false);
   const [studentHomeworkDone, setStudentHomeworkDone] = useState<Record<string, 'yes' | 'no'>>({});
   const [studentDictationGrade, setStudentDictationGrade] = useState<Record<string, number>>({});
   const [studentExamGrade, setStudentExamGrade] = useState<Record<string, number>>({});
@@ -107,6 +110,11 @@ export const LessonControlModal: React.FC = () => {
       setAttendance(selectedLesson.report.attendanceStatus || 'present');
       setLessonWhatWasTaught(selectedLesson.report.teacherNotes || '');
       setLessonNextHomework(selectedLesson.report.homeworkDescription || '');
+      setLessonRecordingLink(selectedLesson.report.recordingLink || selectedLesson.recordingLink || '');
+      setLessonRecordingLink2(selectedLesson.report.recordingLink2 || selectedLesson.recordingLink2 || '');
+      if (selectedLesson.report?.recordingLink2 || selectedLesson.recordingLink2) {
+        setShowRecordingLink2(true);
+      }
       
       if (selectedLesson.report.studentAttendance) {
         setStudentAttendance(selectedLesson.report.studentAttendance);
@@ -174,6 +182,9 @@ export const LessonControlModal: React.FC = () => {
       setPackageChoice(selectedLesson.totalSessionsInPackage || 4);
       setLessonWhatWasTaught('');
       setLessonNextHomework('');
+      setLessonRecordingLink(selectedLesson.recordingLink || '');
+      setLessonRecordingLink2(selectedLesson.recordingLink2 || '');
+      setShowRecordingLink2(!!selectedLesson.recordingLink2);
       setStudentHomeworkDone({});
       setStudentDictationGrade({});
       setStudentExamGrade({});
@@ -234,6 +245,11 @@ export const LessonControlModal: React.FC = () => {
             if (draft.teacherNotes) setTeacherNotes(draft.teacherNotes);
             if (draft.lessonWhatWasTaught) setLessonWhatWasTaught(draft.lessonWhatWasTaught);
             if (draft.lessonNextHomework) setLessonNextHomework(draft.lessonNextHomework);
+            if (draft.lessonRecordingLink) setLessonRecordingLink(draft.lessonRecordingLink);
+            if (draft.lessonRecordingLink2) {
+              setLessonRecordingLink2(draft.lessonRecordingLink2);
+              setShowRecordingLink2(true);
+            }
             if (draft.studentHomeworkDone) setStudentHomeworkDone(draft.studentHomeworkDone);
             if (draft.studentDictationGrade) setStudentDictationGrade(draft.studentDictationGrade);
             if (draft.studentExamGrade) setStudentExamGrade(draft.studentExamGrade);
@@ -250,14 +266,14 @@ export const LessonControlModal: React.FC = () => {
 
   // Auto-save report draft as teacher types
   useEffect(() => {
-    if (selectedLesson && (lessonWhatWasTaught || lessonNextHomework || teacherNotes || homeworkTitle || homeworkDescription)) {
+    if (selectedLesson && (lessonWhatWasTaught || lessonNextHomework || lessonRecordingLink || lessonRecordingLink2 || teacherNotes || homeworkTitle || homeworkDescription)) {
       storage.setItem(`dl_draft_report_${selectedLesson.id}`, {
         attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription,
         quizScore, examScore, participationScore, teacherNotes,
-        lessonWhatWasTaught, lessonNextHomework, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance
+        lessonWhatWasTaught, lessonNextHomework, lessonRecordingLink, lessonRecordingLink2, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance
       });
     }
-  }, [selectedLesson?.id, attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription, quizScore, examScore, participationScore, teacherNotes, lessonWhatWasTaught, lessonNextHomework, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance]);
+  }, [selectedLesson?.id, attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription, quizScore, examScore, participationScore, teacherNotes, lessonWhatWasTaught, lessonNextHomework, lessonRecordingLink, lessonRecordingLink2, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance]);
 
   const handleSendPaymentReminder = () => {
     const teacherAr = getTeacherArabicName(profile, 'المعلم');
@@ -465,17 +481,43 @@ export const LessonControlModal: React.FC = () => {
     const defaultTaught = lessonWhatWasTaught.trim() || (isQuick ? `حصة تجريبية / سريعة: ${selectedLesson.studentName || selectedLesson.title}` : 'تم شرح درس اليوم ومراجعته');
     const defaultHw = lessonNextHomework.trim() || (isQuick ? 'متابعة ما تم شرحه والتطبيقات' : 'مراجعة وحل التدريبات');
 
+    const finalStudentAttendance = { ...studentAttendance };
+    const finalStudentHomeworkDone = { ...studentHomeworkDone };
+    const finalStudentDictationGrade = { ...studentDictationGrade };
+    const finalStudentExamGrade = { ...studentExamGrade };
+    const finalStudentNotes = { ...studentNotes };
+
+    activeLessonStudents.forEach(st => {
+      if (!finalStudentAttendance[st.id]) {
+        finalStudentAttendance[st.id] = 'present';
+      }
+      if (!finalStudentHomeworkDone[st.id]) {
+        finalStudentHomeworkDone[st.id] = 'yes';
+      }
+      if (finalStudentDictationGrade[st.id] === undefined) {
+        finalStudentDictationGrade[st.id] = 10;
+      }
+      if (finalStudentExamGrade[st.id] === undefined) {
+        finalStudentExamGrade[st.id] = 10;
+      }
+      if (finalStudentNotes[st.id] === undefined) {
+        finalStudentNotes[st.id] = '';
+      }
+    });
+
     const reportData: LessonReport = {
       attendanceStatus: attendance || 'present',
-      studentAttendance: isQuick ? (Object.keys(studentAttendance).length > 0 ? studentAttendance : { [qId]: 'present' }) : studentAttendance,
+      studentAttendance: isQuick ? (Object.keys(studentAttendance).length > 0 ? studentAttendance : { [qId]: 'present' }) : finalStudentAttendance,
       homeworkStatus: 'assigned',
       homeworkTitle: defaultHw,
       homeworkDescription: defaultHw,
       teacherNotes: defaultTaught,
-      studentHomeworkDone: isQuick ? (Object.keys(studentHomeworkDone).length > 0 ? studentHomeworkDone : { [qId]: 'yes' }) : studentHomeworkDone,
-      studentDictationGrade: isQuick ? (Object.keys(studentDictationGrade).length > 0 ? studentDictationGrade : { [qId]: 10 }) : studentDictationGrade,
-      studentExamGrade: isQuick ? (Object.keys(studentExamGrade).length > 0 ? studentExamGrade : { [qId]: 10 }) : studentExamGrade,
-      studentNotes: isQuick ? (Object.keys(studentNotes).length > 0 ? studentNotes : { [qId]: selectedLesson.quickNotes || '' }) : studentNotes,
+      recordingLink: lessonRecordingLink.trim() || undefined,
+      recordingLink2: lessonRecordingLink2.trim() || undefined,
+      studentHomeworkDone: isQuick ? (Object.keys(studentHomeworkDone).length > 0 ? studentHomeworkDone : { [qId]: 'yes' }) : finalStudentHomeworkDone,
+      studentDictationGrade: isQuick ? (Object.keys(studentDictationGrade).length > 0 ? studentDictationGrade : { [qId]: 10 }) : finalStudentDictationGrade,
+      studentExamGrade: isQuick ? (Object.keys(studentExamGrade).length > 0 ? studentExamGrade : { [qId]: 10 }) : finalStudentExamGrade,
+      studentNotes: isQuick ? (Object.keys(studentNotes).length > 0 ? studentNotes : { [qId]: selectedLesson.quickNotes || '' }) : finalStudentNotes,
       studentPerformance,
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
@@ -484,7 +526,9 @@ export const LessonControlModal: React.FC = () => {
     updateLesson(selectedLesson.id, { 
       status: 'completed',
       sessionNumber: currentSessionNumber,
-      totalSessionsInPackage: cycleTotalSessions
+      totalSessionsInPackage: cycleTotalSessions,
+      recordingLink: lessonRecordingLink.trim() || undefined,
+      recordingLink2: lessonRecordingLink2.trim() || undefined
     });
     endActiveLessonTimer();
     storage.removeItem(`dl_draft_report_${selectedLesson.id}`);
@@ -1041,17 +1085,30 @@ export const LessonControlModal: React.FC = () => {
                         <FileText className="w-3.5 h-3.5 text-primary" />
                         <span>{t('auto_unified_session_report')}</span>
                       </h3>
-                      {selectedLesson.status !== 'in_progress' && (
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2">
+                        {/* Quick Checkmark Save button in header */}
+                        <button
+                          type="button"
+                          onClick={() => handleSaveReport()}
+                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
+                          title={_t('حفظ البيانات والتعديلات فوراً (زر الصح)', 'Save Changes Now (Checkmark)', 'Speichern')}
+                        >
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          <span>{_t('حفظ', 'Save', 'Speichern')}</span>
+                        </button>
+                        {selectedLesson.status !== 'in_progress' && (
                           <button
                             type="button"
-                            onClick={() => setShowReportForm(false)}
+                            onClick={() => {
+                              setShowReportForm(false);
+                              setIsEditingReport(false);
+                            }}
                             className="text-[10px] text-text-muted hover:text-text-main font-bold hover:underline cursor-pointer"
                           >
                             {t('auto_hide_report')}
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
 
                     {/* Cycle Session Number Banner & Edit Button */}
@@ -1179,6 +1236,129 @@ export const LessonControlModal: React.FC = () => {
                         className="w-full px-3 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60"
                         placeholder={t('auto_enter_details_of_homework_pag')}
                       />
+                    </div>
+
+                    {/* Lecture / Session Recording Links */}
+                    <div className="space-y-2 bg-surface p-3 sm:p-3.5 rounded-xl border border-surface-border">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <Video className="w-4 h-4 text-primary" />
+                          <span className="text-xs font-black text-text-main">
+                            {_t('روابط تسجيل الحصة', 'Session Recordings', 'Aufnahmelinks der Lektion')}
+                          </span>
+                        </div>
+
+                        {/* Open Grain Button */}
+                        <a
+                          href="https://grain.com/app/meetings"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:hover:bg-purple-900/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 transition-all shadow-2xs active:scale-95 cursor-pointer"
+                          title="Open Grain Meetings"
+                        >
+                          <ExternalLink className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                          <span>Open Grain</span>
+                        </a>
+                      </div>
+
+                      {/* Part 1 Recording Input */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-text-muted">
+                          <span>{_t('التسجيل الأول (الجزء 1)', 'Recording 1 (Part 1)', 'Aufnahme 1 (Teil 1)')}</span>
+                          {!showRecordingLink2 && !lessonRecordingLink2 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowRecordingLink2(true)}
+                              className="text-[10px] font-black text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>{_t('+ إضافة تسجيل ثانٍ للحصة', '+ Add Part 2 Recording', '+ Teil 2 hinzufügen')}</span>
+                            </button>
+                          )}
+                        </div>
+                        <div className="relative flex items-center">
+                          <input
+                            type="url"
+                            value={lessonRecordingLink}
+                            onChange={(e) => setLessonRecordingLink(e.target.value)}
+                            className="w-full pl-3 pr-16 py-2 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/50 font-mono text-left"
+                            placeholder="https://... (Grain, Zoom, YouTube, Drive)"
+                            dir="ltr"
+                          />
+                          {lessonRecordingLink.trim() && (
+                            <div className="absolute right-2 flex items-center gap-1">
+                              <a
+                                href={lessonRecordingLink.trim()}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1 text-primary hover:text-primary-hover hover:bg-primary-soft rounded transition-colors"
+                                title={_t('فتح الرابط والتأكد منه', 'Open & Test Link', 'Link testen')}
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => setLessonRecordingLink('')}
+                                className="p-1 text-text-muted hover:text-red-500 rounded transition-colors"
+                                title={_t('مسح', 'Clear', 'Löschen')}
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Part 2 Recording Input */}
+                      {(showRecordingLink2 || lessonRecordingLink2.trim()) && (
+                        <div className="space-y-1 pt-1.5 border-t border-slate-100 dark:border-surface-border">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-text-muted">
+                            <span>{_t('التسجيل الثاني (الجزء 2)', 'Recording 2 (Part 2)', 'Aufnahme 2 (Teil 2)')}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLessonRecordingLink2('');
+                                setShowRecordingLink2(false);
+                              }}
+                              className="text-[10px] font-bold text-red-500 hover:underline flex items-center gap-0.5 cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                              <span>{_t('إلغاء الجزء الثاني', 'Remove Part 2', 'Teil 2 entfernen')}</span>
+                            </button>
+                          </div>
+                          <div className="relative flex items-center">
+                            <input
+                              type="url"
+                              value={lessonRecordingLink2}
+                              onChange={(e) => setLessonRecordingLink2(e.target.value)}
+                              className="w-full pl-3 pr-16 py-2 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/50 font-mono text-left"
+                              placeholder="https://... (Grain, Zoom, YouTube, Drive - Part 2)"
+                              dir="ltr"
+                            />
+                            {lessonRecordingLink2.trim() && (
+                              <div className="absolute right-2 flex items-center gap-1">
+                                <a
+                                  href={lessonRecordingLink2.trim()}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-1 text-primary hover:text-primary-hover hover:bg-primary-soft rounded transition-colors"
+                                  title={_t('فتح الرابط والتأكد منه', 'Open & Test Link', 'Link testen')}
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => setLessonRecordingLink2('')}
+                                  className="p-1 text-text-muted hover:text-red-500 rounded transition-colors"
+                                  title={_t('مسح', 'Clear', 'Löschen')}
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Individual Students Performance and Scores */}
@@ -1363,6 +1543,7 @@ export const LessonControlModal: React.FC = () => {
                                     performance={studentPerformance[st.id]}
                                     onChange={(perf) => setStudentPerformance(prev => ({ ...prev, [st.id]: perf }))}
                                     language='ar'
+                                    student={st}
                                   />
                                 </div>
                               ) : (
@@ -1380,7 +1561,7 @@ export const LessonControlModal: React.FC = () => {
 
                     {/* Validation Alerts */}
                     {!isReportFormValid && (
-                      <div className="p-2.5 bg-amber-50 dark:bg-amber-950/20 border border-dashed border-amber-300 dark:border-amber-900/50 rounded-xl space-y-1 text-xs text-amber-800 dark:text-amber-300">
+                      <div className="p-2.5 bg-amber-50 dark:bg-amber-950/20 border border-dashed border-amber-300 dark:border-amber-900/50 rounded-xl space-y-2 text-xs text-amber-800 dark:text-amber-300">
                         <div className="flex items-center gap-1 font-extrabold text-amber-950 dark:text-amber-200">
                           <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                           <span>{t('auto_please_complete_the_following')}</span>
@@ -1410,20 +1591,33 @@ export const LessonControlModal: React.FC = () => {
                       </div>
                     )}
 
-                    {/* End Session Button */}
-                    <button
-                      type="button"
-                      disabled={!isReportFormValid}
-                      onClick={() => handleSaveReport()}
-                      className={`w-full font-black text-xs py-2.5 rounded-xl shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                        isReportFormValid
-                          ? 'bg-primary hover:bg-primary-hover active:scale-95 text-white'
-                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed border border-slate-300/30'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>{t('auto_end_session_save_report')}</span>
-                    </button>
+                    {/* Action Buttons: Save Edits / End Session */}
+                    <div className="flex items-center gap-2">
+                      {isEditingReport && (
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingReport(false)}
+                          className="px-3 py-2.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted font-bold text-xs rounded-xl border border-surface-border transition-all cursor-pointer"
+                        >
+                          {_t('إلغاء التعديل', 'Cancel', 'Abbrechen')}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleSaveReport()}
+                        className="flex-1 font-black text-xs py-2.5 rounded-xl shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer bg-primary hover:bg-primary-hover active:scale-95 text-white"
+                      >
+                        <Check className="w-4 h-4 stroke-[3]" />
+                        <span>
+                          {isEditingReport
+                            ? _t('حفظ التعديلات في التقرير (زر الصح)', 'Save Edits (Checkmark)', 'Änderungen speichern')
+                            : (isReportFormValid
+                              ? t('auto_end_session_save_report')
+                              : _t('حفظ البيانات الحالية وإنهاء (زر الصح)', 'Save Current Data & Finish (Checkmark)', 'Daten speichern'))
+                          }
+                        </span>
+                      </button>
+                    </div>
                   </form>
                 );
               })()}
@@ -1520,6 +1714,8 @@ export const LessonControlModal: React.FC = () => {
         <ArabicParentReportModal
           lesson={{
             ...selectedLesson,
+            recordingLink: lessonRecordingLink.trim() || selectedLesson.recordingLink,
+            recordingLink2: lessonRecordingLink2.trim() || selectedLesson.recordingLink2,
             sessionNumber: currentSessionNumber || selectedLesson.sessionNumber || 1,
             totalSessionsInPackage: cycleTotalSessions || selectedLesson.totalSessionsInPackage || 4,
             report: {
@@ -1527,16 +1723,33 @@ export const LessonControlModal: React.FC = () => {
               attendanceStatus: attendance,
               studentAttendance: studentAttendance,
               homeworkStatus,
-              homeworkTitle,
-              homeworkDescription,
+              homeworkTitle: lessonNextHomework || homeworkTitle,
+              homeworkDescription: lessonNextHomework || homeworkDescription,
+              teacherNotes: lessonWhatWasTaught || teacherNotes,
+              recordingLink: lessonRecordingLink.trim() || selectedLesson.report?.recordingLink,
+              recordingLink2: lessonRecordingLink2.trim() || selectedLesson.report?.recordingLink2,
               paymentStatus,
               amountPaid: Number(amountPaid),
-              teacherNotes,
             }
           }}
           student={targetStudent || (isQuick ? quickStudentSynthetic : undefined)}
           profile={profile}
           onClose={() => setShowArabicParentReportModal(false)}
+          onSaveReport={(arabicReportText, extraFields) => {
+            if (extraFields?.recordingLink !== undefined) {
+              setLessonRecordingLink(extraFields.recordingLink);
+            }
+            if (extraFields?.recordingLink2 !== undefined) {
+              setLessonRecordingLink2(extraFields.recordingLink2);
+            }
+            saveLessonReport(selectedLesson.id, {
+              ...(selectedLesson.report || {}),
+              recordingLink: extraFields?.recordingLink !== undefined ? extraFields.recordingLink : (lessonRecordingLink.trim() || undefined),
+              recordingLink2: extraFields?.recordingLink2 !== undefined ? extraFields.recordingLink2 : (lessonRecordingLink2.trim() || undefined),
+              arabicFullGeneratedReport: arabicReportText,
+              ...(extraFields || {})
+            });
+          }}
           onGoToHomeScreen={closeLessonControl}
         />
       )}

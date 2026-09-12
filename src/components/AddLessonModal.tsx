@@ -5,7 +5,7 @@ import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
 import { PREDEFINED_GRADES } from '../data/initialData';
 import { GradeLevel, LessonType } from '../types';
-import { X, Calendar, Clock, AlertTriangle, Sparkles, Check, Video, MapPin, Repeat } from 'lucide-react';
+import { X, Calendar, Clock, AlertTriangle, Sparkles, Check, Video, MapPin, Repeat, ExternalLink, Plus } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface AddLessonModalProps {
@@ -24,6 +24,9 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
   const [durationMinutes, setDurationMinutes] = useState(60);
   const [type, setType] = useState<LessonType>('online');
   const [grade, setGrade] = useState<GradeLevel>('Grade 9');
+  const [recordingLink, setRecordingLink] = useState('');
+  const [recordingLink2, setRecordingLink2] = useState('');
+  const [showRecordingLink2, setShowRecordingLink2] = useState(false);
   
   // Weekly Recurring States (Default: True)
   const [isWeeklyRecurring, setIsWeeklyRecurring] = useState(true);
@@ -72,6 +75,11 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
         if (draft.durationMinutes) setDurationMinutes(draft.durationMinutes);
         if (draft.type) setType(draft.type);
         if (draft.grade) setGrade(draft.grade);
+        if (draft.recordingLink) setRecordingLink(draft.recordingLink);
+        if (draft.recordingLink2) {
+          setRecordingLink2(draft.recordingLink2);
+          setShowRecordingLink2(true);
+        }
       }
     }
     loadDraft();
@@ -80,9 +88,9 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
   // Save draft on changes
   useEffect(() => {
     storage.setItem('dl_draft_add_lesson', {
-      groupId, studentId, date, time, durationMinutes, type, grade, isWeeklyRecurring, repeatWeeks
+      groupId, studentId, date, time, durationMinutes, type, grade, isWeeklyRecurring, repeatWeeks, recordingLink, recordingLink2
     });
-  }, [groupId, studentId, date, time, durationMinutes, type, grade, isWeeklyRecurring, repeatWeeks]);
+  }, [groupId, studentId, date, time, durationMinutes, type, grade, isWeeklyRecurring, repeatWeeks, recordingLink, recordingLink2]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,7 +112,9 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
       status: 'scheduled',
       paymentStatus: 'pending',
       amountDue: selectedGroup ? Math.round(selectedGroup.monthlyPackagePrice / selectedGroup.sessionCount) : 250,
-      amountPaid: 0
+      amountPaid: 0,
+      recordingLink: recordingLink.trim() || undefined,
+      recordingLink2: recordingLink2.trim() || undefined,
     }, isWeeklyRecurring ? Number(repeatWeeks) : 1);
 
     storage.removeItem('dl_draft_add_lesson');
@@ -315,6 +325,83 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
                 Offline
               </button>
             </div>
+          </div>
+
+          {/* Optional Session Recording Links */}
+          <div className="space-y-2 bg-surface p-2.5 sm:p-3 rounded-xl border border-surface-border">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-1.5">
+                <Video className="w-3.5 h-3.5 text-primary" />
+                <span className="text-xs font-bold text-text-main">
+                  {profile.language === 'ar' ? 'روابط تسجيل الحصة (اختياري)' : 'Session Recordings (Optional)'}
+                </span>
+              </div>
+
+              {/* Open Grain Button */}
+              <a
+                href="https://grain.com/app/meetings"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:hover:bg-purple-900/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 transition-all shadow-2xs active:scale-95 cursor-pointer"
+                title="Open Grain Meetings"
+              >
+                <ExternalLink className="w-2.5 h-2.5 text-purple-600 dark:text-purple-400" />
+                <span>Open Grain</span>
+              </a>
+            </div>
+
+            {/* Part 1 */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[10px] font-bold text-text-muted">
+                <span>{profile.language === 'ar' ? 'التسجيل الأول (الجزء 1)' : 'Recording 1 (Part 1)'}</span>
+                {!showRecordingLink2 && !recordingLink2 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRecordingLink2(true)}
+                    className="text-[10px] font-bold text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                    <span>{profile.language === 'ar' ? '+ إضافة جزء ثانٍ' : '+ Add Part 2'}</span>
+                  </button>
+                )}
+              </div>
+              <input
+                type="url"
+                value={recordingLink}
+                onChange={(e) => setRecordingLink(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/50 font-mono text-left"
+                placeholder="https://... (Grain, Zoom, Drive)"
+                dir="ltr"
+              />
+            </div>
+
+            {/* Part 2 */}
+            {(showRecordingLink2 || recordingLink2.trim()) && (
+              <div className="space-y-1 pt-1 border-t border-slate-100 dark:border-surface-border">
+                <div className="flex items-center justify-between text-[10px] font-bold text-text-muted">
+                  <span>{profile.language === 'ar' ? 'التسجيل الثاني (الجزء 2)' : 'Recording 2 (Part 2)'}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecordingLink2('');
+                      setShowRecordingLink2(false);
+                    }}
+                    className="text-[10px] font-bold text-red-500 hover:underline flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                    <span>{profile.language === 'ar' ? 'إلغاء' : 'Remove'}</span>
+                  </button>
+                </div>
+                <input
+                  type="url"
+                  value={recordingLink2}
+                  onChange={(e) => setRecordingLink2(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/50 font-mono text-left"
+                  placeholder="https://... (Grain, Zoom, Drive - Part 2)"
+                  dir="ltr"
+                />
+              </div>
+            )}
           </div>
 
           {/* Submit */}

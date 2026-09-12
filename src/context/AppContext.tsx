@@ -2985,6 +2985,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           totalSessionsInPackage: updatedTotalSessions,
           paymentStatus: report.paymentStatus,
           amountPaid: finalAmountPaid,
+          recordingLink: report.recordingLink !== undefined ? report.recordingLink : l.recordingLink,
+          recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : l.recordingLink2,
           studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : l.studentPayments,
           report
         } as Lesson);

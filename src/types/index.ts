@@ -751,6 +751,8 @@ export interface LessonReport {
   studentExamGrade?: Record<string, number>;
   studentNotes?: Record<string, string>;
   studentPerformance?: Record<string, StudentSessionPerformance>;
+  recordingLink?: string;
+  recordingLink2?: string;
   savedAt?: string;
   scores?: any;
 }
@@ -797,6 +799,8 @@ export interface Lesson extends SyncableRecord {
   amountDue: number;
   amountPaid: number;
   meetingLink?: string;
+  recordingLink?: string;
+  recordingLink2?: string;
   locationAddress?: string;
   location?: string;
   report?: LessonReport;

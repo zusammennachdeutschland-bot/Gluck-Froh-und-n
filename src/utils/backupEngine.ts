@@ -633,9 +633,14 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
         quizScore: sanitizeOptionalNumber(report.quizScore),
         examScore: sanitizeOptionalNumber(report.examScore),
         dictationScore: sanitizeOptionalNumber(report.dictationScore),
-        arabicExamScore: sanitizeOptionalNumber(report.arabicExamScore)
+        arabicExamScore: sanitizeOptionalNumber(report.arabicExamScore),
+        recordingLink: typeof report.recordingLink === 'string' ? report.recordingLink.trim() : undefined,
+        recordingLink2: typeof report.recordingLink2 === 'string' ? report.recordingLink2.trim() : undefined
       };
     }
+
+    const rec1 = typeof l.recordingLink === 'string' ? l.recordingLink.trim() : (report?.recordingLink || undefined);
+    const rec2 = typeof l.recordingLink2 === 'string' ? l.recordingLink2.trim() : (report?.recordingLink2 || undefined);
 
     sanitizedLessons.push({
       ...l,
@@ -647,6 +652,8 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       studentId: typeof l.studentId === 'string' ? l.studentId : undefined,
       sessionNumber: sanitizeOptionalNumber(l.sessionNumber),
       price: sanitizeOptionalNumber(l.price),
+      recordingLink: rec1,
+      recordingLink2: rec2,
       report
     });
   }

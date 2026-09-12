@@ -50,6 +50,16 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
     const sessionLine = (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) 
       ? `⏱️ Sitzung: Session ${lesson.sessionNumber} von ${lesson.totalSessionsInPackage}\n` 
       : '';
+    const recLink1 = report?.recordingLink || lesson.recordingLink;
+    const recLink2 = report?.recordingLink2 || lesson.recordingLink2;
+    let recordingLine = '';
+    if (recLink1 && recLink2) {
+      recordingLine = `\n🎥 Aufnahmen der Lektion (Recordings):\n• Teil 1: ${recLink1}\n• Teil 2: ${recLink2}\n`;
+    } else if (recLink1) {
+      recordingLine = `\n🎥 Aufnahme der Lektion (Recording):\n${recLink1}\n`;
+    } else if (recLink2) {
+      recordingLine = `\n🎥 Aufnahme der Lektion (Recording):\n${recLink2}\n`;
+    }
     
     return `Guten Tag ${parentName}! 🇩🇪
 
@@ -57,7 +67,7 @@ Hier ist der Unterrichtsbericht für ${lesson.studentName || lesson.title} vom $
 
 📚 Kurs: ${lesson.title} (${lesson.grade})
 ${sessionLine}✅ Anwesenheit: ${attendance}
-📖 Hausaufgabe: ${homework} ${report?.homeworkTitle ? `("${report.homeworkTitle}")` : ''}
+📖 Hausaufgabe: ${homework} ${report?.homeworkTitle ? `("${report.homeworkTitle}")` : ''}${recordingLine}
 📊 Bewertung:
   • Quiz: ${report?.quizScore ?? 'N/A'}/100
   • Mitarbeit: ${report?.participationScore ?? 'N/A'}/100

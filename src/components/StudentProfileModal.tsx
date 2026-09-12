@@ -10,7 +10,7 @@ import {
   X, Phone, Send, FileText, Upload, Trash2, Calendar, Award, DollarSign, 
   BookOpen, CheckCircle2, AlertCircle, Download, FileCheck, User, Camera, Edit3, Save, Check, Sparkles,
   RefreshCw, Shield, Lock, MoreHorizontal, MessageSquare, Info, Star, GraduationCap, Users, Plus, Eye, Share2,
-  AtSign
+  AtSign, Video, ExternalLink, Copy, Play
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
@@ -22,19 +22,20 @@ import { isLikelyFemaleStudent } from '../utils/genderUtils';
 interface StudentProfileModalProps {
   student: Student;
   onClose: () => void;
-  initialTab?: 'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'edit';
+  initialTab?: 'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'recordings' | 'edit';
 }
 
 export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ student, onClose, initialTab = 'overview' }) => {
   const { groups, lessons, payments, certificates, profile, uploadStudentDocument, deleteStudentDocument, updateStudent, updateStudentCertificateName, deleteStudent, t, _t } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'edit'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'recordings' | 'edit'>(initialTab);
   const [selectedCategory, setSelectedCategory] = useState<'homework' | 'exam' | 'doc'>('homework');
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isIssueCertModalOpen, setIsIssueCertModalOpen] = useState(false);
   const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
   const [latinNameInput, setLatinNameInput] = useState(student.certificateName || '');
   const [isLatinSaved, setIsLatinSaved] = useState(false);
+  const [copiedRecId, setCopiedRecId] = useState<string | null>(null);
 
   // Editable Student Fields
   const [editName, setEditName] = useState(student.name);
@@ -62,6 +63,45 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
     return matchesGroup || matchesStudent;
   });
   const studentPayments = (payments || []).filter(p => p.studentId === student.id || p.studentName === student.name);
+
+  const studentRecordings = (studentLessons || []).filter(l => {
+    const r1 = l.recordingLink?.trim() || l.report?.recordingLink?.trim();
+    const r2 = l.recordingLink2?.trim() || l.report?.recordingLink2?.trim();
+    return Boolean(r1 || r2);
+  }).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || ''));
+
+  const handleCopyStudentRecLink = (lessonId: string, link: string) => {
+    navigator.clipboard.writeText(link);
+    setCopiedRecId(`${lessonId}_${link}`);
+    setTimeout(() => setCopiedRecId(null), 2000);
+  };
+
+  const handleShareStudentRecWhatsApp = (lesson: any) => {
+    const r1 = lesson.recordingLink?.trim() || lesson.report?.recordingLink?.trim();
+    const r2 = lesson.recordingLink2?.trim() || lesson.report?.recordingLink2?.trim();
+    const targetPhone = student.studentPhone || student.parentPhone || '';
+    
+    let msg = `🎥 *تسجيل الحصة للطالب/ة: ${student.name}*\n📅 التاريخ: ${lesson.date} (${lesson.time || ''})\n`;
+    if (lesson.sessionNumber) {
+      msg += `🔢 الحصة رقم: ${lesson.sessionNumber}\n`;
+    }
+    const topic = (lesson.report?.homeworkTitle || lesson.title || '').trim();
+    if (topic) {
+      msg += `📖 الموضوع: ${topic}\n`;
+    }
+    msg += `\n`;
+
+    if (r1 && r2) {
+      msg += `🎥 *تسجيلات الحصة (جزئين):*\n• الجزء الأول: ${r1}\n• الجزء الثاني: ${r2}\n`;
+    } else if (r1) {
+      msg += `🎥 *رابط تسجيل الحصة:* ${r1}\n`;
+    } else if (r2) {
+      msg += `🎥 *رابط تسجيل الحصة:* ${r2}\n`;
+    }
+
+    const url = buildWhatsAppUrl(targetPhone, msg);
+    window.open(url, '_blank');
+  };
 
   // Dynamic cycle pricing & package progress calculation
   const { cycleLength, amountDue, pricePerSession } = getStudentCyclePricing(student, assignedGroup);
@@ -432,6 +472,18 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
             >
               {_t(`الشهادات (${studentCertificates.length})`, `Certificates (${studentCertificates.length})`, `Zertifikate (${studentCertificates.length})`)}
             </button>
+
+            <button
+              onClick={() => setActiveTab('recordings')}
+              className={`px-3 sm:px-4 py-2 sm:py-2.5 transition-all whitespace-nowrap border-b-2 font-black flex items-center gap-1 ${
+                activeTab === 'recordings' 
+                  ? 'border-primary text-primary' 
+                  : 'border-transparent text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <Video className="w-3.5 h-3.5" />
+              <span>{_t(`التسجيلات (${studentRecordings.length})`, `Recordings (${studentRecordings.length})`, `Aufnahmen (${studentRecordings.length})`)}</span>
+            </button>
           </div>
 
           {/* Dynamic Tab Body Component View */}
@@ -502,6 +554,31 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                       <span className="font-mono font-black text-slate-800 dark:text-white">{student.joinedDate || '2026-08-10'}</span>
                     </div>
                   </div>
+
+                  {/* Quick Recordings summary row */}
+                  {studentRecordings.length > 0 && (
+                    <div 
+                      onClick={() => setActiveTab('recordings')}
+                      className="p-3 bg-purple-500/10 hover:bg-purple-500/15 border border-purple-500/20 rounded-2xl flex items-center justify-between cursor-pointer transition-all"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-purple-600 text-white rounded-xl shadow-2xs">
+                          <Video className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-text-main">
+                            {_t(`تسجيلات الحصص المتاحة (${studentRecordings.length})`, `Available Session Recordings (${studentRecordings.length})`, `Verfügbare Aufnahmen (${studentRecordings.length})`)}
+                          </p>
+                          <p className="text-[10px] text-text-muted">
+                            {_t('انقر لعرض ومشاركة تسجيلات الأجزاء مع الطالب أو ولي الأمر', 'Click to view and share part recordings', 'Klicken zum Anzeigen und Teilen')}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-black text-purple-600 dark:text-purple-400">
+                        {_t('عرض التسجيلات ←', 'View →', 'Anzeigen →')}
+                      </span>
+                    </div>
+                  )}
 
                   {student.notes && (
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
@@ -855,6 +932,169 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                         </div>
                       </div>
                     ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* RECORDINGS TAB */}
+            {activeTab === 'recordings' && (
+              <div className="space-y-4">
+                {/* Header with Grain Quick Access */}
+                <div className="flex items-center justify-between p-3.5 bg-gradient-to-r from-purple-500/10 via-violet-500/10 to-primary/10 border border-purple-200 dark:border-purple-900/40 rounded-2xl">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="p-2 bg-purple-600 text-white rounded-xl shadow-2xs shrink-0">
+                      <Video className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="font-black text-xs text-text-main truncate">
+                        {_t('تسجيلات حصص الطالب', 'Student Lesson Recordings', 'Schüler-Aufnahmen')}
+                      </h4>
+                      <p className="text-[10px] text-text-muted truncate">
+                        {studentRecordings.length} {_t('تسجيلات متاحة لمشاهدتها ومشاركتها', 'recordings available', 'Aufnahmen verfügbar')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <a
+                    href="https://grain.com/app/meetings"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open Grain</span>
+                  </a>
+                </div>
+
+                {/* Recordings List */}
+                <div className="space-y-2.5">
+                  {studentRecordings.length === 0 ? (
+                    <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+                      <Video className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
+                      <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                        {_t('لا توجد تسجيلات محفوظة لحصص هذا الطالب حتى الآن', 'No recordings saved for this student yet', 'Noch keine Aufnahmen vorhanden')}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        {_t('عند تسجيل تقرير الحصة وإضافة رابط Grain أو غيره، ستظهر هنا تلقائياً', 'Recordings added to lesson reports will appear here automatically', 'Werden automatisch aus den Berichten geladen')}
+                      </p>
+                    </div>
+                  ) : (
+                    studentRecordings.map((lesson) => {
+                      const r1 = lesson.recordingLink?.trim() || lesson.report?.recordingLink?.trim();
+                      const r2 = lesson.recordingLink2?.trim() || lesson.report?.recordingLink2?.trim();
+                      const attStatus = lesson.report?.studentAttendance?.[student.id] || (lesson.studentId === student.id ? lesson.report?.attendanceStatus : undefined);
+
+                      return (
+                        <div
+                          key={lesson.id}
+                          className="p-3.5 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-3xs hover:border-primary/40 transition-all space-y-2.5"
+                        >
+                          {/* Top: Session Badge, Title, Date & Time */}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="px-2 py-0.5 bg-primary/10 text-primary font-black text-[10px] rounded-md shrink-0 font-mono">
+                                {lesson.sessionNumber ? `حصة ${lesson.sessionNumber}` : `${lesson.date}`}
+                              </span>
+                              <span className="text-xs font-black text-slate-800 dark:text-white truncate">
+                                {lesson.title || lesson.groupName}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {attStatus && (
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                                  attStatus === 'present' 
+                                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400' 
+                                    : attStatus === 'late'
+                                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400'
+                                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400'
+                                }`}>
+                                  {attStatus === 'present' ? 'حاضر' : attStatus === 'late' ? 'متأخر' : 'غائب'}
+                                </span>
+                              )}
+                              <span className="text-[10px] text-slate-400 font-bold font-mono">
+                                {lesson.date}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Homework / Topic summary */}
+                          {(lesson.report?.homeworkTitle || lesson.whatWasTaught) && (
+                            <p className="text-[11px] text-slate-600 dark:text-slate-300 font-medium line-clamp-1">
+                              <span className="font-bold text-slate-800 dark:text-white">{_t('موضوع الحصة: ', 'Topic: ', 'Thema: ')}</span>
+                              {lesson.report?.homeworkTitle || lesson.whatWasTaught}
+                            </p>
+                          )}
+
+                          {/* Recording Links & Actions */}
+                          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                            {r1 && (
+                              <div className="inline-flex items-center gap-1 bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-900/50 rounded-xl p-1">
+                                <a
+                                  href={r1}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-2.5 py-1 bg-violet-600 hover:bg-violet-700 text-white font-black text-xs rounded-lg transition-all flex items-center gap-1 shadow-2xs"
+                                >
+                                  <Play className="w-3 h-3 fill-white" />
+                                  <span>{r2 ? _t('مشاهدة الجزء 1', 'Watch Part 1', 'Teil 1 ansehen') : _t('مشاهدة التسجيل', 'Watch Recording', 'Aufnahme ansehen')}</span>
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyStudentRecLink(lesson.id, r1)}
+                                  className="p-1.5 hover:bg-violet-200 dark:hover:bg-violet-900/50 text-violet-700 dark:text-violet-300 rounded-lg cursor-pointer transition-colors"
+                                  title={_t('نسخ رابط التسجيل', 'Copy Link', 'Link kopieren')}
+                                >
+                                  {copiedRecId === `${lesson.id}_${r1}` ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                            )}
+
+                            {r2 && (
+                              <div className="inline-flex items-center gap-1 bg-fuchsia-50 dark:bg-fuchsia-950/30 border border-fuchsia-200 dark:border-fuchsia-900/50 rounded-xl p-1">
+                                <a
+                                  href={r2}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-2.5 py-1 bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-black text-xs rounded-lg transition-all flex items-center gap-1 shadow-2xs"
+                                >
+                                  <Play className="w-3 h-3 fill-white" />
+                                  <span>{_t('مشاهدة الجزء 2', 'Watch Part 2', 'Teil 2 ansehen')}</span>
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyStudentRecLink(lesson.id, r2)}
+                                  className="p-1.5 hover:bg-fuchsia-200 dark:hover:bg-fuchsia-900/50 text-fuchsia-700 dark:text-fuchsia-300 rounded-lg cursor-pointer transition-colors"
+                                  title={_t('نسخ رابط الجزء 2', 'Copy Part 2 Link', 'Link kopieren')}
+                                >
+                                  {copiedRecId === `${lesson.id}_${r2}` ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Direct WhatsApp Share to student / parent */}
+                            <button
+                              type="button"
+                              onClick={() => handleShareStudentRecWhatsApp(lesson)}
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ml-auto"
+                              title={_t('إرسال التسجيل عبر واتساب', 'Send via WhatsApp', 'Per WhatsApp senden')}
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                              <span>{_t('إرسال لواتساب الطالب', 'Share WhatsApp', 'Per WhatsApp')}</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>

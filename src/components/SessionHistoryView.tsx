@@ -6,7 +6,7 @@ import { formatLocalDate } from '../utils/timeUtils';
 import { 
   History, Search, Filter, Calendar, Clock, CheckCircle2, XCircle, 
   AlertTriangle, Users, User, ArrowUpRight, FileText, Settings, Play, 
-  Check, DollarSign, BookOpen, ChevronRight, Award
+  Check, DollarSign, BookOpen, ChevronRight, Award, Video
 } from 'lucide-react';
 import { ArabicParentReportModal } from './ArabicParentReportModal';
 
@@ -372,7 +372,54 @@ export const SessionHistoryView: React.FC = () => {
                 )}
 
                 {/* Action Controls */}
-                <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-850">
+                <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-850 flex-wrap">
+                  {(() => {
+                    const r1 = lesson.recordingLink || lesson.report?.recordingLink;
+                    const r2 = lesson.recordingLink2 || lesson.report?.recordingLink2;
+                    if (r1 && r2) {
+                      return (
+                        <>
+                          <a
+                            href={r1}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2 py-1 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-700 dark:text-red-300 font-bold rounded text-xs border border-red-200 dark:border-red-900/40 flex items-center gap-1 cursor-pointer transition-all"
+                            title="مشاهدة الجزء الأول من تسجيل الحصة"
+                          >
+                            <Video className="w-3 h-3 text-red-600 dark:text-red-400" />
+                            <span>تسجيل (جزء 1)</span>
+                          </a>
+                          <a
+                            href={r2}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2 py-1 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-700 dark:text-red-300 font-bold rounded text-xs border border-red-200 dark:border-red-900/40 flex items-center gap-1 cursor-pointer transition-all"
+                            title="مشاهدة الجزء الثاني من تسجيل الحصة"
+                          >
+                            <Video className="w-3 h-3 text-red-600 dark:text-red-400" />
+                            <span>تسجيل (جزء 2)</span>
+                          </a>
+                        </>
+                      );
+                    }
+                    if (r1 || r2) {
+                      const link = (r1 || r2)!;
+                      return (
+                        <a
+                          href={link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2 py-1 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-700 dark:text-red-300 font-bold rounded text-xs border border-red-200 dark:border-red-900/40 flex items-center gap-1 cursor-pointer transition-all"
+                          title="مشاهدة تسجيل الحصة"
+                        >
+                          <Video className="w-3 h-3 text-red-600 dark:text-red-400" />
+                          <span>تسجيل الحصة</span>
+                        </a>
+                      );
+                    }
+                    return null;
+                  })()}
+
                   <button
                     onClick={() => setReportModalLesson(lesson)}
                     className="px-2 py-1 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft text-primary dark:text-primary font-bold rounded text-xs border border-primary-border dark:border-primary-border flex items-center gap-1 cursor-pointer transition-all"
@@ -409,6 +456,16 @@ export const SessionHistoryView: React.FC = () => {
               ...(extraFields || {}),
               savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             });
+            const lessonUpdates: Partial<Lesson> = {};
+            if (extraFields?.recordingLink !== undefined) {
+              lessonUpdates.recordingLink = extraFields.recordingLink;
+            }
+            if (extraFields?.recordingLink2 !== undefined) {
+              lessonUpdates.recordingLink2 = extraFields.recordingLink2;
+            }
+            if (Object.keys(lessonUpdates).length > 0) {
+              updateLesson(reportModalLesson.id, lessonUpdates);
+            }
             setReportModalLesson(null);
           }}
         />

@@ -1,12 +1,15 @@
 import React from 'react';
-import { StudentSessionPerformance, PerformanceLevel, ParticipationLevel, UnderstandingLevel, SpeakingLevel, FocusLevel, ProgressLevel } from '../types';
+import { Student, StudentSessionPerformance, PerformanceLevel, ParticipationLevel, UnderstandingLevel, SpeakingLevel, FocusLevel, ProgressLevel } from '../types';
 import { generateFeedback } from '../utils/feedbackGenerator';
+import { getStudentGender } from '../utils/genderUtils';
 import { RefreshCw, BarChart2 } from 'lucide-react';
 
 interface Props {
   performance?: StudentSessionPerformance;
   onChange: (perf: StudentSessionPerformance) => void;
   language?: 'ar' | 'en' | 'de';
+  student?: Student | { name?: string; gender?: 'male' | 'female' };
+  defaultGender?: 'male' | 'female';
 }
 
 const levels: { value: PerformanceLevel; label: string; color: string }[] = [
@@ -51,13 +54,21 @@ const progressOpts: { value: ProgressLevel; label: string }[] = [
   { value: 'needs_attention', label: '↓ تراجع' }
 ];
 
-export const StudentSessionPerformanceSelector: React.FC<Props> = ({ performance, onChange, language = 'ar' }) => {
+export const StudentSessionPerformanceSelector: React.FC<Props> = ({ 
+  performance, 
+  onChange, 
+  language = 'ar',
+  student,
+  defaultGender
+}) => {
   const perf = performance || {};
-  const currentGender: 'male' | 'female' = perf.gender || 'male';
+  // Automatically determine student's gender from profile settings or name
+  const autoResolvedGender: 'male' | 'female' = defaultGender || (student ? getStudentGender(student) : 'male');
+  const currentGender: 'male' | 'female' = perf.gender || autoResolvedGender;
   const lang: 'ar' | 'en' | 'de' = (language === 'de' || language === 'en') ? language : 'ar';
 
   const handleUpdate = (updates: Partial<StudentSessionPerformance>) => {
-    const activeGender = updates.gender !== undefined ? updates.gender : currentGender;
+    const activeGender = updates.gender !== undefined ? updates.gender : (perf.gender || autoResolvedGender);
     const newPerf: StudentSessionPerformance = { ...perf, ...updates, gender: activeGender };
     
     // Auto-generate feedback if level is selected
@@ -72,18 +83,14 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({ performance
     onChange(newPerf);
   };
 
-  const handleToggleGender = (targetGender: 'male' | 'female') => {
-    if (targetGender === currentGender && perf.generatedFeedback) return;
-    handleUpdate({ gender: targetGender });
-  };
-
   const handleRegenerate = (e: React.MouseEvent) => {
     e.preventDefault();
     if (perf.level) {
-      const generated = generateFeedback(perf, lang, perf.feedbackVariantId, currentGender);
+      const activeGender = perf.gender || autoResolvedGender;
+      const generated = generateFeedback(perf, lang, perf.feedbackVariantId, activeGender);
       onChange({
         ...perf,
-        gender: currentGender,
+        gender: activeGender,
         generatedFeedback: generated.feedback,
         feedbackVariantId: generated.variantId,
         feedbackLanguage: lang,
@@ -98,6 +105,11 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({ performance
         <div className="flex items-center gap-2">
           <BarChart2 className="w-3.5 h-3.5 text-text-muted" />
           <span className="text-[10.5px] font-black text-text-main">أداء الحصة (Session Performance)</span>
+        </div>
+
+        {/* Small subtle gender indicator (auto from student profile) */}
+        <div className="flex items-center gap-1 text-[10px] font-bold text-text-muted bg-surface px-2 py-0.5 rounded-md border border-surface-border">
+          <span>{currentGender === 'female' ? '👧 طالبة (مؤنث)' : '👦 طالب (مذكر)'}</span>
         </div>
       </div>
       
@@ -232,48 +244,16 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({ performance
                 <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2 pb-1.5 border-b border-surface-border/40">
                   <span className="text-[9.5px] font-black text-text-muted">النص التلقائي (Generated Feedback)</span>
                   
-                  <div className="flex items-center gap-1.5">
-                    {/* Small Gender Toggle Switcher (مذكر / مؤنث) */}
-                    <div className="inline-flex items-center p-0.5 bg-surface border border-surface-border rounded-md shadow-2xs">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleGender('male')}
-                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-all flex items-center gap-0.5 ${
-                          currentGender === 'male'
-                            ? 'bg-blue-600 text-white shadow-2xs'
-                            : 'text-text-muted hover:text-text-main hover:bg-surface-hover'
-                        }`}
-                        title="صياغة المذكر (طالب 👦)"
-                      >
-                        <span>👦</span>
-                        <span>مذكر</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleToggleGender('female')}
-                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-all flex items-center gap-0.5 ${
-                          currentGender === 'female'
-                            ? 'bg-rose-500 text-white shadow-2xs'
-                            : 'text-text-muted hover:text-text-main hover:bg-surface-hover'
-                        }`}
-                        title="صياغة المؤنث (طالبة 👧)"
-                      >
-                        <span>👧</span>
-                        <span>مؤنث</span>
-                      </button>
-                    </div>
-
-                    {/* Regenerate Button */}
-                    <button
-                      type="button"
-                      onClick={handleRegenerate}
-                      className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold text-primary bg-primary-soft hover:bg-primary/20 border border-primary-border transition-colors"
-                      title="تغيير صياغة النص التلقائي"
-                    >
-                      <RefreshCw className="w-2.5 h-2.5" />
-                      <span>صياغة أخرى</span>
-                    </button>
-                  </div>
+                  {/* Regenerate Button */}
+                  <button
+                    type="button"
+                    onClick={handleRegenerate}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-black text-primary bg-primary-soft hover:bg-primary/20 border border-primary-border transition-colors cursor-pointer"
+                    title="تغيير صياغة النص التلقائي"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>صياغة أخرى</span>
+                  </button>
                 </div>
 
                 <p className="text-[11px] font-semibold text-text-main leading-relaxed">

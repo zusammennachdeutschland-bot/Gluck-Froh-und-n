@@ -33,7 +33,8 @@ export const StudentsView: React.FC = () => {
   const [selectedGroupDay, setSelectedGroupDay] = useState<string>('all');
 
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [selectedStudentTab, setSelectedStudentTab] = useState<'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'edit'>('overview');
+  const [selectedStudentTab, setSelectedStudentTab] = useState<'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'recordings' | 'edit'>('overview');
+  const [selectedGroupInitialTab, setSelectedGroupInitialTab] = useState<'details' | 'recordings'>('details');
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [isAiImportModalOpen, setIsAiImportModalOpen] = useState(false);
@@ -585,6 +586,21 @@ export const StudentsView: React.FC = () => {
                               <span>{t('auto_payment_history')}</span>
                             </button>
 
+                            {/* Lesson Recordings */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedStudent(student);
+                                setSelectedStudentTab('recordings');
+                                setActiveMenuId(null);
+                              }}
+                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                            >
+                              <Video className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                              <span>{_t('تسجيلات الحصص', 'Lesson Recordings', 'Aufnahmen')}</span>
+                            </button>
+
                             <div className="border-t border-slate-100 dark:border-surface-border/80 my-1.5" />
 
                             {/* Send WhatsApp message & Phone Call */}
@@ -700,6 +716,7 @@ export const StudentsView: React.FC = () => {
                   : (group.monthlyPackagePrice || 0));
 
             const packageSessionsCount = (group.sessionCount && group.sessionCount > 1) ? group.sessionCount : (cycleInfo.sessionCount || 4);
+            const groupRecordingsCount = (lessons || []).filter(l => l.groupId === group.id && (l.recordingLink?.trim() || l.recordingLink2?.trim() || l.report?.recordingLink?.trim() || l.report?.recordingLink2?.trim())).length;
 
             return (
               <div
@@ -734,6 +751,20 @@ export const StudentsView: React.FC = () => {
                       <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1 py-0.2 rounded text-[9px] shrink-0">
                         {count} {t('daily_stats_students')}
                       </span>
+                      {groupRecordingsCount > 0 && (
+                        <span 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedGroup(group);
+                            setSelectedGroupInitialTab('recordings');
+                          }}
+                          className="font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900/40 px-1.5 py-0.2 rounded text-[9px] flex items-center gap-1 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/60 transition-all shrink-0"
+                          title={_t('عرض تسجيلات المجموعة', 'View Group Recordings', 'Aufnahmen der Gruppe anzeigen')}
+                        >
+                          <Video className="w-2.5 h-2.5 text-purple-600" />
+                          <span>{groupRecordingsCount} {_t('تسجيلات', 'Recs', 'Aufn.')}</span>
+                        </span>
+                      )}
                       <span className="font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft border border-primary-border/30 dark:border-primary-border px-1 py-0.2 rounded text-[9px] font-mono shrink-0">
                         {isPerLessonGroup
                           ? `${perSessionPrice} ${profile.currency} / ${_t('حصة', 'Session', 'Sitzung')}`
@@ -789,12 +820,27 @@ export const StudentsView: React.FC = () => {
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedGroup(group);
+                              setSelectedGroupInitialTab('details');
                               setActiveMenuId(null);
                             }}
                             className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                           >
                             <User className="w-4 h-4 text-primary" />
                             <span>{t('auto_view_details')}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedGroup(group);
+                              setSelectedGroupInitialTab('recordings');
+                              setActiveMenuId(null);
+                            }}
+                            className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                          >
+                            <Video className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                            <span>{_t('تسجيلات الحصص', 'Lesson Recordings', 'Aufnahmen')} ({groupRecordingsCount})</span>
                           </button>
 
                           <div className="border-t border-slate-100 dark:border-surface-border/80 my-1.5" />
@@ -978,7 +1024,11 @@ export const StudentsView: React.FC = () => {
       {selectedGroup && (
         <GroupProfileModal
           group={selectedGroup}
-          onClose={() => setSelectedGroup(null)}
+          initialTab={selectedGroupInitialTab}
+          onClose={() => {
+            setSelectedGroup(null);
+            setSelectedGroupInitialTab('details');
+          }}
         />
       )}
 

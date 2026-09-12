@@ -5,7 +5,7 @@ import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact, i
 import { getUpcomingGroupSchedule } from '../utils/scheduleUtils';
 import { 
   X, Send, Copy, Check, MessageSquare, AlertTriangle, Clock, Link as LinkIcon, 
-  MapPin, Video, Sparkles, Phone, Users, CheckCircle2, AtSign 
+  MapPin, Video, Sparkles, Phone, Users, CheckCircle2, AtSign, Plus 
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -25,6 +25,19 @@ const ARRIVAL_TIME_OPTIONS = [
   'نص ساعة',
 ];
 
+// Helper to format time to 12-hour clock (e.g. 18:00 -> 6:00)
+export const formatTimeTo12Hour = (timeStr?: string): string => {
+  if (!timeStr) return '';
+  const clean = timeStr.trim();
+  const [hStr, mStr] = clean.split(':');
+  if (!hStr || mStr === undefined) return clean;
+  let h = parseInt(hStr, 10);
+  if (isNaN(h)) return clean;
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}:${mStr}`;
+};
+
 export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   lesson,
   group,
@@ -37,8 +50,9 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   const targetGroup = group || (lesson?.groupId ? groups.find(g => g.id === lesson.groupId) : null);
   const groupStudents = targetGroup ? students.filter(s => s.groupId === targetGroup.id) : [];
   
-  // A group lesson ONLY applies if there are more than 1 student in the group
-  const isGroupLesson = Boolean(targetGroup && groupStudents.length > 1);
+  // Multi-student group flag
+  const isMultiStudentGroup = Boolean(targetGroup && groupStudents.length > 1);
+  const isSingleStudentGroup = Boolean(targetGroup && groupStudents.length <= 1);
   const groupWhatsAppLink = targetGroup?.whatsAppGroupLink || '';
   
   // Single Source of Truth for Schedule
@@ -69,7 +83,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   // Resolve target student / parent contact for 1-on-1 lessons (including groups with only 1 student)
   const targetStudent = lesson?.studentId 
     ? students.find(s => s.id === lesson.studentId)
-    : (groupStudents.length === 1 ? groupStudents[0] : (targetGroup && !isGroupLesson ? groupStudents[0] : null));
+    : (groupStudents.length === 1 ? groupStudents[0] : (targetGroup && !isMultiStudentGroup ? groupStudents[0] : null));
 
   const resolvedContact = resolveStudentWhatsAppContact(targetStudent, {
     quickParentPhone: recipientPhone || lesson?.quickParentPhone,
@@ -82,6 +96,12 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   const [whatsAppGroupLinkInput, setWhatsAppGroupLinkInput] = useState(groupWhatsAppLink);
   const [isSavingWhatsAppLink, setIsSavingWhatsAppLink] = useState(false);
   const [whatsAppSaveSuccess, setWhatsAppSaveSuccess] = useState(false);
+  const [showWhatsAppGroupSection, setShowWhatsAppGroupSection] = useState(Boolean(groupWhatsAppLink));
+  
+  // Mode selection for single-student groups or individual
+  const [sendMode, setSendMode] = useState<'individual' | 'group'>(
+    isMultiStudentGroup ? 'group' : (groupWhatsAppLink ? 'group' : 'individual')
+  );
 
   const [selectedArrivalTime, setSelectedArrivalTime] = useState('15 دقيقة');
   const [zoomLink, setZoomLink] = useState(initialZoomLink);
@@ -92,12 +112,14 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
 
   useEffect(() => {
     setWhatsAppGroupLinkInput(groupWhatsAppLink);
+    if (groupWhatsAppLink) {
+      setShowWhatsAppGroupSection(true);
+    }
   }, [groupWhatsAppLink]);
 
-  // Format lesson time cleanly for display
+  // Format lesson time cleanly for display (12-hour format with period)
   const formattedLessonTime = React.useMemo(() => {
     if (!rawTime) return 'المحدد';
-    // If format is HH:MM, append Egyptian time suffix or keep clean string
     const [hStr, mStr] = rawTime.split(':');
     if (hStr && mStr) {
       let h = parseInt(hStr, 10);
@@ -111,17 +133,18 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     return displayDay ? `يوم ${displayDay} الساعة ${rawTime}` : rawTime;
   }, [rawTime, displayDay]);
 
-  // Generate exact Arabic template according to requirements
+  // Generate exact Arabic template according to requirements (Always 12-hour system)
   const generatedMessage = React.useMemo(() => {
+    const time12 = formatTimeTo12Hour(rawTime);
     if (isOnline) {
-      return `السلام عليكم\n\nهنبدأ إن شاء الله الساعة ${rawTime}.\n\nلينك الحصة:\n\n${zoomLink}`;
+      return `السلام عليكم\n\nهنبدأ إن شاء الله الساعة ${time12}.\n\nلينك الحصة:\n\n${zoomLink}`;
     } else {
-      if (isGroupLesson) {
+      if (isMultiStudentGroup || (targetGroup && sendMode === 'group')) {
         return `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل للمجموعة خلال ${selectedArrivalTime} إن شاء الله.`;
       }
       return `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${selectedArrivalTime} إن شاء الله.`;
     }
-  }, [isOnline, rawTime, zoomLink, selectedArrivalTime, isGroupLesson]);
+  }, [isOnline, rawTime, zoomLink, selectedArrivalTime, isMultiStudentGroup, targetGroup, sendMode]);
 
   const activeMessage = customMessage !== null ? customMessage : generatedMessage;
 
@@ -166,11 +189,13 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
 
   const handleSendWhatsApp = () => {
     if (isOnline && !zoomLink.trim()) {
-      alert('برجاء إضافة رابط الزووم للجروب أولاً قبل إرسال التذكير.');
+      alert('برجاء إضافة رابط الزووم أولاً قبل إرسال التذكير.');
       return;
     }
 
-    if (isGroupLesson) {
+    const isGroupMode = isMultiStudentGroup || (targetGroup && sendMode === 'group');
+
+    if (isGroupMode) {
       const activeLink = whatsAppGroupLinkInput.trim() || groupWhatsAppLink;
       try {
         navigator.clipboard.writeText(activeMessage);
@@ -204,7 +229,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
 
   const handleSendToFirstParent = (studentToTarget = firstStudent) => {
     if (!studentToTarget) {
-      alert('لا يوجد طلاب مسجلين في هذه المجموعة.');
+      alert('لا يوجد طالب مسجل.');
       return;
     }
     const resolved = resolveStudentWhatsAppContact(studentToTarget);
@@ -217,8 +242,9 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       return;
     }
 
+    const time12 = formatTimeTo12Hour(rawTime);
     const parentMsg = isOnline 
-      ? `السلام عليكم\n\nهنبدأ إن شاء الله الساعة ${rawTime}.\n\nلينك الحصة:\n\n${zoomLink}`
+      ? `السلام عليكم\n\nهنبدأ إن شاء الله الساعة ${time12}.\n\nلينك الحصة:\n\n${zoomLink}`
       : `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${selectedArrivalTime} إن شاء الله.`;
 
     const finalMsg = customMessage !== null ? customMessage : parentMsg;
@@ -300,7 +326,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           )}
 
           {/* Recipient Destination Section: Group vs 1-on-1 Student */}
-          {isGroupLesson ? (
+          {isMultiStudentGroup ? (
             <div className="space-y-2 bg-primary-soft/30 border border-primary-border/60 p-3 sm:p-3.5 rounded-2xl">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-black text-text-main flex items-center gap-1.5">
@@ -357,7 +383,129 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                 )}
               </div>
             </div>
+          ) : isSingleStudentGroup ? (
+            /* SINGLE-STUDENT GROUP: Supports both individual phone AND WhatsApp group */
+            <div className="space-y-2.5 bg-primary-soft/20 border border-primary-border/50 p-3 sm:p-3.5 rounded-2xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-primary" />
+                  <span className="text-xs font-black text-text-main">
+                    وجهة الإرسال ({targetGroup?.name}):
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold bg-primary-soft text-primary border border-primary-border px-2 py-0.5 rounded-full">
+                  طالب واحد في المجموعة
+                </span>
+              </div>
+
+              {/* Mode Switcher */}
+              <div className="flex bg-surface p-1 rounded-xl border border-surface-border gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSendMode('individual')}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    sendMode === 'individual'
+                      ? 'bg-primary text-white shadow-xs font-black'
+                      : 'text-text-muted hover:text-text-main'
+                  }`}
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  <span>رقم ولي الأمر {targetStudent ? `(${targetStudent.name})` : ''}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSendMode('group');
+                    setShowWhatsAppGroupSection(true);
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    sendMode === 'group'
+                      ? 'bg-primary text-white shadow-xs font-black'
+                      : 'text-text-muted hover:text-text-main'
+                  }`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>جروب الواتساب</span>
+                </button>
+              </div>
+
+              {/* Individual Phone Input */}
+              {sendMode === 'individual' && (
+                <div className="space-y-1 pt-1">
+                  <div className="flex items-center justify-between text-[11px] text-text-muted">
+                    <span className="flex items-center gap-1 font-bold">
+                      {isWhatsAppUsername(phone) ? <AtSign className="w-3 h-3 text-primary" /> : <Phone className="w-3 h-3 text-primary" />}
+                      رقم أو يوزر نيم ولي أمر الطالب:
+                    </span>
+                    {targetStudent && <span className="font-bold">{targetStudent.name}</span>}
+                  </div>
+                  <input
+                    type="text"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="010xxxxxxxx أو @username"
+                    className="w-full bg-background border border-surface-border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    dir="ltr"
+                  />
+                  {!showWhatsAppGroupSection && !groupWhatsAppLink && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowWhatsAppGroupSection(true);
+                        setSendMode('group');
+                      }}
+                      className="mt-1 text-[11px] text-primary font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>إضافة رابط جروب واتساب لهذه المجموعة</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* WhatsApp Group Link Input */}
+              {(sendMode === 'group' || showWhatsAppGroupSection) && (
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-[11px] font-bold text-text-muted flex items-center gap-1">
+                    <LinkIcon className="w-3 h-3 text-primary" />
+                    <span>رابط جروب الواتساب:</span>
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={whatsAppGroupLinkInput}
+                      onChange={(e) => setWhatsAppGroupLinkInput(e.target.value)}
+                      placeholder="https://chat.whatsapp.com/..."
+                      className={`flex-1 bg-background border rounded-xl px-3 py-2 text-xs font-mono focus:outline-none ${
+                        !whatsAppGroupLinkInput.trim()
+                          ? 'border-amber-400 focus:ring-2 focus:ring-amber-500/50'
+                          : 'border-surface-border focus:ring-2 focus:ring-primary/40'
+                      }`}
+                      dir="ltr"
+                    />
+                    {targetGroup && (
+                      <button
+                        type="button"
+                        onClick={handleSaveWhatsAppGroupLink}
+                        disabled={isSavingWhatsAppLink || !whatsAppGroupLinkInput.trim()}
+                        className="bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-black text-xs px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        {whatsAppSaveSuccess ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-white" />
+                            <span className="text-xs">تم الحفظ</span>
+                          </>
+                        ) : (
+                          <span className="text-xs">حفظ الرابط</span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
+            /* 1-on-1 LESSON WITHOUT GROUP */
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-text-muted flex items-center gap-1.5">
@@ -548,38 +696,66 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           >
             <Send className="w-4 h-4 fill-white" />
             <span>
-              {isGroupLesson 
+              {isMultiStudentGroup || (targetGroup && sendMode === 'group')
                 ? ((whatsAppGroupLinkInput.trim() || groupWhatsAppLink) 
                     ? `إرسال لجروب الواتساب (${targetGroup?.name || 'الجروب'})` 
                     : `نسخ وفتح واتساب (${targetGroup?.name || 'الجروب'})`)
-                : 'إرسال عبر واتساب (WhatsApp)'}
+                : `إرسال عبر واتساب ${targetStudent ? `(${targetStudent.name})` : ''}`}
             </span>
           </button>
 
-          {/* Send directly to First Parent in the Group (Under Send to Group) */}
-          {isGroupLesson && firstStudent && (() => {
-            const firstResolved = resolveStudentWhatsAppContact(firstStudent);
-            return (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleSendToFirstParent(firstStudent);
-                }}
-                className="w-full bg-primary-soft/70 hover:bg-primary-soft border border-primary-border text-primary font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[40px]"
-              >
-                {firstResolved.isUsername ? (
-                  <AtSign className="w-3.5 h-3.5 text-primary shrink-0" />
-                ) : (
-                  <Phone className="w-3.5 h-3.5 text-primary shrink-0" />
-                )}
-                <span>
-                  إرسال لولي أمر ({firstStudent.name})
-                  {firstResolved.hasContact ? ` - ${firstResolved.display}` : ' (غير مسجل)'}
-                </span>
-              </button>
-            );
-          })()}
+          {/* Secondary Send Option: Send to Parent when in Group Mode, or Send to Group when in Individual Mode */}
+          {targetGroup && (
+            (isMultiStudentGroup || sendMode === 'group') ? (
+              firstStudent && (() => {
+                const firstResolved = resolveStudentWhatsAppContact(firstStudent);
+                return (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSendToFirstParent(firstStudent);
+                    }}
+                    className="w-full bg-primary-soft/70 hover:bg-primary-soft border border-primary-border text-primary font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[40px]"
+                  >
+                    {firstResolved.isUsername ? (
+                      <AtSign className="w-3.5 h-3.5 text-primary shrink-0" />
+                    ) : (
+                      <Phone className="w-3.5 h-3.5 text-primary shrink-0" />
+                    )}
+                    <span>
+                      إرسال فردي لولي أمر ({firstStudent.name})
+                      {firstResolved.hasContact ? ` - ${firstResolved.display}` : ' (غير مسجل)'}
+                    </span>
+                  </button>
+                );
+              })()
+            ) : (
+              (whatsAppGroupLinkInput.trim() || groupWhatsAppLink) && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const activeLink = whatsAppGroupLinkInput.trim() || groupWhatsAppLink;
+                    try {
+                      navigator.clipboard.writeText(activeMessage);
+                    } catch (err) {}
+                    if (activeLink) {
+                      window.open(activeLink, '_blank');
+                    } else {
+                      window.open(buildWhatsAppUrl('', activeMessage), '_blank');
+                    }
+                  }}
+                  className="w-full bg-primary-soft/70 hover:bg-primary-soft border border-primary-border text-primary font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[40px]"
+                >
+                  <Users className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span>
+                    إرسال لجروب الواتساب بدلاً من ذلك ({targetGroup.name})
+                  </span>
+                </button>
+              )
+            )
+          )}
 
           {/* Secondary Actions (Copy & Cancel) */}
           <div className="flex items-center gap-2 w-full">

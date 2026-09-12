@@ -17,6 +17,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
   const [selectedGroup, setSelectedGroup] = useState<PendingFollowUp | null>(
     initialGroupId ? pendingFollowUps.find(p => p.groupId === initialGroupId) || null : null
   );
+  const [followUpStyle, setFollowUpStyle] = useState<'egyptian' | 'standard'>('egyptian');
 
   const handleMarkDone = (lessonId: string) => {
     updateLesson(lessonId, { homeworkFollowUpSentAt: new Date().toISOString() });
@@ -117,22 +118,40 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
 
     const messages = Object.entries(byContact).map(([contact, { names, isUsername, display }]) => {
       const isMultiple = names.length > 1;
-      let message = `السلام عليكم ورحمة الله وبركاته،\n\n`;
-      if (isMultiple) {
-        const targetStudents = groupStudents.filter(s => names.includes(s.name));
-        const allFemale = targetStudents.length > 0 && targetStudents.every(s => (s.gender === 'female' || (!s.gender && isLikelyFemaleStudent(s.name))));
-        message += allFemale ? `تذكير بمتابعة واجب الطالبات:\n` : `تذكير بمتابعة واجب الطلاب:\n`;
-        names.forEach(name => {
-          message += `• ${name}\n`;
-        });
+      let message = '';
+      
+      if (followUpStyle === 'egyptian') {
+        message += `أهلاً بحضرتك يا فندم 👋\n\n`;
+        if (isMultiple) {
+          const targetStudents = groupStudents.filter(s => names.includes(s.name));
+          const allFemale = targetStudents.length > 0 && targetStudents.every(s => (s.gender === 'female' || (!s.gender && isLikelyFemaleStudent(s.name))));
+          message += allFemale ? `تذكير بمتابعة واجب الطالبات:\n` : `تذكير بمتابعة واجب الطلاب:\n`;
+          names.forEach(name => {
+            message += `• ${name}\n`;
+          });
+        } else {
+          const singleStudent = groupStudents.find(s => s.name === names[0]);
+          const role = singleStudent ? getStudentRoleLabel(singleStudent) : 'الطالب';
+          message += `تذكير بمتابعة واجب ${role}: *${names[0]}* 🇩🇪\n`;
+        }
+        message += `\n📖 *اللي اتشرح في الحصة:* ${lessonTitle}\n📝 *الواجب المطلوب:* ${homeworkText}\n\nبرجاء التأكد من حل الواجب قبل موعد الحصة القادمة إن شاء الله.\nشكراً لمتابعة واهتمام حضرتك 🌸`;
       } else {
-        const singleStudent = groupStudents.find(s => s.name === names[0]);
-        const role = singleStudent ? getStudentRoleLabel(singleStudent) : 'الطالب';
-        message += `تذكير بمتابعة واجب ${role}: *${names[0]}*\n`;
+        message += `السلام عليكم ورحمة الله وبركاته،\n\n`;
+        if (isMultiple) {
+          const targetStudents = groupStudents.filter(s => names.includes(s.name));
+          const allFemale = targetStudents.length > 0 && targetStudents.every(s => (s.gender === 'female' || (!s.gender && isLikelyFemaleStudent(s.name))));
+          message += allFemale ? `تذكير بمتابعة واجب الطالبات:\n` : `تذكير بمتابعة واجب الطلاب:\n`;
+          names.forEach(name => {
+            message += `• ${name}\n`;
+          });
+        } else {
+          const singleStudent = groupStudents.find(s => s.name === names[0]);
+          const role = singleStudent ? getStudentRoleLabel(singleStudent) : 'الطالب';
+          message += `تذكير بمتابعة واجب ${role}: *${names[0]}*\n`;
+        }
+        message += `\n📖 *عنوان الدرس:* ${lessonTitle}\n📝 *الواجب:* ${homeworkText}\n\nبرجاء التأكد من حل الواجب قبل موعد الحصة القادمة.\nشكراً لحضراتكم.`;
       }
-      
-      message += `\n📖 *عنوان الدرس:* ${lessonTitle}\n📝 *الواجب:* ${homeworkText}\n\nبرجاء التأكد من حل الواجب قبل موعد الحصة القادمة.\nشكراً لحضراتكم.`;
-      
+
       if (teacherSign) {
         message += `\n\nمع تحيات: *${teacherSign}*`;
       }
@@ -195,7 +214,34 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
             </div>
 
             <div className="space-y-4">
-              <h3 className="text-sm font-black text-text-main">رسائل المتابعة لأولياء الأمور</h3>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h3 className="text-sm font-black text-text-main">رسائل المتابعة لأولياء الأمور</h3>
+                
+                <div className="inline-flex items-center p-0.5 bg-surface border border-surface-border rounded-lg shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setFollowUpStyle('egyptian')}
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${
+                      followUpStyle === 'egyptian'
+                        ? 'bg-amber-500 text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    🇪🇬 مصري راقي
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFollowUpStyle('standard')}
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${
+                      followUpStyle === 'standard'
+                        ? 'bg-primary text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    📜 فصحى
+                  </button>
+                </div>
+              </div>
               
               {messages.length === 0 ? (
                 <p className="text-sm text-text-muted">لا توجد أرقام هواتف أو يوزرات واتساب مسجلة للطلاب أو أولياء الأمور في هذه المجموعة.</p>
