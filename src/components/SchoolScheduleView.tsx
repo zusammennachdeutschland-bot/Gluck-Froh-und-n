@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { SchoolSettings, SchoolPeriodRecord, SchoolPeriodSettings, SchoolDayPresence } from '../types';
+import { SchoolSettings, SchoolPeriodRecord, SchoolPeriodSettings, SchoolDayPresence, CustomTimedSession } from '../types';
 import { 
   BookOpen, Sparkles, Copy, Check, Upload, AlertTriangle, Info,
   Plus, Trash2, Calendar, Clock, Edit3, X, CheckCircle2, RefreshCw, FileText,
-  Download, Share2
+  Download, Share2, Tag, MapPin
 } from 'lucide-react';
 import { 
   getSchoolSettings, 
   calculatePeriodsTimings, 
   parseTimeToMinutes,
-  formatMinutesToTime 
+  formatMinutesToTime,
+  getCustomSessionsForPeriod,
+  getUnmatchedCustomSessions,
+  getMergedDayScheduleItems,
+  UnifiedDayTimelineItem
 } from '../utils/schoolUtils';
 import { SchoolScheduleExportModal } from './SchoolScheduleExportModal';
 
@@ -27,6 +31,18 @@ export const SchoolScheduleView: React.FC = () => {
   const [className, setClassName] = useState('');
   const [notes, setNotes] = useState('');
 
+  // Custom Timed Session Modal & Form State
+  const [isCustomSessionModalOpen, setIsCustomSessionModalOpen] = useState(false);
+  const [editingCustomSession, setEditingCustomSession] = useState<CustomTimedSession | null>(null);
+  const [customDayKey, setCustomDayKey] = useState<string>('0');
+  const [customStartTime, setCustomStartTime] = useState<string>('14:30');
+  const [customEndTime, setCustomEndTime] = useState<string>('15:30');
+  const [customClassName, setCustomClassName] = useState<string>('');
+  const [customSubjectName, setCustomSubjectName] = useState<string>('');
+  const [customRoom, setCustomRoom] = useState<string>('');
+  const [customNotes, setCustomNotes] = useState<string>('');
+  const [customSessionType, setCustomSessionType] = useState<string>('حصة إضافية / تقوية');
+
   // AI Import State
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importText, setImportText] = useState('');
@@ -42,6 +58,109 @@ export const SchoolScheduleView: React.FC = () => {
   const [isConfirmResetOpen, setIsConfirmResetOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const handleOpenAddCustomSession = (prefillDayKey?: string) => {
+    setEditingCustomSession(null);
+    setCustomDayKey(prefillDayKey || selectedDay || '0');
+    setCustomStartTime('14:30');
+    setCustomEndTime('15:30');
+    setCustomClassName('');
+    setCustomSubjectName('');
+    setCustomRoom('');
+    setCustomNotes('');
+    setCustomSessionType('حصة إضافية / تقوية');
+    setIsCustomSessionModalOpen(true);
+  };
+
+  const handleOpenEditCustomSession = (session: CustomTimedSession) => {
+    setEditingCustomSession(session);
+    setCustomDayKey(session.dayKey);
+    setCustomStartTime(session.startTime || '14:30');
+    setCustomEndTime(session.endTime || '15:30');
+    setCustomClassName(session.className || '');
+    setCustomSubjectName(session.subjectName || '');
+    setCustomRoom(session.room || '');
+    setCustomNotes(session.notes || '');
+    setCustomSessionType(session.sessionType || 'حصة إضافية / تقوية');
+    setIsCustomSessionModalOpen(true);
+  };
+
+  const handleSaveCustomSession = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!customClassName.trim()) {
+      alert(_t('يرجى إدخال اسم الفصل أو المجموعة', 'Please enter class or group name', 'Bitte Klassen-/Gruppennamen eingeben'));
+      return;
+    }
+
+    const existingCustoms: CustomTimedSession[] = currentSettings.customTimedSessions || [];
+    let updatedCustoms: CustomTimedSession[];
+    const nowTime = Date.now();
+
+    const teacherId = profile?.id || 'hod';
+    const teacherName = profile?.displayName || profile?.name || 'المعلم';
+
+    if (editingCustomSession) {
+      updatedCustoms = existingCustoms.map(s => {
+        if (s.id === editingCustomSession.id) {
+          return {
+            ...s,
+            dayKey: customDayKey,
+            startTime: customStartTime,
+            endTime: customEndTime,
+            className: customClassName.trim(),
+            subjectName: customSubjectName.trim(),
+            room: customRoom.trim() || undefined,
+            notes: customNotes.trim() || undefined,
+            sessionType: customSessionType,
+            updatedAt: nowTime
+          };
+        }
+        return s;
+      });
+    } else {
+      const newSession: CustomTimedSession = {
+        id: `custom_sess_${nowTime}_${Math.random().toString(36).substring(2, 7)}`,
+        teacherId,
+        teacherName,
+        dayKey: customDayKey,
+        startTime: customStartTime,
+        endTime: customEndTime,
+        className: customClassName.trim(),
+        subjectName: customSubjectName.trim(),
+        room: customRoom.trim() || undefined,
+        notes: customNotes.trim() || undefined,
+        sessionType: customSessionType,
+        createdAt: new Date().toISOString(),
+        updatedAt: nowTime
+      };
+      updatedCustoms = [...existingCustoms, newSession];
+    }
+
+    const updatedSettings: SchoolSettings = {
+      ...currentSettings,
+      customTimedSessions: updatedCustoms
+    };
+
+    updateProfile({ schoolSettings: updatedSettings });
+    setIsCustomSessionModalOpen(false);
+    setToastMessage(_t('تم حفظ الحصة المخصصة بنجاح ✅', 'Custom session saved successfully ✅', 'Spezielle Stunde erfolgreich gespeichert ✅'));
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleDeleteCustomSession = (sessionId: string) => {
+    const existingCustoms: CustomTimedSession[] = currentSettings.customTimedSessions || [];
+    const updatedCustoms = existingCustoms.filter(s => s.id !== sessionId);
+
+    const updatedSettings: SchoolSettings = {
+      ...currentSettings,
+      customTimedSessions: updatedCustoms
+    };
+
+    updateProfile({ schoolSettings: updatedSettings });
+    setIsCustomSessionModalOpen(false);
+    setToastMessage(_t('تم حذف الحصة بنجاح', 'Session deleted successfully', 'Stunde gelöscht'));
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   const handleFullReset = async () => {
     if (isResetting) return;
@@ -471,7 +590,17 @@ KEY CONSTRAINTS & RULES:
           <span className="text-primary font-black">{totalWeeklyLessons} {_t('حصة أسبوعية', 'Weekly Lessons', 'Wochenstunden')}</span>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            onClick={() => handleOpenAddCustomSession(selectedDay)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs font-bold transition-all active:scale-95 border border-indigo-200 dark:border-indigo-800 shrink-0 cursor-pointer shadow-2xs"
+            id="add-custom-session-btn"
+            title={_t('إضافة حصة بتوقيت مخصص (خارج الأوقات النمطية أو في وقت محدد)', 'Add custom timed session', 'Spezielle Stunde hinzufügen')}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>{_t('+ حصة بتوقيت مخصص', '+ Custom Session', '+ Spezielle Stunde')}</span>
+          </button>
+
           <button
             onClick={() => setIsExportModalOpen(true)}
             className="flex items-center gap-1.5 px-2.5 py-1.5 bg-surface hover:bg-surface-hover text-text-main rounded-lg text-xs font-bold transition-all active:scale-95 border border-surface-border shrink-0 cursor-pointer shadow-2xs"
@@ -494,7 +623,7 @@ KEY CONSTRAINTS & RULES:
         </div>
       </div>
 
-      {isEmpty ? (
+      {isEmpty && (currentSettings.customTimedSessions || []).length === 0 ? (
         <div className="p-6 sm:p-8 rounded-2xl bg-white dark:bg-gray-900 border border-slate-150/60 dark:border-gray-850 text-center space-y-3 shadow-xs" id="school-empty-state">
           <div className="w-12 h-12 rounded-xl bg-primary-soft text-primary flex items-center justify-center mx-auto border border-primary-border/40">
             <BookOpen className="w-6 h-6" />
@@ -528,9 +657,19 @@ KEY CONSTRAINTS & RULES:
         <>
           {/* WEEKLY GRID */}
           <div className="space-y-2" id="weekly-schedule-grid-container">
-            <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-wider px-1">
-              {_t('الجدول الأسبوعي العام', 'Weekly Schedule Grid', 'Wochen-Stundenplan')}
-            </h3>
+            <div className="flex items-center justify-between px-1">
+              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
+                {_t('الجدول الأسبوعي العام', 'Weekly Schedule Grid', 'Wochen-Stundenplan')}
+              </h3>
+              <button
+                type="button"
+                onClick={() => handleOpenAddCustomSession(selectedDay)}
+                className="text-[10.5px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <Clock className="w-3 h-3" />
+                <span>{_t('+ حصة مخصصة', '+ Custom Session', '+ Spez. Stunde')}</span>
+              </button>
+            </div>
             <div className="w-full overflow-hidden rounded-xl border border-slate-100 dark:border-gray-850 bg-white dark:bg-gray-900 shadow-xs relative">
               <table className="w-full border-collapse text-start table-fixed">
                 <thead>
@@ -605,6 +744,7 @@ KEY CONSTRAINTS & RULES:
                           const daySchedule = currentSettings.schedule[dayKey] || [];
                           const record = daySchedule.find(p => p.periodNumber === period.periodNumber);
                           const isFilled = record && (record.subjectName || record.className);
+                          const matchingCustoms = getCustomSessionsForPeriod(currentSettings.customTimedSessions, dayKey, period.periodNumber, calculatedPeriods);
                           const isCellSelected = selectedDay === dayKey;
 
                           return (
@@ -616,53 +756,143 @@ KEY CONSTRAINTS & RULES:
                                 isCellSelected ? 'bg-primary-soft/30 dark:bg-primary-soft/15' : 'hover:bg-slate-50/40 dark:hover:bg-slate-800/20'
                               }`}
                             >
-                              {isFilled ? (
-                                <div 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedDay(dayKey);
-                                    startEditPeriod(dayKey, period.periodNumber);
-                                  }}
-                                  className="p-0.5 sm:p-1.5 rounded-lg bg-primary-soft/50 dark:bg-primary-soft/25 border border-primary-border/40 text-center flex flex-col justify-center items-center min-h-[38px] sm:min-h-[44px] transition-all hover:bg-primary-soft/80 group/card overflow-hidden"
-                                >
-                                  {record.className ? (
-                                    <>
-                                      <div className="text-[10.5px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight truncate max-w-full tracking-tight">
-                                        {record.className}
-                                      </div>
-                                      {record.subjectName && (
-                                        <div className="text-[7px] sm:text-[8px] font-bold text-primary leading-none truncate max-w-full mt-0.5 uppercase opacity-90">
-                                          {record.subjectName}
+                              <div className="flex flex-col gap-1 w-full">
+                                {isFilled && (
+                                  <div 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedDay(dayKey);
+                                      startEditPeriod(dayKey, period.periodNumber);
+                                    }}
+                                    className="p-0.5 sm:p-1.5 rounded-lg bg-primary-soft/50 dark:bg-primary-soft/25 border border-primary-border/40 text-center flex flex-col justify-center items-center min-h-[36px] sm:min-h-[40px] transition-all hover:bg-primary-soft/80 group/card overflow-hidden"
+                                    title={`${record.className || ''} ${record.subjectName ? `- ${record.subjectName}` : ''}`}
+                                  >
+                                    {record.className ? (
+                                      <>
+                                        <div className="text-[10.5px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight truncate max-w-full tracking-tight">
+                                          {record.className}
                                         </div>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <div className="text-[9px] sm:text-[11px] font-bold text-slate-800 dark:text-slate-100 truncate leading-tight">
-                                      {record.subjectName}
+                                        {record.subjectName && (
+                                          <div className="text-[7px] sm:text-[8px] font-bold text-primary leading-none truncate max-w-full mt-0.5 uppercase opacity-90">
+                                            {record.subjectName}
+                                          </div>
+                                        )}
+                                      </>
+                                    ) : (
+                                      <div className="text-[9px] sm:text-[11px] font-bold text-slate-800 dark:text-slate-100 truncate leading-tight">
+                                        {record.subjectName}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {matchingCustoms.map(cs => (
+                                  <div
+                                    key={cs.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedDay(dayKey);
+                                      handleOpenEditCustomSession(cs);
+                                    }}
+                                    className="p-0.5 sm:p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-300 dark:border-indigo-700/60 text-center flex flex-col justify-center items-center min-h-[36px] sm:min-h-[40px] transition-all hover:bg-indigo-100 dark:hover:bg-indigo-900/60 group/card overflow-hidden shadow-2xs"
+                                    title={`${cs.className} (⏱️ ${cs.startTime} - ${cs.endTime}) ${cs.subjectName ? `- ${cs.subjectName}` : ''}`}
+                                  >
+                                    <div className="text-[10px] sm:text-[11.5px] font-black text-indigo-900 dark:text-indigo-200 leading-tight truncate max-w-full">
+                                      {cs.className}
                                     </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <div 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedDay(dayKey);
-                                    startEditPeriod(dayKey, period.periodNumber);
-                                  }}
-                                  className="py-2.5 sm:py-3.5 text-slate-300 dark:text-slate-700 text-xs font-semibold flex items-center justify-center border border-dashed border-transparent hover:border-slate-200 dark:hover:border-slate-800 rounded-lg transition-all min-h-[38px] sm:min-h-[44px]"
-                                >
-                                  <span className="hidden group-hover:inline-block text-[9px] font-black text-primary">
-                                    +
-                                  </span>
-                                  <span className="group-hover:hidden text-[10px] text-slate-300 dark:text-slate-700 font-bold">+</span>
-                                </div>
-                              )}
+                                    <div className="text-[7px] sm:text-[8px] font-mono font-bold text-indigo-600 dark:text-indigo-400 leading-none truncate max-w-full mt-0.5">
+                                      ⏱️ {cs.startTime}-{cs.endTime}
+                                    </div>
+                                    {cs.subjectName && (
+                                      <div className="text-[6.5px] sm:text-[7.5px] font-semibold text-indigo-700 dark:text-indigo-300 leading-none truncate max-w-full mt-0.5 hidden sm:block">
+                                        {cs.subjectName}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+
+                                {!isFilled && matchingCustoms.length === 0 && (
+                                  <div 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedDay(dayKey);
+                                      startEditPeriod(dayKey, period.periodNumber);
+                                    }}
+                                    className="py-2.5 sm:py-3.5 text-slate-300 dark:text-slate-700 text-xs font-semibold flex items-center justify-center border border-dashed border-transparent hover:border-slate-200 dark:hover:border-slate-800 rounded-lg transition-all min-h-[38px] sm:min-h-[44px]"
+                                  >
+                                    <span className="hidden group-hover:inline-block text-[9px] font-black text-primary">
+                                      +
+                                    </span>
+                                    <span className="group-hover:hidden text-[10px] text-slate-300 dark:text-slate-700 font-bold">+</span>
+                                  </div>
+                                )}
+                              </div>
                             </td>
                           );
                         })}
                       </tr>
                     );
                   })}
+
+                  {/* After-school / Unmatched Custom Timed Sessions Row if any */}
+                  {(() => {
+                    const activeDaysKeys = daysList.filter(day => currentSettings.presence[day.key]?.active).map(day => day.key);
+                    const columnsDayKeys = activeDaysKeys.length > 0 ? activeDaysKeys : ['0', '1', '2', '3', '4'];
+                    const hasAnyUnmatched = columnsDayKeys.some(dayKey => 
+                      getUnmatchedCustomSessions(currentSettings.customTimedSessions, dayKey, calculatedPeriods).length > 0
+                    );
+
+                    if (!hasAnyUnmatched) return null;
+
+                    const numCols = columnsDayKeys.length;
+                    const timePct = numCols > 5 ? 12 : 15;
+                    const dayPct = (100 - timePct) / numCols;
+
+                    return (
+                      <tr className="bg-indigo-50/40 dark:bg-indigo-950/20 border-t-2 border-indigo-200 dark:border-indigo-800/40">
+                        <td 
+                          style={{ width: `${timePct}%` }}
+                          className="bg-indigo-50/80 dark:bg-indigo-950/60 border-r border-indigo-200 dark:border-indigo-800 p-1 sm:p-2 text-center"
+                        >
+                          <div className="flex flex-col items-center justify-center text-indigo-600 dark:text-indigo-400">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span className="text-[7.5px] sm:text-[8.5px] font-black tracking-tighter mt-0.5">{_t('مخصص', 'Custom', 'Spez.')}</span>
+                          </div>
+                        </td>
+                        {columnsDayKeys.map(dayKey => {
+                          const unmatchedCustoms = getUnmatchedCustomSessions(currentSettings.customTimedSessions, dayKey, calculatedPeriods);
+                          return (
+                            <td 
+                              key={dayKey}
+                              style={{ width: `${dayPct}%` }}
+                              className="p-0.5 sm:p-1 text-center transition-all border-r border-indigo-100 dark:border-indigo-900/40 last:border-r-0"
+                            >
+                              <div className="flex flex-col gap-1 w-full">
+                                {unmatchedCustoms.map(cs => (
+                                  <div
+                                    key={cs.id}
+                                    onClick={() => {
+                                      setSelectedDay(dayKey);
+                                      handleOpenEditCustomSession(cs);
+                                    }}
+                                    className="p-1 rounded-lg bg-indigo-100/90 dark:bg-indigo-900/70 border border-indigo-300 dark:border-indigo-700 text-center flex flex-col justify-center items-center cursor-pointer hover:bg-indigo-200/90 dark:hover:bg-indigo-900 transition-all shadow-2xs"
+                                    title={`${cs.className} (⏱️ ${cs.startTime} - ${cs.endTime})`}
+                                  >
+                                    <div className="text-[10px] sm:text-[11px] font-black text-indigo-950 dark:text-indigo-100 truncate w-full">
+                                      {cs.className}
+                                    </div>
+                                    <div className="text-[7px] sm:text-[8px] font-mono font-bold text-indigo-700 dark:text-indigo-300 leading-none truncate w-full mt-0.5">
+                                      ⏱️ {cs.startTime}-{cs.endTime}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -682,13 +912,31 @@ KEY CONSTRAINTS & RULES:
                   );
                 })()}
               </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddCustomSession(selectedDay)}
+                  className="flex items-center gap-1 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 rounded-lg text-[10.5px] font-bold transition-all border border-indigo-200 dark:border-indigo-800 cursor-pointer shadow-2xs"
+                >
+                  <Clock className="w-3 h-3" />
+                  <span>{_t('+ حصة مخصصة', '+ Custom Session', '+ Spez. Stunde')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startEditPeriod(selectedDay, 1)}
+                  className="flex items-center gap-1 px-2 py-1 bg-primary-soft hover:bg-primary/20 text-primary rounded-lg text-[10.5px] font-bold transition-all border border-primary-border/60 cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>{_t('+ حصة عادية', '+ Standard Period', '+ Stunde')}</span>
+                </button>
+              </div>
             </div>
 
             {(() => {
               const selectedDayObj = daysList.find(d => d.key === selectedDay)!;
               const isSchoolActive = currentSettings.presence[selectedDay]?.active;
-              const daySchedule = currentSettings.schedule[selectedDay] || [];
-
+              
               if (!isSchoolActive) {
                 return (
                   <div className="p-5 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-dashed border-slate-200 dark:border-gray-800 text-center space-y-1.5">
@@ -703,76 +951,111 @@ KEY CONSTRAINTS & RULES:
                 );
               }
 
-              const filledPeriods = calculatedPeriods.filter(period => {
-                const record = daySchedule.find(p => p.periodNumber === period.periodNumber);
-                return record && (record.subjectName || record.className);
-              });
+              // Merged & Chronologically Sorted Schedule Items (Standard Periods + Custom Sessions)
+              const mergedItems = getMergedDayScheduleItems(
+                currentSettings.schedule[selectedDay],
+                currentSettings.customTimedSessions,
+                selectedDay,
+                calculatedPeriods
+              );
 
-              if (filledPeriods.length === 0) {
+              if (mergedItems.length === 0) {
                 return (
                   <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/20 border border-dashed border-slate-100 dark:border-gray-800 text-center space-y-1">
                     <Info className="w-4 h-4 text-slate-400 mx-auto" />
                     <h4 className="text-xs font-black text-slate-500 dark:text-slate-400">
                       {_t('لا توجد حصص مجدولة لهذا اليوم', 'No scheduled classes for this day', 'Keine Unterrichtsstunden für diesen Tag geplant')}
                     </h4>
-                    <button
-                      onClick={() => startEditPeriod(selectedDay, 1)}
-                      className="text-[10px] font-black text-primary hover:underline cursor-pointer"
-                    >
-                      {_t('+ إضافة أول حصة اليوم', '+ Add first class today', '+ Erste Stunde hinzufügen')}
-                    </button>
+                    <div className="flex items-center justify-center gap-3 pt-1">
+                      <button
+                        onClick={() => startEditPeriod(selectedDay, 1)}
+                        className="text-[10px] font-black text-primary hover:underline cursor-pointer"
+                      >
+                        {_t('+ إضافة حصة عادية', '+ Add standard class', '+ Stunde hinzufügen')}
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-700">•</span>
+                      <button
+                        onClick={() => handleOpenAddCustomSession(selectedDay)}
+                        className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                      >
+                        {_t('+ إضافة حصة بتوقيت مخصص', '+ Add custom timed class', '+ Spezielle Stunde')}
+                      </button>
+                    </div>
                   </div>
                 );
               }
 
               return (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2" id="periods-timeline-list">
-                  {filledPeriods.map((period) => {
-                    const record = daySchedule.find(p => p.periodNumber === period.periodNumber)!;
-                    const isFilled = record && (record.subjectName || record.className);
+                  {mergedItems.map((item) => {
+                    const isCustom = item.isCustomTime;
 
                     return (
                       <div 
-                        key={period.periodNumber}
-                        className="p-2.5 rounded-lg border bg-primary-soft/20 dark:bg-primary-soft/10 border-primary-border/40 transition-all duration-200"
-                        id={`period-item-${period.periodNumber}`}
+                        key={item.id}
+                        className={`p-2.5 rounded-lg border transition-all duration-200 ${
+                          isCustom 
+                            ? 'bg-indigo-50/40 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800/60 shadow-2xs' 
+                            : 'bg-primary-soft/20 dark:bg-primary-soft/10 border-primary-border/40'
+                        }`}
+                        id={`schedule-item-${item.id}`}
                       >
                         <div className="flex items-start justify-between gap-2.5">
                           <div className="flex gap-2 text-start">
-                            <span className="w-6 h-6 rounded-md bg-primary text-white flex items-center justify-center text-xs font-black shrink-0 shadow-2xs">
-                              {period.periodNumber}
-                            </span>
+                            {isCustom ? (
+                              <span className="w-6 h-6 rounded-md bg-indigo-600 text-white flex items-center justify-center text-xs font-black shrink-0 shadow-2xs">
+                                <Clock className="w-3.5 h-3.5" />
+                              </span>
+                            ) : (
+                              <span className="w-6 h-6 rounded-md bg-primary text-white flex items-center justify-center text-xs font-black shrink-0 shadow-2xs">
+                                {item.periodNumber}
+                              </span>
+                            )}
                             
                             <div className="space-y-0.5">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-black text-slate-800 dark:text-slate-200 font-mono">
-                                  {period.startTime} - {period.endTime}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`text-xs font-black font-mono ${isCustom ? 'text-indigo-900 dark:text-indigo-200' : 'text-slate-800 dark:text-slate-200'}`}>
+                                  {item.startTime} - {item.endTime}
                                 </span>
                                 <span className="text-[10px] text-slate-400 font-semibold">
-                                  ({period.duration} {_t('دقيقة', 'mins', 'Min.')})
+                                  ({item.durationMinutes} {_t('دقيقة', 'mins', 'Min.')})
                                 </span>
+                                {isCustom && (
+                                  <span className="px-1.5 py-0.2 rounded-full text-[8.5px] font-bold bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                                    {item.sessionType || _t('توقيت مخصص', 'Custom Time', 'Spezielle Zeit')}
+                                  </span>
+                                )}
                               </div>
 
                               <div className="space-y-1 pt-0.5">
-                                {record.className ? (
-                                  <div className="flex items-center gap-2">
+                                {item.className ? (
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-sm font-black text-slate-900 dark:text-white">
-                                      {record.className}
+                                      {item.className}
                                     </span>
-                                    {record.subjectName && (
-                                      <span className="text-[10px] font-bold text-primary bg-primary-soft border border-primary-border/60 px-2 py-0.5 rounded-md uppercase">
-                                        {record.subjectName}
+                                    {item.subjectName && (
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase border ${
+                                        isCustom 
+                                          ? 'text-indigo-700 dark:text-indigo-300 bg-white dark:bg-surface border-indigo-200 dark:border-indigo-800' 
+                                          : 'text-primary bg-primary-soft border-primary-border/60'
+                                      }`}>
+                                        {item.subjectName}
+                                      </span>
+                                    )}
+                                    {item.room && (
+                                      <span className="text-[10px] text-slate-500 font-mono">
+                                        📍 {item.room}
                                       </span>
                                     )}
                                   </div>
                                 ) : (
                                   <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                                    {record.subjectName}
+                                    {item.subjectName}
                                   </div>
                                 )}
-                                {record.notes && (
+                                {item.notes && (
                                   <p className="text-[10px] text-slate-400 leading-relaxed font-medium bg-slate-50 dark:bg-slate-800 p-1.5 rounded-lg border border-slate-100 dark:border-gray-800">
-                                    {record.notes}
+                                    {item.notes}
                                   </p>
                                 )}
                               </div>
@@ -782,22 +1065,32 @@ KEY CONSTRAINTS & RULES:
                           {/* Actions buttons */}
                           <div className="flex items-center gap-1 shrink-0">
                             <button
-                              onClick={() => startEditPeriod(selectedDay, period.periodNumber)}
+                              onClick={() => {
+                                if (isCustom && item.rawCustomSession) {
+                                  handleOpenEditCustomSession(item.rawCustomSession);
+                                } else if (item.periodNumber) {
+                                  startEditPeriod(selectedDay, item.periodNumber);
+                                }
+                              }}
                               className="p-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg transition-colors focus:outline-none cursor-pointer"
                               title={_t('تعديل', 'Edit', 'Bearbeiten')}
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
                             
-                            {isFilled && (
-                              <button
-                                onClick={() => clearPeriod(selectedDay, period.periodNumber)}
-                                className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-500 rounded-lg transition-colors focus:outline-none cursor-pointer"
-                                title={_t('مسح الحصة', 'Clear Period', 'Entfernen')}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => {
+                                if (isCustom && item.rawCustomSession) {
+                                  handleDeleteCustomSession(item.rawCustomSession.id);
+                                } else if (item.periodNumber) {
+                                  clearPeriod(selectedDay, item.periodNumber);
+                                }
+                              }}
+                              className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-500 rounded-lg transition-colors focus:outline-none cursor-pointer"
+                              title={_t('مسح / حذف', 'Clear / Delete', 'Entfernen / Löschen')}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -852,43 +1145,238 @@ KEY CONSTRAINTS & RULES:
                   placeholder={_t('مثال: 1/أ، مجموعة التقوية...', 'e.g. Class 10A, Group B...', 'z.B. Klasse 10A, Gruppe B...')}
                   value={className}
                   onChange={(e) => setClassName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-gray-800 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white font-bold"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-gray-850 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white font-bold"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                  {_t('ملاحظات إضافية', 'Additional Notes', 'Zusätzliche Notizen')}
+                  {_t('ملاحظات أو القاعة (اختياري)', 'Notes / Room (Optional)', 'Notizen / Raum (Optional)')}
                 </label>
-                <textarea
-                  rows={2}
-                  placeholder={_t('أي ملاحظات أو تنبيهات لهذه الحصة...', 'Any notes regarding this school period...', 'Notizen zu dieser Stunde...')}
+                <input
+                  type="text"
+                  placeholder={_t('مثال: معمل اللغات، الطابق الثاني...', 'e.g. Language Lab, 2nd Floor...', 'z.B. Sprachlabor, 2. Stock...')}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-gray-800 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white font-medium"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-gray-800 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white font-bold"
                 />
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-gray-800">
               <button
                 onClick={() => setEditingPeriod(null)}
-                className="px-4 py-2 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-xs font-bold focus:outline-none cursor-pointer"
+                className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
               >
                 {_t('إلغاء', 'Cancel', 'Abbrechen')}
               </button>
               <button
                 onClick={savePeriodEdit}
-                className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg text-xs font-bold focus:outline-none shadow-xs cursor-pointer active:scale-95"
+                className="px-5 py-2 text-xs font-black bg-primary hover:bg-primary-hover text-white rounded-xl shadow-md transition-all cursor-pointer"
               >
-                {_t('حفظ البيانات', 'Save', 'Speichern')}
+                {_t('حفظ التعديلات', 'Save Changes', 'Änderungen speichern')}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL 2: AI IMPORT WIZARD */}
+      {/* MODAL 2: Add / Edit Custom Timed Session Modal */}
+      {isCustomSessionModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-lg p-5 space-y-4 animate-scale-up shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-surface-border">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-text-main">
+                    {editingCustomSession 
+                      ? _t('تعديل الحصة ذات التوقيت المخصص', 'Edit Custom Timed Session', 'Spezielle Stunde bearbeiten') 
+                      : _t('إضافة حصة بتوقيت مخصص', 'Add Custom Timed Session', 'Neue spezielle Stunde hinzufügen')}
+                  </h3>
+                  <p className="text-[11px] text-text-muted">
+                    {_t('تظهر في الجدول والبطاقات والجدول المجمع وفق وقتها الزمني الدقيق', 'Appears in schedule, cards, and matrix based on its exact time', 'Wird gemäß exakter Uhrzeit im Plan und der Übersicht angezeigt')}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsCustomSessionModalOpen(false)}
+                className="p-1 hover:bg-surface-hover rounded-full text-text-muted cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCustomSession} className="space-y-3.5">
+              {/* Day Selection */}
+              <div className="space-y-1">
+                <label className="text-xs font-black text-text-main flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>{_t('اليوم', 'Day', 'Tag')}</span>
+                </label>
+                <div className="grid grid-cols-5 sm:grid-cols-7 gap-1">
+                  {daysList.map(d => (
+                    <button
+                      key={d.key}
+                      type="button"
+                      onClick={() => setCustomDayKey(d.key)}
+                      className={`py-1.5 px-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer text-center ${
+                        customDayKey === d.key 
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs font-black' 
+                          : 'bg-surface hover:bg-surface-hover text-text-muted border-surface-border'
+                      }`}
+                    >
+                      {d.short}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Exact Time Range */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-black text-text-main flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('وقت البدء', 'Start Time', 'Startzeit')}</span>
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={customStartTime}
+                    onChange={(e) => setCustomStartTime(e.target.value)}
+                    className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-mono font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-black text-text-main flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('وقت الانتهاء', 'End Time', 'Endzeit')}</span>
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={customEndTime}
+                    onChange={(e) => setCustomEndTime(e.target.value)}
+                    className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-mono font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Class and Subject */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-black text-text-main">
+                    {_t('الفصل / المجموعة *', 'Class / Group *', 'Klasse / Gruppe *')}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder={_t('مثال: 11-D، مجموعة التقوية...', 'e.g. 11-D, Tutoring Group A...', 'z.B. 11-D, Fördergruppe...')}
+                    value={customClassName}
+                    onChange={(e) => setCustomClassName(e.target.value)}
+                    className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-black text-text-main">
+                    {_t('المادة أو النشاط', 'Subject / Activity', 'Fach / Aktivität')}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={_t('مثال: لغة ألمانية، مراجعة نهائية...', 'e.g. German, Review...', 'z.B. Deutsch, Wiederholung...')}
+                    value={customSubjectName}
+                    onChange={(e) => setCustomSubjectName(e.target.value)}
+                    className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Room & Session Type */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-black text-text-main flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('القاعة / المكان (اختياري)', 'Room / Location', 'Raum / Ort')}</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={_t('مثال: معمل اللغات، قاعة 204...', 'e.g. Language Lab 204...', 'z.B. Sprachlabor 204...')}
+                    value={customRoom}
+                    onChange={(e) => setCustomRoom(e.target.value)}
+                    className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-black text-text-main flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('نوع الحصة', 'Session Type', 'Stundentyp')}</span>
+                  </label>
+                  <select
+                    value={customSessionType}
+                    onChange={(e) => setCustomSessionType(e.target.value)}
+                    className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="حصة إضافية / تقوية">{_t('حصة إضافية / تقوية', 'Extra / Remedial', 'Förderunterricht')}</option>
+                    <option value="حصة خاصة">{_t('حصة خاصة', 'Private Session', 'Privatstunde')}</option>
+                    <option value="نشاط إثرائي">{_t('نشاط إثرائي', 'Enrichment Activity', 'Förderaktivität')}</option>
+                    <option value="تدريب لغوي">{_t('تدريب لغوي', 'Language Training', 'Sprachtraining')}</option>
+                    <option value="حصة خارج الجدول">{_t('حصة خارج الجدول', 'Off-Schedule Session', 'Außerplanmäßige Stunde')}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-1">
+                <label className="text-xs font-black text-text-main">
+                  {_t('ملاحظات إضافية (اختياري)', 'Additional Notes', 'Zusätzliche Notizen')}
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder={_t('أهداف الحصة، الطلاب المستهدفين...', 'Session goals, targeted students...', 'Ziele, Schüler...')}
+                  value={customNotes}
+                  onChange={(e) => setCustomNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                />
+              </div>
+
+              {/* Form Buttons */}
+              <div className="flex items-center justify-between pt-3 border-t border-surface-border">
+                {editingCustomSession ? (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCustomSession(editingCustomSession.id)}
+                    className="px-3 py-2 text-xs font-bold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{_t('حذف الحصة', 'Delete', 'Löschen')}</span>
+                  </button>
+                ) : <div />}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomSessionModalOpen(false)}
+                    className="px-4 py-2 text-xs font-bold text-text-muted hover:bg-surface-hover rounded-xl transition-colors cursor-pointer"
+                  >
+                    {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{_t('حفظ الحصة', 'Save Session', 'Speichern')}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: AI IMPORT WIZARD */}
       {isImportModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-900 rounded-3xl border border-slate-100 dark:border-gray-800 w-full max-w-2xl p-5 space-y-4 animate-scale-up shadow-2xl max-h-[90vh] overflow-y-auto">

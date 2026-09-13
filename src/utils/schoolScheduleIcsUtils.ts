@@ -334,6 +334,44 @@ export function generateRecurringSchoolScheduleIcs(
 
       icsLines.push(...formatIcsEventBlock(periodEvt, 15));
     });
+
+    // Custom Timed Sessions Events
+    const customSessions = (settings.customTimedSessions || []).filter(cs => cs.dayKey === dayKey);
+    customSessions.forEach((cs) => {
+      periodsCount++;
+
+      const cleanStartTime = cs.startTime.replace(':', '') + '00';
+      const cleanEndTime = cs.endTime.replace(':', '') + '00';
+      const startDT = `${cleanDate}T${cleanStartTime}`;
+      const endDT = `${cleanDate}T${cleanEndTime}`;
+
+      const subject = cs.subjectName || (lang === 'ar' ? 'حصة بتوقيت مخصص' : 'Custom Timed Session');
+      const cls = cs.className ? `(${cs.className})` : '';
+
+      const summary = `⏱️ ${subject} ${cls}`.trim();
+      const descLines = [
+        `Custom Timed Session (${cs.startTime} - ${cs.endTime})`,
+        cs.className ? `Class / Group: ${cs.className}` : '',
+        cs.subjectName ? `Subject / Activity: ${cs.subjectName}` : '',
+        cs.sessionType ? `Type: ${cs.sessionType}` : '',
+        cs.room ? `Room: ${cs.room}` : '',
+        cs.notes ? `Notes: ${cs.notes}` : ''
+      ].filter(Boolean);
+
+      const customEvt: SchoolIcsEventItem = {
+        uid: `school_custom_session_rrule_${cs.id}@teacherassistant`,
+        summary,
+        description: descLines.join('\n'),
+        location: cs.room ? `School - ${cs.room}` : 'School',
+        startDT,
+        endDT,
+        rrule: `FREQ=WEEKLY;BYDAY=${byDay}`,
+        type: 'period',
+        dayKey
+      };
+
+      icsLines.push(...formatIcsEventBlock(customEvt, 15));
+    });
   });
 
   icsLines.push('END:VCALENDAR');

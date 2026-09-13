@@ -15,7 +15,8 @@ import {
 import { 
   getSchoolSettings, 
   calculatePeriodsTimings, 
-  CalculatedPeriod 
+  CalculatedPeriod,
+  getCustomSessionsForPeriod 
 } from '../utils/schoolUtils';
 import { 
   sanitizeModernCssColors, 
@@ -156,23 +157,47 @@ export function buildSchoolScheduleExportModel(
     activeDaysList.forEach(day => {
       const daySchedule = currentSettings.schedule[day.key] || [];
       const record = daySchedule.find(p => p.periodNumber === period.periodNumber);
-      const isFilled = Boolean(record && (record.subjectName?.trim() || record.className?.trim()));
+      const matchingCustoms = getCustomSessionsForPeriod(currentSettings.customTimedSessions, day.key, period.periodNumber, calculatedPeriods);
 
-      if (isFilled && record) {
-        if (record.className && record.className.trim()) {
+      let className = record?.className?.trim() || '';
+      let subjectName = record?.subjectName?.trim() || '';
+      let notes = record?.notes?.trim() || '';
+
+      if (matchingCustoms.length > 0) {
+        const customNames = matchingCustoms.map(cs => `${cs.className} [${cs.startTime}]`).join(', ');
+        if (className) {
+          className = `${className} / ${customNames}`;
+        } else {
+          className = customNames;
+          subjectName = matchingCustoms[0].subjectName || (lang === 'ar' ? 'حصة مخصصة' : 'Custom');
+          notes = matchingCustoms[0].notes || '';
+        }
+      }
+
+      const isFilled = Boolean(className || subjectName);
+
+      if (isFilled) {
+        if (record?.className && record.className.trim()) {
           uniqueClassesSet.add(record.className.trim());
           const stage = extractStageNumber(record.className);
           if (stage) uniqueStagesSet.add(stage);
         }
-        totalWeeklyLessons++;
+        matchingCustoms.forEach(cs => {
+          if (cs.className) {
+            uniqueClassesSet.add(cs.className.trim());
+            const stage = extractStageNumber(cs.className);
+            if (stage) uniqueStagesSet.add(stage);
+          }
+        });
+        totalWeeklyLessons += (record && (record.className || record.subjectName) ? 1 : 0) + matchingCustoms.length;
       }
 
       cellsByPeriod[period.periodNumber][day.key] = {
         periodNumber: period.periodNumber,
         dayKey: day.key,
-        className: record?.className?.trim() || '',
-        subjectName: record?.subjectName?.trim() || '',
-        notes: record?.notes?.trim() || '',
+        className,
+        subjectName,
+        notes,
         isFilled
       };
     });
