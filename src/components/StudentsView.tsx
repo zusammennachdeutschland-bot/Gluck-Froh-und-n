@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Student, Group } from '../types';
 import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
-import { Users, UserPlus, Search, Phone, Send, ChevronRight, Plus, MapPin, Video, FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, FileText, Award, DollarSign, Bot, ChevronDown, Filter, Sparkles, AtSign, Mars, Venus, CircleHelp } from 'lucide-react';
+import { Users, UserPlus, Search, Phone, Send, ChevronRight, Plus, MapPin, Video, FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, FileText, Award, DollarSign, Bot, ChevronDown, Filter, Sparkles, AtSign, Mars, Venus, CircleHelp, Copy, Check } from 'lucide-react';
 import { StudentProfileModal } from './StudentProfileModal';
 import { GroupProfileModal } from './GroupProfileModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
@@ -12,6 +12,7 @@ import { QuickGenderAssignModal } from './QuickGenderAssignModal';
 import { formatGroupScheduleDisplay, getDayNumber } from '../utils/scheduleUtils';
 import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
+import { getStudentCode } from '../utils/studentCodeUtils';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
 import { getGroupCycleInfo } from '../utils/lessonUtils';
@@ -36,6 +37,7 @@ export const StudentsView: React.FC = () => {
   const [selectedStudentTab, setSelectedStudentTab] = useState<'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'recordings' | 'edit'>('overview');
   const [selectedGroupInitialTab, setSelectedGroupInitialTab] = useState<'details' | 'recordings'>('details');
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [copiedStudentCodeId, setCopiedStudentCodeId] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [isAiImportModalOpen, setIsAiImportModalOpen] = useState(false);
   const [isGenderAssignModalOpen, setIsGenderAssignModalOpen] = useState(false);
@@ -388,6 +390,7 @@ export const StudentsView: React.FC = () => {
             sortedStudents.map((student, idx) => {
               const studentGroup = groups.find(g => g.id === student.groupId);
               const cleanParentPhone = student.parentPhone.replace(/[^0-9+]/g, '');
+              const studentCode = getStudentCode(student);
 
               return (
                 <div
@@ -455,6 +458,26 @@ export const StudentsView: React.FC = () => {
                         <span className="text-[9px] font-black text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft/40 border border-primary-border/50 dark:border-primary-border/30 px-1.5 py-0.2 rounded shrink-0">
                           {student.grade}
                         </span>
+
+                        {/* Student Portal Code Badge (1-click copy) */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(studentCode);
+                            setCopiedStudentCodeId(student.id);
+                            setTimeout(() => setCopiedStudentCodeId(null), 1800);
+                          }}
+                          className="text-[9px] font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200/80 dark:border-indigo-800/60 px-1.5 py-0.2 rounded inline-flex items-center gap-1 shrink-0 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition-colors cursor-pointer"
+                          title={_t('كود الطالب لبوابة ولي الأمر (اضغط للنسخ)', 'Student Portal Code (Click to copy)', 'Schüler-Portal-Code (Klicken zum Kopieren)')}
+                        >
+                          <span className="font-mono font-bold tracking-wider">{studentCode}</span>
+                          {copiedStudentCodeId === student.id ? (
+                            <Check className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                          ) : (
+                            <Copy className="w-2.5 h-2.5 text-indigo-500 opacity-70" />
+                          )}
+                        </button>
 
                         {/* English/Certificate Name (compact & truncated to prevent line break) */}
                         {student.certificateName && (

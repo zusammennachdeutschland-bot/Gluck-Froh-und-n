@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Users, Calendar, BookOpen, FileText, CheckCircle2, AlertTriangle, Clock, Plus, Trash2, Edit3, Send, Sparkles, Printer, Check, X, Shield, FileCheck, Layers, ChevronRight, RefreshCw, RotateCcw, Upload, Phone, MessageCircle, Copy, MapPin, Eye, Target, ClipboardList, Award, BarChart3, Download, Loader2, GraduationCap } from 'lucide-react';
+import { Users, Calendar, BookOpen, FileText, CheckCircle2, AlertTriangle, Clock, Plus, Trash2, Edit3, Send, Sparkles, Printer, Check, X, Shield, FileCheck, Layers, ChevronRight, RefreshCw, RotateCcw, Upload, Phone, MessageCircle, Copy, MapPin, Eye, Target, ClipboardList, Award, BarChart3, Download, Loader2, GraduationCap, Tag } from 'lucide-react';
 import { calculatePeriodsTimings } from '../utils/schoolUtils';
 import { 
   printObservationReport, 
@@ -16,7 +16,7 @@ import {
   printSingleWeeklyPlan,
   printAllWeeklyPlansCombinedTable
 } from '../utils/weeklyPlanPrintUtils';
-import { StageFollowUpRecord, TeacherStageEvaluationItem, StaffAttendanceRecord } from '../types';
+import { StageFollowUpRecord, TeacherStageEvaluationItem, StaffAttendanceRecord, CustomTimedSession, SchoolPeriodRecord } from '../types';
 import { SchoolScheduleExportModal } from './SchoolScheduleExportModal';
 import { ObservationFormModal } from './ObservationFormModal';
 import { HodStudentsView } from './HodStudentsView';
@@ -395,11 +395,190 @@ export const HodHubView: React.FC = () => {
   const [periodSubjectName, setPeriodSubjectName] = useState('');
   const [periodNotes, setPeriodNotes] = useState('');
 
+  // Custom Timed Sessions (Independent of standard school schedule periods)
+  const [isCustomSessionModalOpen, setIsCustomSessionModalOpen] = useState(false);
+  const [editingCustomSession, setEditingCustomSession] = useState<CustomTimedSession | null>(null);
+  const [customTeacherId, setCustomTeacherId] = useState('');
+  const [customDayKey, setCustomDayKey] = useState('0');
+  const [customSubjectName, setCustomSubjectName] = useState('');
+  const [customClassName, setCustomClassName] = useState('');
+  const [customStartTime, setCustomStartTime] = useState('14:30');
+  const [customEndTime, setCustomEndTime] = useState('16:00');
+  const [customRoom, setCustomRoom] = useState('');
+  const [customNotes, setCustomNotes] = useState('');
+  const [customSessionType, setCustomSessionType] = useState('حصة إضافية / تقوية');
+  const [customSessionTeacherFilter, setCustomSessionTeacherFilter] = useState('all');
+  const [customSessionDayFilter, setCustomSessionDayFilter] = useState('all');
+
   const timings = calculatePeriodsTimings(schoolSettings.periodSettings || {
     periodsCount: 8,
     firstPeriodStart: '07:30',
     defaultDuration: 45
   });
+
+  const handleOpenAddCustomSession = (prefill?: { teacherId?: string; dayKey?: string; startTime?: string; endTime?: string }) => {
+    setEditingCustomSession(null);
+    setCustomTeacherId(prefill?.teacherId || teachers[0]?.id || 'hod');
+    setCustomDayKey(prefill?.dayKey || '0');
+    setCustomSubjectName('');
+    setCustomClassName('');
+    setCustomStartTime(prefill?.startTime || '14:30');
+    setCustomEndTime(prefill?.endTime || '16:00');
+    setCustomRoom('');
+    setCustomNotes('');
+    setCustomSessionType('حصة إضافية / تقوية');
+    setIsCustomSessionModalOpen(true);
+  };
+
+  const handleOpenEditCustomSession = (session: CustomTimedSession) => {
+    setEditingCustomSession(session);
+    setCustomTeacherId(session.teacherId);
+    setCustomDayKey(session.dayKey);
+    setCustomSubjectName(session.subjectName);
+    setCustomClassName(session.className);
+    setCustomStartTime(session.startTime);
+    setCustomEndTime(session.endTime);
+    setCustomRoom(session.room || '');
+    setCustomNotes(session.notes || '');
+    setCustomSessionType(session.sessionType || 'حصة إضافية / تقوية');
+    setIsCustomSessionModalOpen(true);
+  };
+
+  const handleSaveCustomSession = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!customClassName.trim() && !customSubjectName.trim()) {
+      triggerToast(_t('يرجى إدخال اسم الفصل أو المادة', 'Please enter class or subject name', 'Bitte Klasse oder Fach eingeben'));
+      return;
+    }
+    if (!customStartTime || !customEndTime) {
+      triggerToast(_t('يرجى تحديد وقت بدء ونهاية الحصة', 'Please select start and end time', 'Bitte Start- und Endzeit angeben'));
+      return;
+    }
+
+    const teacher = teachers.find(t => t.id === customTeacherId);
+    const teacherName = teacher?.name || (customTeacherId === 'hod' ? (schoolSettings.hodName || _t('رئيس القسم', 'HOD', 'Fachleiter')) : customTeacherId);
+
+    const sessionId = editingCustomSession?.id || `custom_session_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    const newSession: CustomTimedSession = {
+      id: sessionId,
+      teacherId: customTeacherId,
+      teacherName,
+      dayKey: customDayKey,
+      subjectName: customSubjectName.trim(),
+      className: customClassName.trim(),
+      startTime: customStartTime,
+      endTime: customEndTime,
+      room: customRoom.trim() || undefined,
+      notes: customNotes.trim() || undefined,
+      sessionType: customSessionType,
+      updatedAt: Date.now(),
+      createdAt: editingCustomSession?.createdAt || new Date().toISOString()
+    };
+
+    // 1. Update customTimedSessions array
+    const existingList = (schoolSettings.customTimedSessions || []) as CustomTimedSession[];
+    const existingIdx = existingList.findIndex(s => s.id === sessionId);
+    let updatedList: CustomTimedSession[];
+    if (existingIdx >= 0) {
+      updatedList = [...existingList];
+      updatedList[existingIdx] = newSession;
+    } else {
+      updatedList = [newSession, ...existingList];
+    }
+
+    // 2. Also mirror into teacherSchedules and schedule
+    const currentTeacherSchedules = { ...(schoolSettings.teacherSchedules || {}) };
+    const currentTeacherSchedule = { ...(currentTeacherSchedules[customTeacherId] || (customTeacherId === 'hod' ? (schoolSettings.schedule || {}) : {})) };
+    const daySchedule = [...(currentTeacherSchedule[customDayKey] || [])];
+    
+    const mirrorIdx = daySchedule.findIndex((p: any) => p.id === sessionId);
+    const periodRecord: SchoolPeriodRecord = {
+      id: sessionId,
+      periodNumber: 0,
+      isCustomTime: true,
+      startTime: customStartTime,
+      endTime: customEndTime,
+      subjectName: customSubjectName.trim(),
+      className: customClassName.trim(),
+      notes: customNotes.trim(),
+      room: customRoom.trim(),
+      sessionType: customSessionType,
+      teacherId: customTeacherId,
+      teacherName,
+      dayKey: customDayKey,
+      source: 'custom_timed_session'
+    };
+
+    if (mirrorIdx >= 0) {
+      daySchedule[mirrorIdx] = periodRecord;
+    } else {
+      daySchedule.push(periodRecord);
+    }
+
+    currentTeacherSchedule[customDayKey] = daySchedule;
+    currentTeacherSchedules[customTeacherId] = currentTeacherSchedule;
+
+    const updates: any = {
+      customTimedSessions: updatedList,
+      teacherSchedules: currentTeacherSchedules
+    };
+
+    if (customTeacherId === 'hod') {
+      const mainSchedule = { ...(schoolSettings.schedule || {}) };
+      const mainDaySchedule = [...(mainSchedule[customDayKey] || [])];
+      const mainIdx = mainDaySchedule.findIndex((p: any) => p.id === sessionId);
+      if (mainIdx >= 0) {
+        mainDaySchedule[mainIdx] = periodRecord;
+      } else {
+        mainDaySchedule.push(periodRecord);
+      }
+      mainSchedule[customDayKey] = mainDaySchedule;
+      updates.schedule = mainSchedule;
+    }
+
+    persistHodData(updates);
+    setIsCustomSessionModalOpen(false);
+    setEditingCustomSession(null);
+    triggerToast(_t('تم حفظ الحصة المخصصة وتثبيتها بنجاح في الجداول ⏱️', 'Custom timed session saved successfully ⏱️', 'Spezielle Stunde gespeichert ⏱️'));
+  };
+
+  const handleDeleteCustomSession = (sessionId: string) => {
+    const existingList = (schoolSettings.customTimedSessions || []) as CustomTimedSession[];
+    const targetSession = existingList.find(s => s.id === sessionId);
+    const updatedList = existingList.filter(s => s.id !== sessionId);
+
+    const updates: any = {
+      customTimedSessions: updatedList
+    };
+
+    if (targetSession) {
+      const currentTeacherSchedules = { ...(schoolSettings.teacherSchedules || {}) };
+      if (currentTeacherSchedules[targetSession.teacherId]) {
+        const ts = { ...currentTeacherSchedules[targetSession.teacherId] };
+        if (ts[targetSession.dayKey]) {
+          ts[targetSession.dayKey] = ts[targetSession.dayKey].filter((p: any) => p.id !== sessionId);
+        }
+        currentTeacherSchedules[targetSession.teacherId] = ts;
+        updates.teacherSchedules = currentTeacherSchedules;
+      }
+
+      if (targetSession.teacherId === 'hod') {
+        const mainSchedule = { ...(schoolSettings.schedule || {}) };
+        if (mainSchedule[targetSession.dayKey]) {
+          mainSchedule[targetSession.dayKey] = mainSchedule[targetSession.dayKey].filter((p: any) => p.id !== sessionId);
+        }
+        updates.schedule = mainSchedule;
+      }
+    }
+
+    persistHodData(updates);
+    if (editingCustomSession?.id === sessionId) {
+      setIsCustomSessionModalOpen(false);
+      setEditingCustomSession(null);
+    }
+    triggerToast(_t('تم حذف الحصة المخصصة بنجاح', 'Custom session deleted', 'Spezielle Stunde gelöscht'));
+  };
 
   const startEditPeriod = (teacherId: string, dayKey: string, periodNumber: number) => {
     const teacher = teachers.find(t => t.id === teacherId);
@@ -526,6 +705,16 @@ export const HodHubView: React.FC = () => {
         });
       }
     }
+
+    // Include customTimedSessions
+    const customForTeacher = (schoolSettings.customTimedSessions || []).filter(
+      (s: CustomTimedSession) => s.teacherId === teacherId
+    );
+    customForTeacher.forEach((s: CustomTimedSession) => {
+      if (!scheduleRecords.some((r: any) => r.id === s.id)) {
+        scheduleRecords.push(s);
+      }
+    });
     
     const activeLessons = scheduleRecords.filter(r => r.subjectName || r.className);
     const scheduleClasses = Array.from(new Set(activeLessons.map(r => r.className).filter(Boolean))) as string[];
@@ -567,6 +756,8 @@ export const HodHubView: React.FC = () => {
     '2': _t('الثلاثاء', 'Tuesday', 'Dienstag'),
     '3': _t('الأربعاء', 'Wednesday', 'Mittwoch'),
     '4': _t('الخميس', 'Thursday', 'Donnerstag'),
+    '5': _t('الجمعة', 'Friday', 'Freitag'),
+    '6': _t('السبت', 'Saturday', 'Samstag'),
   };
 
   const parseTimeToMinutes = (timeStr: string) => {
@@ -584,13 +775,25 @@ export const HodHubView: React.FC = () => {
     return daySchedule.find((l: any) => l.periodNumber === periodNum && (l.className || l.subjectName));
   };
 
+  const getTeacherCustomSessions = (teacherId: string, dayKey?: string) => {
+    const list = (schoolSettings.customTimedSessions || []) as CustomTimedSession[];
+    return list.filter(s => s.teacherId === teacherId && (!dayKey || s.dayKey === dayKey));
+  };
+
   const getTeacherTodaySchedule = (teacherId: string) => {
     const todayKey = new Date().getDay().toString();
     const schedules = teacherId === 'hod' 
       ? schoolSettings.schedule 
       : schoolSettings.teacherSchedules?.[teacherId];
     const daySchedule = schedules?.[todayKey] || [];
-    return daySchedule.filter((l: any) => l.className || l.subjectName).sort((a: any, b: any) => a.periodNumber - b.periodNumber);
+    const regular = daySchedule.filter((l: any) => l.className || l.subjectName).sort((a: any, b: any) => a.periodNumber - b.periodNumber);
+    
+    // Also include custom sessions
+    const custom = getTeacherCustomSessions(teacherId, todayKey);
+    return {
+      regular,
+      custom
+    };
   };
 
   const getTeacherStatus = (teacherId: string) => {
@@ -601,12 +804,30 @@ export const HodHubView: React.FC = () => {
     
     const todaySchedule = schedules?.[todayKey] || [];
     const activeLessons = todaySchedule.filter((l: any) => l.subjectName || l.className);
+    const customSessionsToday = (schoolSettings.customTimedSessions || []).filter(
+      (s: CustomTimedSession) => s.teacherId === teacherId && s.dayKey === todayKey
+    );
 
-    if (activeLessons.length === 0) return { status: 'no_class' };
+    if (activeLessons.length === 0 && customSessionsToday.length === 0) return { status: 'no_class' };
 
     const timings = calculatePeriodsTimings(schoolSettings.periodSettings);
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    // Check if currently in a custom-timed session!
+    for (const cs of customSessionsToday) {
+      const csStart = parseTimeToMinutes(cs.startTime);
+      const csEnd = parseTimeToMinutes(cs.endTime);
+      if (currentMinutes >= csStart && currentMinutes <= csEnd) {
+        return { 
+          status: 'in_class', 
+          class: cs.className, 
+          period: `${cs.startTime} - ${cs.endTime}`,
+          isCustom: true,
+          subject: cs.subjectName 
+        };
+      }
+    }
 
     let currentPeriod = timings.find(p => {
       const start = parseTimeToMinutes(p.startTime);
@@ -614,10 +835,20 @@ export const HodHubView: React.FC = () => {
       return currentMinutes >= start && currentMinutes <= end;
     });
 
-    const lastLessonPeriod = Math.max(...activeLessons.map((l: any) => l.periodNumber));
+    const standardLessons = activeLessons.filter((l: any) => !l.isCustomTime && l.periodNumber > 0);
+    const lastLessonPeriod = standardLessons.length > 0 ? Math.max(...standardLessons.map((l: any) => l.periodNumber)) : 0;
     const lastTiming = timings.find((t: any) => t.periodNumber === lastLessonPeriod);
     
-    if (lastTiming && currentMinutes > parseTimeToMinutes(lastTiming.endTime)) {
+    const latestCustomEnd = customSessionsToday.length > 0 
+      ? Math.max(...customSessionsToday.map((cs: CustomTimedSession) => parseTimeToMinutes(cs.endTime)))
+      : 0;
+
+    const effectiveEndMinutes = Math.max(
+      lastTiming ? parseTimeToMinutes(lastTiming.endTime) : 0,
+      latestCustomEnd
+    );
+
+    if (effectiveEndMinutes > 0 && currentMinutes > effectiveEndMinutes) {
        return { status: 'finished' };
     }
 
@@ -2003,28 +2234,42 @@ export const HodHubView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {teachers.map(t => (
-                    <tr key={t.id} className="border border-surface-border hover:bg-surface-hover/30">
-                      <td className="p-2 border border-surface-border font-bold text-text-main">
-                        {t.name}
-                      </td>
-                      {timings.map(p => {
-                        const todayKey = new Date().getDay().toString();
-                        const lesson = getLessonForTeacher(t.id, todayKey, p.periodNumber);
-                        return (
-                          <td key={p.periodNumber} className="p-2 border border-surface-border text-center">
-                            {lesson ? (
-                              <span className="inline-block px-1.5 py-0.5 bg-primary/10 text-primary font-black rounded text-[10px]">
-                                {lesson.className}
+                  {teachers.map(t => {
+                    const todayKey = new Date().getDay().toString();
+                    const teacherCustomsToday = (schoolSettings.customTimedSessions || [] as CustomTimedSession[]).filter(
+                      (cs: CustomTimedSession) => cs.teacherId === t.id && cs.dayKey === todayKey
+                    );
+
+                    return (
+                      <tr key={t.id} className="border border-surface-border hover:bg-surface-hover/30">
+                        <td className="p-2 border border-surface-border font-bold text-text-main">
+                          <div className="flex flex-col">
+                            <span>{t.name}</span>
+                            {teacherCustomsToday.length > 0 && (
+                              <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-1 mt-0.5">
+                                <Clock className="w-2.5 h-2.5" />
+                                <span>{teacherCustomsToday.length} {_t('حصة مخصصة', 'custom', 'Spezial')}</span>
                               </span>
-                            ) : (
-                              <span className="text-text-muted/30">-</span>
                             )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                          </div>
+                        </td>
+                        {timings.map(p => {
+                          const lesson = getLessonForTeacher(t.id, todayKey, p.periodNumber);
+                          return (
+                            <td key={p.periodNumber} className="p-2 border border-surface-border text-center">
+                              {lesson ? (
+                                <span className="inline-block px-1.5 py-0.5 bg-primary/10 text-primary font-black rounded text-[10px]">
+                                  {lesson.className}
+                                </span>
+                              ) : (
+                                <span className="text-text-muted/30">-</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2266,27 +2511,36 @@ export const HodHubView: React.FC = () => {
             <h2 className="text-[11px] font-black text-text-main px-2">
               {_t('الجدول والمتابعة', 'Timetable & Tracker', 'Stundenplan & Übersicht')}
             </h2>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
               <button
+                type="button"
+                onClick={() => handleOpenAddCustomSession()}
+                className="flex-1 sm:flex-none px-2 py-1 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:hover:bg-indigo-900/40 dark:text-indigo-400 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 border border-indigo-100 dark:border-indigo-800 cursor-pointer whitespace-nowrap"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>{_t('إضافة حصة بتوقيت مخصص', 'Add Custom Session', 'Spezielle Stunde')}</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setIsExportModalOpen(true)}
-                className="flex-1 sm:flex-none px-2 py-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 border border-emerald-100 dark:border-emerald-800 cursor-pointer"
+                className="flex-1 sm:flex-none px-2 py-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 border border-emerald-100 dark:border-emerald-800 cursor-pointer whitespace-nowrap"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>{_t('طباعة / تصدير', 'Print / Export', 'Drucken / Export')}</span>
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setImportScope('all');
                   setSelectedTeacherForImport('');
                   setValidationResult(null);
                   setIsImportModalOpen(true);
                 }}
-                className="flex-1 sm:flex-none px-2 py-1 bg-primary-soft text-primary hover:bg-primary-soft/80 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                className="flex-1 sm:flex-none px-2 py-1 bg-primary-soft text-primary hover:bg-primary-soft/80 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>{_t('استيراد بالذكاء الاصطناعي', 'AI Import', 'KI-Import')}</span>
               </button>
-              
             </div>
           </div>
 
@@ -2336,7 +2590,7 @@ export const HodHubView: React.FC = () => {
             </div>
 
             {matrixViewMode === 'single' && (
-              <div className="p-3 border-b border-surface-border bg-surface-hover/20">
+              <div className="p-3 border-b border-surface-border bg-surface-hover/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                 <select
                   value={selectedSingleTeacher}
                   onChange={(e) => setSelectedSingleTeacher(e.target.value)}
@@ -2347,6 +2601,17 @@ export const HodHubView: React.FC = () => {
                     <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
                 </select>
+
+                {selectedSingleTeacher && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddCustomSession({ teacherId: selectedSingleTeacher })}
+                    className="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 border border-indigo-200 dark:border-indigo-800/50 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{_t('إضافة حصة مخصصة لهذا المعلم', 'Add Custom Session for Teacher', 'Spezielle Stunde für diesen Lehrer')}</span>
+                  </button>
+                )}
               </div>
             )}
 
@@ -2418,6 +2683,66 @@ export const HodHubView: React.FC = () => {
                             })}
                           </tr>
                         ))}
+
+                        {/* Custom Timed Sessions Row in Grid Matrix for this Day */}
+                        {(() => {
+                          const dayCustoms = (schoolSettings.customTimedSessions || [] as CustomTimedSession[]).filter(
+                            (s: CustomTimedSession) => s.dayKey === dayKey
+                          );
+                          if (dayCustoms.length === 0) return null;
+
+                          return (
+                            <tr className="bg-indigo-50/40 dark:bg-indigo-950/20 border-b border-indigo-200/50 dark:border-indigo-800/40">
+                              <td className="p-0.5 sm:p-1 border-b border-indigo-200/50 dark:border-indigo-800/40 font-bold text-indigo-600 dark:text-indigo-400 text-center align-middle bg-indigo-50/70 dark:bg-indigo-950/40">
+                                <div className="flex flex-col items-center justify-center" title={_t('حصص بتوقيت مخصص', 'Custom Timed Sessions', 'Spezielle Zeiten')}>
+                                  <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                                  <span className="text-[7.5px] sm:text-[8.5px] font-black tracking-tighter mt-0.5 leading-none">{_t('مخصص', 'Custom', 'Spez.')}</span>
+                                </div>
+                              </td>
+                              {teachers.map(t => {
+                                const teacherCustoms = dayCustoms.filter((s: CustomTimedSession) => s.teacherId === t.id);
+                                return (
+                                  <td 
+                                    key={t.id} 
+                                    className="p-0.5 sm:p-1 border-b border-l border-indigo-200/50 dark:border-indigo-800/40 text-center h-full align-middle overflow-hidden"
+                                  >
+                                    {teacherCustoms.length > 0 ? (
+                                      <div className="flex flex-col gap-1 w-full">
+                                        {teacherCustoms.map((cs: CustomTimedSession) => (
+                                          <div
+                                            key={cs.id}
+                                            onClick={() => handleOpenEditCustomSession(cs)}
+                                            className="flex flex-col items-center justify-center bg-indigo-100/80 hover:bg-indigo-200/80 dark:bg-indigo-900/60 dark:hover:bg-indigo-900/90 border border-indigo-300 dark:border-indigo-700/60 rounded-[4px] py-1 px-0.5 sm:px-1 w-full overflow-hidden transition-all cursor-pointer shadow-2xs group/cs"
+                                            title={`${t.name}: ${cs.className} (${cs.startTime} - ${cs.endTime}) ${cs.subjectName ? `- ${cs.subjectName}` : ''} - ${_t('انقر للتعديل', 'Click to edit', 'Klicken zum Bearbeiten')}`}
+                                          >
+                                            <span className="font-black text-indigo-900 dark:text-indigo-200 text-[9px] sm:text-[10.5px] leading-none truncate w-full">{cs.className}</span>
+                                            <span className="text-[7px] sm:text-[8.5px] text-indigo-700 dark:text-indigo-300 font-mono font-bold truncate w-full leading-none mt-0.5">
+                                              ⏱️ {cs.startTime}-{cs.endTime}
+                                            </span>
+                                            {cs.subjectName && (
+                                              <span className="text-[7px] sm:text-[8.5px] text-indigo-600 dark:text-indigo-400 font-semibold truncate w-full leading-none mt-0.5 hidden sm:block">
+                                                {cs.subjectName}
+                                              </span>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenAddCustomSession({ teacherId: t.id, dayKey })}
+                                        className="w-full py-1 text-indigo-300/60 hover:text-indigo-600 dark:text-indigo-700/60 dark:hover:text-indigo-400 text-[10px] font-bold transition-colors cursor-pointer"
+                                        title={_t('إضافة حصة بتوقيت مخصص لهذا المعلم', 'Add custom timed session', 'Spezielle Stunde hinzufügen')}
+                                      >
+                                        +
+                                      </button>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })()}
                       </React.Fragment>
                     ))}
                   </tbody>
@@ -2431,12 +2756,21 @@ export const HodHubView: React.FC = () => {
                   ) : (
                     (['0','1','2','3','4'].filter(d => matrixDayFilter === 'all' || d === matrixDayFilter)).map((dayKey) => {
                       const dayLessons = timings.map(p => getLessonForTeacher(selectedSingleTeacher, dayKey, p.periodNumber)).filter(Boolean);
-                      if (dayLessons.length === 0) return null;
+                      const dayCustomSessions = getTeacherCustomSessions(selectedSingleTeacher, dayKey);
+                      if (dayLessons.length === 0 && dayCustomSessions.length === 0) return null;
                       
                       return (
                         <div key={dayKey} className="bg-surface border border-surface-border rounded-xl overflow-hidden shadow-2xs">
-                          <div className="bg-surface-hover px-2 py-1 border-b border-surface-border font-black text-text-main text-[11px]">
-                            {WEEKDAY_NAMES[dayKey as keyof typeof WEEKDAY_NAMES]}
+                          <div className="bg-surface-hover px-2 py-1 border-b border-surface-border font-black text-text-main text-[11px] flex items-center justify-between">
+                            <span>{WEEKDAY_NAMES[dayKey as keyof typeof WEEKDAY_NAMES]}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAddCustomSession({ teacherId: selectedSingleTeacher, dayKey })}
+                              className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>{_t('إضافة حصة مخصصة', 'Add Custom Session', '+ Spezielle Stunde')}</span>
+                            </button>
                           </div>
                           <div className="divide-y divide-surface-border/50">
                             {timings.map(period => {
@@ -2468,6 +2802,50 @@ export const HodHubView: React.FC = () => {
                                 </div>
                               );
                             })}
+
+                            {/* Custom Timed Sessions for Single Teacher */}
+                            {dayCustomSessions.map(cs => (
+                              <div 
+                                key={cs.id}
+                                className="p-3 flex items-center justify-between bg-indigo-50/50 dark:bg-indigo-950/20 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 cursor-pointer transition-colors border-l-4 border-indigo-500"
+                                onClick={() => handleOpenEditCustomSession(cs)}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="flex flex-col items-center justify-center w-10 h-10 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-xl shrink-0">
+                                    <Clock className="w-4 h-4" />
+                                  </div>
+                                  <div className="flex flex-col">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-bold text-text-main text-[11px]">{cs.className}</span>
+                                      <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                                        {cs.sessionType || _t('توقيت مخصص', 'Custom Time', 'Spezielle Zeit')}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono font-bold">
+                                      ⏱️ {cs.startTime} - {cs.endTime} {cs.room ? `• ${cs.room}` : ''}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {cs.subjectName && (
+                                    <span className="text-[10px] font-bold px-2 py-1 bg-white dark:bg-surface text-indigo-700 dark:text-indigo-300 rounded-lg border border-indigo-200 dark:border-indigo-800">
+                                      {cs.subjectName}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteCustomSession(cs.id);
+                                    }}
+                                    className="p-1 hover:bg-rose-50 text-rose-500 rounded-lg transition-colors cursor-pointer"
+                                    title={_t('حذف', 'Delete', 'Löschen')}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       );
@@ -2476,6 +2854,186 @@ export const HodHubView: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* DEDICATED SECTION: Independent & Custom-Timed Sessions */}
+          <div className="bg-surface border border-surface-border rounded-xl p-3 shadow-2xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-surface-border">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 flex items-center justify-center shrink-0">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-[11px] font-black text-text-main flex items-center gap-1.5">
+                    <span>{_t('الحصص الخاصة وخارج الجدول المدرسي (بتوقيت مخصص)', 'Custom & Independent Timed Sessions', 'Spezielle & Unabhängige Stunden')}</span>
+                    <span className="px-1.5 py-0.2 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 rounded-md text-[9px] font-bold">
+                      {((schoolSettings.customTimedSessions || []) as CustomTimedSession[]).length}
+                    </span>
+                  </h3>
+                  <p className="text-[10px] text-text-muted">
+                    {_t('حصص ومجموعات مستقلة بوقت محدد (من كام لكام) واسم الفصل والمادة دون التقيد بأرقام الحصص المدرسية', 'Add custom sessions with exact start/end time, subject, and class independent of standard periods', 'Stunden mit freier Start- und Endzeit')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {/* Teacher Filter */}
+                <select
+                  value={customSessionTeacherFilter}
+                  onChange={(e) => setCustomSessionTeacherFilter(e.target.value)}
+                  className="px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10px] font-bold text-text-main outline-none"
+                >
+                  <option value="all">{_t('كل المعلمين', 'All Teachers', 'Alle Lehrer')}</option>
+                  {teachers.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+
+                {/* Day Filter */}
+                <select
+                  value={customSessionDayFilter}
+                  onChange={(e) => setCustomSessionDayFilter(e.target.value)}
+                  className="px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10px] font-bold text-text-main outline-none"
+                >
+                  <option value="all">{_t('كل الأيام', 'All Days', 'Alle Tage')}</option>
+                  {['0','1','2','3','4','5','6'].map(d => (
+                    <option key={d} value={d}>{WEEKDAY_NAMES[d as keyof typeof WEEKDAY_NAMES]}</option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddCustomSession()}
+                  className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer active:scale-95 shadow-xs"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>{_t('إضافة حصة مخصصة', 'New Session', 'Neue Stunde')}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Sessions Grid / List */}
+            {(() => {
+              const allCustom = ((schoolSettings.customTimedSessions || []) as CustomTimedSession[]);
+              const filtered = allCustom.filter(s => {
+                const matchTeacher = customSessionTeacherFilter === 'all' || s.teacherId === customSessionTeacherFilter;
+                const matchDay = customSessionDayFilter === 'all' || s.dayKey === customSessionDayFilter;
+                return matchTeacher && matchDay;
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="py-6 text-center border border-dashed border-surface-border rounded-xl space-y-2">
+                    <Clock className="w-8 h-8 text-indigo-300 dark:text-indigo-700 mx-auto" />
+                    <p className="text-[11px] font-bold text-text-main">
+                      {_t('لا توجد حصص مخصصة مسجلة حالياً', 'No custom timed sessions added yet', 'Noch keine speziellen Stunden hinzugefügt')}
+                    </p>
+                    <p className="text-[10px] text-text-muted max-w-sm mx-auto">
+                      {_t('يمكنك إضافة حصص إضافية، مجموعات تقوية، أو فترات تدريب بوقت مخصص حر (مثلاً من 14:30 إلى 16:00)', 'Add remedial classes, extra tutoring, or language clubs with exact start and end times', 'Fügen Sie Förderkurse oder Sprachclubs mit genauen Uhrzeiten hinzu')}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAddCustomSession()}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{_t('إضافة أول حصة مخصصة الآن', 'Add Custom Session Now', 'Jetzt Stunde hinzufügen')}</span>
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {filtered.map(session => {
+                    const startMin = parseTimeToMinutes(session.startTime);
+                    const endMin = parseTimeToMinutes(session.endTime);
+                    const durationMin = endMin > startMin ? endMin - startMin : 0;
+
+                    return (
+                      <div
+                        key={session.id}
+                        className="bg-surface-hover/60 border border-surface-border hover:border-indigo-300 dark:hover:border-indigo-700 rounded-xl p-2.5 space-y-2 transition-all shadow-2xs group relative"
+                      >
+                        <div className="flex items-start justify-between gap-1.5">
+                          <div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-bold text-[10px]">
+                                {WEEKDAY_NAMES[session.dayKey as keyof typeof WEEKDAY_NAMES] || session.dayKey}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-md bg-surface text-text-muted border border-surface-border text-[10px] font-bold">
+                                {session.sessionType || _t('حصة إضافية', 'Extra Session', 'Zusatzstunde')}
+                              </span>
+                            </div>
+                            <h4 className="text-[12px] font-black text-text-main mt-1.5 flex items-center gap-1">
+                              <span>{session.className}</span>
+                              {session.subjectName && (
+                                <span className="text-primary font-bold text-[11px]">({session.subjectName})</span>
+                              )}
+                            </h4>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditCustomSession(session)}
+                              className="p-1 hover:bg-surface rounded-lg text-text-muted hover:text-primary transition-colors cursor-pointer"
+                              title={_t('تعديل', 'Edit', 'Bearbeiten')}
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCustomSession(session.id)}
+                              className="p-1 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg text-rose-500 transition-colors cursor-pointer"
+                              title={_t('حذف', 'Delete', 'Löschen')}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1 pt-1 border-t border-surface-border/60">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-text-muted flex items-center gap-1">
+                              <Users className="w-3 h-3 text-text-muted" />
+                              <span>{_t('المعلم:', 'Teacher:', 'Lehrer:')}</span>
+                            </span>
+                            <span className="font-bold text-text-main">{session.teacherName}</span>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-text-muted flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-indigo-500" />
+                              <span>{_t('الوقت:', 'Time:', 'Zeit:')}</span>
+                            </span>
+                            <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                              {session.startTime} - {session.endTime} {durationMin > 0 ? `(${durationMin} د)` : ''}
+                            </span>
+                          </div>
+
+                          {session.room && (
+                            <div className="flex items-center justify-between text-[10px]">
+                              <span className="text-text-muted flex items-center gap-1">
+                                <MapPin className="w-3 h-3 text-text-muted" />
+                                <span>{_t('المكان / القاعة:', 'Room:', 'Raum:')}</span>
+                              </span>
+                              <span className="font-bold text-text-main">{session.room}</span>
+                            </div>
+                          )}
+
+                          {session.notes && (
+                            <p className="text-[10px] text-text-muted italic pt-1 truncate" title={session.notes}>
+                              📝 {session.notes}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Live Real-time Status Tracker */}
@@ -2514,7 +3072,9 @@ export const HodHubView: React.FC = () => {
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                             {_t('في الحصة', 'In Class', 'Im Unterricht')} ({statusObj.period})
                           </span>
-                          <span className="text-[10px] font-bold text-text-main px-1">{statusObj.class}</span>
+                          <span className="text-[10px] font-bold text-text-main px-1">
+                            {statusObj.class} {statusObj.subject ? `(${statusObj.subject})` : ''}
+                          </span>
                         </span>
                       )}
                       {statusObj.status === 'free' && (
@@ -2549,8 +3109,9 @@ export const HodHubView: React.FC = () => {
             </div>
             <div className="space-y-3">
               {teachers.map(t => {
-                const todaySchedule = getTeacherTodaySchedule(t.id);
-                if (!todaySchedule || todaySchedule.length === 0) return null;
+                const todayData = getTeacherTodaySchedule(t.id);
+                const hasLessons = (todayData.regular && todayData.regular.length > 0) || (todayData.custom && todayData.custom.length > 0);
+                if (!hasLessons) return null;
                 
                 return (
                   <div key={t.id} className="bg-surface-hover border border-surface-border rounded-xl p-3 space-y-2">
@@ -2559,18 +3120,29 @@ export const HodHubView: React.FC = () => {
                       {t.name}
                     </h4>
                     <div className="flex flex-wrap gap-2">
-                      {todaySchedule.map((lesson: any) => (
+                      {todayData.regular.map((lesson: any) => (
                         <div key={lesson.periodNumber} className="bg-surface border border-surface-border px-2 py-1.5 rounded-lg flex items-center gap-2 text-[10px] shadow-sm">
                           <span className="font-bold text-primary shrink-0">ح{lesson.periodNumber}</span>
                           <span className="font-bold text-text-main">{lesson.className}</span>
                           {lesson.subjectName && <span className="text-text-muted truncate max-w-[80px]">({lesson.subjectName})</span>}
                         </div>
                       ))}
+                      {todayData.custom.map((cs: CustomTimedSession) => (
+                        <div key={cs.id} className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 px-2 py-1.5 rounded-lg flex items-center gap-1.5 text-[10px] shadow-sm text-indigo-700 dark:text-indigo-300">
+                          <Clock className="w-3 h-3 text-indigo-500 shrink-0" />
+                          <span className="font-bold">{cs.className}</span>
+                          <span className="font-mono text-[9px] bg-white/60 dark:bg-black/30 px-1 rounded">{cs.startTime}-{cs.endTime}</span>
+                          {cs.subjectName && <span className="truncate max-w-[80px]">({cs.subjectName})</span>}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 );
               })}
-              {teachers.every(t => !getTeacherTodaySchedule(t.id) || getTeacherTodaySchedule(t.id).length === 0) && (
+              {teachers.every(t => {
+                const data = getTeacherTodaySchedule(t.id);
+                return (!data.regular || data.regular.length === 0) && (!data.custom || data.custom.length === 0);
+              }) && (
                 <div className="text-center py-6 text-[11px] text-text-muted border border-dashed border-surface-border rounded-xl">
                   {_t('لا توجد حصص مسجلة لليوم في جداول المعلمين', 'No sessions assigned for today', 'Heute keine Unterrichtsstunden zugewiesen')}
                 </div>
@@ -2932,28 +3504,45 @@ export const HodHubView: React.FC = () => {
 
                         {/* Middle: Compact Stats & Coverage */}
                         <div className="flex-1 flex flex-col md:flex-row items-start md:items-center gap-2.5 text-[11px] justify-start md:justify-center">
-                          <div className="flex items-center gap-1.5">
-                            {teacher.workload.totalSessions > 0 ? (
-                              <>
-                                <div className="flex items-center gap-1.5 shrink-0 bg-surface border border-surface-border px-2 py-1 rounded-lg">
-                                  <BookOpen className="w-3.5 h-3.5 text-primary" />
-                                  <span className="font-bold text-text-main">
-                                    {teacher.workload.totalSessions} {_t('حصة', 'sessions', 'Std.')}
+                          {(() => {
+                            const teacherCustoms = (schoolSettings.customTimedSessions || [] as CustomTimedSession[]).filter(
+                              (cs: CustomTimedSession) => cs.teacherId === teacher.id
+                            );
+
+                            return (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {teacher.workload.totalSessions > 0 ? (
+                                  <>
+                                    <div className="flex items-center gap-1.5 shrink-0 bg-surface border border-surface-border px-2 py-1 rounded-lg">
+                                      <BookOpen className="w-3.5 h-3.5 text-primary" />
+                                      <span className="font-bold text-text-main">
+                                        {teacher.workload.totalSessions} {_t('حصة', 'sessions', 'Std.')}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 shrink-0 bg-surface border border-surface-border px-2 py-1 rounded-lg">
+                                      <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                                      <span className="font-bold text-text-main">
+                                        {teacher.workload.assignedClasses.length} {_t('فصول', 'classes', 'Klassen')}
+                                      </span>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <span className="text-[11px] text-text-muted font-bold">
+                                    {_t('لا توجد حصص', 'No sessions', 'Keine Std.')}
                                   </span>
-                                </div>
-                                <div className="flex items-center gap-1.5 shrink-0 bg-surface border border-surface-border px-2 py-1 rounded-lg">
-                                  <Layers className="w-3.5 h-3.5 text-indigo-500" />
-                                  <span className="font-bold text-text-main">
-                                    {teacher.workload.assignedClasses.length} {_t('فصول', 'classes', 'Klassen')}
-                                  </span>
-                                </div>
-                              </>
-                            ) : (
-                              <span className="text-[11px] text-text-muted font-bold">
-                                {_t('لا توجد حصص', 'No sessions', 'Keine Std.')}
-                              </span>
-                            )}
-                          </div>
+                                )}
+
+                                {teacherCustoms.length > 0 && (
+                                  <div className="flex items-center gap-1 shrink-0 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 px-2 py-1 rounded-lg">
+                                    <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                                    <span className="font-bold">
+                                      {teacherCustoms.length} {_t('مخصصة', 'custom', 'Spez.')}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                           
                           {/* Visit Coverage Progress Bar */}
                           {!teacher.isHod && teacher.workload.assignedClasses.length > 0 && (() => {
@@ -3110,6 +3699,63 @@ export const HodHubView: React.FC = () => {
                     </div>
                   </div>
                 )}
+
+                {/* Custom Timed Sessions for this teacher */}
+                {(() => {
+                  const teacherCustoms = (schoolSettings.customTimedSessions || [] as CustomTimedSession[]).filter(
+                    (cs: CustomTimedSession) => cs.teacherId === t.id
+                  );
+                  if (teacherCustoms.length === 0) return null;
+
+                  return (
+                    <div className="space-y-2 p-3 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-800/40 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 font-black text-[11px]">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>{_t('حصص بتوقيت مخصص', 'Custom Timed Sessions', 'Spezielle Stunden')} ({teacherCustoms.length})</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedTeacherDetails(null);
+                            handleOpenAddCustomSession({ teacherId: t.id });
+                          }}
+                          className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>{_t('إضافة حصة', 'Add', 'Neu')}</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {teacherCustoms.map((cs: CustomTimedSession) => (
+                          <div 
+                            key={cs.id}
+                            onClick={() => {
+                              setSelectedTeacherDetails(null);
+                              handleOpenEditCustomSession(cs);
+                            }}
+                            className="p-2 rounded-lg bg-surface border border-indigo-200/70 dark:border-indigo-800/60 flex items-center justify-between text-[11px] cursor-pointer hover:border-indigo-400 transition-all shadow-2xs"
+                          >
+                            <div>
+                              <div className="font-bold text-text-main flex items-center gap-1.5">
+                                <span>{cs.className}</span>
+                                <span className="text-[9px] px-1.5 py-0.2 bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 rounded font-semibold">
+                                  {WEEKDAY_NAMES[cs.dayKey as keyof typeof WEEKDAY_NAMES]?.split(' ')[0] || cs.dayKey}
+                                </span>
+                              </div>
+                              {cs.subjectName && (
+                                <div className="text-[10px] text-text-muted">{cs.subjectName}</div>
+                              )}
+                            </div>
+                            <span className="text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400 shrink-0">
+                              {cs.startTime} - {cs.endTime}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Teacher Attendance Summary Card (Requirement 2) */}
                 {(() => {
@@ -4854,6 +5500,287 @@ export const HodHubView: React.FC = () => {
           _t={_t}
           language={language}
         />
+      )}
+
+      {/* CUSTOM TIMED SESSION MODAL */}
+      {isCustomSessionModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-scale-up">
+            {/* Modal Header */}
+            <div className="p-3.5 border-b border-surface-border flex items-center justify-between bg-surface-hover/50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shadow-xs">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black text-text-main">
+                    {editingCustomSession
+                      ? _t('تعديل الحصة المخصصة', 'Edit Custom Session', 'Spezielle Stunde bearbeiten')
+                      : _t('إضافة حصة بتوقيت مخصص حر', 'Add Custom Timed Session', 'Spezielle Stunde hinzufügen')}
+                  </h3>
+                  <p className="text-[10px] text-text-muted mt-0.5">
+                    {_t('حصة مستقلة بوقت حر (من - إلى) واسم الفصل والمادة', 'Independent class with custom time range and room', 'Eigene Start- und Endzeit festlegen')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCustomSessionModalOpen(false);
+                  setEditingCustomSession(null);
+                }}
+                className="p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-xl transition-all cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSaveCustomSession} className="p-3.5 sm:p-4 overflow-y-auto space-y-3.5 flex-1 scrollbar-thin">
+              {/* Teacher & Day Selection */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-text-main flex items-center gap-1">
+                    <Users className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('المعلم المسؤول', 'Assigned Teacher', 'Zuständiger Lehrer')}</span>
+                    <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={customTeacherId}
+                    onChange={(e) => setCustomTeacherId(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                    required
+                  >
+                    <option value="hod">{schoolSettings.hodName || _t('رئيس القسم (HOD)', 'Head of Department (HOD)', 'Fachleiter')}</option>
+                    {teachers.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-text-main flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('اليوم', 'Day', 'Tag')}</span>
+                    <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={customDayKey}
+                    onChange={(e) => setCustomDayKey(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                    required
+                  >
+                    {['0', '1', '2', '3', '4', '5', '6'].map(d => (
+                      <option key={d} value={d}>{WEEKDAY_NAMES[d as keyof typeof WEEKDAY_NAMES]}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Class / Group Name & Subject */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-text-main flex items-center gap-1">
+                    <GraduationCap className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('اسم الفصل أو المجموعة', 'Class / Group Name', 'Klasse / Gruppe')}</span>
+                    <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={customClassName}
+                    onChange={(e) => setCustomClassName(e.target.value)}
+                    placeholder={_t('مثال: 10/1 أو مجموعة تقوية أ', 'e.g., 10/1 or Study Group A', 'z.B. 10/1')}
+                    className="w-full px-2.5 py-1.5 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-text-main flex items-center gap-1">
+                    <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('المادة / المحتوى', 'Subject / Content', 'Fach / Inhalt')}</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={customSubjectName}
+                    onChange={(e) => setCustomSubjectName(e.target.value)}
+                    placeholder={_t('مثال: Deutsch, Förderkurs, محادثة', 'e.g. Deutsch, Remedial', 'z.B. Deutsch')}
+                    className="w-full px-2.5 py-1.5 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Time from / to */}
+              <div className="p-3 bg-surface-hover/60 border border-surface-border rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-text-main flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('التوقيت (من كام لكام)', 'Session Timing (Start - End)', 'Uhrzeit (Von - Bis)')}</span>
+                    <span className="text-rose-500">*</span>
+                  </label>
+                  {customStartTime && customEndTime && (
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 rounded-md">
+                      {(() => {
+                        const s = parseTimeToMinutes(customStartTime);
+                        const e = parseTimeToMinutes(customEndTime);
+                        return e > s ? `${e - s} ${_t('دقيقة', 'min', 'Min')}` : '';
+                      })()}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-text-muted block">{_t('من الساعة:', 'From (Start):', 'Von:')}</span>
+                    <input
+                      type="time"
+                      value={customStartTime}
+                      onChange={(e) => setCustomStartTime(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-surface border border-surface-border rounded-xl text-[11px] font-mono font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-text-muted block">{_t('إلى الساعة:', 'To (End):', 'Bis:')}</span>
+                    <input
+                      type="time"
+                      value={customEndTime}
+                      onChange={(e) => setCustomEndTime(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-surface border border-surface-border rounded-xl text-[11px] font-mono font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Quick Preset Times */}
+                <div className="flex flex-wrap items-center gap-1 pt-1">
+                  <span className="text-[9px] font-bold text-text-muted">{_t('أوقات شائعة:', 'Presets:', 'Vorlagen:')}</span>
+                  {[
+                    { label: '14:30 - 16:00', start: '14:30', end: '16:00' },
+                    { label: '14:00 - 15:30', start: '14:00', end: '15:30' },
+                    { label: '15:00 - 16:30', start: '15:00', end: '16:30' },
+                    { label: '16:00 - 17:30', start: '16:00', end: '17:30' }
+                  ].map(p => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => {
+                        setCustomStartTime(p.start);
+                        setCustomEndTime(p.end);
+                      }}
+                      className="px-1.5 py-0.5 bg-surface text-text-muted hover:text-indigo-600 hover:border-indigo-300 dark:hover:border-indigo-700 border border-surface-border rounded-md text-[9px] font-mono font-bold transition-all cursor-pointer"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Session Type / Category */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-text-main flex items-center gap-1">
+                  <Tag className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>{_t('نوع الحصة / التصنيف', 'Session Type / Tag', 'Kategorie')}</span>
+                </label>
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    'حصة إضافية / تقوية',
+                    'نشاط لغوي / محادثة',
+                    'حصة خاصة',
+                    'تدريب إثرائي / أولمبياد',
+                    'مراجعة عامة',
+                    'أخرى'
+                  ].map(type => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setCustomSessionType(type)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
+                        customSessionType === type
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                          : 'bg-surface text-text-muted border-surface-border hover:bg-surface-hover hover:text-text-main'
+                      }`}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Room & Location + Notes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-text-main flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('المكان أو القاعة (اختياري)', 'Room / Location', 'Raum')}</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={customRoom}
+                    onChange={(e) => setCustomRoom(e.target.value)}
+                    placeholder={_t('مثال: معمل اللغات / قاعة 12', 'e.g., Language Lab / Room 12', 'z.B. Raum 12')}
+                    className="w-full px-2.5 py-1.5 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-text-main flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{_t('ملاحظات إضافية (اختياري)', 'Notes', 'Notizen')}</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={customNotes}
+                    onChange={(e) => setCustomNotes(e.target.value)}
+                    placeholder={_t('ملاحظات للمعلم أو المتابعة...', 'Extra notes...', 'Notizen...')}
+                    className="w-full px-2.5 py-1.5 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Modal Footer Actions */}
+              <div className="pt-2 border-t border-surface-border flex items-center justify-between gap-2">
+                <div>
+                  {editingCustomSession && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editingCustomSession) {
+                          handleDeleteCustomSession(editingCustomSession.id);
+                        }
+                      }}
+                      className="px-2.5 py-1.5 bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{_t('حذف الحصة', 'Delete', 'Löschen')}</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomSessionModalOpen(false);
+                      setEditingCustomSession(null);
+                    }}
+                    className="px-3 py-1.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-[11px] font-bold rounded-xl transition-all cursor-pointer"
+                  >
+                    {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5 active:scale-95"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{_t('حفظ الحصة', 'Save Session', 'Speichern')}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

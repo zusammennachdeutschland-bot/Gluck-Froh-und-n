@@ -18,6 +18,7 @@ import { CreateCertificateModal } from './certificates/CreateCertificateModal';
 import { CertificatePreviewModal } from './certificates/CertificatePreviewModal';
 import { downloadCertificatePDF, shareCertificateWhatsApp } from '../utils/certificateExportUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
+import { getStudentCode, buildParentPortalShareText } from '../utils/studentCodeUtils';
 
 interface StudentProfileModalProps {
   student: Student;
@@ -38,7 +39,11 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   const [copiedRecId, setCopiedRecId] = useState<string | null>(null);
 
   // Editable Student Fields
+  const studentCode = getStudentCode(student);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedPortal, setCopiedPortal] = useState(false);
   const [editName, setEditName] = useState(student.name);
+  const [editStudentCode, setEditStudentCode] = useState(student.studentCode || studentCode);
   const [editCertificateName, setEditCertificateName] = useState(student.certificateName || '');
   const [editGender, setEditGender] = useState<'male' | 'female'>(student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male'));
   const [editGroupId, setEditGroupId] = useState(student.groupId);
@@ -161,6 +166,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
     updateStudent(student.id, {
       name: editName,
+      studentCode: editStudentCode.trim() || studentCode,
       certificateName: editCertificateName,
       gender: editGender,
       groupId: editGroupId,
@@ -269,6 +275,45 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                 <p className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-400 font-semibold uppercase tracking-wider truncate" dir="ltr">
                   {studentEnglishFallback}
                 </p>
+
+                {/* Student Code & Parent Portal Quick Actions */}
+                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                  {/* Student Code Pill */}
+                  <div className="inline-flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60 px-2 py-0.5 rounded-lg text-[10px] sm:text-[11px] font-black shadow-2xs">
+                    <span className="text-indigo-500/90 dark:text-indigo-400 text-[9px] font-bold">كود الطالب:</span>
+                    <span className="font-mono tracking-wider font-bold">{studentCode}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard.writeText(studentCode);
+                        setCopiedCode(true);
+                        setTimeout(() => setCopiedCode(false), 2000);
+                      }}
+                      className="p-0.5 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded transition-colors cursor-pointer text-indigo-600 dark:text-indigo-300"
+                      title="نسخ كود الطالب"
+                    >
+                      {copiedCode ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                  </div>
+
+                  {/* Share Parent Portal Info Button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const shareText = buildParentPortalShareText(student.name, studentCode, profile.displayNameAr || profile.displayName);
+                      const targetPhone = student.parentPhone ? student.parentPhone.replace(/[^0-9+]/g, '') : '';
+                      const url = buildWhatsAppUrl(targetPhone, shareText);
+                      window.open(url, '_blank');
+                    }}
+                    className="inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 px-2 py-0.5 rounded-lg text-[10px] sm:text-[11px] font-black transition-all cursor-pointer shadow-2xs"
+                    title="مشاركة رابط وكود البوابة مع ولي الأمر عبر واتساب"
+                  >
+                    <Share2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                    <span>بوابة ولي الأمر 📱</span>
+                  </button>
+                </div>
 
                 {student.parentPhone && (
                   <div className="inline-flex items-center gap-1.5 bg-blue-50/50 dark:bg-blue-950/20 text-primary px-2.5 py-1 rounded-full text-[10px] sm:text-[11px] font-bold border border-blue-100/50 dark:border-blue-950/30 max-w-full truncate" dir="ltr">
@@ -1103,8 +1148,22 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
             {/* EDIT STUDENT DATA TAB */}
             {activeTab === 'edit' && (
               <form onSubmit={handleSaveStudent} className="space-y-3.5 pt-1">
-                {/* Student Name & English Name grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Student Code, Name & English Name */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                      <span>{_t('كود الطالب (Portal Code)', 'Student Code', 'Schüler-Code')}</span>
+                      <span className="text-[10px] text-primary font-bold">لبوابة ولي الأمر</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={editStudentCode}
+                      onChange={(e) => setEditStudentCode(e.target.value)}
+                      placeholder="e.g. STU-1001"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-primary text-primary dark:text-sky-300 uppercase tracking-wider"
+                    />
+                  </div>
+
                   <div className="space-y-1">
                     <label className="text-xs font-black text-slate-700 dark:text-slate-300">
                       {_t('اسم الطالب (Student Name) *', 'Student Name *', 'Schüler Name *')}

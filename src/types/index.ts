@@ -315,11 +315,35 @@ export interface SchoolPeriodSettings {
 
 export interface SchoolPeriodRecord {
   id?: string; // Stable ID
-  source?: string; // e.g. "school_schedule"
-  periodNumber: number; // 1-indexed
+  source?: string; // e.g. "school_schedule" | "custom_timed_session"
+  periodNumber: number; // 1-indexed (or 0 for custom-timed session)
   subjectName?: string;
   className?: string;
   notes?: string;
+  isCustomTime?: boolean; // When true, has dedicated custom start & end time independent of standard school period numbers
+  startTime?: string; // e.g. "14:30"
+  endTime?: string; // e.g. "16:00"
+  teacherId?: string;
+  teacherName?: string;
+  dayKey?: string; // "0" to "6"
+  room?: string;
+  sessionType?: string; // e.g. "حصة إضافية" | "تقوية" | "خاصة" | "نشاط"
+}
+
+export interface CustomTimedSession {
+  id: string;
+  teacherId: string;
+  teacherName?: string;
+  dayKey: string; // "0" to "6"
+  subjectName: string;
+  className: string;
+  startTime: string; // HH:MM (e.g. "14:30")
+  endTime: string; // HH:MM (e.g. "16:00")
+  room?: string;
+  notes?: string;
+  sessionType?: string; // e.g. "حصة إضافية / تقوية" | "حصة خاصة" | "نشاط إثرائي" | "تدريب لغوي" | "حصة خارج الجدول"
+  createdAt?: string;
+  updatedAt?: number;
 }
 
 export interface StageManager {
@@ -533,6 +557,7 @@ export interface SchoolSettings {
   complaints?: Complaint[];
   actionPlans?: StudentActionPlan[];
   staffAttendanceRecords?: StaffAttendanceRecord[];
+  customTimedSessions?: CustomTimedSession[];
 }
 
 export interface WeeklyPlanLog {
@@ -659,6 +684,7 @@ export type PaymentPlanType = 'per_lesson' | '4_lessons' | '8_lessons' | '12_les
 
 export interface Student extends SyncableRecord {
   name: string;
+  studentCode?: string; // Unique student code for parent portal lookup (e.g. STU-1001)
   certificateName?: string; // Transliterated/custom name used on certificates (e.g. "Rital Tarek" for "ريتال طارق")
   gender?: 'male' | 'female';
   groupId: string;

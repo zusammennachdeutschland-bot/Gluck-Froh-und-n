@@ -56,7 +56,8 @@ export function getSchoolSettings(profile: TeacherProfile | null | undefined): S
       ...profile.schoolSettings.periodSettings,
       customDurations: profile.schoolSettings.periodSettings?.customDurations || {}
     },
-    schedule: migratedSchedule
+    schedule: migratedSchedule,
+    customTimedSessions: profile.schoolSettings.customTimedSessions || []
   };
 }
 

@@ -6,8 +6,9 @@ import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cl
 import { getTeacherArabicName } from '../utils/teacherUtils';
 import { formatTimeDisplay, parseLocalDate } from '../utils/timeUtils';
 import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString } from '../utils/genderUtils';
+import { getStudentCode } from '../utils/studentCodeUtils';
 import { 
-  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw
+  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -151,6 +152,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const parentPhone = resolvedContact.contact;
 
   // Editable generated report
+  const [copiedCodeInModal, setCopiedCodeInModal] = useState<boolean>(false);
   const [finalGeneratedText, setFinalGeneratedText] = useState<string>('');
   const [isManualEdited, setIsManualEdited] = useState<boolean>(false);
   const [reportStyle, setReportStyle] = useState<'egyptian' | 'standard' | 'concise'>('egyptian');
@@ -320,6 +322,7 @@ ${nextHomework}${recordingSection}
     let perfFeedback = '';
 
     const studentDisplayName = activeStudent?.name || lesson.studentName || 'الطالب';
+    const activeStudentCode = activeStudent ? getStudentCode(activeStudent) : (lesson.studentId ? getStudentCode({ id: lesson.studentId, name: lesson.studentName || '' }) : '');
     const explicitGender = activeStudent ? (activeStudent.gender || lesson.report?.studentPerformance?.[activeStudent.id]?.gender) : undefined;
     const isFemale = isLikelyFemaleStudent(studentDisplayName, explicitGender);
     const studentRoleLabel = isFemale ? 'الطالبة' : 'الطالب';
@@ -358,6 +361,7 @@ ${nextHomework}${recordingSection}
 
     const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
     const cycleLine = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
+    const codeLine = activeStudentCode ? `🔑 كود الطالب للمتابعة: *${activeStudentCode}*` : '';
 
     const taughtToday = lesson.report?.arabicTopicsExplained || lesson.report?.teacherNotes || lesson.topic || 'لم يحدد بعد';
     const nextHomework = lesson.report?.arabicHomeworkRequired || lesson.report?.homeworkDescription || (lesson.report?.homeworkTitle ? `${lesson.report.homeworkTitle}` : 'لا يوجد واجب');
@@ -400,7 +404,7 @@ ${nextHomework}${recordingSection}
 
       const generated = `${selectedGreeting}
 ${selectedIntro}
-${[dayDateLine, timeLine, cycleLine].filter(Boolean).join('\n')}
+${[dayDateLine, timeLine, cycleLine, codeLine].filter(Boolean).join('\n')}
 
 📖 اللي اتشرح النهاردة في الحصة:
 ${taughtToday}
@@ -429,7 +433,7 @@ ${selectedOutro}`;
     // CONCISE FORMULA (صيغة كبسولة سريعة ومختصرة)
     if (reportStyle === 'concise') {
       const generated = `🇩🇪 كبسولة تقرير حصة الألماني:
-👤 ${studentRoleLabel}: *${studentDisplayName}*
+👤 ${studentRoleLabel}: *${studentDisplayName}* ${activeStudentCode ? `(كود: ${activeStudentCode})` : ''}
 ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
 📖 ما تم شرحه: ${taughtToday}
@@ -451,6 +455,7 @@ ${perfFeedback ? `🌟 التقييم: ${perfFeedback}` : ''}${cleanStudentNote 
       `السلام عليكم ورحمة الله وبركاته 👋`,
       `📊 تقرير متابعة الحصة:`,
       `👤 ${studentRoleLabel}: ${studentDisplayName}`,
+      codeLine,
       dayDateLine,
       timeLine,
       cycleLine
@@ -694,13 +699,46 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
 
           {/* Report Metadata */}
           {activeTab === 'individual' ? (
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 bg-primary-soft/40 p-3 sm:p-3.5 rounded-xl border border-primary-border/40 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 bg-primary-soft/40 p-3 sm:p-3.5 rounded-xl border border-primary-border/40 text-xs">
               <div>
                 <span className="text-text-muted font-bold block mb-0.5">{t('auto_student')}</span>
                 <span className="font-extrabold text-text-main text-xs sm:text-[13px] truncate block">
                   {activeStudent?.name || lesson.studentName || t('auto_not_specified')}
                 </span>
+                {activeStudent?.grade && (
+                  <span className="text-[10px] text-primary font-bold">
+                    {activeStudent.grade}
+                  </span>
+                )}
               </div>
+
+              {/* Student Code for Parent Portal */}
+              {activeStudent && (
+                <div>
+                  <span className="text-text-muted font-bold block mb-0.5">
+                    {_t('كود الطالب (المنصة)', 'Student Code (Portal)', 'Schüler-Code')}
+                  </span>
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <span className="font-mono font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 px-2 py-0.5 rounded-lg text-xs">
+                      {getStudentCode(activeStudent)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard.writeText(getStudentCode(activeStudent));
+                        setCopiedCodeInModal(true);
+                        setTimeout(() => setCopiedCodeInModal(false), 2000);
+                      }}
+                      className="p-1 hover:bg-primary-soft rounded-md transition-colors cursor-pointer text-indigo-600 dark:text-indigo-400"
+                      title={_t('نسخ كود الطالب', 'Copy student code', 'Code kopieren')}
+                    >
+                      {copiedCodeInModal ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <span className="text-text-muted font-bold block mb-0.5">
                   {resolvedContact.isUsername 
