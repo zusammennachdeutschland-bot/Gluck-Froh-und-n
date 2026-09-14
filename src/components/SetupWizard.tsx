@@ -79,7 +79,7 @@ export const SetupWizard: React.FC = () => {
   const [email, setEmail] = useState(profile.email || '');
 
   // Step 2: School Data State (NEW STEP)
-  const [schoolName, setSchoolName] = useState(profile.schoolSettings?.schoolName || 'مدرسة الأورمان الرسمية لغات');
+  const [schoolName, setSchoolName] = useState(profile.schoolSettings?.schoolName || 'مدرسة الألسن للغات');
   const [departmentName, setDepartmentName] = useState(profile.schoolSettings?.departmentName || 'قسم اللغة الألمانية (Deutsch)');
   const [academicYear, setAcademicYear] = useState(profile.schoolSettings?.academicYear || '2025 / 2026');
   const [currentTerm, setCurrentTerm] = useState(profile.schoolSettings?.currentTerm || 'الفصل الدراسي الأول');
@@ -249,7 +249,7 @@ export const SetupWizard: React.FC = () => {
 
     const updatedSchoolSettings: SchoolSettings = {
       ...(profile.schoolSettings || DEFAULT_SCHOOL_SETTINGS),
-      schoolName: schoolName.trim() || 'مدرسة الأورمان الرسمية لغات',
+      schoolName: schoolName.trim() || 'مدرسة الألسن للغات',
       departmentName: departmentName.trim() || 'قسم اللغة الألمانية (Deutsch)',
       academicYear: academicYear.trim() || '2025 / 2026',
       currentTerm: currentTerm.trim() || 'الفصل الدراسي الأول',
@@ -1331,7 +1331,7 @@ export const SetupWizard: React.FC = () => {
                         <div className="flex items-center gap-2">
                           <span className="text-base">🏫</span>
                           <div>
-                            <span className="font-bold text-white block">{schoolName || 'مدرسة الأورمان الرسمية لغات'}</span>
+                            <span className="font-bold text-white block">{schoolName || 'مدرسة الألسن للغات'}</span>
                             <span className="text-[11px] text-slate-300">{departmentName} • {academicYear}</span>
                           </div>
                         </div>

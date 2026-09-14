@@ -1,6 +1,11 @@
 import { SchoolSettings, VisitRecord, StageFollowUpRecord, StudentActionPlan } from '../types';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { sanitizeModernCssColors } from './certificateExportUtils';
+import { getReportSchoolLogoHtml } from './alsunLogoData';
 
 export function generateStageFollowUpReportHtml(
   record: StageFollowUpRecord,
@@ -9,18 +14,18 @@ export function generateStageFollowUpReportHtml(
   lang: string,
   autoPrint: boolean = true
 ): string {
-  const logoHtml = settings.schoolLogoUrl ? '<img src="' + settings.schoolLogoUrl + '" style="height: 44px; object-fit: contain;" />' : '';
-  const flagHtml = '<div style="display: flex; flex-direction: column; width: 46px; height: 30px; border: 1px solid #000;">' +
+  const logoHtml = getReportSchoolLogoHtml(settings, { height: 48 });
+  const flagHtml = '<div style="display: flex; flex-direction: column; width: 46px; height: 30px; border: 1px solid #000; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">' +
     '<div style="flex: 1; background-color: #000;"></div>' +
     '<div style="flex: 1; background-color: #f00;"></div>' +
     '<div style="flex: 1; background-color: #fc0;"></div>' +
   '</div>';
 
-  const schoolName = settings.schoolName || '';
-  const departmentName = settings.departmentName || '';
-  const academicYear = settings.academicYear || '';
+  const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
+  const departmentName = settings.departmentName || 'قسم اللغة الألمانية';
+  const academicYear = settings.academicYear || '2026/2027';
   const term = settings.currentTerm || 'Term 1';
-  const hodName = settings.hodName || '';
+  const hodName = settings.hodName || 'عبد الرحمن غريب';
 
   const periodLabel = record.periodType === 'weekly' ? 'أسبوعية' : record.periodType === 'monthly' ? 'شهرية' : 'فصلية';
   const weekLabel = record.weekNumber ? ` - الأسبوع ${record.weekNumber}` : '';
@@ -58,24 +63,28 @@ export function generateStageFollowUpReportHtml(
       '<meta charset="UTF-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
       '<title>Stage Follow-Up - ' + record.stageManagerName + '</title>' +
+      '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+      '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+      '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
       '<style>' +
         '@page { size: A4; margin: 10mm 12mm 15mm 12mm; }' +
-        '* { box-sizing: border-box; }' +
+        '* { box-sizing: border-box; font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
         'html, body { height: 100%; margin: 0; padding: 0; background: #fff; }' +
-        'body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; color: #0f172a; line-height: 1.3; font-size: 8.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; }' +
-        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #000; padding-bottom: 4px; margin-bottom: 5px; }' +
-        '.header-text { text-align: center; flex: 1; }' +
-        '.header h1 { font-size: 11pt; margin: 0 0 2px; text-transform: uppercase; font-weight: bold; line-height: 1.15; }' +
-        '.header p { font-size: 8pt; margin: 0; font-weight: 600; line-height: 1.15; }' +
-        '.title { text-align: center; font-size: 11pt; font-weight: bold; margin-bottom: 5px; text-decoration: underline; text-transform: uppercase; line-height: 1.2; }' +
-        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1px solid #000; padding: 5px 8px; background: #fafafa; align-items: center; }' +
-        '.meta-item { font-size: 8pt; font-weight: 500; line-height: 1.3; display: flex; align-items: center; text-align: ' + (isRtl ? 'right' : 'left') + '; }' +
-        '.meta-label { font-weight: bold; margin-left: 4px; margin-right: 4px; display: inline-block; white-space: nowrap; }' +
+        'body { color: #0f172a; line-height: 1.35; font-size: 8.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
+        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 6px; }' +
+        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 60px; }' +
+        '.header-text { text-align: center; flex: 1; padding: 0 10px; }' +
+        '.header h1 { font-size: 13pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
+        '.header p { font-size: 8.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
+        '.title { text-align: center; font-size: 11.5pt; font-weight: 800; margin-bottom: 6px; text-decoration: underline; line-height: 1.3; color: #0f172a; }' +
+        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
+        '.meta-item { font-size: 8.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; text-align: ' + (isRtl ? 'right' : 'left') + '; color: #1e293b; }' +
+        '.meta-label { font-weight: 800; margin-left: 5px; margin-right: 5px; display: inline-block; white-space: nowrap; color: #0f172a; }' +
         'table { width: 100%; border-collapse: collapse; margin-bottom: 8px; table-layout: fixed; }' +
-        'th, td { border: 1px solid #000; padding: 3px 5px; vertical-align: middle; font-size: 8pt; line-height: 1.25; word-break: break-word; overflow-wrap: break-word; }' +
-        'th { background: #e2e8f0; font-weight: bold; font-size: 8pt; height: 20px; text-align: center; vertical-align: middle; }' +
-        '.feedback-section { margin-top: 5px; border: 1px solid #000; padding: 5px 8px; min-height: 32px; background: #fafafa; }' +
-        '.feedback-title { font-weight: bold; font-size: 8pt; margin-bottom: 3px; text-transform: uppercase; border-bottom: 1px dotted #000; padding-bottom: 2px; line-height: 1.15; }' +
+        'th, td { border: 1px solid #0f172a; padding: 4px 6px; vertical-align: middle; font-size: 8.5pt; line-height: 1.3; word-break: break-word; overflow-wrap: break-word; }' +
+        'th { background: #e2e8f0; font-weight: 800; font-size: 8.5pt; height: 22px; text-align: center; vertical-align: middle; color: #0f172a; }' +
+        '.feedback-section { margin-top: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; min-height: 34px; background: #f8fafc; border-radius: 4px; }' +
+        '.feedback-title { font-weight: 800; font-size: 8.5pt; margin-bottom: 3px; border-bottom: 1px dotted #0f172a; padding-bottom: 2px; line-height: 1.3; color: #0f172a; }' +
         '.signatures { margin-top: 20px; display: flex; justify-content: space-between; align-items: flex-start; text-align: center; page-break-inside: avoid; break-inside: avoid; padding-bottom: 2.5rem; margin-bottom: 1.5rem; line-height: 1.6; }' +
         '.sig-block { width: 44%; display: flex; flex-direction: column; align-items: center; page-break-inside: avoid; break-inside: avoid; }' +
         '.sig-job-title { font-weight: 900; font-size: 9.5pt; color: #0f172a; margin-bottom: 2px; line-height: 1.4; }' +
@@ -85,7 +94,7 @@ export function generateStageFollowUpReportHtml(
     '</head>' +
     '<body ' + bodyLoadAttr + '>' +
       '<div class="header">' +
-        '<div>' + logoHtml + '</div>' +
+        '<div class="header-logo">' + logoHtml + '</div>' +
         '<div class="header-text">' +
           '<h1>' + schoolName + '</h1>' +
           '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
@@ -280,12 +289,12 @@ export function generateStageFollowUpReportHtml(
     '</html>';
 }
 
-export async function generateStageFollowUpPdfBlob(
+export async function generateStageFollowUpPdfInstance(
   record: StageFollowUpRecord,
   settings: SchoolSettings,
   isRtl: boolean,
   lang: string
-): Promise<Blob> {
+): Promise<jsPDF> {
   const htmlStr = generateStageFollowUpReportHtml(record, settings, isRtl, lang, false);
 
   const container = document.createElement('div');
@@ -308,10 +317,20 @@ export async function generateStageFollowUpPdfBlob(
     const canvas = await html2canvas(container, {
       scale: 2,
       useCORS: true,
+      allowTaint: true,
+      imageTimeout: 5000,
       logging: false,
       backgroundColor: '#ffffff',
       width: 794,
       windowWidth: 794,
+      onclone: (clonedDoc) => {
+        const styles = clonedDoc.querySelectorAll('style');
+        styles.forEach(s => {
+          if (s.textContent) {
+            s.textContent = sanitizeModernCssColors(s.textContent);
+          }
+        });
+      }
     });
 
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
@@ -332,12 +351,12 @@ export async function generateStageFollowUpPdfBlob(
       const scale = pdfHeight / imgHeight;
       const finalWidth = imgWidth * scale;
       const xMargin = (pdfWidth - finalWidth) / 2;
-      pdf.addImage(imgData, 'JPEG', xMargin, 0, finalWidth, pdfHeight);
+      pdf.addImage(imgData, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
     } else {
-      pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
+      pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
     }
 
-    return pdf.output('blob');
+    return pdf;
   } finally {
     if (document.body.contains(container)) {
       document.body.removeChild(container);
@@ -345,27 +364,45 @@ export async function generateStageFollowUpPdfBlob(
   }
 }
 
+export async function generateStageFollowUpPdfBlob(
+  record: StageFollowUpRecord,
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string
+): Promise<Blob> {
+  const pdf = await generateStageFollowUpPdfInstance(record, settings, isRtl, lang);
+  return pdf.output('blob');
+}
+
 export async function downloadStageFollowUpPdf(
   record: StageFollowUpRecord,
   settings: SchoolSettings,
   isRtl: boolean,
   lang: string
-): Promise<void> {
+): Promise<{ success: boolean; filename: string; error?: string }> {
   try {
-    const blob = await generateStageFollowUpPdfBlob(record, settings, isRtl, lang);
-    const safeManagerName = (record.stageManagerName || 'Manager').replace(/\s+/g, '_');
-    const fileName = `Stage_FollowUp_${safeManagerName}_${record.date}.pdf`;
+    const pdf = await generateStageFollowUpPdfInstance(record, settings, isRtl, lang);
+    const safeManagerName = (record.stageManagerName || 'Manager').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+    const fileName = `متابعة_مرحلة_${safeManagerName}_${record.date || Date.now()}.pdf`;
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-  } catch (error) {
+    if (Capacitor.isNativePlatform()) {
+      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: pdfBase64,
+        directory: Directory.Cache
+      });
+      await Share.share({
+        title: `تقرير متابعة - ${record.stageManagerName}`,
+        url: savedFile.uri
+      });
+    } else {
+      pdf.save(fileName);
+    }
+    return { success: true, filename: fileName };
+  } catch (error: any) {
     console.error('Error downloading Stage Follow-up PDF:', error);
+    return { success: false, filename: '', error: error?.message || 'Download failed' };
   }
 }
 
@@ -375,9 +412,9 @@ export async function shareStageFollowUpViaWhatsApp(
   isRtl: boolean,
   lang: string
 ): Promise<void> {
-  const safeManagerName = (record.stageManagerName || 'Manager').replace(/\s+/g, '_');
+  const safeManagerName = (record.stageManagerName || 'Manager').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
   const weekNumStr = record.weekNumber ? `_W${record.weekNumber}` : '';
-  const fileName = `Stage_FollowUp_${safeManagerName}${weekNumStr}_${record.date}.pdf`;
+  const fileName = `متابعة_مرحلة_${safeManagerName}${weekNumStr}_${record.date || Date.now()}.pdf`;
   const periodLabel = record.periodType === 'weekly' ? 'أسبوعية' : record.periodType === 'monthly' ? 'شهرية' : 'فصلية';
   const weekTitleStr = record.weekNumber ? ` - الأسبوع ${record.weekNumber}` : '';
 
@@ -392,7 +429,24 @@ export async function shareStageFollowUpViaWhatsApp(
     `👨‍🏫 *رئيس القسم:* ${settings.hodName || ''}`;
 
   try {
-    const blob = await generateStageFollowUpPdfBlob(record, settings, isRtl, lang);
+    const pdf = await generateStageFollowUpPdfInstance(record, settings, isRtl, lang);
+
+    if (Capacitor.isNativePlatform()) {
+      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: pdfBase64,
+        directory: Directory.Cache
+      });
+      await Share.share({
+        title: `تقرير متابعة - ${record.stageManagerName}`,
+        text: textSummary,
+        url: savedFile.uri
+      });
+      return;
+    }
+
+    const blob = pdf.output('blob');
     const pdfFile = new File([blob], fileName, { type: 'application/pdf' });
 
     if (
@@ -437,18 +491,18 @@ export function generateObservationReportHtml(
   lang: string,
   autoPrint: boolean = true
 ): string {
-  const logoHtml = settings.schoolLogoUrl ? '<img src="' + settings.schoolLogoUrl + '" style="height: 48px; object-fit: contain;" />' : '';
-  const flagHtml = '<div style="display: flex; flex-direction: column; width: 50px; height: 32px; border: 1px solid #000;">' +
+  const logoHtml = getReportSchoolLogoHtml(settings, { height: 50 });
+  const flagHtml = '<div style="display: flex; flex-direction: column; width: 48px; height: 32px; border: 1px solid #0f172a; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">' +
     '<div style="flex: 1; background-color: #000;"></div>' +
     '<div style="flex: 1; background-color: #f00;"></div>' +
     '<div style="flex: 1; background-color: #fc0;"></div>' +
   '</div>';
   
-  const schoolName = settings.schoolName || '';
-  const departmentName = settings.departmentName || '';
-  const academicYear = settings.academicYear || '';
+  const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
+  const departmentName = settings.departmentName || 'قسم اللغة الألمانية';
+  const academicYear = settings.academicYear || '2026/2027';
   const term = settings.currentTerm || 'Term 1';
-  const hodName = settings.hodName || '';
+  const hodName = settings.hodName || 'عبد الرحمن غريب';
 
   const t = (en: string, ar: string) => isRtl ? ar : en;
 
@@ -473,37 +527,41 @@ export function generateObservationReportHtml(
       '<meta charset="UTF-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
       '<title>Observation Report - ' + visit.teacherName + '</title>' +
+      '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+      '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+      '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
       '<style>' +
         '@page { size: A4; margin: 8mm 8mm; }' +
-        '* { box-sizing: border-box; }' +
+        '* { box-sizing: border-box; font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
         'html, body { height: 100%; margin: 0; padding: 0; background: #fff; }' +
-        'body { font-family: "Segoe UI", Arial, Tahoma, Geneva, sans-serif; color: #000; line-height: 1.2; font-size: 9pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; }' +
-        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #000; padding-bottom: 4px; margin-bottom: 6px; }' +
-        '.header-text { text-align: center; flex: 1; }' +
-        '.header h1 { font-size: 12pt; margin: 0 0 2px; text-transform: uppercase; font-weight: bold; line-height: 1.2; }' +
-        '.header p { font-size: 8.5pt; margin: 0; font-weight: 600; line-height: 1.2; }' +
-        '.title { text-align: center; font-size: 11.5pt; font-weight: bold; margin-bottom: 6px; text-decoration: underline; text-transform: uppercase; line-height: 1.25; }' +
-        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1px solid #000; padding: 5px 8px; background: #fafafa; align-items: center; }' +
-        '.meta-item { font-size: 9pt; font-weight: 500; line-height: 1.3; display: flex; align-items: center; }' +
-        '.meta-label { font-weight: bold; margin-right: 4px; margin-left: 4px; display: inline-block; }' +
-        '.category-title { font-size: 9pt; font-weight: bold; margin-top: 4px; margin-bottom: 2px; background: #e2e8f0; padding: 3px 6px; border: 1px solid #000; border-bottom: none; text-transform: uppercase; line-height: 1.2; vertical-align: middle; }' +
+        'body { color: #0f172a; line-height: 1.3; font-size: 8.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
+        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 5px; margin-bottom: 6px; }' +
+        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 60px; }' +
+        '.header-text { text-align: center; flex: 1; padding: 0 10px; }' +
+        '.header h1 { font-size: 13pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
+        '.header p { font-size: 8.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
+        '.title { text-align: center; font-size: 11.5pt; font-weight: 800; margin-bottom: 6px; text-decoration: underline; line-height: 1.3; color: #0f172a; }' +
+        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
+        '.meta-item { font-size: 8.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; color: #1e293b; }' +
+        '.meta-label { font-weight: 800; margin-right: 5px; margin-left: 5px; display: inline-block; color: #0f172a; white-space: nowrap; }' +
+        '.category-title { font-size: 8.5pt; font-weight: 800; margin-top: 4px; margin-bottom: 2px; background: #e2e8f0; padding: 3px 6px; border: 1px solid #0f172a; border-bottom: none; line-height: 1.3; vertical-align: middle; color: #0f172a; }' +
         'table { width: 100%; border-collapse: collapse; margin-bottom: 4px; table-layout: fixed; }' +
-        'th, td { border: 1px solid #000; padding: 3px 4px; text-align: center; vertical-align: middle; font-size: 8.5pt; line-height: 1.25; }' +
-        'th { background: #f1f5f9; font-weight: bold; font-size: 8.5pt; height: 18px; }' +
-        '.criteria-col { text-align: ' + (isRtl ? 'right' : 'left') + '; width: 55%; font-weight: 600; vertical-align: middle; padding-left: 6px; padding-right: 6px; line-height: 1.25; }' +
+        'th, td { border: 1px solid #0f172a; padding: 3px 4px; text-align: center; vertical-align: middle; font-size: 8.5pt; line-height: 1.25; }' +
+        'th { background: #f1f5f9; font-weight: 800; font-size: 8.5pt; height: 20px; color: #0f172a; }' +
+        '.criteria-col { text-align: ' + (isRtl ? 'right' : 'left') + '; width: 55%; font-weight: 700; vertical-align: middle; padding-left: 6px; padding-right: 6px; line-height: 1.3; color: #1e293b; }' +
         '.rating-col { width: 9%; font-weight: bold; font-size: 9.5pt; text-align: center; vertical-align: middle; line-height: 1; }' +
-        '.feedback-section { margin-top: 6px; border: 1px solid #000; padding: 5px 8px; min-height: 40px; background: #fafafa; }' +
-        '.feedback-title { font-weight: bold; font-size: 8.5pt; margin-bottom: 2px; text-transform: uppercase; border-bottom: 1px dotted #000; padding-bottom: 2px; line-height: 1.2; }' +
-        '.overall-box { margin-top: 6px; padding: 4px 8px; border: 1.5px solid #000; font-weight: bold; text-align: center; font-size: 10pt; text-transform: uppercase; display: flex; justify-content: space-around; align-items: center; background: #f8fafc; line-height: 1.2; }' +
+        '.feedback-section { margin-top: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; min-height: 40px; background: #f8fafc; border-radius: 4px; }' +
+        '.feedback-title { font-weight: 800; font-size: 8.5pt; margin-bottom: 2px; border-bottom: 1px dotted #0f172a; padding-bottom: 2px; line-height: 1.3; color: #0f172a; }' +
+        '.overall-box { margin-top: 6px; padding: 5px 8px; border: 1.5px solid #0f172a; font-weight: 800; text-align: center; font-size: 9.5pt; display: flex; justify-content: space-around; align-items: center; background: #f8fafc; line-height: 1.3; border-radius: 4px; }' +
         '.signatures { margin-top: 14px; display: flex; justify-content: space-around; align-items: flex-end; text-align: center; page-break-inside: avoid; }' +
         '.sig-block { width: 40%; }' +
-        '.sig-title { font-weight: bold; font-size: 9pt; margin-bottom: 16px; line-height: 1.2; }' +
-        '.sig-line { border-top: 1px solid #000; padding-top: 3px; font-size: 8.5pt; font-weight: bold; line-height: 1.2; }' +
+        '.sig-title { font-weight: 800; font-size: 9pt; margin-bottom: 16px; line-height: 1.3; color: #0f172a; }' +
+        '.sig-line { border-top: 1px solid #0f172a; padding-top: 3px; font-size: 8.5pt; font-weight: 800; line-height: 1.3; color: #1e293b; }' +
       '</style>' +
     '</head>' +
     '<body ' + bodyLoadAttr + '>' +
       '<div class="header">' +
-        '<div>' + logoHtml + '</div>' +
+        '<div class="header-logo">' + logoHtml + '</div>' +
         '<div class="header-text">' +
           '<h1>' + schoolName + '</h1>' +
           '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
@@ -605,16 +663,16 @@ export async function printObservationReport(
 }
 
 /**
- * Generates a real PDF Blob (application/pdf) contained on a single A4 page.
+ * Generates a real jsPDF instance contained on a single A4 page.
  */
-export async function generateObservationReportPdfBlob(
+export async function generateObservationReportPdfInstance(
   visit: VisitRecord,
   settings: SchoolSettings,
   isRtl: boolean,
   lang: string
-): Promise<Blob> {
+): Promise<jsPDF> {
   const container = document.createElement('div');
-  container.style.position = 'fixed';
+  container.style.position = 'absolute';
   container.style.left = '-9999px';
   container.style.top = '0';
   container.style.width = '794px'; // standard A4 width at 96dpi
@@ -637,10 +695,20 @@ export async function generateObservationReportPdfBlob(
     const canvas = await html2canvas(container, {
       scale: 2,
       useCORS: true,
+      allowTaint: true,
+      imageTimeout: 5000,
       logging: false,
       backgroundColor: '#ffffff',
       width: 794,
       windowWidth: 794,
+      onclone: (clonedDoc) => {
+        const styles = clonedDoc.querySelectorAll('style');
+        styles.forEach(s => {
+          if (s.textContent) {
+            s.textContent = sanitizeModernCssColors(s.textContent);
+          }
+        });
+      }
     });
 
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
@@ -662,12 +730,12 @@ export async function generateObservationReportPdfBlob(
       const scale = pdfHeight / imgHeight;
       const finalWidth = imgWidth * scale;
       const xMargin = (pdfWidth - finalWidth) / 2;
-      pdf.addImage(imgData, 'JPEG', xMargin, 0, finalWidth, pdfHeight);
+      pdf.addImage(imgData, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
     } else {
-      pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
+      pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
     }
 
-    return pdf.output('blob');
+    return pdf;
   } finally {
     if (document.body.contains(container)) {
       document.body.removeChild(container);
@@ -676,30 +744,51 @@ export async function generateObservationReportPdfBlob(
 }
 
 /**
- * Downloads report as a REAL PDF file (application/pdf) compatible with Android & iOS.
+ * Generates a real PDF Blob (application/pdf) contained on a single A4 page.
+ */
+export async function generateObservationReportPdfBlob(
+  visit: VisitRecord,
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string
+): Promise<Blob> {
+  const pdf = await generateObservationReportPdfInstance(visit, settings, isRtl, lang);
+  return pdf.output('blob');
+}
+
+/**
+ * Downloads report as a REAL PDF file (application/pdf) compatible with Android, iOS & Web.
  */
 export async function downloadObservationReportPdf(
   visit: VisitRecord,
   settings: SchoolSettings,
   isRtl: boolean,
   lang: string
-): Promise<void> {
+): Promise<{ success: boolean; filename: string; error?: string }> {
   try {
-    const blob = await generateObservationReportPdfBlob(visit, settings, isRtl, lang);
-    const safeTeacherName = (visit.teacherName || 'Teacher').replace(/\s+/g, '_');
-    const safeClassName = (visit.className || 'Class').replace(/\s+/g, '_');
-    const fileName = `Observation_Report_${safeTeacherName}_${safeClassName}.pdf`;
+    const pdf = await generateObservationReportPdfInstance(visit, settings, isRtl, lang);
+    const safeTeacherName = (visit.teacherName || 'Teacher').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+    const safeClassName = (visit.className || 'Class').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+    const fileName = `تقرير_زيارة_${safeTeacherName}_${safeClassName}.pdf`;
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-  } catch (error) {
-    console.error('Error downloading PDF:', error);
+    if (Capacitor.isNativePlatform()) {
+      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: pdfBase64,
+        directory: Directory.Cache
+      });
+      await Share.share({
+        title: `تقرير زيارة صفية - ${visit.teacherName}`,
+        url: savedFile.uri
+      });
+    } else {
+      pdf.save(fileName);
+    }
+    return { success: true, filename: fileName };
+  } catch (error: any) {
+    console.error('Error downloading Observation Report PDF:', error);
+    return { success: false, filename: '', error: error?.message || 'Download failed' };
   }
 }
 
@@ -712,9 +801,9 @@ export async function shareObservationReportViaWhatsApp(
   isRtl: boolean,
   lang: string
 ): Promise<void> {
-  const safeTeacherName = (visit.teacherName || 'Teacher').replace(/\s+/g, '_');
-  const safeClassName = (visit.className || 'Class').replace(/\s+/g, '_');
-  const fileName = `Observation_Report_${safeTeacherName}_${safeClassName}.pdf`;
+  const safeTeacherName = (visit.teacherName || 'Teacher').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+  const safeClassName = (visit.className || 'Class').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+  const fileName = `تقرير_زيارة_${safeTeacherName}_${safeClassName}.pdf`;
 
   const textSummary =
     `📋 *تقرير زيارة صفية - قسم اللغة الألمانية*\n\n` +
@@ -727,7 +816,24 @@ export async function shareObservationReportViaWhatsApp(
     `👨‍🏫 *المشرف:* ${settings.hodName || 'عبد الرحمن غريب'}`;
 
   try {
-    const blob = await generateObservationReportPdfBlob(visit, settings, isRtl, lang);
+    const pdf = await generateObservationReportPdfInstance(visit, settings, isRtl, lang);
+
+    if (Capacitor.isNativePlatform()) {
+      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: pdfBase64,
+        directory: Directory.Cache
+      });
+      await Share.share({
+        title: `تقرير زيارة صفية - ${visit.teacherName}`,
+        text: textSummary,
+        url: savedFile.uri
+      });
+      return;
+    }
+
+    const blob = pdf.output('blob');
     const pdfFile = new File([blob], fileName, { type: 'application/pdf' });
 
     // Check if browser/OS supports file sharing (Web Share API level 2)
@@ -796,7 +902,7 @@ export function generateActionPlansReportHtml(
     filteredPlans = plans.filter(p => p.status === 'RESOLVED');
   }
 
-  const schoolName = settings.schoolName || 'مدرسة السلام الحديثة';
+  const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
   const departmentName = settings.departmentName || 'قسم اللغة الألمانية (Deutschabteilung)';
   const currentTerm = settings.currentTerm || 'الفصل الدراسي الأول';
   const rawHodName = settings.hodName || 'عبد الرحمن غريب';
@@ -829,22 +935,26 @@ export function generateActionPlansReportHtml(
         '</tr>';
       }).join('');
 
+  const logoHtml = getReportSchoolLogoHtml(settings, { height: 50 });
+
   return '<!DOCTYPE html>' +
     '<html lang="' + lang + '" dir="' + (isRtl ? 'rtl' : 'ltr') + '">' +
     '<head>' +
       '<meta charset="UTF-8">' +
       '<title>تقرير خطط الدعم الأكاديمي الشامل</title>' +
+      '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+      '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+      '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
       '<style>' +
         '@page { size: A4 portrait; margin: 10mm; }' +
         '@media print { body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }' +
-        '* { box-sizing: border-box; margin: 0; padding: 0; font-family: "Cairo", "Alexandria", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
-        'body { padding: 15px; color: #0f172a; background: #fff; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; font-size: 9.5pt; line-height: 1.4; }' +
+        '* { box-sizing: border-box; margin: 0; padding: 0; font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
+        'body { padding: 15px; color: #0f172a; background: #fff; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; font-size: 9.5pt; line-height: 1.4; -webkit-font-smoothing: antialiased; }' +
         '.formal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2.5px solid #047857; padding-bottom: 10px; margin-bottom: 12px; }' +
-        '.brand-section { display: flex; align-items: center; gap: 12px; }' +
-        '.logo-img { max-height: 50px; max-width: 120px; object-fit: contain; }' +
-        '.logo-placeholder { width: 44px; height: 44px; background: #047857; color: #ffffff; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 15pt; }' +
-        '.school-name { font-size: 14pt; font-weight: 900; color: #0f172a; }' +
-        '.dept-name { font-size: 10pt; font-weight: 700; color: #047857; }' +
+        '.brand-section { display: flex; align-items: center; gap: 14px; }' +
+        '.logo-img { max-height: 52px; max-width: 120px; object-fit: contain; }' +
+        '.school-name { font-size: 14pt; font-weight: 900; color: #0f172a; line-height: 1.3; }' +
+        '.dept-name { font-size: 10pt; font-weight: 700; color: #047857; line-height: 1.3; }' +
         '.doc-title-box { text-align: left; }' +
         '.doc-title { font-size: 11pt; font-weight: 900; color: #065f46; background: #ecfdf5; padding: 4px 12px; border-radius: 6px; border: 1px solid #a7f3d0; display: inline-block; }' +
         '.metadata-bar { display: flex; align-items: center; justify-content: space-between; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 14px; margin-bottom: 14px; font-size: 9pt; font-weight: 700; }' +
@@ -869,9 +979,7 @@ export function generateActionPlansReportHtml(
     '<body ' + bodyLoadAttr + '>' +
       '<div class="formal-header">' +
         '<div class="brand-section">' +
-          (settings.schoolLogoUrl
-            ? `<img src="${settings.schoolLogoUrl}" alt="School Logo" class="logo-img" />`
-            : `<div class="logo-placeholder">DE</div>`) +
+          logoHtml +
           '<div>' +
             '<div class="school-name">' + schoolName + '</div>' +
             '<div class="dept-name">' + departmentName + '</div>' +
@@ -948,7 +1056,7 @@ export async function downloadActionPlansPdf(
   settings: SchoolSettings,
   optionsOrRtl: boolean | ActionPlansPrintOptions = true,
   lang: string = 'ar'
-): Promise<void> {
+): Promise<{ success: boolean; filename: string; error?: string }> {
   const htmlStr = generateActionPlansReportHtml(plans, settings, optionsOrRtl, lang, false);
   const container = document.createElement('div');
   container.style.position = 'absolute';
@@ -962,8 +1070,18 @@ export async function downloadActionPlansPdf(
     const canvas = await html2canvas(container, {
       scale: 2,
       useCORS: true,
+      allowTaint: true,
+      imageTimeout: 5000,
       logging: false,
-      backgroundColor: '#ffffff'
+      backgroundColor: '#ffffff',
+      onclone: (clonedDoc) => {
+        const styles = clonedDoc.querySelectorAll('style');
+        styles.forEach(s => {
+          if (s.textContent) {
+            s.textContent = sanitizeModernCssColors(s.textContent);
+          }
+        });
+      }
     });
 
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
@@ -971,11 +1089,27 @@ export async function downloadActionPlansPdf(
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
 
-    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-    pdf.save(`Action_Plans_Report_${new Date().toISOString().split('T')[0]}.pdf`);
-  } catch (error) {
+    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+    const fileName = `خطط_علاجية_${new Date().toISOString().split('T')[0]}.pdf`;
+
+    if (Capacitor.isNativePlatform()) {
+      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: pdfBase64,
+        directory: Directory.Cache
+      });
+      await Share.share({
+        title: `خطط علاجية للطلاب`,
+        url: savedFile.uri
+      });
+    } else {
+      pdf.save(fileName);
+    }
+    return { success: true, filename: fileName };
+  } catch (error: any) {
     console.error('Error generating Action Plans PDF:', error);
-    printActionPlansReport(plans, settings, optionsOrRtl, lang);
+    return { success: false, filename: '', error: error?.message || 'Download failed' };
   } finally {
     if (document.body.contains(container)) {
       document.body.removeChild(container);

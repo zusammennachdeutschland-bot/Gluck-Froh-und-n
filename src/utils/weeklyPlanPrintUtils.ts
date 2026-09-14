@@ -4,6 +4,7 @@ import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { getReportSchoolLogoHtml } from './alsunLogoData';
 
 export interface WeeklyPlanGradeItem {
   gradeName: string;
@@ -28,6 +29,70 @@ export interface WeeklyPlanRecord {
 export function cleanSecretaryName(name?: string): string {
   if (!name) return '';
   return name.replace(/^(أستاذة|أ\/|سكرتيرة|السكرتيرة|Frau|Herr)\s*/gi, '').trim();
+}
+
+/**
+ * Resolves the stage secretary from SchoolSettings for a given grade band.
+ * Prioritizes SchoolSettings -> StageSecretaries linked to StageManagers or matched by band.
+ */
+export function getSecretaryForGradeBand(
+  gradeBand: string,
+  settings?: SchoolSettings,
+  fallbackName?: string,
+  fallbackPhone?: string
+): { name: string; phone: string } {
+  const secretaries = settings?.stageSecretaries || [];
+  const managers = settings?.stageManagers || [];
+
+  if (secretaries.length > 0) {
+    // 1. Try finding secretary via linked StageManager whose gradeBand matches
+    const matchedManager = managers.find(m => {
+      const mBand = (m.gradeBand || '').toLowerCase();
+      const gBand = (gradeBand || '').toLowerCase();
+      if (gBand.includes('1–3') || gBand.includes('1-3')) {
+        return mBand.includes('1–3') || mBand.includes('1-3') || mBand.includes('prim');
+      }
+      if (gBand.includes('4–6') || gBand.includes('4-6')) {
+        return mBand.includes('4–6') || mBand.includes('4-6');
+      }
+      if (gBand.includes('7–9') || gBand.includes('7-9')) {
+        return mBand.includes('7–9') || mBand.includes('7-9') || mBand.includes('prep');
+      }
+      if (gBand.includes('10–12') || gBand.includes('10-12')) {
+        return mBand.includes('10–12') || mBand.includes('10-12') || mBand.includes('sec');
+      }
+      return false;
+    });
+
+    if (matchedManager) {
+      const found = secretaries.find(s => s.stageManagerId === matchedManager.id);
+      if (found && found.name && found.name.trim() !== '') {
+        return { name: cleanSecretaryName(found.name), phone: found.phone || '' };
+      }
+    }
+
+    // 2. Try index-based matching (0: Grades 1-3, 1: Grades 4-6, 2: Grades 7-9, 3: Grades 10-12)
+    let bandIdx = 0;
+    if (gradeBand.includes('4–6') || gradeBand.includes('4-6')) bandIdx = 1;
+    else if (gradeBand.includes('7–9') || gradeBand.includes('7-9')) bandIdx = 2;
+    else if (gradeBand.includes('10–12') || gradeBand.includes('10-12')) bandIdx = 3;
+
+    if (secretaries[bandIdx]?.name && secretaries[bandIdx].name.trim() !== '') {
+      return { name: cleanSecretaryName(secretaries[bandIdx].name), phone: secretaries[bandIdx].phone || '' };
+    }
+
+    // 3. Fallback to first available secretary
+    if (secretaries[0]?.name && secretaries[0].name.trim() !== '') {
+      return { name: cleanSecretaryName(secretaries[0].name), phone: secretaries[0].phone || '' };
+    }
+  }
+
+  // 4. Fallback to manually saved name if provided
+  if (fallbackName && fallbackName.trim() !== '') {
+    return { name: cleanSecretaryName(fallbackName), phone: fallbackPhone || '' };
+  }
+
+  return { name: '', phone: '' };
 }
 
 export function cleanHodName(name?: string, fallback: string = ''): string {
@@ -136,7 +201,8 @@ export function generateSingleWeeklyPlanHtml(
   settings: SchoolSettings,
   weekNum: number
 ): string {
-  const secName = cleanSecretaryName(plan.secretaryName);
+  const sec = getSecretaryForGradeBand(plan.gradeBand, settings, plan.secretaryName, plan.secretaryPhone);
+  const secName = cleanSecretaryName(sec.name);
   const hodName = cleanHodName(settings.hodName, 'Fachleiter');
   const grades = (plan.gradesContent && plan.gradesContent.length > 0)
     ? plan.gradesContent
@@ -145,8 +211,8 @@ export function generateSingleWeeklyPlanHtml(
   const stageDe = getGermanGradeBandLabel(plan.gradeBand);
   const stageAr = getArabicGradeBandLabel(plan.gradeBand);
   const appreciation = getWeeklySecretaryAppreciationText(weekNum, secName);
-  const schoolName = settings.schoolName || 'Deutsche Abteilung';
-  const logoHtml = settings.schoolLogoUrl ? `<img src="${settings.schoolLogoUrl}" style="max-height: 48px; object-fit: contain;" />` : '';
+  const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
+  const logoHtml = getReportSchoolLogoHtml(settings, { height: 48 });
 
   return `<!DOCTYPE html>
 <html dir="ltr" lang="de">
@@ -154,6 +220,9 @@ export function generateSingleWeeklyPlanHtml(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Wochenplan_Woche_${weekNum}_${encodeURIComponent(plan.gradeBand)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
   <style>
     @page {
       size: A4 portrait;
@@ -163,15 +232,16 @@ export function generateSingleWeeklyPlanHtml(
       box-sizing: border-box;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
+      font-family: 'Cairo', 'Tajawal', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       color: #0f172a;
       margin: 0;
       padding: 0;
       background: #ffffff;
       line-height: 1.4;
       font-size: 10pt;
+      -webkit-font-smoothing: antialiased;
     }
     .page-container {
       max-width: 100%;
@@ -512,8 +582,8 @@ export function generateAllWeeklyPlansCombinedTableHtml(
   weekNum: number
 ): string {
   const hodName = cleanHodName(settings.hodName, 'Fachleiter');
-  const schoolName = settings.schoolName || 'Deutsche Abteilung';
-  const logoHtml = settings.schoolLogoUrl ? `<img src="${settings.schoolLogoUrl}" style="max-height: 44px; object-fit: contain;" />` : '';
+  const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
+  const logoHtml = getReportSchoolLogoHtml(settings, { height: 44 });
 
   // Order stage bands logically: 1-3, 4-6, 7-9, 10-12
   const sortedPlans = [...plans].sort((a, b) => {
@@ -533,6 +603,9 @@ export function generateAllWeeklyPlansCombinedTableHtml(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gesamter_Wochenplan_Woche_${weekNum}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
   <style>
     @page {
       size: A4 landscape;
@@ -542,15 +615,16 @@ export function generateAllWeeklyPlansCombinedTableHtml(
       box-sizing: border-box;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
+      font-family: 'Cairo', 'Tajawal', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       color: #0f172a;
       margin: 0;
       padding: 0;
       background: #ffffff;
       line-height: 1.35;
       font-size: 8.5pt;
+      -webkit-font-smoothing: antialiased;
     }
     .page-container {
       max-width: 100%;
@@ -766,7 +840,8 @@ export function generateAllWeeklyPlansCombinedTableHtml(
       </thead>
       <tbody>
         ${sortedPlans.map(plan => {
-          const secName = cleanSecretaryName(plan.secretaryName);
+          const sec = getSecretaryForGradeBand(plan.gradeBand, settings, plan.secretaryName, plan.secretaryPhone);
+          const secName = cleanSecretaryName(sec.name);
           const stageDe = getGermanGradeBandLabel(plan.gradeBand);
           const grades = (plan.gradesContent && plan.gradesContent.length > 0)
             ? plan.gradesContent
@@ -880,7 +955,8 @@ export async function downloadSingleWeeklyPlanPdf(
   weekNum: number
 ): Promise<{ success: boolean; filename?: string; error?: string }> {
   try {
-    const secName = cleanSecretaryName(plan.secretaryName);
+    const sec = getSecretaryForGradeBand(plan.gradeBand, settings, plan.secretaryName, plan.secretaryPhone);
+    const secName = cleanSecretaryName(sec.name);
     const hodName = cleanHodName(settings.hodName, 'Fachleiter');
     const grades = (plan.gradesContent && plan.gradesContent.length > 0)
       ? plan.gradesContent
@@ -889,8 +965,8 @@ export async function downloadSingleWeeklyPlanPdf(
     const stageDe = getGermanGradeBandLabel(plan.gradeBand);
     const stageAr = getArabicGradeBandLabel(plan.gradeBand);
     const appreciation = getWeeklySecretaryAppreciationText(weekNum, secName);
-    const schoolName = settings.schoolName || 'Deutsche Abteilung';
-    const logoHtml = settings.schoolLogoUrl ? `<img src="${settings.schoolLogoUrl}" style="max-height: 48px; object-fit: contain;" />` : '';
+    const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
+    const logoHtml = getReportSchoolLogoHtml(settings, { height: 48 });
 
     const container = document.createElement('div');
     container.style.position = 'fixed';
@@ -899,7 +975,7 @@ export async function downloadSingleWeeklyPlanPdf(
     container.style.width = '794px';
     container.style.backgroundColor = '#ffffff';
     container.style.padding = '24px';
-    container.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    container.style.fontFamily = "'Cairo', 'Tajawal', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
     container.style.color = '#0f172a';
     container.style.boxSizing = 'border-box';
     container.style.zIndex = '-9999';
@@ -1063,8 +1139,8 @@ export async function downloadAllWeeklyPlansCombinedPdf(
 ): Promise<{ success: boolean; filename?: string; error?: string }> {
   try {
     const hodName = cleanHodName(settings.hodName, 'Fachleiter');
-    const schoolName = settings.schoolName || 'Deutsche Abteilung';
-    const logoHtml = settings.schoolLogoUrl ? `<img src="${settings.schoolLogoUrl}" style="max-height: 44px; object-fit: contain;" />` : '';
+    const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
+    const logoHtml = getReportSchoolLogoHtml(settings, { height: 44 });
 
     const sortedPlans = [...plans].sort((a, b) => {
       const getOrder = (band: string) => {
@@ -1084,7 +1160,7 @@ export async function downloadAllWeeklyPlansCombinedPdf(
     container.style.width = '1120px'; // A4 landscape width standard
     container.style.backgroundColor = '#ffffff';
     container.style.padding = '20px';
-    container.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    container.style.fontFamily = "'Cairo', 'Tajawal', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
     container.style.color = '#0f172a';
     container.style.boxSizing = 'border-box';
     container.style.zIndex = '-9999';
@@ -1130,7 +1206,8 @@ export async function downloadAllWeeklyPlansCombinedPdf(
         </thead>
         <tbody>
           ${sortedPlans.map(p => {
-            const secName = cleanSecretaryName(p.secretaryName);
+            const sec = getSecretaryForGradeBand(p.gradeBand, settings, p.secretaryName, p.secretaryPhone);
+            const secName = cleanSecretaryName(sec.name);
             const stageDe = getGermanGradeBandLabel(p.gradeBand);
             const grades = (p.gradesContent && p.gradesContent.length > 0)
               ? p.gradesContent

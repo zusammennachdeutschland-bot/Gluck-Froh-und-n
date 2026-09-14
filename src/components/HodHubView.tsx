@@ -14,7 +14,8 @@ import {
   downloadSingleWeeklyPlanPdf,
   downloadAllWeeklyPlansCombinedPdf,
   printSingleWeeklyPlan,
-  printAllWeeklyPlansCombinedTable
+  printAllWeeklyPlansCombinedTable,
+  getSecretaryForGradeBand
 } from '../utils/weeklyPlanPrintUtils';
 import { StageFollowUpRecord, TeacherStageEvaluationItem, StaffAttendanceRecord, CustomTimedSession, SchoolPeriodRecord } from '../types';
 import { SchoolScheduleExportModal } from './SchoolScheduleExportModal';
@@ -42,10 +43,17 @@ export const HodHubView: React.FC = () => {
   const handleDownloadPdf = async (v: any) => {
     if (!v || activeLoadingAction) return;
     setActiveLoadingAction({ id: v.id, type: 'download' });
+    triggerToast(_t('جاري إنشاء وتحميل تقرير الزيارة PDF 📄...', 'Generating and downloading visit report PDF 📄...', 'Bericht wird als PDF generiert 📄...'));
     try {
-      await downloadObservationReportPdf(v, schoolSettings, (language === 'ar'), language);
+      const res = await downloadObservationReportPdf(v, schoolSettings, (language === 'ar'), language);
+      if (res?.success) {
+        triggerToast(_t(`تم تجهيز وتحميل تقرير الزيارة (${res.filename}) بنجاح 📥`, `Visit report downloaded successfully 📥`, `Bericht heruntergeladen 📥`));
+      } else {
+        triggerToast(_t('تعذر تحميل التقرير، يرجى المحاولة مجدداً', 'Download failed, please try again', 'Fehler beim Download'));
+      }
     } catch (err) {
       console.error('Download PDF error:', err);
+      triggerToast(_t('حدث خطأ أثناء تحميل التقرير', 'Error downloading report', 'Fehler beim Download'));
     } finally {
       setActiveLoadingAction(null);
     }
@@ -1390,20 +1398,15 @@ export const HodHubView: React.FC = () => {
   const [editingPlanRecord, setEditingPlanRecord] = useState<any | null>(null);
 
   const createDefaultPlanForBandAndWeek = (band: string, weekNum: number) => {
-    let secIdx = 0;
-    if (band.includes('4–6') || band.includes('4-6')) secIdx = 1;
-    else if (band.includes('7–9') || band.includes('7-9')) secIdx = 2;
-    else if (band.includes('10–12') || band.includes('10-12')) secIdx = 3;
-
-    const secObj = schoolSettings.stageSecretaries?.[secIdx];
+    const sec = getSecretaryForGradeBand(band, schoolSettings);
 
     return {
       id: `${band}_w${weekNum}`,
       gradeBand: band,
       status: 'not_sent', // Strictly NOT_SENT by default
       sentAt: undefined,
-      secretaryName: secObj?.name || '',
-      secretaryPhone: secObj?.phone || '',
+      secretaryName: sec.name || '',
+      secretaryPhone: sec.phone || '',
       weekNumber: weekNum,
       gradesContent: getEmptyGradesForBand(band)
     };
@@ -1432,8 +1435,11 @@ export const HodHubView: React.FC = () => {
       p => p.gradeBand === band && Number(p.weekNumber || 1) === Number(selectedPlanWeekNumber)
     );
     if (existing) {
+      const resolvedSec = getSecretaryForGradeBand(band, schoolSettings, existing.secretaryName, existing.secretaryPhone);
       return {
         ...existing,
+        secretaryName: existing.secretaryName || resolvedSec.name,
+        secretaryPhone: existing.secretaryPhone || resolvedSec.phone,
         gradesContent: sanitizeGradesContent(existing.gradesContent, existing.gradeBand)
       };
     }
@@ -1625,10 +1631,17 @@ export const HodHubView: React.FC = () => {
   const handleDownloadStageFollowUp = async (record: StageFollowUpRecord) => {
     if (activeLoadingAction) return;
     setActiveLoadingAction({ id: record.id, type: 'download' });
+    triggerToast(_t('جاري إنشاء وتحميل تقرير المتابعة PDF 📄...', 'Generating and downloading follow-up report PDF 📄...', 'Bericht wird als PDF generiert 📄...'));
     try {
-      await downloadStageFollowUpPdf(record, schoolSettings, (language === 'ar'), language);
+      const res = await downloadStageFollowUpPdf(record, schoolSettings, (language === 'ar'), language);
+      if (res?.success) {
+        triggerToast(_t(`تم تجهيز وتحميل تقرير المتابعة (${res.filename}) بنجاح 📥`, `Follow-up report downloaded successfully 📥`, `Bericht heruntergeladen 📥`));
+      } else {
+        triggerToast(_t('تعذر تحميل التقرير، يرجى المحاولة مجدداً', 'Download failed, please try again', 'Fehler beim Download'));
+      }
     } catch (err) {
       console.error('Download error:', err);
+      triggerToast(_t('حدث خطأ أثناء تحميل التقرير', 'Error downloading report', 'Fehler beim Download'));
     } finally {
       setActiveLoadingAction(null);
     }
@@ -1795,7 +1808,8 @@ export const HodHubView: React.FC = () => {
 
   const handleCopyFormattedPlanText = (plan: any) => {
     const weekNum = plan.weekNumber || selectedPlanWeekNumber;
-    const text = generateWeeklyPlanMessage(plan, weekNum, plan.secretaryName, schoolSettings.hodName);
+    const sec = getSecretaryForGradeBand(plan.gradeBand, schoolSettings, plan.secretaryName, plan.secretaryPhone);
+    const text = generateWeeklyPlanMessage(plan, weekNum, sec.name, schoolSettings.hodName);
     navigator.clipboard.writeText(text);
     triggerToast(_t('تم نسخ الخطة الأسبوعية بنسق الواتساب 📋', 'Plan copied to clipboard 📋', 'In Zwischenablage kopiert 📋'));
   };
@@ -1804,8 +1818,9 @@ export const HodHubView: React.FC = () => {
     if (!targetPlan) return;
     const weekNum = targetPlan.weekNumber || selectedPlanWeekNumber;
     const band = targetPlan.gradeBand;
-    const text = generateWeeklyPlanMessage(targetPlan, weekNum, targetPlan.secretaryName, schoolSettings.hodName);
-    const cleanPhone = (targetPlan.secretaryPhone || '').replace(/[^0-9]/g, '');
+    const sec = getSecretaryForGradeBand(band, schoolSettings, targetPlan.secretaryName, targetPlan.secretaryPhone);
+    const text = generateWeeklyPlanMessage(targetPlan, weekNum, sec.name, schoolSettings.hodName);
+    const cleanPhone = (sec.phone || targetPlan.secretaryPhone || '').replace(/[^0-9]/g, '');
     const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
     
     const freshSentAt = new Date().toISOString().split('T')[0];
@@ -3329,7 +3344,14 @@ export const HodHubView: React.FC = () => {
                   <div className="pt-2 border-t border-surface-border space-y-2">
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
                       <button
-                        onClick={() => setEditingPlanRecord(plan)}
+                        onClick={() => {
+                          const resolvedSec = getSecretaryForGradeBand(plan.gradeBand, schoolSettings, plan.secretaryName, plan.secretaryPhone);
+                          setEditingPlanRecord({
+                            ...plan,
+                            secretaryName: plan.secretaryName || resolvedSec.name,
+                            secretaryPhone: plan.secretaryPhone || resolvedSec.phone
+                          });
+                        }}
                         className="px-2.5 py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-[11px] font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1"
                         title={_t('تعديل الدروس والإنجازات', 'Edit plan details', 'Bearbeiten')}
                       >
@@ -5127,47 +5149,116 @@ export const HodHubView: React.FC = () => {
             {/* Modal Body */}
             <div className="p-2.5 sm:p-3 overflow-y-auto space-y-3 flex-1">
               {/* Meta Inputs: Week Number & Secretary Details */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 bg-surface-hover/60 border border-surface-border p-3.5 rounded-xl">
-                <div>
-                  <label className="text-[11px] font-bold text-text-main block mb-1">
-                    {_t('رقم الأسبوع الدراسي (Woche):', 'Academic Week Number:', 'Schulwoche:')}
-                  </label>
-                  <select
-                    value={editingPlanRecord.weekNumber || selectedPlanWeekNumber}
-                    onChange={e => setEditingPlanRecord({ ...editingPlanRecord, weekNumber: Number(e.target.value) })}
-                    className="w-full px-2 py-1 bg-surface border border-surface-border rounded-xl text-[11px] font-black text-primary focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+              <div className="bg-surface-hover/60 border border-surface-border p-3.5 rounded-xl space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-surface-border/60">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-primary">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    <span>{_t('بيانات الخطة وسكرتيرة المرحلة (مربوطة تلقائياً بالإعدادات)', 'Plan Meta & Stage Secretary (Auto-linked to Settings)', 'Metadaten & Stufensekretärin')}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const autoSec = getSecretaryForGradeBand(editingPlanRecord.gradeBand, schoolSettings);
+                      setEditingPlanRecord({
+                        ...editingPlanRecord,
+                        secretaryName: autoSec.name,
+                        secretaryPhone: autoSec.phone
+                      });
+                      triggerToast(_t('تمت استعادة بيانات السكرتيرة من إعدادات المدرسة 🔄', 'Restored secretary info from school settings 🔄', 'Aus Schuleinstellungen wiederhergestellt 🔄'));
+                    }}
+                    className="px-2 py-1 bg-surface hover:bg-primary/10 border border-surface-border hover:border-primary/30 text-primary text-[10px] font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
+                    title={_t('استعادة السكرتيرة المسجلة في إعدادات المدرسة لهذه المرحلة', 'Restore assigned secretary from school settings', 'Aus Einstellungen laden')}
                   >
-                    {Array.from({ length: 20 }, (_, i) => i + 1).map(num => (
-                      <option key={num} value={num}>Woche {num} (Schulwoche {num})</option>
-                    ))}
-                  </select>
+                    <RotateCcw className="w-3 h-3" />
+                    <span>{_t('استعادة من الإعدادات', 'Restore from Settings', 'Aus Einstellungen laden')}</span>
+                  </button>
                 </div>
 
-                <div>
-                  <label className="text-[11px] font-bold text-text-main block mb-1">
-                    {_t('اسم السكرتيرة المسؤولة:', 'Secretary Name:', 'Name der Sekretärin:')}
-                  </label>
-                  <input
-                    type="text"
-                    value={editingPlanRecord.secretaryName || ''}
-                    onChange={e => setEditingPlanRecord({ ...editingPlanRecord, secretaryName: e.target.value })}
-                    placeholder={_t('اسم السكرتيرة...', 'Secretary name...', 'Name...')}
-                    className="w-full px-2 py-1 bg-surface border border-surface-border rounded-xl text-[11px] text-text-main font-bold focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-text-main block mb-1">
+                      {_t('رقم الأسبوع الدراسي (Woche):', 'Academic Week Number:', 'Schulwoche:')}
+                    </label>
+                    <select
+                      value={editingPlanRecord.weekNumber || selectedPlanWeekNumber}
+                      onChange={e => setEditingPlanRecord({ ...editingPlanRecord, weekNumber: Number(e.target.value) })}
+                      className="w-full px-2 py-1 bg-surface border border-surface-border rounded-xl text-[11px] font-black text-primary focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                    >
+                      {Array.from({ length: 20 }, (_, i) => i + 1).map(num => (
+                        <option key={num} value={num}>Woche {num} (Schulwoche {num})</option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="text-[11px] font-bold text-text-main block mb-1">
-                    {_t('رقم الواتساب (للتواصل المباشر):', 'WhatsApp Phone Number:', 'WhatsApp-Nummer:')}
-                  </label>
-                  <input
-                    type="text"
-                    value={editingPlanRecord.secretaryPhone || ''}
-                    onChange={e => setEditingPlanRecord({ ...editingPlanRecord, secretaryPhone: e.target.value })}
-                    placeholder="010XXXXXXXX"
-                    className="w-full px-2 py-1 bg-surface border border-surface-border rounded-xl text-[11px] text-text-main font-bold focus:outline-none focus:ring-1 focus:ring-primary dir-ltr text-right"
-                  />
+                  <div>
+                    <label className="text-[11px] font-bold text-text-main block mb-1">
+                      {_t('اسم السكرتيرة المسؤولة:', 'Secretary Name:', 'Name der Sekretärin:')}
+                    </label>
+                    {schoolSettings.stageSecretaries && schoolSettings.stageSecretaries.length > 0 ? (
+                      <div className="space-y-1">
+                        <select
+                          value={
+                            schoolSettings.stageSecretaries.some((s: any) => cleanSecretaryName(s.name) === cleanSecretaryName(editingPlanRecord.secretaryName))
+                              ? schoolSettings.stageSecretaries.find((s: any) => cleanSecretaryName(s.name) === cleanSecretaryName(editingPlanRecord.secretaryName))?.id
+                              : 'custom'
+                          }
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === 'custom') return;
+                            const sec = schoolSettings.stageSecretaries.find((s: any) => s.id === val);
+                            if (sec) {
+                              setEditingPlanRecord({
+                                ...editingPlanRecord,
+                                secretaryName: cleanSecretaryName(sec.name),
+                                secretaryPhone: sec.phone || ''
+                              });
+                            }
+                          }}
+                          className="w-full px-2 py-1 bg-surface border border-surface-border rounded-xl text-[11px] text-text-main font-bold focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                        >
+                          <option value="" disabled>{_t('— اختر من سكرتيرات المدرسة —', '— Choose from School Secretaries —', '— Sekretärin auswählen —')}</option>
+                          {schoolSettings.stageSecretaries.map((s: any) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name} {s.phone ? `(${s.phone})` : ''}
+                            </option>
+                          ))}
+                          <option value="custom">{_t('✏️ كتابة اسم مخصص يدوي...', '✏️ Custom manual name...', '✏️ Manuell...')}</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={editingPlanRecord.secretaryName || ''}
+                          onChange={e => setEditingPlanRecord({ ...editingPlanRecord, secretaryName: e.target.value })}
+                          placeholder={_t('اسم السكرتيرة...', 'Secretary name...', 'Name...')}
+                          className="w-full px-2 py-1 bg-surface border border-surface-border rounded-xl text-[11px] text-text-main font-bold focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        value={editingPlanRecord.secretaryName || ''}
+                        onChange={e => setEditingPlanRecord({ ...editingPlanRecord, secretaryName: e.target.value })}
+                        placeholder={_t('اسم السكرتيرة...', 'Secretary name...', 'Name...')}
+                        className="w-full px-2 py-1 bg-surface border border-surface-border rounded-xl text-[11px] text-text-main font-bold focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-text-main block mb-1">
+                      {_t('رقم الواتساب (للتواصل المباشر):', 'WhatsApp Phone Number:', 'WhatsApp-Nummer:')}
+                    </label>
+                    <input
+                      type="text"
+                      value={editingPlanRecord.secretaryPhone || ''}
+                      onChange={e => setEditingPlanRecord({ ...editingPlanRecord, secretaryPhone: e.target.value })}
+                      placeholder="010XXXXXXXX"
+                      className="w-full px-2 py-1 bg-surface border border-surface-border rounded-xl text-[11px] text-text-main font-bold focus:outline-none focus:ring-1 focus:ring-primary dir-ltr text-right"
+                    />
+                  </div>
                 </div>
+                <p className="text-[10px] text-text-muted flex items-center gap-1">
+                  <span>ℹ️ {_t('ملاحظة: يتم سحب بيانات السكرتيرة تلقائياً لكل مرحلة من الإعدادات، ويمكنك تغييرها أو تعديلها هنا إن لزم.', 'Note: Secretary info is auto-populated from School Settings for this stage band.', 'Hinweis: Wird automatisch aus den Schuleinstellungen geladen.')}</span>
+                </p>
               </div>
 
               {/* Grades Content Inputs */}

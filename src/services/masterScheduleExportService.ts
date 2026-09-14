@@ -118,40 +118,49 @@ function createMasterExportDomElement(
   container.style.fontFamily = isRtl ? "'Cairo', sans-serif" : "sans-serif";
   container.style.direction = isRtl ? 'rtl' : 'ltr';
   container.style.boxSizing = 'border-box';
-  container.style.padding = '40px';
+  container.style.padding = '30px';
   
   const title = document.createElement('h1');
-  title.innerText = isRtl ? 'الجدول الأسبوعي الموحد' : 'Unified Weekly Master Schedule';
+  title.innerText = isRtl ? 'الجدول الأسبوعي الموحد لجميع المعلمين' : 'Unified Weekly Master Schedule';
   title.style.textAlign = 'center';
-  title.style.fontSize = '24px';
-  title.style.marginBottom = '20px';
+  title.style.fontSize = '26px';
+  title.style.fontWeight = '900';
+  title.style.color = '#0f172a';
+  title.style.marginBottom = '16px';
   container.appendChild(title);
 
   const table = document.createElement('table');
   table.style.width = '100%';
   table.style.borderCollapse = 'collapse';
   table.style.tableLayout = 'fixed';
-  table.style.fontSize = '9px'; // Tiny font to fit everything on one page "all cleard"
-  table.style.border = '1px solid #ccc';
+  table.style.border = '2px solid #0f172a';
   
   const thead = document.createElement('thead');
   const trHead = document.createElement('tr');
   
   const thTime = document.createElement('th');
-  thTime.style.border = '1px solid #ccc';
-  thTime.style.padding = '4px';
-  thTime.style.backgroundColor = '#f3f4f6';
-  thTime.style.width = '60px';
+  thTime.innerText = isRtl ? 'الحصة / التوقيت' : 'Period / Time';
+  thTime.style.border = '2.5px solid #000000';
+  thTime.style.padding = '10px 4px';
+  thTime.style.backgroundColor = '#0f172a';
+  thTime.style.color = '#ffffff';
+  thTime.style.fontSize = '18px';
+  thTime.style.fontWeight = '900';
+  thTime.style.width = '110px';
   trHead.appendChild(thTime);
 
   const teachers = settings.teachers || [];
   teachers.forEach(t => {
     const th = document.createElement('th');
-    th.innerText = t.name.split(' ').map((n, i) => i===0 ? n : n.charAt(0)+'.').join(' ');
-    th.style.border = '1px solid #ccc';
-    th.style.padding = '4px';
-    th.style.backgroundColor = '#f3f4f6';
+    th.innerText = t.name;
+    th.style.border = '2.5px solid #000000';
+    th.style.padding = '10px 4px';
+    th.style.backgroundColor = '#0f172a';
+    th.style.color = '#ffffff';
+    th.style.fontSize = '18px';
+    th.style.fontWeight = '900';
     th.style.overflow = 'hidden';
+    th.style.wordBreak = 'break-word';
     trHead.appendChild(th);
   });
   thead.appendChild(trHead);
@@ -168,30 +177,35 @@ function createMasterExportDomElement(
     const dayTd = document.createElement('td');
     dayTd.colSpan = teachers.length + 1;
     dayTd.innerText = dayNames[dIdx];
-    dayTd.style.backgroundColor = '#e5e7eb';
-    dayTd.style.fontWeight = 'bold';
+    dayTd.style.backgroundColor = '#0f172a';
+    dayTd.style.color = '#ffffff';
+    dayTd.style.fontWeight = '900';
+    dayTd.style.fontSize = '26px';
     dayTd.style.textAlign = 'center';
-    dayTd.style.padding = '4px';
-    dayTd.style.border = '1px solid #ccc';
+    dayTd.style.padding = '10px';
+    dayTd.style.border = '2.5px solid #000000';
     dayTr.appendChild(dayTd);
     tbody.appendChild(dayTr);
 
     periods.forEach(p => {
       const tr = document.createElement('tr');
       const tdTime = document.createElement('td');
-      tdTime.innerText = `P${p.periodNumber} 
- ${p.startTime}`;
-      tdTime.style.border = '1px solid #ccc';
-      tdTime.style.padding = '2px';
+      tdTime.innerHTML = `
+        <div style="font-weight: 900; font-size: 19px; color: #000000; margin-bottom: 2px;">${isRtl ? 'حصة ' : 'P'}${p.periodNumber}</div>
+        <div style="font-weight: 900; font-size: 15px; color: #000000; font-family: 'Cairo', monospace; background: #e2e8f0; padding: 2px 4px; border-radius: 4px; border: 1px solid #94a3b8; display: inline-block;">${p.startTime}</div>
+      `;
+      tdTime.style.border = '2px solid #000000';
+      tdTime.style.backgroundColor = '#f8fafc';
+      tdTime.style.padding = '6px 2px';
       tdTime.style.textAlign = 'center';
-      tdTime.style.whiteSpace = 'pre-wrap';
       tr.appendChild(tdTime);
 
       teachers.forEach(t => {
         const td = document.createElement('td');
-        td.style.border = '1px solid #ccc';
-        td.style.padding = '2px';
+        td.style.border = '2px solid #000000';
+        td.style.padding = '4px 2px';
         td.style.textAlign = 'center';
+        td.style.verticalAlign = 'middle';
         
         let lessons: any[] = [];
         if (t.id === 'hod') lessons = settings.schedule?.[day] || [];
@@ -199,7 +213,13 @@ function createMasterExportDomElement(
         
         const lesson = lessons.find((l: any) => l.periodNumber === p.periodNumber && (l.className || l.subjectName));
         if (lesson) {
-          td.innerHTML = `<div style="font-weight:bold;color:#2563eb;">${lesson.className||''}</div><div style="color:#4b5563;">${lesson.subjectName||''}</div>`;
+          td.style.backgroundColor = '#ffffff';
+          td.innerHTML = `
+            <div style="font-weight: 900; font-size: 26px; color: #000000; line-height: 1.1; margin: 0; letter-spacing: -0.3px;">${lesson.className || ''}</div>
+            ${lesson.subjectName ? `<div style="font-weight: 900; font-size: 13px; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #cbd5e1; margin-top: 3px; display: inline-block;">${lesson.subjectName}</div>` : ''}
+          `;
+        } else {
+          td.style.backgroundColor = '#ffffff';
         }
         tr.appendChild(td);
       });

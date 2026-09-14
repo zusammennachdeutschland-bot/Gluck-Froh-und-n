@@ -10,6 +10,7 @@ import {
   exportSchoolScheduleAsPdf, 
   exportSchoolScheduleAsIcs,
   shareSchoolSchedule, 
+  printSchoolScheduleNative,
   SchoolScheduleExportFormat, 
   SchoolScheduleExportTheme,
   buildSchoolScheduleExportModel
@@ -122,6 +123,38 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
     } finally {
       setIsProcessing(false);
       setStatusMessage('');
+    }
+  };
+
+  const handleExecutePrint = () => {
+    try {
+      let settingsToUse = schoolSettings;
+      let tName = profile?.displayName || '';
+      if (exportScope !== 'my_schedule' && exportScope !== 'master') {
+         const teacher = schoolSettings?.teachers?.find(t => t.id === exportScope);
+         if (teacher) {
+            settingsToUse = { ...schoolSettings, schedule: schoolSettings.teacherSchedules?.[exportScope] || {} };
+            tName = teacher.name;
+         }
+      }
+
+      const options = {
+        format: selectedFormat,
+        theme: selectedTheme,
+        language: language as any
+      };
+
+      const result = printSchoolScheduleNative(settingsToUse, { ...profile, displayName: tName } as any, options);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to print schedule');
+      }
+    } catch (err: any) {
+      console.error('[Print School Schedule Error]:', err);
+      setErrorFeedback(_t(
+        'تعذر فتح نافذة الطباعة مباشرة. يرجى تصدير ملف PDF والطباعة منه.',
+        'Could not open print window. Please export as PDF to print.',
+        'Druckfenster konnte nicht geöffnet werden. Bitte als PDF exportieren.'
+      ));
     }
   };
 
@@ -481,20 +514,32 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
         </div>
 
         {/* MODAL ACTIONS FOOTER */}
-        <div className="p-4 sm:p-5 border-t border-surface-border bg-surface-hover/30 flex flex-col sm:flex-row items-center gap-3">
+        <div className="p-4 sm:p-5 border-t border-surface-border bg-surface-hover/30 flex flex-col sm:flex-row items-center gap-2.5">
+          {/* DIRECT PRINT BUTTON */}
+          <button
+            type="button"
+            onClick={handleExecutePrint}
+            disabled={isProcessing || selectedFormat === 'ics'}
+            className={`w-full sm:w-auto flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-surface border border-surface-border text-text-main hover:bg-surface-hover font-black text-xs transition-all active:scale-95 cursor-pointer shadow-2xs ${selectedFormat === 'ics' ? 'opacity-40 cursor-not-allowed' : ''}`}
+            title={_t('طباعة فورية للجدول', 'Print Schedule Directly', 'Direkt drucken')}
+          >
+            <Printer className="w-4 h-4 text-primary shrink-0" />
+            <span>{_t('طباعة فورية', 'Print Now', 'Drucken')}</span>
+          </button>
+
           {/* SHARE BUTTON (ANDROID SHARE SHEET / WEB SHARE) */}
           <button
             type="button"
             onClick={handleExecuteShare}
             disabled={isProcessing}
-            className="w-full sm:w-1/2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-surface border border-surface-border text-text-main hover:bg-surface-hover font-bold text-xs transition-all active:scale-95 cursor-pointer shadow-2xs"
+            className="w-full sm:flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-surface border border-surface-border text-text-main hover:bg-surface-hover font-bold text-xs transition-all active:scale-95 cursor-pointer shadow-2xs"
           >
             {isProcessing ? (
-              <Loader2 className="w-4 h-4 animate-spin text-primary" />
+              <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
             ) : (
-              <Share2 className="w-4 h-4 text-primary" />
+              <Share2 className="w-4 h-4 text-primary shrink-0" />
             )}
-            <span>{_t('مشاركة مباشرة', 'Direct Share', 'Direkt teilen')}</span>
+            <span>{_t('مشاركة', 'Share', 'Teilen')}</span>
           </button>
 
           {/* SAVE / DOWNLOAD BUTTON */}
@@ -502,22 +547,22 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
             type="button"
             onClick={handleExecuteSave}
             disabled={isProcessing}
-            className="w-full sm:w-1/2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white font-black text-xs transition-all active:scale-95 cursor-pointer shadow-sm"
+            className="w-full sm:flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white font-black text-xs transition-all active:scale-95 cursor-pointer shadow-sm"
           >
             {isProcessing ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>{statusMessage || _t('جاري التصدير...', 'Exporting...', 'Wird exportiert...')}</span>
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                <span className="truncate">{statusMessage || _t('جاري التصدير...', 'Exporting...', 'Wird exportiert...')}</span>
               </>
             ) : (
               <>
-                <Download className="w-4 h-4" />
-                <span>
+                <Download className="w-4 h-4 shrink-0" />
+                <span className="truncate">
                   {selectedFormat === 'ics'
-                    ? _t('تصدير وحفظ ملف التقويم (.ics)', 'Export & Save Calendar (.ics)', 'Kalenderdatei speichern (.ics)')
+                    ? _t('حفظ التقويم (.ics)', 'Save Calendar (.ics)', 'Speichern (.ics)')
                     : selectedFormat === 'pdf' 
-                      ? _t('تصدير وحفظ PDF', 'Export & Save PDF', 'PDF speichern')
-                      : _t('تصدير وحفظ الصورة', 'Export & Save Image', 'Bild speichern')
+                      ? _t('حفظ PDF', 'Save PDF', 'PDF speichern')
+                      : _t('حفظ الصورة', 'Save Image', 'Bild speichern')
                   }
                 </span>
               </>

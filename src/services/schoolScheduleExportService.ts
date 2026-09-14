@@ -288,28 +288,28 @@ function createExportDomElement(
   container.style.minHeight = '1046px';
   container.style.zIndex = '-9999';
   container.style.backgroundColor = '#ffffff';
-  container.style.color = '#0f172a';
+  container.style.color = '#000000';
   container.style.fontFamily = isRtl 
     ? "'Cairo', 'Alexandria', 'Amiri', system-ui, -apple-system, sans-serif" 
     : "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
   container.style.direction = isRtl ? 'rtl' : 'ltr';
   container.style.boxSizing = 'border-box';
-  container.style.padding = '36px 44px';
+  container.style.padding = '28px 36px';
   container.style.display = 'flex';
   container.style.flexDirection = 'column';
   container.style.justifyContent = 'space-between';
 
-  // Primary palette variables
-  const primaryColor = isAccentTheme ? '#0284c7' : '#0f172a';
+  // Primary palette variables for high print contrast
+  const primaryColor = isAccentTheme ? '#0284c7' : '#000000';
   const primarySoftBg = isAccentTheme ? '#f0f9ff' : '#f8fafc';
-  const primaryBorder = isAccentTheme ? '#bae6fd' : '#e2e8f0';
+  const tableBorder = '#000000'; // Pure crisp black borders for high-contrast printing
 
   const numCols = model.days.length;
-  const timeColWidth = numCols > 5 ? '11%' : '13%';
-  const dayColWidth = `${(100 - (numCols > 5 ? 11 : 13)) / numCols}%`;
+  const timeColWidth = numCols > 5 ? '13%' : '15%';
+  const dayColWidth = `${(100 - (numCols > 5 ? 13 : 15)) / numCols}%`;
 
-  const timeLabel = model.language === 'ar' ? 'الوقت / الحصة' : (model.language === 'de' ? 'Zeit / Std.' : 'Time / Period');
-  const exportedLabel = model.language === 'ar' ? 'تم التصدير في:' : (model.language === 'de' ? 'Exportiert am:' : 'Exported on:');
+  const timeLabel = model.language === 'ar' ? 'الحصة / التوقيت' : (model.language === 'de' ? 'Stunde / Zeit' : 'Period / Time');
+  const exportedLabel = model.language === 'ar' ? 'تاريخ الطباعة:' : (model.language === 'de' ? 'Druckdatum:' : 'Print Date:');
   const teacherLabel = model.language === 'ar' ? 'المعلم:' : (model.language === 'de' ? 'Lehrkraft:' : 'Teacher:');
 
   // Build rows HTML
@@ -324,10 +324,10 @@ function createExportDomElement(
 
       if (!isFilled) {
         return `
-          <td style="width: ${dayColWidth}; padding: 5px; border: 1px solid #e2e8f0; background: #ffffff; text-align: center; vertical-align: middle;">
-            <div style="min-height: 54px; display: table; width: 100%;">
+          <td style="width: ${dayColWidth}; padding: 4px; border: 2px solid ${tableBorder}; background: #ffffff; text-align: center; vertical-align: middle;">
+            <div style="min-height: 76px; display: table; width: 100%;">
               <div style="display: table-cell; vertical-align: middle; text-align: center;">
-                <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background-color: #f1f5f9;"></span>
+                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background-color: #cbd5e1;"></span>
               </div>
             </div>
           </td>
@@ -335,17 +335,22 @@ function createExportDomElement(
       }
 
       return `
-        <td style="width: ${dayColWidth}; padding: 5px; border: 1px solid #e2e8f0; background: ${primarySoftBg}; text-align: center; vertical-align: middle;">
-          <div style="box-sizing: border-box; border: 1px solid ${primaryBorder}; border-radius: 8px; padding: 6px 4px; background: #ffffff; text-align: center; min-height: 54px; display: table; width: 100%;">
+        <td style="width: ${dayColWidth}; padding: 4px; border: 2px solid ${tableBorder}; background: ${primarySoftBg}; text-align: center; vertical-align: middle;">
+          <div style="box-sizing: border-box; border: 2px solid ${tableBorder}; border-radius: 8px; padding: 6px 4px; background: #ffffff; text-align: center; min-height: 76px; display: table; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
             <div style="display: table-cell; vertical-align: middle; text-align: center;">
               ${cell.className ? `
-                <div style="display: block; font-weight: 900; font-size: 13.5px; color: #0f172a; line-height: 1.25; margin: 0 0 ${cell.subjectName ? '4px' : '0'} 0; letter-spacing: -0.2px; word-break: break-word;">
+                <div style="display: block; font-weight: 900; font-size: 34px; color: #000000; line-height: 1.1; margin: 0; letter-spacing: -0.5px; word-break: break-word;">
                   ${cell.className}
                 </div>
               ` : ''}
               ${cell.subjectName ? `
-                <div style="display: inline-block; font-weight: 700; font-size: 10px; color: ${primaryColor}; line-height: 1.2; text-transform: uppercase; background: ${primarySoftBg}; padding: 2px 7px; border-radius: 4px; border: 1px solid ${primaryBorder}; margin: 0; word-break: break-word;">
+                <div style="display: inline-block; font-weight: 900; font-size: 15px; color: #0f172a; line-height: 1.2; background: #f1f5f9; padding: 3px 10px; border-radius: 6px; border: 1.5px solid #94a3b8; margin-top: 4px; word-break: break-word;">
                   ${cell.subjectName}
+                </div>
+              ` : ''}
+              ${cell.notes ? `
+                <div style="display: block; font-weight: 800; font-size: 13px; color: #334155; line-height: 1.15; margin-top: 3px;">
+                  ${cell.notes}
                 </div>
               ` : ''}
             </div>
@@ -356,11 +361,11 @@ function createExportDomElement(
 
     return `
       <tr>
-        <td style="width: ${timeColWidth}; padding: 6px 4px; border: 1px solid #cbd5e1; background: #f8fafc; text-align: center; vertical-align: middle;">
-          <div style="display: block; font-weight: 900; font-size: 12px; color: ${primaryColor}; font-family: monospace; line-height: 1.2; margin-bottom: 3px;">
+        <td style="width: ${timeColWidth}; padding: 6px 4px; border: 2px solid ${tableBorder}; background: #f8fafc; text-align: center; vertical-align: middle;">
+          <div style="display: block; font-weight: 900; font-size: 24px; color: #000000; line-height: 1.15; margin-bottom: 4px;">
             ${periodNumberLabel}
           </div>
-          <div style="display: block; font-weight: 700; font-size: 10px; color: #64748b; line-height: 1.1; margin: 0;">
+          <div style="display: inline-block; font-weight: 900; font-size: 18px; color: #000000; line-height: 1.2; font-family: 'Cairo', monospace, system-ui; margin: 0; background: #e2e8f0; padding: 3px 8px; border-radius: 6px; border: 1.5px solid #94a3b8; letter-spacing: 0.3px;">
             ${period.startTime} - ${period.endTime}
           </div>
         </td>
@@ -369,42 +374,42 @@ function createExportDomElement(
     `;
   }).join('');
 
-  // Table header days
+  // Table header days (اليوم) - HUGE, BOLD, HIGH-CONTRAST FOR PRINTING
   const headerDaysHtml = model.days.map(day => `
-    <th style="width: ${dayColWidth}; padding: 10px 6px; border: 1px solid #cbd5e1; background: #f1f5f9; text-align: center; font-size: 13px; font-weight: 900; color: #1e293b;">
+    <th style="width: ${dayColWidth}; padding: 14px 6px; border: 2px solid ${tableBorder}; background: #0f172a; text-align: center; font-size: 30px; font-weight: 900; color: #ffffff; letter-spacing: -0.2px;">
       <div>${day.label}</div>
     </th>
   `).join('');
 
   container.innerHTML = `
     <!-- HEADER AREA -->
-    <div style="border-bottom: 2px solid #0f172a; padding-bottom: 18px; margin-bottom: 18px; display: flex; align-items: flex-end; justify-content: space-between;">
+    <div style="border-bottom: 3px solid #000000; padding-bottom: 14px; margin-bottom: 14px; display: flex; align-items: flex-end; justify-content: space-between;">
       <div>
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <div style="width: 32px; height: 32px; border-radius: 8px; background: ${primaryColor}; color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="width: 40px; height: 40px; border-radius: 8px; background: #000000; color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 22px;">
             📖
           </div>
-          <h1 style="margin: 0; font-size: 26px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px;">
+          <h1 style="margin: 0; font-size: 32px; font-weight: 900; color: #000000; letter-spacing: -0.5px;">
             ${model.title}
           </h1>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; font-weight: 800; color: #475569;">
-          <span style="background: #f1f5f9; padding: 3px 10px; border-radius: 6px; border: 1px solid #e2e8f0;">
-            ${model.stats.summaryLine}
-          </span>
+        <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 16px; font-weight: 800; color: #000000;">
           ${model.teacherName ? `
-            <span style="background: #f8fafc; padding: 3px 10px; border-radius: 6px; border: 1px solid #e2e8f0; color: #334155;">
+            <span style="background: #f8fafc; padding: 6px 16px; border-radius: 8px; border: 2.5px solid #000000; color: #000000; font-size: 22px; font-weight: 900;">
               ${teacherLabel} <strong>${model.teacherName}</strong>
             </span>
           ` : ''}
+          <span style="background: #f1f5f9; padding: 6px 14px; border-radius: 8px; border: 1.5px solid #94a3b8; font-weight: 900; font-size: 16px; color: #0f172a;">
+            ${model.stats.summaryLine}
+          </span>
         </div>
       </div>
 
       <div style="text-align: ${isRtl ? 'left' : 'right'};">
-        <div style="font-size: 14px; font-weight: 900; color: #0f172a; letter-spacing: 0.5px;">
+        <div style="font-size: 20px; font-weight: 900; color: #000000; letter-spacing: 0.5px;">
           GLÜCK
         </div>
-        <div style="font-size: 11px; font-weight: 700; color: #64748b; margin-top: 2px;">
+        <div style="font-size: 14px; font-weight: 800; color: #334155; margin-top: 2px;">
           ${exportedLabel} ${model.exportDateFormatted}
         </div>
       </div>
@@ -412,10 +417,10 @@ function createExportDomElement(
 
     <!-- MAIN SCHEDULE TABLE -->
     <div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-start;">
-      <table style="width: 100%; border-collapse: collapse; border: 1.5px solid #cbd5e1; table-layout: fixed;">
+      <table style="width: 100%; border-collapse: collapse; border: 3px solid ${tableBorder}; table-layout: fixed;">
         <thead>
           <tr>
-            <th style="width: ${timeColWidth}; padding: 10px 6px; border: 1px solid #cbd5e1; background: #e2e8f0; text-align: center; font-size: 11px; font-weight: 900; color: #334155;">
+            <th style="width: ${timeColWidth}; padding: 14px 6px; border: 2px solid ${tableBorder}; background: #0f172a; text-align: center; font-size: 20px; font-weight: 900; color: #ffffff;">
               ${timeLabel}
             </th>
             ${headerDaysHtml}
@@ -428,7 +433,7 @@ function createExportDomElement(
     </div>
 
     <!-- FOOTER AREA -->
-    <div style="margin-top: 18px; padding-top: 12px; border-top: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #94a3b8;">
+    <div style="margin-top: 14px; padding-top: 10px; border-top: 2px solid #000000; display: flex; align-items: center; justify-content: space-between; font-size: 14px; font-weight: 800; color: #334155;">
       <div>
         Glück Teacher Assistant • ${model.stats.totalWeeklyLessons} ${model.language === 'ar' ? 'حصة أسبوعية' : (model.language === 'de' ? 'Wochenstunden' : 'Weekly Lessons')}
       </div>
@@ -808,3 +813,94 @@ export async function shareSchoolSchedule(
     };
   }
 }
+
+/**
+ * Direct Browser / Native Printing for School Schedule
+ */
+export function printSchoolScheduleNative(
+  settings: SchoolSettings | null | undefined,
+  profile: TeacherProfile | null | undefined,
+  options: SchoolScheduleExportOptions = {}
+): { success: boolean; error?: string } {
+  try {
+    const model = buildSchoolScheduleExportModel(settings, profile, options);
+    const element = createExportDomElement(model, options);
+    
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      // Fallback: If popup blocked, print current page after isolating or report error
+      window.print();
+      return { success: true };
+    }
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html dir="${model.isRtl ? 'rtl' : 'ltr'}" lang="${model.language}">
+      <head>
+        <meta charset="utf-8">
+        <title>${model.title} - ${model.teacherName || 'Glück'}</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@700;800;900&display=swap" rel="stylesheet">
+        <style>
+          @page {
+            size: A4 landscape;
+            margin: 6mm;
+          }
+          * {
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          body {
+            margin: 0;
+            padding: 0;
+            background: #ffffff;
+            font-family: ${model.isRtl ? "'Cairo', sans-serif" : "system-ui, sans-serif"};
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+          }
+          #print-wrapper {
+            width: 100%;
+            max-width: 100%;
+          }
+          #print-wrapper > div {
+            position: static !important;
+            left: auto !important;
+            top: auto !important;
+            width: 100% !important;
+            min-height: auto !important;
+            padding: 10px !important;
+          }
+          @media print {
+            body {
+              width: 100%;
+              height: 100%;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div id="print-wrapper">
+          ${element.outerHTML}
+        </div>
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.focus();
+              window.print();
+            }, 250);
+          };
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+    return { success: true };
+  } catch (err: any) {
+    console.error('Direct print failed:', err);
+    return { success: false, error: err?.message || 'Print failed' };
+  }
+}
+

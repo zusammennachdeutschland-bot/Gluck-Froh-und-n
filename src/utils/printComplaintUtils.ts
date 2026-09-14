@@ -1,4 +1,5 @@
-import { Complaint } from '../types';
+import { Complaint, SchoolSettings } from '../types';
+import { getReportSchoolLogoHtml } from './alsunLogoData';
 
 export interface StageManagerReportData {
   stageManagerName: string;
@@ -9,6 +10,7 @@ export interface StageManagerReportData {
   hodName: string;
   complaints: Complaint[];
   reportType: 'weekly' | 'monthly' | 'termly';
+  settings?: SchoolSettings;
 }
 
 export const generateStageManagerReportPrint = (data: StageManagerReportData) => {
@@ -18,10 +20,14 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
     term,
     month = '',
     reportDate,
-    hodName = '',
+    hodName = 'عبد الرحمن غريب',
     complaints,
     reportType,
+    settings,
   } = data;
+
+  const schoolName = settings?.schoolName || 'مدرسة الألسن للغات';
+  const logoHtml = getReportSchoolLogoHtml(settings, { height: 50 });
 
   const teacherToStudentCount = complaints.filter(c => c.direction === 'TEACHER_TO_STUDENT').length;
   const studentToTeacherCount = complaints.filter(c => c.direction === 'STUDENT_TO_TEACHER').length;
@@ -36,8 +42,8 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
   const rowsHtml = complaints.map((c, index) => {
     const isTeacherToStudent = c.direction === 'TEACHER_TO_STUDENT';
     const directionBadge = isTeacherToStudent
-      ? `<span style="background-color: #fee2e2; color: #991b1b; padding: 2px 8px; rounded: 4px; font-weight: bold; font-size: 8pt; border: 1px solid #fca5a5;">👨‍🏫 معلم ضد طالب</span>`
-      : `<span style="background-color: #e0e7ff; color: #3730a3; padding: 2px 8px; rounded: 4px; font-weight: bold; font-size: 8pt; border: 1px solid #a5b4fc;">👦 طالب/ولي أمر ضد معلم</span>`;
+      ? `<span style="background-color: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 8pt; border: 1px solid #fca5a5;">👨‍🏫 معلم ضد طالب</span>`
+      : `<span style="background-color: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 8pt; border: 1px solid #a5b4fc;">👦 طالب/ولي أمر ضد معلم</span>`;
 
     const formattedDate = new Date(c.timestamp).toLocaleDateString('ar-EG', {
       weekday: 'short',
@@ -52,20 +58,20 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
 
     return `
       <tr style="border-bottom: 1px solid #e2e8f0; font-size: 9pt;">
-        <td style="padding: 8px 6px; text-align: center; font-weight: bold; color: #64748b;">${index + 1}</td>
-        <td style="padding: 8px 6px; text-align: center;">${directionBadge}</td>
-        <td style="padding: 8px 6px; font-weight: bold; color: #1e293b;">${c.teacherName || 'غير محدد'}</td>
-        <td style="padding: 8px 6px;">
+        <td style="padding: 6px 4px; text-align: center; font-weight: bold; color: #64748b;">${index + 1}</td>
+        <td style="padding: 6px 4px; text-align: center;">${directionBadge}</td>
+        <td style="padding: 6px 4px; font-weight: bold; color: #1e293b;">${c.teacherName || 'غير محدد'}</td>
+        <td style="padding: 6px 4px;">
           <div style="font-weight: bold; color: #0f172a;">${c.studentNameAr || c.studentNameEn}</div>
           ${c.studentNameEn && c.studentNameAr ? `<div style="font-size: 8pt; color: #64748b; font-family: sans-serif;">${c.studentNameEn}</div>` : ''}
         </td>
-        <td style="padding: 8px 6px; text-align: center; font-weight: bold; color: #2563eb;">${c.gradeClass}</td>
-        <td style="padding: 8px 6px; color: #334155; line-height: 1.4;">
+        <td style="padding: 6px 4px; text-align: center; font-weight: bold; color: #2563eb;">${c.gradeClass}</td>
+        <td style="padding: 6px 4px; color: #334155; line-height: 1.4;">
           <strong>${c.reason}</strong>
           ${c.notes ? `<div style="font-size: 8pt; color: #64748b; margin-top: 2px;">📝 ${c.notes}</div>` : ''}
         </td>
-        <td style="padding: 8px 6px; color: #047857; font-weight: bold;">${c.actionTaken}</td>
-        <td style="padding: 8px 6px; text-align: center; font-size: 8.5pt; color: #475569;">
+        <td style="padding: 6px 4px; color: #047857; font-weight: bold;">${c.actionTaken}</td>
+        <td style="padding: 6px 4px; text-align: center; font-size: 8.5pt; color: #475569;">
           <div>${formattedDate}</div>
           <div style="font-size: 7.5pt; margin-top: 2px;">${statusBadge}</div>
         </td>
@@ -79,94 +85,114 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
     <head>
       <meta charset="UTF-8">
       <title>${titleText} - ${stageManagerName}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
       <style>
         @page {
           size: A4 portrait;
-          margin: 12mm 10mm 15mm 10mm;
+          margin: 10mm 10mm 12mm 10mm;
+        }
+        * {
+          box-sizing: border-box;
+          font-family: 'Cairo', 'Tajawal', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
         body {
-          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
           background-color: #fff;
           color: #0f172a;
           margin: 0;
-          padding: 0;
+          padding: 10px;
           direction: rtl;
+          text-align: right;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
+          -webkit-font-smoothing: antialiased;
         }
         .header-container {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          border-bottom: 3px double #0284c7;
-          padding-bottom: 10px;
-          margin-bottom: 15px;
+          border-bottom: 2.5px solid #0284c7;
+          padding-bottom: 8px;
+          margin-bottom: 12px;
+        }
+        .header-logo {
+          display: flex;
+          align-items: center;
+          min-width: 60px;
         }
         .header-title-box {
           text-align: center;
           flex-grow: 1;
+          padding: 0 10px;
         }
         .dept-badge {
           background-color: #0284c7;
           color: white;
-          padding: 4px 12px;
+          padding: 3px 12px;
           border-radius: 20px;
-          font-size: 10pt;
-          font-weight: bold;
+          font-size: 9.5pt;
+          font-weight: 800;
           display: inline-block;
-          margin-bottom: 5px;
+          margin-bottom: 4px;
         }
         .main-title {
-          font-size: 14pt;
+          font-size: 13pt;
           font-weight: 900;
           color: #0f172a;
-          margin: 4px 0;
+          margin: 3px 0;
+          line-height: 1.3;
         }
         .sub-meta {
-          font-size: 9pt;
+          font-size: 8.5pt;
           color: #475569;
-          font-weight: bold;
+          font-weight: 700;
         }
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
           gap: 8px;
-          margin-bottom: 15px;
+          margin-bottom: 12px;
           text-align: center;
         }
         .stat-card {
           border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          padding: 8px;
+          border-radius: 6px;
+          padding: 6px 4px;
           background-color: #f8fafc;
         }
         .stat-val {
-          font-size: 12pt;
+          font-size: 13pt;
           font-weight: 900;
-          color: #0369a1;
+          color: #0284c7;
+          line-height: 1.2;
         }
         .stat-lbl {
-          font-size: 8pt;
+          font-size: 7.5pt;
+          font-weight: 700;
           color: #64748b;
-          font-weight: bold;
           margin-top: 2px;
         }
         table {
           width: 100%;
           border-collapse: collapse;
-          margin-bottom: 20px;
+          margin-bottom: 15px;
         }
         th {
           background-color: #f1f5f9;
           color: #1e293b;
-          font-size: 9pt;
+          font-size: 8.5pt;
           font-weight: 800;
-          padding: 8px 6px;
-          border-bottom: 2px solid #cbd5e1;
+          padding: 6px 4px;
+          border: 1px solid #cbd5e1;
           text-align: right;
         }
+        td {
+          border: 1px solid #e2e8f0;
+          vertical-align: middle;
+        }
         .footer-sig {
-          margin-top: 30px;
+          margin-top: 25px;
           display: flex;
           justify-content: space-between;
           padding: 0 20px;
@@ -179,8 +205,8 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
           padding-top: 8px;
         }
         .sig-title {
-          font-size: 10pt;
-          font-weight: bold;
+          font-size: 9.5pt;
+          font-weight: 800;
           color: #1e293b;
         }
         .sig-sub {
@@ -192,12 +218,12 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
     </head>
     <body>
       <div class="header-container">
-        <div>
-          <div style="font-size: 11pt; font-weight: 900; color: #0369a1;">قسم اللغة الألمانية (Deutschabteilung)</div>
-          <div style="font-size: 8.5pt; color: #64748b;">إدارة المتابعة والتقييم - نظام الشكاوى المتبادل</div>
+        <div class="header-logo">
+          ${logoHtml}
         </div>
         <div class="header-title-box">
-          <div class="dept-badge">🇩🇪 German Department</div>
+          <div style="font-size: 13pt; font-weight: 900; color: #0f172a; margin-bottom: 2px;">${schoolName}</div>
+          <div class="dept-badge">🇩🇪 قسم اللغة الألمانية (Deutschabteilung)</div>
           <div class="main-title">${titleText}</div>
           <div class="sub-meta">المرحلة: ${stageName} | الموجه / مدير المرحلة: <strong>${stageManagerName}</strong></div>
         </div>

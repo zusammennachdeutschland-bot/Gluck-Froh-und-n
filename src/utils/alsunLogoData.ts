@@ -1,0 +1,63 @@
+import { SchoolSettings } from '../types';
+
+export const AL_ALSON_SHIELD_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 460" width="100%" height="100%">
+  <defs>
+    <linearGradient id="alsNavyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1b2e59" />
+      <stop offset="50%" stop-color="#122143" />
+      <stop offset="100%" stop-color="#0a142c" />
+    </linearGradient>
+    <filter id="alsShadow" x="-10%" y="-10%" width="120%" height="125%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.35" />
+    </filter>
+  </defs>
+  <g filter="url(#alsShadow)">
+    <path d="M 60,75 C 90,45 150,30 200,42 C 250,30 310,45 340,75 C 345,140 355,240 300,325 C 265,380 220,415 200,432 C 180,415 135,380 100,325 C 45,240 55,140 60,75 Z" fill="url(#alsNavyGrad)" stroke="#ffffff" stroke-width="5" stroke-linejoin="round" />
+    <path d="M 72,85 C 98,58 152,44 200,54 C 248,44 302,58 328,85 C 333,144 342,234 292,314 C 258,367 218,400 200,416 C 182,400 142,367 108,314 C 58,234 67,144 72,85 Z" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-opacity="0.85" />
+    <path id="topArchPath" d="M 85,92 C 140,55 260,55 315,92" fill="none" stroke="none" />
+    <text font-family="'Times New Roman', Georgia, serif" font-weight="900" font-size="28" fill="#ffffff" letter-spacing="4" text-anchor="middle">
+      <textPath href="#topArchPath" startOffset="50%">AL ALSON</textPath>
+    </text>
+    <g transform="translate(142, 130)">
+      <path d="M 58,0 L 25,120 L 45,120 L 52,94 L 84,94 L 91,120 L 111,120 L 78,0 Z M 68,36 L 80,78 L 56,78 Z" fill="#ffffff" stroke="#122143" stroke-width="3" />
+    </g>
+    <g transform="translate(178, 175)">
+      <path d="M 0,0 L 18,0 L 18,70 L 58,70 L 58,85 L 0,85 Z" fill="#ffffff" stroke="#122143" stroke-width="3" />
+    </g>
+    <g transform="translate(195, 125)">
+      <path d="M 52,24 C 46,12 34,8 20,10 C 8,12 2,22 4,32 C 7,45 22,50 36,58 C 55,68 64,80 60,98 C 56,118 36,126 18,124 C 4,122 -4,110 -5,98 L 12,96 C 13,105 20,111 30,111 C 40,111 46,104 47,95 C 49,83 37,76 22,68 C 6,58 -3,46 1,30 C 5,10 24,0 45,0 C 58,0 66,7 69,18 Z" fill="#ffffff" stroke="#122143" stroke-width="3" />
+    </g>
+    <path d="M 38,300 C 25,320 20,350 48,370 C 65,355 75,340 70,320 Z" fill="#0d1b3d" stroke="#ffffff" stroke-width="2" />
+    <path d="M 362,300 C 375,320 380,350 352,370 C 335,355 325,340 330,320 Z" fill="#0d1b3d" stroke="#ffffff" stroke-width="2" />
+    <path id="bottomRibbonPath" d="M 35,335 C 100,410 300,410 365,335 C 335,352 275,378 200,380 C 125,378 65,352 35,335 Z" fill="#1b2e59" stroke="#ffffff" stroke-width="2.5" />
+    <path id="botTextPath" d="M 45,342 C 110,412 290,412 355,342" fill="none" stroke="none" />
+    <text font-family="'Times New Roman', Georgia, serif" font-weight="bold" font-size="16.5" fill="#ffffff" letter-spacing="3.5" text-anchor="middle">
+      <textPath href="#botTextPath" startOffset="50%">LANGUAGE SCHOOL</textPath>
+    </text>
+  </g>
+</svg>`;
+
+export const AL_ALSON_LOGO_DATA_URI = `data:image/svg+xml;utf8,${encodeURIComponent(AL_ALSON_SHIELD_SVG)}`;
+
+/**
+ * Returns the effective school logo URL or the default Al Alson logo data URI if empty or unset
+ */
+export function getEffectiveSchoolLogo(settings?: SchoolSettings): string {
+  if (settings?.schoolLogoUrl && settings.schoolLogoUrl.trim().length > 0) {
+    return settings.schoolLogoUrl;
+  }
+  return AL_ALSON_LOGO_DATA_URI;
+}
+
+/**
+ * Generates an optimized HTML img tag for the school logo
+ */
+export function getReportSchoolLogoHtml(
+  settings?: SchoolSettings,
+  options: { height?: number; className?: string; extraStyles?: string } = {}
+): string {
+  const logoSrc = getEffectiveSchoolLogo(settings);
+  const height = options.height || 52;
+  const extraStyles = options.extraStyles || '';
+  return `<img src="${logoSrc}" alt="School Logo" style="height: ${height}px; max-height: ${height}px; width: auto; object-fit: contain; display: inline-block; vertical-align: middle; ${extraStyles}" />`;
+}

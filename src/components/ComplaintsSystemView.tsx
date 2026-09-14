@@ -507,6 +507,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
       hodName: schoolSettings.hodName || profile?.displayName || '',
       complaints: targetComplaintsToPrint,
       reportType: dispatchReportType,
+      settings: schoolSettings,
     });
 
     setIsDispatchReportModalOpen(false);

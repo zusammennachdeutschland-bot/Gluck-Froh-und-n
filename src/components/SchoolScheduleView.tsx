@@ -729,12 +729,12 @@ KEY CONSTRAINTS & RULES:
                         {/* Time / Period Column */}
                         <td 
                           style={{ width: `${timePct}%` }}
-                          className={`bg-slate-50/60 dark:bg-slate-900/60 border-r border-slate-100 dark:border-gray-850 p-1 sm:p-2 text-center`}
+                          className={`bg-slate-50/80 dark:bg-slate-900/80 border-r border-slate-200 dark:border-gray-800 p-1 sm:p-2 text-center`}
                         >
-                          <div className="text-[10px] sm:text-xs font-black text-primary font-mono">
+                          <div className="text-[11px] sm:text-xs font-black text-primary font-mono">
                             {_t(`ح${period.periodNumber}`, `P${period.periodNumber}`, `Std. ${period.periodNumber}`)}
                           </div>
-                          <div className="text-[7.5px] sm:text-[9px] text-slate-400 dark:text-slate-500 font-bold mt-0.5 leading-none">
+                          <div className="text-[8.5px] sm:text-[10px] text-slate-700 dark:text-slate-300 font-extrabold mt-0.5 leading-none font-mono">
                             {period.startTime}
                           </div>
                         </td>
@@ -764,22 +764,22 @@ KEY CONSTRAINTS & RULES:
                                       setSelectedDay(dayKey);
                                       startEditPeriod(dayKey, period.periodNumber);
                                     }}
-                                    className="p-0.5 sm:p-1.5 rounded-lg bg-primary-soft/50 dark:bg-primary-soft/25 border border-primary-border/40 text-center flex flex-col justify-center items-center min-h-[36px] sm:min-h-[40px] transition-all hover:bg-primary-soft/80 group/card overflow-hidden"
+                                    className="p-1 sm:p-2 rounded-lg bg-primary-soft/50 dark:bg-primary-soft/25 border border-primary-border/60 text-center flex flex-col justify-center items-center min-h-[40px] sm:min-h-[46px] transition-all hover:bg-primary-soft/80 group/card overflow-hidden shadow-2xs"
                                     title={`${record.className || ''} ${record.subjectName ? `- ${record.subjectName}` : ''}`}
                                   >
                                     {record.className ? (
                                       <>
-                                        <div className="text-[10.5px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight truncate max-w-full tracking-tight">
+                                        <div className="text-xs sm:text-sm font-black text-slate-950 dark:text-white leading-tight truncate max-w-full tracking-tight">
                                           {record.className}
                                         </div>
                                         {record.subjectName && (
-                                          <div className="text-[7px] sm:text-[8px] font-bold text-primary leading-none truncate max-w-full mt-0.5 uppercase opacity-90">
+                                          <div className="text-[7.5px] sm:text-[9px] font-bold text-primary leading-none truncate max-w-full mt-0.5 uppercase opacity-95">
                                             {record.subjectName}
                                           </div>
                                         )}
                                       </>
                                     ) : (
-                                      <div className="text-[9px] sm:text-[11px] font-bold text-slate-800 dark:text-slate-100 truncate leading-tight">
+                                      <div className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-slate-100 truncate leading-tight">
                                         {record.subjectName}
                                       </div>
                                     )}
