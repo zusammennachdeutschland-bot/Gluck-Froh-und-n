@@ -734,7 +734,14 @@ KEY CONSTRAINTS & RULES:
                           <div className="text-[11px] sm:text-xs font-black text-primary font-mono">
                             {_t(`ح${period.periodNumber}`, `P${period.periodNumber}`, `Std. ${period.periodNumber}`)}
                           </div>
-                          <div className="text-[8.5px] sm:text-[10px] text-slate-700 dark:text-slate-300 font-extrabold mt-0.5 leading-none font-mono">
+                          <div 
+                            className="mt-0.5 px-1 py-0.5 rounded bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary-light font-mono font-black text-[7.5px] sm:text-[8.5px] whitespace-nowrap flex items-center justify-center gap-0.5 border border-primary/20 shadow-2xs"
+                            title={`${_t('ينتهي في', 'Ends at', 'Endet um')} ${period.endTime}`}
+                          >
+                            <span className="text-[6.5px] sm:text-[7px] font-sans font-bold opacity-80">{_t('ينتهي', 'Ends', 'Bis')}</span>
+                            <span>{period.endTime}</span>
+                          </div>
+                          <div className="text-[7px] sm:text-[8px] text-slate-500 dark:text-slate-400 font-mono mt-0.5 whitespace-nowrap" title={_t('وقت البداية', 'Start time', 'Startzeit')}>
                             {period.startTime}
                           </div>
                         </td>

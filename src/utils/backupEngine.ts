@@ -740,19 +740,31 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
   }
 
   // Sanitize HOD German Students
-  const rawHodStudents: any[] = Array.isArray(data.hodStudents) ? data.hodStudents : [];
+  const rawHodStudents: any[] = Array.isArray(data.hodStudents) ? data.hodStudents : (Array.isArray(data.schoolSettings?.germanStudents) ? data.schoolSettings.germanStudents : []);
   const sanitizedHodStudents: HodGermanStudent[] = [];
   for (let i = 0; i < rawHodStudents.length; i++) {
     const s = rawHodStudents[i];
     if (!s || typeof s !== 'object' || Array.isArray(s)) continue;
     const id = typeof s.id === 'string' && s.id.trim() ? s.id.trim() : `hod_st_${Date.now()}_${i}`;
+    const nameAr = typeof s.nameAr === 'string' && s.nameAr.trim() ? s.nameAr.trim() : (typeof s.name === 'string' ? s.name.trim() : 'طالب جديد');
+    const nameEn = typeof s.nameEn === 'string' && s.nameEn.trim() ? s.nameEn.trim() : (typeof s.name === 'string' ? s.name.trim() : 'New Student');
+    const gradeClass = typeof s.gradeClass === 'string' && s.gradeClass.trim() ? s.gradeClass.trim().toUpperCase() : (typeof s.className === 'string' ? s.className.trim().toUpperCase() : '10A');
+    const gender = s.gender === 'Girl' ? 'Girl' : 'Boy';
+    const busLine = typeof s.busLine === 'string' ? s.busLine : 'N/A';
+
     sanitizedHodStudents.push({
       ...s,
       id,
-      name: typeof s.name === 'string' ? s.name : 'German Student',
+      name: typeof s.name === 'string' ? s.name : nameAr,
+      nameAr,
+      nameEn,
+      gradeClass,
+      gender,
+      secondLanguage: 'German',
+      busLine,
       stage: typeof s.stage === 'string' ? s.stage : 'primary',
       grade: typeof s.grade === 'string' ? s.grade : 'Grade 1',
-      className: typeof s.className === 'string' ? s.className : '',
+      className: gradeClass,
       status: s.status || 'active',
       updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : Date.now(),
       deleted: Boolean(s.deleted)

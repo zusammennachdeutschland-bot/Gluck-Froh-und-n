@@ -16,6 +16,8 @@ interface SchoolLessonNotesModalProps {
   className?: string;
   subjectName?: string;
   dateStr: string;
+  teacherId?: string;
+  teacherName?: string;
 }
 
 const QUICK_TAGS: { ar: string; en: string; de: string; color: string }[] = [
@@ -35,9 +37,12 @@ export const SchoolLessonNotesModal: React.FC<SchoolLessonNotesModalProps> = ({
   endTime,
   className = '',
   subjectName = '',
-  dateStr
+  dateStr,
+  teacherId,
+  teacherName
 }) => {
   const { 
+    profile,
     schoolNotes, 
     addSchoolNote, 
     updateSchoolNote, 
@@ -127,6 +132,26 @@ export const SchoolLessonNotesModal: React.FC<SchoolLessonNotesModalProps> = ({
   const handleSaveNote = () => {
     if (!noteText.trim()) return;
 
+    const schoolSettings = profile?.schoolSettings;
+    let resolvedTeacherId = teacherId;
+    let resolvedTeacherName = teacherName;
+
+    if (!resolvedTeacherId && className && schoolSettings?.teachers) {
+      const matched = (schoolSettings.teachers || []).find((t: any) => {
+        const tSched = schoolSettings.teacherSchedules?.[t.id];
+        if (tSched) {
+          return Object.values(tSched).some((periods: any) =>
+            Array.isArray(periods) && periods.some((p: any) => (p.className || '').trim().toLowerCase() === className.trim().toLowerCase())
+          );
+        }
+        return false;
+      });
+      if (matched) {
+        resolvedTeacherId = matched.id;
+        resolvedTeacherName = matched.name;
+      }
+    }
+
     if (editingNoteId) {
       updateSchoolNote(editingNoteId, {
         type: noteType,
@@ -134,6 +159,8 @@ export const SchoolLessonNotesModal: React.FC<SchoolLessonNotesModalProps> = ({
         tags: selectedTags,
         pinned: isPinned,
         className: className.trim(),
+        teacherId: resolvedTeacherId,
+        teacherName: resolvedTeacherName,
         periodNumber: noteType === 'lesson' ? periodNumber : undefined,
         date: noteType === 'lesson' ? dateStr : undefined,
         studentId: noteType === 'student' ? selectedStudentId : undefined,
@@ -147,6 +174,8 @@ export const SchoolLessonNotesModal: React.FC<SchoolLessonNotesModalProps> = ({
         tags: selectedTags,
         pinned: isPinned,
         className: className.trim(),
+        teacherId: resolvedTeacherId,
+        teacherName: resolvedTeacherName,
         periodNumber: noteType === 'lesson' ? periodNumber : undefined,
         date: noteType === 'lesson' ? dateStr : undefined,
         studentId: noteType === 'student' ? selectedStudentId : undefined,

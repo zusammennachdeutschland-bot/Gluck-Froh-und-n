@@ -8,6 +8,7 @@ import { useApp } from '../context/AppContext';
 import { StudentActionPlan, WeeklyPlanLog, HodGermanStudent } from '../types';
 import { storage } from '../services/storageService';
 import { printActionPlansReport, downloadActionPlansPdf } from '../utils/printObservationUtils';
+import { normalizeClassCode, compareClassCodes } from '../utils/classNormalizer';
 
 // Arabic Selector Preset Options
 export const WEAKNESS_AREAS_PRESETS = [
@@ -172,12 +173,12 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
 
   // Unique Available Classes from Students Database
   const availableClasses: string[] = Array.from<string>(
-    new Set(germanStudents.map(s => String(s.gradeClass || '')).filter(Boolean))
-  ).sort();
+    new Set(germanStudents.map(s => normalizeClassCode(s.gradeClass || '')).filter(Boolean))
+  ).sort(compareClassCodes);
 
   // Filtered Students for selected class in Form
   const filteredStudentsForForm = germanStudents.filter(
-    s => !formClass || (s.gradeClass || '').toUpperCase() === (formClass || '').toUpperCase()
+    s => !formClass || normalizeClassCode(s.gradeClass || '') === normalizeClassCode(formClass || '')
   );
 
   // Toggle Checkboxes
@@ -1451,18 +1452,20 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                   </table>
                 </div>
 
-                {/* Refined Formal Signature Footer */}
+                {/* Refined Formal Signature Footer: Right side = German HOD, Left side = Stage Manager */}
                 <div className="pt-6 flex items-start justify-between px-8 text-center text-[10px] font-bold text-slate-900">
-                  <div className="w-[42%] flex flex-col items-center">
-                    <div className="font-black text-slate-900 text-[10px] mb-1">مدير المرحلة</div>
-                    <div className="text-slate-700 mb-3">أ/ {currentStageManager}</div>
-                    <div className="w-36 text-center text-slate-500 font-normal tracking-widest">..................................</div>
-                  </div>
-
+                  {/* RIGHT SIDE (First in RTL): German HOD */}
                   <div className="w-[42%] flex flex-col items-center">
                     <div className="font-black text-slate-900 text-[10px] mb-1">رئيس قسم اللغة الألمانية</div>
                     <div className="text-slate-700 mb-3">أ/ {formattedHodName}</div>
-                    <div className="w-36 text-center text-slate-500 font-normal tracking-widest">..................................</div>
+                    <div className="w-36 text-center text-slate-500 font-normal tracking-widest font-mono">..................................</div>
+                  </div>
+
+                  {/* LEFT SIDE (Second in RTL): Stage Manager */}
+                  <div className="w-[42%] flex flex-col items-center">
+                    <div className="font-black text-slate-900 text-[10px] mb-1">مدير المرحلة</div>
+                    <div className="text-slate-500 mb-3 tracking-widest font-mono">..................................</div>
+                    <div className="w-36 text-center text-slate-500 font-normal tracking-widest font-mono">..................................</div>
                   </div>
                 </div>
               </div>

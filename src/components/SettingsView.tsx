@@ -1842,9 +1842,9 @@ export const SettingsView: React.FC = () => {
 
             <p className="text-[11px] text-text-muted text-center sm:text-start leading-relaxed">
               {_t(
-                '✨ صُممت هذه المنصة خصيصاً لدعم معلمي وأساتذة اللغة الألمانية لتيسير إدارة الحصص وتوفير الوقت والمجهود.',
-                '✨ Designed specifically to empower German language teachers and streamline daily classroom management.',
-                '✨ Entwickelt zur Unterstützung von Deutschlehrern bei der täglichen Unterrichtsorganisation.'
+                '✨ صُممت هذه المنصة خصيصاً بواسطة أ/ عبد الرحمن غريب لدعم معلمي وأساتذة اللغة الألمانية وتيسير إدارة الحصص. نسألكم خالص الدعاء له ولوالديه بظهر الغيب بالبركة والتوفيق والقبول وجزيل الأجر والثواب 🤲',
+                '✨ Designed specifically by Mr. Abdul Rahman Ghareeb to empower German language teachers. Kindly keep him in your sincere prayers.',
+                '✨ Entwickelt von Herrn Abdul Rahman Ghareeb zur Unterstützung von Deutschlehrern. Bitte denken Sie an ihn in Ihren Gebeten.'
               )}
             </p>
           </div>

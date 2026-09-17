@@ -725,14 +725,18 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                           {dictationGrade !== undefined && (
                             <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
                               <span className="text-slate-400">درجة الإملاء:</span>
-                              <span className="text-primary font-mono">{dictationGrade} / 10</span>
+                              <span className={`font-mono ${dictationGrade === -1 ? 'text-amber-600 dark:text-amber-400 text-[10px] font-bold' : 'text-primary'}`}>
+                                {dictationGrade === -1 ? 'مكانش فيه' : `${dictationGrade} / 10`}
+                              </span>
                             </div>
                           )}
 
                           {examGrade !== undefined && (
                             <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
                               <span className="text-slate-400">درجة الامتحان:</span>
-                              <span className="text-primary font-mono">{examGrade} / 10</span>
+                              <span className={`font-mono ${examGrade === -1 ? 'text-amber-600 dark:text-amber-400 text-[10px] font-bold' : 'text-primary'}`}>
+                                {examGrade === -1 ? 'مكانش فيه' : `${examGrade} / 10`}
+                              </span>
                             </div>
                           )}
                         </div>

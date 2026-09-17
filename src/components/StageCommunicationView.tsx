@@ -942,8 +942,8 @@ export const StageCommunicationView: React.FC = () => {
 
               {/* Metadata Bar */}
               <div className="grid grid-cols-2 gap-2 p-3 bg-slate-50 border border-slate-300 rounded-xl text-[11px] mb-5 font-semibold text-slate-800">
-                <div>مدير المرحلة: <strong className="text-slate-950">{selectedManager.name}</strong></div>
                 <div>النطاق والصفوف: <strong className="text-slate-950">{(selectedManager.assignedGradeGroups || []).join(', ') || 'عام'}</strong></div>
+                <div>مدير المرحلة: <strong className="text-slate-950 font-mono tracking-wider">..................................</strong></div>
                 <div>رئيس القسم المسؤول: <strong className="text-slate-950">أ/ {formattedHodName}</strong></div>
                 <div>عدد المعلمين بالتقرير: <strong className="text-slate-950">{supervisedTeachers.length} معلم</strong></div>
               </div>
@@ -1098,6 +1098,8 @@ export const StageCommunicationView: React.FC = () => {
               {/* ========================================================================= */}
               {/* PRINT LAYOUT & BOTTOM CLIPPING FIX: SIGNATURE FOOTER */}
               {/* ========================================================================= */}
+              {/* FORMAL SIGNATURE FOOTER - HOD ON RIGHT, STAGE MANAGER ON LEFT (WITH DOTS) */}
+              {/* ========================================================================= */}
               <div 
                 className="signature-container mt-8 pt-4 flex items-start justify-between text-center border-t border-slate-300 page-break-avoid"
                 style={{ 
@@ -1108,26 +1110,26 @@ export const StageCommunicationView: React.FC = () => {
                   lineHeight: 1.6 
                 }}
               >
-                {/* RIGHT SIDE: STAGE MANAGER */}
-                <div className="flex-1 flex flex-col items-center page-break-avoid text-center">
-                  <div className="font-black text-[11px] text-slate-950 mb-0.5">
-                    مدير المرحلة
-                  </div>
-                  <div className="font-bold text-[11px] text-slate-800 mb-3">
-                    أ/ {formattedManagerName}
-                  </div>
-                  <div className="text-slate-400 text-[11px] tracking-widest font-mono">
-                    ..................................
-                  </div>
-                </div>
-
-                {/* LEFT SIDE: HEAD OF DEPARTMENT */}
+                {/* RIGHT SIDE (First in RTL): HEAD OF DEPARTMENT */}
                 <div className="flex-1 flex flex-col items-center page-break-avoid text-center">
                   <div className="font-black text-[11px] text-slate-950 mb-0.5">
                     رئيس قسم اللغة الألمانية
                   </div>
                   <div className="font-bold text-[11px] text-slate-800 mb-3">
                     أ/ {formattedHodName}
+                  </div>
+                  <div className="text-slate-400 text-[11px] tracking-widest font-mono">
+                    ..................................
+                  </div>
+                </div>
+
+                {/* LEFT SIDE (Second in RTL): STAGE MANAGER */}
+                <div className="flex-1 flex flex-col items-center page-break-avoid text-center">
+                  <div className="font-black text-[11px] text-slate-950 mb-0.5">
+                    مدير المرحلة
+                  </div>
+                  <div className="font-bold text-[11px] text-slate-500 mb-3 tracking-widest font-mono">
+                    ..................................
                   </div>
                   <div className="text-slate-400 text-[11px] tracking-widest font-mono">
                     ..................................

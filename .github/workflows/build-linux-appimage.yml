@@ -20,16 +20,26 @@ jobs:
           node-version: 20
           cache: 'npm'
 
+      - name: Cache Electron Binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-cache-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-cache-
+
       - name: Install dependencies
-        run: npm ci
+        run: npm ci || npm install --legacy-peer-deps
 
       - name: Build web assets
         run: npm run build
 
       - name: Build AppImage
-        run: npx electron-builder --linux AppImage
+        run: npx electron-builder --linux AppImage --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          USE_HARD_LINKS: "false"
 
       - name: Verify AppImage Generated
         run: |

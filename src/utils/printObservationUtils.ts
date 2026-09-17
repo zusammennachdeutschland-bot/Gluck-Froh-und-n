@@ -103,12 +103,12 @@ export function generateStageFollowUpReportHtml(
       '</div>' +
       '<div class="title">تقرير متابعة وتقييم معلمي المرحلة (' + periodLabel + weekLabel + ')</div>' +
       '<div class="meta-grid">' +
-        '<div class="meta-item"><span class="meta-label">اسم مدير المرحلة:</span> ' + record.stageManagerName + '</div>' +
         '<div class="meta-item"><span class="meta-label">المرحلة / الصفوف:</span> ' + record.gradeBand + '</div>' +
+        '<div class="meta-item"><span class="meta-label">مدير المرحلة:</span> ..................................</div>' +
         '<div class="meta-item"><span class="meta-label">نوع المتابعة:</span> متابعة ' + periodLabel + '</div>' +
         '<div class="meta-item"><span class="meta-label">رقم الأسبوع:</span> الأسبوع ' + (record.weekNumber || 1) + '</div>' +
         '<div class="meta-item"><span class="meta-label">تاريخ المتابعة:</span> ' + record.date + '</div>' +
-        '<div class="meta-item"><span class="meta-label">رئيس القسم:</span> ' + hodName + '</div>' +
+        '<div class="meta-item"><span class="meta-label">رئيس القسم:</span> ' + formattedHodName + '</div>' +
         '<div class="meta-item" style="grid-column: span 2;"><span class="meta-label">عدد المعلمين التابعين:</span> ' + record.teachersData.length + ' معلم</div>' +
       '</div>' +
       '<table>' +
@@ -275,13 +275,13 @@ export function generateStageFollowUpReportHtml(
       ) : '') +
       '<div class="signatures">' +
         '<div class="sig-block">' +
-          '<div class="sig-job-title">مدير المرحلة</div>' +
-          '<div class="sig-person-name">أ/ ' + formattedManagerName + '</div>' +
+          '<div class="sig-job-title">رئيس قسم اللغة الألمانية</div>' +
+          '<div class="sig-person-name">أ/ ' + formattedHodName + '</div>' +
           '<div class="sig-dotted-line">..................................</div>' +
         '</div>' +
         '<div class="sig-block">' +
-          '<div class="sig-job-title">رئيس قسم اللغة الألمانية</div>' +
-          '<div class="sig-person-name">أ/ ' + formattedHodName + '</div>' +
+          '<div class="sig-job-title">مدير المرحلة</div>' +
+          '<div class="sig-person-name" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">..................................</div>' +
           '<div class="sig-dotted-line">..................................</div>' +
         '</div>' +
       '</div>' +
@@ -481,15 +481,44 @@ export function printStageFollowUpReport(
     printWindow.document.open();
     printWindow.document.write(htmlStr);
     printWindow.document.close();
+  } else {
+    // Fallback for Android WebView & Chrome popup blockers
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(htmlStr);
+      doc.close();
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          console.warn('Iframe print error:', e);
+        } finally {
+          setTimeout(() => {
+            if (document.body.contains(iframe)) {
+              document.body.removeChild(iframe);
+            }
+          }, 3000);
+        }
+      }, 400);
+    }
   }
 }
 
-export function generateObservationReportHtml(
+export function generateObservationReportContentHtml(
   visit: VisitRecord,
   settings: SchoolSettings,
   isRtl: boolean,
-  lang: string,
-  autoPrint: boolean = true
+  lang: string
 ): string {
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 50 });
   const flagHtml = '<div style="display: flex; flex-direction: column; width: 48px; height: 32px; border: 1px solid #0f172a; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">' +
@@ -519,7 +548,97 @@ export function generateObservationReportHtml(
     '</tr>';
   };
 
+  const catTitlesEn = ['Classroom Management', 'Teaching Skills', 'Student Engagement', 'Booklet & Workbook Correction'];
+  const catTitlesAr = ['إدارة الفصل', 'المهارات التدريسية', 'تفاعل الطلاب', 'متابعة تصحيح الدفتر'];
+  
+  const categoriesHtml = ['cm', 'ts', 'se', 'bc'].map((cat, index) => {
+    let rows = '';
+    if (cat === 'cm') {
+      rows += renderRow('Classroom organization and cleanliness', 'تنظيم ونظافة الفصل', visit.cm_organization);
+      rows += renderRow('Teacher\'s control and discipline', 'سيطرة المعلم وضبط الفصل', visit.cm_control);
+      rows += renderRow('Effective use of time', 'إدارة وقت الحصة بفعالية', visit.cm_time);
+      rows += renderRow('Respectful interaction with students', 'التعامل باحترام مع الطلاب', visit.cm_respect);
+    } else if (cat === 'ts') {
+      rows += renderRow('Lesson objectives clearly stated', 'وضوح أهداف الدرس', visit.ts_objectives);
+      rows += renderRow('Use of various teaching aids', 'استخدام الوسائل التعليمية المتنوعة', visit.ts_aids);
+      rows += renderRow('Encouraging student participation', 'تشجيع الطلاب على المشاركة', visit.ts_participation);
+      rows += renderRow('Asking thought-provoking questions', 'طرح أسئلة مثيرة للتفكير', visit.ts_questions);
+      rows += renderRow('Clarity and simplicity of explanation', 'وضوح وبساطة الشرح', visit.ts_clarity);
+    } else if (cat === 'se') {
+      rows += renderRow('Students\' participation in activities', 'مشاركة الطلاب في الأنشطة', visit.se_participation);
+      rows += renderRow('Positive interaction with the teacher', 'التفاعل الإيجابي مع المعلم', visit.se_interaction);
+      rows += renderRow('Students\' adherence to classroom rules', 'التزام الطلاب بقواعد الفصل', visit.se_rules);
+    } else if (cat === 'bc') {
+      rows += renderRow('Regularity and promptness of marking', 'انتظام وسرعة التصحيح', visit.bc_regularity);
+      rows += renderRow('Quality of feedback & corrections given to students', 'جودة التغذية الراجعة للطلاب', visit.bc_quality);
+      rows += renderRow('Student compliance with notebook corrections', 'استجابة الطلاب لتصويبات المعلم', visit.bc_compliance);
+    }
+
+    return '<div class="category-title">' + t(catTitlesEn[index], catTitlesAr[index]) + '</div>' +
+      '<table>' +
+        '<thead>' +
+          '<tr>' +
+            '<th class="criteria-col">' + t('Criteria', 'المعايير') + '</th>' +
+            '<th class="rating-col">5</th>' +
+            '<th class="rating-col">4</th>' +
+            '<th class="rating-col">3</th>' +
+            '<th class="rating-col">2</th>' +
+            '<th class="rating-col">1</th>' +
+          '</tr>' +
+        '</thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table>';
+  }).join('');
+
+  return '<div class="report-single-page">' +
+    '<div class="header">' +
+      '<div class="header-logo">' + logoHtml + '</div>' +
+      '<div class="header-text">' +
+        '<h1>' + schoolName + '</h1>' +
+        '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
+      '</div>' +
+      '<div>' + flagHtml + '</div>' +
+    '</div>' +
+    '<div class="title">' + t('Teacher Classroom Observation Form', 'نموذج تقييم زيارة صفية للمعلم') + '</div>' +
+    '<div class="meta-grid">' +
+      '<div class="meta-item"><span class="meta-label">' + t('Teacher Name:', 'اسم المعلم:') + '</span> ' + visit.teacherName + '</div>' +
+      '<div class="meta-item"><span class="meta-label">' + t('Subject:', 'المادة:') + '</span> ' + t('German', 'لغة ألمانية') + '</div>' +
+      '<div class="meta-item"><span class="meta-label">' + t('Grade/Class:', 'الفصل:') + '</span> ' + visit.className + '</div>' +
+      '<div class="meta-item"><span class="meta-label">' + t('Period:', 'الحصة:') + '</span> ' + (visit.periodNumber || '-') + '</div>' +
+      '<div class="meta-item"><span class="meta-label">' + t('Date:', 'التاريخ:') + '</span> ' + visit.visitedDate + '</div>' +
+      '<div class="meta-item"><span class="meta-label">' + t('Observer:', 'المشرف:') + '</span> ' + hodName + '</div>' +
+    '</div>' +
+    categoriesHtml +
+    '<div class="overall-box">' +
+      '<span>' + t('Total Score', 'النتيجة الكلية') + ': ' + (visit.overallScore || '-') + '/75</span>' +
+      '<span>' + t('Category', 'التقييم العام') + ': ' + (visit.overallCategory || '-') + '</span>' +
+    '</div>' +
+    '<div class="feedback-section">' +
+      '<div class="feedback-title">' + t('Supervisor Notes & Recommendations', 'ملاحظات وتوصيات المشرف') + '</div>' +
+      '<div style="white-space: pre-wrap; margin-top: 3px; font-size: 8.5pt;">' + (visit.consolidatedNotes || 'لا توجد ملاحظات إضافية.') + '</div>' +
+    '</div>' +
+    '<div class="signatures">' +
+      '<div class="sig-block">' +
+        '<div class="sig-title">' + t('Teacher\'s Signature', 'توقيع المعلم') + '</div>' +
+        '<div class="sig-line">' + visit.teacherName + '</div>' +
+      '</div>' +
+      '<div class="sig-block">' +
+        '<div class="sig-title">' + t('Supervisor\'s Signature', 'توقيع المشرف') + '</div>' +
+        '<div class="sig-line">' + hodName + '</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+export function generateObservationReportHtml(
+  visit: VisitRecord,
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string,
+  autoPrint: boolean = true
+): string {
   const bodyLoadAttr = autoPrint ? 'onload="window.print(); window.onafterprint = function() { window.close(); }"' : 'onload="window.print()"';
+  const innerContent = generateObservationReportContentHtml(visit, settings, isRtl, lang);
 
   return '<!DOCTYPE html>' +
     '<html lang="' + lang + '" dir="' + (isRtl ? 'rtl' : 'ltr') + '">' +
@@ -560,88 +679,262 @@ export function generateObservationReportHtml(
       '</style>' +
     '</head>' +
     '<body ' + bodyLoadAttr + '>' +
-      '<div class="header">' +
-        '<div class="header-logo">' + logoHtml + '</div>' +
-        '<div class="header-text">' +
-          '<h1>' + schoolName + '</h1>' +
-          '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
-        '</div>' +
-        '<div>' + flagHtml + '</div>' +
-      '</div>' +
-      '<div class="title">' + t('Teacher Classroom Observation Form', 'نموذج تقييم زيارة صفية للمعلم') + '</div>' +
-      '<div class="meta-grid">' +
-        '<div class="meta-item"><span class="meta-label">' + t('Teacher Name:', 'اسم المعلم:') + '</span> ' + visit.teacherName + '</div>' +
-        '<div class="meta-item"><span class="meta-label">' + t('Subject:', 'المادة:') + '</span> ' + t('German', 'لغة ألمانية') + '</div>' +
-        '<div class="meta-item"><span class="meta-label">' + t('Grade/Class:', 'الفصل:') + '</span> ' + visit.className + '</div>' +
-        '<div class="meta-item"><span class="meta-label">' + t('Period:', 'الحصة:') + '</span> ' + (visit.periodNumber || '-') + '</div>' +
-        '<div class="meta-item"><span class="meta-label">' + t('Date:', 'التاريخ:') + '</span> ' + visit.visitedDate + '</div>' +
-        '<div class="meta-item"><span class="meta-label">' + t('Observer:', 'المشرف:') + '</span> ' + hodName + '</div>' +
-      '</div>' +
-      
-      ['cm', 'ts', 'se', 'bc'].map((cat, index) => {
-        const catTitlesEn = ['Classroom Management', 'Teaching Skills', 'Student Engagement', 'Booklet & Workbook Correction'];
-        const catTitlesAr = ['إدارة الفصل', 'المهارات التدريسية', 'تفاعل الطلاب', 'متابعة تصحيح الدفتر'];
-        
-        let rows = '';
-        if (cat === 'cm') {
-          rows += renderRow('Classroom organization and cleanliness', 'تنظيم ونظافة الفصل', visit.cm_organization);
-          rows += renderRow('Teacher\'s control and discipline', 'سيطرة المعلم وضبط الفصل', visit.cm_control);
-          rows += renderRow('Effective use of time', 'إدارة وقت الحصة بفعالية', visit.cm_time);
-          rows += renderRow('Respectful interaction with students', 'التعامل باحترام مع الطلاب', visit.cm_respect);
-        } else if (cat === 'ts') {
-          rows += renderRow('Lesson objectives clearly stated', 'وضوح أهداف الدرس', visit.ts_objectives);
-          rows += renderRow('Use of various teaching aids', 'استخدام الوسائل التعليمية المتنوعة', visit.ts_aids);
-          rows += renderRow('Encouraging student participation', 'تشجيع الطلاب على المشاركة', visit.ts_participation);
-          rows += renderRow('Asking thought-provoking questions', 'طرح أسئلة مثيرة للتفكير', visit.ts_questions);
-          rows += renderRow('Clarity and simplicity of explanation', 'وضوح وبساطة الشرح', visit.ts_clarity);
-        } else if (cat === 'se') {
-          rows += renderRow('Students\' participation in activities', 'مشاركة الطلاب في الأنشطة', visit.se_participation);
-          rows += renderRow('Positive interaction with the teacher', 'التفاعل الإيجابي مع المعلم', visit.se_interaction);
-          rows += renderRow('Students\' adherence to classroom rules', 'التزام الطلاب بقواعد الفصل', visit.se_rules);
-        } else if (cat === 'bc') {
-          rows += renderRow('Regularity and promptness of marking', 'انتظام وسرعة التصحيح', visit.bc_regularity);
-          rows += renderRow('Quality of feedback & corrections given to students', 'جودة التغذية الراجعة للطلاب', visit.bc_quality);
-          rows += renderRow('Student compliance with notebook corrections', 'استجابة الطلاب لتصويبات المعلم', visit.bc_compliance);
-        }
-
-        return '<div class="category-title">' + t(catTitlesEn[index], catTitlesAr[index]) + '</div>' +
-          '<table>' +
-            '<thead>' +
-              '<tr>' +
-                '<th class="criteria-col">' + t('Criteria', 'المعايير') + '</th>' +
-                '<th class="rating-col">5</th>' +
-                '<th class="rating-col">4</th>' +
-                '<th class="rating-col">3</th>' +
-                '<th class="rating-col">2</th>' +
-                '<th class="rating-col">1</th>' +
-              '</tr>' +
-            '</thead>' +
-            '<tbody>' + rows + '</tbody>' +
-          '</table>';
-      }).join('') +
-
-      '<div class="overall-box">' +
-        '<span>' + t('Total Score', 'النتيجة الكلية') + ': ' + (visit.overallScore || '-') + '/75</span>' +
-        '<span>' + t('Category', 'التقييم العام') + ': ' + (visit.overallCategory || '-') + '</span>' +
-      '</div>' +
-
-      '<div class="feedback-section">' +
-        '<div class="feedback-title">' + t('Supervisor Notes & Recommendations', 'ملاحظات وتوصيات المشرف') + '</div>' +
-        '<div style="white-space: pre-wrap; margin-top: 3px; font-size: 8.5pt;">' + (visit.consolidatedNotes || 'لا توجد ملاحظات إضافية.') + '</div>' +
-      '</div>' +
-
-      '<div class="signatures">' +
-        '<div class="sig-block">' +
-          '<div class="sig-title">' + t('Teacher\'s Signature', 'توقيع المعلم') + '</div>' +
-          '<div class="sig-line">' + visit.teacherName + '</div>' +
-        '</div>' +
-        '<div class="sig-block">' +
-          '<div class="sig-title">' + t('Supervisor\'s Signature', 'توقيع المشرف') + '</div>' +
-          '<div class="sig-line">' + hodName + '</div>' +
-        '</div>' +
-      '</div>' +
+      innerContent +
     '</body>' +
     '</html>';
+}
+
+/**
+ * Generates combined printable HTML for multiple observation reports with proper page breaks.
+ */
+export function generateCombinedObservationReportsHtml(
+  visits: VisitRecord[],
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string,
+  autoPrint: boolean = true
+): string {
+  const bodyLoadAttr = autoPrint ? 'onload="window.print(); window.onafterprint = function() { window.close(); }"' : 'onload="window.print()"';
+
+  const pagesHtml = visits.map((visit, idx) => {
+    const isLast = idx === visits.length - 1;
+    const inner = generateObservationReportContentHtml(visit, settings, isRtl, lang);
+    return `<div class="report-page ${isLast ? 'last-page' : ''}">${inner}</div>`;
+  }).join('');
+
+  return '<!DOCTYPE html>' +
+    '<html lang="' + lang + '" dir="' + (isRtl ? 'rtl' : 'ltr') + '">' +
+    '<head>' +
+      '<meta charset="UTF-8">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+      '<title>Combined Observation Reports (' + visits.length + ')</title>' +
+      '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+      '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+      '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
+      '<style>' +
+        '@page { size: A4; margin: 8mm 8mm; }' +
+        '* { box-sizing: border-box; font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
+        'html, body { margin: 0; padding: 0; background: #fff; }' +
+        'body { color: #0f172a; line-height: 1.3; font-size: 8.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
+        '.report-page { page-break-after: always; break-after: page; width: 100%; background: #ffffff; padding: 0; margin-bottom: 25px; }' +
+        '.report-page.last-page { page-break-after: auto; break-after: auto; margin-bottom: 0; }' +
+        '@media print { .report-page { margin-bottom: 0; } }' +
+        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 5px; margin-bottom: 6px; }' +
+        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 60px; }' +
+        '.header-text { text-align: center; flex: 1; padding: 0 10px; }' +
+        '.header h1 { font-size: 13pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
+        '.header p { font-size: 8.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
+        '.title { text-align: center; font-size: 11.5pt; font-weight: 800; margin-bottom: 6px; text-decoration: underline; line-height: 1.3; color: #0f172a; }' +
+        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
+        '.meta-item { font-size: 8.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; color: #1e293b; }' +
+        '.meta-label { font-weight: 800; margin-right: 5px; margin-left: 5px; display: inline-block; color: #0f172a; white-space: nowrap; }' +
+        '.category-title { font-size: 8.5pt; font-weight: 800; margin-top: 4px; margin-bottom: 2px; background: #e2e8f0; padding: 3px 6px; border: 1px solid #0f172a; border-bottom: none; line-height: 1.3; vertical-align: middle; color: #0f172a; }' +
+        'table { width: 100%; border-collapse: collapse; margin-bottom: 4px; table-layout: fixed; }' +
+        'th, td { border: 1px solid #0f172a; padding: 3px 4px; text-align: center; vertical-align: middle; font-size: 8.5pt; line-height: 1.25; }' +
+        'th { background: #f1f5f9; font-weight: 800; font-size: 8.5pt; height: 20px; color: #0f172a; }' +
+        '.criteria-col { text-align: ' + (isRtl ? 'right' : 'left') + '; width: 55%; font-weight: 700; vertical-align: middle; padding-left: 6px; padding-right: 6px; line-height: 1.3; color: #1e293b; }' +
+        '.rating-col { width: 9%; font-weight: bold; font-size: 9.5pt; text-align: center; vertical-align: middle; line-height: 1; }' +
+        '.feedback-section { margin-top: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; min-height: 40px; background: #f8fafc; border-radius: 4px; }' +
+        '.feedback-title { font-weight: 800; font-size: 8.5pt; margin-bottom: 2px; border-bottom: 1px dotted #0f172a; padding-bottom: 2px; line-height: 1.3; color: #0f172a; }' +
+        '.overall-box { margin-top: 6px; padding: 5px 8px; border: 1.5px solid #0f172a; font-weight: 800; text-align: center; font-size: 9.5pt; display: flex; justify-content: space-around; align-items: center; background: #f8fafc; line-height: 1.3; border-radius: 4px; }' +
+        '.signatures { margin-top: 14px; display: flex; justify-content: space-around; align-items: flex-end; text-align: center; page-break-inside: avoid; }' +
+        '.sig-block { width: 40%; }' +
+        '.sig-title { font-weight: 800; font-size: 9pt; margin-bottom: 16px; line-height: 1.3; color: #0f172a; }' +
+        '.sig-line { border-top: 1px solid #0f172a; padding-top: 3px; font-size: 8.5pt; font-weight: 800; line-height: 1.3; color: #1e293b; }' +
+      '</style>' +
+    '</head>' +
+    '<body ' + bodyLoadAttr + '>' +
+      pagesHtml +
+    '</body>' +
+    '</html>';
+}
+
+/**
+ * Prints multiple observation reports in a single print dialog.
+ */
+export async function printCombinedObservationReports(
+  visits: VisitRecord[],
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string
+): Promise<void> {
+  if (!visits || visits.length === 0) return;
+
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    await downloadCombinedObservationReportsPdf(visits, settings, isRtl, lang);
+    return;
+  }
+
+  const htmlContent = generateCombinedObservationReportsHtml(visits, settings, isRtl, lang, true);
+  printWindow.document.open();
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
+}
+
+/**
+ * Generates a unified jsPDF document containing all provided observation reports, 1 page per report.
+ */
+export async function generateCombinedObservationReportsPdfInstance(
+  visits: VisitRecord[],
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<jsPDF> {
+  if (!visits || visits.length === 0) {
+    throw new Error('No visit records provided');
+  }
+
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+  });
+
+  const pdfWidth = pdf.internal.pageSize.getWidth(); // 210mm
+  const pdfHeight = pdf.internal.pageSize.getHeight(); // 297mm
+
+  const container = document.createElement('div');
+  container.style.position = 'absolute';
+  container.style.left = '-9999px';
+  container.style.top = '0';
+  container.style.width = '794px'; // standard A4 width at 96dpi
+  container.style.backgroundColor = '#ffffff';
+  container.style.boxSizing = 'border-box';
+  container.style.padding = '15px 20px';
+  container.style.zIndex = '-9999';
+  document.body.appendChild(container);
+
+  try {
+    for (let i = 0; i < visits.length; i++) {
+      const visit = visits[i];
+      if (onProgress) {
+        onProgress(i + 1, visits.length);
+      }
+
+      if (i > 0) {
+        pdf.addPage('a4', 'portrait');
+      }
+
+      const htmlStr = generateObservationReportHtml(visit, settings, isRtl, lang, false);
+      const bodyMatch = htmlStr.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+      const styleMatch = htmlStr.match(/<style[^>]*>([\s\S]*)<\/style>/i);
+
+      const styleTag = styleMatch ? `<style>${styleMatch[1]}</style>` : '';
+      const bodyContent = bodyMatch ? bodyMatch[1] : htmlStr;
+
+      container.innerHTML = `${styleTag}<div style="width: 100%; background: #ffffff; color: #000000;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent}</div>`;
+
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        imageTimeout: 5000,
+        logging: false,
+        backgroundColor: '#ffffff',
+        width: 794,
+        windowWidth: 794,
+        onclone: (clonedDoc) => {
+          const styles = clonedDoc.querySelectorAll('style');
+          styles.forEach(s => {
+            if (s.textContent) {
+              s.textContent = sanitizeModernCssColors(s.textContent);
+            }
+          });
+        }
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      const imgWidth = pdfWidth;
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      if (imgHeight > pdfHeight) {
+        const scale = pdfHeight / imgHeight;
+        const finalWidth = imgWidth * scale;
+        const xMargin = (pdfWidth - finalWidth) / 2;
+        pdf.addImage(imgData, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
+      } else {
+        pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
+      }
+    }
+
+    return pdf;
+  } finally {
+    if (document.body.contains(container)) {
+      document.body.removeChild(container);
+    }
+  }
+}
+
+async function savePdfFileCrossPlatform(pdf: jsPDF, fileName: string, shareTitle?: string): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    const pdfBase64 = pdf.output('datauristring').split(',')[1];
+    const savedFile = await Filesystem.writeFile({
+      path: fileName,
+      data: pdfBase64,
+      directory: Directory.Cache
+    });
+    await Share.share({
+      title: shareTitle || fileName,
+      url: savedFile.uri
+    });
+    return;
+  }
+
+  // Web & Mobile Browser (Android Chrome, iOS Safari, etc.)
+  try {
+    const blob = pdf.output('blob');
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = fileName;
+    link.target = '_self';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+
+    setTimeout(() => {
+      if (document.body.contains(link)) {
+        document.body.removeChild(link);
+      }
+      URL.revokeObjectURL(blobUrl);
+    }, 4000);
+  } catch (err) {
+    // Fallback to jsPDF standard save
+    pdf.save(fileName);
+  }
+}
+
+/**
+ * Downloads multiple observation reports in a single merged PDF file.
+ */
+export async function downloadCombinedObservationReportsPdf(
+  visits: VisitRecord[],
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<{ success: boolean; filename: string; error?: string }> {
+  try {
+    if (!visits || visits.length === 0) {
+      return { success: false, filename: '', error: 'No visits selected' };
+    }
+
+    const pdf = await generateCombinedObservationReportsPdfInstance(visits, settings, isRtl, lang, onProgress);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const teacherName = visits.length === 1 
+      ? (visits[0].teacherName || 'Teacher').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_')
+      : 'مجموعة_معلمين';
+    const fileName = `تقارير_زيارات_مجمعة_${visits.length}_${teacherName}_${dateStr}.pdf`;
+
+    await savePdfFileCrossPlatform(pdf, fileName, `تقارير زيارات صفية مجمعة (${visits.length})`);
+    return { success: true, filename: fileName };
+  } catch (error: any) {
+    console.error('Error downloading combined observation reports PDF:', error);
+    return { success: false, filename: '', error: error?.message || 'Download failed' };
+  }
 }
 
 export async function printObservationReport(
@@ -771,20 +1064,7 @@ export async function downloadObservationReportPdf(
     const safeClassName = (visit.className || 'Class').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
     const fileName = `تقرير_زيارة_${safeTeacherName}_${safeClassName}.pdf`;
 
-    if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: fileName,
-        data: pdfBase64,
-        directory: Directory.Cache
-      });
-      await Share.share({
-        title: `تقرير زيارة صفية - ${visit.teacherName}`,
-        url: savedFile.uri
-      });
-    } else {
-      pdf.save(fileName);
-    }
+    await savePdfFileCrossPlatform(pdf, fileName, `تقرير زيارة صفية - ${visit.teacherName}`);
     return { success: true, filename: fileName };
   } catch (error: any) {
     console.error('Error downloading Observation Report PDF:', error);
@@ -1022,13 +1302,13 @@ export function generateActionPlansReportHtml(
 
       '<div class="signatures-container">' +
         '<div class="sig-block">' +
-          '<div class="sig-job-title">مدير المرحلة</div>' +
-          '<div class="sig-person-name">أ/ ' + stageManagerName + '</div>' +
+          '<div class="sig-job-title">رئيس قسم اللغة الألمانية</div>' +
+          '<div class="sig-person-name">أ/ ' + hodName + '</div>' +
           '<div class="sig-dotted-line">..................................</div>' +
         '</div>' +
         '<div class="sig-block">' +
-          '<div class="sig-job-title">رئيس قسم اللغة الألمانية</div>' +
-          '<div class="sig-person-name">أ/ ' + hodName + '</div>' +
+          '<div class="sig-job-title">مدير المرحلة</div>' +
+          '<div class="sig-person-name" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">..................................</div>' +
           '<div class="sig-dotted-line">..................................</div>' +
         '</div>' +
       '</div>' +
@@ -1048,6 +1328,36 @@ export function printActionPlansReport(
     printWindow.document.open();
     printWindow.document.write(htmlStr);
     printWindow.document.close();
+  } else {
+    // Fallback for Android WebView & Chrome popup blockers
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(htmlStr);
+      doc.close();
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          console.warn('Iframe print error:', e);
+        } finally {
+          setTimeout(() => {
+            if (document.body.contains(iframe)) {
+              document.body.removeChild(iframe);
+            }
+          }, 3000);
+        }
+      }, 400);
+    }
   }
 }
 

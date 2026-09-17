@@ -92,17 +92,20 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, delay: 0.2 }}
-        className="flex flex-col items-center gap-1 z-10"
+        className="flex flex-col items-center gap-1.5 z-10 text-center max-w-md px-4"
       >
-        <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-950/5 dark:bg-emerald-900/30 border border-emerald-900/10 dark:border-emerald-500/20">
+        <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-950/5 dark:bg-emerald-900/30 border border-emerald-900/10 dark:border-emerald-500/20 shadow-xs">
           <span className="text-amber-500 text-xs">✨</span>
-          <p className="text-xs font-bold text-emerald-950 dark:text-emerald-200 tracking-wide">
-            Designed &amp; Created by <span className="font-black text-emerald-800 dark:text-emerald-400">Mr. Abdul Rahman</span>
+          <p className="text-xs font-black text-emerald-950 dark:text-emerald-200 tracking-wide">
+            تصميم وتطوير: <span className="text-emerald-700 dark:text-emerald-400 font-black">عبدالرحمن غريب</span>
           </p>
           <span className="text-amber-500 text-xs">✨</span>
         </div>
-        <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
-          v1.0.2 • Das ultimative Lehrermanagement-System
+        <p className="text-[11px] sm:text-xs font-medium text-emerald-900/90 dark:text-emerald-300/90 leading-relaxed">
+          برجاء خالص الدعاء له بظهر الغيب بالتوفيق والبركة والقبول وجزيل الأجر والثواب 🤲
+        </p>
+        <p className="text-[9.5px] font-medium text-slate-400 dark:text-slate-500">
+          Glück • Das ultimative Lehrermanagement-System
         </p>
       </motion.div>
     </div>

@@ -4,28 +4,21 @@ import {
   X, Copy, RefreshCw, CheckCircle2, Bus, GraduationCap, 
   ShieldCheck, FileSpreadsheet, ArrowUpDown, ClipboardCheck, 
   FileCode, ExternalLink, Code2, AlertCircle, CheckSquare, 
-  Square, Filter, Layers, AlertTriangle, Target, Download
+  Square, Filter, Layers, AlertTriangle, Target, Download,
+  SlidersHorizontal, Check, ArrowRightLeft
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { HodGermanStudent, Complaint, StudentActionPlan } from '../types';
 import { storage } from '../services/storageService';
 import { ActionPlansView } from './ActionPlansView';
+import { 
+  normalizeClassCode, 
+  extractGradeFromClass, 
+  compareClassCodes,
+  generateUnifiedGermanPrompt 
+} from '../utils/classNormalizer';
 
-// Helper to extract grade identifier (e.g., "5A" -> "5", "12B" -> "12", "Grade 3" -> "3", "KG2" -> "KG2")
-const extractGradeFromClass = (cls: string): string => {
-  if (!cls) return '';
-  const trimmed = cls.trim();
-  const leadNum = trimmed.match(/^(\d+)/);
-  if (leadNum) return leadNum[1];
-  const gNum = trimmed.match(/(?:grade|g)[\s\-_]*(\d+)/i);
-  if (gNum) return gNum[1];
-  const anyNum = trimmed.match(/\d+/);
-  if (anyNum) return anyNum[0];
-  const word = trimmed.match(/^[A-Za-z0-9]+/);
-  return word ? word[0].toUpperCase() : trimmed.toUpperCase();
-};
-
-export const EXTERNAL_AI_PROMPT_TEXT = `Analyze this class roster image. Extract ONLY students studying German as a second language (EXCLUDE French students completely). Return a valid JSON array where each student object has: nameAr (Arabic name if available), nameEn (English name if available), gender ('Boy' or 'Girl'), gradeClass (class name from top header), and busLine (bus number/line or 'N/A').`;
+export const EXTERNAL_AI_PROMPT_TEXT = generateUnifiedGermanPrompt();
 
 export const HodStudentsView: React.FC = () => {
   const { profile, updateProfile, _t } = useApp();
@@ -65,6 +58,24 @@ export const HodStudentsView: React.FC = () => {
   const [targetDeleteClass, setTargetDeleteClass] = useState<string>('');
   const [targetDeleteGrade, setTargetDeleteGrade] = useState<string>('');
 
+  // Move Student States
+  const [studentToMove, setStudentToMove] = useState<HodGermanStudent | null>(null);
+  const [targetMoveClass, setTargetMoveClass] = useState<string>('10A');
+  const [customMoveClass, setCustomMoveClass] = useState<string>('');
+  const [isCustomMoveClass, setIsCustomMoveClass] = useState(false);
+
+  // Bulk Move Selected Students
+  const [isBulkMoveModalOpen, setIsBulkMoveModalOpen] = useState(false);
+  const [targetBulkMoveClass, setTargetBulkMoveClass] = useState<string>('10A');
+  const [customBulkMoveClass, setCustomBulkMoveClass] = useState<string>('');
+  const [isCustomBulkMoveClass, setIsCustomBulkMoveClass] = useState(false);
+
+  // Move Entire Class to Another Class
+  const [classToMoveFrom, setClassToMoveFrom] = useState<string | null>(null);
+  const [targetWholeClassMove, setTargetWholeClassMove] = useState<string>('10B');
+  const [customWholeClassMove, setCustomWholeClassMove] = useState<string>('');
+  const [isCustomWholeClassMove, setIsCustomWholeClassMove] = useState(false);
+
   // Add/Edit Modal
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<HodGermanStudent | null>(null);
@@ -77,13 +88,15 @@ export const HodStudentsView: React.FC = () => {
   }>({
     nameAr: '',
     nameEn: '',
-    gradeClass: '5A',
+    gradeClass: '10A',
     gender: 'Boy',
     busLine: 'N/A',
   });
 
   // External AI Prompt Generator & Paste JSON Modal
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
+  const [promptTargetGrade, setPromptTargetGrade] = useState<string>('');
+  const [promptTargetClass, setPromptTargetClass] = useState<string>('');
   const [promptCopied, setPromptCopied] = useState(false);
   const [pastedAiJsonText, setPastedAiJsonText] = useState('');
   const [pasteError, setPasteError] = useState<string | null>(null);
@@ -94,16 +107,16 @@ export const HodStudentsView: React.FC = () => {
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Helper migration for existing storage records without nameAr/nameEn
+  // Helper migration for existing storage records with normalization
   const sanitizeStudentData = (rawList: any[]): HodGermanStudent[] => {
     return rawList.map((s, idx) => ({
       id: s.id || `gs-loaded-${Date.now()}-${idx}`,
       nameAr: s.nameAr || s.name || 'طالب جديد',
       nameEn: s.nameEn || (s.name ? 'Student ' + (idx + 1) : 'New Student'),
-      gradeClass: (s.gradeClass || '5A').toString().toUpperCase(),
+      gradeClass: normalizeClassCode(s.gradeClass || '10A'),
       gender: s.gender === 'Girl' ? 'Girl' : 'Boy',
       secondLanguage: 'German',
       busLine: s.busLine || 'N/A',
@@ -111,7 +124,7 @@ export const HodStudentsView: React.FC = () => {
     }));
   };
 
-  // Load persistence (clean start: empty list [] if no stored data)
+  // Load persistence & automatically normalize existing students in database
   useEffect(() => {
     async function loadGermanStudents() {
       setIsLoading(true);
@@ -126,7 +139,13 @@ export const HodStudentsView: React.FC = () => {
           setActionPlans(storedPlans);
         }
         if (stored !== null && stored !== undefined && Array.isArray(stored)) {
-          setStudents(sanitizeStudentData(stored));
+          const sanitized = sanitizeStudentData(stored);
+          setStudents(sanitized);
+          // Check if any student class was changed during normalization and persist
+          const hasChanges = stored.some((s, i) => String(s.gradeClass || '').trim().toUpperCase() !== sanitized[i]?.gradeClass);
+          if (hasChanges) {
+            await storage.setItem('hod_german_students', sanitized);
+          }
         } else {
           const profileBackup = profile?.schoolSettings?.germanStudents;
           if (profileBackup !== undefined && profileBackup !== null && Array.isArray(profileBackup)) {
@@ -172,9 +191,9 @@ export const HodStudentsView: React.FC = () => {
   const uniqueClasses = useMemo(() => {
     const set = new Set<string>();
     students.forEach(s => {
-      if (s.gradeClass) set.add(s.gradeClass.trim().toUpperCase());
+      if (s.gradeClass) set.add(normalizeClassCode(s.gradeClass));
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return Array.from(set).sort(compareClassCodes);
   }, [students]);
 
   // Unique Grades/Levels list (e.g., Grade 5, Grade 6...)
@@ -245,7 +264,7 @@ export const HodStudentsView: React.FC = () => {
         set.add(`${selectedGrade}${letter}`);
       });
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return Array.from(set).sort(compareClassCodes);
   }, [selectedGrade, uniqueClasses]);
 
   // Grade & Class Selection Matrix Handlers
@@ -367,7 +386,7 @@ export const HodStudentsView: React.FC = () => {
       } else if (sortField === 'nameEn') {
         comp = (a.nameEn || '').localeCompare(b.nameEn || '', 'en');
       } else if (sortField === 'gradeClass') {
-        comp = (a.gradeClass || '').localeCompare(b.gradeClass || '', undefined, { numeric: true });
+        comp = compareClassCodes(a.gradeClass || '', b.gradeClass || '');
       } else if (sortField === 'busLine') {
         comp = (a.busLine || '').localeCompare(b.busLine || '', 'ar');
       }
@@ -440,6 +459,7 @@ export const HodStudentsView: React.FC = () => {
 
     const finalAr = studentForm.nameAr.trim() || studentForm.nameEn.trim();
     const finalEn = studentForm.nameEn.trim() || studentForm.nameAr.trim();
+    const standardizedClass = normalizeClassCode(studentForm.gradeClass.trim());
 
     if (editingStudent) {
       const updated = students.map(s => 
@@ -448,7 +468,7 @@ export const HodStudentsView: React.FC = () => {
               ...s, 
               nameAr: finalAr,
               nameEn: finalEn,
-              gradeClass: studentForm.gradeClass.trim().toUpperCase(),
+              gradeClass: standardizedClass,
               gender: studentForm.gender,
               busLine: studentForm.busLine.trim() || 'N/A',
               secondLanguage: 'German' as const
@@ -462,7 +482,7 @@ export const HodStudentsView: React.FC = () => {
         id: `gs-${Date.now()}`,
         nameAr: finalAr,
         nameEn: finalEn,
-        gradeClass: studentForm.gradeClass.trim().toUpperCase(),
+        gradeClass: standardizedClass,
         gender: studentForm.gender,
         secondLanguage: 'German',
         busLine: studentForm.busLine.trim() || 'N/A',
@@ -472,6 +492,27 @@ export const HodStudentsView: React.FC = () => {
       showToast(_t('تمت إضافة الطالب بنجاح', 'Student added', 'Schüler hinzugefügt'));
     }
     setIsAddEditModalOpen(false);
+  };
+
+  // ================= UNIFY & STANDARDIZE ALL EXISTING CLASSES =================
+  const handleUnifyAllClasses = async () => {
+    let changedCount = 0;
+    const updated = students.map(s => {
+      const normalized = normalizeClassCode(s.gradeClass);
+      if (normalized !== s.gradeClass) {
+        changedCount++;
+        return { ...s, gradeClass: normalized };
+      }
+      return s;
+    });
+
+    if (changedCount === 0) {
+      showToast(_t('جميع أسماء وفصول الطلاب موحدة ومنسقة بالفعل (10A, 10B, 7A...) ✓', 'All student classes are already standardized (10A, 10B...) ✓', 'Alle Klassen bereits standardisiert ✓'));
+      return;
+    }
+
+    await persistStudents(updated);
+    showToast(_t(`تم بنجاح توحيد وتنسيق فصول (${changedCount}) طالب لتتوافق مع كافة الفلاتر والجداول! ✓`, `Successfully normalized (${changedCount}) student classes! ✓`, `(${changedCount}) Schülerklassen standardisiert! ✓`));
   };
 
   // ================= DELETION HANDLERS =================
@@ -562,6 +603,50 @@ export const HodStudentsView: React.FC = () => {
     setIsBulkDeleteModalOpen(false);
   };
 
+  // Move Single Student to Another Class
+  const handleMoveStudentToClass = async (studentId: string, newClassCode: string) => {
+    const normClass = normalizeClassCode(newClassCode);
+    if (!normClass) return;
+    const target = students.find(s => s.id === studentId);
+    const updated = students.map(s => s.id === studentId ? { ...s, gradeClass: normClass } : s);
+    await persistStudents(updated);
+    showToast(_t(`تم نقل الطالب (${target?.nameAr || 'المحدد'}) إلى فصل (${normClass}) بنجاح!`, `Moved student to class (${normClass})!`, `Schüler in Klasse (${normClass}) verschoben!`));
+    setStudentToMove(null);
+  };
+
+  // Bulk Move Selected Students to Another Class
+  const handleMoveSelectedStudentsToClass = async (newClassCode: string) => {
+    const normClass = normalizeClassCode(newClassCode);
+    if (!normClass || selectedStudentIds.length === 0) return;
+    const count = selectedStudentIds.length;
+    const idSet = new Set(selectedStudentIds);
+    const updated = students.map(s => idSet.has(s.id) ? { ...s, gradeClass: normClass } : s);
+    await persistStudents(updated);
+    setSelectedStudentIds([]);
+    showToast(_t(`تم نقل (${count}) طلاب إلى فصل (${normClass}) بنجاح!`, `Moved (${count}) students to class (${normClass})!`, `(${count}) Schüler in Klasse (${normClass}) verschoben!`));
+    setIsBulkMoveModalOpen(false);
+  };
+
+  // Move Whole Class to Another Class (e.g. all students from 5A to 5B)
+  const handleMoveWholeClassToClass = async (fromClass: string, newClassCode: string) => {
+    const normFrom = normalizeClassCode(fromClass);
+    const normTo = normalizeClassCode(newClassCode);
+    if (!normFrom || !normTo || normFrom === normTo) return;
+    const targetStudents = students.filter(s => s.gradeClass.toUpperCase() === normFrom.toUpperCase());
+    const count = targetStudents.length;
+    if (count === 0) {
+      showToast(_t(`لا يوجد طلاب في فصل (${normFrom})`, `No students in class (${normFrom})`, `Keine Schüler`));
+      return;
+    }
+    const updated = students.map(s => s.gradeClass.toUpperCase() === normFrom.toUpperCase() ? { ...s, gradeClass: normTo } : s);
+    await persistStudents(updated);
+    showToast(_t(`تم نقل جميع طلاب فصل (${normFrom}) وعددهم (${count}) إلى فصل (${normTo}) بنجاح!`, `Moved all ${count} students from ${normFrom} to ${normTo}!`, `Alle ${count} Schüler in Klasse ${normTo} verschoben!`));
+    setClassToMoveFrom(null);
+    if (classFilter === normFrom || selectedClass === normFrom) {
+      applyGradeClassFilter(normTo);
+    }
+  };
+
   // Copy Single Row
   const handleCopyStudentRow = (s: HodGermanStudent) => {
     const text = `👤 ${s.nameAr} (${s.nameEn}) | 🏫 ${s.gradeClass} | ${s.gender === 'Boy' ? '👦 Boy' : '👧 Girl'} | 🚌 ${s.busLine} | 🇩🇪 German`;
@@ -601,11 +686,16 @@ export const HodStudentsView: React.FC = () => {
     showToast(_t('تم تصدير القائمة بنجاح (CSV)', 'Bilingual roster exported to CSV', 'CSV exportiert'));
   };
 
+  // Computed Dynamic AI Prompt text based on selected target grade / class
+  const activePromptText = useMemo(() => {
+    return generateUnifiedGermanPrompt(promptTargetGrade || undefined, promptTargetClass || undefined);
+  }, [promptTargetGrade, promptTargetClass]);
+
   // Copy System Prompt Text for External AI
   const handleCopyPromptText = () => {
-    navigator.clipboard.writeText(EXTERNAL_AI_PROMPT_TEXT);
+    navigator.clipboard.writeText(activePromptText);
     setPromptCopied(true);
-    showToast(_t('تم نسخ برومبت الـ AI الخارجي للـ Clipboard!', 'External AI Prompt copied to clipboard!', 'KI-Prompt in Zwischenablage kopiert!'));
+    showToast(_t('تم نسخ برومبت الـ AI المنسق والموضح للـ Clipboard!', 'Standardized AI Prompt copied to clipboard!', 'Standardisierter KI-Prompt kopiert!'));
     setTimeout(() => setPromptCopied(false), 3000);
   };
 
@@ -645,7 +735,8 @@ export const HodStudentsView: React.FC = () => {
         const ar = item.nameAr || item.name_ar || item.arabicName || item.name || 'طالب جديد';
         const en = item.nameEn || item.name_en || item.englishName || (item.name ? item.name : 'New Student');
         const gender = (item.gender === 'Girl' || item.gender === 'girl' || item.gender === 'أنثى' || item.gender === 'بنت') ? 'Girl' : 'Boy';
-        const gradeClass = (item.gradeClass || item.class || item.grade || '5A').toString().toUpperCase();
+        const rawClass = (item.gradeClass || item.class || item.grade || promptTargetClass || (promptTargetGrade ? `${promptTargetGrade}A` : '10A')).toString();
+        const gradeClass = normalizeClassCode(rawClass, promptTargetGrade || undefined);
         const busLine = item.busLine || item.bus || item.bus_line || 'N/A';
 
         return {
@@ -663,7 +754,7 @@ export const HodStudentsView: React.FC = () => {
       const updated = [...newStudents, ...students];
       persistStudents(updated);
       setPasteSuccessCount(newStudents.length);
-      showToast(_t(`تم استيراد ${newStudents.length} طالب بنجاح من الـ AI الخارجي!`, `Successfully imported ${newStudents.length} students!`, `${newStudents.length} Schüler importiert!`));
+      showToast(_t(`تم استيراد ${newStudents.length} طالب بنجاح وتوحيد فصولهم بدقة!`, `Successfully imported ${newStudents.length} students with unified classes!`, `${newStudents.length} Schüler importiert!`));
       setPastedAiJsonText('');
     } catch (err: any) {
       console.error('Failed parsing pasted AI JSON:', err);
@@ -804,6 +895,18 @@ export const HodStudentsView: React.FC = () => {
               className="px-2.5 py-1 bg-surface hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
             >
               {_t('إلغاء التحديد', 'Deselect All', 'Auswahl aufheben')}
+            </button>
+
+            {/* Bulk Move Button */}
+            <button
+              onClick={() => {
+                setTargetBulkMoveClass(uniqueClasses[0] || '10A');
+                setIsBulkMoveModalOpen(true);
+              }}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span>{_t(`نقل المحددين (${selectedStudentIds.length}) لفصل آخر`, `Move Selected (${selectedStudentIds.length}) to Class`, `Ausgewählte (${selectedStudentIds.length}) verschieben`)}</span>
             </button>
 
             <button
@@ -998,6 +1101,48 @@ export const HodStudentsView: React.FC = () => {
                   );
                 })}
               </div>
+
+              {/* Class Actions Toolbar (when a specific class is selected) */}
+              {selectedClass && selectedClass !== 'all' && (
+                <div className="mt-2.5 p-2 bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-xl flex items-center justify-between flex-wrap gap-2 text-[11px] animate-fade-in">
+                  <div className="flex items-center gap-1.5 font-bold text-text-main">
+                    <span className="text-primary font-black">🏫 {_t('إدارة فصل:', 'Manage Class:', 'Klasse:')}</span>
+                    <span className="px-2 py-0.5 bg-primary text-white rounded-md font-black text-xs shadow-2xs">
+                      {selectedClass}
+                    </span>
+                    <span className="text-text-muted text-[11px]">
+                      ({students.filter(s => s.gradeClass.toUpperCase() === selectedClass.toUpperCase()).length} {_t('طلاب مسجلين', 'students registered', 'Schüler')})
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const otherClasses = uniqueClasses.filter(c => c.toUpperCase() !== selectedClass.toUpperCase());
+                        setTargetWholeClassMove(otherClasses[0] || '10B');
+                        setIsCustomWholeClassMove(false);
+                        setClassToMoveFrom(selectedClass);
+                      }}
+                      className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer text-[11px]"
+                      title={_t('نقل جميع طلاب هذا الفصل بالكامل إلى فصل آخر', 'Move all students in this class to another', 'Alle Schüler dieser Klasse verschieben')}
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>{_t(`نقل طلاب (${selectedClass})`, `Move Class Students`, `Klasse verschieben`)}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteByClass(selectedClass)}
+                      className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer text-[11px]"
+                      title={_t('مسح وإفراغ جميع طلاب هذا الفصل بالكامل', 'Clear all students from this class', 'Alle Schüler dieser Klasse löschen')}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{_t(`مسح طلاب (${selectedClass})`, `Clear Class`, `Klasse leeren`)}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1167,6 +1312,50 @@ export const HodStudentsView: React.FC = () => {
           </div>
         ) : (
           <div className="max-h-[620px] overflow-y-auto scrollbar-thin">
+            {/* Selection Toolbar Banner */}
+            {selectedStudentIds.length > 0 && (
+              <div className="bg-primary/10 border-b border-primary/20 px-3 py-2 flex items-center justify-between gap-2 flex-wrap text-xs sticky top-0 z-20 backdrop-blur-md">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-primary text-white rounded-md font-black text-[11px]">
+                    {selectedStudentIds.length}
+                  </span>
+                  <span className="font-bold text-primary text-[11.5px]">
+                    {_t('طالب محدد في القائمة', 'students selected', 'Schüler ausgewählt')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTargetBulkMoveClass(uniqueClasses[0] || '10A');
+                      setIsCustomBulkMoveClass(false);
+                      setCustomBulkMoveClass('');
+                      setIsBulkMoveModalOpen(true);
+                    }}
+                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    <span>{_t('نقل المحددين إلى فصل آخر', 'Move to Class', 'In Klasse verschieben')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteSelectedStudents}
+                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{_t('حذف المحددين', 'Delete Selected', 'Ausgewählte löschen')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudentIds([])}
+                    className="px-2 py-1 bg-surface-hover hover:bg-surface text-text-muted hover:text-text-main border border-surface-border rounded-lg text-[11px] font-bold transition-all cursor-pointer"
+                  >
+                    {_t('إلغاء التحديد', 'Clear Selection', 'Auswahl aufheben')}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <table className="w-full text-right border-collapse text-[11px]">
               {/* Sticky Header */}
               <thead className="sticky top-0 z-10 bg-surface-hover/95 backdrop-blur border-b border-surface-border text-[11px] font-bold text-text-muted uppercase tracking-wider">
@@ -1381,6 +1570,16 @@ export const HodStudentsView: React.FC = () => {
                             title={_t('نسخ الصف', 'Copy row', 'Zeile kopieren')}
                           >
                             <Copy className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setStudentToMove(s);
+                              setTargetMoveClass(s.gradeClass || uniqueClasses[0] || '10A');
+                            }}
+                            className="p-1 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded transition-all cursor-pointer"
+                            title={_t('نقل الطالب إلى فصل آخر', 'Move student to class', 'Schüler verschieben')}
+                          >
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleOpenEdit(s)}
@@ -1630,7 +1829,7 @@ export const HodStudentsView: React.FC = () => {
       {/* ================= MODAL 1: EXTERNAL AI PROMPT GENERATOR & PASTE DATA ================= */}
       {isPromptModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-2.5 animate-fade-in overflow-y-auto">
-          <div className="bg-surface border border-surface-border rounded-xl max-w-2xl w-full p-2.5 sm:p-3 shadow-2xl space-y-2 my-auto">
+          <div className="bg-surface border border-surface-border rounded-xl max-w-2xl w-full p-3 sm:p-4 shadow-2xl space-y-3 my-auto max-h-[92vh] overflow-y-auto">
             {/* Modal Header */}
             <div className="flex items-center justify-between pb-2.5 border-b border-surface-border">
               <div className="flex items-center gap-2">
@@ -1638,32 +1837,87 @@ export const HodStudentsView: React.FC = () => {
                   <Code2 className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-[11px] font-black text-text-main">
-                    {_t('مُولّد البرومبت الخارجي (External AI Prompt Generator & Paste)', 'External AI Prompt Generator', 'KI-Prompt-Generator')}
+                  <h3 className="text-xs sm:text-sm font-black text-text-main">
+                    {_t('مُولّد ومُنسّق استيراد الطلاب بالذكاء الاصطناعي', 'AI Student Import & Class Normalizer', 'KI-Schülerimport & Klassen-Normalisierer')}
                   </h3>
                   <p className="text-[10.5px] text-text-muted">
-                    {_t('انسخ البرومبت أدناه ووضعه مع صورة القائمة في ChatGPT أو Gemini، ثم الصق النتيجة أدناه لاستيراد الطلاب فوراً.', 'Copy system prompt for external AI, then paste JSON output below to import students.', 'KI-Prompt kopieren und JSON-Ergebnis unten einfügen.')}
+                    {_t('توجيه الـ AI لاستخراج طلاب الألماني فقط وتوحيد أسماء الفصول (10A, 10B, 7A...) لتظهر بدقة في كافة الفلاتر.', 'Instruct AI to extract German students and normalize classes (10A, 10B...) for flawless filtering.', 'KI anweisen, Deutschschüler zu extrahieren und Klassen zu vereinheitlichen.')}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setIsPromptModalOpen(false)}
-                className="p-1 hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg"
+                className="p-1 hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* STEP 1: Copy System Prompt */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
+            {/* Quick Unify Existing Records Banner */}
+            <div className="p-2.5 bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <div className="text-[11px] font-black text-primary flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span>{_t('توحيد وتنسيق فصول الطلاب الحاليين المسجلين:', 'Unify Existing Students Classes:', 'Bestehende Klassen vereinheitlichen:')}</span>
+                </div>
+                <div className="text-[10px] text-text-muted">
+                  {_t('تحويل المسميات مثل "FIRST SECONDARY 10A" تلقائياً إلى "10A" لضبط الفلاتر', 'Converts labels like "FIRST SECONDARY 10A" into "10A"', 'Wandelt Labels wie "FIRST SECONDARY 10A" in "10A" um')}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleUnifyAllClasses}
+                className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-lg text-[10.5px] font-bold shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap active:scale-95"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>{_t(`توحيد الفصول الآن (${students.length} طالب)`, `Unify Classes (${students.length} students)`, `Klassen vereinheitlichen (${students.length})`)}</span>
+              </button>
+            </div>
+
+            {/* STEP 1: Customize & Copy System Prompt */}
+            <div className="space-y-2 pt-1 border-t border-surface-border">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <label className="text-[11px] font-extrabold text-text-main flex items-center gap-1.5">
-                  <span className="w-3.5 h-3.5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-black">1</span>
-                  <span>{_t('البرومبت المجهز للنسخ (Pre-formatted System Prompt):', 'System Prompt to Copy:', 'System-Prompt kopieren:')}</span>
+                  <span className="w-4 h-4 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-black">1</span>
+                  <span>{_t('تخصيص ونسخ البرومبت (Prompt Customization & Copy):', 'Customize & Copy Prompt:', 'Prompt anpassen & kopieren:')}</span>
                 </label>
+
+                {/* Target Grade / Class Optional Quick Selectors */}
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={promptTargetGrade}
+                    onChange={e => {
+                      setPromptTargetGrade(e.target.value);
+                      if (e.target.value && !promptTargetClass) {
+                        setPromptTargetClass(`${e.target.value}A`);
+                      }
+                    }}
+                    className="px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10.5px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                  >
+                    <option value="">{_t('المرحلة المستهدفة (تلقائي)', 'Target Grade (Auto)', 'Zielstufe (Auto)')}</option>
+                    {allSchoolGrades.map(g => (
+                      <option key={`prompt-g-${g}`} value={g}>الصف {g} (Grade {g})</option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="text"
+                    value={promptTargetClass}
+                    onChange={e => setPromptTargetClass(e.target.value)}
+                    placeholder={_t('الفصل (مثال: 10A)', 'Class (e.g. 10A)', 'Klasse (z.B. 10A)')}
+                    className="w-24 px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10.5px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-text-muted/60"
+                  />
+                </div>
+              </div>
+
+              {/* Copy Button Row */}
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-text-muted font-bold">
+                  {_t('البرومبت يوجه الذكاء الاصطناعي لاستخراج طلاب الألماني فقط وتوحيد الفصل إلى رمز موحد:', 'Instructs AI to extract German students and standardize class codes:', 'Weist KI an, Deutschschüler zu extrahieren und Klassencodes zu standardisieren:')}
+                </span>
                 <button
                   onClick={handleCopyPromptText}
-                  className={`px-3 py-1 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs ${
+                  className={`px-3 py-1 rounded-xl text-[10.5px] font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs ${
                     promptCopied 
                       ? 'bg-emerald-600 text-white' 
                       : 'bg-primary hover:bg-primary-hover text-white'
@@ -1674,18 +1928,18 @@ export const HodStudentsView: React.FC = () => {
                 </button>
               </div>
 
-              <div className="p-3 bg-surface-hover/90 border border-surface-border rounded-xl text-[11px] font-mono text-text-main leading-relaxed relative group ltr text-left select-all">
-                {EXTERNAL_AI_PROMPT_TEXT}
+              <div className="p-2.5 bg-surface-hover/90 border border-surface-border rounded-xl text-[10px] sm:text-[10.5px] font-mono text-text-main leading-relaxed relative group ltr text-left select-all max-h-36 overflow-y-auto">
+                {activePromptText}
               </div>
 
               {/* Quick Launch External Links */}
-              <div className="flex items-center gap-2 pt-1">
-                <span className="text-[11px] font-bold text-text-muted">{_t('افتح أداة AI خارجية:', 'Open External AI Tool:', 'Externe KI öffnen:')}</span>
+              <div className="flex items-center gap-2 pt-0.5">
+                <span className="text-[10.5px] font-bold text-text-muted">{_t('افتح أداة AI خارجية:', 'Open External AI Tool:', 'Externe KI öffnen:')}</span>
                 <a
                   href="https://chatgpt.com/"
                   target="_blank"
                   rel="noreferrer"
-                  className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-lg text-[11px] font-bold border border-surface-border inline-flex items-center gap-1 transition-all"
+                  className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border inline-flex items-center gap-1 transition-all"
                 >
                   <span>ChatGPT</span>
                   <ExternalLink className="w-3 h-3 text-emerald-500" />
@@ -1694,7 +1948,7 @@ export const HodStudentsView: React.FC = () => {
                   href="https://gemini.google.com/"
                   target="_blank"
                   rel="noreferrer"
-                  className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-lg text-[11px] font-bold border border-surface-border inline-flex items-center gap-1 transition-all"
+                  className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border inline-flex items-center gap-1 transition-all"
                 >
                   <span>Google Gemini</span>
                   <ExternalLink className="w-3 h-3 text-blue-500" />
@@ -1706,7 +1960,7 @@ export const HodStudentsView: React.FC = () => {
             <div className="space-y-2 pt-2 border-t border-surface-border">
               <label className="text-[11px] font-extrabold text-text-main flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-3.5 h-3.5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-[10px] font-black">2</span>
+                  <span className="w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-[10px] font-black">2</span>
                   <span>{_t('الصق النتيجة المستخرجة من الـ AI هنا (Paste AI JSON Output):', 'Paste AI Output Here:', 'KI-Ergebnis hier einfügen:')}</span>
                 </div>
               </label>
@@ -1718,9 +1972,9 @@ export const HodStudentsView: React.FC = () => {
                   setPasteError(null);
                   setPasteSuccessCount(null);
                 }}
-                rows={5}
-                placeholder={_t('الصق كود الـ JSON الناتج من ChatGPT أو Gemini هنا...\n\nمثال:\n[\n  {"nameAr": "أحمد علي", "nameEn": "Ahmed Ali", "gender": "Boy", "gradeClass": "5A", "busLine": "Line 04"}\n]', 'Paste JSON output here...\n\nExample:\n[\n  {"nameAr": "Ahmed Ali", "nameEn": "Ahmed Ali", "gender": "Boy", "gradeClass": "5A", "busLine": "Line 04"}\n]', 'Fügen Sie hier das JSON-Ergebnis ein...')}
-                className="w-full p-3 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-mono text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 placeholder:text-text-muted/60"
+                rows={4}
+                placeholder={_t('الصق كود الـ JSON الناتج من ChatGPT أو Gemini هنا...\n\nمثال:\n[\n  {"nameAr": "أحمد علي", "nameEn": "Ahmed Ali", "gender": "Boy", "gradeClass": "10A", "busLine": "Line 04"}\n]', 'Paste JSON output here...\n\nExample:\n[\n  {"nameAr": "Ahmed Ali", "nameEn": "Ahmed Ali", "gender": "Boy", "gradeClass": "10A", "busLine": "Line 04"}\n]', 'Fügen Sie hier das JSON-Ergebnis ein...')}
+                className="w-full p-2.5 bg-surface-hover border border-surface-border rounded-xl text-[10.5px] font-mono text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 placeholder:text-text-muted/60"
               />
 
               {pasteError && (
@@ -1733,24 +1987,24 @@ export const HodStudentsView: React.FC = () => {
               {pasteSuccessCount !== null && (
                 <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>{_t(`تم استيراد ${pasteSuccessCount} طالب بنجاح وإضافتهم للجدول!`, `Successfully imported ${pasteSuccessCount} students!`, `${pasteSuccessCount} Schüler erfolgreich importiert!`)}</span>
+                  <span>{_t(`تم استيراد وتوحيد فصول ${pasteSuccessCount} طالب بنجاح!`, `Successfully imported and normalized ${pasteSuccessCount} students!`, `${pasteSuccessCount} Schüler erfolgreich importiert!`)}</span>
                 </div>
               )}
 
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
                   onClick={() => setIsPromptModalOpen(false)}
-                  className="px-2 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
+                  className="px-2.5 py-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
                 >
                   {_t('إغلاق', 'Close', 'Schließen')}
                 </button>
                 <button
                   onClick={handleParseAndImportPastedJson}
                   disabled={!pastedAiJsonText.trim()}
-                  className="px-2.5 py-1 bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="px-3 py-1.5 bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
                 >
                   <FileCode className="w-3.5 h-3.5" />
-                  <span>{_t('استيراد البيانات الملصقة الآن', 'Import Pasted Data Now', 'Daten jetzt importieren')}</span>
+                  <span>{_t('استيراد وتوحيد الفصول الآن', 'Import & Normalize Classes Now', 'Jetzt importieren & normalisieren')}</span>
                 </button>
               </div>
             </div>
@@ -2017,6 +2271,313 @@ export const HodStudentsView: React.FC = () => {
                 className="px-2.5 py-1 bg-surface-hover text-text-main rounded-xl text-[11px] font-bold border border-surface-border cursor-pointer"
               >
                 {_t('إغلاق', 'Close', 'Schließen')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SINGLE STUDENT MOVE TO CLASS MODAL */}
+      {studentToMove && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-text-main">
+                    {_t('نقل الطالب إلى فصل / مجموعة أخرى', 'Move Student to Another Class', 'Schüler in andere Klasse verschieben')}
+                  </h3>
+                  <p className="text-xs text-text-muted">
+                    {studentToMove.nameAr} ({studentToMove.nameEn})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStudentToMove(null)}
+                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-[11px] text-text-muted bg-surface-hover/50 p-2.5 rounded-lg border border-surface-border-soft flex items-center justify-between">
+                <span className="font-bold">{_t('الفصل الحالي:', 'Current Class:', 'Aktuelle Klasse:')}</span>
+                <span className="text-text-main font-black bg-surface px-2 py-0.5 rounded border border-surface-border">
+                  {studentToMove.gradeClass}
+                </span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-text-main">
+                    {_t('اختر الفصل المستهدف الجديد:', 'Select Target Class:', 'Zielklasse wählen:')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomMoveClass(!isCustomMoveClass)}
+                    className="text-[10px] text-primary hover:underline font-bold"
+                  >
+                    {isCustomMoveClass ? _t('اختر من القائمة', 'Select from list', 'Aus Liste') : _t('+ كتابة فصل جديد', '+ Type new class', '+ Neue Klasse')}
+                  </button>
+                </div>
+
+                {!isCustomMoveClass ? (
+                  <select
+                    value={targetMoveClass}
+                    onChange={(e) => setTargetMoveClass(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                  >
+                    {uniqueClasses.map(cls => (
+                      <option key={cls} value={cls}>
+                        {cls} ({studentCountsByClass[cls] || 0} {_t('طلاب', 'students', 'Schüler')})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={customMoveClass}
+                    onChange={(e) => setCustomMoveClass(e.target.value)}
+                    placeholder={_t('مثال: 5B أو 10C...', 'e.g. 5B or 10C...', 'z.B. 5B oder 10C...')}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 uppercase"
+                  />
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setStudentToMove(null)}
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = isCustomMoveClass ? customMoveClass.trim() : targetMoveClass;
+                  if (target) {
+                    handleMoveStudentToClass(studentToMove.id, target);
+                  }
+                }}
+                disabled={isCustomMoveClass && !customMoveClass.trim()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>{_t('تأكيد النقل', 'Confirm Move', 'Verschieben bestätigen')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK MOVE STUDENTS TO CLASS MODAL */}
+      {isBulkMoveModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-text-main">
+                    {_t('نقل الطلاب المحددين جماعياً إلى فصل جديد', 'Bulk Move Selected Students', 'Ausgewählte Schüler in Klasse verschieben')}
+                  </h3>
+                  <p className="text-xs text-text-muted">
+                    {_t(`سيتم نقل ${selectedStudentIds.length} طالب دفعة واحدة`, `Moving ${selectedStudentIds.length} students at once`, `${selectedStudentIds.length} Schüler werden verschoben`)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBulkMoveModalOpen(false)}
+                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-text-main">
+                    {_t('اختر الفصل المستهدف الجديد للطلاب:', 'Select Target Class for Students:', 'Zielklasse für Schüler wählen:')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomBulkMoveClass(!isCustomBulkMoveClass)}
+                    className="text-[10px] text-primary hover:underline font-bold"
+                  >
+                    {isCustomBulkMoveClass ? _t('اختر من القائمة', 'Select from list', 'Aus Liste') : _t('+ كتابة فصل جديد', '+ Type new class', '+ Neue Klasse')}
+                  </button>
+                </div>
+
+                {!isCustomBulkMoveClass ? (
+                  <select
+                    value={targetBulkMoveClass}
+                    onChange={(e) => setTargetBulkMoveClass(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                  >
+                    {uniqueClasses.map(cls => (
+                      <option key={cls} value={cls}>
+                        {cls} ({studentCountsByClass[cls] || 0} {_t('طلاب', 'students', 'Schüler')})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={customBulkMoveClass}
+                    onChange={(e) => setCustomBulkMoveClass(e.target.value)}
+                    placeholder={_t('مثال: 5B أو 10C...', 'e.g. 5B or 10C...', 'z.B. 5B oder 10C...')}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 uppercase"
+                  />
+                )}
+              </div>
+
+              <div className="max-h-36 overflow-y-auto bg-surface-hover/50 p-2 rounded-lg border border-surface-border-soft space-y-1">
+                {selectedStudentIds.map(id => {
+                  const st = students.find(s => s.id === id);
+                  return (
+                    <div key={id} className="text-xs font-bold text-text-main flex items-center justify-between">
+                      <span>{st?.nameAr || st?.nameEn || id}</span>
+                      <span className="text-[10px] text-text-muted font-normal">
+                        {st?.gradeClass || 'N/A'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setIsBulkMoveModalOpen(false)}
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = isCustomBulkMoveClass ? customBulkMoveClass.trim() : targetBulkMoveClass;
+                  if (target) {
+                    handleMoveSelectedStudentsToClass(target);
+                  }
+                }}
+                disabled={isCustomBulkMoveClass && !customBulkMoveClass.trim()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>{_t(`نقل (${selectedStudentIds.length}) طالب إلى (${isCustomBulkMoveClass ? (customBulkMoveClass || '...') : targetBulkMoveClass})`, `Move (${selectedStudentIds.length}) students`, `(${selectedStudentIds.length}) Schüler verschieben`)}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MOVE WHOLE CLASS TO ANOTHER CLASS MODAL */}
+      {classToMoveFrom && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-text-main">
+                    {_t(`نقل جميع طلاب فصل (${classToMoveFrom}) إلى فصل آخر`, `Move All Students in Class (${classToMoveFrom})`, `Alle Schüler aus (${classToMoveFrom}) verschieben`)}
+                  </h3>
+                  <p className="text-xs text-text-muted">
+                    {_t(`إجمالي عدد الطلاب في هذا الفصل: ${students.filter(s => s.gradeClass.toUpperCase() === classToMoveFrom.toUpperCase()).length} طالب`, `Total students: ${students.filter(s => s.gradeClass.toUpperCase() === classToMoveFrom.toUpperCase()).length}`, `Gesamt: ${students.filter(s => s.gradeClass.toUpperCase() === classToMoveFrom.toUpperCase()).length} Schüler`)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setClassToMoveFrom(null)}
+                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-[11px] text-text-muted bg-surface-hover/50 p-2.5 rounded-lg border border-surface-border-soft flex items-center justify-between">
+                <span className="font-bold">{_t('الفصل المصدر (الحالي):', 'Source Class:', 'Ausgangsklasse:')}</span>
+                <span className="text-blue-600 dark:text-blue-400 font-black bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
+                  {classToMoveFrom}
+                </span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-text-main">
+                    {_t('اختر الفصل الجديد الذي سينتقل إليه الطلاب:', 'Select New Target Class:', 'Neue Zielklasse wählen:')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomWholeClassMove(!isCustomWholeClassMove)}
+                    className="text-[10px] text-primary hover:underline font-bold"
+                  >
+                    {isCustomWholeClassMove ? _t('اختر من القائمة', 'Select from list', 'Aus Liste') : _t('+ كتابة فصل جديد', '+ Type new class', '+ Neue Klasse')}
+                  </button>
+                </div>
+
+                {!isCustomWholeClassMove ? (
+                  <select
+                    value={targetWholeClassMove}
+                    onChange={(e) => setTargetWholeClassMove(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                  >
+                    {uniqueClasses.filter(c => c.toUpperCase() !== classToMoveFrom.toUpperCase()).map(cls => (
+                      <option key={cls} value={cls}>
+                        {cls} ({studentCountsByClass[cls] || 0} {_t('طلاب', 'students', 'Schüler')})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={customWholeClassMove}
+                    onChange={(e) => setCustomWholeClassMove(e.target.value)}
+                    placeholder={_t('مثال: 5C أو 11A...', 'e.g. 5C or 11A...', 'z.B. 5C oder 11A...')}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 uppercase"
+                  />
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setClassToMoveFrom(null)}
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = isCustomWholeClassMove ? customWholeClassMove.trim() : targetWholeClassMove;
+                  if (target) {
+                    handleMoveWholeClassToClass(classToMoveFrom, target);
+                  }
+                }}
+                disabled={isCustomWholeClassMove && !customWholeClassMove.trim()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>{_t(`نقل طلاب الفصل بالكامل إلى (${isCustomWholeClassMove ? (customWholeClassMove || '...') : targetWholeClassMove})`, `Move Class to (${isCustomWholeClassMove ? customWholeClassMove : targetWholeClassMove})`, `Klasse verschieben`)}</span>
               </button>
             </div>
           </div>

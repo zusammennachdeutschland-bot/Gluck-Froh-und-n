@@ -77,6 +77,7 @@ export const SetupWizard: React.FC = () => {
   const [phone, setPhone] = useState(profile.phone || '');
   const [whatsappNumber, setWhatsappNumber] = useState(profile.whatsappNumber || '');
   const [email, setEmail] = useState(profile.email || '');
+  const [showBuddyCustomizer, setShowBuddyCustomizer] = useState(false);
 
   // Step 2: School Data State (NEW STEP)
   const [schoolName, setSchoolName] = useState(profile.schoolSettings?.schoolName || 'مدرسة الألسن للغات');
@@ -372,41 +373,43 @@ export const SetupWizard: React.FC = () => {
   ];
 
   return (
-    <div id="setup-wizard-overlay" className="fixed inset-0 z-[120] overflow-hidden bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 font-sans">
+    <div id="setup-wizard-overlay" className="fixed inset-0 z-[120] overflow-hidden bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-1.5 sm:p-5 font-sans">
       
       {/* Main Container Card */}
-      <div className="relative z-10 w-full max-w-3xl max-h-[92dvh] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden">
+      <div className="relative z-10 w-full max-w-3xl max-h-[96dvh] sm:max-h-[92dvh] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden">
         
         {/* Header with Stepper */}
-        <div className="px-5 sm:px-7 pt-5 sm:pt-6 pb-3.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/80">
-          <div className="flex items-center justify-between gap-4 mb-3.5">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-primary text-white flex items-center justify-center text-lg shadow-sm font-bold">
+        <div className="px-3 sm:px-6 pt-2.5 sm:pt-4 pb-2 sm:pb-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/90">
+          <div className="flex items-center justify-between gap-2 mb-1.5 sm:mb-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-primary text-white flex items-center justify-center text-sm shadow-xs font-bold shrink-0">
                 🇩🇪
               </div>
-              <div>
-                <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-                  <span>Glück Teacher</span>
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                    Setup Wizard
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <h1 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white tracking-tight truncate">
+                    Glück Teacher
+                  </h1>
+                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
+                    {_t('الإعداد', 'Setup', 'Setup')}
                   </span>
-                </h1>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                  {_t('إعداد ملف المعلم وبيانات المدرسة والجدول الدراسي', 'Configure teacher profile, school data and schedules', 'Lehrerprofil, Schuldaten und Arbeitszeiten einrichten')}
+                </div>
+                <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
+                  {stepTitles[currentStep].title}
                 </p>
               </div>
             </div>
 
             {/* Step Counter Badge */}
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-200/70 dark:bg-slate-800 border border-slate-300/60 dark:border-slate-700">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-200/80 dark:bg-slate-800 border border-slate-300/60 dark:border-slate-700 shrink-0">
+              <span className="text-[11px] font-black text-slate-700 dark:text-slate-300">
                 {currentStep + 1} / {stepsCount}
               </span>
             </div>
           </div>
 
           {/* Stepper Progress Bar */}
-          <div className="relative w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden mb-3">
+          <div className="relative w-full h-1 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
             <motion.div 
               className="absolute top-0 bottom-0 left-0 bg-primary rounded-full"
               initial={false}
@@ -415,8 +418,8 @@ export const SetupWizard: React.FC = () => {
             />
           </div>
 
-          {/* Stepper Interactive Pills */}
-          <div className="flex items-center justify-between gap-1 overflow-x-auto no-scrollbar py-1">
+          {/* Desktop Stepper Interactive Pills */}
+          <div className="hidden sm:flex items-center justify-between gap-1 overflow-x-auto no-scrollbar pt-2">
             {stepTitles.map((step, idx) => {
               const isPast = idx < currentStep;
               const isCurrent = idx === currentStep;
@@ -431,24 +434,53 @@ export const SetupWizard: React.FC = () => {
                     }
                   }}
                   disabled={idx > currentStep && !displayName.trim()}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
                     isCurrent 
-                      ? 'bg-primary text-white shadow-sm ring-2 ring-primary/20' 
+                      ? 'bg-primary text-white shadow-xs ring-1 ring-primary/20' 
                       : isPast 
                       ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 cursor-pointer' 
                       : 'text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-60'
                   }`}
                 >
-                  <span>{isPast ? '✓' : step.icon}</span>
-                  <span className="hidden sm:inline">{step.title}</span>
+                  <span className="text-[11px]">{isPast ? '✓' : step.icon}</span>
+                  <span className="text-[11px]">{step.title}</span>
                 </button>
+              );
+            })}
+          </div>
+
+          {/* Mobile Stepper Mini Dots */}
+          <div className="flex sm:hidden items-center justify-center gap-1.5 pt-1.5">
+            {stepTitles.map((step, idx) => {
+              const isPast = idx < currentStep;
+              const isCurrent = idx === currentStep;
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    if (idx < currentStep || (idx > 0 && displayName.trim())) {
+                      setDirection(idx > currentStep ? 1 : -1);
+                      setCurrentStep(idx);
+                    }
+                  }}
+                  disabled={idx > currentStep && !displayName.trim()}
+                  className={`h-1.5 rounded-full transition-all ${
+                    isCurrent 
+                      ? 'w-5 bg-primary' 
+                      : isPast 
+                      ? 'w-1.5 bg-emerald-500 cursor-pointer' 
+                      : 'w-1.5 bg-slate-300 dark:bg-slate-700'
+                  }`}
+                  title={step.title}
+                />
               );
             })}
           </div>
         </div>
 
         {/* Content Body Area */}
-        <div className="flex-1 overflow-y-auto px-5 sm:px-7 py-5">
+        <div className="flex-1 overflow-y-auto px-3 sm:px-7 py-2.5 sm:py-4">
           <AnimatePresence mode="wait" custom={direction}>
             <motion.div
               key={currentStep}
@@ -462,23 +494,38 @@ export const SetupWizard: React.FC = () => {
 
               {/* ================= STEP 0: LANGUAGE, THEME & CURRENCY ================= */}
               {currentStep === 0 && (
-                <div className="space-y-5">
-                  <div className="text-center sm:text-left space-y-1">
-                    <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center justify-center sm:justify-start gap-2">
+                <div className="space-y-3 sm:space-y-3.5">
+                  {/* Welcome Dedication & Supplication Banner */}
+                  <div className="p-2 sm:p-2.5 rounded-xl bg-gradient-to-r from-emerald-500/10 via-primary/10 to-teal-500/10 border border-emerald-500/25 dark:border-emerald-500/35 text-center space-y-1 shadow-2xs">
+                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 text-[10.5px] font-black">
+                      <span>✨</span>
+                      <span>{_t('إهداء وتصميم المنظومة: أ/ عبدالرحمن غريب', 'Glück Teacher • Designed by Abdelrahman Gharib', 'Entworfen von Abdelrahman Gharib')}</span>
+                    </div>
+                    <p className="text-[11px] sm:text-xs text-emerald-800 dark:text-emerald-300 font-medium leading-relaxed max-w-xl mx-auto">
+                      {_t(
+                        'نسألكم خالص وصالح الدعاء له ولوالديه بظهر الغيب بالتوفيق والبركة والقبول وجزيل الأجر والثواب 🤲',
+                        'Kindly keep him and his parents in your sincere prayers for blessing and success 🤲',
+                        'Bitte schließen Sie ihn und seine Eltern in Ihre aufrichtigen Gebete ein 🤲'
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="space-y-0.5">
+                    <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                       <span>🎨</span>
                       <span>{_t('اختر اللغة والمظهر والعملة', 'Language, Theme & Currency', 'Sprache, Design & Währung')}</span>
                     </h2>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                    <p className="text-[10.5px] sm:text-xs text-slate-500 dark:text-slate-400">
                       {_t('حدد لغة العرض ونمط الألوان والعملة الافتراضية لمنصتك.', 'Select your interface language, color scheme, and primary currency.', 'Wählen Sie Ihre bevorzugte Sprache und Währung.')}
                     </p>
                   </div>
 
                   {/* Language Selector Cards */}
-                  <div className="space-y-2">
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                       {_t('لغة واجهة التطبيق', 'App Interface Language', 'Oberflächensprache')}
                     </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="grid grid-cols-3 gap-2">
                       {[
                         { id: 'de' as AppLanguage, name: 'Deutsch', sub: 'German', flag: '🇩🇪' },
                         { id: 'ar' as AppLanguage, name: 'العربية', sub: 'Arabic (RTL)', flag: '🇪🇬' },
@@ -491,25 +538,25 @@ export const SetupWizard: React.FC = () => {
                             setLocalLanguage(langItem.id);
                             setLanguage(langItem.id);
                           }}
-                          className={`p-3.5 rounded-2xl border text-center transition-all flex flex-col items-center gap-1 cursor-pointer ${
+                          className={`p-2 sm:p-2.5 rounded-xl border text-center transition-all flex flex-col items-center gap-0.5 cursor-pointer ${
                             language === langItem.id 
-                              ? 'border-primary bg-primary/10 shadow-sm ring-2 ring-primary/20 text-primary' 
+                              ? 'border-primary bg-primary/10 shadow-xs ring-1 ring-primary/20 text-primary' 
                               : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 hover:border-slate-300 dark:hover:border-slate-700'
                           }`}
                         >
-                          <span className="text-2xl">{langItem.flag}</span>
-                          <span className="font-bold text-sm text-slate-900 dark:text-white">{langItem.name}</span>
-                          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">{langItem.sub}</span>
+                          <span className="text-lg sm:text-xl">{langItem.flag}</span>
+                          <span className="font-bold text-xs text-slate-900 dark:text-white">{langItem.name}</span>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{langItem.sub}</span>
                         </button>
                       ))}
                     </div>
                   </div>
 
                   {/* Theme & Currency Controls */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {/* Theme Mode */}
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                         {_t('نمط الألوان', 'Color Theme', 'Farbschema')}
                       </label>
                       <div className="grid grid-cols-2 gap-2">
@@ -519,14 +566,14 @@ export const SetupWizard: React.FC = () => {
                             setIsDarkMode(false);
                             if (theme === 'dark') toggleTheme();
                           }}
-                          className={`p-2.5 rounded-xl border flex items-center justify-center gap-2 font-bold text-xs transition-all ${
+                          className={`p-2 rounded-xl border flex items-center justify-center gap-1.5 font-bold text-xs transition-all ${
                             !isDarkMode 
-                              ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-2 ring-amber-500/20' 
+                              ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-1 ring-amber-500/20' 
                               : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400'
                           }`}
                         >
-                          <Sun className="w-4 h-4 text-amber-500" />
-                          <span>{_t('فاتح (Light)', 'Light Mode', 'Hell')}</span>
+                          <Sun className="w-3.5 h-3.5 text-amber-500" />
+                          <span>{_t('فاتح', 'Light', 'Hell')}</span>
                         </button>
                         <button
                           type="button"
@@ -534,28 +581,28 @@ export const SetupWizard: React.FC = () => {
                             setIsDarkMode(true);
                             if (theme === 'light') toggleTheme();
                           }}
-                          className={`p-2.5 rounded-xl border flex items-center justify-center gap-2 font-bold text-xs transition-all ${
+                          className={`p-2 rounded-xl border flex items-center justify-center gap-1.5 font-bold text-xs transition-all ${
                             isDarkMode 
-                              ? 'border-indigo-500 bg-indigo-500/10 text-indigo-400 ring-2 ring-indigo-500/20' 
+                              ? 'border-indigo-500 bg-indigo-500/10 text-indigo-400 ring-1 ring-indigo-500/20' 
                               : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400'
                           }`}
                         >
-                          <Moon className="w-4 h-4 text-indigo-400" />
-                          <span>{_t('داكن (Dark)', 'Dark Mode', 'Dunkel')}</span>
+                          <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>{_t('داكن', 'Dark', 'Dunkel')}</span>
                         </button>
                       </div>
                     </div>
 
                     {/* Currency */}
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                         {_t('العملة الأساسية', 'Primary Currency', 'Hauptwährung')}
                       </label>
                       <div className="relative">
                         <select
                           value={currency}
                           onChange={(e) => setCurrency(e.target.value)}
-                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary appearance-none cursor-pointer"
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary appearance-none cursor-pointer"
                         >
                           <option value="EGP">EGP (ج.م - الجنيه المصري)</option>
                           <option value="EUR">EUR (€ - Euro)</option>
@@ -564,17 +611,17 @@ export const SetupWizard: React.FC = () => {
                           <option value="AED">AED (د.إ - الدرهم الإماراتي)</option>
                           <option value="KWD">KWD (د.ك - الدينار الكويتي)</option>
                         </select>
-                        <Coins className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                        <Coins className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" />
                       </div>
                     </div>
                   </div>
 
                   {/* Accent Colors Palette */}
-                  <div className="space-y-2">
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                       {_t('اللون المميز (Accent Color)', 'Accent Highlight Color', 'Akzentfarbe')}
                     </label>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       {ACCENT_COLORS.map((col) => (
                         <button
                           key={col.id}
@@ -583,13 +630,13 @@ export const SetupWizard: React.FC = () => {
                             setLocalAccent(col.id);
                             setAccentColor(col.id);
                           }}
-                          className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                            accent === col.id ? 'ring-4 ring-primary/30 scale-110 shadow-sm' : 'hover:scale-105 opacity-80'
+                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
+                            accent === col.id ? 'ring-2 ring-primary/40 scale-110 shadow-2xs' : 'hover:scale-105 opacity-80'
                           }`}
                           style={{ backgroundColor: col.hex }}
                           title={col.name}
                         >
-                          {accent === col.id && <Check className="w-3.5 h-3.5 text-white drop-shadow" />}
+                          {accent === col.id && <Check className="w-3 h-3 text-white drop-shadow" />}
                         </button>
                       ))}
                     </div>
@@ -599,90 +646,44 @@ export const SetupWizard: React.FC = () => {
 
               {/* ================= STEP 1: TEACHER PROFILE ================= */}
               {currentStep === 1 && (
-                <div className="space-y-5">
-                  <div className="text-center sm:text-left space-y-1">
-                    <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center justify-center sm:justify-start gap-2">
+                <div className="space-y-3 sm:space-y-3.5">
+                  <div className="space-y-0.5">
+                    <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                       <span>👤</span>
                       <span>{_t('هوية المعلم وبيانات التواصل', 'Teacher Profile & Contacts', 'Lehrer-Profil & Kontakt')}</span>
                     </h2>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                    <p className="text-[10.5px] sm:text-xs text-slate-500 dark:text-slate-400 leading-tight">
                       {_t('تُستخدم هذه البيانات في إصدار الشهادات، وتذييل التقارير، وتذكيرات أولياء الأمور.', 'Used in certificate issuance, report headers, and parent communications.', 'Wird für Zertifikate und Elternberichte verwendet.')}
                     </p>
                   </div>
 
-                  {/* Buddy Mascot Customizer & Avatar */}
-                  <div className="space-y-3">
-                    <BuddyCustomizer
-                      value={buddyConfig}
-                      onChange={setBuddyConfig}
-                    />
-
-                    {/* Or Upload Custom Teacher Photo */}
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {customAvatarImg ? (
-                          <div className="w-8 h-8 rounded-lg overflow-hidden border border-primary/40 shrink-0">
-                            <img src={customAvatarImg} alt="Uploaded" className="w-full h-full object-cover" />
-                          </div>
-                        ) : (
-                          <Camera className="w-4 h-4 text-slate-400" />
-                        )}
-                        <div>
-                          <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                            {customAvatarImg ? _t('تم تعيين صورة مخصصة', 'Custom Photo Uploaded', 'Eigenes Foto ausgewählt') : _t('أو استخدام صورة شخصية حقيقية', 'Or use a real profile photo', 'Oder eigenes Profilfoto')}
-                          </p>
-                          <p className="text-[10px] text-slate-500">
-                            {_t('اختياري — تظهر في الشهادات والتقارير الرسمية', 'Optional — used in certificates and reports', 'Optional für Zertifikate')}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {customAvatarImg && (
-                          <button
-                            type="button"
-                            onClick={() => { setCustomAvatarImg(''); setSelectedAvatar(''); }}
-                            className="text-[11px] font-bold text-red-500 hover:underline cursor-pointer"
-                          >
-                            {_t('حذف', 'Remove', 'Entfernen')}
-                          </button>
-                        )}
-                        <label className="text-xs font-bold px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer flex items-center gap-1.5 transition-colors">
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>{customAvatarImg ? _t('تغيير', 'Change', 'Ändern') : _t('رفع صورة', 'Upload', 'Hochladen')}</span>
-                          <input type="file" accept="image/*" onChange={handleAvatarFileUpload} className="hidden" />
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Names */}
-                  <div className="space-y-3.5">
+                  {/* Names - Primary Input Focus */}
+                  <div className="space-y-2.5">
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
+                      <label className="block text-[11.5px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                         {_t('الاسم الأساسي (يظهر في القوائم والتطبيق) *', 'Display Name (Main) *', 'Anzeigename *')}
                       </label>
                       <div className="relative">
-                        <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                        <User className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
                         <input
                           type="text"
                           value={displayName}
                           onChange={(e) => setDisplayName(e.target.value)}
-                          placeholder="e.g. Herr Omar Hassan / أ. عمر حسن"
-                          className="w-full pl-10 pr-3.5 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary shadow-sm"
+                          placeholder="مثال: أ. عمر حسن / Herr Omar"
+                          className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary shadow-2xs"
                           autoFocus
                         />
                       </div>
                       {!displayName.trim() && (
-                        <p className="text-[11px] text-red-500 mt-1 font-medium">
+                        <p className="text-[10.5px] text-red-500 mt-0.5 font-medium">
                           {_t('يرجى إدخال اسم المعلم للمتابعة', 'Teacher name is required to proceed.', 'Bitte geben Sie den Lehrernamen ein.')}
                         </p>
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
-                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                           📜 {_t('الاسم بالألمانية/الإنجليزية (للشهادات)', 'German/English Name (Certificates)', 'Name für Zertifikate')}
                         </label>
                         <input
@@ -690,11 +691,11 @@ export const SetupWizard: React.FC = () => {
                           value={displayNameEn}
                           onChange={(e) => setDisplayNameEn(e.target.value)}
                           placeholder="e.g. Herr Omar Hassan"
-                          className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-medium text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
+                          className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-medium text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                           📊 {_t('الاسم بالعربية (للتقارير والواتساب)', 'Arabic Name (Reports & Parent msgs)', 'Arabischer Name')}
                         </label>
                         <input
@@ -703,67 +704,131 @@ export const SetupWizard: React.FC = () => {
                           onChange={(e) => setDisplayNameAr(e.target.value)}
                           placeholder="مثال: أ. عمر حسن"
                           dir="rtl"
-                          className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-medium text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
+                          className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-medium text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
                         />
+                      </div>
+                    </div>
+
+                    {/* Contacts */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
+                          📱 {_t('رقم الواتساب للتواصل', 'WhatsApp Number', 'WhatsApp-Nummer')}
+                        </label>
+                        <div className="relative">
+                          <MessageSquare className="w-3.5 h-3.5 text-emerald-500 absolute left-3 top-2" />
+                          <input
+                            type="tel"
+                            value={whatsappNumber}
+                            onChange={(e) => setWhatsappNumber(e.target.value)}
+                            placeholder="+20 10 1234 5678"
+                            className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
+                          📞 {_t('رقم الهاتف الأساسي', 'Primary Phone', 'Telefonnummer')}
+                        </label>
+                        <div className="relative">
+                          <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2" />
+                          <input
+                            type="tel"
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                            placeholder="01012345678"
+                            className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Contacts */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
-                        {_t('رقم الواتساب للتواصل', 'WhatsApp Number', 'WhatsApp-Nummer')}
-                      </label>
-                      <div className="relative">
-                        <MessageSquare className="w-4 h-4 text-emerald-500 absolute left-3.5 top-2.5" />
-                        <input
-                          type="tel"
-                          value={whatsappNumber}
-                          onChange={(e) => setWhatsappNumber(e.target.value)}
-                          placeholder="+20 10 1234 5678"
-                          className="w-full pl-10 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary"
-                        />
+                  {/* Collapsible Avatar & Mascot Customizer (Optional) */}
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/70 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setShowBuddyCustomizer(!showBuddyCustomizer)}
+                      className="w-full px-3 py-2 flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm">✨</span>
+                        <span>{_t('تخصيص شخصية المساعد الذكي والصورة الشخصية (اختياري)', 'Mascot & Photo Customization (Optional)', 'Mascot & Foto anpassen')}</span>
                       </div>
-                    </div>
+                      <span className="text-[11px] font-bold text-primary">
+                        {showBuddyCustomizer ? '▲ ' + _t('إخفاء', 'Hide', 'Verbergen') : '▼ ' + _t('تخصيص', 'Customize', 'Anpassen')}
+                      </span>
+                    </button>
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
-                        {_t('رقم الهاتف الأساسي', 'Primary Phone', 'Telefonnummer')}
-                      </label>
-                      <div className="relative">
-                        <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
-                        <input
-                          type="tel"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          placeholder="01012345678"
-                          className="w-full pl-10 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary"
+                    {showBuddyCustomizer && (
+                      <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                        <BuddyCustomizer
+                          value={buddyConfig}
+                          onChange={setBuddyConfig}
                         />
+
+                        {/* Or Upload Custom Teacher Photo */}
+                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {customAvatarImg ? (
+                              <div className="w-8 h-8 rounded-lg overflow-hidden border border-primary/40 shrink-0">
+                                <img src={customAvatarImg} alt="Uploaded" className="w-full h-full object-cover" />
+                              </div>
+                            ) : (
+                              <Camera className="w-4 h-4 text-slate-400" />
+                            )}
+                            <div>
+                              <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                                {customAvatarImg ? _t('تم تعيين صورة مخصصة', 'Custom Photo Uploaded', 'Eigenes Foto ausgewählt') : _t('أو استخدام صورة شخصية حقيقية', 'Or use a real profile photo', 'Oder eigenes Profilfoto')}
+                              </p>
+                              <p className="text-[10px] text-slate-500">
+                                {_t('اختياري — تظهر في الشهادات والتقارير الرسمية', 'Optional — used in certificates and reports', 'Optional für Zertifikate')}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {customAvatarImg && (
+                              <button
+                                type="button"
+                                onClick={() => { setCustomAvatarImg(''); setSelectedAvatar(''); }}
+                                className="text-[11px] font-bold text-red-500 hover:underline cursor-pointer"
+                              >
+                                {_t('حذف', 'Remove', 'Entfernen')}
+                              </button>
+                            )}
+                            <label className="text-xs font-bold px-2.5 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer flex items-center gap-1 transition-colors">
+                              <Upload className="w-3 h-3" />
+                              <span>{customAvatarImg ? _t('تغيير', 'Change', 'Ändern') : _t('رفع صورة', 'Upload', 'Hochladen')}</span>
+                              <input type="file" accept="image/*" onChange={handleAvatarFileUpload} className="hidden" />
+                            </label>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               )}
 
-              {/* ================= STEP 2: SCHOOL & ACADEMIC DATA (NEW STEP) ================= */}
+              {/* ================= STEP 2: SCHOOL & ACADEMIC DATA ================= */}
               {currentStep === 2 && (
-                <div className="space-y-5">
-                  <div className="text-center sm:text-left space-y-1">
-                    <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center justify-center sm:justify-start gap-2">
+                <div className="space-y-3 sm:space-y-3.5">
+                  <div className="space-y-0.5">
+                    <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                       <span>🏫</span>
                       <span>{_t('بيانات المدرسة والجدول المدرسي', 'School & Academic Profile', 'Schuldaten & Stundenplan')}</span>
                     </h2>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
-                      {_t('سجّل اسم المدرسة، القسم، العام الدراسي، ومواعيد الحصص المدرسية لتنظيم جدول الحصص والتقارير المدرسية.', 'Register school name, department, academic year, and period timings for school reports.', 'Geben Sie Schulname, Fachabteilung, Schuljahr und Unterrichtszeiten ein.')}
+                    <p className="text-[10.5px] sm:text-xs text-slate-500 dark:text-slate-400">
+                      {_t('سجّل اسم المدرسة، القسم، العام الدراسي، ومواعيد الحصص المدرسية لتنظيم جدول الحصص والتقارير.', 'Register school name, department, academic year, and period timings for reports.', 'Geben Sie Schulname, Fachabteilung und Stundenplan ein.')}
                     </p>
                   </div>
 
                   {/* School & Department Identifiers */}
-                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3.5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="p-2.5 sm:p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
                           🏫 {_t('اسم المدرسة', 'School Name', 'Schulname')}
                         </label>
                         <input
@@ -771,12 +836,12 @@ export const SetupWizard: React.FC = () => {
                           value={schoolName}
                           onChange={(e) => setSchoolName(e.target.value)}
                           placeholder="مثال: مدرسة الأورمان الرسمية لغات"
-                          className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary"
+                          className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
                           📖 {_t('القسم / المادة التعليمية', 'Department / Subject', 'Fachabteilung')}
                         </label>
                         <input
@@ -784,14 +849,14 @@ export const SetupWizard: React.FC = () => {
                           value={departmentName}
                           onChange={(e) => setDepartmentName(e.target.value)}
                           placeholder="مثال: قسم اللغة الألمانية (Deutsch)"
-                          className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary"
+                          className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
                           📅 {_t('العام الدراسي', 'Academic Year', 'Schuljahr')}
                         </label>
                         <input
@@ -799,18 +864,18 @@ export const SetupWizard: React.FC = () => {
                           value={academicYear}
                           onChange={(e) => setAcademicYear(e.target.value)}
                           placeholder="2025 / 2026"
-                          className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
+                          className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
                           🗓️ {_t('الفصل الدراسي', 'Current Term', 'Semester / Halbjahr')}
                         </label>
                         <select
                           value={currentTerm}
                           onChange={(e) => setCurrentTerm(e.target.value)}
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                          className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary cursor-pointer"
                         >
                           <option value="الفصل الدراسي الأول">الفصل الدراسي الأول (Term 1)</option>
                           <option value="الفصل الدراسي الثاني">الفصل الدراسي الثاني (Term 2)</option>
@@ -819,7 +884,7 @@ export const SetupWizard: React.FC = () => {
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
                           👔 {_t('المشرف / رئيس القسم (HOD)', 'HOD / Supervisor', 'Fachleiter')}
                         </label>
                         <input
@@ -827,19 +892,19 @@ export const SetupWizard: React.FC = () => {
                           value={hodName}
                           onChange={(e) => setHodName(e.target.value)}
                           placeholder="Abdul-rahman Ghareeb"
-                          className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
+                          className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
                     </div>
                   </div>
 
                   {/* School Days & Periods Timing */}
-                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3.5">
-                    <div className="space-y-2">
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  <div className="p-2.5 sm:p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                         {_t('أيام الحضور والجدول في المدرسة', 'School Attendance Days', 'Schultage')}
                       </label>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-1.5">
                         {[
                           { key: '0', labelAr: 'الأحد', labelEn: 'Sun', labelDe: 'So' },
                           { key: '1', labelAr: 'الإثنين', labelEn: 'Mon', labelDe: 'Mo' },
@@ -855,9 +920,9 @@ export const SetupWizard: React.FC = () => {
                               key={day.key}
                               type="button"
                               onClick={() => toggleSchoolPresenceDay(day.key)}
-                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
                                 isSelected 
-                                  ? 'bg-primary text-white shadow-sm ring-2 ring-primary/20' 
+                                  ? 'bg-primary text-white shadow-2xs ring-1 ring-primary/20' 
                                   : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 hover:border-slate-300'
                               }`}
                             >
@@ -869,37 +934,37 @@ export const SetupWizard: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1.5 border-t border-slate-200 dark:border-slate-800">
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                           ⏰ {_t('وقت الحضور', 'Arrival', 'Ankunft')}
                         </label>
                         <input
                           type="time"
                           value={schoolArrivalTime}
                           onChange={(e) => setSchoolArrivalTime(e.target.value)}
-                          className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white"
+                          className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-xs text-slate-900 dark:text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                           ⏰ {_t('الانصراف', 'Departure', 'Abfahrt')}
                         </label>
                         <input
                           type="time"
                           value={schoolDepartureTime}
                           onChange={(e) => setSchoolDepartureTime(e.target.value)}
-                          className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white"
+                          className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-xs text-slate-900 dark:text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                           🔢 {_t('عدد الحصص', 'Periods', 'Stunden')}
                         </label>
                         <select
                           value={periodsCount}
                           onChange={(e) => setPeriodsCount(Number(e.target.value))}
-                          className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white"
+                          className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-xs text-slate-900 dark:text-white"
                         >
                           <option value={6}>6 حصص</option>
                           <option value={7}>7 حصص</option>
@@ -908,24 +973,24 @@ export const SetupWizard: React.FC = () => {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                           🔔 {_t('الحصة الأولى', '1st Period', '1. Stunde')}
                         </label>
                         <input
                           type="time"
                           value={firstPeriodStart}
                           onChange={(e) => setFirstPeriodStart(e.target.value)}
-                          className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white"
+                          className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-xs text-slate-900 dark:text-white"
                         />
                       </div>
                       <div className="col-span-2 sm:col-span-1">
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                           ⏱️ {_t('مدة الحصة', 'Duration', 'Dauer')}
                         </label>
                         <select
                           value={periodDuration}
                           onChange={(e) => setPeriodDuration(Number(e.target.value))}
-                          className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white"
+                          className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-xs text-slate-900 dark:text-white"
                         >
                           <option value={40}>40 دقيقة</option>
                           <option value={45}>45 دقيقة</option>
@@ -939,90 +1004,90 @@ export const SetupWizard: React.FC = () => {
 
               {/* ================= STEP 3: PAYMENT & FINANCE ================= */}
               {currentStep === 3 && (
-                <div className="space-y-5">
-                  <div className="text-center sm:text-left space-y-1">
-                    <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center justify-center sm:justify-start gap-2">
+                <div className="space-y-3 sm:space-y-3.5">
+                  <div className="space-y-0.5">
+                    <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                       <span>💳</span>
                       <span>{_t('قنوات الدفع واستلام المصروفات', 'Payment & Collection Channels', 'Zahlungskanäle')}</span>
                     </h2>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                    <p className="text-[10.5px] sm:text-xs text-slate-500 dark:text-slate-400">
                       {_t('تُدرج هذه البيانات تلقائياً في رسائل تذكير السداد وإشعارات أولياء الأمور لتسهيل التحصيل.', 'Automatically attached to invoice messages & payment reminders for parents.', 'Wird automatisch an Zahlungserinnerungen angehängt.')}
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {/* InstaPay */}
-                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
-                      <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
-                        <span className="w-6 h-6 rounded-lg bg-pink-500/10 text-pink-500 flex items-center justify-center font-black">⚡</span>
-                        <span>{_t('عنوان إنستاباي (InstaPay ID / IPA)', 'InstaPay ID / Address', 'InstaPay')}</span>
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                        <span className="w-5 h-5 rounded-md bg-pink-500/10 text-pink-500 flex items-center justify-center font-black text-xs">⚡</span>
+                        <span className="text-[11px]">{_t('عنوان إنستاباي (InstaPay ID / IPA)', 'InstaPay ID / Address', 'InstaPay')}</span>
                       </div>
                       <input
                         type="text"
                         value={instaPayId}
                         onChange={(e) => setInstaPayId(e.target.value)}
                         placeholder="e.g. omar@instapay"
-                        className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-pink-500"
+                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-pink-500"
                       />
                     </div>
 
                     {/* Vodafone Cash */}
-                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
-                      <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
-                        <span className="w-6 h-6 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center font-black">📱</span>
-                        <span>{_t('فودافون كاش / محفظة إلكترونية', 'Vodafone Cash / Wallet', 'Mobile Wallet')}</span>
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                        <span className="w-5 h-5 rounded-md bg-red-500/10 text-red-500 flex items-center justify-center font-black text-xs">📱</span>
+                        <span className="text-[11px]">{_t('فودافون كاش / محفظة إلكترونية', 'Vodafone Cash / Wallet', 'Mobile Wallet')}</span>
                       </div>
                       <input
                         type="tel"
                         value={vodafoneCashNumber}
                         onChange={(e) => setVodafoneCashNumber(e.target.value)}
                         placeholder="e.g. 01012345678"
-                        className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-red-500"
+                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-red-500"
                       />
                     </div>
 
                     {/* Bank Account */}
-                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
-                      <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
-                        <span className="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-black">🏦</span>
-                        <span>{_t('الحساب البنكي / IBAN', 'Bank Account / IBAN', 'Bankkonto')}</span>
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                        <span className="w-5 h-5 rounded-md bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-black text-xs">🏦</span>
+                        <span className="text-[11px]">{_t('الحساب البنكي / IBAN', 'Bank Account / IBAN', 'Bankkonto')}</span>
                       </div>
                       <input
                         type="text"
                         value={bankAccount}
                         onChange={(e) => setBankAccount(e.target.value)}
                         placeholder="e.g. CIB / NBE / QNB - 1000..."
-                        className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500"
                       />
                     </div>
 
                     {/* Payment Link */}
-                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
-                      <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
-                        <span className="w-6 h-6 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center font-black">🔗</span>
-                        <span>{_t('رابط دفع خارجي أو تفاصيل أخرى', 'Payment Link / Note', 'Zahlungslink')}</span>
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                        <span className="w-5 h-5 rounded-md bg-blue-500/10 text-blue-500 flex items-center justify-center font-black text-xs">🔗</span>
+                        <span className="text-[11px]">{_t('رابط دفع خارجي أو تفاصيل أخرى', 'Payment Link / Note', 'Zahlungslink')}</span>
                       </div>
                       <input
                         type="text"
                         value={paymentLink}
                         onChange={(e) => setPaymentLink(e.target.value)}
                         placeholder="https://..."
-                        className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-blue-500"
                       />
                     </div>
                   </div>
 
                   {/* Auto-create finance accounts toggle */}
-                  <div className="p-3.5 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center font-bold">
+                  <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-primary text-white flex items-center justify-center font-bold text-xs shrink-0">
                         💼
                       </div>
                       <div>
                         <h4 className="text-xs font-bold text-slate-900 dark:text-white">
                           {_t('تهيئة الحسابات المالية الافتراضية تلقائياً', 'Auto-create Standard Finance Accounts', 'Finanzkonten automatisch erstellen')}
                         </h4>
-                        <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                        <p className="text-[10px] text-slate-600 dark:text-slate-400">
                           {_t('إنشاء حساب "الخزينة كاش" ومحفظة فودافون كاش في النظام المالي للبدء فوراً.', 'Initializes Cash Drawer & Wallet in the Finance Center.', 'Erstellt Bargeld- & Wallet-Konten.')}
                         </p>
                       </div>
@@ -1031,7 +1096,7 @@ export const SetupWizard: React.FC = () => {
                       type="checkbox"
                       checked={autoCreateFinanceAccounts}
                       onChange={(e) => setAutoCreateFinanceAccounts(e.target.checked)}
-                      className="w-5 h-5 accent-primary rounded cursor-pointer"
+                      className="w-4 h-4 accent-primary rounded cursor-pointer"
                     />
                   </div>
                 </div>
@@ -1039,23 +1104,23 @@ export const SetupWizard: React.FC = () => {
 
               {/* ================= STEP 4: SCHEDULE & WORKING DAYS ================= */}
               {currentStep === 4 && (
-                <div className="space-y-5">
-                  <div className="text-center sm:text-left space-y-1">
-                    <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center justify-center sm:justify-start gap-2">
+                <div className="space-y-3 sm:space-y-3.5">
+                  <div className="space-y-0.5">
+                    <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                       <span>⏰</span>
                       <span>{_t('جدول الحصص الخاصة وحصص الأونلاين', 'Tutoring Schedule & Online Links', 'Privatunterricht & Online-Links')}</span>
                     </h2>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                    <p className="text-[10.5px] sm:text-xs text-slate-500 dark:text-slate-400">
                       {_t('حدد أيام وساعات العمل المعتادة لتنظيم جدول الدروس الخصوصية والروابط الثابتة.', 'Set your private tutoring days, work hours, and permanent virtual class links.', 'Legen Sie Unterrichtstage und Standard-Links fest.')}
                     </p>
                   </div>
 
                   {/* Days Selector */}
-                  <div className="space-y-2">
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                       {_t('أيام تدريس الدروس الخصوصية', 'Active Tutoring Days', 'Unterrichtstage')}
                     </label>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-1.5">
                       {DAYS_OF_WEEK.map((day) => {
                         const isSelected = selectedDays.includes(day.key);
                         return (
@@ -1063,9 +1128,9 @@ export const SetupWizard: React.FC = () => {
                             key={day.key}
                             type="button"
                             onClick={() => toggleDaySelection(day.key)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
                               isSelected 
-                                ? 'bg-primary text-white shadow-sm ring-2 ring-primary/20' 
+                                ? 'bg-primary text-white shadow-2xs ring-1 ring-primary/20' 
                                 : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
                             }`}
                           >
@@ -1078,37 +1143,37 @@ export const SetupWizard: React.FC = () => {
                   </div>
 
                   {/* Hours & Duration */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
                         {_t('بداية وقت العمل', 'Start Time', 'Startzeit')}
                       </label>
                       <input
                         type="time"
                         value={startTime}
                         onChange={(e) => setStartTime(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary"
+                        className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
                         {_t('نهاية وقت العمل', 'End Time', 'Endzeit')}
                       </label>
                       <input
                         type="time"
                         value={endTime}
                         onChange={(e) => setEndTime(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary"
+                        className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
                         {_t('مدة الحصة الافتراضية', 'Default Duration', 'Dauer')}
                       </label>
                       <select
                         value={defaultDuration}
                         onChange={(e) => setDefaultDuration(Number(e.target.value))}
-                        className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary appearance-none cursor-pointer"
+                        className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary appearance-none cursor-pointer"
                       >
                         <option value={45}>45 {_t('دقيقة', 'min', 'Min')}</option>
                         <option value={60}>60 {_t('دقيقة', 'min', 'Min')}</option>
@@ -1119,14 +1184,14 @@ export const SetupWizard: React.FC = () => {
                   </div>
 
                   {/* Virtual Class Links */}
-                  <div className="space-y-2.5 pt-1">
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  <div className="space-y-1.5 pt-0.5">
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                       {_t('روابط الحصص الافتراضية الثابتة (أونلاين)', 'Default Online Meeting Links', 'Online-Unterrichtslinks')}
                     </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 mb-1">
-                          <Video className="w-3.5 h-3.5" />
+                        <div className="flex items-center gap-1 text-[11px] font-bold text-blue-600 dark:text-blue-400 mb-0.5">
+                          <Video className="w-3 h-3" />
                           <span>Zoom Meeting Link</span>
                         </div>
                         <input
@@ -1134,13 +1199,13 @@ export const SetupWizard: React.FC = () => {
                           value={defaultZoomLink}
                           onChange={(e) => setDefaultZoomLink(e.target.value)}
                           placeholder="https://zoom.us/j/..."
-                          className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-medium text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-medium text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-blue-500"
                         />
                       </div>
 
                       <div>
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-1">
-                          <Video className="w-3.5 h-3.5" />
+                        <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mb-0.5">
+                          <Video className="w-3 h-3" />
                           <span>Google Meet Link</span>
                         </div>
                         <input
@@ -1148,7 +1213,7 @@ export const SetupWizard: React.FC = () => {
                           value={defaultMeetLink}
                           onChange={(e) => setDefaultMeetLink(e.target.value)}
                           placeholder="https://meet.google.com/..."
-                          className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-medium text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500"
+                          className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-medium text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
                     </div>
@@ -1158,30 +1223,30 @@ export const SetupWizard: React.FC = () => {
 
               {/* ================= STEP 5: SMART ALERTS & INSPIRATION ================= */}
               {currentStep === 5 && (
-                <div className="space-y-5">
-                  <div className="text-center sm:text-left space-y-1">
-                    <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center justify-center sm:justify-start gap-2">
+                <div className="space-y-3 sm:space-y-3.5">
+                  <div className="space-y-0.5">
+                    <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                       <span>🔔</span>
                       <span>{_t('التنبيهات الذكية ورسائل التفاؤل والبركة', 'Smart Alerts & Daily Inspiration', 'Erinnerungen & Inspiration')}</span>
                     </h2>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                    <p className="text-[10.5px] sm:text-xs text-slate-500 dark:text-slate-400">
                       {_t('تنبيهك قبل موعد بدء الحصة ورسائل التفاؤل والبركة اليومية لبداية موفقة.', 'Timely alerts before sessions and daily motivational teacher quotes.', 'Rechtzeitige Erinnerungen und tägliche Inspiration.')}
                     </p>
                   </div>
 
-                  <div className="space-y-3.5">
+                  <div className="space-y-2">
                     {/* Lesson alerts card */}
-                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
-                            <Bell className="w-4 h-4" />
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
+                            <Bell className="w-3.5 h-3.5" />
                           </div>
                           <div>
                             <h4 className="text-xs font-bold text-slate-900 dark:text-white">
                               {_t('تنبيهات اقتراب موعد الحصة', 'Upcoming Lesson Reminders', 'Unterrichtserinnerung')}
                             </h4>
-                            <p className="text-[11px] text-slate-500">
+                            <p className="text-[10px] text-slate-500">
                               {_t('إشعار على الجهاز قبل بدء الحصة بالوقت المحدد', 'Get notified before class begins', 'Benachrichtigung vor Unterrichtsbeginn')}
                             </p>
                           </div>
@@ -1190,20 +1255,20 @@ export const SetupWizard: React.FC = () => {
                           type="checkbox"
                           checked={enableLessonAlerts}
                           onChange={(e) => setEnableLessonAlerts(e.target.checked)}
-                          className="w-5 h-5 accent-primary rounded cursor-pointer"
+                          className="w-4 h-4 accent-primary rounded cursor-pointer"
                         />
                       </div>
 
                       {enableLessonAlerts && (
-                        <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                        <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-slate-200 dark:border-slate-800">
                           <div>
-                            <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-0.5">
                               {_t('التنبيه قبل الحصة بـ:', 'Alert before class:', 'Erinnern vor:')}
                             </span>
                             <select
                               value={alertMinutesBefore}
                               onChange={(e) => setAlertMinutesBefore(Number(e.target.value))}
-                              className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold"
+                              className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold"
                             >
                               <option value={5}>5 {_t('دقائق', 'mins', 'Min')}</option>
                               <option value={10}>10 {_t('دقائق', 'mins', 'Min')}</option>
@@ -1213,13 +1278,13 @@ export const SetupWizard: React.FC = () => {
                             </select>
                           </div>
                           <div>
-                            <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-0.5">
                               {_t('نغمة التنبيه:', 'Alert sound:', 'Ton:')}
                             </span>
                             <select
                               value={notificationSound}
                               onChange={(e) => setNotificationSound(e.target.value as NotificationSound)}
-                              className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold"
+                              className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold"
                             >
                               <option value="beep">Beep (صافرة واضحة)</option>
                               <option value="chime">Chime (جرس ناعم)</option>
@@ -1233,16 +1298,16 @@ export const SetupWizard: React.FC = () => {
                     </div>
 
                     {/* Daily Inspiration card */}
-                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                          <Heart className="w-4 h-4" />
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
+                          <Heart className="w-3.5 h-3.5" />
                         </div>
                         <div>
                           <h4 className="text-xs font-bold text-slate-900 dark:text-white">
                             {_t('رسائل التفاؤل والبركة اليومية', 'Daily Inspiration & Blessing Quotes', 'Tägliche Inspiration & Motivation')}
                           </h4>
-                          <p className="text-[11px] text-slate-500">
+                          <p className="text-[10px] text-slate-500">
                             {_t('عرض عبارات تشجيعية وتذكيرية بالخير عند فتح التطبيق يومياً', 'Daily motivating quotes for the teacher', 'Tägliche ermutigende Zitate')}
                           </p>
                         </div>
@@ -1251,21 +1316,21 @@ export const SetupWizard: React.FC = () => {
                         type="checkbox"
                         checked={enableInspiration}
                         onChange={(e) => setEnableInspiration(e.target.checked)}
-                        className="w-5 h-5 accent-amber-500 rounded cursor-pointer"
+                        className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
                       />
                     </div>
 
                     {/* Daily Summary card */}
-                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
-                          <Calendar className="w-4 h-4" />
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-500 flex items-center justify-center shrink-0">
+                          <Calendar className="w-3.5 h-3.5" />
                         </div>
                         <div>
                           <h4 className="text-xs font-bold text-slate-900 dark:text-white">
                             {_t('إشعار التقرير المسائي اليومي (الساعة 8 مساءً)', 'Daily Summary Alert (8:00 PM)', 'Täglicher Abendbericht (20:00 Uhr)')}
                           </h4>
-                          <p className="text-[11px] text-slate-500">
+                          <p className="text-[10px] text-slate-500">
                             {_t('ملخص سريع للحصص المنفذة والمدفوعات المحصلة اليوم', 'Summary of today\'s lessons and income', 'Übersicht des Tages und Einnahmen')}
                           </p>
                         </div>
@@ -1274,7 +1339,7 @@ export const SetupWizard: React.FC = () => {
                         type="checkbox"
                         checked={enableDailySummary}
                         onChange={(e) => setEnableDailySummary(e.target.checked)}
-                        className="w-5 h-5 accent-purple-500 rounded cursor-pointer"
+                        className="w-4 h-4 accent-purple-500 rounded cursor-pointer"
                       />
                     </div>
                   </div>
@@ -1283,93 +1348,93 @@ export const SetupWizard: React.FC = () => {
 
               {/* ================= STEP 6: SUMMARY & READY TO LAUNCH ================= */}
               {currentStep === 6 && (
-                <div className="space-y-5">
-                  <div className="text-center space-y-1">
-                    <div className="w-14 h-14 rounded-2xl bg-primary text-white flex items-center justify-center text-2xl mx-auto shadow-md mb-2">
+                <div className="space-y-3 sm:space-y-4">
+                  <div className="text-center space-y-0.5">
+                    <div className="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center text-xl mx-auto shadow-sm mb-1">
                       🚀
                     </div>
-                    <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
+                    <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
                       {_t('أنت الآن جاهز للانطلاق!', 'You are all set!', 'Alles ist bereit!')}
                     </h2>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mx-auto">
+                    <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
                       {_t('تم إعداد كافة متطلبات منصتك التعليمية بنجاح. راجع بطاقة المعلم والمدرسة أدناه ثم اضغط ابدأ.', 'Your teaching workspace is now fully configured and ready for action.', 'Ihr digitaler Lehrarbeitsplatz ist einsatzbereit.')}
                     </p>
                   </div>
 
                   {/* Teacher & School Preview Card */}
-                  <div className="p-4 sm:p-5 rounded-2xl bg-slate-900 text-white shadow-xl relative overflow-hidden border border-slate-800">
-                    <div className="space-y-3.5">
+                  <div className="p-3 sm:p-4 rounded-xl bg-slate-900 text-white shadow-lg relative overflow-hidden border border-slate-800">
+                    <div className="space-y-2.5">
                       
                       {/* Teacher Row */}
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-2xl overflow-visible flex-shrink-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-xl overflow-visible flex-shrink-0">
                             {customAvatarImg ? (
-                              <img src={customAvatarImg} alt="Avatar" className="w-full h-full object-cover rounded-2xl" />
+                              <img src={customAvatarImg} alt="Avatar" className="w-full h-full object-cover rounded-xl" />
                             ) : (
                               <BuddyAnimation mood="celebration" size="sm" customization={buddyConfig} popOut={true} />
                             )}
                           </div>
                           <div>
-                            <h3 className="text-base font-black text-white">
+                            <h3 className="text-sm font-black text-white">
                               {displayName || 'Teacher'}
                             </h3>
-                            <div className="flex items-center gap-2 text-xs text-slate-300">
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-300">
                               <span>{displayNameEn || displayName}</span>
                               {displayNameAr && <span>• {displayNameAr}</span>}
                             </div>
                           </div>
                         </div>
 
-                        <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold">
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
                           Active Teacher 🇩🇪
                         </span>
                       </div>
 
                       {/* School & Department Badge */}
-                      <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <div className="p-2.5 rounded-lg bg-white/5 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs">
                         <div className="flex items-center gap-2">
-                          <span className="text-base">🏫</span>
+                          <span className="text-sm">🏫</span>
                           <div>
-                            <span className="font-bold text-white block">{schoolName || 'مدرسة الألسن للغات'}</span>
-                            <span className="text-[11px] text-slate-300">{departmentName} • {academicYear}</span>
+                            <span className="font-bold text-white block text-[11.5px]">{schoolName || 'مدرسة الألسن للغات'}</span>
+                            <span className="text-[10px] text-slate-300">{departmentName} • {academicYear}</span>
                           </div>
                         </div>
                         <div className="text-right">
-                          <span className="text-[10px] text-slate-400 block">{_t('رئيس القسم (HOD)', 'HOD', 'Fachleiter')}</span>
-                          <span className="font-bold text-slate-200">{hodName || 'Abdul-rahman Ghareeb'}</span>
+                          <span className="text-[9.5px] text-slate-400 block">{_t('رئيس القسم (HOD)', 'HOD', 'Fachleiter')}</span>
+                          <span className="font-bold text-[11px] text-slate-200">{hodName || 'Abdul-rahman Ghareeb'}</span>
                         </div>
                       </div>
 
                       {/* Meta stats */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-white/10 text-xs">
-                        <div className="bg-white/5 p-2 rounded-xl">
-                          <span className="text-[10px] text-slate-400 block">{_t('اللغة', 'Language', 'Sprache')}</span>
-                          <span className="font-bold">{language.toUpperCase()}</span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1.5 border-t border-white/10 text-xs">
+                        <div className="bg-white/5 p-1.5 rounded-lg">
+                          <span className="text-[9.5px] text-slate-400 block">{_t('اللغة', 'Language', 'Sprache')}</span>
+                          <span className="font-bold text-[11px]">{language.toUpperCase()}</span>
                         </div>
-                        <div className="bg-white/5 p-2 rounded-xl">
-                          <span className="text-[10px] text-slate-400 block">{_t('العملة', 'Currency', 'Währung')}</span>
-                          <span className="font-bold">{currency}</span>
+                        <div className="bg-white/5 p-1.5 rounded-lg">
+                          <span className="text-[9.5px] text-slate-400 block">{_t('العملة', 'Currency', 'Währung')}</span>
+                          <span className="font-bold text-[11px]">{currency}</span>
                         </div>
-                        <div className="bg-white/5 p-2 rounded-xl">
-                          <span className="text-[10px] text-slate-400 block">{_t('أيام الدروس', 'Tutoring Days', 'Tage')}</span>
-                          <span className="font-bold">{selectedDays.length} {_t('أيام', 'days', 'Tage')}</span>
+                        <div className="bg-white/5 p-1.5 rounded-lg">
+                          <span className="text-[9.5px] text-slate-400 block">{_t('أيام الدروس', 'Tutoring Days', 'Tage')}</span>
+                          <span className="font-bold text-[11px]">{selectedDays.length} {_t('أيام', 'days', 'Tage')}</span>
                         </div>
-                        <div className="bg-white/5 p-2 rounded-xl">
-                          <span className="text-[10px] text-slate-400 block">{_t('أيام المدرسة', 'School Days', 'Schultage')}</span>
-                          <span className="font-bold">{schoolPresenceDays.length} {_t('أيام', 'days', 'Tage')}</span>
+                        <div className="bg-white/5 p-1.5 rounded-lg">
+                          <span className="text-[9.5px] text-slate-400 block">{_t('أيام المدرسة', 'School Days', 'Schultage')}</span>
+                          <span className="font-bold text-[11px]">{schoolPresenceDays.length} {_t('أيام', 'days', 'Tage')}</span>
                         </div>
                       </div>
 
                       {(instaPayId || vodafoneCashNumber) && (
-                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                           {instaPayId && (
-                            <span className="px-2 py-0.5 rounded-lg bg-pink-500/20 text-pink-300 text-[11px] font-semibold">
+                            <span className="px-2 py-0.5 rounded-md bg-pink-500/20 text-pink-300 text-[10px] font-semibold">
                               ⚡ InstaPay: {instaPayId}
                             </span>
                           )}
                           {vodafoneCashNumber && (
-                            <span className="px-2 py-0.5 rounded-lg bg-red-500/20 text-red-300 text-[11px] font-semibold">
+                            <span className="px-2 py-0.5 rounded-md bg-red-500/20 text-red-300 text-[10px] font-semibold">
                               📱 Cash: {vodafoneCashNumber}
                             </span>
                           )}
@@ -1379,14 +1444,14 @@ export const SetupWizard: React.FC = () => {
                   </div>
 
                   {/* Restore backup alternative prompt */}
-                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-dashed border-slate-300 dark:border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
-                    <div className="flex items-center gap-2.5">
-                      <RotateCcw className="w-4 h-4 text-primary flex-shrink-0" />
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-dashed border-slate-300 dark:border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
+                    <div className="flex items-center gap-2">
+                      <RotateCcw className="w-3.5 h-3.5 text-primary flex-shrink-0" />
                       <div className="text-xs">
-                        <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                        <span className="font-bold text-slate-800 dark:text-slate-200 block text-[11.5px]">
                           {_t('هل لديك ملف نسخة احتياطية سابقة؟', 'Already have a backup file?', 'Haben Sie ein Backup?')}
                         </span>
-                        <span className="text-[11px] text-slate-500">
+                        <span className="text-[10px] text-slate-500">
                           {_t('يمكنك استعادة بياناتك بالكامل بضغطة زر وتخطي الإعداد.', 'Restore your data directly from file.', 'Daten direkt aus Backup laden.')}
                         </span>
                       </div>
@@ -1395,7 +1460,7 @@ export const SetupWizard: React.FC = () => {
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isRestoring}
-                      className="px-3.5 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-xs hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
+                      className="px-3 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-[11px] hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
                     >
                       {isRestoring ? _t('جار الاستعادة...', 'Restoring...', 'Wiederherstellen...') : _t('استعادة النسخة الآن', 'Restore Backup Now', 'Backup laden')}
                     </button>
@@ -1407,6 +1472,16 @@ export const SetupWizard: React.FC = () => {
                       className="hidden"
                     />
                   </div>
+
+                  {/* Dedication and Prayer Card */}
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-500/20 text-center space-y-0.5">
+                    <p className="text-xs font-black text-emerald-800 dark:text-emerald-300">
+                      {_t('برنامج Glück Teacher • فكرة وتصميم: عبدالرحمن غريب', 'Glück Teacher • Designed by Abdelrahman Gharib', 'Glück Teacher • Entworfen von Abdelrahman Gharib')}
+                    </p>
+                    <p className="text-[11px] text-emerald-700/90 dark:text-emerald-400/90 font-medium">
+                      {_t('برجاء خالص وصالح الدعاء له ولوالديه بظهر الغيب بالتوفيق والبركة والقبول وجزيل الأجر والثواب 🤲', 'Kindly keep him in your sincere prayers for blessings, success, and acceptance.', 'Bitte denken Sie an ihn in Ihren aufrichtigen Gebeten.')}
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -1415,19 +1490,19 @@ export const SetupWizard: React.FC = () => {
         </div>
 
         {/* Footer Navigation Bar */}
-        <div className="px-5 sm:px-7 py-3.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+        <div className="px-3.5 sm:px-6 py-2 sm:py-2.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
           {/* Previous Button */}
           <button
             type="button"
             onClick={handlePrev}
             disabled={currentStep === 0}
-            className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg font-bold text-xs flex items-center gap-1 transition-all ${
               currentStep === 0 
                 ? 'opacity-0 pointer-events-none' 
                 : 'bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700 cursor-pointer'
             }`}
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-3.5 h-3.5" />
             <span>{_t('السابق', 'Back', 'Zurück')}</span>
           </button>
 
@@ -1437,16 +1512,16 @@ export const SetupWizard: React.FC = () => {
               type="button"
               onClick={handleNext}
               disabled={currentStep === 1 && !displayName.trim()}
-              className="px-6 sm:px-7 py-2 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-primary hover:bg-primary/90 shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer active:scale-98"
+              className="px-5 sm:px-7 py-1.5 sm:py-2 rounded-lg font-bold text-xs sm:text-sm text-white bg-primary hover:bg-primary/90 shadow-xs transition-all flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer active:scale-98"
             >
               <span>{_t('التالي', 'Next', 'Weiter')}</span>
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           ) : (
             <button
               type="button"
               onClick={handleFinish}
-              className="px-6 sm:px-8 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-primary hover:bg-primary/90 shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-98"
+              className="px-5 sm:px-7 py-1.5 sm:py-2 rounded-lg font-bold text-xs sm:text-sm text-white bg-primary hover:bg-primary/90 shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-98"
             >
               <span>🚀</span>
               <span>{_t('ابدأ رحلة التدريس الآن', 'Start Teaching Now', 'Jetzt durchstarten!')}</span>

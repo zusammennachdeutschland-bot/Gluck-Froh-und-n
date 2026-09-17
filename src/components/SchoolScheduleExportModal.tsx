@@ -207,7 +207,7 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs animate-fade-in"
+      className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs animate-fade-in"
       onClick={onClose}
     >
       <div 

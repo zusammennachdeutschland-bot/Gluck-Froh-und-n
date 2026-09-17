@@ -1,6 +1,6 @@
 
-import { SchoolSettings, TeacherProfile, AppLanguage } from '../types';
-import { calculatePeriodsTimings } from '../utils/schoolUtils';
+import { SchoolSettings, TeacherProfile, AppLanguage, CustomTimedSession } from '../types';
+import { calculatePeriodsTimings, getCustomSessionsForPeriod, getUnmatchedCustomSessions } from '../utils/schoolUtils';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
@@ -146,7 +146,7 @@ function createMasterExportDomElement(
   thTime.style.color = '#ffffff';
   thTime.style.fontSize = '18px';
   thTime.style.fontWeight = '900';
-  thTime.style.width = '110px';
+  thTime.style.width = '130px';
   trHead.appendChild(thTime);
 
   const teachers = settings.teachers || [];
@@ -187,12 +187,13 @@ function createMasterExportDomElement(
     dayTr.appendChild(dayTd);
     tbody.appendChild(dayTr);
 
+    // Standard Period Rows
     periods.forEach(p => {
       const tr = document.createElement('tr');
       const tdTime = document.createElement('td');
       tdTime.innerHTML = `
-        <div style="font-weight: 900; font-size: 19px; color: #000000; margin-bottom: 2px;">${isRtl ? 'حصة ' : 'P'}${p.periodNumber}</div>
-        <div style="font-weight: 900; font-size: 15px; color: #000000; font-family: 'Cairo', monospace; background: #e2e8f0; padding: 2px 4px; border-radius: 4px; border: 1px solid #94a3b8; display: inline-block;">${p.startTime}</div>
+        <div style="font-weight: 900; font-size: 20px; color: #000000; margin-bottom: 3px; line-height: 1;">${isRtl ? 'حصة ' : 'P'}${p.periodNumber}</div>
+        <div style="font-weight: 900; font-size: 13px; color: #000000; font-family: 'Cairo', monospace, sans-serif; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; border: 1.5px solid #94a3b8; display: inline-block; white-space: nowrap;">${p.startTime} - ${p.endTime}</div>
       `;
       tdTime.style.border = '2px solid #000000';
       tdTime.style.backgroundColor = '#f8fafc';
@@ -206,25 +207,81 @@ function createMasterExportDomElement(
         td.style.padding = '4px 2px';
         td.style.textAlign = 'center';
         td.style.verticalAlign = 'middle';
+        td.style.backgroundColor = '#ffffff';
         
         let lessons: any[] = [];
         if (t.id === 'hod') lessons = settings.schedule?.[day] || [];
         else lessons = settings.teacherSchedules?.[t.id]?.[day] || [];
         
         const lesson = lessons.find((l: any) => l.periodNumber === p.periodNumber && (l.className || l.subjectName));
+        const matchingCustoms = getCustomSessionsForPeriod(settings.customTimedSessions, day, p.periodNumber, periods, t.id);
+
+        let cellContentHtml = '';
+
         if (lesson) {
-          td.style.backgroundColor = '#ffffff';
-          td.innerHTML = `
-            <div style="font-weight: 900; font-size: 26px; color: #000000; line-height: 1.1; margin: 0; letter-spacing: -0.3px;">${lesson.className || ''}</div>
+          cellContentHtml += `
+            <div style="font-weight: 900; font-size: 24px; color: #000000; line-height: 1.1; margin: 0; letter-spacing: -0.3px;">${lesson.className || ''}</div>
             ${lesson.subjectName ? `<div style="font-weight: 900; font-size: 13px; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #cbd5e1; margin-top: 3px; display: inline-block;">${lesson.subjectName}</div>` : ''}
           `;
-        } else {
-          td.style.backgroundColor = '#ffffff';
         }
+
+        matchingCustoms.forEach((cs: CustomTimedSession) => {
+          cellContentHtml += `
+            <div style="margin-top: ${lesson ? '4px' : '0'}; padding: 3px 2px; background: #e0e7ff; border: 1.5px solid #818cf8; border-radius: 5px;">
+              <div style="font-weight: 900; font-size: 20px; color: #1e1b4b; line-height: 1.1; margin: 0;">${cs.className || ''}</div>
+              <div style="font-weight: 900; font-size: 12px; color: #3730a3; font-family: monospace; margin-top: 2px; display: inline-block;">⏱️ ${cs.startTime}-${cs.endTime}</div>
+              ${cs.subjectName ? `<div style="font-weight: 900; font-size: 12px; color: #312e81; background: #ffffff; padding: 1px 5px; border-radius: 3px; border: 1px solid #c7d2fe; margin-top: 2px; display: inline-block;">${cs.subjectName}</div>` : ''}
+            </div>
+          `;
+        });
+
+        td.innerHTML = cellContentHtml;
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
     });
+
+    // Unmatched / Extended Custom Timed Sessions Row for this day if any exist
+    const dayUnmatched = getUnmatchedCustomSessions(settings.customTimedSessions, day, periods);
+    if (dayUnmatched.length > 0) {
+      const customTr = document.createElement('tr');
+      const customTdTime = document.createElement('td');
+      customTdTime.innerHTML = `
+        <div style="font-weight: 900; font-size: 16px; color: #3730a3; margin-bottom: 2px; line-height: 1.1;">⏱️ ${isRtl ? 'مخصص' : 'Custom'}</div>
+        <div style="font-weight: 800; font-size: 11px; color: #4338ca;">${isRtl ? 'خارج الحصص' : 'Extended'}</div>
+      `;
+      customTdTime.style.border = '2px solid #6366f1';
+      customTdTime.style.backgroundColor = '#eef2ff';
+      customTdTime.style.padding = '6px 2px';
+      customTdTime.style.textAlign = 'center';
+      customTr.appendChild(customTdTime);
+
+      teachers.forEach(t => {
+        const customTd = document.createElement('td');
+        customTd.style.border = '2px solid #6366f1';
+        customTd.style.padding = '4px 2px';
+        customTd.style.textAlign = 'center';
+        customTd.style.verticalAlign = 'middle';
+        customTd.style.backgroundColor = '#f5f3ff';
+
+        const teacherUnmatched = dayUnmatched.filter(s => s.teacherId === t.id);
+        let customCellHtml = '';
+
+        teacherUnmatched.forEach((cs: CustomTimedSession) => {
+          customCellHtml += `
+            <div style="padding: 3px 2px; background: #e0e7ff; border: 1.5px solid #818cf8; border-radius: 5px; margin-bottom: 3px;">
+              <div style="font-weight: 900; font-size: 20px; color: #1e1b4b; line-height: 1.1; margin: 0;">${cs.className || ''}</div>
+              <div style="font-weight: 900; font-size: 12px; color: #3730a3; font-family: monospace; margin-top: 2px; display: inline-block;">⏱️ ${cs.startTime}-${cs.endTime}</div>
+              ${cs.subjectName ? `<div style="font-weight: 900; font-size: 12px; color: #312e81; background: #ffffff; padding: 1px 5px; border-radius: 3px; border: 1px solid #c7d2fe; margin-top: 2px; display: inline-block;">${cs.subjectName}</div>` : ''}
+            </div>
+          `;
+        });
+
+        customTd.innerHTML = customCellHtml;
+        customTr.appendChild(customTd);
+      });
+      tbody.appendChild(customTr);
+    }
   });
 
   table.appendChild(tbody);

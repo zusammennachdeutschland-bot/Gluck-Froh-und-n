@@ -111,6 +111,8 @@ export interface SchoolNote extends SyncableRecord {
   // Contextual linkages
   classId?: string;
   className?: string;
+  teacherId?: string;
+  teacherName?: string;
   studentId?: string;
   studentName?: string;
   lessonId?: string;
@@ -768,7 +770,10 @@ export interface LessonReport {
   arabicExamScore?: string;
   arabicPerformance?: string;
   arabicHomeworkOption?: string;
+  arabicTopicsExplained?: string;
   arabicHomeworkRequired?: string;
+  arabicPreviousHomework?: string;
+  previousHomeworkDescription?: string;
   arabicParentNotes?: string;
   arabicTemplateMessage?: string;
   arabicFullGeneratedReport?: string;

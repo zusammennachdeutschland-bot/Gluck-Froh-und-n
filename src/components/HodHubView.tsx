@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Users, Calendar, BookOpen, FileText, CheckCircle2, AlertTriangle, Clock, Plus, Trash2, Edit3, Send, Sparkles, Printer, Check, X, Shield, FileCheck, Layers, ChevronRight, RefreshCw, RotateCcw, Upload, Phone, MessageCircle, Copy, MapPin, Eye, Target, ClipboardList, Award, BarChart3, Download, Loader2, GraduationCap, Tag } from 'lucide-react';
-import { calculatePeriodsTimings } from '../utils/schoolUtils';
+import { Users, Calendar, BookOpen, FileText, CheckCircle2, AlertTriangle, Clock, Plus, Trash2, Edit3, Send, Sparkles, Printer, Check, X, Shield, FileCheck, Layers, ChevronRight, RefreshCw, RotateCcw, Upload, Phone, MessageCircle, Copy, MapPin, Eye, Target, ClipboardList, Award, BarChart3, Download, Loader2, GraduationCap, Tag, CheckSquare, Square, Pin, Search, MessageSquare, AlertCircle, Bookmark } from 'lucide-react';
+import { calculatePeriodsTimings, getCustomSessionsForPeriod, getUnmatchedCustomSessions, getMergedDayScheduleItems } from '../utils/schoolUtils';
 import { 
   printObservationReport, 
   downloadObservationReportPdf, 
   shareObservationReportViaWhatsApp,
   downloadStageFollowUpPdf,
   shareStageFollowUpViaWhatsApp,
-  printStageFollowUpReport
+  printStageFollowUpReport,
+  downloadCombinedObservationReportsPdf,
+  printCombinedObservationReports
 } from '../utils/printObservationUtils';
 import {
   downloadSingleWeeklyPlanPdf,
@@ -17,9 +19,11 @@ import {
   printAllWeeklyPlansCombinedTable,
   getSecretaryForGradeBand
 } from '../utils/weeklyPlanPrintUtils';
-import { StageFollowUpRecord, TeacherStageEvaluationItem, StaffAttendanceRecord, CustomTimedSession, SchoolPeriodRecord } from '../types';
+import { StageFollowUpRecord, TeacherStageEvaluationItem, StaffAttendanceRecord, CustomTimedSession, SchoolPeriodRecord, SchoolNote, SchoolNoteType } from '../types';
 import { SchoolScheduleExportModal } from './SchoolScheduleExportModal';
+import { SchoolLessonNotesModal } from './SchoolLessonNotesModal';
 import { ObservationFormModal } from './ObservationFormModal';
+import { BulkObservationExportModal } from './BulkObservationExportModal';
 import { HodStudentsView } from './HodStudentsView';
 import { ComplaintsSystemView } from './ComplaintsSystemView';
 import { ActionPlansView } from './ActionPlansView';
@@ -28,8 +32,32 @@ import { TeacherAttendanceModal } from './TeacherAttendanceModal';
 import { DetailedStaffAttendanceModal } from './DetailedStaffAttendanceModal';
 import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
 
+const QUICK_TEACHER_NOTE_TAGS = [
+  { ar: '📝 واجب', en: '📝 Homework', de: '📝 Hausaufgabe', color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' },
+  { ar: '⭐ تميز', en: '⭐ Outstanding', de: '⭐ Hervorragend', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
+  { ar: '⚠️ تنبيه', en: '⚠️ Warning', de: '⚠️ Warnung', color: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' },
+  { ar: '💡 فكرة', en: '💡 Idea', de: '💡 Idee', color: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' },
+  { ar: '🎯 متابعة', en: '🎯 Follow-up', de: '🎯 Nachfassen', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' },
+  { ar: '📖 مشاركة', en: '📖 Participation', de: '📖 Beteiligung', color: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20' },
+];
+
 export const HodHubView: React.FC = () => {
-  const { profile, updateProfile, groups, students, lessons, language, _t, t, addAppNotification } = useApp();
+  const { 
+    profile, 
+    updateProfile, 
+    groups, 
+    students, 
+    lessons, 
+    schoolNotes, 
+    addSchoolNote, 
+    updateSchoolNote, 
+    deleteSchoolNote, 
+    hodStudents, 
+    language, 
+    _t, 
+    t, 
+    addAppNotification 
+  } = useApp();
   const schoolSettings = profile?.schoolSettings || {} as any;
 
   const [activeTab, setActiveTab] = useState<'overview' | 'timetables' | 'stage_managers' | 'plans' | 'action_plans' | 'staff' | 'students' | 'complaints'>('overview');
@@ -243,6 +271,47 @@ export const HodHubView: React.FC = () => {
   const [editingAttendanceRecord, setEditingAttendanceRecord] = useState<StaffAttendanceRecord | null>(null);
   const [isDetailedAttendanceModalOpen, setIsDetailedAttendanceModalOpen] = useState(false);
 
+  // Teacher Notes & School Session Notes State
+  const [teacherNotesFilterType, setTeacherNotesFilterType] = useState<'all' | 'pinned' | 'lesson' | 'class' | 'student'>('all');
+  const [teacherNotesClassFilter, setTeacherNotesClassFilter] = useState<string>('all');
+  const [teacherNotesSearch, setTeacherNotesSearch] = useState<string>('');
+  const [isTeacherNoteFormOpen, setIsTeacherNoteFormOpen] = useState<boolean>(false);
+  const [editingTeacherNoteId, setEditingTeacherNoteId] = useState<string | null>(null);
+  const [teacherNoteForm, setTeacherNoteForm] = useState<{
+    type: SchoolNoteType;
+    className: string;
+    studentId: string;
+    studentName: string;
+    periodNumber: number | '';
+    date: string;
+    tags: string[];
+    pinned: boolean;
+    text: string;
+  }>({
+    type: 'lesson',
+    className: '',
+    studentId: '',
+    studentName: '',
+    periodNumber: 1,
+    date: new Date().toISOString().split('T')[0],
+    tags: [],
+    pinned: false,
+    text: ''
+  });
+
+  // State for opening SchoolLessonNotesModal from Timetable or other areas
+  const [activeNotesModalProps, setActiveNotesModalProps] = useState<{
+    isOpen: boolean;
+    periodNumber: number;
+    startTime: string;
+    endTime: string;
+    className?: string;
+    subjectName?: string;
+    dateStr: string;
+    teacherId?: string;
+    teacherName?: string;
+  } | null>(null);
+
   const staffAttendanceRecords: StaffAttendanceRecord[] = schoolSettings.staffAttendanceRecords || [];
 
   const weeklyAttendanceMetrics = React.useMemo(() => {
@@ -366,6 +435,7 @@ export const HodHubView: React.FC = () => {
   const [selectedTeacherForImport, setSelectedTeacherForImport] = useState<string>('');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [showClearScheduleConfirm, setShowClearScheduleConfirm] = useState(false);
+  const [showClearTeacherScheduleConfirm, setShowClearTeacherScheduleConfirm] = useState(false);
   const [validationResult, setValidationResult] = useState<{
     isValid: boolean;
     errors: string[];
@@ -378,6 +448,7 @@ export const HodHubView: React.FC = () => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [matrixDayFilter, setMatrixDayFilter] = useState<'all' | '0' | '1' | '2' | '3' | '4'>('all');
   const [selectedSingleTeacher, setSelectedSingleTeacher] = useState<string>('');
+  const [showClearMatrixTeacherConfirm, setShowClearMatrixTeacherConfirm] = useState(false);
   const [selectedCellDetails, setSelectedCellDetails] = useState<{
     teacherId?: string;
     teacherName: string;
@@ -418,11 +489,149 @@ export const HodHubView: React.FC = () => {
   const [customSessionTeacherFilter, setCustomSessionTeacherFilter] = useState('all');
   const [customSessionDayFilter, setCustomSessionDayFilter] = useState('all');
 
-  const timings = calculatePeriodsTimings(schoolSettings.periodSettings || {
-    periodsCount: 8,
-    firstPeriodStart: '07:30',
-    defaultDuration: 45
-  });
+  // Real-time tracker for the horizontal time indicator line across the matrix
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 15000); // 15 seconds refresh for responsive live line progression
+    return () => clearInterval(timer);
+  }, []);
+
+  const effectivePeriodSettings = React.useMemo(() => {
+    const base = schoolSettings.periodSettings || {
+      periodsCount: 8,
+      firstPeriodStart: '07:30',
+      defaultDuration: 45
+    };
+    let maxP = base.periodsCount || 8;
+    const checkList = (items: any[]) => {
+      if (Array.isArray(items)) {
+        items.forEach(it => {
+          if (it?.periodNumber && it.periodNumber > maxP) maxP = it.periodNumber;
+        });
+      }
+    };
+    if (schoolSettings.schedule) {
+      Object.values(schoolSettings.schedule).forEach((dayList: any) => checkList(dayList));
+    }
+    if (schoolSettings.teacherSchedules) {
+      Object.values(schoolSettings.teacherSchedules).forEach((tSched: any) => {
+        if (tSched) {
+          Object.values(tSched).forEach((dayList: any) => checkList(dayList));
+        }
+      });
+    }
+    return {
+      firstPeriodStart: '07:30',
+      defaultDuration: 45,
+      ...base,
+      periodsCount: Math.max(maxP, base.periodsCount || 8)
+    };
+  }, [schoolSettings]);
+
+  const timings = calculatePeriodsTimings(effectivePeriodSettings);
+
+  const liveTimeInfo = React.useMemo(() => {
+    const currentHours = currentTime.getHours();
+    const currentMinutes = currentTime.getMinutes();
+    const nowTotalMinutes = currentHours * 60 + currentMinutes;
+    const formatted = `${currentHours.toString().padStart(2, '0')}:${currentMinutes.toString().padStart(2, '0')}`;
+    const realDayKey = currentTime.getDay().toString();
+
+    if (!timings || timings.length === 0) {
+      return {
+        formatted,
+        nowTotalMinutes,
+        realDayKey,
+        activePeriodNumber: null,
+        activeStatus: 'unknown' as const,
+        progressPct: 50,
+        remainingMinutes: 0,
+        activePeriodInfo: null
+      };
+    }
+
+    const firstPeriod = timings[0];
+    const lastPeriod = timings[timings.length - 1];
+    const firstStartMin = parseTimeToMinutes(firstPeriod.startTime);
+    const lastEndMin = parseTimeToMinutes(lastPeriod.endTime);
+
+    let activePeriodNumber: number | null = null;
+    let activeStatus: 'in_period' | 'break' | 'before' | 'after' = 'before';
+    let progressPct = 0;
+    let remainingMinutes = 0;
+    let activePeriodInfo: any = null;
+
+    if (nowTotalMinutes < firstStartMin) {
+      activeStatus = 'before';
+      activePeriodNumber = firstPeriod.periodNumber;
+      progressPct = 0;
+      remainingMinutes = firstStartMin - nowTotalMinutes;
+      activePeriodInfo = {
+        periodNumber: firstPeriod.periodNumber,
+        startTime: firstPeriod.startTime,
+        endTime: firstPeriod.endTime
+      };
+    } else if (nowTotalMinutes >= lastEndMin) {
+      activeStatus = 'after';
+      activePeriodNumber = lastPeriod.periodNumber;
+      progressPct = 100;
+      remainingMinutes = 0;
+      activePeriodInfo = {
+        periodNumber: lastPeriod.periodNumber,
+        startTime: lastPeriod.startTime,
+        endTime: lastPeriod.endTime
+      };
+    } else {
+      for (let i = 0; i < timings.length; i++) {
+        const p = timings[i];
+        const pStart = parseTimeToMinutes(p.startTime);
+        const pEnd = parseTimeToMinutes(p.endTime);
+
+        if (nowTotalMinutes >= pStart && nowTotalMinutes < pEnd) {
+          activeStatus = 'in_period';
+          activePeriodNumber = p.periodNumber;
+          const duration = Math.max(1, pEnd - pStart);
+          progressPct = Math.min(94, Math.max(6, ((nowTotalMinutes - pStart) / duration) * 100));
+          remainingMinutes = pEnd - nowTotalMinutes;
+          activePeriodInfo = p;
+          break;
+        } else if (i < timings.length - 1) {
+          const nextP = timings[i + 1];
+          const nextStart = parseTimeToMinutes(nextP.startTime);
+          if (nowTotalMinutes >= pEnd && nowTotalMinutes < nextStart) {
+            activeStatus = 'break';
+            activePeriodNumber = p.periodNumber;
+            progressPct = 98;
+            remainingMinutes = nextStart - nowTotalMinutes;
+            activePeriodInfo = p;
+            break;
+          }
+        }
+      }
+    }
+
+    return {
+      formatted,
+      nowTotalMinutes,
+      realDayKey,
+      activePeriodNumber,
+      activeStatus,
+      progressPct,
+      remainingMinutes,
+      activePeriodInfo
+    };
+  }, [currentTime, timings]);
+
+  const isDayActiveForLine = (dayKey: string) => {
+    if (matrixDayFilter !== 'all') {
+      return dayKey === matrixDayFilter;
+    }
+    const realDayKey = liveTimeInfo.realDayKey;
+    const schoolDays = ['0', '1', '2', '3', '4'];
+    return schoolDays.includes(realDayKey) ? dayKey === realDayKey : dayKey === '0';
+  };
 
   const handleOpenAddCustomSession = (prefill?: { teacherId?: string; dayKey?: string; startTime?: string; endTime?: string }) => {
     setEditingCustomSession(null);
@@ -818,7 +1027,7 @@ export const HodHubView: React.FC = () => {
 
     if (activeLessons.length === 0 && customSessionsToday.length === 0) return { status: 'no_class' };
 
-    const timings = calculatePeriodsTimings(schoolSettings.periodSettings);
+    const timings = calculatePeriodsTimings(effectivePeriodSettings);
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
@@ -873,10 +1082,43 @@ export const HodHubView: React.FC = () => {
   const handleClearAllTimetables = () => {
     persistHodData({ teacherSchedules: {}, schedule: {} });
     setShowClearScheduleConfirm(false);
+    setShowClearTeacherScheduleConfirm(false);
     setIsImportModalOpen(false);
     setValidationResult(null);
     setImportText('');
     triggerToast(_t('تم مسح جميع جداول القسم بنجاح', 'All department timetables cleared successfully', 'Alle Stundenpläne der Abteilung erfolgreich gelöscht'));
+  };
+
+  const handleClearSingleTeacherTimetable = (teacherId: string) => {
+    if (!teacherId) {
+      triggerToast(_t('الرجاء اختيار المعلم أولاً', 'Please select a teacher first', 'Bitte wählen Sie zuerst einen Lehrer aus'));
+      return;
+    }
+
+    const currentTeacherSchedules = { ...(schoolSettings.teacherSchedules || {}) };
+    delete currentTeacherSchedules[teacherId];
+
+    const existingCustoms = (schoolSettings.customTimedSessions || []) as CustomTimedSession[];
+    const updatedCustoms = existingCustoms.filter(cs => cs.teacherId !== teacherId);
+
+    const updates: any = {
+      teacherSchedules: currentTeacherSchedules,
+      customTimedSessions: updatedCustoms
+    };
+
+    if (teacherId === 'hod') {
+      updates.schedule = {};
+    }
+
+    persistHodData(updates);
+    setShowClearTeacherScheduleConfirm(false);
+    setIsImportModalOpen(false);
+    setValidationResult(null);
+    setImportText('');
+
+    const teacher = teachers.find(t => t.id === teacherId);
+    const teacherName = teacher ? teacher.name : (teacherId === 'hod' ? (schoolSettings.hodName || _t('رئيس القسم', 'HOD', 'Fachleiter')) : teacherId);
+    triggerToast(_t(`تم مسح جدول المعلم (${teacherName}) بنجاح 🧹`, `Schedule of teacher (${teacherName}) cleared successfully 🧹`, `Stundenplan von (${teacherName}) erfolgreich gelöscht 🧹`));
   };
 
   const generateAIPrompt = () => {
@@ -1073,6 +1315,54 @@ export const HodHubView: React.FC = () => {
   const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
   const [obsInitialTeacherId, setObsInitialTeacherId] = useState<string | undefined>(undefined);
   const [previewVisitRecord, setPreviewVisitRecord] = useState<any | null>(null);
+  const [isBulkVisitExportModalOpen, setIsBulkVisitExportModalOpen] = useState(false);
+  const [bulkExportTeacherId, setBulkExportTeacherId] = useState<string | undefined>(undefined);
+  const [selectedTeacherVisitIds, setSelectedTeacherVisitIds] = useState<Set<string>>(new Set());
+  const [isBatchGeneratingPdf, setIsBatchGeneratingPdf] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+
+  const handleBatchDownloadVisitsPdf = async (visitsToDownload: any[]) => {
+    if (visitsToDownload.length === 0 || isBatchGeneratingPdf) return;
+    setIsBatchGeneratingPdf(true);
+    setBatchProgress({ current: 1, total: visitsToDownload.length });
+    triggerToast(_t('جاري تجميع وإنشاء ملف PDF للزيارات المحددة 📄...', 'Generating combined PDF for selected visits 📄...', 'Kombiniertes PDF wird erstellt 📄...'));
+    try {
+      const res = await downloadCombinedObservationReportsPdf(
+        visitsToDownload,
+        schoolSettings,
+        (language === 'ar'),
+        language,
+        (current, total) => setBatchProgress({ current, total })
+      );
+      if (res?.success) {
+        triggerToast(_t(`تم تحميل ملف PDF المجمّع (${res.filename}) بنجاح 📥`, 'Combined PDF downloaded successfully 📥', 'Kombiniertes PDF erfolgreich heruntergeladen 📥'));
+      } else {
+        triggerToast(_t('تعذر تحميل الملف المجمّع، يرجى المحاولة مجدداً', 'Failed to generate combined PDF', 'Fehler beim Erstellen des kombinierten PDF'));
+      }
+    } catch (err) {
+      console.error('Batch download PDF error:', err);
+      triggerToast(_t('حدث خطأ أثناء تحميل ملف الـ PDF المجمّع', 'Error generating combined PDF', 'Fehler beim Erstellen des kombinierten PDF'));
+    } finally {
+      setIsBatchGeneratingPdf(false);
+      setBatchProgress(null);
+    }
+  };
+
+  const handleBatchPrintVisits = async (visitsToPrint: any[]) => {
+    if (visitsToPrint.length === 0) return;
+    try {
+      await printCombinedObservationReports(
+        visitsToPrint,
+        schoolSettings,
+        (language === 'ar'),
+        language
+      );
+    } catch (err) {
+      console.error('Batch print error:', err);
+      triggerToast(_t('حدث خطأ أثناء طباعة الزيارات', 'Error printing visits', 'Fehler beim Drucken'));
+    }
+  };
+
   const [visitForm, setVisitForm] = useState({
     teacherId: '',
     className: '',
@@ -2242,8 +2532,11 @@ export const HodHubView: React.FC = () => {
                   <tr className="bg-surface-hover text-text-muted font-bold">
                     <th className="p-2 border border-surface-border text-right">{_t('المعلم', 'Teacher', 'Lehrer')}</th>
                     {timings.map(p => (
-                      <th key={p.periodNumber} className="p-2 border border-surface-border text-center w-12">
-                        P{p.periodNumber}
+                      <th key={p.periodNumber} className="p-1.5 border border-surface-border text-center min-w-[65px]">
+                        <div className="flex flex-col items-center justify-center">
+                          <span className="font-black text-text-main text-[11px]">P{p.periodNumber}</span>
+                          <span className="text-[8px] font-mono font-bold text-text-muted tracking-tighter whitespace-nowrap">{p.startTime}-{p.endTime}</span>
+                        </div>
                       </th>
                     ))}
                   </tr>
@@ -2270,15 +2563,31 @@ export const HodHubView: React.FC = () => {
                         </td>
                         {timings.map(p => {
                           const lesson = getLessonForTeacher(t.id, todayKey, p.periodNumber);
+                          const matchingCustoms = getCustomSessionsForPeriod(
+                            schoolSettings.customTimedSessions,
+                            todayKey,
+                            p.periodNumber,
+                            timings,
+                            t.id
+                          );
+
                           return (
-                            <td key={p.periodNumber} className="p-2 border border-surface-border text-center">
-                              {lesson ? (
-                                <span className="inline-block px-1.5 py-0.5 bg-primary/10 text-primary font-black rounded text-[10px]">
-                                  {lesson.className}
-                                </span>
-                              ) : (
-                                <span className="text-text-muted/30">-</span>
-                              )}
+                            <td key={p.periodNumber} className="p-1 border border-surface-border text-center align-middle">
+                              <div className="flex flex-col gap-0.5 items-center justify-center">
+                                {lesson && (
+                                  <span className="inline-block px-1.5 py-0.5 bg-primary/10 text-primary font-black rounded text-[10px]">
+                                    {lesson.className}
+                                  </span>
+                                )}
+                                {matchingCustoms.map((cs: CustomTimedSession) => (
+                                  <span key={cs.id} className="inline-block px-1 py-0.2 bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold rounded text-[8.5px] border border-indigo-200 dark:border-indigo-800" title={`${cs.className} (⏱️ ${cs.startTime}-${cs.endTime})`}>
+                                    {cs.className}
+                                  </span>
+                                ))}
+                                {!lesson && matchingCustoms.length === 0 && (
+                                  <span className="text-text-muted/30">-</span>
+                                )}
+                              </div>
                             </td>
                           );
                         })}
@@ -2618,25 +2927,107 @@ export const HodHubView: React.FC = () => {
                 </select>
 
                 {selectedSingleTeacher && (
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAddCustomSession({ teacherId: selectedSingleTeacher })}
-                    className="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 border border-indigo-200 dark:border-indigo-800/50 cursor-pointer"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>{_t('إضافة حصة مخصصة لهذا المعلم', 'Add Custom Session for Teacher', 'Spezielle Stunde für diesen Lehrer')}</span>
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAddCustomSession({ teacherId: selectedSingleTeacher })}
+                      className="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 border border-indigo-200 dark:border-indigo-800/50 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>{_t('إضافة حصة مخصصة', 'Add Custom Session', 'Spezielle Stunde')}</span>
+                    </button>
+
+                    {!showClearMatrixTeacherConfirm ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowClearMatrixTeacherConfirm(true)}
+                        className="px-2.5 py-1 bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 border border-rose-200 dark:border-rose-800/50 cursor-pointer"
+                        title={_t('مسح جدول هذا المعلم فقط', "Clear This Teacher's Schedule Only", 'Diesen Stundenplan löschen')}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>{_t('مسح جدول المعلم', 'Clear Schedule', 'Plan löschen')}</span>
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1.5 p-0.5 bg-rose-500/10 border border-rose-500/30 rounded-lg animate-fade-in">
+                        <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 px-1">
+                          {_t('تأكيد مسح جدول هذا المعلم؟', 'Confirm clear schedule?', 'Löschen bestätigen?')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleClearSingleTeacherTimetable(selectedSingleTeacher);
+                            setShowClearMatrixTeacherConfirm(false);
+                          }}
+                          className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[9.5px] font-bold cursor-pointer transition-all active:scale-95"
+                        >
+                          {_t('نعم، امسح', 'Yes, Clear', 'Ja, löschen')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowClearMatrixTeacherConfirm(false)}
+                          className="px-2 py-0.5 bg-surface hover:bg-surface-hover text-text-muted rounded text-[9.5px] font-bold border border-surface-border cursor-pointer transition-all"
+                        >
+                          {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}
+
+            {/* Live Current Time Status Ribbon */}
+            <div className="mx-2 mb-2 p-2 rounded-xl bg-gradient-to-r from-rose-500/10 via-primary/5 to-amber-500/10 border border-rose-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-2xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative flex items-center justify-center">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping absolute" />
+                  <span className="w-2 h-2 rounded-full bg-rose-600 relative" />
+                </div>
+                <span className="text-[11px] font-black text-rose-600 dark:text-rose-400">
+                  {_t('الوقت الحالي الآن:', 'Current Time:', 'Aktuelle Zeit:')}
+                </span>
+                <span className="text-[11.5px] font-black font-mono bg-surface px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 shadow-2xs">
+                  {liveTimeInfo.formatted}
+                </span>
+                <span className="text-[10.5px] font-bold text-text-main">
+                  • {liveTimeInfo.activePeriodInfo ? (
+                    liveTimeInfo.activeStatus === 'in_period' ? (
+                      <span>
+                        {_t('أنت الآن في الحصة', 'Currently in Period', 'Aktuell in Stunde')} <strong className="text-rose-600 dark:text-rose-400 font-black">{liveTimeInfo.activePeriodInfo.periodNumber}</strong> ({liveTimeInfo.activePeriodInfo.startTime} - {liveTimeInfo.activePeriodInfo.endTime}) — {_t('متبقي على انتهائها', 'remaining', 'verbleibend')}: <strong className="text-rose-600 dark:text-rose-400 font-mono font-black">{liveTimeInfo.remainingMinutes} {_t('دقيقة', 'min', 'Min')}</strong>
+                      </span>
+                    ) : liveTimeInfo.activeStatus === 'break' ? (
+                      <span className="text-amber-600 dark:text-amber-400">
+                        ☕ {_t('استراحة / فسحة بين الحصص', 'Break between periods', 'Pause zwischen Stunden')} (متبقي {liveTimeInfo.remainingMinutes}د على الحصة القادمة)
+                      </span>
+                    ) : liveTimeInfo.activeStatus === 'before' ? (
+                      <span className="text-text-muted">
+                        🌅 {_t('قبل بداية اليوم الدراسي', 'Before school starts', 'Vor Unterrichtsbeginn')} (الحصة 1 تبدأ {timings[0]?.startTime || '08:00'})
+                      </span>
+                    ) : (
+                      <span className="text-text-muted">
+                        🏁 {_t('انتهى اليوم الدراسي لجميع الحصص', 'School day finished for all periods', 'Schultag beendet')}
+                      </span>
+                    )
+                  ) : null}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5 text-[10px] text-text-muted font-bold shrink-0">
+                <span className="w-2.5 h-[2.5px] bg-rose-500 rounded-full shadow-[0_0_6px_rgba(244,63,94,0.8)]" />
+                <span>{_t('الخط الأحمر يقطع الجدول لتوضيح سير الوقت الحالي', 'Red line tracks live time across matrix', 'Rote Linie zeigt aktuelle Zeit')}</span>
+              </div>
+            </div>
 
             <div className={`overflow-y-auto max-h-[60vh] scrollbar-thin ${matrixViewMode === 'grid' ? 'w-full overflow-hidden' : ''}`}>
               {matrixViewMode === 'grid' ? (
                 <table className="w-full text-left border-collapse table-fixed text-[11px]">
                   <thead className="sticky top-0 z-20 bg-surface-hover shadow-sm">
                     <tr>
-                      <th className="p-1 border-b border-surface-border font-bold text-text-muted w-10 sm:w-16 text-center align-middle">
-                        {_t('ي/ح', 'D/P', 'T/S')}
+                      <th className="p-1 border-b border-surface-border font-bold text-text-muted w-14 sm:w-20 text-center align-middle">
+                        <div className="flex flex-col items-center justify-center">
+                          <span className="text-[10px] sm:text-[11px] font-black">{_t('ي/ح', 'D/P', 'T/S')}</span>
+                          <span className="text-[7.5px] sm:text-[8px] text-primary font-bold">{_t('نهاية الحصة', 'Ends At', 'Ende')}</span>
+                        </div>
                       </th>
                       {teachers.map(t => {
                         const nameParts = t.name.split(' ');
@@ -2652,82 +3043,182 @@ export const HodHubView: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {(['0','1','2','3','4'].filter(d => matrixDayFilter === 'all' || d === matrixDayFilter)).map((dayKey) => (
-                      <React.Fragment key={dayKey}>
-                        <tr>
-                          <td colSpan={teachers.length + 1} className="bg-primary/5 dark:bg-primary/10 py-1.5 px-2 font-black text-primary text-center border-y border-surface-border text-[11px] sm:text-[11px]">
-                            {WEEKDAY_NAMES[dayKey as keyof typeof WEEKDAY_NAMES]}
-                          </td>
-                        </tr>
-                        {timings.map(period => (
-                          <tr key={`${dayKey}-${period.periodNumber}`} className="hover:bg-surface-hover/50 group">
-                            <td className="p-0.5 sm:p-1 border-b border-surface-border font-bold text-text-muted text-center align-middle bg-surface group-hover:bg-surface-hover">
-                              <div className="flex flex-col items-center justify-center">
-                                <span className="text-text-main text-[10px] sm:text-[11px]">{period.periodNumber}</span>
-                                <span className="text-[7px] sm:text-[9px] text-text-muted/70 font-mono tracking-tighter hidden sm:block">{period.startTime}</span>
+                    {(['0','1','2','3','4'].filter(d => matrixDayFilter === 'all' || d === matrixDayFilter)).map((dayKey) => {
+                      const dayUnmatchedCustoms = getUnmatchedCustomSessions(schoolSettings.customTimedSessions, dayKey, timings);
+                      
+                      return (
+                        <React.Fragment key={dayKey}>
+                          <tr>
+                            <td colSpan={teachers.length + 1} className={`py-1.5 px-2 font-black text-center border-y border-surface-border text-[11px] sm:text-[12px] transition-colors ${
+                              isDayActiveForLine(dayKey)
+                                ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300 dark:bg-rose-950/40 border-rose-300 dark:border-rose-900/60'
+                                : 'bg-primary/5 dark:bg-primary/10 text-primary'
+                            }`}>
+                              <div className="flex items-center justify-center gap-2">
+                                <span>{WEEKDAY_NAMES[dayKey as keyof typeof WEEKDAY_NAMES]}</span>
+                                {isDayActiveForLine(dayKey) && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-mono font-black bg-rose-600 text-white shadow-xs animate-pulse">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                                    <span>{_t('اليوم الحالي', 'Today', 'Heute')}</span>
+                                    <span>•</span>
+                                    <span>{liveTimeInfo.formatted}</span>
+                                  </span>
+                                )}
                               </div>
                             </td>
-                            {teachers.map(t => {
-                              const lesson = getLessonForTeacher(t.id, dayKey, period.periodNumber);
-                              return (
-                                <td 
-                                  key={t.id} 
-                                  onClick={() => startEditPeriod(t.id, dayKey, period.periodNumber)}
-                                  className="p-0.5 sm:p-1 border-b border-l border-surface-border text-center h-full align-middle overflow-hidden cursor-pointer hover:bg-primary-soft/20 transition-colors group/cell"
-                                  title={lesson 
-                                    ? `${t.name}: ${lesson.className}${lesson.subjectName ? ` - ${lesson.subjectName}` : ''} (${_t('انقر للتعديل', 'Click to edit', 'Klicken zum Bearbeiten')})` 
-                                    : `${t.name}: ${_t('انقر لإضافة حصة', 'Click to add period', 'Klicken zum Hinzufügen')}`
-                                  }
-                                >
-                                  {lesson ? (
-                                    <div className="flex flex-col items-center justify-center bg-primary/10 hover:bg-primary/20 border border-primary/20 hover:border-primary/40 rounded-[4px] py-1 px-0.5 sm:px-1 w-full overflow-hidden transition-all">
-                                      <span className="font-bold text-text-main text-[9px] sm:text-[11px] leading-none truncate w-full">{lesson.className}</span>
-                                      {lesson.subjectName && (
-                                        <span className="text-[7.5px] sm:text-[9px] text-primary font-bold truncate w-full leading-none mt-0.5 hidden sm:block">
-                                          {lesson.subjectName}
+                          </tr>
+                          {timings.map(period => {
+                            const isThisPeriodActive = isDayActiveForLine(dayKey) && (liveTimeInfo.activePeriodNumber === period.periodNumber);
+
+                            return (
+                            <tr 
+                              key={`${dayKey}-${period.periodNumber}`} 
+                              className={`hover:bg-surface-hover/50 group relative transition-colors ${
+                                isThisPeriodActive ? 'bg-rose-500/[0.04] dark:bg-rose-500/[0.08]' : ''
+                              }`}
+                            >
+                              <td className={`p-0.5 sm:p-1 border-b border-surface-border font-bold text-text-muted text-center align-middle bg-surface group-hover:bg-surface-hover relative overflow-visible ${
+                                isThisPeriodActive ? 'ring-1 ring-inset ring-rose-500/30' : ''
+                              }`}>
+                                {/* Live Time Line cutting across the D/P cell with time badge */}
+                                {isThisPeriodActive && (
+                                  <div 
+                                    className="absolute left-0 right-0 h-[2.5px] bg-rose-500 dark:bg-rose-400 z-30 pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.9)]"
+                                    style={{ top: `${liveTimeInfo.progressPct}%` }}
+                                  >
+                                    <div className="absolute start-0 -translate-y-1/2 z-40 flex items-center gap-1 bg-rose-600 text-white text-[8px] sm:text-[8.5px] font-mono font-black px-1.5 py-0.5 rounded-full shadow-lg border border-white/40 whitespace-nowrap animate-pulse">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                                      <span>{liveTimeInfo.formatted}</span>
+                                      {liveTimeInfo.activeStatus === 'in_period' && (
+                                        <span className="hidden sm:inline text-[7px] font-sans font-bold opacity-90">
+                                          ({liveTimeInfo.remainingMinutes}د)
                                         </span>
                                       )}
                                     </div>
-                                  ) : (
-                                    <div className="flex items-center justify-center w-full py-1 text-slate-300 dark:text-slate-600 group-hover/cell:text-primary transition-colors">
-                                      <span className="text-[11px] font-black leading-none select-none">+</span>
+                                  </div>
+                                )}
+
+                                <div className="flex flex-col items-center justify-center leading-tight py-1 relative z-10">
+                                  <span className="text-text-main font-black text-[11px] sm:text-[12px]">{period.periodNumber}</span>
+                                  
+                                  {/* Explicit user requirement: Under period number, display when it ends */}
+                                  <div 
+                                    className="mt-0.5 px-1 sm:px-1.5 py-0.5 rounded bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary-light font-mono font-black text-[8px] sm:text-[8.5px] whitespace-nowrap flex items-center justify-center gap-0.5 border border-primary/20 shadow-2xs"
+                                    title={`${_t('الحصة', 'Period', 'Stunde')} ${period.periodNumber}: ${_t('من', 'from', 'von')} ${period.startTime} ${_t('حتى', 'to', 'bis')} ${period.endTime}`}
+                                  >
+                                    <span className="text-[6.5px] sm:text-[7px] font-sans font-bold opacity-80">{_t('ينتهي', 'Ends', 'Bis')}</span>
+                                    <span>{period.endTime}</span>
+                                  </div>
+
+                                  <span className="text-[6.5px] sm:text-[7px] text-text-muted font-mono opacity-65 mt-0.5" title={_t('وقت البداية', 'Start time', 'Startzeit')}>
+                                    {period.startTime}
+                                  </span>
+                                </div>
+                              </td>
+                              {teachers.map((t, tIdx) => {
+                                const isLastTeacher = tIdx === teachers.length - 1;
+                                const lesson = getLessonForTeacher(t.id, dayKey, period.periodNumber);
+                                const matchingCustoms = getCustomSessionsForPeriod(
+                                  schoolSettings.customTimedSessions,
+                                  dayKey,
+                                  period.periodNumber,
+                                  timings,
+                                  t.id
+                                );
+
+                                return (
+                                  <td 
+                                    key={t.id} 
+                                    onClick={() => startEditPeriod(t.id, dayKey, period.periodNumber)}
+                                    className="p-0.5 sm:p-1 border-b border-l border-surface-border text-center h-full align-middle overflow-visible cursor-pointer hover:bg-primary-soft/20 transition-colors group/cell relative"
+                                    title={lesson 
+                                      ? `${t.name}: ${lesson.className}${lesson.subjectName ? ` - ${lesson.subjectName}` : ''} (${_t('انقر للتعديل', 'Click to edit', 'Klicken zum Bearbeiten')})` 
+                                      : `${t.name}: ${_t('انقر لإضافة حصة', 'Click to add period', 'Klicken zum Hinzufügen')}`
+                                    }
+                                  >
+                                    {/* Horizontal Line cutting across this teacher's column */}
+                                    {isThisPeriodActive && (
+                                      <div 
+                                        className="absolute left-0 right-0 h-[2.5px] bg-rose-500 dark:bg-rose-400 z-30 pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.9)]"
+                                        style={{ top: `${liveTimeInfo.progressPct}%` }}
+                                      >
+                                        {isLastTeacher && (
+                                          <div className="absolute end-0 -translate-y-1/2 z-40 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900 shadow-md flex items-center justify-center">
+                                            <span className="w-1 h-1 rounded-full bg-white" />
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    <div className="flex flex-col gap-1 w-full relative z-10">
+                                      {lesson && (
+                                        <div className="flex flex-col items-center justify-center bg-primary/10 hover:bg-primary/20 border border-primary/20 hover:border-primary/40 rounded-[4px] py-1 px-0.5 sm:px-1 w-full overflow-hidden transition-all">
+                                          <span className="font-bold text-text-main text-[9px] sm:text-[11px] leading-none truncate w-full">{lesson.className}</span>
+                                          {lesson.subjectName && (
+                                            <span className="text-[7.5px] sm:text-[9px] text-primary font-bold truncate w-full leading-none mt-0.5 hidden sm:block">
+                                              {lesson.subjectName}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+
+                                      {matchingCustoms.map((cs: CustomTimedSession) => (
+                                        <div
+                                          key={cs.id}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleOpenEditCustomSession(cs);
+                                          }}
+                                          className="flex flex-col items-center justify-center bg-indigo-100/90 hover:bg-indigo-200/90 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/80 border border-indigo-300 dark:border-indigo-700/80 rounded-[4px] py-0.5 px-0.5 sm:px-1 w-full overflow-hidden transition-all cursor-pointer shadow-2xs group/cs"
+                                          title={`${t.name}: ${cs.className} (⏱️ ${cs.startTime} - ${cs.endTime}) ${cs.subjectName ? `- ${cs.subjectName}` : ''} - ${_t('انقر للتعديل', 'Click to edit', 'Klicken zum Bearbeiten')}`}
+                                        >
+                                          <span className="font-black text-indigo-950 dark:text-indigo-200 text-[9px] sm:text-[10.5px] leading-none truncate w-full">{cs.className}</span>
+                                          <span className="text-[7px] sm:text-[8px] text-indigo-700 dark:text-indigo-300 font-mono font-bold truncate w-full leading-none mt-0.5">
+                                            ⏱️ {cs.startTime}-{cs.endTime}
+                                          </span>
+                                          {cs.subjectName && (
+                                            <span className="text-[6.5px] sm:text-[7.5px] text-indigo-600 dark:text-indigo-400 font-semibold truncate w-full leading-none mt-0.5 hidden sm:block">
+                                              {cs.subjectName}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))}
+
+                                      {!lesson && matchingCustoms.length === 0 && (
+                                        <div className="flex items-center justify-center w-full py-1 text-slate-300 dark:text-slate-600 group-hover/cell:text-primary transition-colors">
+                                          <span className="text-[11px] font-black leading-none select-none">+</span>
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          )})}
 
-                        {/* Custom Timed Sessions Row in Grid Matrix for this Day */}
-                        {(() => {
-                          const dayCustoms = (schoolSettings.customTimedSessions || [] as CustomTimedSession[]).filter(
-                            (s: CustomTimedSession) => s.dayKey === dayKey
-                          );
-                          if (dayCustoms.length === 0) return null;
-
-                          return (
+                          {/* Unmatched / Extended Custom Timed Sessions integrated directly into the day timeline */}
+                          {dayUnmatchedCustoms.length > 0 && (
                             <tr className="bg-indigo-50/40 dark:bg-indigo-950/20 border-b border-indigo-200/50 dark:border-indigo-800/40">
                               <td className="p-0.5 sm:p-1 border-b border-indigo-200/50 dark:border-indigo-800/40 font-bold text-indigo-600 dark:text-indigo-400 text-center align-middle bg-indigo-50/70 dark:bg-indigo-950/40">
-                                <div className="flex flex-col items-center justify-center" title={_t('حصص بتوقيت مخصص', 'Custom Timed Sessions', 'Spezielle Zeiten')}>
-                                  <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                                <div className="flex flex-col items-center justify-center py-0.5" title={_t('حصص بتوقيت مخصص خارج الحصص الأساسية', 'Custom Timed Sessions', 'Spezielle Zeiten')}>
+                                  <Clock className="w-3 h-3 text-indigo-500" />
                                   <span className="text-[7.5px] sm:text-[8.5px] font-black tracking-tighter mt-0.5 leading-none">{_t('مخصص', 'Custom', 'Spez.')}</span>
                                 </div>
                               </td>
                               {teachers.map(t => {
-                                const teacherCustoms = dayCustoms.filter((s: CustomTimedSession) => s.teacherId === t.id);
+                                const teacherUnmatched = dayUnmatchedCustoms.filter((s: CustomTimedSession) => s.teacherId === t.id);
                                 return (
                                   <td 
                                     key={t.id} 
                                     className="p-0.5 sm:p-1 border-b border-l border-indigo-200/50 dark:border-indigo-800/40 text-center h-full align-middle overflow-hidden"
                                   >
-                                    {teacherCustoms.length > 0 ? (
+                                    {teacherUnmatched.length > 0 ? (
                                       <div className="flex flex-col gap-1 w-full">
-                                        {teacherCustoms.map((cs: CustomTimedSession) => (
+                                        {teacherUnmatched.map((cs: CustomTimedSession) => (
                                           <div
                                             key={cs.id}
                                             onClick={() => handleOpenEditCustomSession(cs)}
-                                            className="flex flex-col items-center justify-center bg-indigo-100/80 hover:bg-indigo-200/80 dark:bg-indigo-900/60 dark:hover:bg-indigo-900/90 border border-indigo-300 dark:border-indigo-700/60 rounded-[4px] py-1 px-0.5 sm:px-1 w-full overflow-hidden transition-all cursor-pointer shadow-2xs group/cs"
+                                            className="flex flex-col items-center justify-center bg-indigo-100/90 hover:bg-indigo-200/90 dark:bg-indigo-900/70 dark:hover:bg-indigo-900/90 border border-indigo-300 dark:border-indigo-700/80 rounded-[4px] py-1 px-0.5 sm:px-1 w-full overflow-hidden transition-all cursor-pointer shadow-2xs group/cs"
                                             title={`${t.name}: ${cs.className} (${cs.startTime} - ${cs.endTime}) ${cs.subjectName ? `- ${cs.subjectName}` : ''} - ${_t('انقر للتعديل', 'Click to edit', 'Klicken zum Bearbeiten')}`}
                                           >
                                             <span className="font-black text-indigo-900 dark:text-indigo-200 text-[9px] sm:text-[10.5px] leading-none truncate w-full">{cs.className}</span>
@@ -2735,7 +3226,7 @@ export const HodHubView: React.FC = () => {
                                               ⏱️ {cs.startTime}-{cs.endTime}
                                             </span>
                                             {cs.subjectName && (
-                                              <span className="text-[7px] sm:text-[8.5px] text-indigo-600 dark:text-indigo-400 font-semibold truncate w-full leading-none mt-0.5 hidden sm:block">
+                                              <span className="text-[7px] sm:text-[8px] text-indigo-600 dark:text-indigo-400 font-semibold truncate w-full leading-none mt-0.5 hidden sm:block">
                                                 {cs.subjectName}
                                               </span>
                                             )}
@@ -2756,10 +3247,10 @@ export const HodHubView: React.FC = () => {
                                 );
                               })}
                             </tr>
-                          );
-                        })()}
-                      </React.Fragment>
-                    ))}
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               ) : (
@@ -2770,13 +3261,23 @@ export const HodHubView: React.FC = () => {
                     </div>
                   ) : (
                     (['0','1','2','3','4'].filter(d => matrixDayFilter === 'all' || d === matrixDayFilter)).map((dayKey) => {
-                      const dayLessons = timings.map(p => getLessonForTeacher(selectedSingleTeacher, dayKey, p.periodNumber)).filter(Boolean);
-                      const dayCustomSessions = getTeacherCustomSessions(selectedSingleTeacher, dayKey);
-                      if (dayLessons.length === 0 && dayCustomSessions.length === 0) return null;
+                      const teacherSchedule = selectedSingleTeacher === 'hod' 
+                        ? schoolSettings.schedule?.[dayKey] 
+                        : schoolSettings.teacherSchedules?.[selectedSingleTeacher]?.[dayKey];
+                      
+                      const unifiedTimelineItems = getMergedDayScheduleItems(
+                        teacherSchedule,
+                        schoolSettings.customTimedSessions,
+                        dayKey,
+                        timings,
+                        selectedSingleTeacher
+                      );
+                      
+                      if (unifiedTimelineItems.length === 0) return null;
                       
                       return (
                         <div key={dayKey} className="bg-surface border border-surface-border rounded-xl overflow-hidden shadow-2xs">
-                          <div className="bg-surface-hover px-2 py-1 border-b border-surface-border font-black text-text-main text-[11px] flex items-center justify-between">
+                          <div className="bg-surface-hover px-2.5 py-1.5 border-b border-surface-border font-black text-text-main text-[11px] flex items-center justify-between">
                             <span>{WEEKDAY_NAMES[dayKey as keyof typeof WEEKDAY_NAMES]}</span>
                             <button
                               type="button"
@@ -2788,79 +3289,81 @@ export const HodHubView: React.FC = () => {
                             </button>
                           </div>
                           <div className="divide-y divide-surface-border/50">
-                            {timings.map(period => {
-                              const lesson = getLessonForTeacher(selectedSingleTeacher, dayKey, period.periodNumber);
-                              if (!lesson) return null;
+                            {unifiedTimelineItems.map((item) => {
+                              const isCustom = item.isCustomTime || item.type === 'custom_session';
                               
                               return (
                                 <div 
-                                  key={period.periodNumber} 
-                                  className="p-3 flex items-center justify-between hover:bg-surface-hover/30 cursor-pointer transition-colors"
+                                  key={item.id} 
+                                  className={`p-3 flex items-center justify-between cursor-pointer transition-colors ${
+                                    isCustom 
+                                      ? 'bg-indigo-50/50 dark:bg-indigo-950/25 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border-l-4 border-indigo-500' 
+                                      : 'hover:bg-surface-hover/30'
+                                  }`}
                                   onClick={() => {
-                                    startEditPeriod(selectedSingleTeacher, dayKey, period.periodNumber);
+                                    if (isCustom && item.rawCustomSession) {
+                                      handleOpenEditCustomSession(item.rawCustomSession);
+                                    } else if (item.periodNumber) {
+                                      startEditPeriod(selectedSingleTeacher, dayKey, item.periodNumber);
+                                    }
                                   }}
                                 >
-                                  <div className="flex items-center gap-1.5">
-                                    <div className="flex flex-col items-center justify-center w-10 h-10 bg-primary-soft text-primary rounded-xl shrink-0">
-                                      <span className="font-bold text-[11px]">{_t(`ح${period.periodNumber}`, `P${period.periodNumber}`, `S${period.periodNumber}`)}</span>
+                                  <div className="flex items-center gap-2">
+                                    <div className={`flex flex-col items-center justify-center w-11 h-11 rounded-xl shrink-0 ${
+                                      isCustom 
+                                        ? 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300' 
+                                        : 'bg-primary-soft text-primary'
+                                    }`}>
+                                      {item.periodNumber ? (
+                                        <span className="font-black text-[11px]">{_t(`ح${item.periodNumber}`, `P${item.periodNumber}`, `S${item.periodNumber}`)}</span>
+                                      ) : (
+                                        <Clock className="w-4 h-4" />
+                                      )}
+                                      <span className="text-[7.5px] font-bold font-mono tracking-tighter leading-none mt-0.5">
+                                        {isCustom ? _t('مخصص', 'Custom', 'Spez.') : item.periodNumber}
+                                      </span>
                                     </div>
                                     <div className="flex flex-col">
-                                      <span className="font-bold text-text-main text-[11px]">{lesson.className}</span>
-                                      <span className="text-[10px] text-text-muted font-mono">{period.startTime} - {period.endTime}</span>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-bold text-text-main text-[12px]">{item.className || _t('حصة بدون فصل', 'No Class Name', 'Ohne Klasse')}</span>
+                                        {isCustom && (
+                                          <span className="px-1.5 py-0.5 rounded-full text-[8.5px] font-bold bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                                            {item.sessionType || _t('توقيت مخصص', 'Custom Time', 'Spezielle Zeit')}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span className={`text-[10px] font-mono font-bold ${isCustom ? 'text-indigo-600 dark:text-indigo-400' : 'text-text-muted'}`}>
+                                        ⏱️ {item.startTime} - {item.endTime} {item.room ? `• ${item.room}` : ''}
+                                      </span>
                                     </div>
                                   </div>
-                                  {lesson.subjectName && (
-                                    <span className="text-[10px] font-bold px-2 py-1 bg-surface-hover text-text-muted rounded-lg border border-surface-border text-right max-w-[100px] truncate">
-                                      {lesson.subjectName}
-                                    </span>
-                                  )}
+                                  <div className="flex items-center gap-2">
+                                    {item.subjectName && (
+                                      <span className={`text-[10px] font-bold px-2 py-1 rounded-lg border max-w-[120px] truncate ${
+                                        isCustom 
+                                          ? 'bg-white dark:bg-surface text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' 
+                                          : 'bg-surface-hover text-text-muted border-surface-border text-right'
+                                      }`}>
+                                        {item.subjectName}
+                                      </span>
+                                    )}
+                                    {isCustom && item.rawCustomSession && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeleteCustomSession(item.rawCustomSession!.id);
+                                        }}
+                                        className="p-1 hover:bg-rose-50 text-rose-500 rounded-lg transition-colors cursor-pointer"
+                                        title={_t('حذف', 'Delete', 'Löschen')}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                               );
                             })}
-
-                            {/* Custom Timed Sessions for Single Teacher */}
-                            {dayCustomSessions.map(cs => (
-                              <div 
-                                key={cs.id}
-                                className="p-3 flex items-center justify-between bg-indigo-50/50 dark:bg-indigo-950/20 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 cursor-pointer transition-colors border-l-4 border-indigo-500"
-                                onClick={() => handleOpenEditCustomSession(cs)}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <div className="flex flex-col items-center justify-center w-10 h-10 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-xl shrink-0">
-                                    <Clock className="w-4 h-4" />
-                                  </div>
-                                  <div className="flex flex-col">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="font-bold text-text-main text-[11px]">{cs.className}</span>
-                                      <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
-                                        {cs.sessionType || _t('توقيت مخصص', 'Custom Time', 'Spezielle Zeit')}
-                                      </span>
-                                    </div>
-                                    <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono font-bold">
-                                      ⏱️ {cs.startTime} - {cs.endTime} {cs.room ? `• ${cs.room}` : ''}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  {cs.subjectName && (
-                                    <span className="text-[10px] font-bold px-2 py-1 bg-white dark:bg-surface text-indigo-700 dark:text-indigo-300 rounded-lg border border-indigo-200 dark:border-indigo-800">
-                                      {cs.subjectName}
-                                    </span>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDeleteCustomSession(cs.id);
-                                    }}
-                                    className="p-1 hover:bg-rose-50 text-rose-500 rounded-lg transition-colors cursor-pointer"
-                                    title={_t('حذف', 'Delete', 'Löschen')}
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
                           </div>
                         </div>
                       );
@@ -3463,6 +3966,17 @@ export const HodHubView: React.FC = () => {
                   </button>
                   <button
                     onClick={() => {
+                      setBulkExportTeacherId(undefined);
+                      setIsBulkVisitExportModalOpen(true);
+                    }}
+                    className="px-2 sm:px-2.5 py-1.5 sm:py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800 text-[10.5px] sm:text-[11px] font-bold rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap"
+                    title={_t('تصدير وطباعة تقارير الزيارات مجمعة', 'Bulk Observation Reports Export & Print', 'Sammeldruck von Unterrichtsbesuchen')}
+                  >
+                    <Download className="w-3.5 h-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                    <span className="truncate">{_t('تصدير الزيارات مجمعة', 'Bulk Visits Export', 'Sammeldruck')}</span>
+                  </button>
+                  <button
+                    onClick={() => {
                       setObsInitialTeacherId(undefined);
                       setIsVisitModalOpen(true);
                     }}
@@ -3988,23 +4502,36 @@ export const HodHubView: React.FC = () => {
 
                 {/* Embedded Observation Log (سجل الزيارات داخل كارت المدرس) */}
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       <FileText className="w-4 h-4 text-primary" />
                       <h4 className="text-[11px] font-bold text-text-main uppercase tracking-wider">
                         {_t('سجل الزيارات الصفية', 'Classroom Visits History', 'Besuchsverlauf')}
                       </h4>
                     </div>
-                    <button
-                      onClick={() => {
-                        setObsInitialTeacherId(t.id);
-                        setIsVisitModalOpen(true);
-                      }}
-                      className="px-2 py-1 bg-primary text-white hover:bg-primary-hover text-[11px] font-bold rounded-xl transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>{_t('تسجيل زيارة', 'Add Observation', 'Beobachtung hinzufügen')}</span>
-                    </button>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        onClick={() => {
+                          setBulkExportTeacherId(t.id);
+                          setIsBulkVisitExportModalOpen(true);
+                        }}
+                        className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800 text-[11px] font-bold rounded-xl transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                        title={_t('تصدير وطباعة تقارير الزيارات مجمعة', 'Bulk Observation Reports Export & Print', 'Sammeldruck')}
+                      >
+                        <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                        <span>{_t('تصدير / طباعة مجمعة', 'Bulk Export / Print', 'Sammeldruck')}</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setObsInitialTeacherId(t.id);
+                          setIsVisitModalOpen(true);
+                        }}
+                        className="px-2 py-1 bg-primary text-white hover:bg-primary-hover text-[11px] font-bold rounded-xl transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{_t('تسجيل زيارة', 'Add Observation', 'Beobachtung hinzufügen')}</span>
+                      </button>
+                    </div>
                   </div>
 
                   {(() => {
@@ -4019,82 +4546,927 @@ export const HodHubView: React.FC = () => {
                       );
                     }
 
+                    const selectedTeacherVisits = teacherVisitsList.filter(v => selectedTeacherVisitIds.has(v.id));
+                    const isAllSelected = teacherVisitsList.length > 0 && selectedTeacherVisits.length === teacherVisitsList.length;
+
+                    const toggleSelectAllForTeacher = () => {
+                      if (isAllSelected) {
+                        setSelectedTeacherVisitIds(prev => {
+                          const next = new Set(prev);
+                          teacherVisitsList.forEach(v => next.delete(v.id));
+                          return next;
+                        });
+                      } else {
+                        setSelectedTeacherVisitIds(prev => {
+                          const next = new Set(prev);
+                          teacherVisitsList.forEach(v => next.add(v.id));
+                          return next;
+                        });
+                      }
+                    };
+
+                    const toggleSelectVisit = (visitId: string) => {
+                      setSelectedTeacherVisitIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(visitId)) {
+                          next.delete(visitId);
+                        } else {
+                          next.add(visitId);
+                        }
+                        return next;
+                      });
+                    };
+
                     return (
                       <div className="space-y-2">
-                        {teacherVisitsList.map(v => (
-                          <div key={v.id} className="p-3 bg-surface-hover border border-surface-border rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 hover:border-primary/30 transition-all">
-                            <div className="min-w-0 flex-1 space-y-1">
-                              <div className="flex items-center gap-2">
-                                <h5 className="text-[11px] font-bold text-text-main truncate">{_t('الفصل:', 'Class:', 'Klasse:')} {v.className}</h5>
-                                <span className="text-[10px] font-black px-2 py-0.5 rounded-md border border-primary/20 bg-primary/5 text-primary">
-                                  {v.overallScore || '-'}/75
-                                </span>
-                                {v.overallCategory && (
-                                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-surface border border-surface-border text-text-muted">
-                                    {v.overallCategory}
-                                  </span>
+                        {/* Quick Selection Toolbar */}
+                        <div className="flex items-center justify-between bg-surface-hover/80 px-2.5 py-1.5 rounded-xl border border-surface-border flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={toggleSelectAllForTeacher}
+                            className="flex items-center gap-1.5 text-xs font-bold text-text-main hover:text-primary transition-colors cursor-pointer"
+                          >
+                            {isAllSelected ? (
+                              <CheckSquare className="w-4 h-4 text-primary" />
+                            ) : (
+                              <Square className="w-4 h-4 text-text-muted" />
+                            )}
+                            <span>
+                              {isAllSelected
+                                ? _t('إلغاء تحديد الكل', 'Deselect All', 'Alle abwählen')
+                                : _t('تحديد الكل', 'Select All', 'Alle auswählen')}
+                            </span>
+                          </button>
+
+                          {selectedTeacherVisits.length > 0 ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[11px] text-text-muted">
+                                {_t('تم تحديد', 'Selected', 'Ausgewählt')}{' '}
+                                <strong className="text-primary font-black">{selectedTeacherVisits.length}</strong>{' '}
+                                {_t('من', 'of', 'von')} {teacherVisitsList.length}
+                              </span>
+
+                              <button
+                                onClick={() => handleBatchPrintVisits(selectedTeacherVisits)}
+                                className="h-7 px-2 text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 dark:text-indigo-300 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 dark:border-indigo-800 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                                title={_t('طباعة التقارير المحددة', 'Print Selected', 'Ausgewählte drucken')}
+                              >
+                                <Printer className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                                <span>{_t('طباعة مجمعة', 'Bulk Print', 'Sammeldruck')}</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleBatchDownloadVisitsPdf(selectedTeacherVisits)}
+                                disabled={isBatchGeneratingPdf}
+                                className="h-7 px-2.5 text-[10px] font-bold text-white bg-primary hover:bg-primary-hover rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-xs disabled:opacity-50"
+                                title={_t('تحميل التقارير المحددة في ملف PDF واحد', 'Download Selected as single combined PDF', 'Als kombiniertes PDF herunterladen')}
+                              >
+                                {isBatchGeneratingPdf ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Download className="w-3 h-3" />
                                 )}
+                                <span>
+                                  {isBatchGeneratingPdf
+                                    ? _t('جاري التحميل...', 'Downloading...', 'Wird geladen...')
+                                    : _t(`تحميل PDF مجمّع (${selectedTeacherVisits.length})`, `Download PDF (${selectedTeacherVisits.length})`, `PDF (${selectedTeacherVisits.length})`)}
+                                </span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setSelectedTeacherVisitIds(prev => {
+                                    const next = new Set(prev);
+                                    teacherVisitsList.forEach(v => next.delete(v.id));
+                                    return next;
+                                  });
+                                }}
+                                className="h-7 px-2 text-[10px] font-bold text-text-muted hover:text-text-main rounded-lg transition-all cursor-pointer"
+                              >
+                                {_t('إلغاء', 'Clear', 'Abbrechen')}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-text-muted">
+                              {_t('حدد التقارير للتحميل في ملف PDF واحد', 'Select reports to download as single PDF', 'Wählen Sie Berichte für ein PDF')}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Progress Bar for Batch Generation */}
+                        {isBatchGeneratingPdf && batchProgress && (
+                          <div className="p-2 bg-primary/10 border border-primary/20 rounded-xl flex items-center justify-between text-[11px] text-primary font-bold">
+                            <div className="flex items-center gap-2">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>
+                                {_t(
+                                  `جاري إعداد الصفحة ${batchProgress.current} من ${batchProgress.total}...`,
+                                  `Preparing page ${batchProgress.current} of ${batchProgress.total}...`,
+                                  `Seite ${batchProgress.current} von ${batchProgress.total} wird vorbereitet...`
+                                )}
+                              </span>
+                            </div>
+                            <span className="font-mono">{Math.round((batchProgress.current / batchProgress.total) * 100)}%</span>
+                          </div>
+                        )}
+
+                        {teacherVisitsList.map(v => {
+                          const isSelected = selectedTeacherVisitIds.has(v.id);
+                          return (
+                            <div
+                              key={v.id}
+                              className={`p-3 border rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 transition-all ${
+                                isSelected
+                                  ? 'bg-primary/5 border-primary/40 shadow-2xs'
+                                  : 'bg-surface-hover border-surface-border hover:border-primary/30'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSelectVisit(v.id)}
+                                  className="text-primary hover:scale-110 transition-transform cursor-pointer p-0.5 shrink-0"
+                                  title={isSelected ? _t('إلغاء التحديد', 'Deselect', 'Abwählen') : _t('تحديد', 'Select', 'Auswählen')}
+                                >
+                                  {isSelected ? (
+                                    <CheckSquare className="w-4 h-4 text-primary" />
+                                  ) : (
+                                    <Square className="w-4 h-4 text-text-muted hover:text-text-main" />
+                                  )}
+                                </button>
+
+                                <div className="min-w-0 flex-1 space-y-0.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <h5 className="text-[11px] font-bold text-text-main truncate">{_t('الفصل:', 'Class:', 'Klasse:')} {v.className}</h5>
+                                    <span className="text-[9.5px] font-black px-1.5 py-0.2 rounded-md border border-primary/20 bg-primary/5 text-primary">
+                                      {v.overallScore || '-'}/75
+                                    </span>
+                                    {v.overallCategory && (
+                                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-surface border border-surface-border text-text-muted">
+                                        {v.overallCategory}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-text-muted flex items-center gap-1.5 flex-wrap">
+                                    <span>{new Date(v.visitedDate || v.date || Date.now()).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                                    <span>•</span>
+                                    <span>{_t('الحصة', 'Period', 'Stunde')} {v.periodNumber || '-'}</span>
+                                  </div>
+                                  {v.consolidatedNotes && (
+                                    <div className="text-[9.5px] text-text-muted truncate max-w-full italic flex items-center gap-1 opacity-80">
+                                      <FileText className="w-2.5 h-2.5 shrink-0 text-text-muted/60" />
+                                      <span className="truncate">{v.consolidatedNotes}</span>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                              <div className="text-[10px] text-text-muted flex items-center gap-1.5">
-                                <span>{new Date(v.visitedDate || v.date || Date.now()).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
-                                <span>•</span>
-                                <span>{_t('الحصة', 'Period', 'Stunde')} {v.periodNumber || '-'}</span>
+
+                              <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 self-end sm:self-auto flex-wrap pt-1 sm:pt-0">
+                                <button
+                                  onClick={() => setPreviewVisitRecord(v)}
+                                  className="h-7 sm:h-8 px-2 sm:px-2.5 text-[10px] sm:text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200/80 dark:text-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:border-slate-700 rounded-lg transition-all duration-150 active:scale-95 flex items-center justify-center gap-1 cursor-pointer shadow-2xs"
+                                  title={_t('معاينة التقرير', 'Preview Report', 'Bericht anzeigen')}
+                                >
+                                  <Eye className="w-3 h-3 text-slate-600 dark:text-slate-300" />
+                                  <span>{_t('معاينة', 'Preview', 'Vorschau')}</span>
+                                </button>
+                                <button
+                                  onClick={() => handleShareWhatsApp(v)}
+                                  disabled={!!activeLoadingAction}
+                                  className="h-7 sm:h-8 px-2 sm:px-2.5 text-[10px] sm:text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 dark:text-emerald-300 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 dark:border-emerald-800 rounded-lg transition-all duration-150 active:scale-95 flex items-center justify-center gap-1 cursor-pointer shadow-2xs disabled:opacity-60 disabled:pointer-events-none"
+                                  title={_t('مشاركة عبر واتساب', 'Share via WhatsApp', 'Über WhatsApp teilen')}
+                                >
+                                  {activeLoadingAction?.id === v.id && activeLoadingAction?.type === 'share' ? (
+                                    <Loader2 className="w-3 h-3 animate-spin text-emerald-600 dark:text-emerald-400" />
+                                  ) : (
+                                    <MessageCircle className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                  )}
+                                  <span>
+                                    {activeLoadingAction?.id === v.id && activeLoadingAction?.type === 'share'
+                                      ? _t('جاري...', 'Sharing...', 'Wird geteilt...')
+                                      : _t('واتساب', 'WhatsApp', 'WhatsApp')}
+                                  </span>
+                                </button>
+                                <button
+                                  onClick={() => handleDownloadPdf(v)}
+                                  disabled={!!activeLoadingAction}
+                                  className="h-7 sm:h-8 px-2 sm:px-2.5 text-[10px] sm:text-[11px] font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200/80 dark:text-sky-300 dark:bg-sky-950/40 dark:hover:bg-sky-900/60 dark:border-sky-800 rounded-lg transition-all duration-150 active:scale-95 flex items-center justify-center gap-1 cursor-pointer shadow-2xs disabled:opacity-60 disabled:pointer-events-none"
+                                  title={_t('تحميل ملف PDF', 'Download PDF File', 'PDF herunterladen')}
+                                >
+                                  {activeLoadingAction?.id === v.id && activeLoadingAction?.type === 'download' ? (
+                                    <Loader2 className="w-3 h-3 animate-spin text-sky-600 dark:text-sky-400" />
+                                  ) : (
+                                    <Download className="w-3 h-3 text-sky-600 dark:text-sky-400" />
+                                  )}
+                                  <span>
+                                    {activeLoadingAction?.id === v.id && activeLoadingAction?.type === 'download'
+                                      ? _t('جاري...', 'Generating...', 'Wird geladen...')
+                                      : _t('PDF', 'PDF', 'PDF')}
+                                  </span>
+                                </button>
+                                <button
+                                  onClick={() => printObservationReport(v, schoolSettings, (language === 'ar'), language)}
+                                  className="h-7 sm:h-8 px-2 sm:px-2.5 text-[10px] sm:text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 dark:text-indigo-300 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 dark:border-indigo-800 rounded-lg transition-all duration-150 active:scale-95 flex items-center justify-center gap-1 cursor-pointer shadow-2xs"
+                                  title={_t('طباعة التقرير', 'Print Report', 'Drucken')}
+                                >
+                                  <Printer className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                                  <span>{_t('طباعة', 'Print', 'Drucken')}</span>
+                                </button>
                               </div>
                             </div>
-                            <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto flex-wrap">
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Teacher Notes & School Session Notes Section (ملاحظات الحصص والفصول المدرسية للمعلم) */}
+                <div className="space-y-3 pt-2 border-t border-surface-border" id="teacher-school-notes-section">
+                  {(() => {
+                    // 1. Gather all classes linked to this teacher
+                    const assignedClasses = workload.assignedClasses || [];
+                    const teacherClassesSet = new Set<string>(assignedClasses.map((c: string) => c.trim()));
+                    
+                    // Also include classes from teacher's timetable
+                    const tSched = schoolSettings.teacherSchedules?.[t.id] || (t.isHod ? schoolSettings.schedule : {});
+                    if (tSched) {
+                      Object.values(tSched).forEach((dayPeriods: any) => {
+                        if (Array.isArray(dayPeriods)) {
+                          dayPeriods.forEach(p => {
+                            if (p.className) teacherClassesSet.add(p.className.trim());
+                          });
+                        }
+                      });
+                    }
+                    // Also include custom timed sessions
+                    const tCustoms = (schoolSettings.customTimedSessions || [] as CustomTimedSession[]).filter(
+                      (cs: CustomTimedSession) => cs.teacherId === t.id
+                    );
+                    tCustoms.forEach((cs: CustomTimedSession) => {
+                      if (cs.className) teacherClassesSet.add(cs.className.trim());
+                    });
+
+                    const teacherClassesList = Array.from(teacherClassesSet).filter(Boolean);
+
+                    // 2. Filter notes belonging to this teacher, their classes, or students
+                    const allTeacherNotes = (schoolNotes || []).filter(n => {
+                      if (n.deleted) return false;
+                      if (n.teacherId && n.teacherId === t.id) return true;
+                      if (n.teacherName && n.teacherName.trim().toLowerCase() === t.name.trim().toLowerCase()) return true;
+                      if (n.className && teacherClassesList.some(c => c.toLowerCase() === n.className!.trim().toLowerCase())) return true;
+                      return false;
+                    });
+
+                    // Sub-counts
+                    const pinnedNotesCount = allTeacherNotes.filter(n => n.pinned).length;
+                    const lessonNotesCount = allTeacherNotes.filter(n => n.type === 'lesson').length;
+                    const classNotesCount = allTeacherNotes.filter(n => n.type === 'class').length;
+                    const studentNotesCount = allTeacherNotes.filter(n => n.type === 'student').length;
+
+                    // Filtered by Search & Filter Tabs
+                    const filteredNotes = allTeacherNotes.filter(n => {
+                      // Type Filter
+                      if (teacherNotesFilterType === 'pinned' && !n.pinned) return false;
+                      if (teacherNotesFilterType !== 'all' && teacherNotesFilterType !== 'pinned' && n.type !== teacherNotesFilterType) return false;
+                      // Class Filter
+                      if (teacherNotesClassFilter !== 'all' && n.className?.trim().toLowerCase() !== teacherNotesClassFilter.trim().toLowerCase()) return false;
+                      // Search
+                      if (teacherNotesSearch.trim()) {
+                        const q = teacherNotesSearch.trim().toLowerCase();
+                        const matchesText = n.text?.toLowerCase().includes(q);
+                        const matchesStudent = n.studentName?.toLowerCase().includes(q);
+                        const matchesClass = n.className?.toLowerCase().includes(q);
+                        const matchesTags = (n.tags || []).some(tag => tag.toLowerCase().includes(q));
+                        if (!matchesText && !matchesStudent && !matchesClass && !matchesTags) return false;
+                      }
+                      return true;
+                    }).sort((a, b) => {
+                      if (a.pinned && !b.pinned) return -1;
+                      if (!a.pinned && b.pinned) return 1;
+                      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+                    });
+
+                    const handleSaveTeacherNote = (e?: React.FormEvent) => {
+                      if (e) e.preventDefault();
+                      if (!teacherNoteForm.text.trim()) {
+                        triggerToast(_t('يرجى كتابة نص الملاحظة', 'Please enter note text', 'Bitte Notiztext eingeben'));
+                        return;
+                      }
+
+                      if (editingTeacherNoteId) {
+                        updateSchoolNote(editingTeacherNoteId, {
+                          type: teacherNoteForm.type,
+                          text: teacherNoteForm.text.trim(),
+                          tags: teacherNoteForm.tags,
+                          pinned: teacherNoteForm.pinned,
+                          className: teacherNoteForm.className.trim(),
+                          teacherId: t.id,
+                          teacherName: t.name,
+                          periodNumber: teacherNoteForm.type === 'lesson' ? Number(teacherNoteForm.periodNumber) || 1 : undefined,
+                          date: teacherNoteForm.type === 'lesson' ? teacherNoteForm.date : undefined,
+                          studentId: teacherNoteForm.type === 'student' ? teacherNoteForm.studentId : undefined,
+                          studentName: teacherNoteForm.type === 'student' ? teacherNoteForm.studentName : undefined,
+                        });
+                        triggerToast(_t('تم تحديث الملاحظة بنجاح ✅', 'Note updated successfully ✅', 'Notiz aktualisiert ✅'));
+                        setEditingTeacherNoteId(null);
+                      } else {
+                        addSchoolNote({
+                          type: teacherNoteForm.type,
+                          text: teacherNoteForm.text.trim(),
+                          tags: teacherNoteForm.tags,
+                          pinned: teacherNoteForm.pinned,
+                          className: teacherNoteForm.className.trim() || (teacherClassesList[0] || ''),
+                          teacherId: t.id,
+                          teacherName: t.name,
+                          periodNumber: teacherNoteForm.type === 'lesson' ? Number(teacherNoteForm.periodNumber) || 1 : undefined,
+                          date: teacherNoteForm.type === 'lesson' ? teacherNoteForm.date : undefined,
+                          studentId: teacherNoteForm.type === 'student' ? teacherNoteForm.studentId : undefined,
+                          studentName: teacherNoteForm.type === 'student' ? teacherNoteForm.studentName : undefined,
+                        });
+                        triggerToast(_t('تم حفظ الملاحظة بنجاح 📝', 'Note added successfully 📝', 'Notiz hinzugefügt 📝'));
+                      }
+
+                      setIsTeacherNoteFormOpen(false);
+                      setTeacherNoteForm({
+                        type: 'lesson',
+                        className: teacherClassesList[0] || '',
+                        studentId: '',
+                        studentName: '',
+                        periodNumber: 1,
+                        date: new Date().toISOString().split('T')[0],
+                        tags: [],
+                        pinned: false,
+                        text: ''
+                      });
+                    };
+
+                    const handleStartEditTeacherNote = (note: SchoolNote) => {
+                      setEditingTeacherNoteId(note.id);
+                      setTeacherNoteForm({
+                        type: note.type,
+                        className: note.className || teacherClassesList[0] || '',
+                        studentId: note.studentId || '',
+                        studentName: note.studentName || '',
+                        periodNumber: note.periodNumber || 1,
+                        date: note.date || new Date().toISOString().split('T')[0],
+                        tags: note.tags || [],
+                        pinned: !!note.pinned,
+                        text: note.text
+                      });
+                      setIsTeacherNoteFormOpen(true);
+                    };
+
+                    const toggleFormTag = (tagLabel: string) => {
+                      setTeacherNoteForm(prev => ({
+                        ...prev,
+                        tags: prev.tags.includes(tagLabel)
+                          ? prev.tags.filter(t => t !== tagLabel)
+                          : [...prev.tags, tagLabel]
+                      }));
+                    };
+
+                    return (
+                      <div className="space-y-3">
+                        {/* Section Header */}
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <BookOpen className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                            <h4 className="text-[11px] font-bold text-text-main uppercase tracking-wider flex items-center gap-1.5">
+                              <span>{_t('ملاحظات الحصص والفصول المدرسية', 'School & Class Notes', 'Unterrichts- & Klassennotizen')}</span>
+                              <span className="text-[10px] font-black px-1.5 py-0.2 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                                {allTeacherNotes.length}
+                              </span>
+                            </h4>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isTeacherNoteFormOpen && !editingTeacherNoteId) {
+                                setIsTeacherNoteFormOpen(false);
+                              } else {
+                                setEditingTeacherNoteId(null);
+                                setTeacherNoteForm({
+                                  type: 'lesson',
+                                  className: teacherClassesList[0] || '',
+                                  studentId: '',
+                                  studentName: '',
+                                  periodNumber: 1,
+                                  date: new Date().toISOString().split('T')[0],
+                                  tags: [],
+                                  pinned: false,
+                                  text: ''
+                                });
+                                setIsTeacherNoteFormOpen(true);
+                              }
+                            }}
+                            className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold rounded-xl transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                          >
+                            {isTeacherNoteFormOpen && !editingTeacherNoteId ? (
+                              <>
+                                <X className="w-3.5 h-3.5" />
+                                <span>{_t('إغلاق النموذج', 'Close Form', 'Schließen')}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>{_t('إضافة ملاحظة للمعلم / فصوله', 'Add Note for Teacher', 'Notiz hinzufügen')}</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* Add/Edit Note Form */}
+                        {isTeacherNoteFormOpen && (
+                          <div className="bg-surface-hover/80 border border-amber-500/30 rounded-2xl p-3.5 space-y-3 animate-in fade-in duration-200">
+                            <div className="flex items-center justify-between border-b border-surface-border/80 pb-2">
+                              <span className="text-xs font-black text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                                <Edit3 className="w-3.5 h-3.5" />
+                                {editingTeacherNoteId ? _t('تعديل الملاحظة', 'Edit Note', 'Notiz bearbeiten') : _t('إضافة ملاحظة جديدة', 'Add New Note', 'Neue Notiz')}
+                              </span>
                               <button
-                                onClick={() => setPreviewVisitRecord(v)}
-                                className="h-9 px-3 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200/80 dark:text-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:border-slate-700 rounded-xl transition-all duration-150 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                                title={_t('معاينة التقرير', 'Preview Report', 'Bericht anzeigen')}
+                                type="button"
+                                onClick={() => {
+                                  setIsTeacherNoteFormOpen(false);
+                                  setEditingTeacherNoteId(null);
+                                }}
+                                className="text-text-muted hover:text-text-main p-1 rounded-lg"
                               >
-                                <Eye className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
-                                <span>{_t('معاينة', 'Preview', 'Vorschau')}</span>
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            {/* Note Type Selector */}
+                            <div className="grid grid-cols-3 gap-1.5 bg-surface p-1 rounded-xl border border-surface-border">
+                              <button
+                                type="button"
+                                onClick={() => setTeacherNoteForm(prev => ({ ...prev, type: 'lesson' }))}
+                                className={`py-1.5 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                                  teacherNoteForm.type === 'lesson'
+                                    ? 'bg-amber-500 text-white shadow-2xs'
+                                    : 'text-text-muted hover:text-text-main hover:bg-surface-hover'
+                                }`}
+                              >
+                                <Clock className="w-3.5 h-3.5" />
+                                <span>{_t('حصة', 'Lesson', 'Stunde')}</span>
                               </button>
                               <button
-                                onClick={() => handleShareWhatsApp(v)}
-                                disabled={!!activeLoadingAction}
-                                className="h-9 px-3 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 dark:text-emerald-300 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 dark:border-emerald-800 rounded-xl transition-all duration-150 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60 disabled:pointer-events-none"
-                                title={_t('مشاركة عبر واتساب', 'Share via WhatsApp', 'Über WhatsApp teilen')}
+                                type="button"
+                                onClick={() => setTeacherNoteForm(prev => ({ ...prev, type: 'class' }))}
+                                className={`py-1.5 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                                  teacherNoteForm.type === 'class'
+                                    ? 'bg-amber-500 text-white shadow-2xs'
+                                    : 'text-text-muted hover:text-text-main hover:bg-surface-hover'
+                                }`}
                               >
-                                {activeLoadingAction?.id === v.id && activeLoadingAction?.type === 'share' ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600 dark:text-emerald-400" />
+                                <Users className="w-3.5 h-3.5" />
+                                <span>{_t('فصل كامل', 'Class', 'Klasse')}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setTeacherNoteForm(prev => ({ ...prev, type: 'student' }))}
+                                className={`py-1.5 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                                  teacherNoteForm.type === 'student'
+                                    ? 'bg-amber-500 text-white shadow-2xs'
+                                    : 'text-text-muted hover:text-text-main hover:bg-surface-hover'
+                                }`}
+                              >
+                                <GraduationCap className="w-3.5 h-3.5" />
+                                <span>{_t('طالب محدد', 'Student', 'Schüler')}</span>
+                              </button>
+                            </div>
+
+                            {/* Form Fields Grid */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              {/* Class Selection */}
+                              <div>
+                                <label className="block text-[10px] font-bold text-text-muted mb-1">
+                                  {_t('الفصل الدراسي', 'Class', 'Klasse')}
+                                </label>
+                                {teacherClassesList.length > 0 ? (
+                                  <select
+                                    value={teacherNoteForm.className}
+                                    onChange={(e) => setTeacherNoteForm(prev => ({ ...prev, className: e.target.value }))}
+                                    className="w-full bg-surface border border-surface-border rounded-xl px-2.5 py-1.5 text-xs font-bold text-text-main focus:outline-none focus:border-amber-500"
+                                  >
+                                    <option value="">{_t('-- اختر الفصل --', '-- Select Class --', '-- Klasse wählen --')}</option>
+                                    {teacherClassesList.map(c => (
+                                      <option key={c} value={c}>{c}</option>
+                                    ))}
+                                  </select>
                                 ) : (
-                                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                  <input
+                                    type="text"
+                                    value={teacherNoteForm.className}
+                                    onChange={(e) => setTeacherNoteForm(prev => ({ ...prev, className: e.target.value }))}
+                                    placeholder={_t('اسم الفصل (مثال: 1/1)', 'Class name (e.g. 1/1)', 'Klasse')}
+                                    className="w-full bg-surface border border-surface-border rounded-xl px-2.5 py-1.5 text-xs font-bold text-text-main focus:outline-none focus:border-amber-500"
+                                  />
                                 )}
-                                <span>
-                                  {activeLoadingAction?.id === v.id && activeLoadingAction?.type === 'share'
-                                    ? _t('جاري المشاركة...', 'Sharing...', 'Wird geteilt...')
-                                    : _t('واتساب', 'WhatsApp', 'WhatsApp')}
-                                </span>
-                              </button>
+                              </div>
+
+                              {/* Lesson Specifics */}
+                              {teacherNoteForm.type === 'lesson' && (
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-text-muted mb-1">
+                                      {_t('رقم الحصة', 'Period', 'Stunde')}
+                                    </label>
+                                    <select
+                                      value={teacherNoteForm.periodNumber}
+                                      onChange={(e) => setTeacherNoteForm(prev => ({ ...prev, periodNumber: Number(e.target.value) }))}
+                                      className="w-full bg-surface border border-surface-border rounded-xl px-2.5 py-1.5 text-xs font-bold text-text-main focus:outline-none focus:border-amber-500"
+                                    >
+                                      {[1, 2, 3, 4, 5, 6, 7, 8].map(p => (
+                                        <option key={p} value={p}>{_t(`حصة ${p}`, `Period ${p}`, `Std. ${p}`)}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-text-muted mb-1">
+                                      {_t('التاريخ', 'Date', 'Datum')}
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={teacherNoteForm.date}
+                                      onChange={(e) => setTeacherNoteForm(prev => ({ ...prev, date: e.target.value }))}
+                                      className="w-full bg-surface border border-surface-border rounded-xl px-2 py-1.5 text-xs font-bold text-text-main focus:outline-none focus:border-amber-500 font-mono"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Student Specifics */}
+                              {teacherNoteForm.type === 'student' && (
+                                <div>
+                                  <label className="block text-[10px] font-bold text-text-muted mb-1">
+                                    {_t('اسم الطالب', 'Student Name', 'Schülername')}
+                                  </label>
+                                  {(() => {
+                                    const matchingStudents = (hodStudents || []).filter(s => 
+                                      !teacherNoteForm.className || s.className?.trim().toLowerCase() === teacherNoteForm.className.trim().toLowerCase()
+                                    );
+                                    return (
+                                      <select
+                                        value={teacherNoteForm.studentId}
+                                        onChange={(e) => {
+                                          const sId = e.target.value;
+                                          const found = matchingStudents.find(s => s.id === sId);
+                                          setTeacherNoteForm(prev => ({
+                                            ...prev,
+                                            studentId: sId,
+                                            studentName: found ? found.name : ''
+                                          }));
+                                        }}
+                                        className="w-full bg-surface border border-surface-border rounded-xl px-2.5 py-1.5 text-xs font-bold text-text-main focus:outline-none focus:border-amber-500"
+                                      >
+                                        <option value="">{_t('-- اختر الطالب --', '-- Select Student --', '-- Schüler wählen --')}</option>
+                                        {matchingStudents.map(s => (
+                                          <option key={s.id} value={s.id}>{s.name} ({s.className || '-'})</option>
+                                        ))}
+                                      </select>
+                                    );
+                                  })()}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Quick Tags */}
+                            <div>
+                              <label className="block text-[10px] font-bold text-text-muted mb-1">
+                                {_t('الوسوم السريعة', 'Quick Tags', 'Tags')}
+                              </label>
+                              <div className="flex flex-wrap gap-1.5">
+                                {QUICK_TEACHER_NOTE_TAGS.map(tag => {
+                                  const tagLabel = language === 'ar' ? tag.ar : language === 'de' ? tag.de : tag.en;
+                                  const isSelected = teacherNoteForm.tags.includes(tagLabel);
+                                  return (
+                                    <button
+                                      key={tag.en}
+                                      type="button"
+                                      onClick={() => toggleFormTag(tagLabel)}
+                                      className={`px-2 py-0.8 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                                        isSelected 
+                                          ? `${tag.color} ring-1 ring-amber-500/40 shadow-2xs` 
+                                          : 'bg-surface text-text-muted border-surface-border hover:bg-surface-hover'
+                                      }`}
+                                    >
+                                      {tagLabel}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Note Text Area */}
+                            <div>
+                              <textarea
+                                value={teacherNoteForm.text}
+                                onChange={(e) => setTeacherNoteForm(prev => ({ ...prev, text: e.target.value }))}
+                                placeholder={_t('اكتب ملاحظتك التفصيلية هنا...', 'Type detailed note here...', 'Detaillierte Notiz hier eingeben...')}
+                                rows={3}
+                                className="w-full bg-surface border border-surface-border rounded-xl p-2.5 text-xs text-text-main placeholder:text-text-muted/50 focus:outline-none focus:border-amber-500 leading-relaxed"
+                              />
+                            </div>
+
+                            {/* Pin Toggle & Action Buttons */}
+                            <div className="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-surface-border/60">
                               <button
-                                onClick={() => handleDownloadPdf(v)}
-                                disabled={!!activeLoadingAction}
-                                className="h-9 px-3 text-[11px] font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200/80 dark:text-sky-300 dark:bg-sky-950/40 dark:hover:bg-sky-900/60 dark:border-sky-800 rounded-xl transition-all duration-150 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60 disabled:pointer-events-none"
-                                title={_t('تحميل ملف PDF', 'Download PDF File', 'PDF herunterladen')}
+                                type="button"
+                                onClick={() => setTeacherNoteForm(prev => ({ ...prev, pinned: !prev.pinned }))}
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                  teacherNoteForm.pinned 
+                                    ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/40 shadow-2xs' 
+                                    : 'bg-surface text-text-muted border-surface-border hover:bg-surface-hover'
+                                }`}
                               >
-                                {activeLoadingAction?.id === v.id && activeLoadingAction?.type === 'download' ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600 dark:text-sky-400" />
-                                ) : (
-                                  <Download className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-                                )}
-                                <span>
-                                  {activeLoadingAction?.id === v.id && activeLoadingAction?.type === 'download'
-                                    ? _t('جاري التحميل...', 'Generating PDF...', 'Wird geladen...')
-                                    : _t('تحميل PDF', 'Download PDF', 'PDF herunterladen')}
-                                </span>
+                                <Pin className={`w-3.5 h-3.5 ${teacherNoteForm.pinned ? 'fill-amber-500 text-amber-500' : ''}`} />
+                                <span>{_t('تثبيت في الأعلى', 'Pin to Top', 'Oben anheften')}</span>
                               </button>
-                              <button
-                                onClick={() => printObservationReport(v, schoolSettings, (language === 'ar'), language)}
-                                className="h-9 px-3 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 dark:text-indigo-300 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 dark:border-indigo-800 rounded-xl transition-all duration-150 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                                title={_t('طباعة التقرير', 'Print Report', 'Drucken')}
-                              >
-                                <Printer className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                                <span>{_t('طباعة', 'Print', 'Drucken')}</span>
-                              </button>
+
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsTeacherNoteFormOpen(false);
+                                    setEditingTeacherNoteId(null);
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-bold text-text-muted hover:text-text-main bg-surface hover:bg-surface-hover border border-surface-border rounded-xl transition-all cursor-pointer"
+                                >
+                                  {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleSaveTeacherNote}
+                                  className="px-4 py-1.5 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 rounded-xl transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>{editingTeacherNoteId ? _t('حفظ التعديلات', 'Save Changes', 'Änderungen speichern') : _t('حفظ الملاحظة', 'Save Note', 'Notiz speichern')}</span>
+                                </button>
+                              </div>
                             </div>
                           </div>
-                        ))}
+                        )}
+
+                        {/* Filter Toolbar (Search & Pills) */}
+                        {allTeacherNotes.length > 0 && (
+                          <div className="space-y-2 bg-surface-hover/50 p-2.5 rounded-2xl border border-surface-border">
+                            {/* Search + Class Dropdown */}
+                            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between">
+                              <div className="relative flex-1">
+                                <Search className="w-3.5 h-3.5 text-text-muted absolute right-2.5 top-1/2 -translate-y-1/2" />
+                                <input
+                                  type="text"
+                                  value={teacherNotesSearch}
+                                  onChange={(e) => setTeacherNotesSearch(e.target.value)}
+                                  placeholder={_t('بحث في الملاحظات أو الطلاب أو الوسوم...', 'Search notes, students, tags...', 'Notizen, Schüler, Tags suchen...')}
+                                  className="w-full bg-surface border border-surface-border rounded-xl pr-8 pl-3 py-1 text-xs text-text-main placeholder:text-text-muted/60 focus:outline-none focus:border-amber-500"
+                                />
+                              </div>
+
+                              {teacherClassesList.length > 1 && (
+                                <div className="shrink-0 flex items-center gap-1">
+                                  <span className="text-[10px] font-bold text-text-muted whitespace-nowrap">{_t('تصفية الفصل:', 'Class:', 'Klasse:')}</span>
+                                  <select
+                                    value={teacherNotesClassFilter}
+                                    onChange={(e) => setTeacherNotesClassFilter(e.target.value)}
+                                    className="bg-surface border border-surface-border rounded-xl px-2 py-1 text-xs font-bold text-text-main focus:outline-none focus:border-amber-500"
+                                  >
+                                    <option value="all">{_t('كل الفصول', 'All Classes', 'Alle Klassen')}</option>
+                                    {teacherClassesList.map(c => (
+                                      <option key={c} value={c}>{c}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Type Filter Pills */}
+                            <div className="flex flex-wrap gap-1 items-center pt-1 border-t border-surface-border/50">
+                              <button
+                                type="button"
+                                onClick={() => setTeacherNotesFilterType('all')}
+                                className={`px-2 py-0.8 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                                  teacherNotesFilterType === 'all'
+                                    ? 'bg-amber-500 text-white shadow-2xs'
+                                    : 'bg-surface text-text-muted border border-surface-border hover:bg-surface-hover'
+                                }`}
+                              >
+                                {_t('الكل', 'All', 'Alle')} ({allTeacherNotes.length})
+                              </button>
+
+                              {pinnedNotesCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setTeacherNotesFilterType('pinned')}
+                                  className={`px-2 py-0.8 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                                    teacherNotesFilterType === 'pinned'
+                                      ? 'bg-amber-600 text-white shadow-2xs'
+                                      : 'bg-surface text-amber-600 dark:text-amber-400 border border-surface-border hover:bg-surface-hover'
+                                  }`}
+                                >
+                                  <Pin className="w-2.5 h-2.5 fill-current" />
+                                  <span>{_t('المثبتة', 'Pinned', 'Angeheftet')} ({pinnedNotesCount})</span>
+                                </button>
+                              )}
+
+                              {lessonNotesCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setTeacherNotesFilterType('lesson')}
+                                  className={`px-2 py-0.8 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                                    teacherNotesFilterType === 'lesson'
+                                      ? 'bg-blue-600 text-white shadow-2xs'
+                                      : 'bg-surface text-text-muted border border-surface-border hover:bg-surface-hover'
+                                  }`}
+                                >
+                                  {_t('الحصص', 'Lessons', 'Stunden')} ({lessonNotesCount})
+                                </button>
+                              )}
+
+                              {classNotesCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setTeacherNotesFilterType('class')}
+                                  className={`px-2 py-0.8 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                                    teacherNotesFilterType === 'class'
+                                      ? 'bg-purple-600 text-white shadow-2xs'
+                                      : 'bg-surface text-text-muted border border-surface-border hover:bg-surface-hover'
+                                  }`}
+                                >
+                                  {_t('الفصول', 'Classes', 'Klassen')} ({classNotesCount})
+                                </button>
+                              )}
+
+                              {studentNotesCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setTeacherNotesFilterType('student')}
+                                  className={`px-2 py-0.8 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                                    teacherNotesFilterType === 'student'
+                                      ? 'bg-emerald-600 text-white shadow-2xs'
+                                      : 'bg-surface text-text-muted border border-surface-border hover:bg-surface-hover'
+                                  }`}
+                                >
+                                  {_t('الطلاب', 'Students', 'Schüler')} ({studentNotesCount})
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Notes List */}
+                        {allTeacherNotes.length === 0 ? (
+                          <div className="text-[11px] text-text-muted bg-surface-hover p-4 rounded-2xl border border-surface-border flex flex-col items-center justify-center text-center gap-1.5">
+                            <BookOpen className="w-8 h-8 text-amber-500/40 mb-1" />
+                            <p className="font-bold">{_t('لا توجد ملاحظات مسجلة لهذا المعلم أو فصوله بعد', 'No notes recorded for this teacher or their classes yet', 'Keine Notizen für diesen Lehrer vorhanden')}</p>
+                            <p className="text-[10px] text-text-muted">
+                              {_t('الملاحظات التي تسجلها عند فتح كارت المدرسة أو الحصص ستظهر هنا تلقائياً، أو يمكنك الضغط على "إضافة ملاحظة" الآن', 'Notes taken from school card or lessons will appear here automatically, or click "Add Note" now', 'Notizen aus dem Schulplan erscheinen hier')}
+                            </p>
+                          </div>
+                        ) : filteredNotes.length === 0 ? (
+                          <div className="text-[11px] text-text-muted bg-surface-hover p-3 rounded-xl border border-surface-border text-center">
+                            {_t('لا توجد نتائج مطابقة لبحثك أو الفلاتر المحددة', 'No notes match your filter or search criteria', 'Keine passenden Notizen')}
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {filteredNotes.map(note => {
+                              const typeConfig = {
+                                lesson: {
+                                  label: _t('حصة', 'Lesson', 'Stunde'),
+                                  bg: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20'
+                                },
+                                class: {
+                                  label: _t('فصل', 'Class', 'Klasse'),
+                                  bg: 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/20'
+                                },
+                                student: {
+                                  label: _t('طالب', 'Student', 'Schüler'),
+                                  bg: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20'
+                                }
+                              }[note.type] || { label: _t('ملاحظة', 'Note', 'Notiz'), bg: 'bg-slate-500/10 text-slate-700' };
+
+                              return (
+                                <div
+                                  key={note.id}
+                                  className={`p-3 rounded-xl border transition-all relative group bg-surface ${
+                                    note.pinned 
+                                      ? 'border-amber-500/40 bg-amber-500/5 shadow-2xs' 
+                                      : 'border-surface-border hover:border-amber-500/30'
+                                  }`}
+                                >
+                                  {/* Note Header */}
+                                  <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className={`text-[9.5px] font-black px-1.5 py-0.5 rounded border ${typeConfig.bg}`}>
+                                        {typeConfig.label}
+                                      </span>
+                                      {note.className && (
+                                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-surface-hover border border-surface-border text-text-main">
+                                          {note.className}
+                                        </span>
+                                      )}
+                                      {note.periodNumber && (
+                                        <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-blue-500/5 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-mono">
+                                          {_t(`الحصة ${note.periodNumber}`, `Period ${note.periodNumber}`, `Std. ${note.periodNumber}`)}
+                                        </span>
+                                      )}
+                                      {note.studentName && (
+                                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                                          <GraduationCap className="w-2.5 h-2.5" />
+                                          <span>{note.studentName}</span>
+                                        </span>
+                                      )}
+                                      {note.pinned && (
+                                        <span className="text-[9px] font-black px-1.5 py-0.2 rounded-full bg-amber-500 text-white flex items-center gap-0.5 shadow-2xs">
+                                          <Pin className="w-2.5 h-2.5 fill-current" />
+                                          <span>{_t('مثبتة', 'Pinned', 'Angeheftet')}</span>
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Quick Action Buttons */}
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          updateSchoolNote(note.id, { pinned: !note.pinned });
+                                          triggerToast(note.pinned ? _t('تم إلغاء التثبيت', 'Unpinned', 'Gelöst') : _t('تم تثبيت الملاحظة 📌', 'Pinned 📌', 'Angeheftet 📌'));
+                                        }}
+                                        className={`p-1 rounded-lg text-[11px] transition-colors cursor-pointer ${
+                                          note.pinned ? 'text-amber-500 hover:bg-amber-500/10' : 'text-text-muted hover:text-amber-500 hover:bg-surface-hover'
+                                        }`}
+                                        title={note.pinned ? _t('إلغاء التثبيت', 'Unpin', 'Lösen') : _t('تثبيت', 'Pin', 'Anheften')}
+                                      >
+                                        <Pin className={`w-3.5 h-3.5 ${note.pinned ? 'fill-current' : ''}`} />
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleStartEditTeacherNote(note)}
+                                        className="p-1 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                                        title={_t('تعديل', 'Edit', 'Bearbeiten')}
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5" />
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard?.writeText(note.text);
+                                          triggerToast(_t('تم نسخ نص الملاحظة 📋', 'Note text copied 📋', 'Notiz kopiert 📋'));
+                                        }}
+                                        className="p-1 text-text-muted hover:text-emerald-500 hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                                        title={_t('نسخ النص', 'Copy Text', 'Kopieren')}
+                                      >
+                                        <Copy className="w-3.5 h-3.5" />
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (confirm(_t('هل أنت متأكد من حذف هذه الملاحظة؟', 'Delete this note?', 'Diese Notiz löschen?'))) {
+                                            deleteSchoolNote(note.id);
+                                            triggerToast(_t('تم حذف الملاحظة', 'Note deleted', 'Notiz gelöscht'));
+                                          }
+                                        }}
+                                        className="p-1 text-text-muted hover:text-rose-500 hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                                        title={_t('حذف', 'Delete', 'Löschen')}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Note Body Text */}
+                                  <p className="text-xs text-text-main whitespace-pre-wrap leading-relaxed my-1.5 font-medium">
+                                    {note.text}
+                                  </p>
+
+                                  {/* Note Tags & Date Footer */}
+                                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-surface-border/40 text-[10px] text-text-muted flex-wrap">
+                                    <div className="flex flex-wrap gap-1 items-center">
+                                      {(note.tags || []).map(tag => (
+                                        <span key={tag} className="px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-surface-hover border border-surface-border text-text-muted">
+                                          {tag}
+                                        </span>
+                                      ))}
+                                    </div>
+
+                                    <div className="font-mono text-[9px] text-text-muted/70 flex items-center gap-1">
+                                      {note.date ? (
+                                        <span>{note.date}</span>
+                                      ) : note.createdAt ? (
+                                        <span>{new Date(note.createdAt).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -4138,6 +5510,20 @@ export const HodHubView: React.FC = () => {
         teachers={teachers}
         schoolSettings={schoolSettings}
         _t={_t}
+      />
+
+      <BulkObservationExportModal
+        isOpen={isBulkVisitExportModalOpen}
+        onClose={() => {
+          setIsBulkVisitExportModalOpen(false);
+          setBulkExportTeacherId(undefined);
+        }}
+        visitRecords={visitRecords}
+        teachers={teachers}
+        schoolSettings={schoolSettings}
+        language={language}
+        initialTeacherId={bulkExportTeacherId}
+        onPreviewSingle={(visit) => setPreviewVisitRecord(visit)}
       />
       {isImportModalOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2.5">
@@ -4280,45 +5666,104 @@ export const HodHubView: React.FC = () => {
               </div>
             </div>
 
-            {/* Clear All Department Schedules Footer */}
-            <div className="pt-3 mt-1 border-t border-surface-border flex flex-col sm:flex-row items-center justify-between gap-2.5">
-              <div className="flex items-center gap-2 text-text-muted text-[11px]">
-                <Trash2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                <span>
-                  {_t('إعادة ضبط الجداول: يمكنك تفريغ كافة جداول معلمين القسم دفعة واحدة.', 'Reset: Clear all department teacher schedules at once.', 'Zurücksetzen: Alle Stundenpläne der Fachschaft auf einmal löschen.')}
-                </span>
-              </div>
+            {/* Clear Department / Single Teacher Schedule Footer */}
+            <div className="pt-3 mt-1 border-t border-surface-border space-y-2.5">
+              {/* Option 1: Clear Selected Teacher's Schedule (When specific teacher is selected) */}
+              {importScope === 'single' && (
+                <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2 text-text-main text-[11px] font-bold">
+                    <Trash2 className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>
+                      {selectedTeacherForImport ? (
+                        _t(
+                          `مسح جدول (${teachers.find(t => t.id === selectedTeacherForImport)?.name || 'المعلم المحدد'}) فقط: تفريغ حصص هذا المعلم دون التأثير على باقي القسم.`,
+                          `Clear (${teachers.find(t => t.id === selectedTeacherForImport)?.name || 'Selected Teacher'}) schedule only.`,
+                          `Nur den Stundenplan von (${teachers.find(t => t.id === selectedTeacherForImport)?.name || 'Lehrer'}) löschen.`
+                        )
+                      ) : (
+                        _t(
+                          'مسح جدول معلم محدد: اختر معلماً من القائمة أعلاه لتفريغ جدوله فقط.',
+                          'Clear single teacher schedule: Please select a teacher above.',
+                          'Einzelnen Plan löschen: Bitte wählen Sie oben einen Lehrer aus.'
+                        )
+                      )}
+                    </span>
+                  </div>
 
-              {!showClearScheduleConfirm ? (
-                <button
-                  type="button"
-                  onClick={() => setShowClearScheduleConfirm(true)}
-                  className="w-full sm:w-auto px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 hover:border-rose-500/30 rounded-xl text-[11px] font-bold shadow-2xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 shrink-0"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>{_t('مسح كافة جداول القسم', 'Clear All Department Schedules', 'Alle Stundenpläne löschen')}</span>
-                </button>
-              ) : (
-                <div className="flex items-center gap-2 w-full sm:w-auto p-1 bg-rose-500/10 border border-rose-500/30 rounded-xl shrink-0 animate-fade-in">
-                  <span className="text-[10.5px] font-bold text-rose-600 dark:text-rose-400 px-1.5">
-                    {_t('تأكيد مسح كافة الجداول؟', 'Confirm full clear?', 'Löschen bestätigen?')}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleClearAllTimetables}
-                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10.5px] font-bold transition-all cursor-pointer shadow-xs active:scale-95"
-                  >
-                    {_t('نعم، امسح الكل', 'Yes, Clear All', 'Ja, alle löschen')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowClearScheduleConfirm(false)}
-                    className="px-2.5 py-1 bg-surface hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border transition-all cursor-pointer"
-                  >
-                    {_t('إلغاء', 'Cancel', 'Abbrechen')}
-                  </button>
+                  {!showClearTeacherScheduleConfirm ? (
+                    <button
+                      type="button"
+                      disabled={!selectedTeacherForImport}
+                      onClick={() => setShowClearTeacherScheduleConfirm(true)}
+                      className="w-full sm:w-auto px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-40 disabled:cursor-not-allowed text-amber-700 dark:text-amber-300 border border-amber-500/30 rounded-xl text-[11px] font-bold shadow-2xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{_t('مسح جدول هذا المعلم فقط', "Clear This Teacher's Schedule Only", 'Diesen Stundenplan löschen')}</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2 w-full sm:w-auto p-1 bg-amber-500/20 border border-amber-500/40 rounded-xl shrink-0 animate-fade-in">
+                      <span className="text-[10.5px] font-bold text-amber-800 dark:text-amber-200 px-1.5">
+                        {_t('تأكيد مسح جدول هذا المعلم؟', "Confirm clear this teacher's schedule?", 'Diesen Plan wirklich löschen?')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleClearSingleTeacherTimetable(selectedTeacherForImport)}
+                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10.5px] font-bold transition-all cursor-pointer shadow-xs active:scale-95"
+                      >
+                        {_t('نعم، امسح الجدول', 'Yes, Clear Schedule', 'Ja, löschen')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowClearTeacherScheduleConfirm(false)}
+                        className="px-2.5 py-1 bg-surface hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border transition-all cursor-pointer"
+                      >
+                        {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* Option 2: Clear All Department Schedules Footer */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2 text-text-muted text-[11px]">
+                  <Trash2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  <span>
+                    {_t('إعادة ضبط الجداول: يمكنك تفريغ كافة جداول معلمين القسم دفعة واحدة.', 'Reset: Clear all department teacher schedules at once.', 'Zurücksetzen: Alle Stundenpläne der Fachschaft auf einmal löschen.')}
+                  </span>
+                </div>
+
+                {!showClearScheduleConfirm ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowClearScheduleConfirm(true)}
+                    className="w-full sm:w-auto px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 hover:border-rose-500/30 rounded-xl text-[11px] font-bold shadow-2xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{_t('مسح كافة جداول القسم', 'Clear All Department Schedules', 'Alle Stundenpläne löschen')}</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 w-full sm:w-auto p-1 bg-rose-500/10 border border-rose-500/30 rounded-xl shrink-0 animate-fade-in">
+                    <span className="text-[10.5px] font-bold text-rose-600 dark:text-rose-400 px-1.5">
+                      {_t('تأكيد مسح كافة الجداول؟', 'Confirm full clear?', 'Löschen bestätigen?')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleClearAllTimetables}
+                      className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10.5px] font-bold transition-all cursor-pointer shadow-xs active:scale-95"
+                    >
+                      {_t('نعم، امسح الكل', 'Yes, Clear All', 'Ja, alle löschen')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowClearScheduleConfirm(false)}
+                      className="px-2.5 py-1 bg-surface hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border transition-all cursor-pointer"
+                    >
+                      {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

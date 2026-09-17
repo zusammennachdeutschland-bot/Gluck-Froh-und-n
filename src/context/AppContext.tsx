@@ -116,6 +116,9 @@ interface AppContextType {
   addStudent: (student: Omit<Student, 'id' | 'documents' | 'joinedDate'>) => Student;
   updateStudent: (id: string, updates: Partial<Student>) => void;
   deleteStudent: (id: string) => void;
+  deleteStudentsByGroup: (groupId: string) => void;
+  moveStudent: (studentId: string, newGroupId: string) => void;
+  moveStudentsBulk: (studentIds: string[], newGroupId: string) => void;
   archiveStudent: (id: string) => void;
   uploadStudentDocument: (studentId: string, file: File, category: 'homework' | 'exam' | 'doc') => void;
   deleteStudentDocument: (studentId: string, docId: string) => void;
@@ -2306,6 +2309,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
     setStudents(prev => prev.map(s => s.id === id ? wrapDeletion(s) : s));
     autoSyncEngine.notifyMutation('students', id);
+  };
+
+  const deleteStudentsByGroup = (groupId: string) => {
+    const studentsToDelete = students.filter(s => s.groupId === groupId && !s.deleted);
+    if (studentsToDelete.length > 0) {
+      setRecentlyDeleted(prev => ({
+        ...prev,
+        students: [
+          ...studentsToDelete.map(item => ({ item, deletedAt: new Date().toISOString() })),
+          ...prev.students
+        ]
+      }));
+      setStudents(prev => prev.map(s => s.groupId === groupId ? wrapDeletion(s) : s));
+      studentsToDelete.forEach(s => {
+        autoSyncEngine.notifyMutation('students', s.id);
+      });
+    }
+  };
+
+  const moveStudent = (studentId: string, newGroupId: string) => {
+    const targetGroup = groups.find(g => g.id === newGroupId);
+    const newGrade = targetGroup?.grade;
+    setStudents(prev => prev.map(s => {
+      if (s.id === studentId) {
+        return wrapMutation({
+          ...s,
+          groupId: newGroupId,
+          grade: newGrade || s.grade,
+          updatedAt: Date.now()
+        } as Student);
+      }
+      return s;
+    }));
+    autoSyncEngine.notifyMutation('students', studentId);
+  };
+
+  const moveStudentsBulk = (studentIds: string[], newGroupId: string) => {
+    const targetGroup = groups.find(g => g.id === newGroupId);
+    const newGrade = targetGroup?.grade;
+    const idSet = new Set(studentIds);
+    setStudents(prev => prev.map(s => {
+      if (idSet.has(s.id)) {
+        return wrapMutation({
+          ...s,
+          groupId: newGroupId,
+          grade: newGrade || s.grade,
+          updatedAt: Date.now()
+        } as Student);
+      }
+      return s;
+    }));
+    studentIds.forEach(id => {
+      autoSyncEngine.notifyMutation('students', id);
+    });
   };
 
   const archiveStudent = (id: string) => {
@@ -5177,6 +5234,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         addStudent,
         updateStudent,
         deleteStudent,
+        deleteStudentsByGroup,
+        moveStudent,
+        moveStudentsBulk,
         archiveStudent,
         uploadStudentDocument,
         deleteStudentDocument,

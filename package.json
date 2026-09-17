@@ -9,6 +9,7 @@
   "build": {
     "appId": "com.ags.teacherapp",
     "productName": "AGS Teacher App",
+    "publish": null,
     "directories": {
       "output": "release"
     },

@@ -2,7 +2,12 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Student, Group } from '../types';
 import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
-import { Users, UserPlus, Search, Phone, Send, ChevronRight, Plus, MapPin, Video, FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, FileText, Award, DollarSign, Bot, ChevronDown, Filter, Sparkles, AtSign, Mars, Venus, CircleHelp, Copy, Check } from 'lucide-react';
+import { 
+  Users, UserPlus, Search, Phone, Send, ChevronRight, Plus, MapPin, Video, 
+  FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, 
+  FileText, Award, DollarSign, Bot, ChevronDown, Filter, Sparkles, AtSign, 
+  Mars, Venus, CircleHelp, Copy, Check, ArrowRightLeft, UserX, CheckSquare, Square, AlertTriangle 
+} from 'lucide-react';
 import { StudentProfileModal } from './StudentProfileModal';
 import { GroupProfileModal } from './GroupProfileModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
@@ -21,7 +26,8 @@ export const StudentsView: React.FC = () => {
   const { 
     students, groups, profile, lessons, payments, language,
     setIsAddStudentModalOpen, setIsAddGroupModalOpen,
-    deleteStudent, archiveStudent, deleteGroup, archiveGroup,
+    deleteStudent, deleteStudentsByGroup, moveStudent, moveStudentsBulk,
+    archiveStudent, deleteGroup, archiveGroup,
     updateStudent, updateGroup, t, _t
   } = useApp();
 
@@ -41,6 +47,14 @@ export const StudentsView: React.FC = () => {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [isAiImportModalOpen, setIsAiImportModalOpen] = useState(false);
   const [isGenderAssignModalOpen, setIsGenderAssignModalOpen] = useState(false);
+
+  // Student transfer & group clear states
+  const [studentToMove, setStudentToMove] = useState<Student | null>(null);
+  const [targetGroupIdForMove, setTargetGroupIdForMove] = useState<string>('');
+  const [groupToClearStudents, setGroupToClearStudents] = useState<Group | null>(null);
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [isBulkMoveModalOpen, setIsBulkMoveModalOpen] = useState(false);
+  const [bulkMoveTargetGroupId, setBulkMoveTargetGroupId] = useState<string>('');
 
   const [deleteTarget, setDeleteTarget] = useState<{
     type: 'student' | 'group';
@@ -107,7 +121,7 @@ export const StudentsView: React.FC = () => {
     // Avg Dictation score
     const dictationGrades = studentLessons
       .map(l => l.report?.studentDictationGrade?.[student.id])
-      .filter(g => g !== undefined) as number[];
+      .filter(g => g !== undefined && g !== null && g >= 0) as number[];
     const avgDictation = dictationGrades.length > 0 
       ? dictationGrades.reduce((sum, g) => sum + g, 0) / dictationGrades.length 
       : 0;
@@ -115,7 +129,7 @@ export const StudentsView: React.FC = () => {
     // Avg Exam score
     const examGrades = studentLessons
       .map(l => l.report?.studentExamGrade?.[student.id])
-      .filter(g => g !== undefined) as number[];
+      .filter(g => g !== undefined && g !== null && g >= 0) as number[];
     const avgExam = examGrades.length > 0 
       ? examGrades.reduce((sum, g) => sum + g, 0) / examGrades.length 
       : 0;
@@ -366,6 +380,56 @@ export const StudentsView: React.FC = () => {
         </div>
       )}
 
+      {/* MULTI-SELECT ACTION BAR */}
+      {activeSegment === 'students' && selectedStudentIds.length > 0 && (
+        <div className="bg-primary-soft dark:bg-primary-soft/40 border border-primary-border/60 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-sm animate-fade-in">
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-lg bg-primary text-white text-xs font-black flex items-center justify-center">
+              {selectedStudentIds.length}
+            </span>
+            <span className="text-xs font-bold text-text-main">
+              {_t(`تم تحديد ${selectedStudentIds.length} طالب`, `${selectedStudentIds.length} students selected`, `${selectedStudentIds.length} Schüler ausgewählt`)}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                setBulkMoveTargetGroupId(groups[0]?.id || '');
+                setIsBulkMoveModalOpen(true);
+              }}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span>{_t('نقل الطلاب المحددين إلى مجموعة', 'Move Selected to Group', 'In Gruppe verschieben')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(_t(`هل أنت متأكد من حذف ${selectedStudentIds.length} طالب؟`, `Delete ${selectedStudentIds.length} selected students?`, `${selectedStudentIds.length} Schüler löschen?`))) {
+                  selectedStudentIds.forEach(id => deleteStudent(id));
+                  setSelectedStudentIds([]);
+                }
+              }}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{_t('حذف المحددين', 'Delete Selected', 'Ausgewählte löschen')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedStudentIds([])}
+              className="px-2.5 py-1.5 bg-surface hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg text-xs font-bold border border-surface-border transition-all cursor-pointer"
+            >
+              {_t('إلغاء التحديد', 'Deselect All', 'Abbrechen')}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* STUDENTS LIST SEGMENT */}
       {activeSegment === 'students' && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 sm:gap-2.5">
@@ -391,11 +455,14 @@ export const StudentsView: React.FC = () => {
               const studentGroup = groups.find(g => g.id === student.groupId);
               const cleanParentPhone = student.parentPhone.replace(/[^0-9+]/g, '');
               const studentCode = getStudentCode(student);
+              const isSelected = selectedStudentIds.includes(student.id);
 
               return (
                 <div
                   key={`${student.id}_${idx}`}
-                  className={`bg-surface border border-surface-border/60 dark:border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative ${
+                  className={`bg-surface border rounded-lg p-2.5 sm:p-3 shadow-2xs transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative ${
+                    isSelected ? 'border-primary bg-primary-soft/20 dark:border-primary' : 'border-surface-border/60 dark:border-surface-border'
+                  } ${
                     activeMenuId === `student_${student.id}`
                       ? 'z-50'
                       : 'hover:shadow-xs active:scale-[0.99] active:bg-surface-hover z-0'
@@ -406,6 +473,27 @@ export const StudentsView: React.FC = () => {
                   }}
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    {/* Multi-select checkbox */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedStudentIds(prev => 
+                          prev.includes(student.id) 
+                            ? prev.filter(id => id !== student.id) 
+                            : [...prev, student.id]
+                        );
+                      }}
+                      className="p-1 text-text-muted hover:text-primary transition-colors cursor-pointer shrink-0"
+                      title={isSelected ? _t('إلغاء التحديد', 'Deselect', 'Abwählen') : _t('تحديد الطالب', 'Select student', 'Schüler auswählen')}
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="w-4 h-4 text-primary fill-primary/10" />
+                      ) : (
+                        <Square className="w-4 h-4 text-text-muted/60" />
+                      )}
+                    </button>
+
                     <AvatarImage
                       name={student.name}
                       className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg text-xs font-black border border-slate-100 dark:border-surface-border shrink-0"
@@ -562,6 +650,21 @@ export const StudentsView: React.FC = () => {
                             >
                               <User className="w-4 h-4 text-primary" />
                               <span>{t('auto_view_profile')}</span>
+                            </button>
+
+                            {/* Move / Transfer Student to Another Group */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setStudentToMove(student);
+                                setTargetGroupIdForMove(student.groupId || (groups[0]?.id || ''));
+                                setActiveMenuId(null);
+                              }}
+                              className="w-full px-4 py-2 text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                            >
+                              <ArrowRightLeft className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                              <span>{_t('نقل إلى مجموعة / فصل آخر', 'Move to Another Group', 'In andere Gruppe verschieben')}</span>
                             </button>
 
                             {/* Attendance tracking */}
@@ -868,6 +971,20 @@ export const StudentsView: React.FC = () => {
 
                           <div className="border-t border-slate-100 dark:border-surface-border/80 my-1.5" />
 
+                          {/* Clear / Delete All Students in Group */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setGroupToClearStudents(group);
+                              setActiveMenuId(null);
+                            }}
+                            className="w-full px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                          >
+                            <UserX className="w-4 h-4 text-rose-600" />
+                            <span>{_t('مسح طلاب المجموعة', 'Delete Group Students', 'Schüler der Gruppe löschen')} ({students.filter(s => s.groupId === group.id).length})</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={(e) => {
@@ -1127,6 +1244,243 @@ export const StudentsView: React.FC = () => {
         isOpen={isGenderAssignModalOpen}
         onClose={() => setIsGenderAssignModalOpen(false)}
       />
+
+      {/* SINGLE STUDENT MOVE MODAL */}
+      {studentToMove && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-text-main">
+                    {_t('نقل الطالب إلى مجموعة / فصل آخر', 'Move Student to Another Group', 'Schüler verschieben')}
+                  </h3>
+                  <p className="text-xs text-text-muted">
+                    {studentToMove.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStudentToMove(null)}
+                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-text-main mb-1.5">
+                  {_t('اختر المجموعة / الفصل الجديد:', 'Select Target Group:', 'Zielgruppe wählen:')}
+                </label>
+                <select
+                  value={targetGroupIdForMove}
+                  onChange={(e) => setTargetGroupIdForMove(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                >
+                  <option value="">{_t('-- بدون مجموعة --', '-- No Group --', '-- Keine Gruppe --')}</option>
+                  {groups.map(g => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} ({g.level}) - {students.filter(s => s.groupId === g.id).length} {_t('طلاب', 'students', 'Schüler')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {studentToMove.groupId && (
+                <div className="text-[11px] text-text-muted bg-surface-hover/50 p-2.5 rounded-lg border border-surface-border-soft flex items-center gap-2">
+                  <span className="font-bold">{_t('المجموعة الحالية:', 'Current Group:', 'Aktuelle Gruppe:')}</span>
+                  <span className="text-text-main font-bold">
+                    {groups.find(g => g.id === studentToMove.groupId)?.name || studentToMove.groupId}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setStudentToMove(null)}
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  moveStudent(studentToMove.id, targetGroupIdForMove || null);
+                  setStudentToMove(null);
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>{_t('تأكيد النقل', 'Confirm Move', 'Verschieben bestätigen')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK MOVE STUDENTS MODAL */}
+      {isBulkMoveModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-text-main">
+                    {_t('نقل الطلاب المحددين جماعياً', 'Bulk Move Selected Students', 'Ausgewählte Schüler verschieben')}
+                  </h3>
+                  <p className="text-xs text-text-muted">
+                    {_t(`سيتم نقل ${selectedStudentIds.length} طالب دفعة واحدة`, `Moving ${selectedStudentIds.length} students at once`, `${selectedStudentIds.length} Schüler werden verschoben`)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBulkMoveModalOpen(false)}
+                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-text-main mb-1.5">
+                  {_t('اختر المجموعة / الفصل الجديد للطلاب:', 'Select Target Group for Students:', 'Zielgruppe für Schüler wählen:')}
+                </label>
+                <select
+                  value={bulkMoveTargetGroupId}
+                  onChange={(e) => setBulkMoveTargetGroupId(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                >
+                  <option value="">{_t('-- بدون مجموعة --', '-- No Group --', '-- Keine Gruppe --')}</option>
+                  {groups.map(g => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} ({g.level}) - {students.filter(s => s.groupId === g.id).length} {_t('طلاب', 'students', 'Schüler')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="max-h-36 overflow-y-auto bg-surface-hover/50 p-2 rounded-lg border border-surface-border-soft space-y-1">
+                {selectedStudentIds.map(id => {
+                  const st = students.find(s => s.id === id);
+                  return (
+                    <div key={id} className="text-xs font-bold text-text-main flex items-center justify-between">
+                      <span>{st?.name || id}</span>
+                      <span className="text-[10px] text-text-muted font-normal">
+                        {groups.find(g => g.id === st?.groupId)?.name || _t('بدون مجموعة', 'No group', 'Keine')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setIsBulkMoveModalOpen(false)}
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  moveStudentsBulk(selectedStudentIds, bulkMoveTargetGroupId || null);
+                  setSelectedStudentIds([]);
+                  setIsBulkMoveModalOpen(false);
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>{_t(`نقل (${selectedStudentIds.length}) طالب`, `Move (${selectedStudentIds.length}) students`, `(${selectedStudentIds.length}) Schüler verschieben`)}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CLEAR GROUP STUDENTS CONFIRMATION MODAL */}
+      {groupToClearStudents && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center border border-rose-500/20">
+                  <UserX className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-rose-600 dark:text-rose-400">
+                    {_t('مسح طلاب المجموعة / الفصل', 'Clear Group Students', 'Gruppenschüler löschen')}
+                  </h3>
+                  <p className="text-xs text-text-muted">
+                    {groupToClearStudents.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGroupToClearStudents(null)}
+                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl space-y-2 text-xs">
+              <div className="font-bold text-rose-700 dark:text-rose-300 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>
+                  {_t(
+                    `هل أنت متأكد من حذف جميع طلاب فصل (${groupToClearStudents.name})؟`,
+                    `Are you sure you want to delete all students in (${groupToClearStudents.name})?`,
+                    `Möchten Sie wirklich alle Schüler in (${groupToClearStudents.name}) löschen?`
+                  )}
+                </span>
+              </div>
+              <p className="text-rose-600/90 dark:text-rose-300/80 text-[11px] leading-relaxed">
+                {_t(
+                  `سيتم حذف (${students.filter(s => s.groupId === groupToClearStudents.id).length}) طالب ونقلهم إلى المحذوفات مؤخراً ليمكن استرجاعهم عند الحاجة. لن يتم حذف المجموعة نفسها.`,
+                  `(${students.filter(s => s.groupId === groupToClearStudents.id).length}) students will be deleted and kept in Recently Deleted for recovery. The group itself will remain intact.`,
+                  `(${students.filter(s => s.groupId === groupToClearStudents.id).length}) Schüler werden gelöscht und in den Papierkorb verschoben.`
+                )}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setGroupToClearStudents(null)}
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteStudentsByGroup(groupToClearStudents.id);
+                  setGroupToClearStudents(null);
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{_t('تأكيد مسح الطلاب', 'Confirm Delete Students', 'Schüler löschen')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

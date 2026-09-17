@@ -5,7 +5,7 @@ import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, Lesso
 import { 
   X, Play, Pause, Square, Video, MapPin, Send, Phone, CheckCircle2, Check,
   Clock, AlertCircle, Sparkles, FileText, Award, DollarSign, ExternalLink, Navigation,
-  Zap, UserPlus, XCircle, Ban, Edit2, Plus, Minus
+  Zap, UserPlus, XCircle, Ban, Edit2, Plus, Minus, ClipboardCheck
 } from 'lucide-react';
 import { ParentSummaryModal } from './ParentSummaryModal';
 import { StudentSessionPerformanceSelector } from './StudentSessionPerformanceSelector';
@@ -58,6 +58,7 @@ export const LessonControlModal: React.FC = () => {
   // Brand new Session Report Fields (Unifying lesson & student details)
   const [lessonWhatWasTaught, setLessonWhatWasTaught] = useState('');
   const [lessonNextHomework, setLessonNextHomework] = useState('');
+  const [lessonPreviousHomework, setLessonPreviousHomework] = useState('');
   const [lessonRecordingLink, setLessonRecordingLink] = useState('');
   const [lessonRecordingLink2, setLessonRecordingLink2] = useState('');
   const [showRecordingLink2, setShowRecordingLink2] = useState(false);
@@ -66,6 +67,69 @@ export const LessonControlModal: React.FC = () => {
   const [studentExamGrade, setStudentExamGrade] = useState<Record<string, number>>({});
   const [studentNotes, setStudentNotes] = useState<Record<string, string>>({});
   const [studentPerformance, setStudentPerformance] = useState<Record<string, StudentSessionPerformance>>({});
+
+  // Helper to find previous homework from earlier lesson
+  const detectedPreviousHomework = React.useMemo(() => {
+    if (!selectedLesson) return '';
+    if (selectedLesson.report?.arabicPreviousHomework?.trim()) {
+      return selectedLesson.report.arabicPreviousHomework.trim();
+    }
+    if (selectedLesson.report?.previousHomeworkDescription?.trim()) {
+      return selectedLesson.report.previousHomeworkDescription.trim();
+    }
+
+    const groupId = selectedLesson.groupId;
+    const studentId = selectedLesson.studentId;
+    const studentName = (selectedLesson.studentName || '').trim().toLowerCase();
+
+    const candidateLessons = (lessons || []).filter(l => {
+      if (l.id === selectedLesson.id) return false;
+      if (l.deleted) return false;
+
+      const matchGroup = groupId && l.groupId === groupId;
+      const matchStudent = (studentId && (l.studentId === studentId || l.report?.studentAttendance?.[studentId] !== undefined)) ||
+        (studentName && l.studentName && l.studentName.trim().toLowerCase() === studentName);
+
+      return Boolean(matchGroup || matchStudent);
+    });
+
+    if (candidateLessons.length === 0) return '';
+
+    candidateLessons.sort((a, b) => {
+      const timeA = new Date(`${a.date}T${a.time || '00:00'}`).getTime();
+      const timeB = new Date(`${b.date}T${b.time || '00:00'}`).getTime();
+      if (!isNaN(timeA) && !isNaN(timeB) && timeA !== timeB) {
+        return timeB - timeA;
+      }
+      return (b.sessionNumber || 0) - (a.sessionNumber || 0);
+    });
+
+    const currentLessonTime = new Date(`${selectedLesson.date}T${selectedLesson.time || '00:00'}`).getTime();
+
+    const earlierLesson = candidateLessons.find(l => {
+      const lTime = new Date(`${l.date}T${l.time || '00:00'}`).getTime();
+      const isPrior = !isNaN(currentLessonTime) && !isNaN(lTime) ? lTime <= currentLessonTime : true;
+      const hw = l.report?.arabicHomeworkRequired || l.report?.homeworkDescription || l.report?.homeworkTitle || l.homeworkDescription || l.homeworkTitle;
+      return isPrior && Boolean(hw && hw.trim());
+    });
+
+    const targetPrevLesson = earlierLesson || candidateLessons.find(l => {
+      const hw = l.report?.arabicHomeworkRequired || l.report?.homeworkDescription || l.report?.homeworkTitle || l.homeworkDescription || l.homeworkTitle;
+      return Boolean(hw && hw.trim());
+    });
+
+    if (targetPrevLesson) {
+      return (
+        targetPrevLesson.report?.arabicHomeworkRequired ||
+        targetPrevLesson.report?.homeworkDescription ||
+        targetPrevLesson.report?.homeworkTitle ||
+        targetPrevLesson.homeworkDescription ||
+        targetPrevLesson.homeworkTitle ||
+        ''
+      ).trim();
+    }
+    return '';
+  }, [lessons, selectedLesson]);
 
   const [homeworkStatus, setHomeworkStatus] = useState<HomeworkStatus>('assigned');
   const [homeworkTitle, setHomeworkTitle] = useState('');
@@ -110,6 +174,12 @@ export const LessonControlModal: React.FC = () => {
       setAttendance(selectedLesson.report.attendanceStatus || 'present');
       setLessonWhatWasTaught(selectedLesson.report.teacherNotes || '');
       setLessonNextHomework(selectedLesson.report.homeworkDescription || '');
+      setLessonPreviousHomework(
+        selectedLesson.report.arabicPreviousHomework || 
+        selectedLesson.report.previousHomeworkDescription || 
+        detectedPreviousHomework || 
+        ''
+      );
       setLessonRecordingLink(selectedLesson.report.recordingLink || selectedLesson.recordingLink || '');
       setLessonRecordingLink2(selectedLesson.report.recordingLink2 || selectedLesson.recordingLink2 || '');
       if (selectedLesson.report?.recordingLink2 || selectedLesson.recordingLink2) {
@@ -182,6 +252,7 @@ export const LessonControlModal: React.FC = () => {
       setPackageChoice(selectedLesson.totalSessionsInPackage || 4);
       setLessonWhatWasTaught('');
       setLessonNextHomework('');
+      setLessonPreviousHomework(detectedPreviousHomework || '');
       setLessonRecordingLink(selectedLesson.recordingLink || '');
       setLessonRecordingLink2(selectedLesson.recordingLink2 || '');
       setShowRecordingLink2(!!selectedLesson.recordingLink2);
@@ -245,6 +316,7 @@ export const LessonControlModal: React.FC = () => {
             if (draft.teacherNotes) setTeacherNotes(draft.teacherNotes);
             if (draft.lessonWhatWasTaught) setLessonWhatWasTaught(draft.lessonWhatWasTaught);
             if (draft.lessonNextHomework) setLessonNextHomework(draft.lessonNextHomework);
+            if (draft.lessonPreviousHomework) setLessonPreviousHomework(draft.lessonPreviousHomework);
             if (draft.lessonRecordingLink) setLessonRecordingLink(draft.lessonRecordingLink);
             if (draft.lessonRecordingLink2) {
               setLessonRecordingLink2(draft.lessonRecordingLink2);
@@ -262,18 +334,18 @@ export const LessonControlModal: React.FC = () => {
       }
       checkDraft();
     }
-  }, [selectedLesson, students]);
+  }, [selectedLesson, students, detectedPreviousHomework]);
 
   // Auto-save report draft as teacher types
   useEffect(() => {
-    if (selectedLesson && (lessonWhatWasTaught || lessonNextHomework || lessonRecordingLink || lessonRecordingLink2 || teacherNotes || homeworkTitle || homeworkDescription)) {
+    if (selectedLesson && (lessonWhatWasTaught || lessonNextHomework || lessonPreviousHomework || lessonRecordingLink || lessonRecordingLink2 || teacherNotes || homeworkTitle || homeworkDescription)) {
       storage.setItem(`dl_draft_report_${selectedLesson.id}`, {
         attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription,
         quizScore, examScore, participationScore, teacherNotes,
-        lessonWhatWasTaught, lessonNextHomework, lessonRecordingLink, lessonRecordingLink2, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance
+        lessonWhatWasTaught, lessonNextHomework, lessonPreviousHomework, lessonRecordingLink, lessonRecordingLink2, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance
       });
     }
-  }, [selectedLesson?.id, attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription, quizScore, examScore, participationScore, teacherNotes, lessonWhatWasTaught, lessonNextHomework, lessonRecordingLink, lessonRecordingLink2, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance]);
+  }, [selectedLesson?.id, attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription, quizScore, examScore, participationScore, teacherNotes, lessonWhatWasTaught, lessonNextHomework, lessonPreviousHomework, lessonRecordingLink, lessonRecordingLink2, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance]);
 
   const handleSendPaymentReminder = () => {
     const teacherAr = getTeacherArabicName(profile, 'المعلم');
@@ -512,6 +584,10 @@ export const LessonControlModal: React.FC = () => {
       homeworkTitle: defaultHw,
       homeworkDescription: defaultHw,
       teacherNotes: defaultTaught,
+      arabicTopicsExplained: defaultTaught,
+      arabicHomeworkRequired: defaultHw,
+      arabicPreviousHomework: (lessonPreviousHomework || detectedPreviousHomework || '').trim() || undefined,
+      previousHomeworkDescription: (lessonPreviousHomework || detectedPreviousHomework || '').trim() || undefined,
       recordingLink: lessonRecordingLink.trim() || undefined,
       recordingLink2: lessonRecordingLink2.trim() || undefined,
       studentHomeworkDone: isQuick ? (Object.keys(studentHomeworkDone).length > 0 ? studentHomeworkDone : { [qId]: 'yes' }) : finalStudentHomeworkDone,
@@ -1223,6 +1299,28 @@ export const LessonControlModal: React.FC = () => {
                       />
                     </div>
 
+                    {/* Previous Homework Description */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-black text-text-main flex items-center gap-1">
+                          <ClipboardCheck className="w-3.5 h-3.5 text-primary" />
+                          <span>{_t('الواجب السابق (الذي تمت مراجعته في الحصة)', 'Previous Homework (Checked in Session)', 'Vorherige Hausaufgabe')}</span>
+                        </label>
+                        {detectedPreviousHomework && (
+                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200/50">
+                            {_t('تم جلبه من الحصة السابقة', 'Loaded from previous lesson', 'Aus vorheriger Stunde')}
+                          </span>
+                        )}
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={lessonPreviousHomework}
+                        onChange={(e) => setLessonPreviousHomework(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60"
+                        placeholder={_t('اكتب تفاصيل الواجب السابق هنا (يُملأ تلقائياً من الحصة السابقة إن وُجد)...', 'Enter previous homework details...', 'Vorherige Hausaufgabe hier eingeben...')}
+                      />
+                    </div>
+
                     {/* Next Homework Description */}
                     <div className="space-y-1">
                       <label className="text-xs font-black text-text-main flex items-center gap-1">
@@ -1363,9 +1461,49 @@ export const LessonControlModal: React.FC = () => {
 
                     {/* Individual Students Performance and Scores */}
                     <div className="space-y-2">
-                      <h4 className="text-[11px] font-black text-slate-500 uppercase flex items-center gap-1">
-                        {t('auto_status_performance_of_eac')}
-                      </h4>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                        <h4 className="text-[11px] font-black text-slate-500 uppercase flex items-center gap-1">
+                          {t('auto_status_performance_of_eac')}
+                        </h4>
+                        {activeLessonStudents.length > 1 && (
+                          <div className="flex flex-wrap items-center gap-1 text-[10px]">
+                            <span className="text-text-muted font-bold">{_t('الكل:', 'All:', 'Alle:')}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updates: Record<string, 'yes'> = {};
+                                activeLessonStudents.forEach(s => { updates[s.id] = 'yes'; });
+                                setStudentHomeworkDone(prev => ({ ...prev, ...updates }));
+                              }}
+                              className="px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50 rounded text-[9.5px] font-bold hover:bg-emerald-100 transition-colors cursor-pointer"
+                            >
+                              {_t('حل الواجب 👍', 'HW Done', 'HA erledigt')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updates: Record<string, number> = {};
+                                activeLessonStudents.forEach(s => { updates[s.id] = -1; });
+                                setStudentDictationGrade(prev => ({ ...prev, ...updates }));
+                              }}
+                              className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 rounded text-[9.5px] font-bold hover:bg-amber-100 transition-colors cursor-pointer"
+                            >
+                              {_t('إملاء مكانش فيه', 'No Dictation', 'Kein Diktat')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updates: Record<string, number> = {};
+                                activeLessonStudents.forEach(s => { updates[s.id] = -1; });
+                                setStudentExamGrade(prev => ({ ...prev, ...updates }));
+                              }}
+                              className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 rounded text-[9.5px] font-bold hover:bg-amber-100 transition-colors cursor-pointer"
+                            >
+                              {_t('امتحان مكانش فيه', 'No Exam', 'Keine Prüfung')}
+                            </button>
+                          </div>
+                        )}
+                      </div>
 
                       <div className="space-y-2.5">
                         {activeLessonStudents.map(st => {
@@ -1447,7 +1585,14 @@ export const LessonControlModal: React.FC = () => {
                                 <div className="mt-2 space-y-2.5 animate-fade-in">
                                   {/* Homework completed toggle */}
                                   <div className="space-y-1">
-                                    <span className="text-[10.5px] font-black text-text-main block">{t('auto_previous_homework_performance')} <span className="text-primary">*</span></span>
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-[10.5px] font-black text-text-main block">{t('auto_previous_homework_performance')} <span className="text-primary">*</span></span>
+                                      {(lessonPreviousHomework || detectedPreviousHomework) && (
+                                        <span className="text-[9.5px] font-bold text-primary truncate max-w-[190px]" title={lessonPreviousHomework || detectedPreviousHomework}>
+                                          📋 كان: {lessonPreviousHomework || detectedPreviousHomework}
+                                        </span>
+                                      )}
+                                    </div>
                                     <div className="flex gap-1.5">
                                       <button
                                         key={`hw-yes-${st.id}`}
@@ -1480,10 +1625,32 @@ export const LessonControlModal: React.FC = () => {
                                     </div>
                                   </div>
 
-                                  {/* Dictation Score (0 to 10 pills) */}
+                                  {/* Dictation Score (مكانش فيه + 0 to 10 pills) */}
                                   <div className="space-y-1">
-                                    <span className="text-[10.5px] font-black text-text-main block">{t('auto_dictation_grade_out_of_10')} <span className="text-primary">*</span></span>
-                                    <div className="flex flex-wrap gap-1">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10.5px] font-black text-text-main block">{t('auto_dictation_grade_out_of_10')} <span className="text-primary">*</span></span>
+                                      {stDict === -1 && (
+                                        <span className="text-[9.5px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded">
+                                          {_t('مكانش فيه إملاء', 'No Dictation', 'Kein Diktat')}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      <button
+                                        key={`dict-${st.id}-none`}
+                                        type="button"
+                                        onClick={() => {
+                                          setStudentDictationGrade(prev => ({ ...prev, [st.id]: -1 }));
+                                        }}
+                                        className={`px-2 h-7 sm:h-6 rounded-lg sm:rounded-md text-[10.5px] sm:text-[9.5px] font-black flex items-center justify-center border transition-all cursor-pointer ${
+                                          stDict === -1
+                                            ? 'bg-amber-600 text-white border-amber-600 shadow-2xs scale-105'
+                                            : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200 dark:hover:bg-slate-700'
+                                        }`}
+                                        title={_t('لم يُعقد إملاء في هذه الحصة', 'No dictation held in this lesson', 'Kein Diktat')}
+                                      >
+                                        {_t('مكانش فيه', 'None', 'Keins')}
+                                      </button>
                                       {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(score => (
                                         <button
                                           key={`dict-${st.id}-${score}`}
@@ -1503,10 +1670,32 @@ export const LessonControlModal: React.FC = () => {
                                     </div>
                                   </div>
 
-                                  {/* Exam Score (0 to 10 pills) */}
+                                  {/* Exam Score (مكانش فيه + 0 to 10 pills) */}
                                   <div className="space-y-1">
-                                    <span className="text-[10.5px] font-black text-text-main block">{t('auto_exam_quiz_grade_out_of_10')} <span className="text-primary">*</span></span>
-                                    <div className="flex flex-wrap gap-1">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10.5px] font-black text-text-main block">{t('auto_exam_quiz_grade_out_of_10')} <span className="text-primary">*</span></span>
+                                      {stExam === -1 && (
+                                        <span className="text-[9.5px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded">
+                                          {_t('مكانش فيه امتحان', 'No Exam', 'Keine Prüfung')}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      <button
+                                        key={`exam-${st.id}-none`}
+                                        type="button"
+                                        onClick={() => {
+                                          setStudentExamGrade(prev => ({ ...prev, [st.id]: -1 }));
+                                        }}
+                                        className={`px-2 h-7 sm:h-6 rounded-lg sm:rounded-md text-[10.5px] sm:text-[9.5px] font-black flex items-center justify-center border transition-all cursor-pointer ${
+                                          stExam === -1
+                                            ? 'bg-amber-600 text-white border-amber-600 shadow-2xs scale-105'
+                                            : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200 dark:hover:bg-slate-700'
+                                        }`}
+                                        title={_t('لم يُعقد امتحان أو كويز في هذه الحصة', 'No exam held in this lesson', 'Keine Prüfung')}
+                                      >
+                                        {_t('مكانش فيه', 'None', 'Keins')}
+                                      </button>
                                       {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(score => (
                                         <button
                                           key={`exam-${st.id}-${score}`}
@@ -1726,6 +1915,10 @@ export const LessonControlModal: React.FC = () => {
               homeworkTitle: lessonNextHomework || homeworkTitle,
               homeworkDescription: lessonNextHomework || homeworkDescription,
               teacherNotes: lessonWhatWasTaught || teacherNotes,
+              arabicTopicsExplained: lessonWhatWasTaught || teacherNotes,
+              arabicHomeworkRequired: lessonNextHomework || homeworkDescription,
+              arabicPreviousHomework: (lessonPreviousHomework || detectedPreviousHomework || '').trim() || undefined,
+              previousHomeworkDescription: (lessonPreviousHomework || detectedPreviousHomework || '').trim() || undefined,
               recordingLink: lessonRecordingLink.trim() || selectedLesson.report?.recordingLink,
               recordingLink2: lessonRecordingLink2.trim() || selectedLesson.report?.recordingLink2,
               paymentStatus,
@@ -1742,11 +1935,16 @@ export const LessonControlModal: React.FC = () => {
             if (extraFields?.recordingLink2 !== undefined) {
               setLessonRecordingLink2(extraFields.recordingLink2);
             }
+            if (extraFields?.arabicPreviousHomework !== undefined) {
+              setLessonPreviousHomework(extraFields.arabicPreviousHomework);
+            }
             saveLessonReport(selectedLesson.id, {
               ...(selectedLesson.report || {}),
               recordingLink: extraFields?.recordingLink !== undefined ? extraFields.recordingLink : (lessonRecordingLink.trim() || undefined),
               recordingLink2: extraFields?.recordingLink2 !== undefined ? extraFields.recordingLink2 : (lessonRecordingLink2.trim() || undefined),
               arabicFullGeneratedReport: arabicReportText,
+              arabicPreviousHomework: extraFields?.arabicPreviousHomework !== undefined ? extraFields.arabicPreviousHomework : ((lessonPreviousHomework || detectedPreviousHomework || '').trim() || undefined),
+              previousHomeworkDescription: extraFields?.previousHomeworkDescription !== undefined ? extraFields.previousHomeworkDescription : ((lessonPreviousHomework || detectedPreviousHomework || '').trim() || undefined),
               ...(extraFields || {})
             });
           }}

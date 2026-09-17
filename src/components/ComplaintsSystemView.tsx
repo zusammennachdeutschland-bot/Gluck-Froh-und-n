@@ -9,6 +9,7 @@ import { useApp } from '../context/AppContext';
 import { Complaint, HodGermanStudent, Teacher } from '../types';
 import { storage } from '../services/storageService';
 import { generateStageManagerReportPrint } from '../utils/printComplaintUtils';
+import { normalizeClassCode, compareClassCodes } from '../utils/classNormalizer';
 
 // Reason categories and quick options
 export const TEACHER_TO_STUDENT_REASONS = [
@@ -233,9 +234,9 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
   const availableClasses = useMemo(() => {
     const set = new Set<string>();
     germanStudents.forEach(s => {
-      if (s.gradeClass) set.add(s.gradeClass.trim().toUpperCase());
+      if (s.gradeClass) set.add(normalizeClassCode(s.gradeClass));
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return Array.from(set).sort(compareClassCodes);
   }, [germanStudents]);
 
   // Teacher-Specific assigned classes (Direction A logic)
@@ -249,19 +250,19 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
     Object.values(scheduleForTeacher).forEach((daySchedule: any) => {
       if (Array.isArray(daySchedule)) {
         daySchedule.forEach((p: any) => {
-          if (p.className) teacherClassesSet.add(p.className.trim().toUpperCase());
+          if (p.className) teacherClassesSet.add(normalizeClassCode(p.className));
         });
       }
     });
 
-    const result = Array.from(teacherClassesSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const result = Array.from(teacherClassesSet).sort(compareClassCodes);
     return result.length > 0 ? result : availableClasses;
   }, [formTeacherId, schoolSettings.teacherSchedules, availableClasses]);
 
   // Dynamically Filtered Students matching selected class in form
   const classStudentsList = useMemo(() => {
     if (!formGradeClass) return germanStudents;
-    return germanStudents.filter(s => s.gradeClass.toUpperCase() === formGradeClass.toUpperCase());
+    return germanStudents.filter(s => normalizeClassCode(s.gradeClass) === normalizeClassCode(formGradeClass));
   }, [germanStudents, formGradeClass]);
 
   // Stage Managers list from settings

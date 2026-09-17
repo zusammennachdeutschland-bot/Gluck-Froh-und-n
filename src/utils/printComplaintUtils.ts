@@ -214,9 +214,24 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
           color: #64748b;
           margin-top: 4px;
         }
+        .no-print {
+          display: block;
+        }
+        @media print {
+          .no-print {
+            display: none !important;
+          }
+        }
       </style>
     </head>
     <body>
+      <div class="no-print" style="margin-bottom: 12px; background: #0f172a; color: #ffffff; padding: 10px 14px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+        <div style="font-weight: 700; font-size: 9.5pt;">📄 معاينة جاهزة للطباعة أو الحفظ كـ PDF</div>
+        <button onclick="window.print()" style="background: #2563eb; color: #ffffff; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 700; font-size: 9pt; cursor: pointer; display: flex; items-center; gap: 6px;">
+          🖨️ طباعة / حفظ PDF
+        </button>
+      </div>
+
       <div class="header-container">
         <div class="header-logo">
           ${logoHtml}
@@ -225,7 +240,7 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
           <div style="font-size: 13pt; font-weight: 900; color: #0f172a; margin-bottom: 2px;">${schoolName}</div>
           <div class="dept-badge">🇩🇪 قسم اللغة الألمانية (Deutschabteilung)</div>
           <div class="main-title">${titleText}</div>
-          <div class="sub-meta">المرحلة: ${stageName} | الموجه / مدير المرحلة: <strong>${stageManagerName}</strong></div>
+          <div class="sub-meta">المرحلة: ${stageName} | مدير المرحلة: <strong>..................................</strong></div>
         </div>
         <div style="text-align: left; font-size: 8.5pt; color: #475569;">
           <div><strong>الفصل الدراسي:</strong> ${term}</div>
@@ -278,17 +293,17 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
         </table>
       `}
 
-      <!-- Footer Signatures -->
+      <!-- Footer Signatures: Right side = German HOD, Left side = Stage Manager with dotted lines -->
       <div class="footer-sig">
         <div class="sig-box">
           <div class="sig-title">رئيس قسم اللغة الألمانية (Fachleiter)</div>
-          <div class="sig-sub">${hodName}</div>
-          <div style="margin-top: 25px; font-size: 8pt; color: #94a3b8;">التوقيع: ................................</div>
+          <div class="sig-sub">أ/ ${hodName}</div>
+          <div style="margin-top: 25px; font-size: 8.5pt; color: #64748b;">التوقيع: ................................</div>
         </div>
         <div class="sig-box">
           <div class="sig-title">مدير المرحلة (Stage Manager)</div>
-          <div class="sig-sub">${stageManagerName}</div>
-          <div style="margin-top: 25px; font-size: 8pt; color: #94a3b8;">التوقيع: ................................</div>
+          <div class="sig-sub" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">..................................</div>
+          <div style="margin-top: 25px; font-size: 8.5pt; color: #64748b;">التوقيع: ................................</div>
         </div>
       </div>
 
@@ -307,5 +322,35 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
   if (printWindow) {
     printWindow.document.write(printHtml);
     printWindow.document.close();
+  } else {
+    // Fallback for Android WebView / Chrome popup blocker
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(printHtml);
+      doc.close();
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          console.warn('Iframe print error:', e);
+        } finally {
+          setTimeout(() => {
+            if (document.body.contains(iframe)) {
+              document.body.removeChild(iframe);
+            }
+          }, 3000);
+        }
+      }, 400);
+    }
   }
 };

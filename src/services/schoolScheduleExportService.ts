@@ -16,7 +16,8 @@ import {
   getSchoolSettings, 
   calculatePeriodsTimings, 
   CalculatedPeriod,
-  getCustomSessionsForPeriod 
+  getCustomSessionsForPeriod,
+  getUnmatchedCustomSessions
 } from '../utils/schoolUtils';
 import { 
   sanitizeModernCssColors, 
@@ -145,6 +146,30 @@ export function buildSchoolScheduleExportModel(
   // 2. Calculated Periods
   const calculatedPeriods = calculatePeriodsTimings(currentSettings.periodSettings);
 
+  // Also collect any unmatched custom sessions across active days to ensure complete schedule coverage in export
+  const unmatchedList: CalculatedPeriod[] = [];
+  const unmatchedTimingsSet = new Set<string>();
+
+  activeDaysList.forEach(day => {
+    const dayUnmatched = getUnmatchedCustomSessions(currentSettings.customTimedSessions, day.key, calculatedPeriods);
+    dayUnmatched.forEach(cs => {
+      const timingKey = `${cs.startTime}-${cs.endTime}`;
+      if (!unmatchedTimingsSet.has(timingKey)) {
+        unmatchedTimingsSet.add(timingKey);
+        const periodIndex = calculatedPeriods.length + unmatchedList.length + 1;
+        unmatchedList.push({
+          periodNumber: periodIndex,
+          startTime: cs.startTime,
+          endTime: cs.endTime || cs.startTime,
+          duration: 45,
+          isCustom: true
+        });
+      }
+    });
+  });
+
+  const allExportPeriods = [...calculatedPeriods, ...unmatchedList];
+
   // 3. Stats & Metrics
   const uniqueClassesSet = new Set<string>();
   const uniqueStagesSet = new Set<string>();
@@ -152,19 +177,29 @@ export function buildSchoolScheduleExportModel(
 
   const cellsByPeriod: Record<number, Record<string, ScheduleExportCell>> = {};
 
-  calculatedPeriods.forEach(period => {
+  allExportPeriods.forEach(period => {
     cellsByPeriod[period.periodNumber] = {};
+    const isStandardPeriod = period.periodNumber <= calculatedPeriods.length;
+
     activeDaysList.forEach(day => {
       const daySchedule = currentSettings.schedule[day.key] || [];
-      const record = daySchedule.find(p => p.periodNumber === period.periodNumber);
-      const matchingCustoms = getCustomSessionsForPeriod(currentSettings.customTimedSessions, day.key, period.periodNumber, calculatedPeriods);
+      const record = isStandardPeriod ? daySchedule.find(p => p.periodNumber === period.periodNumber) : undefined;
+      
+      let matchingCustoms: any[] = [];
+      if (isStandardPeriod) {
+        matchingCustoms = getCustomSessionsForPeriod(currentSettings.customTimedSessions, day.key, period.periodNumber, calculatedPeriods);
+      } else {
+        // Unmatched slot: check for custom sessions matching this time slot
+        const dayUnmatched = getUnmatchedCustomSessions(currentSettings.customTimedSessions, day.key, calculatedPeriods);
+        matchingCustoms = dayUnmatched.filter(cs => cs.startTime === period.startTime);
+      }
 
       let className = record?.className?.trim() || '';
       let subjectName = record?.subjectName?.trim() || '';
       let notes = record?.notes?.trim() || '';
 
       if (matchingCustoms.length > 0) {
-        const customNames = matchingCustoms.map(cs => `${cs.className} [${cs.startTime}]`).join(', ');
+        const customNames = matchingCustoms.map(cs => `${cs.className} [⏱️ ${cs.startTime}-${cs.endTime}]`).join(' • ');
         if (className) {
           className = `${className} / ${customNames}`;
         } else {
@@ -263,7 +298,7 @@ export function buildSchoolScheduleExportModel(
       summaryLine
     },
     days: activeDaysList,
-    periods: calculatedPeriods,
+    periods: allExportPeriods,
     cellsByPeriod
   };
 }
@@ -314,9 +349,11 @@ function createExportDomElement(
 
   // Build rows HTML
   const rowsHtml = model.periods.map(period => {
-    const periodNumberLabel = model.language === 'ar' 
-      ? `الحصة ${period.periodNumber}` 
-      : (model.language === 'de' ? `Std. ${period.periodNumber}` : `Period ${period.periodNumber}`);
+    const periodNumberLabel = period.isCustom 
+      ? (model.language === 'ar' ? 'حصة مخصصة' : (model.language === 'de' ? 'Spez. Stunde' : 'Custom Session'))
+      : (model.language === 'ar' 
+          ? `الحصة ${period.periodNumber}` 
+          : (model.language === 'de' ? `Std. ${period.periodNumber}` : `Period ${period.periodNumber}`));
 
     const cellsHtml = model.days.map(day => {
       const cell = model.cellsByPeriod[period.periodNumber]?.[day.key];
