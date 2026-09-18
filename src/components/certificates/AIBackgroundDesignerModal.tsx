@@ -188,29 +188,26 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
       <div className="bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-800 rounded-3xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Modal Header */}
-        <div className="px-5 py-4 border-b border-surface-border dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/90">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-linear-to-br from-indigo-500 via-purple-500 to-pink-500 text-white flex items-center justify-center shadow-md">
-              <Sparkles className="w-5 h-5" />
+        <div className="px-3.5 py-2.5 sm:px-5 sm:py-4 border-b border-surface-border dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/90 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-2xl bg-linear-to-br from-indigo-500 via-purple-500 to-pink-500 text-white flex items-center justify-center shadow-md shrink-0">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-black text-text-main flex items-center gap-2">
-                <span>{_t('مصمم خلفيات الشهادات AI', 'AI Certificate Background Designer', 'KI-Zertifikate Hintergrund Designer')}</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold border border-indigo-500/20">
-                  {_t('AI يصمم الخلفية • التطبيق يملك البيانات', 'AI designs bg • App owns data', 'KI Hintergrund • App Daten')}
-                </span>
+            <div className="min-w-0">
+              <h2 className="text-xs sm:text-base font-black text-text-main flex items-center gap-2 truncate">
+                <span className="truncate">{_t('مصمم خلفيات الشهادات AI', 'AI Background Designer', 'KI-Hintergrund Designer')}</span>
               </h2>
-              <p className="text-xs text-text-muted">
-                {_t('صمم خلفيات نقية بدون نصوص بواسطة AI واستوردها لتطبيق بيانات الطلاب والشهادات ديناميكياً بدقة متناهية', 'Generate clean backgrounds using AI & import them as certificate templates with dynamic data overlays', 'Erstellen Sie Hintergründe mit KI und fügen Sie dynamische Daten ein')}
+              <p className="text-[10px] sm:text-xs text-text-muted truncate hidden sm:block">
+                {_t('صمم خلفيات نقية بدون نصوص بواسطة AI واستوردها للشهادات', 'Generate clean backgrounds using AI & import them for certificates', 'Erstellen Sie Hintergründe mit KI')}
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main transition-colors cursor-pointer"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

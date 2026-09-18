@@ -580,9 +580,9 @@ KEY CONSTRAINTS & RULES:
   return (
     <div className="space-y-3 pb-6" id="school-schedule-root">
       {/* HEADER BAR WITH AI BUTTON & COMPACT OVERVIEW */}
-      <div className="flex flex-row items-center justify-between gap-2.5 flex-wrap" id="school-schedule-header">
+      <div className="flex flex-row items-center justify-between gap-1.5 sm:gap-2.5 flex-wrap" id="school-schedule-header">
         {/* COMPACT OVERVIEW SUMMARY LINE */}
-        <div className="flex items-center gap-1.5 py-1 px-2.5 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-gray-800 text-[11px] text-slate-500 dark:text-slate-400 font-bold" id="school-overview-box">
+        <div className="flex items-center gap-1 sm:gap-1.5 py-0.5 sm:py-1 px-2 sm:px-2.5 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-gray-850 text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 font-bold" id="school-overview-box">
           <span>{totalUniqueClasses} {_t('فصول', 'Classes', 'Klassen')}</span>
           <span className="text-slate-300 dark:text-slate-700">•</span>
           <span>{totalUniqueStages} {_t('مراحل', 'Stages', 'Stufen')}</span>
@@ -590,10 +590,10 @@ KEY CONSTRAINTS & RULES:
           <span className="text-primary font-black">{totalWeeklyLessons} {_t('حصة أسبوعية', 'Weekly Lessons', 'Wochenstunden')}</span>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
           <button
             onClick={() => handleOpenAddCustomSession(selectedDay)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs font-bold transition-all active:scale-95 border border-indigo-200 dark:border-indigo-800 shrink-0 cursor-pointer shadow-2xs"
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 rounded-lg text-[10.5px] sm:text-xs font-bold transition-all active:scale-95 border border-indigo-200 dark:border-indigo-800 shrink-0 cursor-pointer shadow-2xs"
             id="add-custom-session-btn"
             title={_t('إضافة حصة بتوقيت مخصص (خارج الأوقات النمطية أو في وقت محدد)', 'Add custom timed session', 'Spezielle Stunde hinzufügen')}
           >
@@ -603,7 +603,7 @@ KEY CONSTRAINTS & RULES:
 
           <button
             onClick={() => setIsExportModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-surface hover:bg-surface-hover text-text-main rounded-lg text-xs font-bold transition-all active:scale-95 border border-surface-border shrink-0 cursor-pointer shadow-2xs"
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 bg-surface hover:bg-surface-hover text-text-main rounded-lg text-[10.5px] sm:text-xs font-bold transition-all active:scale-95 border border-surface-border shrink-0 cursor-pointer shadow-2xs"
             id="export-school-schedule-btn"
             title={_t('تصدير الجدول الأسبوعي (PDF / PNG / JPG)', 'Export Weekly Schedule (PDF / PNG / JPG)', 'Wochenplan exportieren (PDF / PNG / JPG)')}
           >
@@ -613,7 +613,7 @@ KEY CONSTRAINTS & RULES:
 
           <button
             onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-primary-soft hover:bg-primary/20 text-primary rounded-lg text-xs font-bold transition-all active:scale-95 border border-primary-border/60 shrink-0 cursor-pointer"
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 bg-primary-soft hover:bg-primary/20 text-primary rounded-lg text-[10.5px] sm:text-xs font-bold transition-all active:scale-95 border border-primary-border/60 shrink-0 cursor-pointer"
             id="import-ai-btn"
             title={_t('استيراد بالذكاء الاصطناعي', 'Import with AI', 'Mit KI importieren')}
           >
@@ -906,7 +906,7 @@ KEY CONSTRAINTS & RULES:
           </div>
 
           {/* DAILY TIMELINE LIST */}
-          <div className="p-3 rounded-xl bg-white dark:bg-gray-900 border border-slate-100 dark:border-gray-800 space-y-2.5" id="daily-timeline-section">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-white dark:bg-gray-900 border border-slate-100 dark:border-gray-800 space-y-1.5" id="daily-timeline-section">
             <div className="flex items-center justify-between pb-1.5 border-b border-slate-50 dark:border-gray-800">
               <div className="space-y-0.5">
                 {(() => {
@@ -1000,7 +1000,7 @@ KEY CONSTRAINTS & RULES:
                     return (
                       <div 
                         key={item.id}
-                        className={`p-2.5 rounded-lg border transition-all duration-200 ${
+                        className={`p-2 sm:p-2.5 rounded-lg border transition-all duration-200 ${
                           isCustom 
                             ? 'bg-indigo-50/40 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800/60 shadow-2xs' 
                             : 'bg-primary-soft/20 dark:bg-primary-soft/10 border-primary-border/40'

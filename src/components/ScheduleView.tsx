@@ -1,7 +1,7 @@
 import { checkOverlap } from "../utils/lessonUtils";
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Lesson } from '../types';
+import { Lesson, Group } from '../types';
 import { parseLocalDate, formatLocalDate } from '../utils/timeUtils';
 import { 
   Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, 
@@ -12,6 +12,7 @@ import { StartLessonNowModal } from './StartLessonNowModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { ExportMonthlyCalendarModal } from './ExportMonthlyCalendarModal';
 import { DeleteSessionConfirmModal } from './DeleteSessionConfirmModal';
+import { GroupProfileModal } from './GroupProfileModal';
 import { getSchoolSettings, calculatePeriodsTimings } from '../utils/schoolUtils';
 import { DAY_KEY_TO_RRULE_BYDAY, getUpcomingDateForDayKey, formatIcsEventBlock, SchoolIcsEventItem } from '../utils/schoolScheduleIcsUtils';
 import { Capacitor } from '@capacitor/core';
@@ -30,6 +31,7 @@ export const ScheduleView: React.FC = () => {
   const [isExportMonthlyModalOpen, setIsExportMonthlyModalOpen] = useState(false);
   const [reminderLesson, setReminderLesson] = useState<Lesson | null>(null);
   const [lessonToDelete, setLessonToDelete] = useState<Lesson | null>(null);
+  const [selectedGroupForModal, setSelectedGroupForModal] = useState<Group | null>(null);
 
   const handleRefreshCalendar = () => {
     refreshCalendarAndDashboard();
@@ -355,23 +357,23 @@ export const ScheduleView: React.FC = () => {
   return (
     <div className="space-y-4  font-sans">
       {/* TOP HEADER */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-base sm:text-lg font-black text-text-main flex items-center gap-2">
-            <CalendarIcon className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+          <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5 sm:gap-2">
+            <CalendarIcon className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
             <span>{t('schedule_title')}</span>
           </h2>
-          <p className="text-[11px] font-semibold text-text-muted">
+          <p className="text-[10px] sm:text-[11px] font-semibold text-text-muted">
             {t('schedule_working_hours')}: {workingStart} - {workingEnd}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-start sm:justify-end">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 w-full sm:w-auto justify-start sm:justify-end">
           {/* Refresh Calendar Data */}
           <button
             onClick={handleRefreshCalendar}
             title={t('schedule_refresh')}
-            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-xs px-2 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-[10.5px] sm:text-xs px-2 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span className="hidden md:inline">{t('schedule_refresh')}</span>
@@ -381,7 +383,7 @@ export const ScheduleView: React.FC = () => {
           <button
             onClick={handleExportICS}
             title={t('schedule_ical')}
-            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-xs px-2 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-[10.5px] sm:text-xs px-2 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0"
           >
             <Download className="w-3.5 h-3.5" />
             <span className="hidden md:inline">{t('schedule_ical')}</span>
@@ -391,7 +393,7 @@ export const ScheduleView: React.FC = () => {
           <button
             onClick={() => setIsExportMonthlyModalOpen(true)}
             title={_t('تصدير تقويم الشهر (.ics)', 'Export Monthly Calendar (.ics)', 'Monatskalender exportieren (.ics)')}
-            className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-bold text-xs px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+            className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-bold text-[10.5px] sm:text-xs px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0"
           >
             <CalendarIcon className="w-3.5 h-3.5" />
             <span>{_t('تقويم شهري (.ics)', 'Monthly (.ics)', 'Monatskalender (.ics)')}</span>
@@ -401,7 +403,7 @@ export const ScheduleView: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsAddQuickLessonModalOpen(true)}
-            className="bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border hover:bg-primary-soft/80 active:scale-95 font-bold text-xs px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
+            className="bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border hover:bg-primary-soft/80 active:scale-95 font-bold text-[10.5px] sm:text-xs px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
           >
             <Zap className="w-3.5 h-3.5 fill-primary text-primary" />
             <span>{t('nav_quickLesson')}</span>
@@ -410,7 +412,7 @@ export const ScheduleView: React.FC = () => {
           {/* START LESSON NOW */}
           <button
             onClick={() => setShowStartLessonNowModal(true)}
-            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-primary/30 shrink-0"
+            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-[10.5px] sm:text-xs px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-primary/30 shrink-0"
           >
             <Play className="w-3.5 h-3.5 fill-white text-white" />
             <span>{t('schedule_start_now')}</span>
@@ -546,7 +548,7 @@ export const ScheduleView: React.FC = () => {
 
       {/* 1. DAY VIEW */}
       {calendarView === 'day' && (
-        <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-3 shadow-2xs space-y-2.5">
+        <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs space-y-2">
           <div className="flex items-center justify-between text-xs font-bold border-b border-slate-100 dark:border-surface-border pb-1.5">
             <span className="text-slate-500 uppercase text-[11px]">({dayLessons.length}) {t('schedule_title')}</span>
             {dayConflicts.length === 0 ? (
@@ -580,7 +582,7 @@ export const ScheduleView: React.FC = () => {
               .filter(item => item.hasContent);
 
             return (
-              <div className="p-4 rounded-xl bg-indigo-50/20 dark:bg-indigo-950/10 border border-indigo-100/40 dark:border-indigo-900/20 space-y-3 shadow-2xs">
+              <div className="p-2.5 sm:p-3 rounded-xl bg-indigo-50/20 dark:bg-indigo-950/10 border border-indigo-100/40 dark:border-indigo-900/20 space-y-2 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="p-1.5 bg-indigo-600 text-white rounded-lg">
@@ -656,7 +658,7 @@ export const ScheduleView: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="space-y-2.5">
+            <div className="space-y-1.5 sm:space-y-2">
               {dayLessons.map((lesson) => {
                 const isCompleted = lesson.status === 'completed';
                 const isCancelled = lesson.status === 'cancelled';
@@ -689,7 +691,7 @@ export const ScheduleView: React.FC = () => {
                     </div>
 
                     {/* Compact Session Card (72-80px Height) */}
-                    <div className={`flex-1 min-w-0 border rounded-xl p-3 sm:p-3.5 transition-all shadow-2xs ${
+                    <div className={`flex-1 min-w-0 border rounded-xl p-2 sm:p-2.5 transition-all shadow-2xs ${
                       conflict
                         ? 'border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10'
                         : isCompleted
@@ -705,15 +707,39 @@ export const ScheduleView: React.FC = () => {
                             onClick={() => openLessonControl(lesson)}
                             className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
                           >
-                            <h4 className={`text-sm sm:text-[15px] font-bold truncate transition-colors ${
-                              isCompleted
-                                ? 'line-through text-text-muted/70 dark:text-slate-500'
-                                : isCancelled
-                                ? 'line-through text-rose-500'
-                                : 'text-text-main group-hover:text-primary'
-                            }`}>
-                              {lesson.studentName || lesson.groupName || lesson.title}
-                            </h4>
+                            {lesson.groupId && groups.find(g => g.id === lesson.groupId) ? (
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedGroupForModal(groups.find(g => g.id === lesson.groupId) || null);
+                                  }}
+                                  className="text-sm sm:text-[15px] font-black hover:text-primary hover:underline transition-colors truncate cursor-pointer text-start inline-flex items-center gap-1"
+                                  title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                                >
+                                  <span className="truncate">{groups.find(g => g.id === lesson.groupId)?.name}</span>
+                                  <span className="text-[9.5px] font-bold px-1.5 py-0.2 rounded bg-primary-soft text-primary border border-primary-border shrink-0">
+                                    {_t('مجموعة', 'Group', 'Gruppe')}
+                                  </span>
+                                </button>
+                                {lesson.studentName && lesson.studentName !== groups.find(g => g.id === lesson.groupId)?.name && (
+                                  <span className="text-xs text-text-muted truncate">
+                                    ({lesson.studentName})
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <h4 className={`text-sm sm:text-[15px] font-bold truncate transition-colors ${
+                                isCompleted
+                                  ? 'line-through text-text-muted/70 dark:text-slate-500'
+                                  : isCancelled
+                                  ? 'line-through text-rose-500'
+                                  : 'text-text-main group-hover:text-primary'
+                              }`}>
+                                {lesson.studentName || lesson.groupName || lesson.title}
+                              </h4>
+                            )}
 
                             {/* Location Badge */}
                             {lesson.type === 'online' ? (
@@ -830,12 +856,12 @@ export const ScheduleView: React.FC = () => {
 
       {/* 2. WEEK VIEW */}
       {calendarView === 'week' && (
-        <div className="space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-7 gap-2.5">
+        <div className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-7 gap-1.5 sm:gap-2">
             {weekDays.map((day) => (
               <div
                 key={day.dateStr}
-                className={`bg-surface border rounded-lg p-3 shadow-2xs space-y-2 transition-all ${
+                className={`bg-surface border rounded-lg p-2 sm:p-2.5 shadow-2xs space-y-1.5 transition-all ${
                   day.isToday
                     ? 'border-primary dark:border-primary ring-2 ring-primary dark:ring-primary'
                     : 'border-surface-border/90 dark:border-surface-border'
@@ -897,7 +923,7 @@ export const ScheduleView: React.FC = () => {
                         <div
                           key={l.id}
                           onClick={() => openLessonControl(l)}
-                          className={`p-2 rounded-xl border text-xs cursor-pointer transition-all hover:scale-[1.02] ${
+                          className={`p-1.5 rounded-lg border text-xs cursor-pointer transition-all hover:scale-[1.02] ${
                             conflict
                               ? 'bg-primary-soft border-primary-border text-primary dark:bg-primary-soft dark:border-primary-border dark:text-primary'
                               : l.type === 'online'
@@ -933,7 +959,7 @@ export const ScheduleView: React.FC = () => {
 
       {/* 3. MONTH VIEW */}
       {calendarView === 'month' && (
-        <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-4 shadow-2xs space-y-3">
+        <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs space-y-2">
           <div className="grid grid-cols-7 gap-1 text-center text-xs font-black text-text-muted/70 uppercase tracking-wider border-b border-slate-100 dark:border-surface-border pb-2">
             <span>Mon</span>
             <span>Tue</span>
@@ -1107,6 +1133,14 @@ export const ScheduleView: React.FC = () => {
         <DeleteSessionConfirmModal
           lesson={lessonToDelete}
           onClose={() => setLessonToDelete(null)}
+        />
+      )}
+
+      {/* GROUP PROFILE MODAL */}
+      {selectedGroupForModal && (
+        <GroupProfileModal
+          group={selectedGroupForModal}
+          onClose={() => setSelectedGroupForModal(null)}
         />
       )}
     </div>

@@ -30,9 +30,10 @@ interface GroupFormProps {
   onSubmit: (data: GroupFormData) => void;
   isEdit?: boolean;
   children?: React.ReactNode;
+  className?: string;
 }
 
-export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isEdit, children }) => {
+export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isEdit, children, className }) => {
   const { profile, language, t, _t } = useApp();
 
   
@@ -107,7 +108,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
   };
 
   return (
-    <form id="group-form" onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+    <form id="group-form" onSubmit={handleSubmit} className={className || "p-5 space-y-4 max-h-[75vh] overflow-y-auto"}>
       {/* AI Import Shortcut is rendered outside by parent if needed */}
 
       {/* Group Name */}

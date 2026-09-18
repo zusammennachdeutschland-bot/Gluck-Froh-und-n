@@ -171,27 +171,27 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
           onClick={(e) => e.stopPropagation()}
           className="bg-surface w-full max-w-lg rounded-t-[28px] sm:rounded-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[90vh]"
         >
-          <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+          <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
           
-          <div className="p-5 flex items-center justify-between border-b border-surface-border sticky top-0 bg-surface z-10">
-            <div>
+          <div className="px-3.5 py-2.5 sm:p-4 flex items-center justify-between border-b border-surface-border sticky top-0 bg-surface z-10 shrink-0">
+            <div className="min-w-0">
               <button 
                 onClick={() => setSelectedGroup(null)}
-                className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-1 flex items-center hover:underline"
+                className="text-[10px] sm:text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-0.5 flex items-center hover:underline"
               >
                 ← عودة للقائمة
               </button>
-              <h2 className="text-xl font-black text-text-main flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-amber-500" />
-                {selectedGroup.groupName}
+              <h2 className="text-xs sm:text-base font-black text-text-main flex items-center gap-1.5 truncate">
+                <BookOpen className="w-4 h-4 text-amber-500 shrink-0" />
+                <span className="truncate">{selectedGroup.groupName}</span>
               </h2>
             </div>
-            <button onClick={onClose} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
-              <X className="w-5 h-5" />
+            <button onClick={onClose} className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 rounded-full text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0">
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           </div>
 
-          <div className="p-5 overflow-y-auto space-y-6">
+          <div className="p-3.5 sm:p-5 overflow-y-auto space-y-4">
             {/* Homework division card identical to in-lesson structure */}
             <div className="bg-amber-50/90 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 p-4 rounded-xl space-y-2.5">
               <div className="flex items-center justify-between">
@@ -312,15 +312,15 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
         onClick={(e) => e.stopPropagation()}
         className="bg-surface w-full max-w-lg rounded-t-[28px] sm:rounded-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[80vh]"
       >
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
         
-        <div className="p-5 flex items-center justify-between border-b border-surface-border sticky top-0 bg-surface z-10">
-          <h2 className="text-xl font-black text-text-main flex items-center gap-2">
-            <BookOpen className="w-6 h-6 text-amber-500" />
-            متابعة الواجبات (Homework Follow-Up)
+        <div className="px-3.5 py-2.5 sm:p-4 flex items-center justify-between border-b border-surface-border sticky top-0 bg-surface z-10 shrink-0">
+          <h2 className="text-xs sm:text-base font-black text-text-main flex items-center gap-2 truncate">
+            <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 shrink-0" />
+            <span className="truncate">متابعة الواجبات</span>
           </h2>
-          <button onClick={onClose} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 rounded-full text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0">
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

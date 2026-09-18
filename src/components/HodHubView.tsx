@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Users, Calendar, BookOpen, FileText, CheckCircle2, AlertTriangle, Clock, Plus, Trash2, Edit3, Send, Sparkles, Printer, Check, X, Shield, FileCheck, Layers, ChevronRight, RefreshCw, RotateCcw, Upload, Phone, MessageCircle, Copy, MapPin, Eye, Target, ClipboardList, Award, BarChart3, Download, Loader2, GraduationCap, Tag, CheckSquare, Square, Pin, Search, MessageSquare, AlertCircle, Bookmark } from 'lucide-react';
-import { calculatePeriodsTimings, getCustomSessionsForPeriod, getUnmatchedCustomSessions, getMergedDayScheduleItems } from '../utils/schoolUtils';
+import { calculatePeriodsTimings, parseTimeToMinutes, getCustomSessionsForPeriod, getUnmatchedCustomSessions, getMergedDayScheduleItems } from '../utils/schoolUtils';
 import { 
   printObservationReport, 
   downloadObservationReportPdf, 
@@ -975,13 +975,6 @@ export const HodHubView: React.FC = () => {
     '4': _t('الخميس', 'Thursday', 'Donnerstag'),
     '5': _t('الجمعة', 'Friday', 'Freitag'),
     '6': _t('السبت', 'Saturday', 'Samstag'),
-  };
-
-  const parseTimeToMinutes = (timeStr: string) => {
-    if (!timeStr) return 0;
-    const parts = timeStr.split(':');
-    if (parts.length < 2) return 0;
-    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
   };
 
   const getLessonForTeacher = (teacherId: string, dayKey: string, periodNum: number) => {
@@ -2309,7 +2302,7 @@ export const HodHubView: React.FC = () => {
       )}
 
       {/* Tabs Navigation */}
-      <div className="flex w-full items-center justify-between sm:justify-center gap-1 bg-surface p-1 rounded-xl border border-surface-border shadow-2xs overflow-hidden">
+      <div className="flex w-full items-center justify-start sm:justify-center gap-1 bg-surface p-1 rounded-xl border border-surface-border shadow-2xs overflow-x-auto no-scrollbar">
         {[
           { id: 'overview', icon: BarChart3, title: _t('الرئيسية', 'Overview', 'Übersicht'), activeClass: 'bg-primary text-white' },
           { id: 'stage_managers', icon: Shield, title: _t('المراحل', 'Stages', 'Stufen'), activeClass: 'bg-primary text-white' },
@@ -2326,15 +2319,15 @@ export const HodHubView: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`h-9 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer select-none ${
+              className={`h-8 sm:h-9 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer select-none ${
                 isActive 
-                  ? `${tab.activeClass} px-2.5 sm:px-3 gap-1.5 shadow-xs font-black shrink-0` 
-                  : 'w-8 sm:w-9 text-text-muted hover:bg-surface-hover hover:text-text-main shrink-0'
+                  ? `${tab.activeClass} px-2 sm:px-3 gap-1 sm:gap-1.5 shadow-xs font-black shrink-0` 
+                  : 'w-7 sm:w-9 text-text-muted hover:bg-surface-hover hover:text-text-main shrink-0'
               }`}
               title={tab.title}
             >
-              <Icon className="w-4 h-4 shrink-0" />
-              {isActive && <span className="text-[11px] font-bold whitespace-nowrap overflow-hidden">{tab.title}</span>}
+              <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              {isActive && <span className="text-[10px] sm:text-[11px] font-bold whitespace-nowrap overflow-hidden">{tab.title}</span>}
             </button>
           );
         })}
@@ -2358,7 +2351,7 @@ export const HodHubView: React.FC = () => {
 
             <div 
               onClick={() => setActiveTab('action_plans')}
-              className="bg-surface border border-surface-border p-3 rounded-xl shadow-2xs flex flex-col items-center justify-center text-center cursor-pointer hover:border-emerald-500 transition-all"
+              className="bg-surface border border-surface-border p-2 sm:p-2.5 rounded-xl shadow-2xs flex flex-col items-center justify-center text-center cursor-pointer hover:border-emerald-500 transition-all"
             >
               <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center mb-1">
                 <Target className="w-4 h-4" />
@@ -2369,7 +2362,7 @@ export const HodHubView: React.FC = () => {
 
             <div 
               onClick={() => setActiveTab('complaints')}
-              className="bg-surface border border-surface-border p-3 rounded-xl shadow-2xs flex flex-col items-center justify-center text-center cursor-pointer hover:border-rose-500 transition-all"
+              className="bg-surface border border-surface-border p-2 sm:p-2.5 rounded-xl shadow-2xs flex flex-col items-center justify-center text-center cursor-pointer hover:border-rose-500 transition-all"
             >
               <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center mb-1">
                 <AlertTriangle className="w-4 h-4" />
@@ -2380,7 +2373,7 @@ export const HodHubView: React.FC = () => {
           </div>
 
           {/* 2. Live Daily Section Schedule Bar */}
-          <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/20 rounded-xl p-3.5 shadow-2xs flex items-center justify-between">
+          <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/20 rounded-xl p-2.5 sm:p-3 shadow-2xs flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <div className="relative flex items-center justify-center w-8 h-8 rounded-xl bg-primary text-white shrink-0">
                 <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-30 animate-ping" />
@@ -2425,7 +2418,7 @@ export const HodHubView: React.FC = () => {
                 </div>
               ) : (
                 (liveStudentData.stages || []).map((stage: any) => (
-                  <div key={stage.id} className="bg-surface-hover p-3 rounded-xl border border-surface-border space-y-2">
+                  <div key={stage.id} className="bg-surface-hover p-2 sm:p-2.5 rounded-xl border border-surface-border space-y-1.5">
                     <div className="flex justify-between items-center text-[11px] font-bold text-text-main">
                       <span className="truncate">{stage.nameAr}</span>
                       <span className="text-primary font-black shrink-0">{stage.total} {_t('طالب', 'students', 'Schüler')}</span>

@@ -291,7 +291,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
   }
 
   return (
-    <div className="space-y-4.5 animate-in fade-in pb-16">
+    <div className="space-y-2.5 sm:space-y-3 animate-in fade-in pb-10">
       
       {/* ------------------------------------------------------------------ */}
       {/* 0. SHORTCUT BANNER: STUDENT PAYMENTS (CONDITIONAL: ONLY IF DUE)   */}
@@ -329,7 +329,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
       {/* ------------------------------------------------------------------ */}
       {/* 1. MONTHLY GOAL CARD                                              */}
       {/* ------------------------------------------------------------------ */}
-      <div className="bg-surface border border-surface-border rounded-xl p-3 sm:p-3.5 shadow-2xs">
+      <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5">
             <Target className="w-3.5 h-3.5 text-primary" />
@@ -406,7 +406,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
             {_t('لا توجد حسابات بعد. أضف حسابك الأول.', 'No accounts yet. Add your first account.', 'Noch keine Konten.')}
           </div>
         ) : (
-          <div className="flex overflow-x-auto snap-x snap-mandatory gap-3 pb-4 pt-2 hide-scrollbar w-full scroll-smooth">
+          <div className="flex overflow-x-auto snap-x snap-mandatory gap-2.5 pb-2 pt-1 hide-scrollbar w-full scroll-smooth">
             <div className="w-[2vw] sm:hidden shrink-0" />
             {activeAccounts.map(account => (
               <div key={account.id} className="snap-center shrink-0 w-[85vw] sm:w-[340px]">
@@ -461,7 +461,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
       {/* 4. TOTAL NET & FINANCIAL REPORTS IN LINES                         */}
       {/* ------------------------------------------------------------------ */}
       <div className="bg-surface border border-surface-border rounded-xl overflow-hidden shadow-2xs">
-        <div className="p-3 border-b border-surface-border flex items-center justify-between">
+        <div className="p-2 sm:p-2.5 border-b border-surface-border flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <Landmark className="w-3.5 h-3.5 text-primary" />
             <h3 className="font-black text-xs text-text-main uppercase tracking-wider">
@@ -476,7 +476,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
         <div className="divide-y divide-surface-border">
           
           {/* Line 1: Total Net Worth */}
-          <div className="p-2.5 sm:p-3 flex items-center justify-between hover:bg-surface-hover/30 transition-colors">
+          <div className="p-2 sm:p-2.5 flex items-center justify-between hover:bg-surface-hover/30 transition-colors">
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-surface-hover text-primary flex items-center justify-center shrink-0">
                 <Landmark className="w-3.5 h-3.5" />
@@ -500,7 +500,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
           </div>
 
           {/* Line 2: Income This Month */}
-          <div className="p-2.5 sm:p-3 flex items-center justify-between hover:bg-surface-hover/30 transition-colors">
+          <div className="p-2 sm:p-2.5 flex items-center justify-between hover:bg-surface-hover/30 transition-colors">
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
                 <ArrowDownLeft className="w-3.5 h-3.5" />
@@ -524,7 +524,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
           </div>
 
           {/* Line 3: Expenses This Month */}
-          <div className="p-2.5 sm:p-3 flex items-center justify-between hover:bg-surface-hover/30 transition-colors">
+          <div className="p-2 sm:p-2.5 flex items-center justify-between hover:bg-surface-hover/30 transition-colors">
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-500 flex items-center justify-center shrink-0">
                 <ArrowUpRight className="w-3.5 h-3.5" />
@@ -547,7 +547,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
           </div>
 
           {/* Line 4: Net Flow This Month */}
-          <div className="p-2.5 sm:p-3 flex items-center justify-between hover:bg-surface-hover/30 transition-colors">
+          <div className="p-2 sm:p-2.5 flex items-center justify-between hover:bg-surface-hover/30 transition-colors">
             <div className="flex items-center gap-2.5">
               <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
                 netThisMonth >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'
@@ -575,7 +575,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
           {upcomingDues.count > 0 && (
             <div 
               onClick={() => onNavigateTab?.(financeInstallments.length > 0 ? 'installments' : 'recurring')}
-              className="p-2.5 sm:p-3 flex items-center justify-between hover:bg-amber-500/5 transition-colors cursor-pointer group"
+              className="p-2 sm:p-2.5 flex items-center justify-between hover:bg-amber-500/5 transition-colors cursor-pointer group"
             >
               <div className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
@@ -605,7 +605,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
       {/* ------------------------------------------------------------------ */}
       {/* 5. 6-MONTH COMPARISON BAR CHART (RECHARTS)                         */}
       {/* ------------------------------------------------------------------ */}
-      <div className="bg-surface border border-surface-border rounded-xl p-3 sm:p-3.5 shadow-2xs space-y-2.5">
+      <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs space-y-2">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
           <div className="flex items-center gap-1.5">
             <BarChart3 className="w-3.5 h-3.5 text-primary" />
@@ -686,7 +686,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
       
       {/* Top Expense Categories Breakdown Line Items */}
       {categoryExpenses.length > 0 && (
-        <div className="bg-surface border border-surface-border rounded-xl p-3 shadow-2xs space-y-2">
+        <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs space-y-1.5">
           <div className="flex items-center justify-between px-0.5">
             <h4 className="font-black text-xs text-text-main uppercase tracking-wider">
               {_t('أعلى تصنيفات المصروفات', 'Top Categories', 'Hauptausgaben')}
@@ -723,7 +723,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
 
       {/* Recent Activity List Lines */}
       <div className="bg-surface border border-surface-border rounded-xl overflow-hidden shadow-2xs">
-        <div className="p-3 border-b border-surface-border flex items-center justify-between">
+        <div className="p-2 sm:p-2.5 border-b border-surface-border flex items-center justify-between">
           <h3 className="font-black text-xs text-text-main uppercase tracking-wider">
             {_t('آخر العمليات المالية', 'Recent Transactions', 'Letzte Transaktionen')}
           </h3>
@@ -743,7 +743,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
               const isIncome = tx.type === 'income' || tx.type === 'investment_return';
               const isExpense = tx.type === 'expense';
               return (
-                <div key={tx.id} className="p-2.5 sm:p-3 flex items-center justify-between hover:bg-surface-hover/30 transition-colors">
+                <div key={tx.id} className="p-2 sm:p-2.5 flex items-center justify-between hover:bg-surface-hover/30 transition-colors">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
                       isIncome ? 'bg-emerald-500/10 text-emerald-500' : 

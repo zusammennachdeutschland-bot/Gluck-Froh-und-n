@@ -63,19 +63,19 @@ export const AddFinanceRecurringModal: React.FC<AddFinanceRecurringModalProps> =
   const activeAccounts = financeAccounts.filter(a => !a.deleted);
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
       <div className="bg-surface rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-        <div className="flex items-center justify-between p-4 border-b border-surface-border">
-          <h3 className="text-lg font-bold text-text-main flex items-center gap-2">
-            <Repeat className="w-5 h-5 text-primary" />
-            {existingRecurring ? _t('تعديل معاملة متكررة', 'Edit Recurring Payment', 'Bearbeiten') : _t('إضافة معاملة متكررة', 'Add Recurring Payment', 'Hinzufügen')}
+        <div className="flex items-center justify-between px-3.5 py-2.5 sm:p-4 border-b border-surface-border shrink-0">
+          <h3 className="text-xs sm:text-base font-bold text-text-main flex items-center gap-2 truncate">
+            <Repeat className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+            <span className="truncate">{existingRecurring ? _t('تعديل معاملة متكررة', 'Edit Recurring Payment', 'Bearbeiten') : _t('إضافة معاملة متكررة', 'Add Recurring', 'Hinzufügen')}</span>
           </h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-surface-hover rounded-lg text-text-muted transition-colors">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 sm:p-1.5 hover:bg-surface-hover rounded-lg text-text-muted transition-colors shrink-0">
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
-        <div className="p-4 overflow-y-auto space-y-4">
+        <div className="p-3.5 sm:p-4 overflow-y-auto space-y-3.5 sm:space-y-4">
           <div>
             <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('اسم المعاملة', 'Name', 'Name')} *</label>
             <input 

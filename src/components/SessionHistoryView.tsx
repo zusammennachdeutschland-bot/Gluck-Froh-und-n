@@ -115,14 +115,14 @@ export const SessionHistoryView: React.FC = () => {
   return (
     <div className="space-y-4  font-sans">
       {/* Header Banner - redesigned to modern flat theme */}
-      <div className="bg-surface border border-surface-border rounded-xl p-4 shadow-2xs space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-primary-soft dark:bg-primary-soft/40 flex items-center justify-center border border-primary-border/50 dark:border-primary-border/40 shrink-0">
-            <History className="w-5 h-5 text-primary dark:text-primary" />
+      <div className="bg-surface border border-surface-border rounded-xl p-3 sm:p-4 shadow-2xs space-y-2.5 sm:space-y-4">
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-primary-soft dark:bg-primary-soft/40 flex items-center justify-center border border-primary-border/50 dark:border-primary-border/40 shrink-0">
+            <History className="w-4 h-4 sm:w-5 sm:h-5 text-primary dark:text-primary" />
           </div>
           <div>
-            <h1 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">{t('history_title')}</h1>
-            <p className="text-[11px] text-slate-500 font-bold mt-0.5">{t('history_header_sub')}</p>
+            <h1 className="text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">{t('history_title')}</h1>
+            <p className="text-[10px] sm:text-[11px] text-slate-500 font-bold mt-0.5">{t('history_header_sub')}</p>
           </div>
         </div>
 

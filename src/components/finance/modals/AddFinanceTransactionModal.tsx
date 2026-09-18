@@ -94,23 +94,23 @@ export const AddFinanceTransactionModal: React.FC<Props> = ({ type, onClose }) =
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
       <div className="bg-surface rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
         {isSelectingCategory ? (
           <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between p-4 border-b border-surface-border">
-              <h3 className="text-lg font-bold flex items-center gap-2">
+            <div className="flex items-center justify-between px-3.5 py-2.5 sm:p-4 border-b border-surface-border shrink-0">
+              <h3 className="text-xs sm:text-base font-bold flex items-center gap-2 truncate">
                 {selectedParentId && !categorySearch ? (
-                  <button onClick={() => setSelectedParentId(null)} className="p-1 hover:bg-surface-hover rounded-lg">
-                    <ArrowLeftRight className={`w-5 h-5 ${language === 'ar' ? 'rotate-180' : ''}`} />
+                  <button onClick={() => setSelectedParentId(null)} className="p-1 hover:bg-surface-hover rounded-lg shrink-0">
+                    <ArrowLeftRight className={`w-4 h-4 sm:w-5 sm:h-5 ${language === 'ar' ? 'rotate-180' : ''}`} />
                   </button>
                 ) : (
-                  <Tag className="w-5 h-5 text-primary" />
+                  <Tag className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
                 )}
-                {_t('اختر التصنيف', 'Select Category', 'Kategorie wählen')}
+                <span className="truncate">{_t('اختر التصنيف', 'Select Category', 'Kategorie wählen')}</span>
               </h3>
-              <button onClick={() => { setIsSelectingCategory(false); setSelectedParentId(null); setCategorySearch(''); }} className="p-1.5 hover:bg-surface-hover rounded-lg text-text-muted">
-                <X className="w-5 h-5" />
+              <button onClick={() => { setIsSelectingCategory(false); setSelectedParentId(null); setCategorySearch(''); }} className="p-1 sm:p-1.5 hover:bg-surface-hover rounded-lg text-text-muted shrink-0">
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
             
@@ -234,17 +234,17 @@ export const AddFinanceTransactionModal: React.FC<Props> = ({ type, onClose }) =
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between p-4 border-b border-surface-border">
-              <h3 className="text-lg font-bold flex items-center gap-2">
-                <ArrowLeftRight className={`w-5 h-5 ${type === 'income' ? 'text-emerald-500' : type === 'expense' ? 'text-red-500' : 'text-blue-500'}`} />
-                {title}
+            <div className="flex items-center justify-between px-3.5 py-2.5 sm:p-4 border-b border-surface-border shrink-0">
+              <h3 className="text-xs sm:text-base font-bold flex items-center gap-2 truncate">
+                <ArrowLeftRight className={`w-4 h-4 sm:w-5 sm:h-5 shrink-0 ${type === 'income' ? 'text-emerald-500' : type === 'expense' ? 'text-red-500' : 'text-blue-500'}`} />
+                <span className="truncate">{title}</span>
               </h3>
-              <button onClick={onClose} className="p-1.5 hover:bg-surface-hover rounded-lg text-text-muted">
-                <X className="w-5 h-5" />
+              <button onClick={onClose} className="p-1 sm:p-1.5 hover:bg-surface-hover rounded-lg text-text-muted shrink-0">
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
             
-            <div className="p-4 space-y-4">
+            <div className="p-3.5 sm:p-4 space-y-3.5 sm:space-y-4 overflow-y-auto">
               <div>
                 <label className="block text-xs font-bold text-text-muted mb-1.5">{_t('المبلغ', 'Amount', 'Betrag')}</label>
                 <input 

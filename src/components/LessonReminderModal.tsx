@@ -3,9 +3,10 @@ import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getUpcomingGroupSchedule } from '../utils/scheduleUtils';
+import { getGroupCycleInfo } from '../utils/lessonUtils';
 import { 
   X, Send, Copy, Check, MessageSquare, AlertTriangle, Clock, Link as LinkIcon, 
-  MapPin, Video, Sparkles, Phone, Users, CheckCircle2, AtSign, Plus 
+  MapPin, Video, Sparkles, Phone, Users, CheckCircle2, AtSign, Plus, Hash, BookOpen 
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -44,11 +45,14 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   recipientPhone,
   onClose,
 }) => {
-  const { groups, students, profile, updateGroup, updateProfile, t, _t } = useApp();
+  const { groups, students, lessons, profile, updateGroup, updateProfile, t, _t } = useApp();
 
   // Find associated group
   const targetGroup = group || (lesson?.groupId ? groups.find(g => g.id === lesson.groupId) : null);
   const groupStudents = targetGroup ? students.filter(s => s.groupId === targetGroup.id) : [];
+
+  // Find upcoming lesson if lesson is not directly passed
+  const upcomingLesson = lesson || (targetGroup ? (lessons || []).find(l => l.groupId === targetGroup.id && !l.deleted && (l.status === 'scheduled' || l.status === 'in_progress')) : null);
   
   // Multi-student group flag
   const isMultiStudentGroup = Boolean(targetGroup && groupStudents.length > 1);
@@ -91,6 +95,74 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   });
   const initialPhone = resolvedContact.contact;
 
+  // Calculate Package Cycle information
+  const cycleInfo = targetGroup ? getGroupCycleInfo(targetGroup, lessons) : null;
+  const sessionCount = targetGroup?.sessionCount || cycleInfo?.sessionCount || lesson?.totalSessionsInPackage || 4;
+  const isPerLesson = targetGroup?.paymentCycle === 'per_lesson' || targetGroup?.paymentModel === 'per_session' || cycleInfo?.isPerLesson;
+  const hasCycle = !isPerLesson && sessionCount > 1;
+  const defaultSessionNumber = lesson?.sessionNumber || cycleInfo?.currentSessionNumber || 1;
+
+  // Detect previous homework from previous lessons
+  const detectedPreviousHomework = React.useMemo(() => {
+    const currentLesson = lesson || upcomingLesson;
+    const groupId = targetGroup?.id || currentLesson?.groupId;
+    const studentId = targetStudent?.id || currentLesson?.studentId;
+
+    // 1. Direct from current lesson report if already noted
+    if (currentLesson?.report?.previousHomeworkDescription?.trim()) {
+      return currentLesson.report.previousHomeworkDescription.trim();
+    }
+    if (currentLesson?.report?.arabicPreviousHomework?.trim()) {
+      return currentLesson.report.arabicPreviousHomework.trim();
+    }
+
+    // 2. Search previous lessons for this group or student
+    const candidates = (lessons || []).filter(l => {
+      if (currentLesson && l.id === currentLesson.id) return false;
+      if (l.deleted) return false;
+
+      const matchGroup = groupId && l.groupId === groupId;
+      const matchStudent = studentId && (l.studentId === studentId || l.report?.studentAttendance?.[studentId] !== undefined);
+
+      return Boolean(matchGroup || matchStudent);
+    });
+
+    if (candidates.length === 0) return '';
+
+    // Sort descending by date/time
+    candidates.sort((a, b) => {
+      const timeA = new Date(`${a.date}T${a.time || '00:00'}`).getTime();
+      const timeB = new Date(`${b.date}T${b.time || '00:00'}`).getTime();
+      if (!isNaN(timeA) && !isNaN(timeB) && timeA !== timeB) {
+        return timeB - timeA;
+      }
+      return (b.sessionNumber || 0) - (a.sessionNumber || 0);
+    });
+
+    const currentLessonTime = currentLesson 
+      ? new Date(`${currentLesson.date}T${currentLesson.time || '00:00'}`).getTime() 
+      : Date.now();
+
+    const earlier = candidates.find(l => {
+      const lTime = new Date(`${l.date}T${l.time || '00:00'}`).getTime();
+      const isPrior = !isNaN(currentLessonTime) && !isNaN(lTime) ? lTime <= currentLessonTime : true;
+      const hw = l.report?.arabicHomeworkRequired || l.report?.homeworkDescription || l.report?.homeworkTitle;
+      return isPrior && Boolean(hw && hw.trim());
+    });
+
+    const fallback = earlier || candidates.find(l => {
+      const hw = l.report?.arabicHomeworkRequired || l.report?.homeworkDescription || l.report?.homeworkTitle;
+      return Boolean(hw && hw.trim());
+    });
+
+    return (
+      fallback?.report?.arabicHomeworkRequired ||
+      fallback?.report?.homeworkDescription ||
+      fallback?.report?.homeworkTitle ||
+      ''
+    ).trim();
+  }, [lessons, lesson, upcomingLesson, targetGroup, targetStudent]);
+
   // States
   const [phone, setPhone] = useState(initialPhone);
   const [whatsAppGroupLinkInput, setWhatsAppGroupLinkInput] = useState(groupWhatsAppLink);
@@ -110,12 +182,34 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [customMessage, setCustomMessage] = useState<string | null>(null);
 
+  // Cycle & Homework States
+  const [includeCycle, setIncludeCycle] = useState<boolean>(hasCycle);
+  const [sessionNumber, setSessionNumber] = useState<number>(defaultSessionNumber);
+  const [totalCycleSessions, setTotalCycleSessions] = useState<number>(sessionCount);
+
+  const [includeHomework, setIncludeHomework] = useState<boolean>(Boolean(detectedPreviousHomework));
+  const [previousHomework, setPreviousHomework] = useState<string>(detectedPreviousHomework);
+
+  // Message Style: 'confirmation' (تأكيد ميعاد الحصة) vs 'immediate' (بدء الآن / في الطريق)
+  const [reminderStyle, setReminderStyle] = useState<'confirmation' | 'immediate'>('confirmation');
+
+  // Declutter UI toggles
+  const [showRecipientSettings, setShowRecipientSettings] = useState<boolean>(false);
+  const [showHomeworkInput, setShowHomeworkInput] = useState<boolean>(false);
+
   useEffect(() => {
     setWhatsAppGroupLinkInput(groupWhatsAppLink);
     if (groupWhatsAppLink) {
       setShowWhatsAppGroupSection(true);
     }
   }, [groupWhatsAppLink]);
+
+  useEffect(() => {
+    if (detectedPreviousHomework && !previousHomework) {
+      setPreviousHomework(detectedPreviousHomework);
+      setIncludeHomework(true);
+    }
+  }, [detectedPreviousHomework]);
 
   // Format lesson time cleanly for display (12-hour format with period)
   const formattedLessonTime = React.useMemo(() => {
@@ -136,15 +230,57 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   // Generate exact Arabic template according to requirements (Always 12-hour system)
   const generatedMessage = React.useMemo(() => {
     const time12 = formatTimeTo12Hour(rawTime);
+    const isGroup = isMultiStudentGroup || (targetGroup && sendMode === 'group');
+
+    // 1. Cycle Line (if enabled and applicable)
+    const cycleLine = (hasCycle && includeCycle) 
+      ? `\n\n🔢 رقم الحصة: الحصة ${sessionNumber} من ${totalCycleSessions}`
+      : '';
+
+    // 2. Previous Homework Line (if enabled and text exists)
+    const homeworkLine = (includeHomework && previousHomework.trim())
+      ? `\n\n📝 واجب الحصة السابقة المطلوب تجهيزه:\n${previousHomework.trim()}`
+      : '';
+
     if (isOnline) {
-      return `السلام عليكم\n\nهنبدأ إن شاء الله الساعة ${time12}.\n\nلينك الحصة:\n\n${zoomLink}`;
+      const intro = reminderStyle === 'immediate'
+        ? `السلام عليكم ورحمة الله وبركاته\n\nهنبدأ الحصة الآن إن شاء الله.`
+        : `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
+
+      const zoomPart = zoomLink.trim() ? `\n\n🔗 لينك الحصة:\n${zoomLink.trim()}` : '';
+
+      return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
     } else {
-      if (isMultiStudentGroup || (targetGroup && sendMode === 'group')) {
-        return `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل للمجموعة خلال ${selectedArrivalTime} إن شاء الله.`;
+      // Offline
+      let intro = '';
+      if (reminderStyle === 'immediate') {
+        intro = isGroup
+          ? `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل للمجموعة خلال ${selectedArrivalTime} إن شاء الله.`
+          : `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${selectedArrivalTime} إن شاء الله.`;
+      } else {
+        intro = isGroup
+          ? `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصة المجموعة إن شاء الله الساعة ${time12}.`
+          : `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
       }
-      return `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${selectedArrivalTime} إن شاء الله.`;
+
+      return `${intro}${cycleLine}${homeworkLine}`;
     }
-  }, [isOnline, rawTime, zoomLink, selectedArrivalTime, isMultiStudentGroup, targetGroup, sendMode]);
+  }, [
+    isOnline, 
+    rawTime, 
+    zoomLink, 
+    selectedArrivalTime, 
+    isMultiStudentGroup, 
+    targetGroup, 
+    sendMode,
+    hasCycle,
+    includeCycle,
+    sessionNumber,
+    totalCycleSessions,
+    includeHomework,
+    previousHomework,
+    reminderStyle
+  ]);
 
   const activeMessage = customMessage !== null ? customMessage : generatedMessage;
 
@@ -242,12 +378,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       return;
     }
 
-    const time12 = formatTimeTo12Hour(rawTime);
-    const parentMsg = isOnline 
-      ? `السلام عليكم\n\nهنبدأ إن شاء الله الساعة ${time12}.\n\nلينك الحصة:\n\n${zoomLink}`
-      : `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${selectedArrivalTime} إن شاء الله.`;
-
-    const finalMsg = customMessage !== null ? customMessage : parentMsg;
+    const finalMsg = activeMessage;
     const url = buildWhatsAppUrl(resolved.contact, finalMsg);
     window.open(url, '_blank');
     try {
@@ -264,533 +395,438 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           onClose();
         }
       }}
-      className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0 overflow-y-auto font-sans"
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0 overflow-y-auto font-sans"
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-2xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-lg shadow-2xl overflow-hidden animate-scale-up space-y-0 text-text-main flex flex-col max-h-[92dvh] sm:max-h-[88vh]"
+        className="bg-surface border border-surface-border rounded-t-[26px] sm:rounded-2xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-lg shadow-2xl overflow-hidden animate-scale-up text-text-main flex flex-col max-h-[92dvh] sm:max-h-[85vh]"
       >
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+        <div className="w-12 h-1 bg-slate-200 dark:bg-slate-700 rounded-full mx-auto mt-2 sm:hidden shrink-0" />
 
-        {/* Header */}
-        <div className="bg-surface border-b border-surface-border p-4 sm:p-5 flex items-center justify-between relative shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-2 sm:p-2.5 bg-primary-soft text-primary rounded-xl shrink-0">
-              {isOnline ? <Video className="w-5 h-5 sm:w-6 sm:h-6" /> : <MapPin className="w-5 h-5 sm:w-6 sm:h-6" />}
+        {/* 1. Header - Clean & Compact */}
+        <div className="bg-surface border-b border-surface-border px-4 py-3 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-2 rounded-xl shrink-0 bg-primary-soft text-primary border border-primary-border/60">
+              {isOnline ? <Video className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black uppercase tracking-wider bg-primary-soft text-primary border border-primary-border px-2 py-0.5 rounded-full">
-                  {isOnline ? 'أونلاين Online' : 'أوفلاين Offline'}
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h3 className="text-sm font-black text-text-main truncate">
+                  {targetGroup?.name || targetStudent?.name || 'تأكيد موعد الحصة'}
+                </h3>
+                <span className="text-[10px] font-bold bg-primary-soft text-primary border border-primary-border px-1.5 py-0.5 rounded-md shrink-0">
+                  {isOnline ? 'أونلاين' : 'حضوري'} • {formattedLessonTime}
                 </span>
-                {targetGroup && (
-                  <span className="text-xs font-bold text-text-muted truncate max-w-[130px] sm:max-w-[180px]">
-                    {targetGroup.name}
-                  </span>
-                )}
               </div>
-              <h3 className="text-base sm:text-lg font-black mt-0.5 text-text-main">
-                تذكير بموعد الحصة
-              </h3>
+              <p className="text-[11px] text-text-muted truncate mt-0.5">
+                تأكيد الموعد والتذكير عبر واتساب
+              </p>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-            className="p-1.5 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main rounded-full transition-colors cursor-pointer shrink-0"
+            onClick={onClose}
+            className="p-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main rounded-full transition-colors cursor-pointer shrink-0"
+            title="إغلاق"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Body Content */}
-        <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
+        {/* Mismatch Warning (Subtle 1-line badge if applicable) */}
+        {hasTimeMismatch && (
+          <div className="mx-4 mt-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/25 rounded-xl text-[11px] text-amber-700 dark:text-amber-300 font-bold flex items-center gap-1.5 shrink-0">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>تنبيه: وقت الحصة ({lesson?.time}) يختلف عن موعد الجروب ({rawTime})، وتم اعتماد موعد الجروب.</span>
+          </div>
+        )}
 
-          {/* MISMATCH WARNING */}
-          {hasTimeMismatch && (
-            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-3 rounded-xl flex items-start gap-2.5">
-              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-              <div className="text-xs space-y-1">
-                <p className="font-bold text-amber-800 dark:text-amber-300">
-                  تنبيه: وقت الحصة مختلف عن موعد الجروب
-                </p>
-                <p className="text-amber-700 dark:text-amber-400 text-[11px] leading-relaxed">
-                  تم تحديد موعد الجروب ليكون ({rawTime}) لكن هذه الحصة مسجلة في ({lesson?.time}). التزاماً بمعايير النظام، التذكير يعتمد على <span className="font-bold">موعد الجروب الأساسي</span>.
-                </p>
-              </div>
-            </div>
-          )}
+        {/* 2. Destination Strip - Clean & Expandable */}
+        <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900/40 border-b border-surface-border text-xs flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0 text-text-muted">
+            <span className="text-text-main font-bold shrink-0 flex items-center gap-1">
+              {isMultiStudentGroup || sendMode === 'group' ? (
+                <>
+                  <Users className="w-3.5 h-3.5 text-primary" />
+                  <span>الجروب:</span>
+                </>
+              ) : (
+                <>
+                  <Phone className="w-3.5 h-3.5 text-primary" />
+                  <span>ولي الأمر:</span>
+                </>
+              )}
+            </span>
+            <span className="font-semibold text-text-main truncate">
+              {isMultiStudentGroup || sendMode === 'group' 
+                ? (targetGroup?.name || 'جروب الواتساب') 
+                : (targetStudent ? `${targetStudent.name} (${phone || 'غير مسجل'})` : phone)}
+            </span>
+            {isMultiStudentGroup && groupStudents.length > 0 && (
+              <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.2 rounded shrink-0">
+                {groupStudents.length} طلاب
+              </span>
+            )}
+          </div>
 
-          {/* Recipient Destination Section: Group vs 1-on-1 Student */}
-          {isMultiStudentGroup ? (
-            <div className="space-y-2 bg-primary-soft/30 border border-primary-border/60 p-3 sm:p-3.5 rounded-2xl">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-black text-text-main flex items-center gap-1.5">
-                  <Users className="w-4 h-4 text-primary" />
-                  <span>إرسال لجروب الواتساب ({targetGroup?.name}):</span>
-                </label>
-                {groupStudents.length > 0 && (
-                  <span className="text-[10px] font-bold bg-primary-soft text-primary border border-primary-border px-2 py-0.5 rounded-full">
-                    {groupStudents.length} طلاب
-                  </span>
-                )}
-              </div>
+          <button
+            type="button"
+            onClick={() => setShowRecipientSettings(!showRecipientSettings)}
+            className="text-[11px] font-bold text-primary hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
+          >
+            <span>{showRecipientSettings ? 'إخفاء' : 'تعديل'}</span>
+          </button>
+        </div>
 
-              {/* Group Link Input & Save */}
-              <div className="space-y-1.5">
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={whatsAppGroupLinkInput}
-                    onChange={(e) => setWhatsAppGroupLinkInput(e.target.value)}
-                    placeholder="https://chat.whatsapp.com/..."
-                    className={`flex-1 bg-background border rounded-xl px-3 py-2 text-xs font-mono focus:outline-none ${
-                      !whatsAppGroupLinkInput.trim()
-                        ? 'border-amber-400 focus:ring-2 focus:ring-amber-500/50'
-                        : 'border-surface-border focus:ring-2 focus:ring-primary/40'
-                    }`}
-                    dir="ltr"
-                  />
-
-                  {targetGroup && (
-                    <button
-                      type="button"
-                      onClick={handleSaveWhatsAppGroupLink}
-                      disabled={isSavingWhatsAppLink || !whatsAppGroupLinkInput.trim()}
-                      className="bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-black text-xs px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer shrink-0"
-                    >
-                      {whatsAppSaveSuccess ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-white" />
-                          <span className="text-xs">تم الحفظ</span>
-                        </>
-                      ) : (
-                        <span className="text-xs">حفظ الرابط</span>
-                      )}
-                    </button>
-                  )}
-                </div>
-
-                {!whatsAppGroupLinkInput.trim() && (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-400 font-bold flex items-center gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                    <span>يرجى إضافة رابط جروب الواتساب لفتح الجروب وإرسال التذكير مباشرة.</span>
-                  </p>
-                )}
-              </div>
-            </div>
-          ) : isSingleStudentGroup ? (
-            /* SINGLE-STUDENT GROUP: Supports both individual phone AND WhatsApp group */
-            <div className="space-y-2.5 bg-primary-soft/20 border border-primary-border/50 p-3 sm:p-3.5 rounded-2xl">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <Users className="w-4 h-4 text-primary" />
-                  <span className="text-xs font-black text-text-main">
-                    وجهة الإرسال ({targetGroup?.name}):
-                  </span>
-                </div>
-                <span className="text-[10px] font-bold bg-primary-soft text-primary border border-primary-border px-2 py-0.5 rounded-full">
-                  طالب واحد في المجموعة
-                </span>
-              </div>
-
-              {/* Mode Switcher */}
-              <div className="flex bg-surface p-1 rounded-xl border border-surface-border gap-1">
+        {/* Collapsible Destination Settings (Only if clicked) */}
+        {showRecipientSettings && (
+          <div className="px-4 py-2.5 bg-surface-hover/60 border-b border-surface-border space-y-2 text-xs shrink-0 animate-fade-in">
+            {isSingleStudentGroup && (
+              <div className="flex bg-surface p-0.5 rounded-lg border border-surface-border gap-1 max-w-xs">
                 <button
                   type="button"
                   onClick={() => setSendMode('individual')}
-                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    sendMode === 'individual'
-                      ? 'bg-primary text-white shadow-xs font-black'
-                      : 'text-text-muted hover:text-text-main'
+                  className={`flex-1 py-1 px-2 rounded-md text-[11px] font-bold transition-all ${
+                    sendMode === 'individual' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted'
                   }`}
                 >
-                  <Phone className="w-3.5 h-3.5" />
-                  <span>رقم ولي الأمر {targetStudent ? `(${targetStudent.name})` : ''}</span>
+                  ولي الأمر
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setSendMode('group');
-                    setShowWhatsAppGroupSection(true);
-                  }}
-                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    sendMode === 'group'
-                      ? 'bg-primary text-white shadow-xs font-black'
-                      : 'text-text-muted hover:text-text-main'
+                  onClick={() => setSendMode('group')}
+                  className={`flex-1 py-1 px-2 rounded-md text-[11px] font-bold transition-all ${
+                    sendMode === 'group' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted'
                   }`}
                 >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  <span>جروب الواتساب</span>
+                  جروب الواتساب
                 </button>
               </div>
+            )}
 
-              {/* Individual Phone Input */}
-              {sendMode === 'individual' && (
-                <div className="space-y-1 pt-1">
-                  <div className="flex items-center justify-between text-[11px] text-text-muted">
-                    <span className="flex items-center gap-1 font-bold">
-                      {isWhatsAppUsername(phone) ? <AtSign className="w-3 h-3 text-primary" /> : <Phone className="w-3 h-3 text-primary" />}
-                      رقم أو يوزر نيم ولي أمر الطالب:
-                    </span>
-                    {targetStudent && <span className="font-bold">{targetStudent.name}</span>}
-                  </div>
-                  <input
-                    type="text"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="010xxxxxxxx أو @username"
-                    className="w-full bg-background border border-surface-border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    dir="ltr"
-                  />
-                  {!showWhatsAppGroupSection && !groupWhatsAppLink && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowWhatsAppGroupSection(true);
-                        setSendMode('group');
-                      }}
-                      className="mt-1 text-[11px] text-primary font-bold hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>إضافة رابط جروب واتساب لهذه المجموعة</span>
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* WhatsApp Group Link Input */}
-              {(sendMode === 'group' || showWhatsAppGroupSection) && (
-                <div className="space-y-1.5 pt-1">
-                  <label className="text-[11px] font-bold text-text-muted flex items-center gap-1">
-                    <LinkIcon className="w-3 h-3 text-primary" />
-                    <span>رابط جروب الواتساب:</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="url"
-                      value={whatsAppGroupLinkInput}
-                      onChange={(e) => setWhatsAppGroupLinkInput(e.target.value)}
-                      placeholder="https://chat.whatsapp.com/..."
-                      className={`flex-1 bg-background border rounded-xl px-3 py-2 text-xs font-mono focus:outline-none ${
-                        !whatsAppGroupLinkInput.trim()
-                          ? 'border-amber-400 focus:ring-2 focus:ring-amber-500/50'
-                          : 'border-surface-border focus:ring-2 focus:ring-primary/40'
-                      }`}
-                      dir="ltr"
-                    />
-                    {targetGroup && (
-                      <button
-                        type="button"
-                        onClick={handleSaveWhatsAppGroupLink}
-                        disabled={isSavingWhatsAppLink || !whatsAppGroupLinkInput.trim()}
-                        className="bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-black text-xs px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer shrink-0"
-                      >
-                        {whatsAppSaveSuccess ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-white" />
-                            <span className="text-xs">تم الحفظ</span>
-                          </>
-                        ) : (
-                          <span className="text-xs">حفظ الرابط</span>
-                        )}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            /* 1-on-1 LESSON WITHOUT GROUP */
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-text-muted flex items-center gap-1.5">
-                  {isWhatsAppUsername(phone) ? (
-                    <AtSign className="w-3.5 h-3.5 text-primary" />
-                  ) : (
-                    <Phone className="w-3.5 h-3.5 text-primary" />
-                  )}
-                  <span>رقم أو يوزر نيم الواتساب المستلم:</span>
-                </label>
-                {targetStudent && (
-                  <span className="text-[11px] font-bold text-text-muted">
-                    {targetStudent.name}
-                  </span>
-                )}
+            {(isMultiStudentGroup || sendMode === 'group') ? (
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={whatsAppGroupLinkInput}
+                  onChange={(e) => setWhatsAppGroupLinkInput(e.target.value)}
+                  placeholder="https://chat.whatsapp.com/..."
+                  className="flex-1 bg-background border border-surface-border rounded-xl px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveWhatsAppGroupLink}
+                  disabled={isSavingWhatsAppLink || !whatsAppGroupLinkInput.trim()}
+                  className="bg-primary hover:bg-primary-hover text-white px-3 py-1.5 rounded-xl font-bold text-xs shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  {whatsAppSaveSuccess ? 'تم الحفظ' : 'حفظ'}
+                </button>
               </div>
+            ) : (
               <input
                 type="text"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="010xxxxxxxx أو @username"
-                className="w-full bg-background border border-surface-border rounded-xl px-3.5 py-2 sm:py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full bg-background border border-surface-border rounded-xl px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary"
                 dir="ltr"
               />
+            )}
+          </div>
+        )}
+
+        {/* 3. Quick Options Bar - Compact Chips in a Single Row */}
+        <div className="px-4 pt-3 pb-2 space-y-2 shrink-0">
+          <div className="flex items-center justify-between gap-1.5 flex-wrap">
+            {/* Style Switcher (Segmented Control) */}
+            <div className="flex items-center bg-surface-hover p-0.5 rounded-xl border border-surface-border text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  setReminderStyle('confirmation');
+                  setCustomMessage(null);
+                }}
+                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                  reminderStyle === 'confirmation'
+                    ? 'bg-primary text-white shadow-2xs font-black'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                تأكيد الميعاد
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setReminderStyle('immediate');
+                  setCustomMessage(null);
+                }}
+                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                  reminderStyle === 'immediate'
+                    ? 'bg-primary text-white shadow-2xs font-black'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                {isOnline ? 'بدء الآن' : 'في الطريق'}
+              </button>
             </div>
-          )}
 
-          {/* OFFLINE GROUP WORKFLOW */}
-          {!isOnline && (
-            <div className="space-y-2.5 bg-primary-soft/20 border border-primary-border/40 p-3.5 rounded-2xl">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-black text-text-main flex items-center gap-1.5">
-                  <Clock className="w-4 h-4 text-primary" />
-                  <span>هوصل خلال:</span>
-                </label>
-                <span className="text-[11px] font-bold text-text-muted">
-                  اختر موعد الوصول
-                </span>
-              </div>
-
-              {/* Time selection options */}
-              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
-                {ARRIVAL_TIME_OPTIONS.map((timeOpt) => {
-                  const isSelected = selectedArrivalTime === timeOpt;
-                  return (
-                    <button
-                      key={timeOpt}
-                      type="button"
-                      onClick={() => {
-                        setSelectedArrivalTime(timeOpt);
-                        setCustomMessage(null); // Reset custom override on option change
-                      }}
-                      className={`py-2 px-2 rounded-xl text-xs font-black transition-all cursor-pointer border ${
-                        isSelected
-                          ? 'bg-primary border-primary text-white shadow-md shadow-primary/25 scale-[1.02]'
-                          : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main'
-                      }`}
-                    >
-                      {timeOpt}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ONLINE GROUP WORKFLOW */}
-          {isOnline && (
-            <div className="space-y-3">
-              {/* Info badge */}
-              <div className="bg-primary-soft/20 border border-primary-border/40 p-3 rounded-2xl flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2 text-text-main font-bold">
-                  <Clock className="w-4 h-4 text-primary shrink-0" />
-                  <span>وقت الحصة:</span>
-                </div>
-                <span className="font-black text-primary bg-primary-soft border border-primary-border px-2.5 py-1 rounded-lg text-xs">
-                  {formattedLessonTime}
-                </span>
-              </div>
-
-              {/* Zoom Link Section */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-text-muted flex items-center gap-1.5">
-                  <LinkIcon className="w-3.5 h-3.5 text-primary" />
-                  <span>رابط الزووم (Zoom Link):</span>
-                </label>
-
-                {!zoomLink.trim() && (
-                  <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 p-2.5 rounded-xl flex items-start gap-2 text-amber-800 dark:text-amber-300 text-xs mb-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-bold">رابط الزووم غير مضاف لهذا الجروب!</p>
-                      <p className="text-[11px] mt-0.5 text-amber-700 dark:text-amber-400">
-                        برجاء كتابة أو لصق رابط الزووم أدناه قبل إرسال التذكير.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={zoomLink}
-                    onChange={(e) => {
-                      setZoomLink(e.target.value);
+            {/* Feature Chips: Cycle & Homework */}
+            <div className="flex items-center gap-1.5">
+              {/* Cycle Chip */}
+              {hasCycle && (
+                <div className={`flex items-center gap-1 px-2.5 py-1 rounded-xl border text-xs font-bold transition-all select-none ${
+                  includeCycle
+                    ? 'bg-primary/10 border-primary/30 text-primary'
+                    : 'bg-surface border-surface-border text-text-muted opacity-50'
+                }`}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIncludeCycle(!includeCycle);
                       setCustomMessage(null);
                     }}
-                    placeholder="https://zoom.us/j/..."
-                    className={`flex-1 bg-background border rounded-xl px-3 py-2 text-xs font-mono focus:outline-none ${
-                      !zoomLink.trim()
-                        ? 'border-amber-400 focus:ring-2 focus:ring-amber-500/50'
-                        : 'border-surface-border focus:ring-2 focus:ring-primary/40'
-                    }`}
-                    dir="ltr"
-                  />
-                  {zoomLink.trim() && (
-                    <button
-                      type="button"
-                      onClick={handleSaveZoomLink}
-                      disabled={isSavingZoom}
-                      className="bg-surface hover:bg-surface-hover border border-surface-border text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer shrink-0 text-text-main"
-                    >
-                      {zoomSaveSuccess ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-primary" />
-                          <span className="text-primary text-xs">تم الحفظ</span>
-                        </>
-                      ) : (
-                        <span className="text-xs">حفظ للجروب</span>
-                      )}
-                    </button>
+                    className="flex items-center gap-1 cursor-pointer"
+                    title="تضمين رقم الحصة في السايكل"
+                  >
+                    <Hash className="w-3.5 h-3.5" />
+                    <span>الحصة {sessionNumber}/{totalCycleSessions}</span>
+                  </button>
+
+                  {includeCycle && (
+                    <div className="flex items-center border-r border-primary/25 pr-1 mr-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSessionNumber(prev => Math.max(1, prev - 1));
+                          setCustomMessage(null);
+                        }}
+                        disabled={sessionNumber <= 1}
+                        className="w-4 h-4 rounded hover:bg-primary/20 flex items-center justify-center text-xs font-black disabled:opacity-30 cursor-pointer"
+                        title="الحصة السابقة"
+                      >
+                        -
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSessionNumber(prev => Math.min(totalCycleSessions, prev + 1));
+                          setCustomMessage(null);
+                        }}
+                        disabled={sessionNumber >= totalCycleSessions}
+                        className="w-4 h-4 rounded hover:bg-primary/20 flex items-center justify-center text-xs font-black disabled:opacity-30 cursor-pointer"
+                        title="الحصة التالية"
+                      >
+                        +
+                      </button>
+                    </div>
                   )}
                 </div>
-              </div>
-            </div>
-          )}
+              )}
 
-          {/* MESSAGE PREVIEW BOX */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-black text-text-muted flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-primary" />
-                <span>معاينة الرسالة:</span>
-              </label>
-
-              {customMessage !== null && (
+              {/* Homework Chip */}
+              <div className={`flex items-center gap-1 px-2.5 py-1 rounded-xl border text-xs font-bold transition-all select-none ${
+                includeHomework
+                  ? 'bg-primary-soft border-primary-border text-primary'
+                  : 'bg-surface border-surface-border text-text-muted opacity-50'
+              }`}>
                 <button
                   type="button"
-                  onClick={() => setCustomMessage(null)}
-                  className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+                  onClick={() => {
+                    setIncludeHomework(!includeHomework);
+                    setCustomMessage(null);
+                  }}
+                  className="flex items-center gap-1 cursor-pointer"
+                  title="تضمين واجب الحصة السابقة"
                 >
-                  استعادة النص الأصلي
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>الواجب</span>
                 </button>
-              )}
-            </div>
-
-            {/* Message Preview Bubble */}
-            <div className="relative bg-surface-hover/80 border border-surface-border rounded-2xl p-3 sm:p-4 shadow-inner text-right space-y-2 font-sans">
-              <textarea
-                value={activeMessage}
-                onChange={(e) => setCustomMessage(e.target.value)}
-                rows={isOnline ? 4 : 3}
-                className="w-full bg-transparent text-text-main font-semibold text-xs sm:text-sm leading-relaxed resize-none focus:outline-none"
-                dir="rtl"
-              />
-
-              <div className="flex items-center justify-between border-t border-surface-border pt-1.5 text-[10px] text-text-muted">
-                <span>💬 جاهزة للإرسال على الواتساب</span>
-                <span className="font-bold dir-ltr">
-                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ✓✓
-                </span>
+                {includeHomework && (
+                  <button
+                    type="button"
+                    onClick={() => setShowHomeworkInput(!showHomeworkInput)}
+                    className="text-[10px] underline cursor-pointer pr-0.5 hover:opacity-80"
+                    title="تعديل نص الواجب"
+                  >
+                    {previousHomework ? 'تعديل' : 'إضافة'}
+                  </button>
+                )}
               </div>
             </div>
           </div>
 
-        </div>
-
-        {/* Action Footer */}
-        <div className="p-3 sm:p-4 bg-slate-50 dark:bg-slate-900/50 border-t border-surface-border flex flex-col gap-2 shrink-0 pb-safe-bottom sm:pb-4">
-          {/* Main Action Button */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleSendWhatsApp();
-            }}
-            className="w-full bg-primary hover:bg-primary-hover shadow-primary/25 active:scale-98 text-white font-black text-xs sm:text-sm py-2.5 sm:py-3 px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
-          >
-            <Send className="w-4 h-4 fill-white" />
-            <span>
-              {isMultiStudentGroup || (targetGroup && sendMode === 'group')
-                ? ((whatsAppGroupLinkInput.trim() || groupWhatsAppLink) 
-                    ? `إرسال لجروب الواتساب (${targetGroup?.name || 'الجروب'})` 
-                    : `نسخ وفتح واتساب (${targetGroup?.name || 'الجروب'})`)
-                : `إرسال عبر واتساب ${targetStudent ? `(${targetStudent.name})` : ''}`}
-            </span>
-          </button>
-
-          {/* Secondary Send Option: Send to Parent when in Group Mode, or Send to Group when in Individual Mode */}
-          {targetGroup && (
-            (isMultiStudentGroup || sendMode === 'group') ? (
-              firstStudent && (() => {
-                const firstResolved = resolveStudentWhatsAppContact(firstStudent);
-                return (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSendToFirstParent(firstStudent);
-                    }}
-                    className="w-full bg-primary-soft/70 hover:bg-primary-soft border border-primary-border text-primary font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[40px]"
-                  >
-                    {firstResolved.isUsername ? (
-                      <AtSign className="w-3.5 h-3.5 text-primary shrink-0" />
-                    ) : (
-                      <Phone className="w-3.5 h-3.5 text-primary shrink-0" />
-                    )}
-                    <span>
-                      إرسال فردي لولي أمر ({firstStudent.name})
-                      {firstResolved.hasContact ? ` - ${firstResolved.display}` : ' (غير مسجل)'}
-                    </span>
-                  </button>
-                );
-              })()
-            ) : (
-              (whatsAppGroupLinkInput.trim() || groupWhatsAppLink) && (
+          {/* Conditional: Offline arrival times (only when 'في الطريق') */}
+          {!isOnline && reminderStyle === 'immediate' && (
+            <div className="flex items-center gap-1.5 overflow-x-auto py-1 text-xs">
+              <span className="text-[11px] font-bold text-text-muted shrink-0">الوصول خلال:</span>
+              {ARRIVAL_TIME_OPTIONS.map((timeOpt) => (
                 <button
+                  key={timeOpt}
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const activeLink = whatsAppGroupLinkInput.trim() || groupWhatsAppLink;
-                    try {
-                      navigator.clipboard.writeText(activeMessage);
-                    } catch (err) {}
-                    if (activeLink) {
-                      window.open(activeLink, '_blank');
-                    } else {
-                      window.open(buildWhatsAppUrl('', activeMessage), '_blank');
-                    }
+                  onClick={() => {
+                    setSelectedArrivalTime(timeOpt);
+                    setCustomMessage(null);
                   }}
-                  className="w-full bg-primary-soft/70 hover:bg-primary-soft border border-primary-border text-primary font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[40px]"
+                  className={`px-2 py-0.5 rounded-lg text-xs font-bold shrink-0 transition-all cursor-pointer border ${
+                    selectedArrivalTime === timeOpt
+                      ? 'bg-primary text-white border-primary shadow-2xs font-black'
+                      : 'bg-surface border-surface-border text-text-muted hover:text-text-main'
+                  }`}
                 >
-                  <Users className="w-3.5 h-3.5 text-primary shrink-0" />
-                  <span>
-                    إرسال لجروب الواتساب بدلاً من ذلك ({targetGroup.name})
-                  </span>
+                  {timeOpt}
                 </button>
-              )
-            )
+              ))}
+            </div>
           )}
 
-          {/* Secondary Actions (Copy & Cancel) */}
-          <div className="flex items-center gap-2 w-full">
+          {/* Conditional: Homework inline edit drawer */}
+          {includeHomework && showHomeworkInput && (
+            <div className="space-y-1 bg-surface-hover/60 border border-surface-border p-2 rounded-xl text-xs">
+              <div className="flex items-center justify-between text-[11px] text-text-muted">
+                <span className="font-bold">نص واجب الحصة السابقة المطلوب تجهيزه:</span>
+                <button
+                  type="button"
+                  onClick={() => setShowHomeworkInput(false)}
+                  className="text-primary hover:underline font-bold"
+                >
+                  تم
+                </button>
+              </div>
+              <textarea
+                value={previousHomework}
+                onChange={(e) => {
+                  setPreviousHomework(e.target.value);
+                  setCustomMessage(null);
+                }}
+                rows={2}
+                placeholder="اكتب تفاصيل الواجب هنا..."
+                className="w-full bg-background border border-surface-border rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary resize-none text-text-main"
+                dir="rtl"
+              />
+            </div>
+          )}
+
+          {/* Conditional: Online missing Zoom link */}
+          {isOnline && !zoomLink.trim() && (
+            <div className="bg-amber-500/10 border border-amber-500/25 p-2 rounded-xl flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-bold min-w-0 truncate">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">رابط الزووم غير مسجل</span>
+              </div>
+              <div className="flex gap-1.5 shrink-0">
+                <input
+                  type="url"
+                  value={zoomLink}
+                  onChange={(e) => {
+                    setZoomLink(e.target.value);
+                    setCustomMessage(null);
+                  }}
+                  placeholder="https://zoom.us/j/..."
+                  className="bg-background border border-amber-300 dark:border-amber-700 rounded-lg px-2 py-1 text-xs font-mono w-40 sm:w-48"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveZoomLink}
+                  disabled={isSavingZoom || !zoomLink.trim()}
+                  className="bg-primary text-white text-[11px] font-bold px-2 py-1 rounded-lg cursor-pointer disabled:opacity-50"
+                >
+                  حفظ
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 4. Message Box - The Hero View */}
+        <div className="px-4 pb-2 flex-1 flex flex-col min-h-0">
+          <div className="flex items-center justify-between text-[11px] text-text-muted mb-1 px-1">
+            <span className="font-bold flex items-center gap-1 text-text-main">
+              <MessageSquare className="w-3.5 h-3.5 text-primary" />
+              <span>نص الرسالة (جاهز للإرسال على الواتساب):</span>
+            </span>
+            {customMessage !== null && (
+              <button
+                type="button"
+                onClick={() => setCustomMessage(null)}
+                className="text-primary hover:underline font-bold cursor-pointer"
+              >
+                استعادة النص التلقائي
+              </button>
+            )}
+          </div>
+
+          {/* Message Preview Bubble */}
+          <div className="relative bg-primary-soft/20 border border-primary-border/40 rounded-2xl p-3 sm:p-3.5 shadow-2xs flex-1 flex flex-col min-h-[140px] max-h-[240px]">
+            <textarea
+              value={activeMessage}
+              onChange={(e) => setCustomMessage(e.target.value)}
+              className="w-full flex-1 bg-transparent text-text-main font-medium text-xs sm:text-[13px] leading-relaxed resize-none focus:outline-none"
+              dir="rtl"
+            />
+            <div className="flex items-center justify-between border-t border-primary-border/30 pt-1.5 text-[10px] text-text-muted select-none">
+              <span>يمكنك تعديل أي جزء من النص مباشرة ✍️</span>
+              <span className="font-mono dir-ltr font-bold text-primary">
+                {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ✓✓
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* 5. Action Footer - Minimalist & Punchy */}
+        <div className="p-3 sm:p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-surface-border flex flex-col gap-2 shrink-0 pb-safe-bottom sm:pb-4">
+          <div className="flex items-center gap-2">
+            {/* Primary WhatsApp Action */}
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCopyText();
-              }}
-              className="flex-1 bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm py-2.5 sm:py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0 min-h-[42px]"
+              onClick={handleSendWhatsApp}
+              className="flex-1 bg-primary hover:bg-primary-hover text-white font-black text-xs sm:text-sm py-2.5 sm:py-3 px-4 rounded-xl shadow-lg shadow-primary/20 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
+            >
+              <Send className="w-4 h-4 fill-white" />
+              <span>
+                {isMultiStudentGroup || (targetGroup && sendMode === 'group')
+                  ? ((whatsAppGroupLinkInput.trim() || groupWhatsAppLink)
+                      ? `إرسال لجروب الواتساب (${targetGroup?.name || 'الجروب'})`
+                      : `نسخ وفتح واتساب (${targetGroup?.name || 'الجروب'})`)
+                  : `إرسال عبر واتساب`}
+              </span>
+            </button>
+
+            {/* Quick Copy Button */}
+            <button
+              type="button"
+              onClick={handleCopyText}
+              className="bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs py-2.5 sm:py-3 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0 min-h-[44px]"
+              title="نسخ نص الرسالة"
             >
               {copied ? (
                 <>
                   <Check className="w-4 h-4 text-primary" />
-                  <span className="text-primary">تم النسخ</span>
+                  <span className="text-primary font-bold">تم النسخ</span>
                 </>
               ) : (
                 <>
                   <Copy className="w-4 h-4 text-text-muted" />
-                  <span>نسخ النص</span>
+                  <span>نسخ</span>
                 </>
               )}
             </button>
-
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-              }}
-              className="flex-1 bg-transparent hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted font-semibold text-xs sm:text-sm py-2.5 sm:py-3 px-4 rounded-xl transition-all cursor-pointer min-h-[42px]"
-            >
-              إلغاء
-            </button>
           </div>
+
+          {/* Secondary parent send option if in group mode */}
+          {targetGroup && (isMultiStudentGroup || sendMode === 'group') && firstStudent && (
+            <div className="text-center pt-0.5">
+              <button
+                type="button"
+                onClick={() => handleSendToFirstParent(firstStudent)}
+                className="text-[11px] font-bold text-text-muted hover:text-primary transition-colors cursor-pointer inline-flex items-center gap-1"
+              >
+                <span>أو إرسال فردي لولي أمر ({firstStudent.name})</span>
+              </button>
+            </div>
+          )}
         </div>
 
       </div>

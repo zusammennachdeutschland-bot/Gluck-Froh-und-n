@@ -1,18 +1,20 @@
 import { isPendingStatus } from "../utils/lessonUtils";
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Lesson } from '../types';
+import { Lesson, Group } from '../types';
 import { formatLocalDate } from '../utils/timeUtils';
 import { 
   CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { GroupProfileModal } from './GroupProfileModal';
 
 export const TodaysProgressTimeline: React.FC = () => {
-  const { lessons, openLessonControl, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t } = useApp();
+  const { lessons, groups, openLessonControl, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t } = useApp();
   const [now, setNow] = useState(new Date());
   const [isPastPendingExpanded, setIsPastPendingExpanded] = useState(false);
   const [showAllPastPending, setShowAllPastPending] = useState(false);
+  const [selectedGroupForModal, setSelectedGroupForModal] = useState<Group | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -190,9 +192,26 @@ export const TodaysProgressTimeline: React.FC = () => {
                               {pLesson.time}
                             </span>
                           </div>
-                          <h4 className="text-xs font-bold text-text-main group-hover:text-primary dark:group-hover:text-primary truncate">
-                            {pLesson.studentName || pLesson.groupName || pLesson.title}
-                          </h4>
+                          {pLesson.groupId && groups.find(g => g.id === pLesson.groupId) ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedGroupForModal(groups.find(g => g.id === pLesson.groupId) || null);
+                              }}
+                              className="text-xs font-bold text-text-main hover:text-primary dark:hover:text-primary hover:underline truncate text-start cursor-pointer inline-flex items-center gap-1"
+                              title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                            >
+                              <span className="truncate">{groups.find(g => g.id === pLesson.groupId)?.name}</span>
+                              <span className="text-[9px] font-bold px-1 rounded bg-primary-soft text-primary">
+                                {_t('مجموعة', 'Group', 'Gruppe')}
+                              </span>
+                            </button>
+                          ) : (
+                            <h4 className="text-xs font-bold text-text-main group-hover:text-primary dark:group-hover:text-primary truncate">
+                              {pLesson.studentName || pLesson.groupName || pLesson.title}
+                            </h4>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0">
@@ -426,17 +445,43 @@ export const TodaysProgressTimeline: React.FC = () => {
                         )}
                       </div>
 
-                      <h4 className={`text-xs font-bold line-clamp-1 transition-colors ${
-                        isCompletedState 
-                          ? 'line-through text-text-muted/70 dark:text-slate-500' 
-                          : isCancelledState
-                          ? 'line-through text-rose-700/80 dark:text-rose-300/80'
-                          : state === 'active'
-                          ? 'text-blue-900 dark:text-blue-100 font-black group-hover:text-blue-700'
-                          : 'text-text-main group-hover:text-primary dark:group-hover:text-primary'
-                      }`}>
-                        {lesson.studentName || lesson.groupName || lesson.title}
-                      </h4>
+                      {lesson.groupId && groups.find(g => g.id === lesson.groupId) ? (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedGroupForModal(groups.find(g => g.id === lesson.groupId) || null);
+                            }}
+                            className="text-xs font-black text-text-main hover:text-primary dark:hover:text-primary hover:underline truncate text-start cursor-pointer inline-flex items-center gap-1"
+                            title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                          >
+                            <span className="truncate max-w-[180px] sm:max-w-xs">
+                              {groups.find(g => g.id === lesson.groupId)?.name}
+                            </span>
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-primary-soft text-primary border border-primary-border shrink-0">
+                              {_t('مجموعة', 'Group', 'Gruppe')}
+                            </span>
+                          </button>
+                          {lesson.studentName && lesson.studentName !== groups.find(g => g.id === lesson.groupId)?.name && (
+                            <span className="text-[10px] text-text-muted font-medium truncate">
+                              ({lesson.studentName})
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <h4 className={`text-xs font-bold line-clamp-1 transition-colors ${
+                          isCompletedState 
+                            ? 'line-through text-text-muted/70 dark:text-slate-500' 
+                            : isCancelledState
+                            ? 'line-through text-rose-700/80 dark:text-rose-300/80'
+                            : state === 'active'
+                            ? 'text-blue-900 dark:text-blue-100 font-black group-hover:text-blue-700'
+                            : 'text-text-main group-hover:text-primary dark:group-hover:text-primary'
+                        }`}>
+                          {lesson.studentName || lesson.groupName || lesson.title}
+                        </h4>
+                      )}
                       <div className="flex items-center gap-1.5 text-[10px] text-text-muted flex-wrap font-medium">
                         {lesson.grade && <span>{lesson.grade}</span>}
                         {lesson.grade && <span>•</span>}
@@ -506,6 +551,12 @@ export const TodaysProgressTimeline: React.FC = () => {
             })}
           </div>
         </div>
+      )}
+      {selectedGroupForModal && (
+        <GroupProfileModal
+          group={selectedGroupForModal}
+          onClose={() => setSelectedGroupForModal(null)}
+        />
       )}
     </div>
   );

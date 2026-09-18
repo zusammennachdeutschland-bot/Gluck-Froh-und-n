@@ -152,22 +152,22 @@ export const ReportsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4 ">
+    <div className="space-y-2.5 sm:space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-2 sm:gap-4">
         <div>
-          <h2 className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
-            <BarChart2 className="w-4 h-4 text-primary dark:text-primary" />
+          <h2 className="text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5 sm:gap-2">
+            <BarChart2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary dark:text-primary shrink-0" />
             <span>{t ? t('reports_and_analyses') || 'Berichte & Analysen' : 'Berichte & Analysen'}</span>
           </h2>
-          <p className="text-[11px] text-slate-500 font-bold mt-0.5">
+          <p className="text-[10px] sm:text-[11px] text-slate-500 font-bold mt-0.5">
             Sitzungen, wöchentliche Einnahmen & Bezahlungs-Kontrolle
           </p>
         </div>
 
         <button
           onClick={handlePrintReport}
-          className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
+          className="bg-primary hover:bg-primary-hover text-white font-bold text-[10.5px] sm:text-xs px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
         >
           <Printer className="w-3.5 h-3.5" />
           <span>Drucken / PDF</span>
@@ -175,8 +175,8 @@ export const ReportsView: React.FC = () => {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <div className="bg-surface border border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
+        <div className="bg-surface border border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs">
           <span className="block text-[9px] font-bold text-text-muted/70 uppercase tracking-wider">{t('reports_collected_revenue')}</span>
           <div className="flex items-baseline gap-1 mt-0.5">
             <span className="text-base sm:text-lg font-black font-mono text-primary dark:text-primary">
@@ -189,7 +189,7 @@ export const ReportsView: React.FC = () => {
           </span>
         </div>
 
-        <div className="bg-surface border border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs">
+        <div className="bg-surface border border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs">
           <span className="block text-[9px] font-bold text-text-muted/70 uppercase tracking-wider">{t('reports_unpaid_amount')}</span>
           <div className="flex items-baseline gap-1 mt-0.5">
             <span className="text-base sm:text-lg font-black font-mono text-primary dark:text-primary">
@@ -202,7 +202,7 @@ export const ReportsView: React.FC = () => {
           </span>
         </div>
 
-        <div className="bg-surface border border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs">
+        <div className="bg-surface border border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs">
           <span className="block text-[9px] font-bold text-text-muted/70 uppercase tracking-wider">{t('reports_sessions_completed')}</span>
           <div className="flex items-baseline gap-1 mt-0.5">
             <span className="text-base sm:text-lg font-black font-mono text-primary dark:text-primary">
@@ -213,7 +213,7 @@ export const ReportsView: React.FC = () => {
           <span className="text-[9px] text-slate-500 font-bold mt-1 block">{t('reports_total_conducted')}</span>
         </div>
 
-        <div className={`border rounded-lg p-2.5 sm:p-3 shadow-2xs transition-all ${
+        <div className={`border rounded-lg p-2 sm:p-2.5 shadow-2xs transition-all ${
           unpaidLastSessionsCount > 0 
             ? 'bg-red-50/50 dark:bg-red-950/20 border-red-300 dark:border-red-900/60' 
             : 'bg-surface border border-surface-border'
@@ -235,8 +235,8 @@ export const ReportsView: React.FC = () => {
       </div>
 
       {/* WEEKLY SESSIONS & MONEY LOG LIST */}
-      <div className="bg-surface border border-surface-border rounded-lg p-3 sm:p-3.5 shadow-2xs space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-surface-border pb-2.5">
+      <div className="bg-surface border border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs space-y-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-surface-border pb-2">
           <div>
             <h3 className="text-xs font-black text-text-main uppercase tracking-wider flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5 text-primary" />
@@ -352,7 +352,7 @@ export const ReportsView: React.FC = () => {
                       <div 
                         key={l.id}
                         onClick={() => openLessonControl(l)}
-                        className={`p-2 sm:p-2.5 rounded-lg transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2 cursor-pointer ${
+                        className={`p-1.5 sm:p-2 rounded-lg transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2 cursor-pointer ${
                           isUnpaidLastSession
                             ? 'bg-red-50/40 dark:bg-red-950/20 border border-red-300 dark:border-red-900/40 hover:bg-red-50/80'
                             : 'hover:bg-slate-100/40 dark:hover:bg-slate-800/30'

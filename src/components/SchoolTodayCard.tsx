@@ -218,7 +218,7 @@ export const SchoolTodayCard: React.FC = () => {
     <>
       <div
         onClick={() => setActiveTab('schoolSchedule')}
-        className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs space-y-2 hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-all cursor-pointer text-start"
+        className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs space-y-1.5 hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-all cursor-pointer text-start"
         id="school-today-card"
       >
         {/* 1. Header Block */}

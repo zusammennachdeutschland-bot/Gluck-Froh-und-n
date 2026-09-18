@@ -56,34 +56,34 @@ export const LessonAlarmModal: React.FC<LessonAlarmModalProps> = ({
           className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border-2 border-primary/40 dark:border-primary/50 overflow-hidden relative"
         >
           {/* Top Pulsing Alarm Visual Header */}
-          <div className="bg-linear-to-b from-primary/20 via-primary/10 to-transparent p-6 pb-2 text-center relative overflow-hidden">
+          <div className="bg-linear-to-b from-primary/20 via-primary/10 to-transparent p-4 sm:p-6 pb-2 text-center relative overflow-hidden">
             {/* Animated Ringing Bell */}
-            <div className="relative inline-flex items-center justify-center mb-3">
-              <span className="absolute inline-flex h-20 w-20 rounded-full bg-primary/20 animate-ping" />
-              <span className="absolute inline-flex h-16 w-16 rounded-full bg-primary/30 animate-pulse" />
-              <div className="relative z-10 w-16 h-16 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/30 rotate-[-4deg] animate-bounce">
-                <BellRing className="w-8 h-8 animate-wiggle" />
+            <div className="relative inline-flex items-center justify-center mb-2 sm:mb-3">
+              <span className="absolute inline-flex h-14 w-14 sm:h-20 sm:w-20 rounded-full bg-primary/20 animate-ping" />
+              <span className="absolute inline-flex h-12 w-12 sm:h-16 sm:w-16 rounded-full bg-primary/30 animate-pulse" />
+              <div className="relative z-10 w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/30 rotate-[-4deg] animate-bounce">
+                <BellRing className="w-6 h-6 sm:w-8 sm:h-8 animate-wiggle" />
               </div>
             </div>
 
             {/* Title & Subtitle */}
-            <h2 id="alarm-title" className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+            <h2 id="alarm-title" className="text-base sm:text-xl font-black text-slate-900 dark:text-white tracking-tight">
               {_t('⏰ منبه موعد الحصة القادمة', '⏰ Upcoming Lesson Alarm', '⏰ Lektions-Wecker')}
             </h2>
-            <p className="text-xs text-primary font-bold mt-1 flex items-center justify-center gap-1.5">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+            <p className="text-[11px] sm:text-xs text-primary font-bold mt-1 flex items-center justify-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-500 animate-ping" />
               <span>
                 {_t(
-                  `المنبه يرن الآن بصوت متواصل (${remainingSec} ث متبقية)`,
-                  `Alarm ringing continuously (${remainingSec}s remaining)`,
-                  `Wecker klingelt durchgehend (noch ${remainingSec}s)`
+                  `المنبه يرن الآن (${remainingSec} ث متبقية)`,
+                  `Alarm ringing (${remainingSec}s remaining)`,
+                  `Wecker klingelt (noch ${remainingSec}s)`
                 )}
               </span>
             </p>
           </div>
 
           {/* Lesson Details Card */}
-          <div className="px-6 py-4 space-y-3.5">
+          <div className="px-3.5 py-3 sm:px-6 sm:py-4 space-y-3 sm:space-y-3.5">
             <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-700/80 space-y-2.5">
               <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                 <span className="flex items-center gap-1.5 font-bold text-primary">

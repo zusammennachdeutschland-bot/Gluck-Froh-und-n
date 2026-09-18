@@ -48,11 +48,15 @@ export const SettingsView: React.FC = () => {
     addInspirationMessage, updateInspirationMessage, deleteInspirationMessage,
     toggleFavoriteInspirationMessage, restoreDefaultInspirationMessages,
     checkAndTriggerInspirationReminder, accentColor, setAccentColor,
-    notificationSettings
+    notificationSettings, triggerToast
   } = useApp();
 
   const [activeCategory, setActiveCategory] = useState<SettingsCategory | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Live Theme Accent Preview Interactive Demo States
+  const [previewSwitchOn, setPreviewSwitchOn] = useState(true);
+  const [previewFeedbackText, setPreviewFeedbackText] = useState<string | null>(null);
 
   // Inspiration Messages UI States
   const [isManagingMessages, setIsManagingMessages] = useState(false);
@@ -364,11 +368,11 @@ export const SettingsView: React.FC = () => {
       <div className={`w-full lg:w-1/3 shrink-0 lg:sticky lg:top-16 space-y-2.5 ${activeCategory !== null ? 'hidden lg:block' : 'block'}`}>
         {/* Main Title Header */}
         <div>
-          <h2 className="text-lg font-black text-text-main flex items-center gap-2">
-            <Settings className="w-5 h-5 text-primary" />
+          <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5 sm:gap-2">
+            <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
             <span>{t('settings_title')}</span>
           </h2>
-          <p className="text-[11px] text-slate-500 mt-0.5">
+          <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5">
             {t('auto_select_a_section_to_manage_app')}
           </p>
         </div>
@@ -606,12 +610,37 @@ export const SettingsView: React.FC = () => {
             {/* Live Accent Preview */}
             <div className="mt-2.5 p-3 rounded-xl border border-primary-border/60 bg-primary-soft/30 space-y-2 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-24 h-24 bg-primary/10 rounded-full blur-xl pointer-events-none" />
-              <h4 className="text-[9.5px] uppercase font-bold text-text-muted relative z-10">{t('settings_live_preview')}</h4>
+              <div className="flex items-center justify-between relative z-10">
+                <h4 className="text-[9.5px] uppercase font-bold text-text-muted">{t('settings_live_preview')}</h4>
+                {previewFeedbackText && (
+                  <span className="text-[9.5px] font-bold text-primary animate-fade-in">
+                    {previewFeedbackText}
+                  </span>
+                )}
+              </div>
               <div className="flex gap-2 relative z-10">
-                <button className="flex-1 bg-primary text-white py-1.5 rounded-lg text-xs font-bold shadow-sm shadow-primary/20 transition-all hover:bg-primary-hover active:scale-95">
+                <button 
+                  type="button"
+                  id="settings-demo-primary-btn"
+                  onClick={() => {
+                    setPreviewFeedbackText(_t('تم الضغط على الزر الرئيسي ✨', 'Primary button clicked ✨', 'Haupt-Button geklickt ✨'));
+                    triggerToast(_t('تم اختبار الزر الرئيسي بنجاح! الألوان متناسقة ومفعلة ✨', 'Primary button tested successfully! Theme accent is active ✨', 'Haupt-Button erfolgreich getestet!'));
+                    setTimeout(() => setPreviewFeedbackText(null), 3000);
+                  }}
+                  className="flex-1 bg-primary text-white py-1.5 rounded-lg text-xs font-bold shadow-sm shadow-primary/20 transition-all hover:bg-primary-hover active:scale-95 cursor-pointer"
+                >
                   {t('settings_primary_button')}
                 </button>
-                <button className="flex-1 bg-primary-soft text-primary py-1.5 rounded-lg text-xs font-bold transition-all hover:bg-primary/20 active:scale-95">
+                <button 
+                  type="button"
+                  id="settings-demo-secondary-btn"
+                  onClick={() => {
+                    setPreviewFeedbackText(_t('تم الضغط على الزر الثانوي ✨', 'Secondary button clicked ✨', 'Sekundär-Button geklickt ✨'));
+                    triggerToast(_t('تم اختبار الزر الثانوي بنجاح! الألوان متناسقة ومفعلة ✨', 'Secondary button tested successfully! Theme accent is active ✨', 'Sekundär-Button erfolgreich getestet!'));
+                    setTimeout(() => setPreviewFeedbackText(null), 3000);
+                  }}
+                  className="flex-1 bg-primary-soft text-primary py-1.5 rounded-lg text-xs font-bold transition-all hover:bg-primary/20 active:scale-95 cursor-pointer"
+                >
                   {t('settings_secondary_button')}
                 </button>
               </div>
@@ -624,9 +653,20 @@ export const SettingsView: React.FC = () => {
                   <p className="text-[10px] text-text-muted truncate">{t('settings_adapts_accent')}</p>
                 </div>
                 <div className="ml-auto shrink-0">
-                   <div className="w-7 h-3.5 rounded-full bg-primary relative cursor-pointer">
-                     <div className="absolute right-0.5 top-0.5 w-2.5 h-2.5 bg-white rounded-full shadow-2xs"></div>
-                   </div>
+                   <button 
+                     type="button"
+                     id="settings-demo-toggle-switch-btn"
+                     onClick={() => {
+                       const nextState = !previewSwitchOn;
+                       setPreviewSwitchOn(nextState);
+                       setPreviewFeedbackText(nextState ? _t('المفتاح: مفعل', 'Switch: Active', 'Schalter: Aktiv') : _t('المفتاح: معطل', 'Switch: Disabled', 'Schalter: Deaktiviert'));
+                       setTimeout(() => setPreviewFeedbackText(null), 2500);
+                     }}
+                     className={`w-7 h-3.5 rounded-full relative cursor-pointer transition-colors p-0.5 border-0 ${previewSwitchOn ? 'bg-primary' : 'bg-surface-border'}`}
+                     title={_t('انقر لتبديل حالة المفتاح التجريبي', 'Click to toggle switch preview', 'Klicken zum Umschalten')}
+                   >
+                     <div className={`w-2.5 h-2.5 bg-white rounded-full shadow-2xs transition-transform transform ${previewSwitchOn ? (language === 'ar' ? '-translate-x-3.5' : 'translate-x-3.5') : 'translate-x-0'}`} />
+                   </button>
                 </div>
               </div>
             </div>

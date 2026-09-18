@@ -183,16 +183,16 @@ export const ObservationFormModal: React.FC<ObservationFormModalProps> = ({
       >
         {/* Header - Compact */}
         <div className="px-3.5 py-2.5 sm:px-4 sm:py-3 border-b border-surface-border flex items-center justify-between bg-surface-hover/40 shrink-0">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm sm:text-base font-black text-text-main">
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 className="text-xs sm:text-base font-black text-text-main truncate">
               {_t('نموذج تقييم زيارة صفية', 'Classroom Observation Form', 'Klassenbeobachtungsformular')}
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-text-muted hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-all cursor-pointer"
+            className="p-1 sm:p-1.5 text-text-muted hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg sm:rounded-xl transition-all cursor-pointer shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

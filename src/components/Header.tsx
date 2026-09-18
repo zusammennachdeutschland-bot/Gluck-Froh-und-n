@@ -173,34 +173,34 @@ export const Header: React.FC = () => {
       {/* Premium Safe Area Spacer for Android Status Bar */}
       <div 
         className="bg-surface dark:bg-black select-none max-w-lg mx-auto w-full shrink-0 transition-colors" 
-        style={{ height: 'max(24px, env(safe-area-inset-top, 24px))' }}
+        style={{ height: 'max(20px, env(safe-area-inset-top, 20px))' }}
       />
 
       {/* Compact Header */}
-      <header className="bg-surface dark:bg-black border-b border-surface-border/80 px-3.5 py-2 sticky top-0 z-30 transition-colors shadow-2xs">
-        <div className="flex items-center justify-between gap-3 max-w-lg mx-auto">
+      <header className="bg-surface dark:bg-black border-b border-surface-border/80 px-2.5 py-1.5 sm:px-3.5 sm:py-2 sticky top-0 z-30 transition-colors shadow-2xs">
+        <div className="flex items-center justify-between gap-2 sm:gap-3 max-w-lg mx-auto">
           
           {/* Start: Profile Avatar & Greeting / Active Tab Name */}
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
             <GlueckBuddyAvatar />
 
             <div className="leading-tight min-w-0 flex-1">
               {activeTab === 'home' ? (
                 <>
-                  <p className="text-[10px] font-black uppercase tracking-wider text-primary dark:text-primary-hover flex items-center gap-1">
+                  <p className="text-[9.5px] sm:text-[10px] font-black uppercase tracking-wider text-primary dark:text-primary-hover flex items-center gap-1">
                     <span>{t('greeting') || 'WELCOME'}</span>
-                    <span className="inline-block animate-wave text-[11px]">👋</span>
+                    <span className="inline-block animate-wave text-[10px] sm:text-[11px]">👋</span>
                   </p>
-                  <h1 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-slate-100 leading-snug whitespace-normal break-words truncate">
+                  <h1 className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-slate-100 leading-snug whitespace-normal break-words truncate">
                     {profile.displayName}
                   </h1>
                 </>
               ) : (
                 <>
-                  <p className="text-[9px] font-black uppercase tracking-widest text-primary dark:text-primary">
+                  <p className="text-[8.5px] sm:text-[9px] font-black uppercase tracking-widest text-primary dark:text-primary">
                     Glück fröhlich und froh
                   </p>
-                  <h1 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100 capitalize leading-snug whitespace-normal break-words truncate">
+                  <h1 className="text-xs sm:text-sm font-black text-slate-900 dark:text-slate-100 capitalize leading-snug whitespace-normal break-words truncate">
                     {activeTab === 'schedule' ? (t('nav_schedule') || 'Termine')
                      : activeTab === 'students' ? (t('nav_students') || 'Schüler')
                      : activeTab === 'history' ? (t('nav_history') || 'Sitzungen')
@@ -219,14 +219,14 @@ export const Header: React.FC = () => {
           </div>
 
           {/* End Action Toolbar: Notifications, Sync, Settings, 3-Bars Menu */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {/* Notification Bell */}
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               transition={{ type: 'spring', stiffness: 400, damping: 17 }}
               onClick={() => setShowNotifications(true)}
-              className={`relative p-2 sm:p-2.5 rounded-full border transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
+              className={`relative p-1.5 sm:p-2 rounded-full border transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
                 showNotifications
                   ? 'bg-primary text-white border-primary shadow-xs'
                   : 'bg-background dark:bg-background hover:bg-surface-hover text-text-main border-surface-border/80'
@@ -256,7 +256,7 @@ export const Header: React.FC = () => {
               whileTap={{ scale: 0.95 }}
               transition={{ type: 'spring', stiffness: 400, damping: 17 }}
               onClick={() => setActiveTab('settings')}
-              className={`p-2 sm:p-2.5 rounded-full border transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
+              className={`p-1.5 sm:p-2 rounded-full border transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
                 activeTab === 'settings'
                   ? 'bg-primary text-white border-primary shadow-xs'
                   : 'bg-background dark:bg-background hover:bg-surface-hover text-text-main border-surface-border/80'
@@ -273,7 +273,7 @@ export const Header: React.FC = () => {
               whileTap={{ scale: 0.95 }}
               transition={{ type: 'spring', stiffness: 400, damping: 17 }}
               onClick={() => setShowMainMenuDrawer(true)}
-              className={`relative p-2 sm:p-2.5 rounded-full border transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
+              className={`relative p-1.5 sm:p-2 rounded-full border transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
                 showMainMenuDrawer
                   ? 'bg-primary text-white border-primary shadow-xs'
                   : 'bg-background dark:bg-background hover:bg-surface-hover text-text-main border-surface-border/80'

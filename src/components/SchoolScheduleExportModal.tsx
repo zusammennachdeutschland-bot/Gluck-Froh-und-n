@@ -216,16 +216,16 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
         id="school-schedule-export-modal"
       >
         {/* MODAL HEADER */}
-        <div className="p-4 sm:p-5 border-b border-surface-border flex items-center justify-between bg-surface-hover/50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-primary-soft text-primary flex items-center justify-center border border-primary-border shrink-0">
-              <Download className="w-5 h-5" />
+        <div className="px-3.5 py-2.5 sm:p-4 border-b border-surface-border flex items-center justify-between bg-surface-hover/50">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-primary-soft text-primary flex items-center justify-center border border-primary-border shrink-0">
+              <Download className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-black text-text-main leading-tight">
-                {_t('تصدير جدول المدرسة الأسبوعي', 'Export Weekly School Schedule', 'Schulstundenplan exportieren')}
+            <div className="min-w-0">
+              <h2 className="text-xs sm:text-base font-black text-text-main leading-tight truncate">
+                {_t('تصدير جدول المدرسة', 'Export School Schedule', 'Schulplan exportieren')}
               </h2>
-              <p className="text-xs text-text-muted mt-0.5">
+              <p className="text-[10px] sm:text-xs text-text-muted mt-0.5 truncate">
                 {previewModel.stats.summaryLine}
               </p>
             </div>
@@ -233,14 +233,14 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
           <button 
             onClick={onClose}
             disabled={isProcessing}
-            className="p-2 rounded-xl text-text-muted hover:text-text-main hover:bg-surface-border/40 transition-colors cursor-pointer"
+            className="p-1 sm:p-1.5 rounded-lg sm:rounded-xl text-text-muted hover:text-text-main hover:bg-surface-border/40 transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
         {/* MODAL BODY */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar">
+        <div className="p-3.5 sm:p-5 overflow-y-auto space-y-3.5 sm:space-y-4 custom-scrollbar">
           {/* SUCCESS NOTIFICATION */}
           {successToast && (
             <div className="p-3.5 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold flex items-center gap-2.5 animate-scale-up">

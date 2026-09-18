@@ -127,13 +127,13 @@ export const SmartDailySummaryWidget: React.FC = () => {
   }, [lessons, students, groups, payments, profile, todayStr, language, t]);
 
   return (
-    <div className="relative overflow-hidden bg-surface border border-primary-border dark:border-primary-border rounded-xl p-2.5 sm:p-3 shadow-2xs transition-all">
+    <div className="relative overflow-hidden bg-surface border border-primary-border dark:border-primary-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all">
       {/* Subtle Background Glow Accent */}
       <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 dark:bg-primary/10 rounded-full blur-2xl pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-32 h-32 bg-primary/5 dark:bg-primary/10 rounded-full blur-2xl pointer-events-none" />
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-2 relative z-10">
+      <div className="flex items-center justify-between mb-1.5 relative z-10">
         <div className="flex items-center gap-1.5">
           <div className="p-1 rounded-md bg-primary-soft text-primary border border-primary-border">
             <Sparkles className="w-3.5 h-3.5 text-primary dark:text-primary animate-pulse" />
@@ -148,7 +148,7 @@ export const SmartDailySummaryWidget: React.FC = () => {
       </div>
 
       {/* Narrative Card */}
-      <div className="relative z-10 bg-primary-soft/40 dark:bg-background/70 border border-primary-border rounded-lg p-2 sm:p-2.5 mb-2 transition-all">
+      <div className="relative z-10 bg-primary-soft/40 dark:bg-background/70 border border-primary-border rounded-lg p-1.5 sm:p-2 mb-1.5 transition-all">
         <p className="text-xs leading-relaxed text-text-main font-medium">
           {summary.text}
         </p>

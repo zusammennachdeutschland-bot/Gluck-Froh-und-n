@@ -7,12 +7,14 @@ import { X, UserPlus, Info, Phone, AtSign, Sparkles } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
+import { transliterateArabicNameToEnglish } from '../utils/nameUtils';
 
 interface AddStudentModalProps {
   onClose: () => void;
+  initialGroupId?: string;
 }
 
-export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => {
+export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initialGroupId }) => {
   const { groups, students, addStudent, t, _t, language } = useApp();
 
   // Helper for inline translations
@@ -21,8 +23,14 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
   const [gender, setGender] = useState<'male' | 'female'>('male');
   const [hasManualGender, setHasManualGender] = useState(false);
   const [certificateName, setCertificateName] = useState('');
-  const [groupId, setGroupId] = useState(groups[0]?.id || '');
-  const [grade, setGrade] = useState<GradeLevel>('Grade 7');
+  const [groupId, setGroupId] = useState(initialGroupId || groups[0]?.id || '');
+  const [grade, setGrade] = useState<GradeLevel>(() => {
+    if (initialGroupId) {
+      const g = groups.find(x => x.id === initialGroupId);
+      if (g?.grade) return g.grade;
+    }
+    return 'Grade 7';
+  });
   const [parentName, setParentName] = useState('');
   const [parentContactType, setParentContactType] = useState<'phone' | 'username'>('phone');
   const [parentPhone, setParentPhone] = useState('');
@@ -145,25 +153,22 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose }) => 
         onClick={(e) => e.stopPropagation()}
         className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-md shadow-2xl overflow-hidden animate-scale-up"
       >
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
         {/* Header */}
-        <div className="bg-gradient-to-r from-primary to-primary-hover p-5 text-white flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-surface/20 rounded-xl">
-              <UserPlus className="w-5 h-5 text-white" />
+        <div className="bg-gradient-to-r from-primary to-primary-hover px-3.5 py-2.5 sm:p-4 text-white flex items-center justify-between">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            <div className="p-1.5 sm:p-2 bg-surface/20 rounded-lg sm:rounded-xl shrink-0">
+              <UserPlus className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <div>
-              <h2 className="text-base font-bold">{t('auto_add_new_student')}</h2>
-              <p className="text-xs text-primary-soft">{t('auto_automatic_group_pricing_inheri')}</p>
-            </div>
+            <h2 className="text-xs sm:text-sm font-black">{t('auto_add_new_student')}</h2>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-surface/20 rounded-full transition-colors cursor-pointer">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 hover:bg-surface/20 rounded-full transition-colors cursor-pointer">
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 space-y-3 sm:space-y-4 max-h-[78vh] overflow-y-auto">
           {/* Student Name */}
           <div className="space-y-1">
             <label className="text-xs font-bold text-text-main">

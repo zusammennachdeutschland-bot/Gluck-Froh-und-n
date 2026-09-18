@@ -11,6 +11,7 @@ import {
   X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { GroupProfileModal } from './GroupProfileModal';
 
 export { isLikelyFemaleStudent } from '../utils/genderUtils';
 
@@ -85,8 +86,9 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   onSaveReport,
   onGoToHomeScreen
 }) => {
-  const { students, groups, lessons, _t, language, t } = useApp();
+  const { students, groups, lessons, updateLesson, saveLessonReport, _t, language, t } = useApp();
   const [copied, setCopied] = useState(false);
+  const [showGroupProfile, setShowGroupProfile] = useState(false);
 
   // Find the associated group (if any)
   const associatedGroup = groups.find(g => g.id === lesson.groupId);
@@ -249,6 +251,81 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const [showRecordingLink2, setShowRecordingLink2] = useState<boolean>(
     Boolean(lesson.report?.recordingLink2 || lesson.recordingLink2)
   );
+  const [autoSavedNotice, setAutoSavedNotice] = useState<boolean>(false);
+
+  // Auto save recording links directly to lists & lesson database
+  const persistRecordings = React.useCallback((r1?: string, r2?: string, currentText?: string) => {
+    const raw1 = r1 !== undefined ? r1 : recordingLink;
+    const raw2 = r2 !== undefined ? r2 : recordingLink2;
+    const textToCheck = currentText !== undefined ? currentText : finalGeneratedText;
+
+    let finalR1 = raw1.trim();
+    let finalR2 = raw2.trim();
+
+    // If direct link field is empty, detect video recording links from custom edited message
+    if (!finalR1 && textToCheck) {
+      const urls = textToCheck.match(/https?:\/\/[^\s\n\r"']+/g) || [];
+      const match = urls.find(u => 
+        u.includes('grain.co') || u.includes('grain.com') || u.includes('zoom.us') || 
+        u.includes('drive.google') || u.includes('youtube.com') || u.includes('youtu.be') || 
+        u.includes('loom.com') || u.includes('vimeo.com')
+      ) || (urls.length > 0 && !urls[0].includes('whatsapp') && !urls[0].includes('wa.me') ? urls[0] : undefined);
+
+      if (match) {
+        finalR1 = match;
+        setRecordingLink(match);
+      }
+    }
+
+    const rec1 = finalR1 || undefined;
+    const rec2 = finalR2 || undefined;
+
+    updateLesson(lesson.id, {
+      recordingLink: rec1,
+      recordingLink2: rec2,
+      report: {
+        ...(lesson.report || {}),
+        recordingLink: rec1,
+        recordingLink2: rec2,
+        arabicFullGeneratedReport: textToCheck,
+        arabicPreviousHomework: previousHomework.trim() || undefined,
+        previousHomeworkDescription: previousHomework.trim() || undefined
+      }
+    });
+
+    saveLessonReport(lesson.id, {
+      ...(lesson.report || {}),
+      recordingLink: rec1,
+      recordingLink2: rec2,
+      arabicFullGeneratedReport: textToCheck,
+      arabicPreviousHomework: previousHomework.trim() || undefined,
+      previousHomeworkDescription: previousHomework.trim() || undefined
+    });
+
+    if (onSaveReport) {
+      onSaveReport(textToCheck, {
+        recordingLink: rec1,
+        recordingLink2: rec2,
+        arabicPreviousHomework: previousHomework.trim() || undefined,
+        previousHomeworkDescription: previousHomework.trim() || undefined
+      });
+    }
+
+    setAutoSavedNotice(true);
+    setTimeout(() => setAutoSavedNotice(false), 2500);
+  }, [lesson.id, lesson.report, recordingLink, recordingLink2, finalGeneratedText, previousHomework, updateLesson, saveLessonReport, onSaveReport]);
+
+  // Debounce-sync recording link updates automatically to the list
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const currentR1 = lesson.recordingLink || lesson.report?.recordingLink || '';
+      const currentR2 = lesson.recordingLink2 || lesson.report?.recordingLink2 || '';
+      if (recordingLink.trim() !== currentR1.trim() || recordingLink2.trim() !== currentR2.trim()) {
+        persistRecordings();
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [recordingLink, recordingLink2, persistRecordings, lesson.recordingLink, lesson.report?.recordingLink, lesson.recordingLink2, lesson.report?.recordingLink2]);
 
   // Helper to format recording link(s) for the Arabic report
   const formatRecordingsArabic = (link1: string, link2: string): string => {
@@ -607,6 +684,7 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
   ]);
 
   const handleCopyText = () => {
+    persistRecordings(undefined, undefined, finalGeneratedText);
     navigator.clipboard.writeText(finalGeneratedText);
     setCopied(true);
     confetti({ particleCount: 40, spread: 60, origin: { y: 0.8 } });
@@ -614,14 +692,7 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
   };
 
   const handleWhatsAppSend = async () => {
-    if (onSaveReport) {
-      onSaveReport(finalGeneratedText, { 
-        recordingLink: recordingLink.trim() || undefined,
-        recordingLink2: recordingLink2.trim() || undefined,
-        arabicPreviousHomework: previousHomework.trim() || undefined,
-        previousHomeworkDescription: previousHomework.trim() || undefined
-      });
-    }
+    persistRecordings(undefined, undefined, finalGeneratedText);
 
     if (activeTab === 'bulk') {
       try {
@@ -683,28 +754,46 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
           onClose();
         }
       }}
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0 overflow-hidden"
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className={`bg-surface border border-surface-border w-full max-w-xl rounded-t-[28px] sm:rounded-2xl shadow-2xl flex flex-col max-h-[92dvh] sm:max-h-[88vh] overflow-hidden animate-scale-up ${language === 'ar' ? 'text-right' : 'text-left'}`} 
+        className={`bg-surface border border-surface-border w-full max-w-xl rounded-t-[28px] sm:rounded-2xl shadow-2xl flex flex-col h-[94dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden animate-scale-up ${language === 'ar' ? 'text-right' : 'text-left'}`} 
         dir={language === 'ar' ? 'rtl' : 'ltr'}
       >
         <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
         
         {/* Header */}
-        <div className={`bg-surface p-4 sm:p-5 border-b border-surface-border flex items-center justify-between shrink-0 ${language === 'ar' ? 'flex-row' : 'flex-row-reverse'}`}>
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 sm:p-2.5 bg-primary-soft text-primary rounded-xl shrink-0">
-              <Sparkles className="w-5 h-5" />
+        <div className={`bg-surface px-3.5 py-2 sm:p-4 border-b border-surface-border flex items-center justify-between shrink-0 ${language === 'ar' ? 'flex-row' : 'flex-row-reverse'}`}>
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="p-1.5 sm:p-2 bg-primary-soft text-primary rounded-lg sm:rounded-xl shrink-0">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h2 className="text-base font-black text-text-main">
+            <div className="min-w-0">
+              <h2 className="text-xs sm:text-sm font-black text-text-main truncate">
                 {t('auto_share_session_report')}
               </h2>
-              <p className="text-xs text-text-muted">
-                {lesson.title} {lesson.grade ? `• ${lesson.grade}` : ''} {hasCycle ? `• الحصة ${currentSessionNumber}/${totalCycleSessions}` : ''} {lesson.date ? `• ${lesson.date}` : ''}
-              </p>
+              <div className="text-[10px] sm:text-xs text-text-muted truncate flex items-center gap-1 flex-wrap">
+                {associatedGroup ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowGroupProfile(true);
+                    }}
+                    className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                    title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                  >
+                    <span>{associatedGroup.name}</span>
+                    <Users className="w-3 h-3 opacity-80" />
+                  </button>
+                ) : (
+                  <span>{lesson.title}</span>
+                )}
+                {lesson.grade ? <span>• {lesson.grade}</span> : null}
+                {hasCycle ? <span>• الحصة {currentSessionNumber}/{totalCycleSessions}</span> : null}
+                {lesson.date ? <span>• {lesson.date}</span> : null}
+              </div>
             </div>
           </div>
           <button 
@@ -713,14 +802,14 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
               e.stopPropagation();
               onClose();
             }}
-            className="p-1.5 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
+            className="p-1 sm:p-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-4 sm:p-5 space-y-3.5 sm:space-y-4 overflow-y-auto flex-1 min-h-0">
+        <div className="p-2.5 sm:p-3.5 space-y-2 sm:space-y-2.5 overflow-y-auto flex-1 min-h-0">
           
           {/* Group Toggle Tab (Only if multiple students in the group) */}
           {isGroupLesson && (
@@ -872,13 +961,31 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
               </div>
             </div>
           ) : (
-            <div className="p-3 sm:p-3.5 bg-emerald-50/50 dark:bg-emerald-950/10 border border-emerald-100 dark:border-emerald-900/40 rounded-xl space-y-1.5 text-xs">
+            <div className="p-2.5 sm:p-3 bg-emerald-50/50 dark:bg-emerald-950/10 border border-emerald-100 dark:border-emerald-900/40 rounded-xl space-y-1 text-xs">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-text-muted font-bold block mb-0.5">{t('auto_group')}</span>
-                  <span className="font-black text-emerald-700 dark:text-emerald-400 text-xs sm:text-sm">
-                    {associatedGroup?.name || t('auto_german_group')}
-                  </span>
+                  {associatedGroup ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowGroupProfile(true);
+                      }}
+                      className="font-black text-emerald-700 dark:text-emerald-400 text-xs sm:text-sm hover:underline inline-flex items-center gap-1.5 cursor-pointer text-start"
+                      title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                    >
+                      <span>{associatedGroup.name}</span>
+                      <Users className="w-3.5 h-3.5 opacity-80" />
+                      <span className="text-[9px] bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.2 rounded font-bold">
+                        {_t('فتح القائمة', 'Open List', 'Öffnen')}
+                      </span>
+                    </button>
+                  ) : (
+                    <span className="font-black text-emerald-700 dark:text-emerald-400 text-xs sm:text-sm">
+                      {associatedGroup?.name || t('auto_german_group')}
+                    </span>
+                  )}
                 </div>
                 {groupWhatsAppLink ? (
                   <span className="bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 px-2 py-1 rounded-md text-[10px] font-black flex items-center gap-1">
@@ -895,7 +1002,7 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
           )}
 
           {/* Previous Homework Section (الواجب السابق) */}
-          <div className="space-y-2 bg-surface p-3 sm:p-3.5 rounded-xl border border-surface-border">
+          <div className="space-y-1.5 bg-surface p-2.5 sm:p-3 rounded-xl border border-surface-border">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-1.5">
                 <ClipboardCheck className="w-4 h-4 text-primary" />
@@ -919,7 +1026,7 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                   setPreviousHomework(e.target.value);
                   setIsManualEdited(false);
                 }}
-                className="w-full pl-8 pr-3 py-2 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60 text-right font-medium"
+                className="w-full pl-8 pr-3 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60 text-right font-medium"
                 placeholder={_t('اكتب كان إيه الواجب السابق هنا (مثلاً: حل صـ 25 وتدريبات القواعد)...', 'Enter previous homework details...', 'Vorherige Hausaufgabe hier eingeben...')}
               />
               {previousHomework && (
@@ -939,7 +1046,7 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
           </div>
 
           {/* Lecture / Session Recording Links */}
-          <div className="space-y-2 bg-surface p-3 sm:p-3.5 rounded-xl border border-surface-border">
+          <div className="space-y-1.5 bg-surface p-2.5 sm:p-3 rounded-xl border border-surface-border">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-1.5">
                 <Video className="w-4 h-4 text-primary" />
@@ -964,7 +1071,15 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
             {/* Part 1 Recording Input */}
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[11px] font-bold text-text-muted">
-                <span>{_t('التسجيل الأول (الجزء 1)', 'Recording 1 (Part 1)', 'Aufnahme 1 (Teil 1)')}</span>
+                <div className="flex items-center gap-1.5">
+                  <span>{_t('التسجيل الأول (الجزء 1)', 'Recording 1 (Part 1)', 'Aufnahme 1 (Teil 1)')}</span>
+                  {autoSavedNotice && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-1 animate-scale-up font-bold">
+                      <Check className="w-2.5 h-2.5 text-emerald-500" />
+                      <span>{_t('تم الحفظ في القوائم تلقائياً ✓', 'Saved to lists ✓', 'Gespeichert ✓')}</span>
+                    </span>
+                  )}
+                </div>
                 {!showRecordingLink2 && !recordingLink2 && (
                   <button
                     type="button"
@@ -1162,15 +1277,15 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                 setFinalGeneratedText(e.target.value);
                 setIsManualEdited(true);
               }}
-              className="w-full h-32 sm:h-44 bg-surface-hover/80 border border-surface-border rounded-xl p-3 sm:p-4 text-xs font-semibold leading-relaxed text-text-main focus:outline-none focus:ring-2 focus:ring-primary/10 resize-none font-sans"
+              className="w-full h-28 sm:h-36 bg-surface-hover/80 border border-surface-border rounded-xl p-2.5 sm:p-3 text-xs font-semibold leading-relaxed text-text-main focus:outline-none focus:ring-2 focus:ring-primary/10 resize-none font-sans"
             />
           </div>
 
         </div>
 
-        {/* Footer Actions */}
-        <div className="p-3 sm:p-4 bg-surface border-t border-surface-border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3 shrink-0 pb-safe-bottom sm:pb-4">
-          <div className="flex items-center gap-2 flex-1">
+        {/* Footer Actions - Guaranteed visible and accessible */}
+        <div className="p-2.5 sm:p-3 bg-surface border-t border-surface-border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0 pb-[max(12px,env(safe-area-inset-bottom,12px))] shadow-lg z-10">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
             {activeTab === 'bulk' ? (
               <button
                 id="send-whatsapp-group-btn"
@@ -1179,13 +1294,13 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                   e.stopPropagation();
                   handleWhatsAppSend();
                 }}
-                className="flex-1 sm:flex-initial bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
               >
-                <Send className="w-4 h-4" />
-                <span>
+                <Send className="w-4 h-4 shrink-0" />
+                <span className="truncate">
                   {groupWhatsAppLink
                     ? t('auto_send_to_whatsapp_group')
-                    : _t('نسخ وفتح واتساب (اختر الشات)', 'Copy & Open WhatsApp', 'Kopieren & WhatsApp öffnen')}
+                    : _t('إرسال عبر واتساب (اختر الشات)', 'Send via WhatsApp', 'Über WhatsApp senden')}
                 </span>
               </button>
             ) : (
@@ -1195,12 +1310,11 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                   e.stopPropagation();
                   handleWhatsAppSend();
                 }}
-                className="flex-1 sm:flex-initial bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
+                className="flex-1 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
               >
-                <Send className="w-4 h-4" />
-                <span>
+                <Send className="w-4 h-4 shrink-0" />
+                <span className="truncate">
                   {t('auto_send_via_whatsapp')} ({activeStudent?.name || 'الطالب'})
-                  {resolvedContact.isUsername ? ` (${resolvedContact.display})` : ''}
                 </span>
               </button>
             )}
@@ -1211,19 +1325,21 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                 e.stopPropagation();
                 handlePrint();
               }}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 font-bold text-xs py-2.5 sm:py-3 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[42px]"
+              className="bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 font-bold text-xs py-2.5 sm:py-3 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[42px] shrink-0"
+              title={t('auto_print')}
             >
               <Printer className="w-4 h-4" />
               <span className="hidden sm:inline">{t('auto_print')}</span>
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {activeTab === 'individual' && resolvedContact.hasContact && !resolvedContact.isUsername && (
               <a
                 href={`tel:${resolvedContact.contact}`}
                 onClick={(e) => e.stopPropagation()}
                 className="bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 font-bold text-xs py-2.5 sm:py-3 px-3 sm:px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[42px]"
+                title={t('auto_phone_call')}
               >
                 <Phone className="w-4 h-4 text-primary" />
                 <span className="hidden sm:inline">{t('auto_phone_call')}</span>
@@ -1234,14 +1350,7 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                if (onSaveReport) {
-                  onSaveReport(finalGeneratedText, { 
-                    recordingLink: recordingLink.trim() || undefined,
-                    recordingLink2: recordingLink2.trim() || undefined,
-                    arabicPreviousHomework: previousHomework.trim() || undefined,
-                    previousHomeworkDescription: previousHomework.trim() || undefined
-                  });
-                }
+                persistRecordings(undefined, undefined, finalGeneratedText);
                 if (onGoToHomeScreen) {
                   onGoToHomeScreen();
                 } else {
@@ -1250,13 +1359,20 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
               }}
               className="flex-1 sm:flex-initial bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-4 sm:px-6 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md shadow-red-600/20 min-h-[42px]"
             >
-              <Home className="w-4 h-4" />
-              <span>{t('auto_go_to_homescreen')}</span>
+              <Home className="w-4 h-4 shrink-0" />
+              <span className="truncate">{t('auto_go_to_homescreen')}</span>
             </button>
           </div>
         </div>
 
       </div>
+
+      {showGroupProfile && associatedGroup && (
+        <GroupProfileModal
+          group={associatedGroup}
+          onClose={() => setShowGroupProfile(false)}
+        />
+      )}
     </div>
   );
 };

@@ -189,24 +189,24 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
       >
         {/* Header - Compact on mobile */}
         <div className="px-3.5 py-2.5 sm:px-4 sm:py-3 border-b border-surface-border flex items-center justify-between bg-surface-hover/50 shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
-              <Layers className="w-4 h-4 sm:w-5 sm:h-5" />
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+              <Layers className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-sm sm:text-base font-black text-text-main truncate">
-                {_t('تصدير وطباعة تقارير الزيارات مجمعة', 'Bulk Observation Reports Export & Print', 'Sammeldruck von Unterrichtsbesuchen')}
+              <h2 className="text-xs sm:text-base font-black text-text-main truncate">
+                {_t('تصدير وطباعة تقارير الزيارات', 'Bulk Observation Reports Export', 'Sammeldruck von Besuchen')}
               </h2>
               <p className="text-[10px] text-text-muted hidden sm:block truncate">
-                {_t('دمج تقارير الزيارات في ملف PDF واحد متصل مع ترقيم الصفحات أو طباعتها دفعة واحدة', 'Merge observation reports into a single combined PDF or print in batch', 'Berichte in ein einziges PDF zusammenführen oder drucken')}
+                {_t('دمج تقارير الزيارات في ملف PDF واحد متصل أو طباعتها دفعة واحدة', 'Merge observation reports into a single PDF or batch print', 'Berichte zusammenführen oder drucken')}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-xl transition-all cursor-pointer shrink-0"
+            className="p-1 sm:p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg sm:rounded-xl transition-all cursor-pointer shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

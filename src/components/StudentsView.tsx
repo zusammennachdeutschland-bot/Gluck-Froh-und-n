@@ -194,18 +194,18 @@ export const StudentsView: React.FC = () => {
   });
 
   return (
-    <div className="space-y-4 ">
+    <div className="space-y-3 sm:space-y-4">
       {/* Top Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h2 className="text-lg font-black text-text-main flex items-center gap-2">
-          <Users className="w-5 h-5 text-primary shrink-0" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
+        <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5 sm:gap-2">
+          <Users className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
           <span>{t('students_and_groups_title')}</span>
         </h2>
 
-        <div className="grid grid-cols-3 gap-1.5 w-full sm:w-auto sm:flex sm:items-center sm:gap-2">
+        <div className="grid grid-cols-3 gap-1 sm:gap-1.5 w-full sm:w-auto sm:flex sm:items-center sm:gap-2">
           <button
             onClick={() => setIsAddStudentModalOpen(true)}
-            className="px-2 sm:px-3 py-2 sm:py-2.5 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-[10.5px] sm:text-xs rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
           >
             <UserPlus className="w-3.5 h-3.5 shrink-0" />
             <span className="truncate">{t('students_add_student')}</span>
@@ -214,7 +214,7 @@ export const StudentsView: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsAddGroupModalOpen(true)}
-            className="px-2 sm:px-3 py-2 sm:py-2.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 active:scale-95 text-text-main border border-surface-border font-bold text-[10.5px] sm:text-xs rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 active:scale-95 text-text-main border border-surface-border font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
           >
             <Plus className="w-3.5 h-3.5 shrink-0 text-primary" />
             <span className="truncate">{t('students_add_group')}</span>
@@ -223,7 +223,7 @@ export const StudentsView: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsAiImportModalOpen(true)}
-            className="px-2 sm:px-3 py-2 sm:py-2.5 bg-primary-soft hover:bg-primary-soft/80 active:scale-95 text-primary border border-primary-border font-bold text-[10.5px] sm:text-xs rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-primary-soft hover:bg-primary-soft/80 active:scale-95 text-primary border border-primary-border font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
           >
             <Bot className="w-3.5 h-3.5 shrink-0" />
             <span className="truncate">{t('auto_import_group_students')}</span>
@@ -232,10 +232,10 @@ export const StudentsView: React.FC = () => {
       </div>
 
       {/* Segment Switcher Tabs */}
-      <div className="grid grid-cols-3 gap-1 bg-surface-hover p-1 rounded-lg text-xs font-bold">
+      <div className="grid grid-cols-3 gap-1 bg-surface-hover p-1 rounded-lg text-[11px] sm:text-xs font-bold">
         <button
           onClick={() => setActiveSegment('students')}
-          className={`py-1.5 rounded-lg transition-all cursor-pointer ${
+          className={`py-1 sm:py-1.5 rounded-lg transition-all cursor-pointer ${
             activeSegment === 'students'
               ? 'bg-surface text-primary dark:text-primary shadow-xs'
               : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
@@ -246,7 +246,7 @@ export const StudentsView: React.FC = () => {
 
         <button
           onClick={() => setActiveSegment('groups')}
-          className={`py-1.5 rounded-lg transition-all cursor-pointer ${
+          className={`py-1 sm:py-1.5 rounded-lg transition-all cursor-pointer ${
             activeSegment === 'groups'
               ? 'bg-surface text-primary dark:text-primary shadow-xs'
               : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
@@ -257,7 +257,7 @@ export const StudentsView: React.FC = () => {
 
         <button
           onClick={() => setActiveSegment('archive')}
-          className={`py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+          className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
             activeSegment === 'archive'
               ? 'bg-surface text-primary dark:text-primary shadow-xs'
               : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
@@ -460,7 +460,7 @@ export const StudentsView: React.FC = () => {
               return (
                 <div
                   key={`${student.id}_${idx}`}
-                  className={`bg-surface border rounded-lg p-2.5 sm:p-3 shadow-2xs transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative ${
+                  className={`bg-surface border rounded-lg p-2 sm:p-2.5 shadow-2xs transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative ${
                     isSelected ? 'border-primary bg-primary-soft/20 dark:border-primary' : 'border-surface-border/60 dark:border-surface-border'
                   } ${
                     activeMenuId === `student_${student.id}`
@@ -502,7 +502,7 @@ export const StudentsView: React.FC = () => {
                     <div className="min-w-0 space-y-1 flex-1">
                       {/* LINE 1: Name + Gender + Grade + English Name in ONE single row */}
                       <div className="flex items-center gap-1.5 min-w-0 flex-nowrap">
-                        <h3 className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors tracking-tight truncate shrink-0 max-w-[125px] sm:max-w-[200px]">
+                        <h3 className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors tracking-tight truncate max-w-[150px] sm:max-w-[220px]">
                           {student.name}
                         </h3>
 
@@ -543,43 +543,30 @@ export const StudentsView: React.FC = () => {
                         )}
 
                         {/* Grade Badge right next to name & gender */}
-                        <span className="text-[9px] font-black text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft/40 border border-primary-border/50 dark:border-primary-border/30 px-1.5 py-0.2 rounded shrink-0">
+                        <span className="text-[9.5px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft/40 border border-primary-border/50 dark:border-primary-border/30 px-1.5 py-0.2 rounded shrink-0">
                           {student.grade}
                         </span>
-
-                        {/* Student Portal Code Badge (1-click copy) */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigator.clipboard.writeText(studentCode);
-                            setCopiedStudentCodeId(student.id);
-                            setTimeout(() => setCopiedStudentCodeId(null), 1800);
-                          }}
-                          className="text-[9px] font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200/80 dark:border-indigo-800/60 px-1.5 py-0.2 rounded inline-flex items-center gap-1 shrink-0 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition-colors cursor-pointer"
-                          title={_t('كود الطالب لبوابة ولي الأمر (اضغط للنسخ)', 'Student Portal Code (Click to copy)', 'Schüler-Portal-Code (Klicken zum Kopieren)')}
-                        >
-                          <span className="font-mono font-bold tracking-wider">{studentCode}</span>
-                          {copiedStudentCodeId === student.id ? (
-                            <Check className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
-                          ) : (
-                            <Copy className="w-2.5 h-2.5 text-indigo-500 opacity-70" />
-                          )}
-                        </button>
-
-                        {/* English/Certificate Name (compact & truncated to prevent line break) */}
-                        {student.certificateName && (
-                          <span className="text-[9.5px] font-bold text-text-muted/70 font-mono tracking-wide bg-slate-50 dark:bg-slate-800/60 px-1 py-0.2 rounded border border-surface-border-soft dark:border-slate-800 truncate max-w-[80px] sm:max-w-[140px] shrink-0" title={_t('الاسم بالإنجليزية للشهادات', 'English Name for Certificates', 'Englischer Name für Zertifikate')}>
-                            {student.certificateName}
-                          </span>
-                        )}
                       </div>
 
                       {/* LINE 2: Group + Contacts */}
                       <div className="flex items-center gap-1.5 text-xs text-text-muted min-w-0 flex-nowrap overflow-hidden">
-                        <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1.5 py-0.2 rounded text-[9px] truncate max-w-[130px] sm:max-w-[220px] shrink-0">
-                          {studentGroup?.name || 'Gruppe A1'}
-                        </span>
+                        {studentGroup ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedGroup(studentGroup);
+                            }}
+                            className="font-extrabold text-text-main hover:text-primary hover:underline bg-surface-hover border border-surface-border-soft px-1.5 py-0.2 rounded text-[9px] truncate max-w-[130px] sm:max-w-[220px] shrink-0 cursor-pointer transition-colors"
+                            title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                          >
+                            {studentGroup.name}
+                          </button>
+                        ) : (
+                          <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1.5 py-0.2 rounded text-[9px] truncate max-w-[130px] sm:max-w-[220px] shrink-0">
+                            Gruppe A1
+                          </span>
+                        )}
                         <span className="text-[10px] text-text-muted/70 inline-flex items-center gap-0.5 shrink-0">
                           • {isWhatsAppUsername(student.parentPhone) ? (
                             <span className="inline-flex items-center gap-0.5 font-bold text-emerald-600 dark:text-emerald-400 font-mono">
@@ -806,7 +793,7 @@ export const StudentsView: React.FC = () => {
 
       {/* GROUPS LIST SEGMENT */}
       {activeSegment === 'groups' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 sm:gap-2.5">
           {filteredGroups.length === 0 ? (
             <div className="bg-surface border border-surface-border rounded-lg p-5 text-center space-y-2">
               <p className="text-sm font-bold text-text-main">
@@ -848,7 +835,7 @@ export const StudentsView: React.FC = () => {
               <div
                 key={`${group.id}_${idx}`}
                 onClick={() => setSelectedGroup(group)}
-                className={`bg-surface border border-surface-border/60 dark:border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative ${
+                className={`bg-surface border border-surface-border/60 dark:border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative ${
                   activeMenuId === `group_${group.id}`
                     ? 'z-50'
                     : 'hover:shadow-xs active:scale-[0.99] active:bg-surface-hover z-0'

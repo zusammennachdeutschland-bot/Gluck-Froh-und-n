@@ -213,9 +213,9 @@ export const FinanceView: React.FC = () => {
   ] as const;
 
   return (
-    <div className="space-y-3 max-w-7xl mx-auto pb-12">
+    <div className="space-y-2 sm:space-y-2.5 max-w-7xl mx-auto pb-8">
       {/* Tabs Navigation (Same UI as HOD Hub) */}
-      <div className="flex w-full items-center justify-between sm:justify-center gap-1 bg-surface p-1 rounded-xl border border-surface-border shadow-2xs overflow-hidden">
+      <div className="flex w-full items-center justify-start sm:justify-center gap-1 bg-surface p-1 rounded-xl border border-surface-border shadow-2xs overflow-x-auto no-scrollbar">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -223,20 +223,20 @@ export const FinanceView: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`relative h-9 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer select-none ${
+              className={`relative h-8 sm:h-9 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer select-none ${
                 isActive 
-                  ? 'bg-primary text-white px-2.5 sm:px-3 gap-1.5 shadow-xs font-black shrink-0' 
-                  : 'w-8 sm:w-9 text-text-muted hover:bg-surface-hover hover:text-text-main shrink-0'
+                  ? 'bg-primary text-white px-2 sm:px-3 gap-1 sm:gap-1.5 shadow-xs font-black shrink-0' 
+                  : 'w-7 sm:w-9 text-text-muted hover:bg-surface-hover hover:text-text-main shrink-0'
               }`}
               title={tab.label}
             >
-              <Icon className="w-4 h-4 shrink-0" />
+              <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
               {(tab as any).badge && (
                 <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold px-1 min-w-[14px] h-[14px] rounded-full flex items-center justify-center shadow-sm z-10">
                   {(tab as any).badge}
                 </span>
               )}
-              {isActive && <span className="text-[11px] font-bold whitespace-nowrap overflow-hidden">{tab.label}</span>}
+              {isActive && <span className="text-[10px] sm:text-[11px] font-bold whitespace-nowrap overflow-hidden">{tab.label}</span>}
             </button>
           );
         })}

@@ -307,36 +307,36 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in font-sans">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-xs animate-fade-in font-sans">
       <div className="bg-surface dark:bg-slate-900 border border-surface-border dark:border-surface-border-soft rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[92vh]">
         
         {/* HEADER */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-border dark:border-surface-border-soft bg-surface-hover/50 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-primary-soft dark:bg-primary-soft flex items-center justify-center text-primary">
-              <CalendarIcon className="w-5 h-5" />
+        <div className="flex items-center justify-between px-3.5 py-2.5 sm:px-6 sm:py-4 border-b border-surface-border dark:border-surface-border-soft bg-surface-hover/50 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-primary-soft dark:bg-primary-soft flex items-center justify-center text-primary shrink-0">
+              <CalendarIcon className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h3 className="text-base font-bold text-text-main">
-                {_t('تصدير التقويم الشهري (.ics)', 'Export Monthly Calendar (.ics)', 'Monatskalender exportieren (.ics)')}
+            <div className="min-w-0">
+              <h3 className="text-xs sm:text-base font-bold text-text-main truncate">
+                {_t('تصدير التقويم الشهري (.ics)', 'Export Calendar (.ics)', 'Monatskalender exportieren')}
               </h3>
-              <p className="text-xs text-text-muted">
+              <p className="text-[10px] sm:text-xs text-text-muted truncate">
                 {exportStep === 'config' 
-                  ? _t('تخصيص الشهر والبيانات المراد تصديرها', 'Select month & data to export', 'Monat und Daten zum Exportieren wählen') 
-                  : _t('ملخص التصدير والتحميل', 'Export summary & download', 'Export-Übersicht & Download')}
+                  ? _t('تخصيص الشهر والبيانات المراد تصديرها', 'Select month & data', 'Monat wählen') 
+                  : _t('ملخص التصدير والتحميل', 'Summary & download', 'Übersicht')}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-text-muted hover:bg-surface-hover dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-text-muted hover:bg-surface-hover dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* CONTENT */}
-        <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar">
+        <div className="p-3.5 sm:p-6 space-y-3.5 sm:space-y-4 overflow-y-auto custom-scrollbar">
           {exportStep === 'config' ? (
             <>
               {/* Quick Shortcuts */}

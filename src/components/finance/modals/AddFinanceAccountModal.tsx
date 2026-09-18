@@ -119,29 +119,26 @@ export const AddFinanceAccountModal: React.FC<AddFinanceAccountModalProps> = ({ 
       <div className="bg-surface border border-surface-border rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
         
         {/* Header */}
-        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-surface-border bg-surface shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold">
-              <Landmark className="w-5 h-5" />
+        <div className="flex items-center justify-between px-3.5 py-2.5 sm:px-5 sm:py-4 border-b border-surface-border bg-surface shrink-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0">
+              <Landmark className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h3 className="text-base sm:text-lg font-black text-text-main">
-                {existingAccount ? _t('تعديل الحساب البنكي', 'Edit Account', 'Konto bearbeiten') : _t('إضافة حساب بنكي / محفظة', 'Add Bank Account / Card', 'Neues Bankkonto')}
+            <div className="min-w-0">
+              <h3 className="text-xs sm:text-base font-black text-text-main truncate">
+                {existingAccount ? _t('تعديل الحساب البنكي', 'Edit Account', 'Konto bearbeiten') : _t('إضافة حساب بنكي / محفظة', 'Add Account / Card', 'Neues Bankkonto')}
               </h3>
-              <p className="text-xs text-text-muted">
-                {_t('بطاقة رقمية تفاعلية لإدارة أموالك', 'Interactive digital card for your finances', 'Interaktive digitale Karte')}
-              </p>
             </div>
           </div>
           <button 
             onClick={onClose} 
-            className="w-8 h-8 rounded-full hover:bg-surface-hover flex items-center justify-center text-text-muted hover:text-text-main transition-colors"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full hover:bg-surface-hover flex items-center justify-center text-text-muted hover:text-text-main transition-colors shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
         
-        <div className="p-4 sm:p-5 overflow-y-auto space-y-5">
+        <div className="p-3.5 sm:p-5 overflow-y-auto space-y-4 sm:space-y-5">
           
           {/* Live Card Preview */}
           <div>

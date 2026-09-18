@@ -51,7 +51,7 @@ export const WeeklyOverviewWidget: React.FC = () => {
   const remainingToGoal = hasWeeklyGoal ? Math.max(0, weeklyGoal - revenue) : 0;
 
   return (
-    <div className="bg-surface border border-surface-border rounded-xl p-3 shadow-2xs transition-all">
+    <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all">
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
@@ -67,9 +67,9 @@ export const WeeklyOverviewWidget: React.FC = () => {
       </div>
 
       {/* Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 text-center">
         {/* Completed */}
-        <div className="bg-background dark:bg-background/60 p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
+        <div className="bg-background dark:bg-background/60 p-1.5 rounded-lg border border-surface-border/80 dark:border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-primary dark:text-primary mb-0.5">
             <CheckCircle2 className="w-3 h-3 shrink-0" />
             <span>{t('daily_stats_completed_short')}</span>
@@ -80,7 +80,7 @@ export const WeeklyOverviewWidget: React.FC = () => {
         </div>
 
         {/* Cancelled */}
-        <div className="bg-background dark:bg-background/60 p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
+        <div className="bg-background dark:bg-background/60 p-1.5 rounded-lg border border-surface-border/80 dark:border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-primary dark:text-primary mb-0.5">
             <XCircle className="w-3 h-3 shrink-0" />
             <span>{t('stat_cancelled')}</span>
@@ -91,7 +91,7 @@ export const WeeklyOverviewWidget: React.FC = () => {
         </div>
 
         {/* Remaining */}
-        <div className="bg-background dark:bg-background/60 p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
+        <div className="bg-background dark:bg-background/60 p-1.5 rounded-lg border border-surface-border/80 dark:border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-primary dark:text-primary mb-0.5">
             <Clock className="w-3 h-3 shrink-0" />
             <span>{t('stat_remaining')}</span>
@@ -102,7 +102,7 @@ export const WeeklyOverviewWidget: React.FC = () => {
         </div>
 
         {/* Revenue */}
-        <div className="bg-background dark:bg-background/60 p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
+        <div className="bg-background dark:bg-background/60 p-1.5 rounded-lg border border-surface-border/80 dark:border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-primary dark:text-primary mb-0.5">
             <Wallet className="w-3 h-3 shrink-0" />
             <span>{t('daily_stats_revenue')}</span>

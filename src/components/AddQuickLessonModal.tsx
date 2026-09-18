@@ -79,24 +79,21 @@ export const AddQuickLessonModal: React.FC<AddQuickLessonModalProps> = ({ onClos
         onClick={(e) => e.stopPropagation()} 
         className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-md shadow-2xl overflow-hidden animate-scale-up"
       >
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
         {/* Header */}
-        <div className="bg-surface border-b border-slate-100 dark:border-surface-border p-5 flex items-center justify-between text-text-main shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary rounded-lg border border-primary-border dark:border-primary-border">
-              <Zap className="w-5 h-5 text-primary dark:text-primary" />
+        <div className="bg-surface border-b border-slate-100 dark:border-surface-border px-3.5 py-2.5 sm:p-4 flex items-center justify-between text-text-main shrink-0">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            <div className="p-1.5 sm:p-2 bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary rounded-lg border border-primary-border dark:border-primary-border shrink-0">
+              <Zap className="w-4 h-4 text-primary dark:text-primary" />
             </div>
-            <div>
-              <h2 className="text-sm sm:text-base font-black text-text-main">{t('quick_lesson_modal_title')}</h2>
-              <p className="text-xs text-text-muted">{t('quick_lesson_modal_desc')}</p>
-            </div>
+            <h2 className="text-xs sm:text-sm font-black text-text-main">{t('quick_lesson_modal_title')}</h2>
           </div>
-          <button onClick={onClose} className="p-1.5 text-text-muted/70 hover:text-slate-600 dark:hover:text-primary hover:bg-background dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer">
+          <button onClick={onClose} className="p-1 text-text-muted/70 hover:text-slate-600 dark:hover:text-primary hover:bg-background dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-3.5">
+        <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 space-y-3 sm:space-y-3.5 max-h-[78vh] overflow-y-auto">
           {/* Required: Student Name */}
           <div className="space-y-1">
             <label className="text-xs font-bold text-text-main flex items-center gap-1">

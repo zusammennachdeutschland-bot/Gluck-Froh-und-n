@@ -456,24 +456,24 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
       <div onClick={e => e.stopPropagation()} className="bg-surface dark:bg-slate-900 border border-surface-border dark:border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col my-auto max-h-[92vh]">
         
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-surface-border dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold">
-              <Award className="w-5 h-5" />
+        <div className="flex items-center justify-between px-3.5 py-2.5 sm:px-5 sm:py-4 border-b border-surface-border dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0">
+              <Award className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-black text-text-main">
+            <div className="min-w-0">
+              <h2 className="text-xs sm:text-base font-black text-text-main truncate">
                 {initialCertificate
                   ? _t('تعديل الشهادة', 'Edit Certificate', 'Zertifikat bearbeiten')
-                  : _t('إصدار شهادة تقدير جديدة', 'Issue New Certificate', 'Neues Zertifikat ausstellen')}
+                  : _t('إصدار شهادة تقدير جديدة', 'Issue Certificate', 'Neues Zertifikat')}
               </h2>
-              <p className="text-xs text-text-muted">
-                {_t('تكريم الطالب وتوثيق إنجازه بشهادة احترافية بدون بيانات المجموعة أو الصف', 'Honor student with a high-fidelity certificate without group references', 'Schüler mit einem Zertifikat ehren')}
+              <p className="text-[10px] sm:text-xs text-text-muted truncate hidden sm:block">
+                {_t('تكريم الطالب وتوثيق إنجازه بشهادة احترافية', 'Honor student with a certificate', 'Schüler mit einem Zertifikat ehren')}
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 text-text-muted hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 sm:p-2 text-text-muted hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg sm:rounded-xl transition-colors cursor-pointer shrink-0">
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

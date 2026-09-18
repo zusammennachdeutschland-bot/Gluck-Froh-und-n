@@ -76,21 +76,21 @@ export const FinanceCategoryManagerModal: React.FC<Props> = ({ onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
       <div className="bg-surface rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
         
-        <div className="flex items-center justify-between p-4 border-b border-surface-border">
-          <h3 className="text-lg font-bold flex items-center gap-2">
-            <Tag className="w-5 h-5 text-primary" />
-            {_t('إدارة التصنيفات', 'Manage Categories', 'Kategorien verwalten')}
+        <div className="flex items-center justify-between px-3.5 py-2.5 sm:p-4 border-b border-surface-border shrink-0">
+          <h3 className="text-xs sm:text-base font-bold flex items-center gap-2 truncate">
+            <Tag className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+            <span className="truncate">{_t('إدارة التصنيفات', 'Manage Categories', 'Kategorien verwalten')}</span>
           </h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-surface-hover rounded-lg text-text-muted cursor-pointer">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 sm:p-1.5 hover:bg-surface-hover rounded-lg text-text-muted cursor-pointer shrink-0">
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
         
         {/* Type Switcher */}
-        <div className="p-4 border-b border-surface-border">
+        <div className="px-3.5 py-2 sm:p-4 border-b border-surface-border shrink-0">
           <div className="flex p-1 bg-surface-hover rounded-xl">
             <button
               onClick={() => { setActiveTab('expense'); resetForm(); }}

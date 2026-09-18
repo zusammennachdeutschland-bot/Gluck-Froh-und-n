@@ -65,7 +65,7 @@ export const TomorrowsLessonsWidget: React.FC = () => {
   };
 
   return (
-    <div className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs transition-all">
+    <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all">
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">

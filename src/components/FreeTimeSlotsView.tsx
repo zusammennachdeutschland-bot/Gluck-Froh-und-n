@@ -70,20 +70,20 @@ export const FreeTimeSlotsView: React.FC = () => {
   return (
     <div className="space-y-3 max-w-4xl mx-auto font-sans pb-16">
       {/* HEADER */}
-      <div className="bg-surface p-3 sm:p-3.5 rounded-xl border border-surface-border shadow-2xs">
-        <div className="flex items-center gap-2.5 mb-3">
-          <div className="w-8 h-8 rounded-lg bg-primary-soft text-primary flex items-center justify-center shrink-0">
-            <CheckCircle2 className="w-4 h-4" />
+      <div className="bg-surface p-2.5 sm:p-3.5 rounded-xl border border-surface-border shadow-2xs">
+        <div className="flex items-center gap-2 sm:gap-2.5 mb-2.5">
+          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-primary-soft text-primary flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </div>
           <div>
-            <h2 className="text-base font-black text-text-main">{language === 'ar' ? 'البحث الذكي عن الأوقات الفارغة' : language === 'de' ? 'Smarte Freizeitsuche' : 'Smart Free Time Finder'}</h2>
-            <p className="text-[11px] text-text-muted">{language === 'ar' ? 'يبحث تلقائياً عن الفترات المتاحة.' : language === 'de' ? 'Findet automatisch verfügbare Zeiten.' : 'Automatically finds available slots based on your schedule.'}</p>
+            <h2 className="text-sm sm:text-base font-black text-text-main">{language === 'ar' ? 'البحث الذكي عن الأوقات الفارغة' : language === 'de' ? 'Smarte Freizeitsuche' : 'Smart Free Time Finder'}</h2>
+            <p className="text-[10px] sm:text-[11px] text-text-muted">{language === 'ar' ? 'يبحث تلقائياً عن الفترات المتاحة.' : language === 'de' ? 'Findet automatisch verfügbare Zeiten.' : 'Automatically finds available slots based on your schedule.'}</p>
           </div>
         </div>
 
         {/* FILTERS */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-          <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
             {[
               { id: 'today', label: language === 'ar' ? 'اليوم' : language === 'de' ? 'Heute' : 'Today' },
               { id: 'tomorrow', label: language === 'ar' ? 'غداً' : language === 'de' ? 'Morgen' : 'Tomorrow' },
@@ -93,7 +93,7 @@ export const FreeTimeSlotsView: React.FC = () => {
               <button
                 key={f.id}
                 onClick={() => setFilterType(f.id as FilterType)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                className={`px-2 sm:px-2.5 py-1 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
                   filterType === f.id
                     ? 'bg-primary text-white shadow-2xs'
                     : 'bg-surface-hover text-text-muted hover:text-text-main border border-surface-border'
@@ -108,7 +108,7 @@ export const FreeTimeSlotsView: React.FC = () => {
                 type="date"
                 value={specificDate}
                 onChange={e => setSpecificDate(e.target.value)}
-                className="px-2.5 py-1 rounded-lg text-xs font-bold bg-surface border border-primary text-primary focus:outline-none font-mono"
+                className="px-2 sm:px-2.5 py-1 rounded-lg text-[11px] sm:text-xs font-bold bg-surface border border-primary text-primary focus:outline-none font-mono"
               />
             )}
           </div>

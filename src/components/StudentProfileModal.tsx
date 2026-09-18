@@ -215,180 +215,148 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
       onTouchStart={(e) => e.stopPropagation()}
       onTouchMove={(e) => e.stopPropagation()}
       onTouchEnd={(e) => e.stopPropagation()}
-      style={{ overscrollBehaviorY: 'contain' }}
-      className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto overscroll-contain"
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden"
     >
       <div
         onClick={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
         onTouchMove={(e) => e.stopPropagation()}
         onTouchEnd={(e) => e.stopPropagation()}
-        className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl sm:rounded-[32px] w-full max-w-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col my-2 sm:my-4 max-h-[96vh] sm:max-h-none overscroll-contain"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[92vh] sm:max-h-[88vh]"
       >
         
-        {/* Top Control Header */}
-        <div className="flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-5 pb-1 sm:pb-2 shrink-0">
-          <span className="text-[10px] font-black tracking-widest text-slate-400 dark:text-slate-500 uppercase truncate">
-            {_t('بطاقة الطالب الذكية', 'STUDENT SMART CARD', 'SCHÜLER SMART CARD')}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="p-1.5 bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700/80 rounded-full transition-colors cursor-pointer text-slate-400 dark:text-slate-300 hover:text-slate-700 dark:hover:text-white"
-              title="Schließen"
-            >
-              <X className="w-5 h-5" />
-            </button>
+        {/* Fixed Top Control Bar */}
+        <div className="flex items-center justify-between px-3.5 sm:px-5 py-2.5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <span className="text-[10px] sm:text-xs font-black tracking-wider text-slate-400 dark:text-slate-500 uppercase shrink-0">
+              {_t('بطاقة الطالب الذكية', 'STUDENT CARD', 'SCHÜLER SMART CARD')}
+            </span>
+            <span className="text-[9.5px] font-black text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/50 border border-sky-200/80 dark:border-sky-800/60 px-2 py-0.5 rounded-full shrink-0">
+              {student.grade}
+            </span>
+            <span className={`text-[9.5px] font-black px-2 py-0.5 rounded-full border shrink-0 ${
+              (student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female'
+                ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900'
+                : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900'
+            }`}>
+              {(student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female' ? '👧 طالبة' : '👦 طالب'}
+            </span>
+            <span className={`text-[9.5px] font-black px-2 py-0.5 rounded-full border shrink-0 ${
+              student.status === 'active'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900'
+                : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+            }`}>
+              {student.status === 'active' ? _t('نشط ✓', 'Active ✓', 'Aktiv ✓') : _t('مؤرشف ⚪', 'Archived ⚪', 'Archiviert ⚪')}
+            </span>
           </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 sm:p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+            title="Schließen"
+          >
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
+          </button>
         </div>
 
-        {/* Profile Details Area matching the mockup */}
-        <div className="px-3 sm:px-7 py-3 sm:py-4 space-y-3.5 sm:space-y-5 overflow-y-auto">
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-5">
-            {/* Left: Avatar with dynamic badge, Name, Parent text */}
-            <div className="flex flex-row items-center sm:items-start gap-3 sm:gap-5 w-full">
-              <div className="relative shrink-0">
-                <AvatarImage
-                  name={student.name}
-                  className="w-16 h-16 sm:w-[110px] sm:h-[110px] rounded-2xl sm:rounded-[24px] text-xl sm:text-3xl font-black shadow-md"
-                />
-              </div>
-
-              <div className="space-y-1 text-right flex-1 min-w-0" dir="rtl">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="bg-sky-100 dark:bg-sky-950/40 text-sky-600 dark:text-sky-300 text-[10px] font-black px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full border border-sky-200/50 dark:border-sky-950/30 inline-block">
-                    {student.grade}
-                  </span>
-                  <span className={`text-[10px] font-black px-2.5 py-0.5 sm:py-1 rounded-full border ${
-                    (student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female'
-                      ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900'
-                      : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900'
-                  }`}>
-                    {(student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female' ? '👧 طالبة' : '👦 طالب'}
-                  </span>
-                </div>
-                
-                <h2 className="text-lg sm:text-2xl font-black tracking-tight text-slate-800 dark:text-white pt-0.5 truncate">
-                  {student.name}
-                </h2>
-                
-                <p className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-400 font-semibold uppercase tracking-wider truncate" dir="ltr">
-                  {studentEnglishFallback}
-                </p>
-
-                {/* Student Code & Parent Portal Quick Actions */}
-                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                  {/* Student Code Pill */}
-                  <div className="inline-flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60 px-2 py-0.5 rounded-lg text-[10px] sm:text-[11px] font-black shadow-2xs">
-                    <span className="text-indigo-500/90 dark:text-indigo-400 text-[9px] font-bold">كود الطالب:</span>
-                    <span className="font-mono tracking-wider font-bold">{studentCode}</span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigator.clipboard.writeText(studentCode);
-                        setCopiedCode(true);
-                        setTimeout(() => setCopiedCode(false), 2000);
-                      }}
-                      className="p-0.5 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded transition-colors cursor-pointer text-indigo-600 dark:text-indigo-300"
-                      title="نسخ كود الطالب"
-                    >
-                      {copiedCode ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                    </button>
-                  </div>
-
-                  {/* Share Parent Portal Info Button */}
+        {/* The ONLY vertical scroll container in the entire card */}
+        <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 px-3 sm:px-5 py-3.5 space-y-3">
+          
+          {/* Hero Profile Identity Card - Clean, spacious & completely unclipped */}
+          <div className="p-3 sm:p-4 bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0 flex-1 w-full sm:w-auto" dir="rtl">
+              <AvatarImage
+                name={student.name}
+                className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl text-lg sm:text-xl font-black shadow-xs border border-slate-200 dark:border-slate-700 shrink-0"
+              />
+              <div className="min-w-0 space-y-1 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight truncate max-w-full">
+                    {student.name}
+                  </h2>
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const shareText = buildParentPortalShareText(student.name, studentCode, profile.displayNameAr || profile.displayName);
-                      const targetPhone = student.parentPhone ? student.parentPhone.replace(/[^0-9+]/g, '') : '';
-                      const url = buildWhatsAppUrl(targetPhone, shareText);
-                      window.open(url, '_blank');
+                    onClick={() => {
+                      const nextGender = (student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female' ? 'male' : 'female';
+                      updateStudent(student.id, { gender: nextGender });
                     }}
-                    className="inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 px-2 py-0.5 rounded-lg text-[10px] sm:text-[11px] font-black transition-all cursor-pointer shadow-2xs"
-                    title="مشاركة رابط وكود البوابة مع ولي الأمر عبر واتساب"
+                    className="text-[10px] font-bold text-slate-500 hover:text-primary transition-colors cursor-pointer"
+                    title={_t('انقر لتغيير التحديد بين ولد وبنت', 'Click to toggle gender', 'Klicken zum Ändern')}
                   >
-                    <Share2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                    <span>بوابة ولي الأمر 📱</span>
+                    ✏️
                   </button>
                 </div>
 
-                {student.parentPhone && (
-                  <div className="inline-flex items-center gap-1.5 bg-blue-50/50 dark:bg-blue-950/20 text-primary px-2.5 py-1 rounded-full text-[10px] sm:text-[11px] font-bold border border-blue-100/50 dark:border-blue-950/30 max-w-full truncate" dir="ltr">
-                    <span className="text-slate-500 dark:text-slate-400 shrink-0">Eltern:</span>
-                    {isWhatsAppUsername(student.parentPhone) ? (
-                      <span className="font-mono text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 font-bold">
-                        <AtSign className="w-3 h-3 shrink-0" />
-                        {cleanWhatsAppUsername(student.parentPhone)}
-                      </span>
-                    ) : (
-                      <span className="font-mono truncate">{student.parentPhone}</span>
-                    )}
-                  </div>
-                )}
+                <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-500 dark:text-slate-400">
+                  {assignedGroup ? (
+                    <span className="font-extrabold text-primary bg-primary-soft/50 dark:bg-primary-soft/30 border border-primary-border/40 px-2 py-0.5 rounded-md truncate max-w-[170px] sm:max-w-[220px]">
+                      {assignedGroup.name}
+                    </span>
+                  ) : (
+                    <span className="font-medium bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                      {_t('بدون مجموعة', 'No Group', 'Keine Gruppe')}
+                    </span>
+                  )}
+
+                  {student.parentPhone && (
+                    <span className="font-mono text-slate-600 dark:text-slate-300 font-bold inline-flex items-center gap-1">
+                      • {formatContactDisplay(student.parentPhone)}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Right Side Control Buttons */}
-            <div className="flex flex-wrap sm:flex-col items-center sm:items-end justify-center sm:justify-start gap-1.5 sm:gap-2 w-full sm:w-auto">
-              {/* Active Status Badge */}
-              <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-950/30 text-emerald-600 dark:text-emerald-400 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-black flex items-center gap-1 shadow-2xs whitespace-nowrap">
-                <span>{student.status === 'active' ? _t('نشط ✓', 'Active ✓', 'Aktiv ✓') : _t('مؤرشف ⚪', 'Archived ⚪', 'Archiviert ⚪')}</span>
-              </div>
-
-              {/* Edit button */}
+            {/* Quick Action Buttons (Edit & Delete) */}
+            <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
               <button
                 type="button"
                 onClick={() => setActiveTab('edit')}
-                className="px-3 sm:px-4 py-1.5 sm:py-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-200 rounded-xl transition-all cursor-pointer text-[11px] sm:text-xs font-black flex items-center gap-1 shadow-2xs whitespace-nowrap"
+                className="px-2.5 sm:px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
               >
                 <Edit3 className="w-3.5 h-3.5 text-primary" />
-                <span>{_t('تعديل', 'Bearbeiten', 'Bearbeiten')}</span>
+                <span>{_t('تعديل', 'Edit', 'Bearbeiten')}</span>
               </button>
 
-              {/* Delete button */}
               <button
                 type="button"
                 onClick={() => setIsConfirmingDelete(true)}
-                className="px-3 sm:px-4 py-1.5 sm:py-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-900/30 border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 rounded-xl transition-all cursor-pointer text-[11px] sm:text-xs font-black flex items-center gap-1 shadow-2xs whitespace-nowrap"
+                className="px-2.5 sm:px-3 py-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/40 border border-red-200/70 dark:border-red-900/40 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1 shadow-2xs"
               >
-                <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                <span>{_t('حذف', 'Löschen', 'Löschen')}</span>
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{_t('حذف', 'Delete', 'Löschen')}</span>
               </button>
             </div>
           </div>
 
-          {/* Quick Communication Actions (Responsive Grid) */}
+          {/* Quick Communication Actions (Responsive 3-Column Grid) */}
           {(() => {
             const resolvedWhatsApp = resolveStudentWhatsAppContact(student);
             const parentHasCallNumber = !!(student.parentPhone && !isWhatsAppUsername(student.parentPhone));
             const studentHasCallNumber = !!(student.studentPhone && !isWhatsAppUsername(student.studentPhone));
 
             return (
-              <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2.5">
                 <a
                   href={resolvedWhatsApp.hasContact ? buildWhatsAppUrl(resolvedWhatsApp.contact) : '#'}
                   target="_blank"
                   rel="noreferrer"
-                  className={`font-extrabold text-[10px] sm:text-xs py-2 sm:py-3 px-1 rounded-xl transition-all flex items-center justify-center gap-1 min-w-0 ${
+                  className={`font-black text-[11px] sm:text-xs py-2 sm:py-2.5 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 min-w-0 ${
                     resolvedWhatsApp.hasContact
-                      ? 'bg-primary hover:bg-primary-hover active:scale-[0.98] text-white cursor-pointer shadow-sm shadow-primary/20'
+                      ? 'bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white cursor-pointer shadow-xs'
                       : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
                   }`}
                 >
                   <Send className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">
-                    {resolvedWhatsApp.isUsername ? `واتساب (@${cleanWhatsAppUsername(resolvedWhatsApp.contact)})` : 'WhatsApp'}
-                  </span>
+                  <span className="truncate">واتساب</span>
                 </a>
 
                 <a
                   href={parentHasCallNumber ? `tel:${student.parentPhone}` : '#'}
-                  className={`font-extrabold text-[10px] sm:text-xs py-2 sm:py-3 px-1 rounded-xl transition-all flex items-center justify-center gap-1 text-center shadow-sm min-w-0 ${
+                  className={`font-black text-[11px] sm:text-xs py-2 sm:py-2.5 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 text-center min-w-0 ${
                     parentHasCallNumber 
-                      ? 'bg-primary hover:bg-primary-hover active:scale-[0.98] text-white cursor-pointer shadow-primary/20' 
+                      ? 'bg-primary hover:bg-primary-hover active:scale-[0.98] text-white cursor-pointer shadow-xs' 
                       : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
                   }`}
                 >
@@ -398,9 +366,9 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
                 <a
                   href={studentHasCallNumber ? `tel:${student.studentPhone}` : '#'}
-                  className={`font-extrabold text-[10px] sm:text-xs py-2 sm:py-3 px-1 rounded-xl transition-all flex items-center justify-center gap-1 text-center shadow-sm min-w-0 ${
+                  className={`font-black text-[11px] sm:text-xs py-2 sm:py-2.5 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 text-center min-w-0 ${
                     studentHasCallNumber 
-                      ? 'bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-white cursor-pointer shadow-slate-800/20' 
+                      ? 'bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-white cursor-pointer shadow-xs' 
                       : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
                   }`}
                 >
@@ -411,137 +379,159 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
             );
           })()}
 
-          {/* Stat Cards - Responsive Grid */}
-          <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-right" dir="ltr">
-            {/* Card 1 */}
-            <div className="p-2 sm:p-4 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-xl sm:rounded-2xl flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-1 sm:gap-3.5 shadow-3xs hover:border-slate-200 transition-all w-full min-w-0">
-              <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-blue-50 dark:bg-blue-950/20 flex items-center justify-center text-primary shrink-0">
-                <Calendar className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
+          {/* 3-Stat Metric Cards - Perfectly Proportioned */}
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2.5 text-center" dir="ltr">
+            {/* SITZUNGEN */}
+            <div className="p-2 sm:p-3 bg-white dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
+              <div className="flex items-center gap-1 text-primary">
+                <Calendar className="w-3.5 h-3.5" />
+                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-slate-400">SITZUNGEN</span>
               </div>
-              <div className="space-y-0.5 min-w-0 w-full">
-                <span className="block text-[7.5px] sm:text-[9px] font-black text-slate-400 uppercase tracking-tight sm:tracking-widest truncate">SITZUNGEN</span>
-                <span className="block text-sm sm:text-xl font-black text-slate-800 dark:text-white leading-none">{studentLessons.length}</span>
-                <span className="block text-[7.5px] sm:text-[10px] text-slate-400 dark:text-slate-500 font-semibold truncate">Gesamt</span>
-              </div>
+              <span className="text-sm sm:text-lg font-black text-slate-800 dark:text-white leading-tight font-mono">{studentLessons.length}</span>
+              <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold">الحصص الكلية</span>
             </div>
 
-            {/* Card 2 */}
-            <div className="p-2 sm:p-4 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-xl sm:rounded-2xl flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-1 sm:gap-3.5 shadow-3xs hover:border-slate-200 transition-all w-full min-w-0">
-              <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-emerald-50 dark:bg-emerald-950/20 flex items-center justify-center text-emerald-500 shrink-0">
-                <User className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
+            {/* ANWESEND */}
+            <div className="p-2 sm:p-3 bg-white dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
+              <div className="flex items-center gap-1 text-emerald-500">
+                <User className="w-3.5 h-3.5" />
+                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-slate-400">ANWESEND</span>
               </div>
-              <div className="space-y-0.5 min-w-0 w-full">
-                <span className="block text-[7.5px] sm:text-[9px] font-black text-slate-400 uppercase tracking-tight sm:tracking-widest truncate">ANWESEND</span>
-                <span className="block text-sm sm:text-xl font-black text-slate-800 dark:text-white leading-none">{presentCount}</span>
-                <span className="block text-[7.5px] sm:text-[10px] text-slate-400 dark:text-slate-500 font-semibold truncate">Sitzungen</span>
-              </div>
+              <span className="text-sm sm:text-lg font-black text-slate-800 dark:text-white leading-tight font-mono">{presentCount}</span>
+              <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold">حضور الحصص</span>
             </div>
 
-            {/* Card 3 */}
-            <div className="p-2 sm:p-4 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-xl sm:rounded-2xl flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-1 sm:gap-3.5 shadow-3xs hover:border-slate-200 transition-all w-full min-w-0">
-              <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-indigo-50 dark:bg-indigo-950/20 flex items-center justify-center text-indigo-500 shrink-0">
-                <RefreshCw className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
+            {/* PAKETZYKLUS */}
+            <div className="p-2 sm:p-3 bg-white dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
+              <div className="flex items-center gap-1 text-indigo-500">
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-slate-400">PAKETZYKLUS</span>
               </div>
-              <div className="space-y-0.5 min-w-0 w-full">
-                <span className="block text-[7.5px] sm:text-[9px] font-black text-slate-400 uppercase tracking-tight sm:tracking-widest truncate">PAKETZYKLUS</span>
-                <span className="block text-sm sm:text-xl font-black text-slate-800 dark:text-white leading-none">{currentCycleProgress}/{cycleLength}</span>
-                <span className="block text-[7.5px] sm:text-[10px] text-slate-400 dark:text-slate-500 font-semibold truncate">Abgeschlossen</span>
-              </div>
+              <span className="text-sm sm:text-lg font-black text-slate-800 dark:text-white leading-tight font-mono">{currentCycleProgress}/{cycleLength}</span>
+              <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold">دورة الحساب</span>
             </div>
           </div>
 
-          {/* Profile Tabs Navigation - Scrollable with no scrollbar */}
-          <div className="flex items-center gap-1 border-b border-slate-100 dark:border-slate-800 p-0.5 overflow-x-auto text-[11px] sm:text-xs font-bold shrink-0 scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none]">
-            <button
-              onClick={() => setActiveTab('overview')}
-              className={`px-3 sm:px-4 py-2 sm:py-2.5 transition-all whitespace-nowrap border-b-2 font-black ${
-                activeTab === 'overview' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              {_t('Übersicht', 'Overview', 'Übersicht')}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('attendance')}
-              className={`px-3 sm:px-4 py-2 sm:py-2.5 transition-all whitespace-nowrap border-b-2 font-black ${
-                activeTab === 'attendance' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              {_t(`Anwesenheit (${presentCount + lateCount + absentCount})`, `Attendance (${presentCount + lateCount + absentCount})`, `Anwesenheit (${presentCount + lateCount + absentCount})`)}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('scores')}
-              className={`px-3 sm:px-4 py-2 sm:py-2.5 transition-all whitespace-nowrap border-b-2 font-black ${
-                activeTab === 'scores' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              {_t('Noten & Aufgaben', 'Grades & Homework', 'Noten & Aufgaben')}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('payments')}
-              className={`px-3 sm:px-4 py-2 sm:py-2.5 transition-all whitespace-nowrap border-b-2 font-black ${
-                activeTab === 'payments' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              {_t('Zahlungen', 'Payments', 'Zahlungen')}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('files')}
-              className={`px-3 sm:px-4 py-2 sm:py-2.5 transition-all whitespace-nowrap border-b-2 font-black ${
-                activeTab === 'files' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              {_t(`Dateien (${student.documents.length})`, `Files (${student.documents.length})`, `Dateien (${student.documents.length})`)}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('certificates')}
-              className={`px-3 sm:px-4 py-2 sm:py-2.5 transition-all whitespace-nowrap border-b-2 font-black ${
-                activeTab === 'certificates' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              {_t(`الشهادات (${studentCertificates.length})`, `Certificates (${studentCertificates.length})`, `Zertifikate (${studentCertificates.length})`)}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('recordings')}
-              className={`px-3 sm:px-4 py-2 sm:py-2.5 transition-all whitespace-nowrap border-b-2 font-black flex items-center gap-1 ${
-                activeTab === 'recordings' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              <Video className="w-3.5 h-3.5" />
-              <span>{_t(`التسجيلات (${studentRecordings.length})`, `Recordings (${studentRecordings.length})`, `Aufnahmen (${studentRecordings.length})`)}</span>
-            </button>
+          {/* Tabs Navigation exactly like HOD */}
+          <div className="flex w-full items-center justify-start sm:justify-center gap-1 bg-slate-100/90 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/60 shadow-2xs overflow-x-auto no-scrollbar scrollbar-none">
+            {[
+              { id: 'overview' as const, title: _t('الرئيسية', 'Overview', 'Übersicht'), icon: Info, count: undefined },
+              { id: 'attendance' as const, title: _t('الحضور', 'Attendance', 'Anwesenheit'), icon: Calendar, count: presentCount + lateCount + absentCount },
+              { id: 'scores' as const, title: _t('الدرجات', 'Grades & HW', 'Noten'), icon: GraduationCap, count: undefined },
+              { id: 'payments' as const, title: _t('المالية', 'Payments', 'Zahlungen'), icon: DollarSign, count: undefined },
+              { id: 'files' as const, title: _t('الملفات', 'Files', 'Dateien'), icon: FileText, count: student.documents.length },
+              { id: 'certificates' as const, title: _t('الشهادات', 'Certificates', 'Zertifikate'), icon: Award, count: studentCertificates.length },
+              { id: 'recordings' as const, title: _t('التسجيلات', 'Recordings', 'Aufnahmen'), icon: Video, count: studentRecordings.length },
+            ].map(tab => {
+              const isActive = activeTab === tab.id;
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`h-8 sm:h-9 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer select-none ${
+                    isActive 
+                      ? 'bg-primary text-white px-2.5 sm:px-3 gap-1 sm:gap-1.5 shadow-xs font-black shrink-0' 
+                      : 'w-7 sm:w-8 text-slate-500 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-slate-700/60 hover:text-slate-900 dark:hover:text-white shrink-0'
+                  }`}
+                  title={tab.title}
+                >
+                  <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                  {isActive && (
+                    <span className="text-[10px] sm:text-[11px] font-bold whitespace-nowrap overflow-hidden flex items-center gap-1">
+                      <span>{tab.title}</span>
+                      {tab.count !== undefined && (
+                        <span className="text-[9px] bg-white/20 text-white px-1 py-0.2 rounded-full font-mono font-bold">
+                          {tab.count}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
-          {/* Dynamic Tab Body Component View */}
-          <div className="max-h-[38vh] overflow-y-auto space-y-4">
+          {/* Edit Mode Alert Banner (if in edit mode) */}
+          {activeTab === 'edit' && (
+            <div className="flex items-center justify-between px-3 py-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 rounded-xl text-amber-800 dark:text-amber-300 text-xs font-bold">
+              <div className="flex items-center gap-1.5">
+                <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                <span>{_t('وضع تعديل بيانات الطالب', 'Editing Student Profile', 'Schülerprofil bearbeiten')}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab('overview')}
+                className="text-[11px] underline hover:text-amber-900 dark:hover:text-amber-200 cursor-pointer font-extrabold"
+              >
+                {_t('إلغاء والعودة للبيانات ✕', 'Cancel & Return ✕', 'Zurück ✕')}
+              </button>
+            </div>
+          )}
+
+          {/* Dynamic Tab Body Component View - Flowing naturally without nested scroll */}
+          <div className="space-y-4 pt-1">
             
             {/* OVERVIEW TAB */}
             {activeTab === 'overview' && (
-              <div className="space-y-4">
-                {/* Info Card Block directly matching mockup */}
-                <div className="p-5 bg-slate-50/50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800/80 rounded-3xl space-y-3.5">
+              <div className="space-y-3.5">
+                {/* Dedicated Student Code & Parent Portal Card - High contrast, spacious & never clipped */}
+                <div className="p-3.5 sm:p-4 bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-300 font-black text-xs">
+                      <Copy className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                      <span>{_t('كود الطالب وبوابة ولي الأمر', 'Student Code & Parent Portal', 'Schüler-Code & Portal')}</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-100/70 dark:bg-indigo-900/50 px-2 py-0.5 rounded-full">
+                      {_t('خاص بولي الأمر', 'Parent Access', 'Eltern')}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/40 rounded-xl p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{_t('كود الطالب:', 'Student Code:', 'Code:')}</span>
+                      <span className="font-mono text-base font-black text-indigo-600 dark:text-indigo-400 tracking-wider">
+                        {studentCode}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(studentCode);
+                          setCopiedCode(true);
+                          setTimeout(() => setCopiedCode(false), 2000);
+                        }}
+                        className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedCode ? _t('تم النسخ ✓', 'Copied ✓', 'Kopiert ✓') : _t('نسخ الكود', 'Copy Code', 'Kopieren')}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const shareText = buildParentPortalShareText(student.name, studentCode, profile.displayNameAr || profile.displayName);
+                          const targetPhone = student.parentPhone ? student.parentPhone.replace(/[^0-9+]/g, '') : '';
+                          const url = buildWhatsAppUrl(targetPhone, shareText);
+                          window.open(url, '_blank');
+                        }}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                        <span>{_t('مشاركة عبر واتساب', 'Share via WhatsApp', 'Per WhatsApp teilen')}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Info Card Block */}
+                <div className="p-4 sm:p-5 bg-slate-50/70 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl sm:rounded-3xl space-y-3">
                   <div className="flex items-center gap-2 text-primary font-black text-xs uppercase tracking-widest border-b border-slate-100 dark:border-slate-800 pb-2">
                     <Info className="w-4 h-4 text-primary" />
-                    <span>{_t('ALLGEMEINE INFORMATIONEN', 'ALLGEMEINE INFORMATIONEN', 'ALLGEMEINE INFORMATIONEN')}</span>
+                    <span>{_t('بيانات ومعلومات الطالب', 'STUDENT INFORMATION', 'ALLGEMEINE INFORMATIONEN')}</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">

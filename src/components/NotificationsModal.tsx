@@ -13,23 +13,18 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({ onClose 
   return (
     <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center pt-[max(24px,env(safe-area-inset-top,24px))] p-0 sm:p-4 pb-0">
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-2xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-md shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[85vh]">
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
         
         {/* Header */}
-        <div className="p-4 sm:p-5 flex items-center justify-between gap-2 border-b border-surface-border">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-primary/10 rounded-xl text-primary border border-primary/20">
-              <Bell className="w-5 h-5" />
+        <div className="px-3.5 py-2.5 sm:p-4 flex items-center justify-between gap-2 border-b border-surface-border">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            <div className="p-1.5 sm:p-2 bg-primary/10 rounded-lg sm:rounded-xl text-primary border border-primary/20 shrink-0">
+              <Bell className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h2 className="text-base font-black text-text-main">{t('notifications_title')}</h2>
-              <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
-                {t('auto_automatic_system_alerts')}
-              </p>
-            </div>
+            <h2 className="text-xs sm:text-base font-black text-text-main">{t('notifications_title')}</h2>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-surface-hover rounded-full cursor-pointer text-text-muted hover:text-text-main transition-colors">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 sm:p-1.5 hover:bg-surface-hover rounded-full cursor-pointer text-text-muted hover:text-text-main transition-colors shrink-0">
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

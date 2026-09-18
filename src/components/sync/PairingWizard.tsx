@@ -624,7 +624,12 @@ export const PairingWizard: React.FC<PairingWizardProps> = ({
 
             <button
               type="button"
-              className="mt-2 px-4 py-2 bg-surface border border-surface-border rounded-xl text-xs font-bold text-text-main shadow-xs hover:bg-surface-hover cursor-pointer"
+              id="pairing-wizard-browse-files-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                fileInputRef.current?.click();
+              }}
+              className="mt-2 px-4 py-2 bg-surface border border-surface-border rounded-xl text-xs font-bold text-text-main shadow-xs hover:bg-surface-hover cursor-pointer active:scale-95 transition-all"
             >
               {_t('استعراض الملفات', 'Browse Files', 'Dateien durchsuchen')}
             </button>

@@ -216,23 +216,23 @@ export const SchoolLessonNotesModal: React.FC<SchoolLessonNotesModalProps> = ({
         id="school-lesson-notes-modal"
       >
         {/* Modal Header */}
-        <div className="p-3.5 sm:p-4 border-b border-surface-border flex items-center justify-between bg-surface-hover/30">
+        <div className="px-3.5 py-2 sm:p-4 border-b border-surface-border flex items-center justify-between bg-surface-hover/30 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
-              <BookOpen className="w-4 h-4" />
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+              <BookOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-black px-1.5 py-0.5 rounded bg-primary text-white font-mono">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <span className="text-[11px] sm:text-xs font-black px-1.5 py-0.5 rounded bg-primary text-white font-mono">
                   {_t(`حصة ${periodNumber}`, `Period ${periodNumber}`, `Std. ${periodNumber}`)}
                 </span>
                 {className && (
-                  <span className="text-xs font-black text-text-main">
+                  <span className="text-xs font-black text-text-main truncate">
                     {className}
                   </span>
                 )}
                 {subjectName && (
-                  <span className="text-[10px] font-bold text-primary bg-primary-soft border border-primary-border/40 px-1.5 py-0.2 rounded">
+                  <span className="text-[10px] font-bold text-primary bg-primary-soft border border-primary-border/40 px-1.5 py-0.2 rounded truncate">
                     {subjectName}
                   </span>
                 )}

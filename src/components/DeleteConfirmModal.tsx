@@ -39,31 +39,27 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
     (recordsSummary?.studentsCount || 0) > 0;
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0">
-      <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-md p-4 shadow-2xl relative animate-scale-up space-y-3">
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+    <div onClick={onClose} className="fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0">
+      <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-md p-3.5 sm:p-4 shadow-2xl relative animate-scale-up space-y-2.5 sm:space-y-3">
+        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
         
         {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 rounded-lg shrink-0">
-              <AlertTriangle className="w-6 h-6" />
+        <div className="flex items-start justify-between gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-2 sm:p-2.5 bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 rounded-lg shrink-0">
+              <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h3 className="text-base font-black text-text-main">
+            <div className="min-w-0">
+              <h3 className="text-xs sm:text-base font-black text-text-main truncate">
                 {itemType === 'student' ? 'Schüler löschen / archivieren' : 'Gruppe löschen / archivieren'}
               </h3>
-              <p className="text-xs font-semibold text-text-muted mt-0.5">
+              <p className="text-[10px] sm:text-xs font-semibold text-text-muted mt-0.5 truncate">
                 "{itemName}"
               </p>
             </div>
           </div>
-
-          <button
-            onClick={onClose}
-            className="p-1.5 hover:bg-surface-hover rounded-full transition-colors cursor-pointer text-text-muted/70 hover:text-slate-600"
-          >
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 sm:p-1.5 text-text-muted hover:text-text-main transition-colors shrink-0">
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

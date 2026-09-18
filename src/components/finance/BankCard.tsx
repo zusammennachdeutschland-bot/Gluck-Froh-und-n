@@ -200,7 +200,7 @@ export const BankCard: React.FC<BankCardProps> = ({
   return (
     <div
       onClick={isInteractive ? onClick : undefined}
-      className={`relative w-full aspect-[1.586/1] max-w-[360px] rounded-2xl p-4 sm:p-5 text-white border transition-all duration-300 select-none overflow-hidden flex flex-col justify-between ${
+      className={`relative w-full aspect-[1.586/1] max-w-[360px] rounded-2xl p-3.5 sm:p-4 text-white border transition-all duration-300 select-none overflow-hidden flex flex-col justify-between ${
         theme.border
       } bg-gradient-to-br ${theme.bgGradient} ${
         isInteractive ? 'cursor-pointer hover:shadow-lg hover:-translate-y-0.5 active:scale-[0.99]' : ''

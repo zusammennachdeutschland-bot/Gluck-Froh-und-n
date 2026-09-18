@@ -16,7 +16,7 @@ export const HomeworkFollowUpWidget: React.FC = () => {
     <>
       <div 
         onClick={() => setIsModalOpen(true)}
-        className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs flex items-center justify-between gap-2.5 transition-all cursor-pointer hover:bg-surface-hover/80 active:scale-[0.99]"
+        className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs flex items-center justify-between gap-2.5 transition-all cursor-pointer hover:bg-surface-hover/80 active:scale-[0.99]"
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-lg bg-primary-soft text-primary border border-primary-border flex items-center justify-center shrink-0">

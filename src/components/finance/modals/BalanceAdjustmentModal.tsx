@@ -49,16 +49,16 @@ export const BalanceAdjustmentModal: React.FC<BalanceAdjustmentModalProps> = ({ 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center items-center bg-black/60 backdrop-blur-xs">
       <div className="w-full md:w-full md:max-w-md bg-surface border-t md:border border-surface-border md:rounded-2xl shadow-2xl rounded-t-2xl overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200">
-        <div className="flex items-center justify-between p-4 border-b border-surface-border">
-          <h3 className="text-lg font-bold flex items-center gap-2">
-            <Edit2 className="w-5 h-5 text-primary" />
-            {_t('تعديل الرصيد', 'Edit Balance', 'Guthaben bearbeiten')} - {account.name}
+        <div className="flex items-center justify-between px-3.5 py-2.5 sm:p-4 border-b border-surface-border shrink-0">
+          <h3 className="text-xs sm:text-base font-bold flex items-center gap-2 truncate">
+            <Edit2 className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+            <span className="truncate">{_t('تعديل الرصيد', 'Edit Balance', 'Guthaben bearbeiten')} - {account.name}</span>
           </h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-surface-hover rounded-lg text-text-muted cursor-pointer">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 sm:p-1.5 hover:bg-surface-hover rounded-lg text-text-muted cursor-pointer shrink-0">
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
-        <div className="p-4 space-y-4">
+        <div className="p-3.5 sm:p-4 space-y-3 sm:space-y-4">
           <div className="p-4 bg-surface-hover rounded-xl text-center border border-surface-border">
             <div className="text-xs font-bold text-text-muted mb-1">{_t('الرصيد الحالي', 'Current Balance', 'Aktuelles Guthaben')}</div>
             <div className="text-xl font-black text-text-main">{currentDerivedBalance.toLocaleString()} {account.currency}</div>

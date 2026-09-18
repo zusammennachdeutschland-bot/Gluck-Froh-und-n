@@ -64,28 +64,28 @@ export const CascadeDeleteGroupModal: React.FC<CascadeDeleteGroupModalProps> = (
   const isRtl = language === 'ar';
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[60] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div onClick={e => e.stopPropagation()} className={`bg-surface border border-red-500/30 rounded-xl w-full max-w-md p-5 shadow-2xl relative animate-scale-up ${isRtl ? 'dir-rtl text-right' : 'text-left'}`}>
+    <div onClick={onClose} className="fixed inset-0 z-[70] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+      <div onClick={e => e.stopPropagation()} className={`bg-surface border border-red-500/30 rounded-xl w-full max-w-md p-3.5 sm:p-5 shadow-2xl relative animate-scale-up ${isRtl ? 'dir-rtl text-right' : 'text-left'}`}>
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 rounded-lg shrink-0">
-              <AlertTriangle className="w-6 h-6" />
+        <div className="flex items-start justify-between gap-2.5 mb-3 sm:mb-4">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 rounded-lg shrink-0">
+              <AlertTriangle className="w-4 h-4 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <h3 className="text-base font-black text-text-main">
+            <div className="min-w-0">
+              <h3 className="text-xs sm:text-base font-black text-text-main truncate">
                 {_t('حذف المجموعة وجميع البيانات المتعلقة', 'Delete Group & All Related Data', 'Gruppe & Alle zugehörigen Daten löschen')}
               </h3>
-              <p className="text-xs font-semibold text-text-muted mt-0.5">
+              <p className="text-[10px] sm:text-xs font-semibold text-text-muted mt-0.5 truncate">
                 "{groupName}"
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-surface-hover rounded-full transition-colors cursor-pointer text-text-muted/70 hover:text-slate-600"
+            className="p-1 sm:p-1.5 hover:bg-surface-hover rounded-full transition-colors cursor-pointer text-text-muted/70 hover:text-slate-600 shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

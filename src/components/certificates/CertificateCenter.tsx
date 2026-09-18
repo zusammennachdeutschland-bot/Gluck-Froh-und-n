@@ -148,30 +148,30 @@ export const CertificateCenter: React.FC = () => {
     <div className="space-y-4 pb-12">
       
       {/* Top Banner / Hero Card */}
-      <div className="p-3 sm:p-4 bg-linear-to-br from-primary/10 via-primary/5 to-surface dark:from-primary-soft/30 dark:via-primary-soft/10 dark:to-surface rounded-xl border border-primary/20 shadow-2xs space-y-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center font-bold shadow-xs shadow-primary/20 shrink-0">
-              <Award className="w-5 h-5" />
+      <div className="p-2.5 sm:p-4 bg-linear-to-br from-primary/10 via-primary/5 to-surface dark:from-primary-soft/30 dark:via-primary-soft/10 dark:to-surface rounded-xl border border-primary/20 shadow-2xs space-y-2 sm:space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-primary text-white flex items-center justify-center font-bold shadow-xs shadow-primary/20 shrink-0">
+              <Award className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div>
-              <h1 className="text-base sm:text-lg font-black text-text-main flex items-center gap-2">
+              <h1 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5 sm:gap-2">
                 <span>{_t('مركز الشهادات والتكريم', 'Certificate & Honors Center', 'Zertifikate- & Ehrencenter')}</span>
-                <span className="text-[11px] px-2 py-0.2 rounded-full bg-primary/15 text-primary font-bold">
+                <span className="text-[10px] sm:text-[11px] px-1.5 sm:px-2 py-0.2 rounded-full bg-primary/15 text-primary font-bold">
                   {activeCertificates.length}
                 </span>
               </h1>
-              <p className="text-[11px] text-text-muted">
+              <p className="text-[10px] sm:text-[11px] text-text-muted">
                 {_t('إصدار وتوثيق شهادات التقدير واجتياز المستويات والتميز لطلابك', 'Issue and manage professional achievement certificates for your students', 'Zertifikate für Ihre Schüler ausstellen und verwalten')}
               </p>
             </div>
           </div>
 
           {/* Top Quick Actions */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 w-full sm:w-auto sm:flex sm:items-center">
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-1 sm:gap-1.5 w-full sm:w-auto">
             <button
               onClick={() => setIsAIDesignerOpen(true)}
-              className="px-2 sm:px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
+              className="px-2 sm:px-2.5 py-1 sm:py-1.5 bg-primary hover:bg-primary-hover text-white rounded-lg sm:rounded-xl font-bold text-[10px] sm:text-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
               title="AI Certificate Background Designer"
             >
               <Palette className="w-3.5 h-3.5 text-white/90 shrink-0" />
@@ -180,7 +180,7 @@ export const CertificateCenter: React.FC = () => {
 
             <button
               onClick={() => setIsAiModalOpen(true)}
-              className="px-2 sm:px-2.5 py-1.5 bg-surface dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border dark:border-surface-border rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
+              className="px-2 sm:px-2.5 py-1 sm:py-1.5 bg-surface dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border dark:border-surface-border rounded-lg sm:rounded-xl font-bold text-[10px] sm:text-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
               title="AI Name Transliteration"
             >
               <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
@@ -189,7 +189,7 @@ export const CertificateCenter: React.FC = () => {
 
             <button
               onClick={() => setIsBulkModalOpen(true)}
-              className="px-2 sm:px-2.5 py-1.5 bg-surface dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border dark:border-surface-border rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
+              className="px-2 sm:px-2.5 py-1 sm:py-1.5 bg-surface dark:bg-background hover:bg-surface-hover text-text-main border border-surface-border dark:border-surface-border rounded-lg sm:rounded-xl font-bold text-[10px] sm:text-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-colors shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
             >
               <Layers className="w-3.5 h-3.5 text-primary shrink-0" />
               <span className="truncate">{_t('تكريم جماعي', 'Bulk Issue', 'Gruppe ehren')}</span>
@@ -197,7 +197,7 @@ export const CertificateCenter: React.FC = () => {
 
             <button
               onClick={() => setIsFolderModalOpen(true)}
-              className="px-2 sm:px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 rounded-xl font-bold text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
+              className="px-2 sm:px-2.5 py-1 sm:py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 rounded-lg sm:rounded-xl font-bold text-[10px] sm:text-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
               title={_t('مجلد شهادات الهاتف', 'Phone Folder', 'Telefonordner')}
             >
               <FolderDown className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
@@ -211,7 +211,7 @@ export const CertificateCenter: React.FC = () => {
                 setEditingCertificate(undefined);
                 setIsCreateModalOpen(true);
               }}
-              className="px-2.5 sm:px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-black text-[10.5px] sm:text-xs flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
+              className="col-span-2 sm:col-span-1 px-2.5 sm:px-3 py-1 sm:py-1.5 bg-primary hover:bg-primary-hover text-white rounded-lg sm:rounded-xl font-black text-[10px] sm:text-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap"
             >
               <Plus className="w-3.5 h-3.5 stroke-[3] shrink-0" />
               <span className="truncate">{_t('إصدار شهادة', 'New Certificate', 'Neues Zertifikat')}</span>

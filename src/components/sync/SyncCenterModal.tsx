@@ -177,26 +177,26 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
       <div className="flex h-full w-full max-w-4xl flex-col overflow-hidden bg-background text-text-main sm:max-h-[92vh] rounded-3xl shadow-2xl border border-surface-border">
         
         {/* Top Header */}
-        <div className="flex items-center justify-between border-b border-surface-border bg-surface px-4 py-3.5 sm:px-6">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-2xl bg-primary-soft text-primary flex items-center justify-center shrink-0 border border-primary/20 shadow-xs">
-              <RefreshCw className={`w-5 h-5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+        <div className="flex items-center justify-between border-b border-surface-border bg-surface px-3 py-2.5 sm:px-6">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-primary-soft text-primary flex items-center justify-center shrink-0 border border-primary/20 shadow-xs">
+              <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-base sm:text-lg font-black tracking-tight text-text-main truncate">
-                  {_t('مركز المزامنة والأجهزة المتعددة', 'Synchronization & Multi-Device Hub', 'Synchronisations-Zentrum')}
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h2 className="text-xs sm:text-base font-black tracking-tight text-text-main truncate">
+                  {_t('مركز المزامنة والأجهزة', 'Sync & Multi-Device Hub', 'Synchronisations-Zentrum')}
                 </h2>
                 <button
                   type="button"
                   onClick={handleVersionTap}
-                  className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-surface-hover text-text-muted hover:text-primary transition-colors"
+                  className="px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-mono font-bold bg-surface-hover text-text-muted hover:text-primary transition-colors"
                   title={_t('اضغط 5 مرات لفتح لوحة المطورين', '5 taps open Developer Telemetry', '5 Klicks für Entwickler-Telemetrie')}
                 >
                   v2.4
                 </button>
               </div>
-              <p className="text-xs text-text-muted mt-0.5 truncate">
+              <p className="text-[10px] sm:text-xs text-text-muted mt-0.5 truncate hidden sm:block">
                 {_t('مزامنة مباشرة P2P • شبكة آمنة عبر الأجهزة', 'P2P Mesh • Masterless Delta Sync Engine', 'P2P Mesh • Serverlose Delta-Synchronisation')}
               </p>
             </div>
@@ -206,10 +206,10 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full p-2 text-text-muted hover:bg-surface-hover hover:text-text-main transition-colors cursor-pointer border border-surface-border"
+              className="rounded-full p-1 sm:p-2 text-text-muted hover:bg-surface-hover hover:text-text-main transition-colors cursor-pointer border border-surface-border"
               aria-label="Close"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           </div>
         </div>

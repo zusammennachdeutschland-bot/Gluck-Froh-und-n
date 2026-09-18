@@ -144,43 +144,43 @@ export const DetailedStaffAttendanceModal: React.FC<DetailedStaffAttendanceModal
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-surface-border flex items-center justify-between bg-surface-hover/30 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
-              <UserCheck className="w-5 h-5" />
+        <div className="px-3.5 py-2.5 sm:p-4 border-b border-surface-border flex items-center justify-between bg-surface-hover/30 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl bg-primary/10 text-primary border border-primary/20 shrink-0">
+              <UserCheck className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-black text-text-main flex items-center gap-2">
-                {_t('تقرير حضور وانضباط المعلمين التفصيلي', 'Staff Attendance & Discipline Detailed Report', 'Detaillierter Anwesenheitsbericht')}
+            <div className="min-w-0">
+              <h2 className="text-xs sm:text-base font-black text-text-main flex items-center gap-2 truncate">
+                {_t('تقرير حضور وانضباط المعلمين', 'Staff Attendance Report', 'Anwesenheitsbericht')}
               </h2>
-              <p className="text-[11px] font-bold text-text-muted">
-                {_t('متابعة شاملة للغياب، التأخير الصباحي، الانصراف المبكر، ومعدلات الانضباط', 'Comprehensive staff attendance and punctuality tracking', 'Umfassende Anwesenheits- und Pünktlichkeitserfassung')}
+              <p className="text-[10px] sm:text-xs text-text-muted truncate hidden sm:block">
+                {_t('متابعة شاملة للغياب، التأخير الصباحي، والانصراف المبكر', 'Comprehensive staff attendance and punctuality tracking', 'Umfassende Anwesenheitserfassung')}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               onClick={handlePrint}
-              className="p-2 bg-surface-hover hover:bg-surface-border border border-surface-border rounded-xl text-text-main font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+              className="p-1.5 sm:p-2 bg-surface-hover hover:bg-surface-border border border-surface-border rounded-lg sm:rounded-xl text-text-main font-bold text-xs flex items-center gap-1.5 cursor-pointer"
               title={_t('طباعة التقرير', 'Print Report', 'Drucken')}
             >
-              <Printer className="w-4 h-4" />
+              <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span className="hidden sm:inline">{_t('طباعة', 'Print', 'Drucken')}</span>
             </button>
             <button
               onClick={handleShareWhatsApp}
-              className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 border border-emerald-500/20 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+              className="p-1.5 sm:p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 border border-emerald-500/20 rounded-lg sm:rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer"
               title={_t('مشاركة عبر واتساب', 'Share WhatsApp', 'WhatsApp')}
             >
-              <MessageCircle className="w-4 h-4" />
+              <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span className="hidden sm:inline">{_t('واتساب', 'WhatsApp', 'WhatsApp')}</span>
             </button>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-surface-hover rounded-xl text-text-muted cursor-pointer transition-colors"
+              className="p-1 sm:p-2 hover:bg-surface-hover rounded-lg sm:rounded-xl text-text-muted cursor-pointer transition-colors"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           </div>
         </div>

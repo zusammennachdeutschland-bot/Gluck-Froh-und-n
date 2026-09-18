@@ -104,21 +104,21 @@ export const QuickGenderAssignModal: React.FC<QuickGenderAssignModalProps> = ({
         className="bg-surface border border-surface-border w-full max-w-lg rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-scale-up"
       >
         {/* Header */}
-        <div className="bg-surface p-4 sm:p-5 border-b border-surface-border flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 sm:p-2.5 bg-primary-soft text-primary rounded-xl shrink-0">
-              <Sparkles className="w-5 h-5" />
+        <div className="bg-surface px-3.5 py-2.5 sm:p-5 border-b border-surface-border flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="p-1.5 sm:p-2.5 bg-primary-soft text-primary rounded-lg sm:rounded-xl shrink-0">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black text-text-main">
-                  {_t('تحديد جنس الطلاب السريع', 'Quick Student Gender Assignment', 'Schnelle Geschlechtszuweisung')}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 truncate">
+                <h2 className="text-xs sm:text-base font-black text-text-main truncate">
+                  {_t('تحديد جنس الطلاب السريع', 'Quick Gender Assignment', 'Geschlechtszuweisung')}
                 </h2>
-                <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                <span className="text-[10px] sm:text-[11px] font-black px-1.5 sm:px-2 py-0.5 rounded-full bg-primary/10 text-primary shrink-0">
                   {totalAssigned} / {totalStudents}
                 </span>
               </div>
-              <p className="text-[11px] text-text-muted mt-0.5">
+              <p className="text-[11px] text-text-muted mt-0.5 hidden sm:block">
                 {_t('يحدد صياغة المذكر والمؤنث في التقارير ومتابعة الواجبات بدقة', 'Controls gender wording in reports & homework follow-up', 'Steuert Geschlechtsformulierungen in Berichten')}
               </p>
             </div>
@@ -126,9 +126,9 @@ export const QuickGenderAssignModal: React.FC<QuickGenderAssignModalProps> = ({
           <button 
             type="button" 
             onClick={onClose}
-            className="p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
+            className="p-1 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

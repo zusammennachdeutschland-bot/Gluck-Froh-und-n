@@ -40,25 +40,25 @@ export const DeleteSessionConfirmModal: React.FC<DeleteSessionConfirmModalProps>
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
       <div className="bg-surface border border-surface-border rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="bg-rose-500/10 dark:bg-rose-950/30 border-b border-rose-200 dark:border-rose-900/50 p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-rose-500 text-white rounded-xl shadow-xs">
-              <Trash2 className="w-5 h-5" />
+        <div className="bg-rose-500/10 dark:bg-rose-950/30 border-b border-rose-200 dark:border-rose-900/50 px-3.5 py-2.5 sm:p-4 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="p-1.5 sm:p-2 bg-rose-500 text-white rounded-lg sm:rounded-xl shadow-xs shrink-0">
+              <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-rose-700 dark:text-rose-400">
+            <div className="min-w-0">
+              <h3 className="font-bold text-xs sm:text-sm text-rose-700 dark:text-rose-400 truncate">
                 {_t('خيارات حذف الحصة', 'Delete Session Options', 'Sitzung löschen')}
               </h3>
-              <p className="text-xs text-text-muted">
+              <p className="text-[10px] sm:text-xs text-text-muted truncate">
                 {groupNameDisplay} • {lesson.date} ({formatTimeDisplay(lesson.time, language)})
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-rose-500/10 rounded-lg text-text-muted hover:text-text-main transition-colors cursor-pointer"
+            className="p-1 sm:p-1.5 hover:bg-rose-500/10 rounded-lg text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

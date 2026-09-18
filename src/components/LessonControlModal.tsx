@@ -12,6 +12,7 @@ import { StudentSessionPerformanceSelector } from './StudentSessionPerformanceSe
 import { ArabicParentReportModal } from './ArabicParentReportModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { HomeworkFollowUpModal } from './HomeworkFollowUpModal';
+import { GroupProfileModal } from './GroupProfileModal';
 import { getPendingHomeworkFollowUps } from '../utils/homeworkFollowUpUtils';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUtils';
@@ -50,6 +51,7 @@ export const LessonControlModal: React.FC = () => {
   const [isEditingReport, setIsEditingReport] = useState(false);
   const [showParentSummaryModal, setShowParentSummaryModal] = useState(false);
   const [showArabicParentReportModal, setShowArabicParentReportModal] = useState(false);
+  const [showGroupProfile, setShowGroupProfile] = useState(false);
 
   // Form state for lesson report
   const [attendance, setAttendance] = useState<AttendanceStatus>('present');
@@ -435,7 +437,11 @@ export const LessonControlModal: React.FC = () => {
         ? students.filter(s => s.groupId === selectedLesson.groupId)
         : (targetStudent ? [targetStudent] : []));
   
-  const targetGroup = groups.find(g => g.id === selectedLesson.groupId);
+  const targetGroup = groups.find(g => g.id === selectedLesson.groupId)
+    || (targetStudent?.groupId ? groups.find(g => g.id === targetStudent.groupId) : undefined)
+    || (selectedLesson.groupName ? groups.find(g => g.name.trim().toLowerCase() === selectedLesson.groupName.trim().toLowerCase()) : undefined)
+    || groups.find(g => g.name && selectedLesson.title.toLowerCase().includes(g.name.toLowerCase()))
+    || groups.find(g => g.name && g.name.toLowerCase().includes(selectedLesson.title.replace(/Lektion|حصة|درس/gi, '').trim().toLowerCase()));
   const isPerLessonGroup = Boolean(targetGroup && (targetGroup.paymentCycle === 'per_lesson' || targetGroup.paymentModel === 'per_session'));
   // Each group already has its cycle session count recorded in its settings!
   const cycleTotalSessions = targetGroup?.sessionCount || selectedLesson?.totalSessionsInPackage || 4;
@@ -663,30 +669,30 @@ export const LessonControlModal: React.FC = () => {
           closeLessonControl();
         }
       }} 
-      className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center sm: pt-[max(24px,env(safe-area-inset-top,24px))] overflow-y-auto p-0 sm:p-4 pb-0 overscroll-contain"
+      className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0 overflow-hidden overscroll-contain"
     >
       <div 
         onClick={(e) => e.stopPropagation()} 
         onTouchStart={(e) => e.stopPropagation()}
         onTouchMove={(e) => e.stopPropagation()}
         onTouchEnd={(e) => e.stopPropagation()}
-        className="bg-surface border border-surface-border rounded-t-[20px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-xl shadow-xl overflow-hidden animate-scale-up overscroll-contain"
+        className="bg-surface border border-surface-border rounded-t-[20px] sm:rounded-xl mb-0 w-full max-w-xl shadow-xl overflow-hidden animate-scale-up overscroll-contain flex flex-col max-h-[94dvh] sm:max-h-[90vh]"
       >
-        <div className="w-10 h-1 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2 mb-1 sm:hidden shrink-0" />
+        <div className="w-8 h-1 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-1.5 mb-0.5 sm:hidden shrink-0" />
         {/* Top Header */}
-        <div className="bg-surface border-b border-surface-border p-3.5 sm:p-4 flex items-center justify-between relative shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 sm:p-2.5 bg-primary-soft text-primary rounded-xl shrink-0">
-              {selectedLesson.type === 'online' ? <Video className="w-4 h-4 sm:w-5 sm:h-5" /> : <MapPin className="w-4 h-4 sm:w-5 sm:h-5" />}
+        <div className="bg-surface border-b border-surface-border px-3 py-1.5 sm:p-2.5 flex items-center justify-between relative shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="p-1.5 bg-primary-soft text-primary rounded-lg shrink-0">
+              {selectedLesson.type === 'online' ? <Video className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
             </div>
 
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="bg-primary-soft text-primary font-mono text-[10px] font-black px-1.5 py-0.5 rounded border border-primary-border">
+                <span className="bg-primary-soft text-primary font-mono text-[9px] font-black px-1.5 py-0.2 rounded border border-primary-border">
                   {(selectedLesson.type || '').toUpperCase()}
                 </span>
                 {selectedLesson.grade && (
-                  <span className="text-[11px] text-text-muted font-bold">{selectedLesson.grade}</span>
+                  <span className="text-[10px] text-text-muted font-bold truncate">{selectedLesson.grade}</span>
                 )}
                 {hasCycle && (
                   <button
@@ -695,7 +701,7 @@ export const LessonControlModal: React.FC = () => {
                       setShowReportForm(true);
                       setIsEditingSessionNumber(prev => !prev);
                     }}
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-primary bg-primary-soft hover:bg-primary/20 px-2 py-0.5 rounded-md border border-primary-border transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1 text-[10px] font-bold text-primary bg-primary-soft hover:bg-primary/20 px-1.5 py-0.2 rounded-md border border-primary-border transition-colors cursor-pointer"
                     title={_t('انقر لتعديل رقم الحصة في السايكل', 'Click to edit cycle session number', 'Klicken zum Ändern der Sitzungsnummer')}
                   >
                     <span>{_t(`الحصة ${currentSessionNumber} من ${cycleTotalSessions}`, `Session ${currentSessionNumber} of ${cycleTotalSessions}`, `Sitzung ${currentSessionNumber}/${cycleTotalSessions}`)}</span>
@@ -703,20 +709,36 @@ export const LessonControlModal: React.FC = () => {
                   </button>
                 )}
               </div>
-              <h2 className="text-base sm:text-lg font-black tracking-tight text-text-main mt-0.5">{selectedLesson.title}</h2>
+              {targetGroup ? (
+                <button
+                  type="button"
+                  onClick={() => setShowGroupProfile(true)}
+                  className="group/grouplink flex items-center gap-1 mt-0.5 max-w-full text-start cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all"
+                  title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                >
+                  <h2 className="text-xs sm:text-sm font-black tracking-tight text-text-main group-hover/grouplink:text-primary transition-colors truncate">
+                    {selectedLesson.title}
+                  </h2>
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-md bg-primary/10 text-primary shrink-0 opacity-80 group-hover/grouplink:opacity-100 group-hover/grouplink:bg-primary group-hover/grouplink:text-white transition-all">
+                    <ExternalLink className="w-2.5 h-2.5" />
+                  </span>
+                </button>
+              ) : (
+                <h2 className="text-xs sm:text-sm font-black tracking-tight text-text-main mt-0.5 truncate">{selectedLesson.title}</h2>
+              )}
             </div>
           </div>
 
           <button
             onClick={closeLessonControl}
-            className="p-1.5 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main rounded-full transition-colors cursor-pointer shrink-0"
+            className="p-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main rounded-full transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-4 h-4 sm:w-5 sm:h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-3.5 space-y-2.5 max-h-[78vh] overflow-y-auto font-sans">
+        <div className="p-2.5 sm:p-3.5 space-y-2 sm:space-y-2.5 flex-1 min-h-0 overflow-y-auto font-sans pb-[max(16px,env(safe-area-inset-bottom,16px))]">
           {/* Homework Follow-Up Pending Banner */}
           {groupPendingFollowUp && !dismissFollowUpBanner && (
             <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-2.5 rounded-lg flex items-center justify-between gap-2.5 mb-1.5">
@@ -874,124 +896,82 @@ export const LessonControlModal: React.FC = () => {
             </div>
           ) : (
             <>
-              {/* BEFORE STARTING SECTION */}
-              <div className="space-y-1.5 border-b border-slate-100 dark:border-surface-border pb-2.5">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-primary" />
-                  <span>{t('auto_before_starting')}</span>
-                </p>
+              {/* QUICK PRE-LESSON ACTIONS */}
+              <div className="grid grid-cols-2 gap-1.5 pb-1.5 border-b border-surface-border">
+                {/* Main Send Lesson Reminder Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowLessonReminderModal(true)}
+                  className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs min-w-0"
+                >
+                  <Send className="w-3.5 h-3.5 fill-white shrink-0" />
+                  <span className="truncate">{t('auto_send_lesson_reminder')}</span>
+                </button>
 
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {/* Main Send Lesson Reminder Button */}
+                {selectedLesson.type === 'online' ? (
+                  <a
+                    href={selectedLesson.meetingLink || targetGroup?.zoomLink || profile.defaultZoomLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="bg-primary hover:bg-primary-hover text-white font-bold text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1 shadow-2xs active:scale-95 min-w-0"
+                  >
+                    <Video className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{t('auto_open_zoom_link')}</span>
+                    <ExternalLink className="w-3 h-3 shrink-0 opacity-80" />
+                  </a>
+                ) : (
                   <button
                     type="button"
-                    onClick={() => setShowLessonReminderModal(true)}
-                    className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                    onClick={handleSendOfflineLessonStartMessage}
+                    className="bg-primary hover:bg-primary-hover text-white font-bold text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer shadow-2xs min-w-0"
                   >
-                    <Send className="w-3.5 h-3.5 fill-white" />
-                    <span>{t('auto_send_lesson_reminder')}</span>
+                    <Send className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{t('auto_send_lesson_started_notice')}</span>
                   </button>
-
-                  {selectedLesson.type === 'online' ? (
-                    <>
-                      <a
-                        href={selectedLesson.meetingLink || targetGroup?.zoomLink || profile.defaultZoomLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-2xs active:scale-95"
-                      >
-                        <Video className="w-3.5 h-3.5" />
-                        <span>{t('auto_open_zoom_link')}</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-
-                      {profile.defaultMeetLink && (
-                        <a
-                          href={profile.defaultMeetLink}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-2xs"
-                        >
-                          <Video className="w-3.5 h-3.5" />
-                          <span>{t('auto_open_google_meet')}</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handleSendOfflineLessonStartMessage}
-                        className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>{t('auto_send_lesson_started_notice')}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleSendPaymentRequestMessage}
-                        className="bg-primary hover:bg-primary-hover text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
-                      >
-                        <DollarSign className="w-3.5 h-3.5" />
-                        <span>{t('auto_send_payment_request')}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleOpenMaps}
-                        className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
-                      >
-                        <MapPin className="w-3.5 h-3.5 text-primary" />
-                        <span>{t('auto_open_google_maps_navigation')}</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </button>
-                    </>
-                  )}
-                </div>
+                )}
               </div>
 
               {/* SECTION 2 – SESSION TIMER */}
-              <div className="bg-surface border border-surface-border rounded-xl p-3.5 shadow-2xs space-y-3 text-center relative overflow-hidden">
+              <div className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs space-y-1.5 sm:space-y-2 text-center relative overflow-hidden">
                 {/* Background ambient glow when timer is running */}
                 {isTimerRunning && (
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-primary/20 rounded-full blur-[40px] pointer-events-none animate-pulse" />
                 )}
                 
-                <div className="flex items-center justify-between relative z-10">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-text-muted flex items-center gap-1">
+                <div className="flex items-center justify-between relative z-10 text-[10px]">
+                  <span className="font-black uppercase tracking-wider text-text-muted flex items-center gap-1">
                     <Clock className={`w-3.5 h-3.5 ${isTimerRunning ? 'text-primary animate-pulse' : 'text-text-muted/70'}`} />
-                    <span>{t('auto_live_lesson_timer')}</span>
+                    <span className="hidden sm:inline">{t('auto_live_lesson_timer')}</span>
+                    <span className="sm:hidden">{_t('المؤقت', 'Timer', 'Timer')}</span>
                   </span>
 
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.5 rounded border border-primary-border/30">
+                  <div className="flex items-center gap-1">
+                    <span className="font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.2 rounded border border-primary-border/30">
                       {selectedLesson.status === 'completed' ? t('auto_completed_9') :
                        selectedLesson.status === 'cancelled' ? t('auto_cancelled') :
                        isTimerRunning ? t('auto_in_progress') :
                        timerSeconds > 0 ? t('auto_paused') :
                        t('auto_scheduled')}
                     </span>
-                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                    <span className="font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-200 dark:border-slate-700">
                       {_t(
-                        `المدة: ${selectedLesson.durationMinutes || 60} دقيقة`,
-                        `Duration: ${selectedLesson.durationMinutes || 60} min`,
-                        `Dauer: ${selectedLesson.durationMinutes || 60} Min`
+                        `${selectedLesson.durationMinutes || 60} د`,
+                        `${selectedLesson.durationMinutes || 60} min`,
+                        `${selectedLesson.durationMinutes || 60} Min`
                       )}
                     </span>
                   </div>
                 </div>
 
                 {/* Stopwatch Display */}
-                <div className="py-2 relative z-10">
+                <div className="py-0.5 sm:py-1 relative z-10">
                   <div className="flex justify-center">
                     <div className="relative flex flex-col items-center">
-                      <span className={`text-4xl sm:text-5xl font-black font-mono tracking-tight transition-all duration-300 ${isTimerRunning ? 'text-primary drop-shadow-[0_0_15px_rgba(var(--color-primary-rgb),0.4)]' : 'text-slate-700 dark:text-slate-300'}`}>
+                      <span className={`text-3xl sm:text-4xl font-black font-mono tracking-tight transition-all duration-300 ${isTimerRunning ? 'text-primary drop-shadow-[0_0_15px_rgba(var(--color-primary-rgb),0.4)]' : 'text-slate-700 dark:text-slate-300'}`}>
                         {formatTimer(timerSeconds)}
                       </span>
                       {timerSeconds > 0 && (
-                        <span className="text-[9.5px] text-text-muted mt-0.5 font-bold">
+                        <span className="text-[9px] text-text-muted mt-0.5 font-bold">
                           {t('auto_elapsed_time')}
                         </span>
                       )}
@@ -1000,25 +980,25 @@ export const LessonControlModal: React.FC = () => {
                 </div>
 
                 {/* Timer & Main Action Buttons */}
-                <div className="flex flex-col gap-2 relative z-10">
+                <div className="flex flex-col gap-1.5 relative z-10">
                   {selectedLesson.status !== 'completed' && selectedLesson.status !== 'cancelled' && (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-1.5">
                       {/* If lesson has NOT started yet */}
                       {selectedLesson.status === 'scheduled' && timerSeconds === 0 ? (
                         <>
                           <button
                             type="button"
                             onClick={handleStartLesson}
-                            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                           >
-                            <Play className="w-4 h-4 fill-white animate-pulse" />
+                            <Play className="w-3.5 h-3.5 fill-white animate-pulse" />
                             <span>{t('auto_start_session')}</span>
                           </button>
 
                           <button
                             type="button"
                             onClick={() => handleSaveReport()}
-                            className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             <span>{t('auto_end_session')}</span>
@@ -1027,9 +1007,9 @@ export const LessonControlModal: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setShowCancelPrompt(true)}
-                            className="col-span-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-bold text-xs px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/50 transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-95"
+                            className="col-span-2 bg-red-50/70 hover:bg-red-100 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold text-[11px] py-1.5 px-2 rounded-lg border border-red-200/60 dark:border-red-900/40 transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-95"
                           >
-                            <Ban className="w-3.5 h-3.5 text-red-500" />
+                            <Ban className="w-3 h-3 text-red-500" />
                             <span>{t('auto_cancel_session')}</span>
                           </button>
                         </>
@@ -1040,7 +1020,7 @@ export const LessonControlModal: React.FC = () => {
                             <button
                               type="button"
                               onClick={handleStartLesson}
-                              className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                             >
                               <Play className="w-3.5 h-3.5 fill-white" />
                               <span>{t('auto_resume_session')}</span>
@@ -1049,7 +1029,7 @@ export const LessonControlModal: React.FC = () => {
                             <button
                               type="button"
                               onClick={handlePauseLesson}
-                              className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-black text-xs py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                             >
                               <Pause className="w-3.5 h-3.5 fill-white" />
                               <span>{t('auto_pause')}</span>
@@ -1059,7 +1039,7 @@ export const LessonControlModal: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleSaveReport()}
-                            className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs px-4 py-2.5 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             <span>{t('auto_end_session')}</span>
@@ -1068,9 +1048,9 @@ export const LessonControlModal: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setShowCancelPrompt(true)}
-                            className="col-span-2 bg-red-50/50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-bold text-xs px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/50 transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-95"
+                            className="col-span-2 bg-red-50/70 hover:bg-red-100 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold text-[11px] py-1.5 px-2 rounded-lg border border-red-200/60 dark:border-red-900/40 transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-95"
                           >
-                            <Ban className="w-3.5 h-3.5 text-red-500" />
+                            <Ban className="w-3 h-3 text-red-500" />
                             <span>{t('auto_cancel_session')}</span>
                           </button>
                         </>
@@ -1814,12 +1794,12 @@ export const LessonControlModal: React.FC = () => {
           )}
 
           {/* PARENT COMMUNICATION QUICK BUTTONS */}
-          <div className="pt-2 border-t border-slate-100 dark:border-surface-border space-y-1.5">
-            <p className="text-xs font-bold text-text-main">
+          <div className="pt-1.5 border-t border-slate-100 dark:border-surface-border space-y-1">
+            <p className="text-[11px] font-bold text-text-muted">
               {t('auto_parent_communication')}
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
               <button
                 type="button"
                 disabled={selectedLesson.status !== 'completed'}
@@ -1830,14 +1810,14 @@ export const LessonControlModal: React.FC = () => {
                   }
                   setShowArabicParentReportModal(true);
                 }}
-                className={`font-black text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-2xs ${
+                className={`font-black text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-2xs ${
                   selectedLesson.status === 'completed'
                     ? 'bg-primary hover:bg-primary-hover active:scale-95 text-white cursor-pointer'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed border border-slate-200/50'
                 }`}
               >
-                <Send className="w-3.5 h-3.5" />
-                <span>تقرير ولي الأمر</span>
+                <Send className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">تقرير ولي الأمر</span>
               </button>
 
               <a
@@ -1848,19 +1828,19 @@ export const LessonControlModal: React.FC = () => {
                     alert(t('alert_no_parent_phone'));
                   }
                 }}
-                className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center cursor-pointer"
+                className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center cursor-pointer border border-surface-border truncate"
               >
-                <Phone className="w-3 h-3 text-primary" />
-                <span>Anruf Eltern</span>
+                <Phone className="w-3 h-3 text-primary shrink-0" />
+                <span className="truncate">Anruf Eltern</span>
               </a>
 
               {targetStudent?.phone && (
                 <a
                   href={`tel:${targetStudent.phone}`}
-                  className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center"
+                  className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center border border-surface-border truncate col-span-2 sm:col-span-1"
                 >
-                  <Phone className="w-3 h-3 text-primary" />
-                  <span>Anruf Schüler</span>
+                  <Phone className="w-3 h-3 text-primary shrink-0" />
+                  <span className="truncate">Anruf Schüler</span>
                 </a>
               )}
             </div>
@@ -1947,6 +1927,10 @@ export const LessonControlModal: React.FC = () => {
               previousHomeworkDescription: extraFields?.previousHomeworkDescription !== undefined ? extraFields.previousHomeworkDescription : ((lessonPreviousHomework || detectedPreviousHomework || '').trim() || undefined),
               ...(extraFields || {})
             });
+            updateLesson(selectedLesson.id, {
+              recordingLink: extraFields?.recordingLink !== undefined ? extraFields.recordingLink : (lessonRecordingLink.trim() || undefined),
+              recordingLink2: extraFields?.recordingLink2 !== undefined ? extraFields.recordingLink2 : (lessonRecordingLink2.trim() || undefined)
+            });
           }}
           onGoToHomeScreen={closeLessonControl}
         />
@@ -1968,6 +1952,14 @@ export const LessonControlModal: React.FC = () => {
           pendingFollowUps={pendingFollowUps}
           initialGroupId={selectedLesson?.groupId}
           onClose={() => setShowFollowUpModal(false)}
+        />
+      )}
+
+      {/* Group Profile Modal overlay */}
+      {showGroupProfile && targetGroup && (
+        <GroupProfileModal
+          group={targetGroup}
+          onClose={() => setShowGroupProfile(false)}
         />
       )}
     </div>

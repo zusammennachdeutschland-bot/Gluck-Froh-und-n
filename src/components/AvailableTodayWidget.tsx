@@ -42,7 +42,7 @@ export const AvailableTodayWidget: React.FC = () => {
   return (
     <div 
       onClick={() => setActiveTab('freeTime')}
-      className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
+      className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-2">

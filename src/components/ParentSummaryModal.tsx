@@ -107,23 +107,23 @@ Glück fröhlich und froh 🇩🇪`;
         onClick={(e) => e.stopPropagation()}
         className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-lg shadow-2xl overflow-hidden animate-scale-up"
       >
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
         {/* Modal Header */}
-        <div className="bg-surface border-b border-surface-border p-4 sm:p-5 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 sm:p-2.5 bg-primary-soft text-primary rounded-xl shrink-0">
-              <MessageSquare className="w-5 h-5" />
+        <div className="bg-surface border-b border-surface-border px-3.5 py-2.5 sm:p-5 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="p-1.5 sm:p-2.5 bg-primary-soft text-primary rounded-lg sm:rounded-xl shrink-0">
+              <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h2 className="text-base font-bold text-text-main">Parent Summary & Communication</h2>
-              <p className="text-xs text-text-muted">{lesson.title} • {lesson.date}</p>
+            <div className="min-w-0">
+              <h2 className="text-xs sm:text-base font-bold text-text-main truncate">Parent Summary & Communication</h2>
+              <p className="text-[10px] sm:text-xs text-text-muted truncate">{lesson.title} • {lesson.date}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
+            className="p-1 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 

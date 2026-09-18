@@ -30,7 +30,7 @@ export const PaymentAlertsCard: React.FC = () => {
   const currency = profile.currency || (t('auto_egp'));
 
   return (
-    <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-xl p-2.5 sm:p-3 shadow-2xs transition-all font-sans">
+    <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all font-sans">
       <div className="flex items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-lg bg-primary/15 text-primary dark:text-primary flex items-center justify-center shrink-0 border border-primary-border/20">

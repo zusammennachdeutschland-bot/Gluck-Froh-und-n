@@ -133,15 +133,12 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
       >
         <div className="w-10 h-1 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2 mb-1 sm:hidden shrink-0" />
         {/* Header */}
-        <div className="bg-gradient-to-r from-primary to-primary-hover p-3.5 text-white flex items-center justify-between">
+        <div className="bg-gradient-to-r from-primary to-primary-hover px-3.5 py-2.5 sm:p-3.5 text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-surface/20 rounded-lg">
               <Calendar className="w-4 h-4 text-white" />
             </div>
-            <div>
-              <h2 className="text-sm font-bold">{t('schedule_lesson_title')}</h2>
-              <p className="text-[10px] text-primary-soft">Weekly Recurring & Google Calendar Sync</p>
-            </div>
+            <h2 className="text-xs sm:text-sm font-black">{t('schedule_lesson_title')}</h2>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-surface/20 rounded-lg transition-colors cursor-pointer">
             <X className="w-4 h-4" />

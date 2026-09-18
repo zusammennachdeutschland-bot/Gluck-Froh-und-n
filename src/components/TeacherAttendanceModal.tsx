@@ -476,33 +476,33 @@ export const TeacherAttendanceModal: React.FC<TeacherAttendanceModalProps> = ({
         onClick={e => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 border-b border-surface-border flex items-center justify-between bg-surface-hover/30">
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl text-white ${
+        <div className="px-3.5 py-2.5 sm:p-4 border-b border-surface-border flex items-center justify-between bg-surface-hover/30">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl text-white shrink-0 ${
               attendanceType === 'absence' ? 'bg-rose-600' :
               attendanceType === 'late_arrival' ? 'bg-amber-600' : 'bg-orange-600'
             }`}>
-              {attendanceType === 'absence' ? <UserMinus className="w-5 h-5" /> :
-               attendanceType === 'late_arrival' ? <Clock className="w-5 h-5" /> : <LogOut className="w-5 h-5" />}
+              {attendanceType === 'absence' ? <UserMinus className="w-4 h-4 sm:w-5 sm:h-5" /> :
+               attendanceType === 'late_arrival' ? <Clock className="w-4 h-4 sm:w-5 sm:h-5" /> : <LogOut className="w-4 h-4 sm:w-5 sm:h-5" />}
             </div>
-            <div>
-              <h3 className="text-base font-black text-text-main">
+            <div className="min-w-0">
+              <h3 className="text-xs sm:text-base font-black text-text-main truncate">
                 {editingRecord 
-                  ? _t('تعديل سجل الحضور والانضباط', 'Edit Attendance Record', 'Anwesenheit bearbeiten')
-                  : _t('تسجيل الحضور والانضباط المدرسي', 'Log Teacher Attendance & Discipline', 'Anwesenheit & Disziplin erfassen')}
+                  ? _t('تعديل سجل الانضباط', 'Edit Record', 'Anwesenheit bearbeiten')
+                  : _t('تسجيل الحضور والانضباط', 'Log Teacher Attendance', 'Anwesenheit erfassen')}
               </h3>
-              <p className="text-[11px] font-bold text-text-muted">
-                {_t('تسجيل غياب أو تأخير مع إشعار فوري لسكرتارية المرحلة', 'Log absence or delay with instant secretary alert', 'Sofortige Benachrichtigung der Stufenleitung')}
+              <p className="text-[10px] sm:text-xs text-text-muted truncate">
+                {_t('تسجيل غياب أو تأخير مع إشعار فوري', 'Log absence or delay with instant alert', 'Sofortige Benachrichtigung')}
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-surface-hover rounded-xl text-text-muted cursor-pointer transition-colors">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 sm:p-1.5 hover:bg-surface-hover rounded-lg sm:rounded-xl text-text-muted cursor-pointer transition-colors shrink-0">
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs">
+        <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 overflow-y-auto space-y-3 sm:space-y-4 text-xs">
           
           {/* Teacher Selection & Stage Badge */}
           <div className="space-y-1.5">
@@ -1060,20 +1060,20 @@ export const TeacherAttendanceModal: React.FC<TeacherAttendanceModalProps> = ({
 
         {/* SUCCESS & WHATSAPP SHARE DIALOG (Guaranteed access & copy) */}
         {showSuccessDialog && (
-          <div className="fixed inset-0 z-[120] bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in" onClick={e => e.stopPropagation()}>
-            <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-lg shadow-2xl p-5 space-y-4 animate-scale-up" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-emerald-500/10 text-emerald-600 rounded-xl">
-                  <CheckCircle2 className="w-6 h-6" />
+          <div className="fixed inset-0 z-[120] bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in" onClick={e => e.stopPropagation()}>
+            <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-lg shadow-2xl p-3.5 sm:p-5 space-y-3 sm:space-y-4 animate-scale-up" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-2.5 sm:gap-3">
+                <div className="p-1.5 sm:p-2 bg-emerald-500/10 text-emerald-600 rounded-lg sm:rounded-xl shrink-0">
+                  <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" />
                 </div>
-                <div>
-                  <h3 className="text-sm font-black text-text-main">
-                    {_t('تم تسجيل الغياب وحفظ خطة الاحتياطي بنجاح! 🎉', 'Absence & Substitutions Saved Successfully! 🎉', 'Erfolgreich gespeichert! 🎉')}
+                <div className="min-w-0">
+                  <h3 className="text-xs sm:text-sm font-black text-text-main truncate">
+                    {_t('تم تسجيل الغياب وحفظ خطة الاحتياطي بنجاح! 🎉', 'Saved Successfully! 🎉', 'Erfolgreich gespeichert! 🎉')}
                   </h3>
-                  <p className="text-[11px] font-bold text-text-muted">
+                  <p className="text-[10px] sm:text-[11px] font-bold text-text-muted truncate">
                     {linkedSecretary?.phone 
-                      ? _t(`تم تجهيز الرسالة لإرسالها لسكرتيرة المرحلة: ${linkedSecretary.name} (${linkedSecretary.phone})`, `Message prepared for ${linkedSecretary.name}`, 'Bereit zum Senden')
-                      : _t('تم تجهيز الرسالة للمشاركة عبر واتساب — يمكنك البحث عن المستلم وإرسالها', 'Message prepared for WhatsApp contact search', 'Bereit zum Senden')}
+                      ? _t(`إرسال لسكرتيرة المرحلة: ${linkedSecretary.name}`, `Send to ${linkedSecretary.name}`, 'Bereit zum Senden')
+                      : _t('تم تجهيز الرسالة للمشاركة عبر واتساب', 'Ready to share via WhatsApp', 'Bereit zum Senden')}
                   </p>
                 </div>
               </div>

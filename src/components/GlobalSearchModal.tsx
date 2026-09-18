@@ -52,21 +52,21 @@ export const GlobalSearchModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[max(4rem,calc(env(safe-area-inset-top,24px)+2rem))] px-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[max(2rem,calc(env(safe-area-inset-top,24px)+1rem))] p-2 sm:px-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div 
-        className="w-full max-w-2xl bg-surface dark:bg-slate-800 rounded-lg shadow-2xl border border-surface-border dark:border-surface-border-soft overflow-hidden flex flex-col max-h-[80vh]"
+        className="w-full max-w-2xl bg-surface dark:bg-slate-800 rounded-2xl sm:rounded-lg shadow-2xl border border-surface-border dark:border-surface-border-soft overflow-hidden flex flex-col max-h-[85vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search Header Input */}
-        <div className="relative flex items-center px-4 py-3.5 border-b border-surface-border dark:border-surface-border-soft">
-          <Search className="w-5 h-5 text-text-muted/70 dark:text-slate-500 ml-2 mr-3" />
+        <div className="relative flex items-center px-3 py-2.5 sm:px-4 sm:py-3.5 border-b border-surface-border dark:border-surface-border-soft">
+          <Search className="w-4 h-4 sm:w-5 sm:h-5 text-text-muted/70 dark:text-slate-500 ml-1.5 mr-2 sm:ml-2 sm:mr-3 shrink-0" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Suchen nach Schüler, Gruppe, Lektion oder Zahlung..."
             autoFocus
-            className="w-full bg-transparent text-text-main placeholder-slate-400 text-base focus:outline-none"
+            className="w-full bg-transparent text-text-main placeholder-slate-400 text-xs sm:text-sm focus:outline-none"
           />
           {query && (
             <button 
@@ -78,7 +78,7 @@ export const GlobalSearchModal: React.FC = () => {
           )}
           <button 
             onClick={handleClose} 
-            className="ml-3 px-2.5 py-1 text-xs font-medium text-slate-500 bg-slate-100 dark:bg-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition"
+            className="ml-2 sm:ml-3 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[10px] sm:text-xs font-medium text-slate-500 bg-slate-100 dark:bg-slate-700 dark:text-slate-300 rounded-md sm:rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition shrink-0"
           >
             ESC
           </button>

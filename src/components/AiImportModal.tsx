@@ -167,25 +167,25 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
         onClick={(e) => e.stopPropagation()} 
         className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-2xl pb-safe-bottom sm:pb-0 mb-0 w-full max-w-3xl shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[92vh]"
       >
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
         
         {/* Header */}
-        <div className="bg-gradient-to-r from-primary to-primary-hover p-4 sm:p-5 text-white flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-surface/20 backdrop-blur-md flex items-center justify-center shadow-inner shrink-0">
-              <Bot className="w-5 h-5 text-primary-soft" />
+        <div className="bg-gradient-to-r from-primary to-primary-hover px-3.5 py-2.5 sm:p-4 text-white flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-surface/20 backdrop-blur-md flex items-center justify-center shadow-inner shrink-0">
+              <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-primary-soft" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-black text-base sm:text-lg">
-                  {language === 'ar' ? 'استيراد المجموعات والطلاب بالذكاء الاصطناعي' : t('auto_import_group_students_ai_te')}
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h3 className="font-black text-xs sm:text-base truncate">
+                  {language === 'ar' ? 'استيراد بالذكاء الاصطناعي' : t('auto_import_group_students_ai_te')}
                 </h3>
-                <span className="bg-primary/30 text-primary-soft border border-primary-border text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full backdrop-blur-md flex items-center gap-1">
-                  <Layers className="w-3 h-3" />
+                <span className="hidden sm:inline-flex bg-primary/30 text-primary-soft border border-primary-border text-[9px] uppercase font-extrabold px-1.5 py-0.2 rounded-full backdrop-blur-md items-center gap-1">
+                  <Layers className="w-2.5 h-2.5" />
                   Multi-Group AI
                 </span>
               </div>
-              <p className="text-xs text-primary-soft/90">
+              <p className="text-[10px] sm:text-xs text-primary-soft/90 truncate hidden sm:block">
                 {language === 'ar' 
                   ? 'إنشاء مجموعة واحدة أو عدة مجموعات مع طلابها ومواعيدها من برومبت واحد' 
                   : 'Create single or multiple groups with full student rosters & schedules in one prompt'}
@@ -194,14 +194,14 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
           </div>
           <button 
             onClick={handleClose} 
-            className="text-white/80 hover:text-white hover:bg-surface/10 p-1.5 rounded-lg transition-colors cursor-pointer"
+            className="text-white/80 hover:text-white hover:bg-surface/10 p-1 sm:p-1.5 rounded-lg transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+        <div className="p-3 sm:p-5 overflow-y-auto space-y-3 sm:space-y-4 flex-1">
 
           {isSuccess ? (
             /* SUCCESS RESULT VIEW */

@@ -37,7 +37,7 @@ export const InspirationCardWidget: React.FC = () => {
   const isFavorite = activeInspirationCard.isFavorite;
 
   return (
-    <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-xl p-2.5 sm:p-3 shadow-2xs relative overflow-hidden transition-all animate-fade-in font-sans">
+    <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-xl p-2 sm:p-2.5 shadow-2xs relative overflow-hidden transition-all animate-fade-in font-sans">
       {/* Decorative subtle background icon */}
       <div className="absolute -bottom-2 -left-2 text-primary/5 pointer-events-none">
         <Quote className="w-14 h-14 rotate-180" />

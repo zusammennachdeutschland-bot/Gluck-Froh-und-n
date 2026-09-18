@@ -25,19 +25,19 @@ export const RecentlyDeletedModal: React.FC = () => {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-border dark:border-surface-border-soft bg-surface-hover/80">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary">
-              <Trash2 className="w-5 h-5" />
+        <div className="flex items-center justify-between px-3.5 py-2.5 sm:px-6 sm:py-4 border-b border-surface-border dark:border-surface-border-soft bg-surface-hover/80 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+              <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h3 className="text-lg font-bold text-text-main">Zuletzt gelöscht</h3>
-              <p className="text-xs text-text-muted">
-                Gelöschte Elemente wiederherstellen oder dauerhaft entfernen ({totalCount})
+            <div className="min-w-0">
+              <h3 className="text-xs sm:text-base font-bold text-text-main truncate">Zuletzt gelöscht ({totalCount})</h3>
+              <p className="text-[10px] sm:text-xs text-text-muted truncate hidden sm:block">
+                Gelöschte Elemente wiederherstellen oder dauerhaft entfernen
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {totalCount > 0 && (
               <button
                 onClick={() => {
@@ -45,22 +45,22 @@ export const RecentlyDeletedModal: React.FC = () => {
                     clearRecentlyDeleted();
                   }
                 }}
-                className="px-3 py-1.5 text-xs font-semibold text-primary hover:text-primary dark:text-primary hover:bg-primary-soft dark:hover:bg-primary-soft rounded-lg transition"
+                className="px-2 py-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-xs font-semibold text-primary hover:text-primary dark:text-primary hover:bg-primary-soft dark:hover:bg-primary-soft rounded-md sm:rounded-lg transition shrink-0"
               >
                 Papierkorb leeren
               </button>
             )}
             <button
               onClick={() => setIsRecentlyDeletedModalOpen(false)}
-              className="p-1.5 rounded-lg text-text-muted/70 hover:text-slate-600 dark:hover:text-primary hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+              className="p-1 sm:p-1.5 rounded-lg text-text-muted/70 hover:text-slate-600 dark:hover:text-primary hover:bg-slate-200 dark:hover:bg-slate-700 transition shrink-0"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="flex items-center gap-2 px-6 py-3 border-b border-surface-border dark:border-surface-border-soft bg-background/50 dark:bg-surface/30 text-xs font-medium">
+        <div className="flex items-center gap-1.5 sm:gap-2 px-3.5 py-2 sm:px-6 sm:py-3 border-b border-surface-border dark:border-surface-border-soft bg-background/50 dark:bg-surface/30 text-xs font-medium overflow-x-auto no-scrollbar shrink-0">
           <button
             onClick={() => setActiveType('all')}
             className={`px-3 py-1.5 rounded-lg transition ${
