@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -20,22 +20,29 @@ jobs:
           node-version: 22
           cache: 'npm'
 
+      - name: Cache Electron Binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-win-cache-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-win-cache-
+
       - name: Install dependencies
-        run: |
-          npm install --force
-          npm install @rollup/rollup-win32-x64-msvc --no-save || true
+        run: npm ci || npm install --legacy-peer-deps
 
       - name: Build web assets
         run: npm run build
 
       - name: Build Windows Installer (.exe)
-        run: npx electron-builder --win --x64 --publish never
+        run: npx electron-builder --win nsis --x64 --publish never
         env:
           USE_HARD_LINKS: "false"
           ELECTRON_BUILDER_COMPRESSION: "maximum"
 
       - name: Verify EXE Generated
-        shell: bash
         run: |
           echo "=== Verifying Windows EXE Artifacts ==="
           ls -lh release/
