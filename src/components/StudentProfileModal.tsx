@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Student, GradeLevel, CertificateRecord } from '../types';
 import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
@@ -18,7 +18,7 @@ import { CreateCertificateModal } from './certificates/CreateCertificateModal';
 import { CertificatePreviewModal } from './certificates/CertificatePreviewModal';
 import { downloadCertificatePDF, shareCertificateWhatsApp } from '../utils/certificateExportUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
-import { getStudentCode, buildParentPortalShareText } from '../utils/studentCodeUtils';
+import { getStudentCode } from '../utils/studentCodeUtils';
 
 interface StudentProfileModalProps {
   student: Student;
@@ -38,10 +38,17 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   const [isLatinSaved, setIsLatinSaved] = useState(false);
   const [copiedRecId, setCopiedRecId] = useState<string | null>(null);
 
+  // Lock body scroll while modal is active to prevent double scrollbars
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
   // Editable Student Fields
   const studentCode = getStudentCode(student);
-  const [copiedCode, setCopiedCode] = useState(false);
-  const [copiedPortal, setCopiedPortal] = useState(false);
   const [editName, setEditName] = useState(student.name);
   const [editStudentCode, setEditStudentCode] = useState(student.studentCode || studentCode);
   const [editCertificateName, setEditCertificateName] = useState(student.certificateName || '');
@@ -202,11 +209,6 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   // Helper translations or fallback strings
   
 
-  // Romanized student name representation or standard fallback
-  const studentEnglishFallback = student.certificateName || (student.notes?.split('\n')?.[0]?.length && student.notes.split('\n')[0].length < 30
-    ? student.notes.split('\n')[0]
-    : (student.name || '').split(' ').map(n => n ? n.charAt(0).toUpperCase() + n.slice(1) : '').join(' '));
-
   return (
     <div
       role="dialog"
@@ -222,16 +224,16 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
         onTouchStart={(e) => e.stopPropagation()}
         onTouchMove={(e) => e.stopPropagation()}
         onTouchEnd={(e) => e.stopPropagation()}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[92vh] sm:max-h-[88vh]"
+        className="bg-surface border border-surface-border rounded-2xl sm:rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-scale-up flex flex-col max-h-[92vh] sm:max-h-[88vh]"
       >
         
         {/* Fixed Top Control Bar */}
-        <div className="flex items-center justify-between px-3.5 sm:px-5 py-2.5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+        <div className="flex items-center justify-between px-3.5 sm:px-5 py-2.5 border-b border-surface-border bg-surface shrink-0">
           <div className="flex items-center gap-2 flex-wrap min-w-0">
-            <span className="text-[10px] sm:text-xs font-black tracking-wider text-slate-400 dark:text-slate-500 uppercase shrink-0">
+            <span className="text-[10px] sm:text-xs font-black tracking-wider text-text-muted uppercase shrink-0">
               {_t('بطاقة الطالب الذكية', 'STUDENT CARD', 'SCHÜLER SMART CARD')}
             </span>
-            <span className="text-[9.5px] font-black text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/50 border border-sky-200/80 dark:border-sky-800/60 px-2 py-0.5 rounded-full shrink-0">
+            <span className="text-[9.5px] font-black text-primary bg-primary-soft border border-primary-border/60 px-2 py-0.5 rounded-full shrink-0">
               {student.grade}
             </span>
             <span className={`text-[9.5px] font-black px-2 py-0.5 rounded-full border shrink-0 ${
@@ -253,7 +255,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
           <button
             type="button"
             onClick={onClose}
-            className="p-1 sm:p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+            className="p-1 sm:p-1.5 rounded-lg text-text-muted hover:text-text-main hover:bg-surface-hover transition-colors cursor-pointer shrink-0"
             title="Schließen"
           >
             <X className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -261,18 +263,18 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
         </div>
 
         {/* The ONLY vertical scroll container in the entire card */}
-        <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 px-3 sm:px-5 py-3.5 space-y-3">
+        <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 px-3 sm:px-5 py-3.5 space-y-3 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700">
           
           {/* Hero Profile Identity Card - Clean, spacious & completely unclipped */}
-          <div className="p-3 sm:p-4 bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="p-3 sm:p-4 bg-surface-hover/60 border border-surface-border rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0 flex-1 w-full sm:w-auto" dir="rtl">
               <AvatarImage
                 name={student.name}
-                className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl text-lg sm:text-xl font-black shadow-xs border border-slate-200 dark:border-slate-700 shrink-0"
+                className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl text-lg sm:text-xl font-black shadow-xs border border-surface-border shrink-0"
               />
               <div className="min-w-0 space-y-1 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight truncate max-w-full">
+                  <h2 className="text-base sm:text-lg font-black text-text-main tracking-tight truncate max-w-full">
                     {student.name}
                   </h2>
                   <button
@@ -281,26 +283,26 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                       const nextGender = (student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female' ? 'male' : 'female';
                       updateStudent(student.id, { gender: nextGender });
                     }}
-                    className="text-[10px] font-bold text-slate-500 hover:text-primary transition-colors cursor-pointer"
+                    className="text-[10px] font-bold text-text-muted hover:text-primary transition-colors cursor-pointer"
                     title={_t('انقر لتغيير التحديد بين ولد وبنت', 'Click to toggle gender', 'Klicken zum Ändern')}
                   >
                     ✏️
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-500 dark:text-slate-400">
+                <div className="flex items-center gap-2 flex-wrap text-[11px] text-text-muted">
                   {assignedGroup ? (
-                    <span className="font-extrabold text-primary bg-primary-soft/50 dark:bg-primary-soft/30 border border-primary-border/40 px-2 py-0.5 rounded-md truncate max-w-[170px] sm:max-w-[220px]">
+                    <span className="font-extrabold text-primary bg-primary-soft border border-primary-border/40 px-2 py-0.5 rounded-md truncate max-w-[170px] sm:max-w-[220px]">
                       {assignedGroup.name}
                     </span>
                   ) : (
-                    <span className="font-medium bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                    <span className="font-medium bg-surface-hover px-2 py-0.5 rounded-md">
                       {_t('بدون مجموعة', 'No Group', 'Keine Gruppe')}
                     </span>
                   )}
 
                   {student.parentPhone && (
-                    <span className="font-mono text-slate-600 dark:text-slate-300 font-bold inline-flex items-center gap-1">
+                    <span className="font-mono text-text-muted font-bold inline-flex items-center gap-1">
                       • {formatContactDisplay(student.parentPhone)}
                     </span>
                   )}
@@ -313,7 +315,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
               <button
                 type="button"
                 onClick={() => setActiveTab('edit')}
-                className="px-2.5 sm:px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
+                className="px-2.5 sm:px-3 py-1.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
               >
                 <Edit3 className="w-3.5 h-3.5 text-primary" />
                 <span>{_t('تعديل', 'Edit', 'Bearbeiten')}</span>
@@ -345,7 +347,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   className={`font-black text-[11px] sm:text-xs py-2 sm:py-2.5 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 min-w-0 ${
                     resolvedWhatsApp.hasContact
                       ? 'bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white cursor-pointer shadow-xs'
-                      : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
+                      : 'bg-surface-hover text-text-muted cursor-not-allowed pointer-events-none'
                   }`}
                 >
                   <Send className="w-3.5 h-3.5 shrink-0" />
@@ -357,7 +359,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   className={`font-black text-[11px] sm:text-xs py-2 sm:py-2.5 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 text-center min-w-0 ${
                     parentHasCallNumber 
                       ? 'bg-primary hover:bg-primary-hover active:scale-[0.98] text-white cursor-pointer shadow-xs' 
-                      : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
+                      : 'bg-surface-hover text-text-muted cursor-not-allowed pointer-events-none'
                   }`}
                 >
                   <Phone className="w-3.5 h-3.5 shrink-0" />
@@ -369,7 +371,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   className={`font-black text-[11px] sm:text-xs py-2 sm:py-2.5 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 text-center min-w-0 ${
                     studentHasCallNumber 
                       ? 'bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-white cursor-pointer shadow-xs' 
-                      : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed pointer-events-none'
+                      : 'bg-surface-hover text-text-muted cursor-not-allowed pointer-events-none'
                   }`}
                 >
                   <Phone className="w-3.5 h-3.5 shrink-0" />
@@ -382,46 +384,46 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
           {/* 3-Stat Metric Cards - Perfectly Proportioned */}
           <div className="grid grid-cols-3 gap-1.5 sm:gap-2.5 text-center" dir="ltr">
             {/* SITZUNGEN */}
-            <div className="p-2 sm:p-3 bg-white dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
+            <div className="p-2 sm:p-3 bg-surface border border-surface-border rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
               <div className="flex items-center gap-1 text-primary">
                 <Calendar className="w-3.5 h-3.5" />
-                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-slate-400">SITZUNGEN</span>
+                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-text-muted">SITZUNGEN</span>
               </div>
-              <span className="text-sm sm:text-lg font-black text-slate-800 dark:text-white leading-tight font-mono">{studentLessons.length}</span>
-              <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold">الحصص الكلية</span>
+              <span className="text-sm sm:text-lg font-black text-text-main leading-tight font-mono">{studentLessons.length}</span>
+              <span className="text-[8px] sm:text-[9px] text-text-muted font-bold">الحصص الكلية</span>
             </div>
 
             {/* ANWESEND */}
-            <div className="p-2 sm:p-3 bg-white dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
+            <div className="p-2 sm:p-3 bg-surface border border-surface-border rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
               <div className="flex items-center gap-1 text-emerald-500">
                 <User className="w-3.5 h-3.5" />
-                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-slate-400">ANWESEND</span>
+                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-text-muted">ANWESEND</span>
               </div>
-              <span className="text-sm sm:text-lg font-black text-slate-800 dark:text-white leading-tight font-mono">{presentCount}</span>
-              <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold">حضور الحصص</span>
+              <span className="text-sm sm:text-lg font-black text-text-main leading-tight font-mono">{presentCount}</span>
+              <span className="text-[8px] sm:text-[9px] text-text-muted font-bold">حضور الحصص</span>
             </div>
 
             {/* PAKETZYKLUS */}
-            <div className="p-2 sm:p-3 bg-white dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
+            <div className="p-2 sm:p-3 bg-surface border border-surface-border rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
               <div className="flex items-center gap-1 text-indigo-500">
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-slate-400">PAKETZYKLUS</span>
+                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-text-muted">PAKETZYKLUS</span>
               </div>
-              <span className="text-sm sm:text-lg font-black text-slate-800 dark:text-white leading-tight font-mono">{currentCycleProgress}/{cycleLength}</span>
-              <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold">دورة الحساب</span>
+              <span className="text-sm sm:text-lg font-black text-text-main leading-tight font-mono">{currentCycleProgress}/{cycleLength}</span>
+              <span className="text-[8px] sm:text-[9px] text-text-muted font-bold">دورة الحساب</span>
             </div>
           </div>
 
-          {/* Tabs Navigation exactly like HOD */}
-          <div className="flex w-full items-center justify-start sm:justify-center gap-1 bg-slate-100/90 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/60 shadow-2xs overflow-x-auto no-scrollbar scrollbar-none">
+          {/* Tabs Navigation (Same UI as HOD Hub) */}
+          <div className="flex w-full items-center justify-start sm:justify-center gap-1 bg-surface p-1 rounded-xl border border-surface-border shadow-2xs overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden">
             {[
-              { id: 'overview' as const, title: _t('الرئيسية', 'Overview', 'Übersicht'), icon: Info, count: undefined },
-              { id: 'attendance' as const, title: _t('الحضور', 'Attendance', 'Anwesenheit'), icon: Calendar, count: presentCount + lateCount + absentCount },
-              { id: 'scores' as const, title: _t('الدرجات', 'Grades & HW', 'Noten'), icon: GraduationCap, count: undefined },
-              { id: 'payments' as const, title: _t('المالية', 'Payments', 'Zahlungen'), icon: DollarSign, count: undefined },
-              { id: 'files' as const, title: _t('الملفات', 'Files', 'Dateien'), icon: FileText, count: student.documents.length },
-              { id: 'certificates' as const, title: _t('الشهادات', 'Certificates', 'Zertifikate'), icon: Award, count: studentCertificates.length },
-              { id: 'recordings' as const, title: _t('التسجيلات', 'Recordings', 'Aufnahmen'), icon: Video, count: studentRecordings.length },
+              { id: 'overview' as const, title: _t('الرئيسية', 'Overview', 'Übersicht'), icon: Info, count: undefined, activeClass: 'bg-primary text-white' },
+              { id: 'attendance' as const, title: _t('الحضور', 'Attendance', 'Anwesenheit'), icon: Calendar, count: presentCount + lateCount + absentCount, activeClass: 'bg-emerald-600 text-white' },
+              { id: 'scores' as const, title: _t('الدرجات', 'Grades & HW', 'Noten'), icon: GraduationCap, count: undefined, activeClass: 'bg-indigo-600 text-white' },
+              { id: 'payments' as const, title: _t('المالية', 'Payments', 'Zahlungen'), icon: DollarSign, count: undefined, activeClass: 'bg-amber-600 text-white' },
+              { id: 'files' as const, title: _t('الملفات', 'Files', 'Dateien'), icon: FileText, count: student.documents.length, activeClass: 'bg-blue-600 text-white' },
+              { id: 'certificates' as const, title: _t('الشهادات', 'Certificates', 'Zertifikate'), icon: Award, count: studentCertificates.length, activeClass: 'bg-yellow-600 text-white' },
+              { id: 'recordings' as const, title: _t('التسجيلات', 'Recordings', 'Aufnahmen'), icon: Video, count: studentRecordings.length, activeClass: 'bg-purple-600 text-white' },
             ].map(tab => {
               const isActive = activeTab === tab.id;
               const Icon = tab.icon;
@@ -430,10 +432,10 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`h-8 sm:h-9 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer select-none ${
+                  className={`relative h-8 sm:h-9 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer select-none shrink-0 ${
                     isActive 
-                      ? 'bg-primary text-white px-2.5 sm:px-3 gap-1 sm:gap-1.5 shadow-xs font-black shrink-0' 
-                      : 'w-7 sm:w-8 text-slate-500 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-slate-700/60 hover:text-slate-900 dark:hover:text-white shrink-0'
+                      ? `${tab.activeClass} px-2.5 sm:px-3 gap-1 sm:gap-1.5 shadow-xs font-black` 
+                      : 'w-7 sm:w-8.5 text-text-muted hover:bg-surface-hover hover:text-text-main'
                   }`}
                   title={tab.title}
                 >
@@ -441,11 +443,16 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   {isActive && (
                     <span className="text-[10px] sm:text-[11px] font-bold whitespace-nowrap overflow-hidden flex items-center gap-1">
                       <span>{tab.title}</span>
-                      {tab.count !== undefined && (
-                        <span className="text-[9px] bg-white/20 text-white px-1 py-0.2 rounded-full font-mono font-bold">
+                      {tab.count !== undefined && tab.count > 0 && (
+                        <span className="text-[9px] bg-white/25 text-white px-1 py-0.2 rounded-full font-mono font-bold">
                           {tab.count}
                         </span>
                       )}
+                    </span>
+                  )}
+                  {!isActive && tab.count !== undefined && tab.count > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-primary text-white text-[8px] font-mono font-bold px-1 min-w-[14px] h-[14px] rounded-full flex items-center justify-center shadow-2xs">
+                      {tab.count}
                     </span>
                   )}
                 </button>
@@ -476,57 +483,6 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
             {/* OVERVIEW TAB */}
             {activeTab === 'overview' && (
               <div className="space-y-3.5">
-                {/* Dedicated Student Code & Parent Portal Card - High contrast, spacious & never clipped */}
-                <div className="p-3.5 sm:p-4 bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-300 font-black text-xs">
-                      <Copy className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                      <span>{_t('كود الطالب وبوابة ولي الأمر', 'Student Code & Parent Portal', 'Schüler-Code & Portal')}</span>
-                    </div>
-                    <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-100/70 dark:bg-indigo-900/50 px-2 py-0.5 rounded-full">
-                      {_t('خاص بولي الأمر', 'Parent Access', 'Eltern')}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/40 rounded-xl p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{_t('كود الطالب:', 'Student Code:', 'Code:')}</span>
-                      <span className="font-mono text-base font-black text-indigo-600 dark:text-indigo-400 tracking-wider">
-                        {studentCode}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(studentCode);
-                          setCopiedCode(true);
-                          setTimeout(() => setCopiedCode(false), 2000);
-                        }}
-                        className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedCode ? _t('تم النسخ ✓', 'Copied ✓', 'Kopiert ✓') : _t('نسخ الكود', 'Copy Code', 'Kopieren')}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const shareText = buildParentPortalShareText(student.name, studentCode, profile.displayNameAr || profile.displayName);
-                          const targetPhone = student.parentPhone ? student.parentPhone.replace(/[^0-9+]/g, '') : '';
-                          const url = buildWhatsAppUrl(targetPhone, shareText);
-                          window.open(url, '_blank');
-                        }}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                      >
-                        <Share2 className="w-3.5 h-3.5" />
-                        <span>{_t('مشاركة عبر واتساب', 'Share via WhatsApp', 'Per WhatsApp teilen')}</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
                 {/* Info Card Block */}
                 <div className="p-4 sm:p-5 bg-slate-50/70 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl sm:rounded-3xl space-y-3">
                   <div className="flex items-center gap-2 text-primary font-black text-xs uppercase tracking-widest border-b border-slate-100 dark:border-slate-800 pb-2">
@@ -688,12 +644,14 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   <p className="text-xs text-text-muted/70 italic text-center py-4">Keine Prüfungsergebnisse oder Hausaufgaben verzeichnet.</p>
                 ) : (
                   studentLessons.map((l) => {
-                    const hwDone = l.report?.studentHomeworkDone?.[student.id];
-                    const dictationGrade = l.report?.studentDictationGrade?.[student.id];
-                    const examGrade = l.report?.studentExamGrade?.[student.id];
+                    const isStudentAbsent = l.report?.studentAttendance?.[student.id] === 'absent' || 
+                      (l.studentId === student.id && l.report?.attendanceStatus === 'absent');
+                    const hwDone = isStudentAbsent ? undefined : l.report?.studentHomeworkDone?.[student.id];
+                    const dictationGrade = isStudentAbsent ? undefined : l.report?.studentDictationGrade?.[student.id];
+                    const examGrade = isStudentAbsent ? undefined : l.report?.studentExamGrade?.[student.id];
                     const remark = l.report?.studentNotes?.[student.id];
 
-                    if (!hwDone && dictationGrade === undefined && examGrade === undefined && !remark) return null;
+                    if (!isStudentAbsent && !hwDone && dictationGrade === undefined && examGrade === undefined && !remark) return null;
 
                     return (
                       <div key={l.id} className="p-3.5 bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-slate-100 dark:border-slate-800 text-xs space-y-2">
@@ -702,6 +660,11 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                           <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">{l.date}</span>
                         </div>
                         
+                        {isStudentAbsent ? (
+                          <div className="p-2 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 rounded-xl border border-red-200 dark:border-red-900/40 text-center font-bold text-[11px]">
+                            ❌ غائب عن الحصة (لم تسجل درجات أو واجبات)
+                          </div>
+                        ) : (
                         <div className="grid grid-cols-2 gap-2 text-[11px] font-bold">
                           {hwDone !== undefined && (
                             <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
@@ -730,6 +693,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                             </div>
                           )}
                         </div>
+                        )}
 
                         {remark && (
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 italic pt-1">

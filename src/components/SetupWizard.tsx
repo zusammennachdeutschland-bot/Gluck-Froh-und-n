@@ -80,11 +80,11 @@ export const SetupWizard: React.FC = () => {
   const [showBuddyCustomizer, setShowBuddyCustomizer] = useState(false);
 
   // Step 2: School Data State (NEW STEP)
-  const [schoolName, setSchoolName] = useState(profile.schoolSettings?.schoolName || 'مدرسة الألسن للغات');
-  const [departmentName, setDepartmentName] = useState(profile.schoolSettings?.departmentName || 'قسم اللغة الألمانية (Deutsch)');
+  const [schoolName, setSchoolName] = useState(profile.schoolSettings?.schoolName || '');
+  const [departmentName, setDepartmentName] = useState(profile.schoolSettings?.departmentName || '');
   const [academicYear, setAcademicYear] = useState(profile.schoolSettings?.academicYear || '2025 / 2026');
   const [currentTerm, setCurrentTerm] = useState(profile.schoolSettings?.currentTerm || 'الفصل الدراسي الأول');
-  const [hodName, setHodName] = useState(profile.schoolSettings?.hodName || 'Abdul-rahman Ghareeb');
+  const [hodName, setHodName] = useState(profile.schoolSettings?.hodName || '');
   
   // School Attendance Days & Periods
   const [schoolPresenceDays, setSchoolPresenceDays] = useState<string[]>(() => {
@@ -250,11 +250,11 @@ export const SetupWizard: React.FC = () => {
 
     const updatedSchoolSettings: SchoolSettings = {
       ...(profile.schoolSettings || DEFAULT_SCHOOL_SETTINGS),
-      schoolName: schoolName.trim() || 'مدرسة الألسن للغات',
-      departmentName: departmentName.trim() || 'قسم اللغة الألمانية (Deutsch)',
+      schoolName: schoolName.trim(),
+      departmentName: departmentName.trim(),
       academicYear: academicYear.trim() || '2025 / 2026',
       currentTerm: currentTerm.trim() || 'الفصل الدراسي الأول',
-      hodName: hodName.trim() || 'Abdul-rahman Ghareeb',
+      hodName: hodName.trim(),
       presence: newPresence,
       periodSettings: {
         periodsCount,
@@ -891,7 +891,7 @@ export const SetupWizard: React.FC = () => {
                           type="text"
                           value={hodName}
                           onChange={(e) => setHodName(e.target.value)}
-                          placeholder="Abdul-rahman Ghareeb"
+                          placeholder="مثال: أ/ محمد عبد الله"
                           className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
@@ -1396,13 +1396,13 @@ export const SetupWizard: React.FC = () => {
                         <div className="flex items-center gap-2">
                           <span className="text-sm">🏫</span>
                           <div>
-                            <span className="font-bold text-white block text-[11.5px]">{schoolName || 'مدرسة الألسن للغات'}</span>
-                            <span className="text-[10px] text-slate-300">{departmentName} • {academicYear}</span>
+                            <span className="font-bold text-white block text-[11.5px]">{schoolName || _t('اسم المدرسة غير محدد', 'School not specified', 'Schule nicht angegeben')}</span>
+                            <span className="text-[10px] text-slate-300">{departmentName ? `${departmentName} • ` : ''}{academicYear}</span>
                           </div>
                         </div>
                         <div className="text-right">
                           <span className="text-[9.5px] text-slate-400 block">{_t('رئيس القسم (HOD)', 'HOD', 'Fachleiter')}</span>
-                          <span className="font-bold text-[11px] text-slate-200">{hodName || 'Abdul-rahman Ghareeb'}</span>
+                          <span className="font-bold text-[11px] text-slate-200">{hodName || '-'}</span>
                         </div>
                       </div>
 

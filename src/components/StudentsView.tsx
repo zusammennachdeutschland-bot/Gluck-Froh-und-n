@@ -500,8 +500,8 @@ export const StudentsView: React.FC = () => {
                     />
 
                     <div className="min-w-0 space-y-1 flex-1">
-                      {/* LINE 1: Name + Gender + Grade + English Name in ONE single row */}
-                      <div className="flex items-center gap-1.5 min-w-0 flex-nowrap">
+                      {/* LINE 1: Name + Gender + Grade in ONE clean row */}
+                      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                         <h3 className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors tracking-tight truncate max-w-[150px] sm:max-w-[220px]">
                           {student.name}
                         </h3>
@@ -549,7 +549,7 @@ export const StudentsView: React.FC = () => {
                       </div>
 
                       {/* LINE 2: Group + Contacts */}
-                      <div className="flex items-center gap-1.5 text-xs text-text-muted min-w-0 flex-nowrap overflow-hidden">
+                      <div className="flex items-center gap-1.5 text-xs text-text-muted min-w-0 flex-wrap">
                         {studentGroup ? (
                           <button
                             type="button"

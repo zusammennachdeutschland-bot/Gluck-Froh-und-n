@@ -21,11 +21,11 @@ export function generateStageFollowUpReportHtml(
     '<div style="flex: 1; background-color: #fc0;"></div>' +
   '</div>';
 
-  const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
-  const departmentName = settings.departmentName || 'قسم اللغة الألمانية';
-  const academicYear = settings.academicYear || '2026/2027';
-  const term = settings.currentTerm || 'Term 1';
-  const hodName = settings.hodName || 'عبد الرحمن غريب';
+  const schoolName = settings.schoolName || '';
+  const departmentName = settings.departmentName || '';
+  const academicYear = settings.academicYear || '';
+  const term = settings.currentTerm || '';
+  const hodName = settings.hodName || '';
 
   const periodLabel = record.periodType === 'weekly' ? 'أسبوعية' : record.periodType === 'monthly' ? 'شهرية' : 'فصلية';
   const weekLabel = record.weekNumber ? ` - الأسبوع ${record.weekNumber}` : '';
@@ -527,11 +527,11 @@ export function generateObservationReportContentHtml(
     '<div style="flex: 1; background-color: #fc0;"></div>' +
   '</div>';
   
-  const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
-  const departmentName = settings.departmentName || 'قسم اللغة الألمانية';
-  const academicYear = settings.academicYear || '2026/2027';
-  const term = settings.currentTerm || 'Term 1';
-  const hodName = settings.hodName || 'عبد الرحمن غريب';
+  const schoolName = settings.schoolName || '';
+  const departmentName = settings.departmentName || '';
+  const academicYear = settings.academicYear || '';
+  const term = settings.currentTerm || '';
+  const hodName = settings.hodName || '';
 
   const t = (en: string, ar: string) => isRtl ? ar : en;
 
@@ -1092,8 +1092,8 @@ export async function shareObservationReportViaWhatsApp(
     `📅 *التاريخ:* ${visit.visitedDate || '-'}\n` +
     `⏰ *الحصة:* ${visit.periodNumber || '-'}\n` +
     `📊 *النتيجة الكلية:* ${visit.overallScore || '-'}/75 (${visit.overallCategory || '-'})\n\n` +
-    `✍️ *ملاحظات وتوصيات المشرف:*\n${visit.consolidatedNotes || 'لا توجد ملاحظات.'}\n\n` +
-    `👨‍🏫 *المشرف:* ${settings.hodName || 'عبد الرحمن غريب'}`;
+    `✍️ *ملاحظات وتوصيات المشرف:*\n${visit.consolidatedNotes || 'لا توجد ملاحظات.'}` +
+    (settings.hodName ? `\n\n👨‍🏫 *المشرف:* ${settings.hodName}` : '');
 
   try {
     const pdf = await generateObservationReportPdfInstance(visit, settings, isRtl, lang);
@@ -1182,10 +1182,10 @@ export function generateActionPlansReportHtml(
     filteredPlans = plans.filter(p => p.status === 'RESOLVED');
   }
 
-  const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
-  const departmentName = settings.departmentName || 'قسم اللغة الألمانية (Deutschabteilung)';
-  const currentTerm = settings.currentTerm || 'الفصل الدراسي الأول';
-  const rawHodName = settings.hodName || 'عبد الرحمن غريب';
+  const schoolName = settings.schoolName || '';
+  const departmentName = settings.departmentName || '';
+  const currentTerm = settings.currentTerm || '';
+  const rawHodName = settings.hodName || '';
   const hodName = rawHodName.replace(/^أ[\.\/]\s*/, ''); // strip prefix if present to format cleanly with أ/
 
   const activeCount = filteredPlans.filter(p => p.status === 'ACTIVE').length;

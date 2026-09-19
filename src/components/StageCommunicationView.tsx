@@ -244,7 +244,7 @@ export const StageCommunicationView: React.FC = () => {
   }, [teachers, currentManagerGrades, selectedManager, schoolSettings.teacherSchedules]);
 
   // Names formatting for signature blocks
-  const rawHod = schoolSettings.hodName || 'عبد الرحمن غريب';
+  const rawHod = schoolSettings.hodName || '';
   const formattedHodName = rawHod.replace(/^أ[\.\/]\s*/, '');
   const rawManagerName = selectedManager?.name || 'مدير المرحلة';
   const formattedManagerName = rawManagerName.replace(/^أ[\.\/]\s*/, '');

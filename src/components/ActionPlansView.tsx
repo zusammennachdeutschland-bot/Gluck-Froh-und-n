@@ -1198,7 +1198,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
         const modalResolvedCount = modalFilteredPlans.filter(p => p.status === 'RESOLVED').length;
         const modalSuccessRate = modalFilteredPlans.length > 0 ? Math.round((modalResolvedCount / modalFilteredPlans.length) * 100) : 0;
         const currentStageManager = selectedPrintStageManager || schoolSettings.stageManagers?.[0]?.name || 'إدارة المرحلة';
-        const rawHodName = schoolSettings.hodName || 'عبد الرحمن غريب';
+        const rawHodName = schoolSettings.hodName || '';
         const formattedHodName = rawHodName.replace(/^أ[\.\/]\s*/, '');
 
         return (

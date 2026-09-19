@@ -211,7 +211,7 @@ export function generateSingleWeeklyPlanHtml(
   const stageDe = getGermanGradeBandLabel(plan.gradeBand);
   const stageAr = getArabicGradeBandLabel(plan.gradeBand);
   const appreciation = getWeeklySecretaryAppreciationText(weekNum, secName);
-  const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
+  const schoolName = settings.schoolName || '';
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 48 });
 
   return `<!DOCTYPE html>
@@ -582,7 +582,7 @@ export function generateAllWeeklyPlansCombinedTableHtml(
   weekNum: number
 ): string {
   const hodName = cleanHodName(settings.hodName, 'Fachleiter');
-  const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
+  const schoolName = settings.schoolName || '';
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 44 });
 
   // Order stage bands logically: 1-3, 4-6, 7-9, 10-12
@@ -1023,7 +1023,7 @@ export async function downloadSingleWeeklyPlanPdf(
     const stageDe = getGermanGradeBandLabel(plan.gradeBand);
     const stageAr = getArabicGradeBandLabel(plan.gradeBand);
     const appreciation = getWeeklySecretaryAppreciationText(weekNum, secName);
-    const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
+    const schoolName = settings.schoolName || '';
     const logoHtml = getReportSchoolLogoHtml(settings, { height: 48 });
 
     const container = document.createElement('div');
@@ -1197,7 +1197,7 @@ export async function downloadAllWeeklyPlansCombinedPdf(
 ): Promise<{ success: boolean; filename?: string; error?: string }> {
   try {
     const hodName = cleanHodName(settings.hodName, 'Fachleiter');
-    const schoolName = settings.schoolName || 'مدرسة الألسن للغات';
+    const schoolName = settings.schoolName || '';
     const logoHtml = getReportSchoolLogoHtml(settings, { height: 44 });
 
     const sortedPlans = [...plans].sort((a, b) => {

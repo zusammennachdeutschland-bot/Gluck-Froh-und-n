@@ -6224,7 +6224,7 @@ export const HodHubView: React.FC = () => {
                 </div>
                 <div className="p-2 bg-surface-hover rounded-lg">
                   <span className="block font-bold">{_t('المشرف', 'Supervisor', 'Fachleiter')}</span>
-                  <span className="font-black text-text-main truncate block mt-0.5">{schoolSettings.hodName || 'عبد الرحمن غريب'}</span>
+                  <span className="font-black text-text-main truncate block mt-0.5">{schoolSettings.hodName || '-'}</span>
                 </div>
               </div>
             </div>

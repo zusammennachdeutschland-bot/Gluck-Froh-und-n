@@ -434,13 +434,15 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           </button>
         </div>
 
-        {/* Mismatch Warning (Subtle 1-line badge if applicable) */}
-        {hasTimeMismatch && (
-          <div className="mx-4 mt-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/25 rounded-xl text-[11px] text-amber-700 dark:text-amber-300 font-bold flex items-center gap-1.5 shrink-0">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-            <span>تنبيه: وقت الحصة ({lesson?.time}) يختلف عن موعد الجروب ({rawTime})، وتم اعتماد موعد الجروب.</span>
-          </div>
-        )}
+        {/* Scrollable Content Body */}
+        <div className="flex-1 overflow-y-auto min-h-0 overscroll-contain flex flex-col">
+          {/* Mismatch Warning (Subtle 1-line badge if applicable) */}
+          {hasTimeMismatch && (
+            <div className="mx-4 mt-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/25 rounded-xl text-[11px] text-amber-700 dark:text-amber-300 font-bold flex items-center gap-1.5 shrink-0">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span>تنبيه: وقت الحصة ({lesson?.time}) يختلف عن موعد الجروب ({rawTime})، وتم اعتماد موعد الجروب.</span>
+            </div>
+          )}
 
         {/* 2. Destination Strip - Clean & Expandable */}
         <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900/40 border-b border-surface-border text-xs flex items-center justify-between gap-2 shrink-0">
@@ -741,7 +743,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
         </div>
 
         {/* 4. Message Box - The Hero View */}
-        <div className="px-4 pb-2 flex-1 flex flex-col min-h-0">
+        <div className="px-4 pb-3 flex-1 flex flex-col min-h-0">
           <div className="flex items-center justify-between text-[11px] text-text-muted mb-1 px-1">
             <span className="font-bold flex items-center gap-1 text-text-main">
               <MessageSquare className="w-3.5 h-3.5 text-primary" />
@@ -759,11 +761,11 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           </div>
 
           {/* Message Preview Bubble */}
-          <div className="relative bg-primary-soft/20 border border-primary-border/40 rounded-2xl p-3 sm:p-3.5 shadow-2xs flex-1 flex flex-col min-h-[140px] max-h-[240px]">
+          <div className="relative bg-primary-soft/20 border border-primary-border/40 rounded-2xl p-3 sm:p-3.5 shadow-2xs flex-1 flex flex-col min-h-[110px] sm:min-h-[140px]">
             <textarea
               value={activeMessage}
               onChange={(e) => setCustomMessage(e.target.value)}
-              className="w-full flex-1 bg-transparent text-text-main font-medium text-xs sm:text-[13px] leading-relaxed resize-none focus:outline-none"
+              className="w-full flex-1 bg-transparent text-text-main font-medium text-xs sm:text-[13px] leading-relaxed resize-none focus:outline-none min-h-[80px]"
               dir="rtl"
             />
             <div className="flex items-center justify-between border-t border-primary-border/30 pt-1.5 text-[10px] text-text-muted select-none">
@@ -774,6 +776,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
             </div>
           </div>
         </div>
+        </div>
 
         {/* 5. Action Footer - Minimalist & Punchy */}
         <div className="p-3 sm:p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-surface-border flex flex-col gap-2 shrink-0 pb-safe-bottom sm:pb-4">
@@ -782,14 +785,14 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
             <button
               type="button"
               onClick={handleSendWhatsApp}
-              className="flex-1 bg-primary hover:bg-primary-hover text-white font-black text-xs sm:text-sm py-2.5 sm:py-3 px-4 rounded-xl shadow-lg shadow-primary/20 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
+              className="flex-1 bg-primary hover:bg-primary-hover text-white font-black text-xs sm:text-sm py-2.5 sm:py-3 px-3 sm:px-4 rounded-xl shadow-lg shadow-primary/20 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[44px] min-w-0"
             >
-              <Send className="w-4 h-4 fill-white" />
-              <span>
+              <Send className="w-4 h-4 fill-white shrink-0" />
+              <span className="truncate">
                 {isMultiStudentGroup || (targetGroup && sendMode === 'group')
                   ? ((whatsAppGroupLinkInput.trim() || groupWhatsAppLink)
                       ? `إرسال لجروب الواتساب (${targetGroup?.name || 'الجروب'})`
-                      : `نسخ وفتح واتساب (${targetGroup?.name || 'الجروب'})`)
+                      : `فتح واتساب (${targetGroup?.name || 'الجروب'})`)
                   : `إرسال عبر واتساب`}
               </span>
             </button>
@@ -803,12 +806,12 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
             >
               {copied ? (
                 <>
-                  <Check className="w-4 h-4 text-primary" />
+                  <Check className="w-4 h-4 text-primary shrink-0" />
                   <span className="text-primary font-bold">تم النسخ</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-4 h-4 text-text-muted" />
+                  <Copy className="w-4 h-4 text-text-muted shrink-0" />
                   <span>نسخ</span>
                 </>
               )}
@@ -821,9 +824,9 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleSendToFirstParent(firstStudent)}
-                className="text-[11px] font-bold text-text-muted hover:text-primary transition-colors cursor-pointer inline-flex items-center gap-1"
+                className="text-[11px] font-bold text-text-muted hover:text-primary transition-colors cursor-pointer inline-flex items-center gap-1 truncate max-w-full"
               >
-                <span>أو إرسال فردي لولي أمر ({firstStudent.name})</span>
+                <span className="truncate">أو إرسال فردي لولي أمر ({firstStudent.name})</span>
               </button>
             </div>
           )}

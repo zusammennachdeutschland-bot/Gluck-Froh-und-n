@@ -569,23 +569,36 @@ export const LessonControlModal: React.FC = () => {
       if (!finalStudentAttendance[st.id]) {
         finalStudentAttendance[st.id] = 'present';
       }
-      if (!finalStudentHomeworkDone[st.id]) {
-        finalStudentHomeworkDone[st.id] = 'yes';
-      }
-      if (finalStudentDictationGrade[st.id] === undefined) {
-        finalStudentDictationGrade[st.id] = 10;
-      }
-      if (finalStudentExamGrade[st.id] === undefined) {
-        finalStudentExamGrade[st.id] = 10;
+      if (finalStudentAttendance[st.id] === 'absent') {
+        // If absent: strictly REMOVE any homework done or grades!
+        delete finalStudentHomeworkDone[st.id];
+        delete finalStudentDictationGrade[st.id];
+        delete finalStudentExamGrade[st.id];
+      } else {
+        if (!finalStudentHomeworkDone[st.id]) {
+          finalStudentHomeworkDone[st.id] = 'yes';
+        }
+        if (finalStudentDictationGrade[st.id] === undefined) {
+          finalStudentDictationGrade[st.id] = -1; // -1 means "مكانش فيه", not 10!
+        }
+        if (finalStudentExamGrade[st.id] === undefined) {
+          finalStudentExamGrade[st.id] = -1; // -1 means "مكانش فيه", not 10!
+        }
       }
       if (finalStudentNotes[st.id] === undefined) {
         finalStudentNotes[st.id] = '';
       }
     });
 
+    const isSingleStudentAbsent = isQuick
+      ? (studentAttendance[qId] === 'absent')
+      : (activeLessonStudents.length === 1 && finalStudentAttendance[activeLessonStudents[0].id] === 'absent');
+
+    const calculatedAttendanceStatus = isSingleStudentAbsent ? 'absent' : (attendance || 'present');
+
     const reportData: LessonReport = {
-      attendanceStatus: attendance || 'present',
-      studentAttendance: isQuick ? (Object.keys(studentAttendance).length > 0 ? studentAttendance : { [qId]: 'present' }) : finalStudentAttendance,
+      attendanceStatus: calculatedAttendanceStatus,
+      studentAttendance: isQuick ? (Object.keys(studentAttendance).length > 0 ? studentAttendance : { [qId]: calculatedAttendanceStatus }) : finalStudentAttendance,
       homeworkStatus: 'assigned',
       homeworkTitle: defaultHw,
       homeworkDescription: defaultHw,
@@ -596,9 +609,9 @@ export const LessonControlModal: React.FC = () => {
       previousHomeworkDescription: (lessonPreviousHomework || detectedPreviousHomework || '').trim() || undefined,
       recordingLink: lessonRecordingLink.trim() || undefined,
       recordingLink2: lessonRecordingLink2.trim() || undefined,
-      studentHomeworkDone: isQuick ? (Object.keys(studentHomeworkDone).length > 0 ? studentHomeworkDone : { [qId]: 'yes' }) : finalStudentHomeworkDone,
-      studentDictationGrade: isQuick ? (Object.keys(studentDictationGrade).length > 0 ? studentDictationGrade : { [qId]: 10 }) : finalStudentDictationGrade,
-      studentExamGrade: isQuick ? (Object.keys(studentExamGrade).length > 0 ? studentExamGrade : { [qId]: 10 }) : finalStudentExamGrade,
+      studentHomeworkDone: isQuick ? (isSingleStudentAbsent ? {} : (Object.keys(studentHomeworkDone).length > 0 ? studentHomeworkDone : { [qId]: 'yes' })) : finalStudentHomeworkDone,
+      studentDictationGrade: isQuick ? (isSingleStudentAbsent ? {} : (Object.keys(studentDictationGrade).length > 0 ? studentDictationGrade : { [qId]: -1 })) : finalStudentDictationGrade,
+      studentExamGrade: isQuick ? (isSingleStudentAbsent ? {} : (Object.keys(studentExamGrade).length > 0 ? studentExamGrade : { [qId]: -1 })) : finalStudentExamGrade,
       studentNotes: isQuick ? (Object.keys(studentNotes).length > 0 ? studentNotes : { [qId]: selectedLesson.quickNotes || '' }) : finalStudentNotes,
       studentPerformance,
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -610,7 +623,8 @@ export const LessonControlModal: React.FC = () => {
       sessionNumber: currentSessionNumber,
       totalSessionsInPackage: cycleTotalSessions,
       recordingLink: lessonRecordingLink.trim() || undefined,
-      recordingLink2: lessonRecordingLink2.trim() || undefined
+      recordingLink2: lessonRecordingLink2.trim() || undefined,
+      report: reportData
     });
     endActiveLessonTimer();
     storage.removeItem(`dl_draft_report_${selectedLesson.id}`);
@@ -1536,6 +1550,9 @@ export const LessonControlModal: React.FC = () => {
                                     type="button"
                                     onClick={() => {
                                       setStudentAttendance(prev => ({ ...prev, [st.id]: 'present' }));
+                                      if (activeLessonStudents.length === 1) {
+                                        setAttendance('present');
+                                      }
                                     }}
                                     className={`px-2.5 py-0.5 rounded-md text-[10px] font-black cursor-pointer transition-all ${
                                       stAtt === 'present'
@@ -1549,6 +1566,12 @@ export const LessonControlModal: React.FC = () => {
                                     type="button"
                                     onClick={() => {
                                       setStudentAttendance(prev => ({ ...prev, [st.id]: 'absent' }));
+                                      setStudentHomeworkDone(prev => { const n = { ...prev }; delete n[st.id]; return n; });
+                                      setStudentDictationGrade(prev => { const n = { ...prev }; delete n[st.id]; return n; });
+                                      setStudentExamGrade(prev => { const n = { ...prev }; delete n[st.id]; return n; });
+                                      if (activeLessonStudents.length === 1) {
+                                        setAttendance('absent');
+                                      }
                                     }}
                                     className={`px-2.5 py-0.5 rounded-md text-[10px] font-black cursor-pointer transition-all ${
                                       stAtt === 'absent'
@@ -1889,8 +1912,14 @@ export const LessonControlModal: React.FC = () => {
             totalSessionsInPackage: cycleTotalSessions || selectedLesson.totalSessionsInPackage || 4,
             report: {
               ...(selectedLesson.report || {}),
-              attendanceStatus: attendance,
-              studentAttendance: studentAttendance,
+              attendanceStatus: (activeLessonStudents.length === 1 && (studentAttendance[activeLessonStudents[0].id] === 'absent' || (isQuick && studentAttendance[targetStudent?.id || selectedLesson.studentId || selectedLesson.id || 'quick_student'] === 'absent'))) 
+                ? 'absent' 
+                : (selectedLesson.report?.attendanceStatus || attendance || 'present'),
+              studentAttendance: Object.keys(studentAttendance).length > 0 ? studentAttendance : (selectedLesson.report?.studentAttendance || {}),
+              studentHomeworkDone: selectedLesson.report?.studentHomeworkDone || studentHomeworkDone,
+              studentDictationGrade: selectedLesson.report?.studentDictationGrade || studentDictationGrade,
+              studentExamGrade: selectedLesson.report?.studentExamGrade || studentExamGrade,
+              studentNotes: selectedLesson.report?.studentNotes || studentNotes,
               homeworkStatus,
               homeworkTitle: lessonNextHomework || homeworkTitle,
               homeworkDescription: lessonNextHomework || homeworkDescription,

@@ -20,13 +20,13 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
     term,
     month = '',
     reportDate,
-    hodName = 'عبد الرحمن غريب',
+    hodName = '',
     complaints,
     reportType,
     settings,
   } = data;
 
-  const schoolName = settings?.schoolName || 'مدرسة الألسن للغات';
+  const schoolName = settings?.schoolName || '';
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 50 });
 
   const teacherToStudentCount = complaints.filter(c => c.direction === 'TEACHER_TO_STUDENT').length;

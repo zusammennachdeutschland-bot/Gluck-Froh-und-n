@@ -67,16 +67,7 @@ export const ScheduleView: React.FC = () => {
     return map;
   }, [activeLessons]);
 
-  const hasConflict = (lessonId: string) => {
-    return dayConflicts.includes(lessonId);
-  };
-
-  const checkTimeConflict = (date: string, time: string, excludeLessonId?: string) => {
-    const dummy = { id: 'dummy', date, time, durationMinutes: 60 };
-    return activeLessons.some(l => l.id !== excludeLessonId && l.status !== 'cancelled' && checkOverlap(dummy, l));
-  };
-
-  const dayConflicts = useMemo(() => {
+  const allConflicts = useMemo(() => {
     const conflicts: string[] = [];
     const nonCancelled = activeLessons.filter(l => l.status !== 'cancelled');
     
@@ -101,12 +92,26 @@ export const ScheduleView: React.FC = () => {
     return conflicts;
   }, [activeLessons]);
 
+  const hasConflict = (lessonId: string) => {
+    return allConflicts.includes(lessonId);
+  };
+
+  const checkTimeConflict = (date: string, time: string, excludeLessonId?: string) => {
+    const dummy = { id: 'dummy', date, time, durationMinutes: 60 };
+    return activeLessons.some(l => l.id !== excludeLessonId && l.status !== 'cancelled' && checkOverlap(dummy, l));
+  };
+
   // DAY VIEW CALCULATIONS
   const dayLessons = useMemo(() => {
     return activeLessons
       .filter((l) => l.date === selectedDate)
       .sort((a, b) => a.time.localeCompare(b.time));
   }, [activeLessons, selectedDate]);
+
+  // Specific conflicts for the currently selected day only
+  const selectedDayConflicts = useMemo(() => {
+    return dayLessons.filter((l) => allConflicts.includes(l.id));
+  }, [dayLessons, allConflicts]);
 
   // WEEK VIEW CALCULATIONS
   const weekDays = useMemo(() => {
@@ -437,12 +442,12 @@ export const ScheduleView: React.FC = () => {
       )}
 
       {/* CONFLICT ALERT BANNER */}
-      {dayConflicts.length > 0 && calendarView === 'day' && (
-        <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-lg p-2.5 flex items-center justify-between gap-2 animate-pulse">
-          <div className="flex items-center gap-2 text-primary dark:text-primary text-xs font-bold">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-primary dark:text-primary" />
+      {selectedDayConflicts.length > 0 && calendarView === 'day' && (
+        <div className="bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 rounded-lg p-2.5 flex items-center justify-between gap-2 animate-pulse">
+          <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 text-xs font-bold">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
             <span>
-              {t('schedule_conflict_alert')}: {selectedDate}
+              {t('schedule_conflict_alert')}: {selectedDate} ({selectedDayConflicts.length} {selectedDayConflicts.length === 1 ? 'حصة متداخلة' : 'حصص متداخلة'})
             </span>
           </div>
         </div>
@@ -551,13 +556,13 @@ export const ScheduleView: React.FC = () => {
         <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs space-y-2">
           <div className="flex items-center justify-between text-xs font-bold border-b border-slate-100 dark:border-surface-border pb-1.5">
             <span className="text-slate-500 uppercase text-[11px]">({dayLessons.length}) {t('schedule_title')}</span>
-            {dayConflicts.length === 0 ? (
-              <span className="text-primary dark:text-primary flex items-center gap-1 text-[10px]">
+            {selectedDayConflicts.length === 0 ? (
+              <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 text-[10px] font-bold">
                 <CheckCircle2 className="w-3 h-3" /> {t('schedule_no_conflicts')}
               </span>
             ) : (
-              <span className="text-primary dark:text-primary flex items-center gap-1 text-[10px] font-bold">
-                <AlertTriangle className="w-3 h-3" /> {t('schedule_conflict')}
+              <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1 text-[10px] font-bold">
+                <AlertTriangle className="w-3 h-3" /> {t('schedule_conflict')} ({selectedDayConflicts.length})
               </span>
             )}
           </div>
@@ -700,37 +705,34 @@ export const ScheduleView: React.FC = () => {
                         ? 'bg-rose-500/5 dark:bg-rose-500/10 border-rose-500/20 opacity-75'
                         : 'bg-surface hover:bg-surface-hover/60 border-surface-border/90 dark:border-surface-border hover:border-primary/40'
                     }`}>
-                      <div className="space-y-1">
-                        {/* Row 1: Student/Group Name + Badge + Actions */}
-                        <div className="flex items-center justify-between gap-2">
+                      <div className="space-y-1.5">
+                        {/* Row 1: Student/Group Name + Actions */}
+                        <div className="flex items-center justify-between gap-2 min-w-0">
                           <div
                             onClick={() => openLessonControl(lesson)}
-                            className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
+                            className="min-w-0 flex-1 cursor-pointer"
                           >
                             {lesson.groupId && groups.find(g => g.id === lesson.groupId) ? (
-                              <div className="flex items-center gap-1.5 min-w-0">
+                              <div className="flex items-baseline gap-1.5 min-w-0">
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setSelectedGroupForModal(groups.find(g => g.id === lesson.groupId) || null);
                                   }}
-                                  className="text-sm sm:text-[15px] font-black hover:text-primary hover:underline transition-colors truncate cursor-pointer text-start inline-flex items-center gap-1"
+                                  className="text-sm sm:text-[15px] font-black hover:text-primary hover:underline transition-colors truncate cursor-pointer text-start block max-w-full"
                                   title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
                                 >
-                                  <span className="truncate">{groups.find(g => g.id === lesson.groupId)?.name}</span>
-                                  <span className="text-[9.5px] font-bold px-1.5 py-0.2 rounded bg-primary-soft text-primary border border-primary-border shrink-0">
-                                    {_t('مجموعة', 'Group', 'Gruppe')}
-                                  </span>
+                                  {groups.find(g => g.id === lesson.groupId)?.name}
                                 </button>
                                 {lesson.studentName && lesson.studentName !== groups.find(g => g.id === lesson.groupId)?.name && (
-                                  <span className="text-xs text-text-muted truncate">
+                                  <span className="text-xs text-text-muted truncate shrink-0">
                                     ({lesson.studentName})
                                   </span>
                                 )}
                               </div>
                             ) : (
-                              <h4 className={`text-sm sm:text-[15px] font-bold truncate transition-colors ${
+                              <h4 className={`text-sm sm:text-[15px] font-black truncate transition-colors ${
                                 isCompleted
                                   ? 'line-through text-text-muted/70 dark:text-slate-500'
                                   : isCancelled
@@ -740,38 +742,6 @@ export const ScheduleView: React.FC = () => {
                                 {lesson.studentName || lesson.groupName || lesson.title}
                               </h4>
                             )}
-
-                            {/* Location Badge */}
-                            {lesson.type === 'online' ? (
-                              <span className="text-[10px] sm:text-[11px] font-medium text-primary bg-primary-soft dark:bg-primary-soft/80 border border-primary-border/60 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
-                                <Video className="w-3 h-3" />
-                                <span>{t('next_action_online')}</span>
-                              </span>
-                            ) : (
-                              <span className="text-[10px] sm:text-[11px] font-medium text-primary bg-primary-soft dark:bg-primary-soft/80 border border-primary-border/60 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
-                                <MapPin className="w-3 h-3" />
-                                <span>{t('next_action_offline')}</span>
-                              </span>
-                            )}
-
-                            {isCompleted && (
-                              <span className="text-[9px] font-bold uppercase bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 shrink-0">
-                                <CheckCircle2 className="w-2.5 h-2.5 text-slate-500" />
-                                {t('status_completed')}
-                              </span>
-                            )}
-
-                            {isCancelled && (
-                              <span className="text-[9px] font-bold uppercase bg-rose-500/10 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded-md shrink-0">
-                                {t('status_cancelled')}
-                              </span>
-                            )}
-
-                            {conflict && (
-                              <span className="text-[9px] font-bold uppercase bg-amber-500 text-white px-1.5 py-0.5 rounded-md shrink-0">
-                                {t('schedule_conflict')}
-                              </span>
-                            )}
                           </div>
 
                           {/* Action Buttons (Quiet Calm Colors) */}
@@ -780,7 +750,7 @@ export const ScheduleView: React.FC = () => {
                               type="button"
                               onClick={() => setReminderLesson(lesson)}
                               title="إرسال تذكير الحصة"
-                              className="p-1.5 text-emerald-600/80 hover:text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition-all cursor-pointer"
+                              className="p-1.5 text-primary hover:text-primary-hover hover:bg-primary-soft/80 rounded-lg transition-all cursor-pointer"
                             >
                               <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             </button>
@@ -805,33 +775,93 @@ export const ScheduleView: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Row 2: Subject / Lesson Topic */}
+                        {/* Row 2: Badges & Details (Group, Location, Grade, Session, Recurrence, Status) */}
                         <div
                           onClick={() => openLessonControl(lesson)}
-                          className="cursor-pointer text-xs text-text-muted dark:text-slate-400 font-normal leading-tight"
+                          className="flex items-center gap-1.5 text-xs text-text-muted font-medium cursor-pointer flex-wrap"
                         >
-                          {lesson.notes || (lesson.groupName && lesson.groupName !== lesson.title ? lesson.groupName : null) || _t('حصة تعليمية', 'Lesson', 'Lektion')}
-                        </div>
+                          {/* Group / Private Badge */}
+                          {lesson.groupId && groups.find(g => g.id === lesson.groupId) && (
+                            <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-primary-soft text-primary border border-primary-border shrink-0">
+                              {_t('مجموعة', 'Group', 'Gruppe')}
+                            </span>
+                          )}
 
-                        {/* Row 3: Metadata in One Neat Horizontal Row */}
-                        <div
-                          onClick={() => openLessonControl(lesson)}
-                          className="flex items-center gap-2 text-xs text-text-muted font-medium cursor-pointer whitespace-nowrap overflow-x-auto no-scrollbar pt-0.5"
-                        >
-                          <span>{lesson.grade}</span>
+                          {/* Location Badge */}
+                          {lesson.type === 'online' ? (
+                            <span className="text-[9.5px] sm:text-[10px] font-bold text-primary bg-primary-soft dark:bg-primary-soft/80 border border-primary-border/60 px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0">
+                              <Video className="w-3 h-3" />
+                              <span>{t('next_action_online')}</span>
+                            </span>
+                          ) : (
+                            <span className="text-[9.5px] sm:text-[10px] font-bold text-primary bg-primary-soft dark:bg-primary-soft/80 border border-primary-border/60 px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0">
+                              <MapPin className="w-3 h-3" />
+                              <span>{t('next_action_offline')}</span>
+                            </span>
+                          )}
+
+                          {/* Grade */}
+                          {lesson.grade && (
+                            <>
+                              <span className="text-text-muted/40 text-[10px]">•</span>
+                              <span className="text-[11px] font-semibold text-text-main">{lesson.grade}</span>
+                            </>
+                          )}
+
+                          {/* Session Progress */}
                           {(lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) ? (
                             <>
                               <span className="text-text-muted/40 text-[10px]">•</span>
-                              <span className="font-semibold text-primary">
+                              <span className="text-[11px] font-bold text-primary">
                                 Session {lesson.sessionNumber}/{lesson.totalSessionsInPackage}
                               </span>
                             </>
                           ) : null}
+
+                          {/* Weekly */}
                           <span className="text-text-muted/40 text-[10px]">•</span>
-                          <span className="font-semibold text-primary">
+                          <span className="text-[11px] font-semibold text-text-muted">
                             {t('schedule_weekly')}
                           </span>
+
+                          {/* Status Badges */}
+                          {isCompleted && (
+                            <span className="text-[9px] font-bold uppercase bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 shrink-0">
+                              <CheckCircle2 className="w-2.5 h-2.5 text-slate-500" />
+                              {t('status_completed')}
+                            </span>
+                          )}
+
+                          {isCancelled && (
+                            <span className="text-[9px] font-bold uppercase bg-rose-500/10 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded-md shrink-0">
+                              {t('status_cancelled')}
+                            </span>
+                          )}
+
+                          {conflict && (
+                            <span className="text-[9px] font-bold uppercase bg-amber-500 text-white px-1.5 py-0.5 rounded-md shrink-0">
+                              {t('schedule_conflict')}
+                            </span>
+                          )}
                         </div>
+
+                        {/* Row 3: Custom Notes or Specific Topic (ONLY if distinct notes exist) */}
+                        {(() => {
+                          const targetGroupName = groups.find(g => g.id === lesson.groupId)?.name || lesson.groupName;
+                          const hasCustomNote = lesson.notes && 
+                            lesson.notes.trim() !== '' && 
+                            lesson.notes.trim() !== targetGroupName && 
+                            lesson.notes.trim() !== lesson.title;
+                          if (!hasCustomNote) return null;
+                          return (
+                            <div
+                              onClick={() => openLessonControl(lesson)}
+                              className="cursor-pointer text-[11px] text-text-muted dark:text-slate-400 font-normal leading-tight pt-0.5 truncate"
+                            >
+                              📝 {lesson.notes}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
