@@ -36,10 +36,14 @@ jobs:
       - name: Build web assets
         run: npm run build
 
-      - name: Build AppImage
-        run: npx electron-builder --linux AppImage --publish never
+      - name: Prune development dependencies before packaging
+        run: npm prune --omit=dev --legacy-peer-deps || true
+
+      - name: Build AppImage (Maximum Compression)
+        run: npx electron-builder --linux AppImage --x64 --publish never
         env:
           USE_HARD_LINKS: "false"
+          ELECTRON_BUILDER_COMPRESSION: "maximum"
 
       - name: Verify AppImage Generated
         run: |

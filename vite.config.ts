@@ -79,6 +79,8 @@ export default defineConfig(() => {
       entries: ['index.html'],
     },
     build: {
+      cssMinify: true,
+      minify: 'esbuild' as const,
     },
     resolve: {
       alias: {

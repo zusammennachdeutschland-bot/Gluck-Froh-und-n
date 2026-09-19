@@ -13,13 +13,26 @@
     "directories": {
       "output": "release"
     },
+    "compression": "maximum",
+    "asar": true,
     "linux": {
-      "target": "AppImage",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
       "category": "Education"
     },
+    "appImage": {
+      "license": null
+    },
+    "electronLanguages": ["en", "ar", "de"],
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "!dist/server.cjs.map",
+      "!**/*.map"
     ]
   },
   "scripts": {
