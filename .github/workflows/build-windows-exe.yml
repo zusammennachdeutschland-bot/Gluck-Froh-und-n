@@ -33,6 +33,12 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm install --legacy-peer-deps
 
+      - name: Install Wine for Windows cross-compilation
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends wine wine64 wine32
+
       - name: Build web assets
         run: npm run build
 
