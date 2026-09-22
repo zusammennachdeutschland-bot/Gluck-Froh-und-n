@@ -97,6 +97,7 @@ export const HodStudentsView: React.FC = () => {
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
   const [promptTargetGrade, setPromptTargetGrade] = useState<string>('');
   const [promptTargetClass, setPromptTargetClass] = useState<string>('');
+  const [promptLanguage, setPromptLanguage] = useState<'ar' | 'en' | 'bilingual'>('ar');
   const [promptCopied, setPromptCopied] = useState(false);
   const [pastedAiJsonText, setPastedAiJsonText] = useState('');
   const [pasteError, setPasteError] = useState<string | null>(null);
@@ -195,6 +196,38 @@ export const HodStudentsView: React.FC = () => {
     });
     return Array.from(set).sort(compareClassCodes);
   }, [students]);
+
+  // Classes from the school timetable schedule
+  const scheduleClasses = useMemo(() => {
+    const set = new Set<string>();
+    const schedules = profile?.schoolSettings?.teacherSchedules || {};
+    Object.values(schedules).forEach((teacherDays: any) => {
+      if (teacherDays && typeof teacherDays === 'object') {
+        Object.values(teacherDays).forEach((periods: any) => {
+          if (Array.isArray(periods)) {
+            periods.forEach((p: any) => {
+              if (p?.className) set.add(normalizeClassCode(p.className));
+            });
+          }
+        });
+      }
+    });
+    const mainSchedule = profile?.schoolSettings?.schedule || {};
+    Object.values(mainSchedule).forEach((periods: any) => {
+      if (Array.isArray(periods)) {
+        periods.forEach((p: any) => {
+          if (p?.className) set.add(normalizeClassCode(p.className));
+        });
+      }
+    });
+    return Array.from(set).sort(compareClassCodes);
+  }, [profile?.schoolSettings]);
+
+  // Combined known classes from both student roster & timetable schedules
+  const allKnownClasses = useMemo(() => {
+    const set = new Set<string>([...uniqueClasses, ...scheduleClasses]);
+    return Array.from(set).sort(compareClassCodes);
+  }, [uniqueClasses, scheduleClasses]);
 
   // Unique Grades/Levels list (e.g., Grade 5, Grade 6...)
   const uniqueGrades = useMemo(() => {
@@ -686,10 +719,10 @@ export const HodStudentsView: React.FC = () => {
     showToast(_t('تم تصدير القائمة بنجاح (CSV)', 'Bilingual roster exported to CSV', 'CSV exportiert'));
   };
 
-  // Computed Dynamic AI Prompt text based on selected target grade / class
+  // Computed Dynamic AI Prompt text based on selected target grade / class and language
   const activePromptText = useMemo(() => {
-    return generateUnifiedGermanPrompt(promptTargetGrade || undefined, promptTargetClass || undefined);
-  }, [promptTargetGrade, promptTargetClass]);
+    return generateUnifiedGermanPrompt(promptTargetGrade || undefined, promptTargetClass || undefined, promptLanguage);
+  }, [promptTargetGrade, promptTargetClass, promptLanguage]);
 
   // Copy System Prompt Text for External AI
   const handleCopyPromptText = () => {
@@ -1882,8 +1915,33 @@ export const HodStudentsView: React.FC = () => {
                   <span>{_t('تخصيص ونسخ البرومبت (Prompt Customization & Copy):', 'Customize & Copy Prompt:', 'Prompt anpassen & kopieren:')}</span>
                 </label>
 
-                {/* Target Grade / Class Optional Quick Selectors */}
-                <div className="flex items-center gap-1.5">
+                {/* Target Grade / Class & Language Quick Selectors */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {/* Language switch */}
+                  <div className="flex items-center gap-0.5 bg-surface-hover p-0.5 rounded-lg border border-surface-border">
+                    <button
+                      type="button"
+                      onClick={() => setPromptLanguage('ar')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${promptLanguage === 'ar' ? 'bg-primary text-white shadow-xs' : 'text-text-muted hover:text-text-main'}`}
+                    >
+                      العربية
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPromptLanguage('en')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${promptLanguage === 'en' ? 'bg-primary text-white shadow-xs' : 'text-text-muted hover:text-text-main'}`}
+                    >
+                      English
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPromptLanguage('bilingual')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${promptLanguage === 'bilingual' ? 'bg-primary text-white shadow-xs' : 'text-text-muted hover:text-text-main'}`}
+                    >
+                      {_t('ثنائي', 'Bilingual', 'Zweisprachig')}
+                    </button>
+                  </div>
+
                   <select
                     value={promptTargetGrade}
                     onChange={e => {
@@ -1894,7 +1952,7 @@ export const HodStudentsView: React.FC = () => {
                     }}
                     className="px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10.5px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
                   >
-                    <option value="">{_t('المرحلة المستهدفة (تلقائي)', 'Target Grade (Auto)', 'Zielstufe (Auto)')}</option>
+                    <option value="">{_t('المرحلة (تلقائي)', 'Grade (Auto)', 'Stufe (Auto)')}</option>
                     {allSchoolGrades.map(g => (
                       <option key={`prompt-g-${g}`} value={g}>الصف {g} (Grade {g})</option>
                     ))}
@@ -1905,8 +1963,52 @@ export const HodStudentsView: React.FC = () => {
                     value={promptTargetClass}
                     onChange={e => setPromptTargetClass(e.target.value)}
                     placeholder={_t('الفصل (مثال: 10A)', 'Class (e.g. 10A)', 'Klasse (z.B. 10A)')}
-                    className="w-24 px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10.5px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-text-muted/60"
+                    className="w-24 px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10.5px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-text-muted/60 uppercase"
                   />
+                </div>
+              </div>
+
+              {/* Quick Pick Known Classes from Timetable & Student Roster */}
+              {allKnownClasses.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  <span className="text-[10px] text-text-muted font-bold">
+                    {_t('فصول الجدول المسجلة:', 'Classes from Schedule:', 'Klassen aus Stundenplan:')}
+                  </span>
+                  {allKnownClasses.map(cls => (
+                    <button
+                      key={`p-cls-${cls}`}
+                      type="button"
+                      onClick={() => {
+                        setPromptTargetClass(cls);
+                        const gr = extractGradeFromClass(cls);
+                        if (gr) setPromptTargetGrade(gr);
+                      }}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                        promptTargetClass.toUpperCase() === cls.toUpperCase()
+                          ? 'bg-primary text-white shadow-xs'
+                          : 'bg-surface border border-surface-border text-text-muted hover:text-text-main hover:border-primary/50'
+                      }`}
+                    >
+                      {cls}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Strict Class Unification Banner */}
+              <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-2 text-[10.5px] text-emerald-800 dark:text-emerald-300 font-semibold leading-relaxed">
+                <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-black text-emerald-950 dark:text-emerald-200">
+                    {_t('توحيد أسماء الفصول مشدد بالبرومبت:', 'Strict Class Code Standardization:', 'Strenge Klassencode-Standardisierung:')}
+                  </span>{' '}
+                  <span>
+                    {_t(
+                      'البرومبت يُلزم الذكاء الاصطناعي باستخراج طلاب الألماني فقط وكتابة الفصل بالصيغة القياسية الموحدة [رقم الصف][حرف الفصل] (مثل 10A, 11B, 7A...) مع تحويل الحروف العربية (أ=A، ب=B) والمراحل (أولى ثانوي=10) لضمان الربط التام مع جدول الحصص.',
+                      'The prompt instructs AI to extract German students with standardized class codes [Grade][Section] (e.g. 10A, 11B, 7A) matching timetable lessons.',
+                      'Der Prompt weist die KI an, Klassencodes einheitlich (z.B. 10A, 11B, 7A) passend zum Stundenplan zu extrahieren.'
+                    )}
+                  </span>
                 </div>
               </div>
 
@@ -2062,17 +2164,50 @@ export const HodStudentsView: React.FC = () => {
               {/* Class & Gender */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] font-bold text-text-main mb-1">
-                    {_t('الفصل (Class):', 'Class:', 'Klasse:')}
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold text-text-main">
+                      {_t('الفصل (Class):', 'Class:', 'Klasse:')}
+                    </label>
+                    {studentForm.gradeClass && (
+                      <span className="text-[10px] text-primary font-mono font-bold">
+                        {normalizeClassCode(studentForm.gradeClass)}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     required
                     value={studentForm.gradeClass}
                     onChange={e => setStudentForm({ ...studentForm, gradeClass: e.target.value.toUpperCase() })}
-                    placeholder="5A, 6B..."
+                    onBlur={() => {
+                      if (studentForm.gradeClass.trim()) {
+                        setStudentForm(prev => ({ ...prev, gradeClass: normalizeClassCode(prev.gradeClass) }));
+                      }
+                    }}
+                    placeholder="10A, 11B, 7A..."
                     className="w-full px-2 py-1 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary uppercase"
                   />
+                  <p className="text-[9.5px] text-text-muted mt-0.5">
+                    {_t('الصيغة الموحدة: [رقم الصف][حرف الفصل] (مثل: 10A، 11B)', 'Unified: [Grade][Section] (e.g. 10A, 11B)', 'Format: [Stufe][Klasse]')}
+                  </p>
+                  {allKnownClasses.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1 max-h-16 overflow-y-auto pt-0.5">
+                      {allKnownClasses.map(c => (
+                        <button
+                          key={`qp-${c}`}
+                          type="button"
+                          onClick={() => setStudentForm({ ...studentForm, gradeClass: c })}
+                          className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold font-mono transition-all cursor-pointer ${
+                            normalizeClassCode(studentForm.gradeClass) === c
+                              ? 'bg-primary text-white shadow-xs'
+                              : 'bg-surface border border-surface-border text-text-muted hover:text-text-main hover:bg-surface-hover'
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div>

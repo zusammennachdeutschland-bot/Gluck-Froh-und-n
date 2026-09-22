@@ -31,6 +31,7 @@ import { StageCommunicationView } from './StageCommunicationView';
 import { TeacherAttendanceModal } from './TeacherAttendanceModal';
 import { DetailedStaffAttendanceModal } from './DetailedStaffAttendanceModal';
 import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
+import { normalizeClassCode, generateUnifiedScheduleImportPrompt } from '../utils/classNormalizer';
 
 const QUICK_TEACHER_NOTE_TAGS = [
   { ar: '📝 واجب', en: '📝 Homework', de: '📝 Hausaufgabe', color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' },
@@ -1118,50 +1119,16 @@ export const HodHubView: React.FC = () => {
   const generateAIPrompt = () => {
     if (importScope === 'single') {
       const t = teachers.find(t => t.id === selectedTeacherForImport) || teachers[0];
-      const tName = t ? t.name : 'المعلم';
-      return `أنا أقوم ببناء جدول حصص مدرسي. يرجى استخراج جدول الحصص الخاص بالمعلم/ة "${tName}" من النص أو الصورة المرفقة.
-الناتج يجب أن يكون بتنسيق JSON فقط (بدون أي نص إضافي أو شروحات) ويطابق الـ Schema التالي:
-\`\`\`json
-{
-  "schedule": {
-    "0": [{ "periodNumber": 1, "className": "5A", "subjectName": "Deutsch" }],
-    "1": [],
-    "2": [],
-    "3": [],
-    "4": []
-  }
-}
-\`\`\`
-ملاحظات هامة:
-1. المفاتيح من "0" إلى "4" تمثل أيام الأسبوع (0 = الأحد، 1 = الإثنين، 2 = الثلاثاء، 3 = الأربعاء، 4 = الخميس).
-2. className هو اسم الفصل.
-3. subjectName هو اسم المادة.
-4. periodNumber هو رقم الحصة.
-5. لا تقم باختراع أي بيانات غير موجودة.
-أخرج JSON صالح فقط.`;
+      return generateUnifiedScheduleImportPrompt({
+        scope: 'single',
+        teacherName: t ? t.name : 'المعلم',
+      });
     }
 
-    const teacherNames = teachers.map(t => t.name).join('، ');
-    return `أنا أقوم ببناء جدول حصص مدرسي لعدة معلمين. يرجى استخراج جدول الحصص من النص أو الصورة المرفقة.
-قائمة المعلمين المتاحين في النظام (استخدم نفس الأسماء): ${teacherNames}.
-الناتج يجب أن يكون بتنسيق JSON فقط (بدون أي نص إضافي أو شروحات) ويطابق الـ Schema التالي:
-\`\`\`json
-{
-  "teachersSchedules": {
-    "اسم المعلم 1": {
-      "0": [{ "periodNumber": 1, "className": "5A", "subjectName": "Deutsch" }]
-    },
-    "اسم المعلم 2": {
-      "1": [{ "periodNumber": 3, "className": "7B", "subjectName": "Deutsch" }]
-    }
-  }
-}
-\`\`\`
-ملاحظات هامة:
-1. المفاتيح من "0" إلى "4" تمثل أيام الأسبوع (0 = الأحد، 1 = الإثنين، 2 = الثلاثاء، 3 = الأربعاء، 4 = الخميس).
-2. className هو اسم الفصل، subjectName هو المادة، periodNumber هو رقم الحصة.
-3. لا تقم باختراع أي بيانات غير موجودة.
-أخرج JSON صالح فقط.`;
+    return generateUnifiedScheduleImportPrompt({
+      scope: 'all',
+      teachersList: teachers.map(t => t.name),
+    });
   };
 
   const copyPromptToClipboard = () => {
@@ -1224,9 +1191,43 @@ export const HodHubView: React.FC = () => {
 
     if (errors.length > 0) {
       setValidationResult({ isValid: false, errors, warnings, parsedData: null });
-    } else {
-      setValidationResult({ isValid: true, errors, warnings, parsedData: finalTeacherSchedules });
+      return;
     }
+
+    // Strictly normalize and unify all class names across all imported periods (e.g. "10A", "11B", "7A")
+    const sanitizedSchedules: any = {};
+    let totalNormalizedPeriods = 0;
+
+    Object.keys(finalTeacherSchedules).forEach(tId => {
+      const rawSched = finalTeacherSchedules[tId];
+      if (rawSched && typeof rawSched === 'object') {
+        const normDaySched: any = {};
+        Object.keys(rawSched).forEach(dayKey => {
+          const periods = rawSched[dayKey];
+          if (Array.isArray(periods)) {
+            normDaySched[dayKey] = periods.map(p => {
+              totalNormalizedPeriods++;
+              return {
+                ...p,
+                className: p?.className ? normalizeClassCode(p.className) : ''
+              };
+            });
+          } else {
+            normDaySched[dayKey] = periods;
+          }
+        });
+        sanitizedSchedules[tId] = normDaySched;
+      } else {
+        sanitizedSchedules[tId] = rawSched;
+      }
+    });
+
+    setValidationResult({ 
+      isValid: true, 
+      errors, 
+      warnings, 
+      parsedData: sanitizedSchedules 
+    });
   };
 
   const confirmImport = () => {
@@ -1237,9 +1238,24 @@ export const HodHubView: React.FC = () => {
     let newMainSchedule = schoolSettings.schedule;
 
     Object.keys(validationResult.parsedData).forEach(tId => {
-      newSchedules[tId] = validationResult.parsedData[tId];
+      const rawSched = validationResult.parsedData[tId];
+      const normDaySched: any = {};
+      if (rawSched && typeof rawSched === 'object') {
+        Object.keys(rawSched).forEach(dayKey => {
+          const periods = rawSched[dayKey];
+          if (Array.isArray(periods)) {
+            normDaySched[dayKey] = periods.map(p => ({
+              ...p,
+              className: p?.className ? normalizeClassCode(p.className) : ''
+            }));
+          } else {
+            normDaySched[dayKey] = periods;
+          }
+        });
+      }
+      newSchedules[tId] = normDaySched;
       if (tId === 'hod') {
-        newMainSchedule = validationResult.parsedData[tId];
+        newMainSchedule = normDaySched;
       }
     });
 
@@ -1251,7 +1267,7 @@ export const HodHubView: React.FC = () => {
     setImportText('');
     setValidationResult(null);
     setIsImportModalOpen(false);
-    triggerToast(_t('تم استيراد الجدول بنجاح', 'Timetable imported successfully', 'Stundenplan erfolgreich importiert'));
+    triggerToast(_t('تم استيراد الجدول بنجاح وتوحيد كافة أسماء الفصول (10A, 11B, 7A...)! ✨', 'Timetable imported and all class codes unified successfully! ✨', 'Stundenplan importiert und Klassencodes vereinheitlicht! ✨'));
   };
 
   const handleSaveComplaint = (e: React.FormEvent) => {
@@ -5600,10 +5616,17 @@ export const HodHubView: React.FC = () => {
                   </select>
                 )}
 
-                <div className="p-3 bg-primary-soft/30 border border-primary-border rounded-xl space-y-3 mt-4">
+                <div className="p-3 bg-primary-soft/30 border border-primary-border rounded-xl space-y-2 mt-4">
                   <p className="text-[11px] text-text-muted font-semibold leading-relaxed">
                     {_t('انسخ الموجه الذكي وقدمه لـ ChatGPT أو Gemini مع إرفاق صورة جدول الحصص.', 'Copy the smart prompt and provide it to ChatGPT/Gemini along with a photo of the schedule.', 'Kopieren Sie den Prompt und fügen Sie ihn in ChatGPT/Gemini ein.')}
                   </p>
+                  
+                  {/* Strict Class Unification indicator */}
+                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center gap-1.5 text-[10px] text-emerald-700 dark:text-emerald-300 font-bold">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>{_t('توحيد أسماء الفصول مفعل تلقائياً: يوجه الـ AI لضبط الفصول قياسياً (10A, 11B, 7A...) لربط الجدول مع قائمة الطلاب.', 'Standardized Class Codes: Enforces (10A, 11B, 7A...) to match students roster.', 'Standardisierte Klassencodes aktiviert (10A, 11B, 7A...).')}</span>
+                  </div>
+
                   <button
                     onClick={copyPromptToClipboard}
                     className="w-full flex items-center justify-center gap-2 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl text-[11px] font-black transition-all cursor-pointer shadow-xs"
