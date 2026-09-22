@@ -12,7 +12,10 @@ import {
   Loader2,
   Eye,
   AlertCircle,
-  FileText
+  FileText,
+  CheckCircle2,
+  Clock,
+  RotateCcw
 } from 'lucide-react';
 import { VisitRecord, SchoolSettings, Teacher } from '../types';
 import {
@@ -30,6 +33,7 @@ interface BulkObservationExportModalProps {
   language: string;
   initialTeacherId?: string;
   onPreviewSingle?: (visit: VisitRecord) => void;
+  onMarkVisitsDownloaded?: (visitIds: string[], isDownloaded: boolean) => void;
 }
 
 export const BulkObservationExportModal: React.FC<BulkObservationExportModalProps> = ({
@@ -40,7 +44,8 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
   schoolSettings,
   language,
   initialTeacherId,
-  onPreviewSingle
+  onPreviewSingle,
+  onMarkVisitsDownloaded
 }) => {
   const isRtl = language === 'ar';
   const _t = (ar: string, en: string, de: string) => {
@@ -51,6 +56,7 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
 
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>(initialTeacherId || 'all');
   const [selectedTerm, setSelectedTerm] = useState<string>('all');
+  const [downloadFilter, setDownloadFilter] = useState<'all' | 'unprinted' | 'printed'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedVisitIds, setSelectedVisitIds] = useState<Set<string>>(new Set());
   const [isExportingPdf, setIsExportingPdf] = useState(false);
@@ -83,6 +89,14 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
         if (v.term && v.term !== selectedTerm) return false;
       }
 
+      // Downloaded status filter
+      if (downloadFilter === 'unprinted' && v.isDownloaded) {
+        return false;
+      }
+      if (downloadFilter === 'printed' && !v.isDownloaded) {
+        return false;
+      }
+
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -99,14 +113,14 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
       const dateB = new Date(b.visitedDate || b.date || 0).getTime();
       return dateB - dateA;
     });
-  }, [visitRecords, teachers, selectedTeacherId, selectedTerm, searchQuery]);
+  }, [visitRecords, teachers, selectedTeacherId, selectedTerm, downloadFilter, searchQuery]);
 
   // Handle Initial selection on filter change or mount
   React.useEffect(() => {
     if (isOpen && filteredVisits.length > 0) {
       setSelectedVisitIds(new Set(filteredVisits.map(v => v.id)));
     }
-  }, [isOpen, selectedTeacherId, selectedTerm]);
+  }, [isOpen, selectedTeacherId, selectedTerm, downloadFilter]);
 
   const toggleSelectVisit = (id: string) => {
     setSelectedVisitIds(prev => {
@@ -149,6 +163,11 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
           setExportProgress({ current, total });
         }
       );
+
+      // Automatically mark selected visits as downloaded
+      if (onMarkVisitsDownloaded) {
+        onMarkVisitsDownloaded(selectedVisitsList.map(v => v.id), true);
+      }
     } catch (err) {
       console.error('Failed to download combined PDF:', err);
     } finally {
@@ -169,6 +188,11 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
         isRtl,
         language
       );
+
+      // Automatically mark selected visits as downloaded/printed
+      if (onMarkVisitsDownloaded) {
+        onMarkVisitsDownloaded(selectedVisitsList.map(v => v.id), true);
+      }
     } catch (err) {
       console.error('Failed to print combined reports:', err);
     } finally {
@@ -267,6 +291,50 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
               </div>
             </div>
           </div>
+
+          {/* Quick Filter: All vs Unprinted vs Printed */}
+          <div className="flex items-center gap-1.5 pt-0.5">
+            <span className="text-[10px] font-bold text-text-muted shrink-0">
+              {_t('حالة التحميل:', 'Download Status:', 'Status:')}
+            </span>
+            <div className="flex items-center gap-1 bg-surface-hover p-0.5 rounded-lg border border-surface-border">
+              <button
+                type="button"
+                onClick={() => setDownloadFilter('all')}
+                className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
+                  downloadFilter === 'all'
+                    ? 'bg-primary text-white shadow-2xs'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                {_t('الكل', 'All', 'Alle')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDownloadFilter('unprinted')}
+                className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  downloadFilter === 'unprinted'
+                    ? 'bg-amber-500 text-white shadow-2xs'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                <Clock className="w-2.5 h-2.5" />
+                <span>{_t('لم يُحمَّل بعد', 'Not Downloaded', 'Nicht gedruckt')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDownloadFilter('printed')}
+                className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  downloadFilter === 'printed'
+                    ? 'bg-emerald-600 text-white shadow-2xs'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                <CheckCircle2 className="w-2.5 h-2.5" />
+                <span>{_t('تم تحميله سابقاً', 'Downloaded', 'Bereits gedruckt')}</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Selection Stats and Select All Button */}
@@ -296,14 +364,26 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
             </span>
           </div>
 
-          {selectedVisitsList.length > 0 && (
-            <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
+            {selectedVisitsList.length > 0 && onMarkVisitsDownloaded && (
+              <button
+                type="button"
+                onClick={() => onMarkVisitsDownloaded(selectedVisitsList.map(v => v.id), true)}
+                className="h-6 px-2 text-[9.5px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/40 dark:border-emerald-800 rounded-md transition-all flex items-center gap-1 cursor-pointer"
+                title={_t('تعليم المحدد كتم تحميله', 'Mark Selected as Downloaded', 'Als gedruckt markieren')}
+              >
+                <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                <span>{_t('تعليم كتم تحميله', 'Mark Downloaded', 'Als gedruckt')}</span>
+              </button>
+            )}
+
+            {selectedVisitsList.length > 0 && (
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
                 {_t('المتوسط:', 'Avg:', 'Ø:')}{' '}
                 {(selectedVisitsList.reduce((acc, v) => acc + (Number(v.overallScore) || 0), 0) / selectedVisitsList.length).toFixed(1)}/75
               </span>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Visits List - Maximized vertical viewport */}
@@ -363,6 +443,18 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
                             {visit.overallCategory}
                           </span>
                         )}
+                        {/* Downloaded / Handled Status Badge */}
+                        {visit.isDownloaded ? (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-black px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shrink-0">
+                            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                            <span>{_t('تم تحميله / طباعته', 'Downloaded', 'Heruntergeladen')}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800 shrink-0">
+                            <Clock className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400" />
+                            <span>{_t('لم يُحمَّل', 'New / Unprinted', 'Neu')}</span>
+                          </span>
+                        )}
                       </div>
 
                       {/* Line 2: Date & Period */}
@@ -393,6 +485,34 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
                     className="flex items-center gap-1 shrink-0 self-end sm:self-auto pt-0.5 sm:pt-0"
                     onClick={e => e.stopPropagation()}
                   >
+                    {onMarkVisitsDownloaded && (
+                      <button
+                        type="button"
+                        onClick={() => onMarkVisitsDownloaded([visit.id], !visit.isDownloaded)}
+                        className={`h-7 px-2 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer border ${
+                          visit.isDownloaded
+                            ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/40 dark:border-emerald-800'
+                            : 'text-text-muted bg-surface hover:bg-surface-hover border-surface-border'
+                        }`}
+                        title={
+                          visit.isDownloaded
+                            ? _t('تم تحميله - انقر لإلغاء العلامة', 'Downloaded - Click to unmark', 'Heruntergeladen - Klicken zum Aufheben')
+                            : _t('انقر لتعليم كتم تحميله', 'Click to mark as downloaded', 'Als heruntergeladen markieren')
+                        }
+                      >
+                        {visit.isDownloaded ? (
+                          <>
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                            <span className="hidden sm:inline">{_t('مُحمَّل', 'Downloaded', 'Heruntergeladen')}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Clock className="w-3 h-3 text-text-muted" />
+                            <span className="hidden sm:inline">{_t('لم يُحمَّل', 'Mark Done', 'Markieren')}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                     {onPreviewSingle && (
                       <button
                         onClick={() => onPreviewSingle(visit)}
@@ -404,7 +524,12 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
                       </button>
                     )}
                     <button
-                      onClick={() => printObservationReport(visit, schoolSettings, isRtl, language)}
+                      onClick={() => {
+                        printObservationReport(visit, schoolSettings, isRtl, language);
+                        if (onMarkVisitsDownloaded) {
+                          onMarkVisitsDownloaded([visit.id], true);
+                        }
+                      }}
                       className="h-7 px-2 text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 dark:text-indigo-300 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 dark:border-indigo-800 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
                       title={_t('طباعة هذا التقرير فقط', 'Print This Only', 'Nur diesen drucken')}
                     >

@@ -5,7 +5,7 @@ import {
   AlertTriangle, Phone, FileText, Sparkles, Filter, ChevronDown, Check,
   UserCheck, AlertCircle, Calendar, RefreshCw, Loader2, BookOpen, Users
 } from 'lucide-react';
-import { StageManager, StageFollowUpRecord, Complaint, StudentActionPlan, TeacherStageEvaluationItem } from '../types';
+import { StageManager, StageFollowUpRecord, Complaint, StudentActionPlan, TeacherStageEvaluationItem, VisitRecord } from '../types';
 import { 
   downloadStageFollowUpPdf, 
   shareStageFollowUpViaWhatsApp, 
@@ -24,6 +24,7 @@ export const StageCommunicationView: React.FC = () => {
   const complaints: Complaint[] = useMemo(() => schoolSettings.complaints || [], [schoolSettings.complaints]);
   const actionPlans: StudentActionPlan[] = useMemo(() => schoolSettings.actionPlans || [], [schoolSettings.actionPlans]);
   const stageFollowUps: StageFollowUpRecord[] = useMemo(() => schoolSettings.stageFollowUps || [], [schoolSettings.stageFollowUps]);
+  const visitRecords: VisitRecord[] = useMemo(() => schoolSettings.visitRecords || [], [schoolSettings.visitRecords]);
 
   // Selected Stage Manager & Report Form State
   const [selectedManager, setSelectedManager] = useState<StageManager | null>(stageManagers[0] || null);
@@ -45,6 +46,9 @@ export const StageCommunicationView: React.FC = () => {
   const [overallStageNotes, setOverallStageNotes] = useState<string>('');
   const [teachersEvalData, setTeachersEvalData] = useState<Record<string, TeacherStageEvaluationItem>>({});
 
+  const [includeVisits, setIncludeVisits] = useState<boolean>(true);
+  const [selectedVisitIds, setSelectedVisitIds] = useState<string[]>([]);
+
   const [includeComplaints, setIncludeComplaints] = useState<boolean>(true);
   const [selectedComplaintIds, setSelectedComplaintIds] = useState<string[]>([]);
 
@@ -52,14 +56,6 @@ export const StageCommunicationView: React.FC = () => {
   const [selectedActionPlanIds, setSelectedActionPlanIds] = useState<string[]>([]);
 
   const [includeAttendance, setIncludeAttendance] = useState<boolean>(true);
-
-  React.useEffect(() => {
-    setSelectedComplaintIds(stageComplaints.map(c => c.id));
-  }, [selectedManager?.id]);
-
-  React.useEffect(() => {
-    setSelectedActionPlanIds(stageActionPlans.map(p => p.id));
-  }, [selectedManager?.id]);
 
   // Toast and Loading States
   const [showToast, setShowToast] = useState(false);
@@ -154,6 +150,70 @@ export const StageCommunicationView: React.FC = () => {
   // CRITICAL REPORT FILTERING & LIFECYCLE LOGIC
   // =========================================================================
 
+  // Supervised teachers for selected stage manager (Automatic Grade-Based Auto-Association)
+  const supervisedTeachers = useMemo(() => {
+    if (!selectedManager) return [];
+    return teachers.filter(t => {
+      if (t.isHod) return false;
+
+      // Combine direct assignedClasses and schedule classes
+      const directClasses = t.assignedClasses || [];
+      const teacherScheduleRecords: any[] = [];
+      const ts = schoolSettings.teacherSchedules?.[t.id];
+      if (ts) {
+        Object.values(ts).forEach((dayArr: any) => {
+          if (Array.isArray(dayArr)) teacherScheduleRecords.push(...dayArr);
+        });
+      }
+      const scheduleClasses = teacherScheduleRecords.map(r => r.className).filter(Boolean);
+      const allClasses = Array.from(new Set([...directClasses, ...scheduleClasses]));
+
+      const tGrades = extractGradeNumbers(allClasses);
+
+      if (currentManagerGrades.size > 0) {
+        if (tGrades.size > 0) {
+          for (const g of tGrades) {
+            if (currentManagerGrades.has(g)) return true;
+          }
+        }
+        // Fallback string check
+        for (const cls of allClasses) {
+          if (!cls) continue;
+          const clsLower = cls.toLowerCase();
+          for (const gradeNum of currentManagerGrades) {
+            if (clsLower.includes(gradeNum.toString()) || clsLower.includes(`g${gradeNum}`) || clsLower.includes(`grade ${gradeNum}`)) {
+              return true;
+            }
+          }
+        }
+      } else {
+        return true;
+      }
+
+      return false;
+    });
+  }, [teachers, currentManagerGrades, selectedManager, schoolSettings.teacherSchedules]);
+
+  // 0. Classroom Visits Lifecycle Filtering:
+  // - Current Week & Unsent Visits: Includes visits for teachers/grades in this stage that have not yet been sent (weeklyReportSent !== true)
+  const stageVisits = useMemo(() => {
+    return visitRecords.filter(visit => {
+      // Must NOT have been dispatched in a previous report
+      if (visit.weeklyReportSent) return false;
+
+      // Check match by grade / class
+      const visitGradeClass = visit.className || (visit as any).class || (visit as any).gradeClass || '';
+      if (visitGradeClass && matchesStage(visitGradeClass)) return true;
+
+      // If no grade in visit record, check if teacher is one of the supervised teachers for this stage
+      if (visit.teacherId) {
+        return supervisedTeachers.some(t => t.id === visit.teacherId);
+      }
+
+      return matchesStage(visitGradeClass);
+    });
+  }, [visitRecords, currentManagerGrades, supervisedTeachers]);
+
   // 1. Complaints Lifecycle Filtering:
   // - Pending/Open Complaints: Include all new complaints for the selected stage where weeklyReportSent === false
   // - Resolved Complaints: Include resolved complaints ONLY IF they have not yet been reported (weeklyReportSent === false AND status === 'RESOLVED')
@@ -199,49 +259,18 @@ export const StageCommunicationView: React.FC = () => {
   const activePlans = stageActionPlans.filter(p => p.status === 'ACTIVE');
   const newlyResolvedPlans = stageActionPlans.filter(p => p.status === 'RESOLVED' && !p.reportedAsResolved);
 
-  // Supervised teachers for selected stage manager (Automatic Grade-Based Auto-Association)
-  const supervisedTeachers = useMemo(() => {
-    if (!selectedManager) return [];
-    return teachers.filter(t => {
-      if (t.isHod) return false;
+  // Synchronize selection arrays when manager or available items change
+  React.useEffect(() => {
+    setSelectedVisitIds(stageVisits.map(v => v.id));
+  }, [selectedManager?.id, stageVisits.length]);
 
-      // Combine direct assignedClasses and schedule classes
-      const directClasses = t.assignedClasses || [];
-      const teacherScheduleRecords: any[] = [];
-      const ts = schoolSettings.teacherSchedules?.[t.id];
-      if (ts) {
-        Object.values(ts).forEach((dayArr: any) => {
-          if (Array.isArray(dayArr)) teacherScheduleRecords.push(...dayArr);
-        });
-      }
-      const scheduleClasses = teacherScheduleRecords.map(r => r.className).filter(Boolean);
-      const allClasses = Array.from(new Set([...directClasses, ...scheduleClasses]));
+  React.useEffect(() => {
+    setSelectedComplaintIds(stageComplaints.map(c => c.id));
+  }, [selectedManager?.id]);
 
-      const tGrades = extractGradeNumbers(allClasses);
-
-      if (currentManagerGrades.size > 0) {
-        if (tGrades.size > 0) {
-          for (const g of tGrades) {
-            if (currentManagerGrades.has(g)) return true;
-          }
-        }
-        // Fallback string check
-        for (const cls of allClasses) {
-          if (!cls) continue;
-          const clsLower = cls.toLowerCase();
-          for (const gradeNum of currentManagerGrades) {
-            if (clsLower.includes(gradeNum.toString()) || clsLower.includes(`g${gradeNum}`) || clsLower.includes(`grade ${gradeNum}`)) {
-              return true;
-            }
-          }
-        }
-      } else {
-        return true;
-      }
-
-      return false;
-    });
-  }, [teachers, currentManagerGrades, selectedManager, schoolSettings.teacherSchedules]);
+  React.useEffect(() => {
+    setSelectedActionPlanIds(stageActionPlans.map(p => p.id));
+  }, [selectedManager?.id]);
 
   // Names formatting for signature blocks
   const rawHod = schoolSettings.hodName || '';
@@ -258,12 +287,27 @@ export const StageCommunicationView: React.FC = () => {
 
     const nowIso = new Date().toISOString();
 
+    const includedVisitsList = includeVisits
+      ? stageVisits.filter(v => selectedVisitIds.includes(v.id))
+      : [];
     const includedComplaintsList = includeComplaints
       ? stageComplaints.filter(c => selectedComplaintIds.includes(c.id))
       : [];
     const includedActionPlansList = includeActionPlans
       ? stageActionPlans.filter(p => selectedActionPlanIds.includes(p.id))
       : [];
+
+    const includedVisitIdsSet = new Set(includedVisitsList.map(v => v.id));
+    const updatedVisitRecords = visitRecords.map(v => {
+      if (includedVisitIdsSet.has(v.id)) {
+        return {
+          ...v,
+          weeklyReportSent: true,
+          weeklyReportDate: nowIso
+        };
+      }
+      return v;
+    });
 
     const includedComplaintIdsSet = new Set(includedComplaintsList.map(c => c.id));
     const updatedComplaints = complaints.map(c => {
@@ -356,6 +400,9 @@ export const StageCommunicationView: React.FC = () => {
       timestamp: Date.now(),
       teachersData: resolvedTeachersData.length > 0 ? resolvedTeachersData : Object.values(teachersEvalData),
       overallStageNotes: overallStageNotes.trim(),
+      includeVisits,
+      selectedVisitIds,
+      includedVisits: includedVisitsList,
       includeComplaints,
       selectedComplaintIds,
       includedComplaints: includedComplaintsList,
@@ -379,6 +426,7 @@ export const StageCommunicationView: React.FC = () => {
 
     const updatedSettings = {
       ...schoolSettings,
+      visitRecords: updatedVisitRecords,
       complaints: updatedComplaints,
       actionPlans: updatedActionPlans,
       stageFollowUps: updatedFollowUps
@@ -609,6 +657,94 @@ export const StageCommunicationView: React.FC = () => {
                 className="w-full h-9 px-3 bg-surface border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:border-primary focus:outline-none"
               />
             </div>
+          </div>
+
+          {/* SECTION 0: VISITS OPTIONS (اختيار الزيارات الصفية لإدراجها في التقرير) */}
+          <div className="pt-3 border-t border-surface-border space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeVisits}
+                  onChange={(e) => setIncludeVisits(e.target.checked)}
+                  className="w-4 h-4 text-primary rounded border-surface-border accent-primary"
+                />
+                <span className="text-[11px] font-black text-text-main">
+                  {_t('إدراج الزيارات الصفية في تقرير المرحلة (اختيار الزيارات)', 'Include Classroom Visits in Report', 'Unterrichtsbesuche einbeziehen')}
+                </span>
+              </label>
+              <div className="flex items-center gap-2">
+                {stageVisits.length > 0 && includeVisits && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedVisitIds.length === stageVisits.length) {
+                        setSelectedVisitIds([]);
+                      } else {
+                        setSelectedVisitIds(stageVisits.map(v => v.id));
+                      }
+                    }}
+                    className="text-[10px] text-primary hover:underline font-bold"
+                  >
+                    {selectedVisitIds.length === stageVisits.length ? 'إلغاء تحديد الكل' : 'تحديد الكل'}
+                  </button>
+                )}
+                <span className="text-[10px] font-bold text-text-muted">
+                  {stageVisits.length} زيارة متاحة ({selectedVisitIds.length} محددة)
+                </span>
+              </div>
+            </div>
+
+            {includeVisits && (
+              <div className="p-3 bg-surface border border-surface-border rounded-xl space-y-2 max-h-52 overflow-y-auto">
+                {stageVisits.length === 0 ? (
+                  <div className="text-[11px] text-text-muted text-center py-2">
+                    {_t('لا توجد زيارات صفية غير مبعوثة لهذه المرحلة حالياً', 'No unsent classroom visits found for this stage currently', 'Keine ungesendeten Unterrichtsbesuche vorhanden')}
+                  </div>
+                ) : (
+                  stageVisits.map(visit => {
+                    const isChecked = selectedVisitIds.includes(visit.id);
+                    const teacher = teachers.find(t => t.id === visit.teacherId);
+                    const teacherName = teacher?.name || visit.teacherName || 'معلم غير محدد';
+                    const visitGrade = visit.class || (visit as any).gradeClass || 'صف غير محدد';
+                    const score = (visit as any).totalScore ?? (visit as any).score ?? 0;
+                    const maxScore = (visit as any).maxScore ?? 75;
+
+                    return (
+                      <label key={visit.id} className="flex items-center justify-between p-2 bg-surface-hover/30 hover:bg-surface-hover/60 rounded-lg cursor-pointer text-[11px] transition-colors">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedVisitIds(prev => [...prev, visit.id]);
+                              } else {
+                                setSelectedVisitIds(prev => prev.filter(id => id !== visit.id));
+                              }
+                            }}
+                            className="w-3.5 h-3.5 text-primary rounded border-surface-border accent-primary shrink-0"
+                          />
+                          <span className="font-bold text-text-main shrink-0">{teacherName}</span>
+                          <span className="text-text-muted shrink-0">({visitGrade})</span>
+                          {visit.date && (
+                            <span className="text-[10px] text-text-muted shrink-0">— {visit.date}</span>
+                          )}
+                          {visit.focusAreas && (
+                            <span className="text-text-muted text-[10px] truncate max-w-xs">— {visit.focusAreas}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-primary/10 text-primary">
+                            {score}/{maxScore}
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
 
           {/* SECTION A: COMPLAINTS OPTIONS (إدراج الشكاوى المتبادلة) */}
@@ -1008,6 +1144,56 @@ export const StageCommunicationView: React.FC = () => {
                   })}
                 </tbody>
               </table>
+
+              {/* SECTION 0: VISITS SUMMARY IN REPORT */}
+              {includeVisits && (
+                <div className="mb-5 space-y-2">
+                  <h3 className="text-[11px] font-black text-slate-900 border-b border-slate-300 pb-1">
+                    الزيارات الصفية المعتمدة بهذا التقرير ({stageVisits.filter(v => selectedVisitIds.includes(v.id)).length}):
+                  </h3>
+
+                  {stageVisits.filter(v => selectedVisitIds.includes(v.id)).length === 0 ? (
+                    <p className="text-[11px] text-slate-500 italic">لا توجد زيارات صفية محددة لهذا التقرير.</p>
+                  ) : (
+                    <table className="w-full border-collapse border border-slate-400 text-[11px]">
+                      <thead>
+                        <tr className="bg-slate-200 text-slate-900 font-black">
+                          <th className="border border-slate-400 p-1.5 text-center w-8">#</th>
+                          <th className="border border-slate-400 p-1.5 text-right w-36">المعلم</th>
+                          <th className="border border-slate-400 p-1.5 text-center w-24">الصف / الفصل</th>
+                          <th className="border border-slate-400 p-1.5 text-center w-24">التاريخ</th>
+                          <th className="border border-slate-400 p-1.5 text-center w-20">الدرجة</th>
+                          <th className="border border-slate-400 p-1.5 text-right">أهم نقاط التوجيه والملاحظات</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stageVisits.filter(v => selectedVisitIds.includes(v.id)).map((v, i) => {
+                          const t = teachers.find(teach => teach.id === v.teacherId);
+                          const tName = t?.name || v.teacherName || '-';
+                          const vGrade = v.class || (v as any).gradeClass || '-';
+                          const score = (v as any).totalScore ?? (v as any).score ?? 0;
+                          const maxScore = (v as any).maxScore ?? 75;
+
+                          return (
+                            <tr key={v.id || i} className="border border-slate-300">
+                              <td className="border border-slate-300 p-1.5 text-center font-bold">{i + 1}</td>
+                              <td className="border border-slate-300 p-1.5 font-bold">{tName}</td>
+                              <td className="border border-slate-300 p-1.5 text-center">{vGrade}</td>
+                              <td className="border border-slate-300 p-1.5 text-center font-mono text-[10px]">{v.date || '-'}</td>
+                              <td className="border border-slate-300 p-1.5 text-center font-bold text-primary">
+                                {score}/{maxScore}
+                              </td>
+                              <td className="border border-slate-300 p-1.5 text-slate-700 text-[10px]">
+                                {v.focusAreas || v.notes || (v as any).recommendations || 'زيارة إشرافية صفية.'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
 
               {/* SECTION 1: COMPLAINTS SUMMARY IN CYCLE */}
               {includeComplaints && (

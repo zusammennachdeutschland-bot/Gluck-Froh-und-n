@@ -75,6 +75,7 @@ export const HodHubView: React.FC = () => {
     try {
       const res = await downloadObservationReportPdf(v, schoolSettings, (language === 'ar'), language);
       if (res?.success) {
+        handleMarkVisitsDownloaded([v.id], true);
         triggerToast(_t(`تم تجهيز وتحميل تقرير الزيارة (${res.filename}) بنجاح 📥`, `Visit report downloaded successfully 📥`, `Bericht heruntergeladen 📥`));
       } else {
         triggerToast(_t('تعذر تحميل التقرير، يرجى المحاولة مجدداً', 'Download failed, please try again', 'Fehler beim Download'));
@@ -1314,6 +1315,24 @@ export const HodHubView: React.FC = () => {
   const [isBatchGeneratingPdf, setIsBatchGeneratingPdf] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
+  const handleMarkVisitsDownloaded = (visitIds: string[], isDownloaded: boolean = true) => {
+    if (!visitIds || visitIds.length === 0) return;
+    const idSet = new Set(visitIds);
+    const nowIso = new Date().toISOString();
+    const updated = visitRecords.map(v => {
+      if (idSet.has(v.id)) {
+        return {
+          ...v,
+          isDownloaded,
+          downloadedAt: isDownloaded ? nowIso : undefined
+        };
+      }
+      return v;
+    });
+    setVisitRecords(updated);
+    persistHodData({ visitRecords: updated });
+  };
+
   const handleBatchDownloadVisitsPdf = async (visitsToDownload: any[]) => {
     if (visitsToDownload.length === 0 || isBatchGeneratingPdf) return;
     setIsBatchGeneratingPdf(true);
@@ -1328,6 +1347,7 @@ export const HodHubView: React.FC = () => {
         (current, total) => setBatchProgress({ current, total })
       );
       if (res?.success) {
+        handleMarkVisitsDownloaded(visitsToDownload.map(v => v.id), true);
         triggerToast(_t(`تم تحميل ملف PDF المجمّع (${res.filename}) بنجاح 📥`, 'Combined PDF downloaded successfully 📥', 'Kombiniertes PDF erfolgreich heruntergeladen 📥'));
       } else {
         triggerToast(_t('تعذر تحميل الملف المجمّع، يرجى المحاولة مجدداً', 'Failed to generate combined PDF', 'Fehler beim Erstellen des kombinierten PDF'));
@@ -1350,6 +1370,7 @@ export const HodHubView: React.FC = () => {
         (language === 'ar'),
         language
       );
+      handleMarkVisitsDownloaded(visitsToPrint.map(v => v.id), true);
     } catch (err) {
       console.error('Batch print error:', err);
       triggerToast(_t('حدث خطأ أثناء طباعة الزيارات', 'Error printing visits', 'Fehler beim Drucken'));
@@ -2969,45 +2990,45 @@ export const HodHubView: React.FC = () => {
               </div>
             )}
 
-            {/* Live Current Time Status Ribbon */}
-            <div className="mx-2 mb-2 p-2 rounded-xl bg-gradient-to-r from-rose-500/10 via-primary/5 to-amber-500/10 border border-rose-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-2xs">
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="relative flex items-center justify-center">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping absolute" />
-                  <span className="w-2 h-2 rounded-full bg-rose-600 relative" />
+            {/* Live Current Time Status Ribbon - Ultra Compact Single Line */}
+            <div className="mx-2 mb-1.5 px-2.5 py-1 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-between gap-2 shadow-2xs">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
+                <div className="relative flex items-center justify-center shrink-0">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping absolute" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-600 relative" />
                 </div>
-                <span className="text-[11px] font-black text-rose-600 dark:text-rose-400">
-                  {_t('الوقت الحالي الآن:', 'Current Time:', 'Aktuelle Zeit:')}
+                <span className="text-[10px] sm:text-[10.5px] font-black text-rose-600 dark:text-rose-400 shrink-0">
+                  {_t('الوقت الآن:', 'Time:', 'Zeit:')}
                 </span>
-                <span className="text-[11.5px] font-black font-mono bg-surface px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 shadow-2xs">
+                <span className="text-[10px] sm:text-[11px] font-black font-mono bg-surface px-1.5 py-0.2 rounded border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 shadow-2xs shrink-0">
                   {liveTimeInfo.formatted}
                 </span>
-                <span className="text-[10.5px] font-bold text-text-main">
-                  • {liveTimeInfo.activePeriodInfo ? (
+                <span className="text-[9.5px] sm:text-[10px] font-bold text-text-main truncate">
+                  {liveTimeInfo.activePeriodInfo ? (
                     liveTimeInfo.activeStatus === 'in_period' ? (
                       <span>
-                        {_t('أنت الآن في الحصة', 'Currently in Period', 'Aktuell in Stunde')} <strong className="text-rose-600 dark:text-rose-400 font-black">{liveTimeInfo.activePeriodInfo.periodNumber}</strong> ({liveTimeInfo.activePeriodInfo.startTime} - {liveTimeInfo.activePeriodInfo.endTime}) — {_t('متبقي على انتهائها', 'remaining', 'verbleibend')}: <strong className="text-rose-600 dark:text-rose-400 font-mono font-black">{liveTimeInfo.remainingMinutes} {_t('دقيقة', 'min', 'Min')}</strong>
+                        • {_t('الحصة', 'Period', 'Stunde')} <strong className="text-rose-600 dark:text-rose-400 font-black">{liveTimeInfo.activePeriodInfo.periodNumber}</strong> ({liveTimeInfo.activePeriodInfo.startTime}-{liveTimeInfo.activePeriodInfo.endTime}) — {_t('متبقي:', 'rem:', 'Verbl:')} <strong className="text-rose-600 dark:text-rose-400 font-mono font-black">{liveTimeInfo.remainingMinutes} {_t('د', 'm', 'm')}</strong>
                       </span>
                     ) : liveTimeInfo.activeStatus === 'break' ? (
                       <span className="text-amber-600 dark:text-amber-400">
-                        ☕ {_t('استراحة / فسحة بين الحصص', 'Break between periods', 'Pause zwischen Stunden')} (متبقي {liveTimeInfo.remainingMinutes}د على الحصة القادمة)
+                        • ☕ {_t('استراحة بين الحصص', 'Break between periods', 'Pause')} ({liveTimeInfo.remainingMinutes} {_t('د', 'm', 'm')})
                       </span>
                     ) : liveTimeInfo.activeStatus === 'before' ? (
                       <span className="text-text-muted">
-                        🌅 {_t('قبل بداية اليوم الدراسي', 'Before school starts', 'Vor Unterrichtsbeginn')} (الحصة 1 تبدأ {timings[0]?.startTime || '08:00'})
+                        • 🌅 {_t('قبل الحصة 1', 'Before period 1', 'Vor Beginn')} ({timings[0]?.startTime || '08:00'})
                       </span>
                     ) : (
                       <span className="text-text-muted">
-                        🏁 {_t('انتهى اليوم الدراسي لجميع الحصص', 'School day finished for all periods', 'Schultag beendet')}
+                        • 🏁 {_t('انتهى اليوم الدراسي', 'School day finished', 'Schultag beendet')}
                       </span>
                     )
                   ) : null}
                 </span>
               </div>
 
-              <div className="flex items-center gap-1.5 text-[10px] text-text-muted font-bold shrink-0">
-                <span className="w-2.5 h-[2.5px] bg-rose-500 rounded-full shadow-[0_0_6px_rgba(244,63,94,0.8)]" />
-                <span>{_t('الخط الأحمر يقطع الجدول لتوضيح سير الوقت الحالي', 'Red line tracks live time across matrix', 'Rote Linie zeigt aktuelle Zeit')}</span>
+              <div className="flex items-center gap-1 text-[9px] text-text-muted font-bold shrink-0 hidden sm:flex">
+                <span className="w-2 h-[2px] bg-rose-500 rounded-full shadow-[0_0_4px_rgba(244,63,94,0.8)] shrink-0" />
+                <span className="truncate max-w-[200px]">{_t('الخط الأحمر يقطع الجدول لتوضيح الوقت', 'Red line tracks live time', 'Rote Linie zeigt Zeit')}</span>
               </div>
             </div>
 
@@ -3016,11 +3037,8 @@ export const HodHubView: React.FC = () => {
                 <table className="w-full text-left border-collapse table-fixed text-[11px]">
                   <thead className="sticky top-0 z-20 bg-surface-hover shadow-sm">
                     <tr>
-                      <th className="p-1 border-b border-surface-border font-bold text-text-muted w-14 sm:w-20 text-center align-middle">
-                        <div className="flex flex-col items-center justify-center">
-                          <span className="text-[10px] sm:text-[11px] font-black">{_t('ي/ح', 'D/P', 'T/S')}</span>
-                          <span className="text-[7.5px] sm:text-[8px] text-primary font-bold">{_t('نهاية الحصة', 'Ends At', 'Ende')}</span>
-                        </div>
+                      <th className="py-1 px-0.5 border-b border-surface-border font-bold text-text-muted w-10 sm:w-14 text-center align-middle">
+                        <span className="text-[10px] sm:text-[11px] font-black">{_t('الحصة', 'Prd', 'Std')}</span>
                       </th>
                       {teachers.map(t => {
                         const nameParts = t.name.split(' ');
@@ -3042,7 +3060,7 @@ export const HodHubView: React.FC = () => {
                       return (
                         <React.Fragment key={dayKey}>
                           <tr>
-                            <td colSpan={teachers.length + 1} className={`py-1.5 px-2 font-black text-center border-y border-surface-border text-[11px] sm:text-[12px] transition-colors ${
+                            <td colSpan={teachers.length + 1} className={`py-1 px-2 font-black text-center border-y border-surface-border text-[11px] sm:text-[12px] transition-colors ${
                               isDayActiveForLine(dayKey)
                                 ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300 dark:bg-rose-950/40 border-rose-300 dark:border-rose-900/60'
                                 : 'bg-primary/5 dark:bg-primary/10 text-primary'
@@ -3070,40 +3088,25 @@ export const HodHubView: React.FC = () => {
                                 isThisPeriodActive ? 'bg-rose-500/[0.04] dark:bg-rose-500/[0.08]' : ''
                               }`}
                             >
-                              <td className={`p-0.5 sm:p-1 border-b border-surface-border font-bold text-text-muted text-center align-middle bg-surface group-hover:bg-surface-hover relative overflow-visible ${
+                              <td className={`p-0.5 border-b border-surface-border font-bold text-text-muted text-center align-middle bg-surface group-hover:bg-surface-hover relative overflow-visible ${
                                 isThisPeriodActive ? 'ring-1 ring-inset ring-rose-500/30' : ''
                               }`}>
                                 {/* Live Time Line cutting across the D/P cell with time badge */}
                                 {isThisPeriodActive && (
                                   <div 
-                                    className="absolute left-0 right-0 h-[2.5px] bg-rose-500 dark:bg-rose-400 z-30 pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.9)]"
+                                    className="absolute left-0 right-0 h-[2px] bg-rose-500 dark:bg-rose-400 z-30 pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.9)]"
                                     style={{ top: `${liveTimeInfo.progressPct}%` }}
                                   >
-                                    <div className="absolute start-0 -translate-y-1/2 z-40 flex items-center gap-1 bg-rose-600 text-white text-[8px] sm:text-[8.5px] font-mono font-black px-1.5 py-0.5 rounded-full shadow-lg border border-white/40 whitespace-nowrap animate-pulse">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                                    <div className="absolute start-0 -translate-y-1/2 z-40 flex items-center gap-1 bg-rose-600 text-white text-[7.5px] sm:text-[8px] font-mono font-black px-1 py-0.5 rounded-full shadow-lg border border-white/40 whitespace-nowrap animate-pulse">
+                                      <span className="w-1 h-1 rounded-full bg-white animate-ping" />
                                       <span>{liveTimeInfo.formatted}</span>
-                                      {liveTimeInfo.activeStatus === 'in_period' && (
-                                        <span className="hidden sm:inline text-[7px] font-sans font-bold opacity-90">
-                                          ({liveTimeInfo.remainingMinutes}د)
-                                        </span>
-                                      )}
                                     </div>
                                   </div>
                                 )}
 
-                                <div className="flex flex-col items-center justify-center leading-tight py-1 relative z-10">
+                                <div className="flex flex-col items-center justify-center leading-none py-0.5 relative z-10">
                                   <span className="text-text-main font-black text-[11px] sm:text-[12px]">{period.periodNumber}</span>
-                                  
-                                  {/* Explicit user requirement: Under period number, display when it ends */}
-                                  <div 
-                                    className="mt-0.5 px-1 sm:px-1.5 py-0.5 rounded bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary-light font-mono font-black text-[8px] sm:text-[8.5px] whitespace-nowrap flex items-center justify-center gap-0.5 border border-primary/20 shadow-2xs"
-                                    title={`${_t('الحصة', 'Period', 'Stunde')} ${period.periodNumber}: ${_t('من', 'from', 'von')} ${period.startTime} ${_t('حتى', 'to', 'bis')} ${period.endTime}`}
-                                  >
-                                    <span className="text-[6.5px] sm:text-[7px] font-sans font-bold opacity-80">{_t('ينتهي', 'Ends', 'Bis')}</span>
-                                    <span>{period.endTime}</span>
-                                  </div>
-
-                                  <span className="text-[6.5px] sm:text-[7px] text-text-muted font-mono opacity-65 mt-0.5" title={_t('وقت البداية', 'Start time', 'Startzeit')}>
+                                  <span className="text-[7px] sm:text-[7.5px] text-text-muted font-mono opacity-70 mt-0.5 whitespace-nowrap" title={`${period.startTime} - ${period.endTime}`}>
                                     {period.startTime}
                                   </span>
                                 </div>
@@ -3123,32 +3126,37 @@ export const HodHubView: React.FC = () => {
                                   <td 
                                     key={t.id} 
                                     onClick={() => startEditPeriod(t.id, dayKey, period.periodNumber)}
-                                    className="p-0.5 sm:p-1 border-b border-l border-surface-border text-center h-full align-middle overflow-visible cursor-pointer hover:bg-primary-soft/20 transition-colors group/cell relative"
+                                    className="p-0.5 border-b border-l border-surface-border text-center h-full align-middle overflow-visible cursor-pointer hover:bg-primary-soft/20 transition-colors group/cell relative"
                                     title={lesson 
-                                      ? `${t.name}: ${lesson.className}${lesson.subjectName ? ` - ${lesson.subjectName}` : ''} (${_t('انقر للتعديل', 'Click to edit', 'Klicken zum Bearbeiten')})` 
+                                      ? `${t.name}: ${lesson.className}${lesson.subjectName ? ` - ${lesson.subjectName}` : ''} (${period.startTime} - ${period.endTime})` 
                                       : `${t.name}: ${_t('انقر لإضافة حصة', 'Click to add period', 'Klicken zum Hinzufügen')}`
                                     }
                                   >
                                     {/* Horizontal Line cutting across this teacher's column */}
                                     {isThisPeriodActive && (
                                       <div 
-                                        className="absolute left-0 right-0 h-[2.5px] bg-rose-500 dark:bg-rose-400 z-30 pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.9)]"
+                                        className="absolute left-0 right-0 h-[2px] bg-rose-500 dark:bg-rose-400 z-30 pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.9)]"
                                         style={{ top: `${liveTimeInfo.progressPct}%` }}
                                       >
                                         {isLastTeacher && (
-                                          <div className="absolute end-0 -translate-y-1/2 z-40 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900 shadow-md flex items-center justify-center">
+                                          <div className="absolute end-0 -translate-y-1/2 z-40 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900 shadow-md flex items-center justify-center">
                                             <span className="w-1 h-1 rounded-full bg-white" />
                                           </div>
                                         )}
                                       </div>
                                     )}
 
-                                    <div className="flex flex-col gap-1 w-full relative z-10">
+                                    <div className="flex flex-col gap-0.5 w-full relative z-10">
                                       {lesson && (
-                                        <div className="flex flex-col items-center justify-center bg-primary/10 hover:bg-primary/20 border border-primary/20 hover:border-primary/40 rounded-[4px] py-1 px-0.5 sm:px-1 w-full overflow-hidden transition-all">
-                                          <span className="font-bold text-text-main text-[9px] sm:text-[11px] leading-none truncate w-full">{lesson.className}</span>
+                                        <div className="flex flex-col items-center justify-center bg-primary/10 hover:bg-primary/20 border border-primary/20 hover:border-primary/40 rounded-[3px] py-0.5 px-0.5 w-full overflow-hidden transition-all">
+                                          <div className="flex items-center justify-center gap-1 w-full flex-wrap leading-tight">
+                                            <span className="font-bold text-text-main text-[9px] sm:text-[10.5px] truncate">{lesson.className}</span>
+                                            <span className="text-[7px] sm:text-[8px] font-mono text-primary font-bold opacity-90 whitespace-nowrap">
+                                              ({period.startTime}-{period.endTime})
+                                            </span>
+                                          </div>
                                           {lesson.subjectName && (
-                                            <span className="text-[7.5px] sm:text-[9px] text-primary font-bold truncate w-full leading-none mt-0.5 hidden sm:block">
+                                            <span className="text-[7px] sm:text-[8px] text-primary font-bold truncate w-full leading-none mt-0.2 hidden sm:block">
                                               {lesson.subjectName}
                                             </span>
                                           )}
@@ -3162,15 +3170,17 @@ export const HodHubView: React.FC = () => {
                                             e.stopPropagation();
                                             handleOpenEditCustomSession(cs);
                                           }}
-                                          className="flex flex-col items-center justify-center bg-indigo-100/90 hover:bg-indigo-200/90 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/80 border border-indigo-300 dark:border-indigo-700/80 rounded-[4px] py-0.5 px-0.5 sm:px-1 w-full overflow-hidden transition-all cursor-pointer shadow-2xs group/cs"
+                                          className="flex flex-col items-center justify-center bg-indigo-100/90 hover:bg-indigo-200/90 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/80 border border-indigo-300 dark:border-indigo-700/80 rounded-[3px] py-0.5 px-0.5 w-full overflow-hidden transition-all cursor-pointer shadow-2xs group/cs"
                                           title={`${t.name}: ${cs.className} (⏱️ ${cs.startTime} - ${cs.endTime}) ${cs.subjectName ? `- ${cs.subjectName}` : ''} - ${_t('انقر للتعديل', 'Click to edit', 'Klicken zum Bearbeiten')}`}
                                         >
-                                          <span className="font-black text-indigo-950 dark:text-indigo-200 text-[9px] sm:text-[10.5px] leading-none truncate w-full">{cs.className}</span>
-                                          <span className="text-[7px] sm:text-[8px] text-indigo-700 dark:text-indigo-300 font-mono font-bold truncate w-full leading-none mt-0.5">
-                                            ⏱️ {cs.startTime}-{cs.endTime}
-                                          </span>
+                                          <div className="flex items-center justify-center gap-1 w-full flex-wrap leading-tight">
+                                            <span className="font-black text-indigo-950 dark:text-indigo-200 text-[9px] sm:text-[10px] truncate">{cs.className}</span>
+                                            <span className="text-[6.5px] sm:text-[7.5px] text-indigo-700 dark:text-indigo-300 font-mono font-bold whitespace-nowrap">
+                                              ({cs.startTime}-{cs.endTime})
+                                            </span>
+                                          </div>
                                           {cs.subjectName && (
-                                            <span className="text-[6.5px] sm:text-[7.5px] text-indigo-600 dark:text-indigo-400 font-semibold truncate w-full leading-none mt-0.5 hidden sm:block">
+                                            <span className="text-[6.5px] sm:text-[7.5px] text-indigo-600 dark:text-indigo-400 font-semibold truncate w-full leading-none mt-0.2 hidden sm:block">
                                               {cs.subjectName}
                                             </span>
                                           )}
@@ -3178,8 +3188,8 @@ export const HodHubView: React.FC = () => {
                                       ))}
 
                                       {!lesson && matchingCustoms.length === 0 && (
-                                        <div className="flex items-center justify-center w-full py-1 text-slate-300 dark:text-slate-600 group-hover/cell:text-primary transition-colors">
-                                          <span className="text-[11px] font-black leading-none select-none">+</span>
+                                        <div className="flex items-center justify-center w-full py-0.5 text-slate-300 dark:text-slate-600 group-hover/cell:text-primary transition-colors">
+                                          <span className="text-[10px] font-black leading-none select-none">+</span>
                                         </div>
                                       )}
                                     </div>
@@ -3192,10 +3202,10 @@ export const HodHubView: React.FC = () => {
                           {/* Unmatched / Extended Custom Timed Sessions integrated directly into the day timeline */}
                           {dayUnmatchedCustoms.length > 0 && (
                             <tr className="bg-indigo-50/40 dark:bg-indigo-950/20 border-b border-indigo-200/50 dark:border-indigo-800/40">
-                              <td className="p-0.5 sm:p-1 border-b border-indigo-200/50 dark:border-indigo-800/40 font-bold text-indigo-600 dark:text-indigo-400 text-center align-middle bg-indigo-50/70 dark:bg-indigo-950/40">
+                              <td className="p-0.5 border-b border-indigo-200/50 dark:border-indigo-800/40 font-bold text-indigo-600 dark:text-indigo-400 text-center align-middle bg-indigo-50/70 dark:bg-indigo-950/40">
                                 <div className="flex flex-col items-center justify-center py-0.5" title={_t('حصص بتوقيت مخصص خارج الحصص الأساسية', 'Custom Timed Sessions', 'Spezielle Zeiten')}>
                                   <Clock className="w-3 h-3 text-indigo-500" />
-                                  <span className="text-[7.5px] sm:text-[8.5px] font-black tracking-tighter mt-0.5 leading-none">{_t('مخصص', 'Custom', 'Spez.')}</span>
+                                  <span className="text-[7px] sm:text-[8px] font-black tracking-tighter mt-0.5 leading-none">{_t('مخصص', 'Custom', 'Spez.')}</span>
                                 </div>
                               </td>
                               {teachers.map(t => {
@@ -3203,23 +3213,25 @@ export const HodHubView: React.FC = () => {
                                 return (
                                   <td 
                                     key={t.id} 
-                                    className="p-0.5 sm:p-1 border-b border-l border-indigo-200/50 dark:border-indigo-800/40 text-center h-full align-middle overflow-hidden"
+                                    className="p-0.5 border-b border-l border-indigo-200/50 dark:border-indigo-800/40 text-center h-full align-middle overflow-hidden"
                                   >
                                     {teacherUnmatched.length > 0 ? (
-                                      <div className="flex flex-col gap-1 w-full">
+                                      <div className="flex flex-col gap-0.5 w-full">
                                         {teacherUnmatched.map((cs: CustomTimedSession) => (
                                           <div
                                             key={cs.id}
                                             onClick={() => handleOpenEditCustomSession(cs)}
-                                            className="flex flex-col items-center justify-center bg-indigo-100/90 hover:bg-indigo-200/90 dark:bg-indigo-900/70 dark:hover:bg-indigo-900/90 border border-indigo-300 dark:border-indigo-700/80 rounded-[4px] py-1 px-0.5 sm:px-1 w-full overflow-hidden transition-all cursor-pointer shadow-2xs group/cs"
+                                            className="flex flex-col items-center justify-center bg-indigo-100/90 hover:bg-indigo-200/90 dark:bg-indigo-900/70 dark:hover:bg-indigo-900/90 border border-indigo-300 dark:border-indigo-700/80 rounded-[3px] py-0.5 px-0.5 w-full overflow-hidden transition-all cursor-pointer shadow-2xs group/cs"
                                             title={`${t.name}: ${cs.className} (${cs.startTime} - ${cs.endTime}) ${cs.subjectName ? `- ${cs.subjectName}` : ''} - ${_t('انقر للتعديل', 'Click to edit', 'Klicken zum Bearbeiten')}`}
                                           >
-                                            <span className="font-black text-indigo-900 dark:text-indigo-200 text-[9px] sm:text-[10.5px] leading-none truncate w-full">{cs.className}</span>
-                                            <span className="text-[7px] sm:text-[8.5px] text-indigo-700 dark:text-indigo-300 font-mono font-bold truncate w-full leading-none mt-0.5">
-                                              ⏱️ {cs.startTime}-{cs.endTime}
-                                            </span>
+                                            <div className="flex items-center justify-center gap-1 w-full flex-wrap leading-tight">
+                                              <span className="font-black text-indigo-900 dark:text-indigo-200 text-[9px] sm:text-[10px] truncate">{cs.className}</span>
+                                              <span className="text-[6.5px] sm:text-[7.5px] text-indigo-700 dark:text-indigo-300 font-mono font-bold whitespace-nowrap">
+                                                ({cs.startTime}-{cs.endTime})
+                                              </span>
+                                            </div>
                                             {cs.subjectName && (
-                                              <span className="text-[7px] sm:text-[8px] text-indigo-600 dark:text-indigo-400 font-semibold truncate w-full leading-none mt-0.5 hidden sm:block">
+                                              <span className="text-[6.5px] sm:text-[7.5px] text-indigo-600 dark:text-indigo-400 font-semibold truncate w-full leading-none mt-0.2 hidden sm:block">
                                                 {cs.subjectName}
                                               </span>
                                             )}
@@ -3230,7 +3242,7 @@ export const HodHubView: React.FC = () => {
                                       <button
                                         type="button"
                                         onClick={() => handleOpenAddCustomSession({ teacherId: t.id, dayKey })}
-                                        className="w-full py-1 text-indigo-300/60 hover:text-indigo-600 dark:text-indigo-700/60 dark:hover:text-indigo-400 text-[10px] font-bold transition-colors cursor-pointer"
+                                        className="w-full py-0.5 text-indigo-300/60 hover:text-indigo-600 dark:text-indigo-700/60 dark:hover:text-indigo-400 text-[10px] font-bold transition-colors cursor-pointer"
                                         title={_t('إضافة حصة بتوقيت مخصص لهذا المعلم', 'Add custom timed session', 'Spezielle Stunde hinzufügen')}
                                       >
                                         +
@@ -4699,6 +4711,17 @@ export const HodHubView: React.FC = () => {
                                         {v.overallCategory}
                                       </span>
                                     )}
+                                    {v.isDownloaded ? (
+                                      <span className="inline-flex items-center gap-1 text-[9px] font-black px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                                        <span>{_t('تم تحميله / طباعته', 'Downloaded', 'Heruntergeladen')}</span>
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800">
+                                        <Clock className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400" />
+                                        <span>{_t('لم يُحمَّل', 'New', 'Neu')}</span>
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="text-[10px] text-text-muted flex items-center gap-1.5 flex-wrap">
                                     <span>{new Date(v.visitedDate || v.date || Date.now()).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
@@ -4758,7 +4781,10 @@ export const HodHubView: React.FC = () => {
                                   </span>
                                 </button>
                                 <button
-                                  onClick={() => printObservationReport(v, schoolSettings, (language === 'ar'), language)}
+                                  onClick={() => {
+                                    printObservationReport(v, schoolSettings, (language === 'ar'), language);
+                                    handleMarkVisitsDownloaded([v.id], true);
+                                  }}
                                   className="h-7 sm:h-8 px-2 sm:px-2.5 text-[10px] sm:text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 dark:text-indigo-300 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 dark:border-indigo-800 rounded-lg transition-all duration-150 active:scale-95 flex items-center justify-center gap-1 cursor-pointer shadow-2xs"
                                   title={_t('طباعة التقرير', 'Print Report', 'Drucken')}
                                 >
@@ -5517,6 +5543,7 @@ export const HodHubView: React.FC = () => {
         language={language}
         initialTeacherId={bulkExportTeacherId}
         onPreviewSingle={(visit) => setPreviewVisitRecord(visit)}
+        onMarkVisitsDownloaded={handleMarkVisitsDownloaded}
       />
       {isImportModalOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2.5">

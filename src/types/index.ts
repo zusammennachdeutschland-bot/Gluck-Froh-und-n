@@ -399,6 +399,10 @@ export interface VisitRecord extends SyncableRecord {
   overallCategory?: string;
   
   consolidatedNotes?: string;
+  weeklyReportSent?: boolean;
+  weeklyReportDate?: string;
+  isDownloaded?: boolean;
+  downloadedAt?: string;
 }
 
 export interface BookletObservation {
@@ -520,6 +524,9 @@ export interface StageFollowUpRecord {
   includeComplaints?: boolean;
   selectedComplaintIds?: string[];
   includedComplaints?: Complaint[];
+  includeVisits?: boolean;
+  selectedVisitIds?: string[];
+  includedVisits?: VisitRecord[];
   includeActionPlans?: boolean;
   selectedActionPlanIds?: string[];
   includedActionPlans?: StudentActionPlan[];

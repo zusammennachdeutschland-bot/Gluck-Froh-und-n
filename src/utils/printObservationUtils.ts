@@ -125,6 +125,42 @@ export function generateStageFollowUpReportHtml(
           teacherRowsHtml +
         '</tbody>' +
       '</table>' +
+      ((record.includeVisits && record.includedVisits && record.includedVisits.length > 0) ? (
+        '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+          '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">تفاصيل الزيارات الصفية المعتمدة والمرفقة (' + record.includedVisits.length + '):</div>' +
+          '<table>' +
+            '<thead>' +
+              '<tr>' +
+                '<th style="width: 5%;">#</th>' +
+                '<th style="width: 22%;">اسم المعلم</th>' +
+                '<th style="width: 15%;">الصف والحصة</th>' +
+                '<th style="width: 15%;">تاريخ الزيارة</th>' +
+                '<th style="width: 25%;">موضوع الدرس</th>' +
+                '<th style="width: 18%;">التقييم العام</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' +
+              record.includedVisits.map((v: any, i) => {
+                const teacherName = v.teacherName || '-';
+                const classGrade = v.className || v.class || v.gradeClass || '-';
+                const dateVal = v.visitedDate || v.date || '-';
+                const topic = v.lessonTopic || v.topic || v.focusAreas || 'زيارة صفية دورية';
+                const scoreVal = v.overallScore ?? v.totalScore ?? v.score;
+                const scoreText = (scoreVal !== undefined && scoreVal !== null) ? `${scoreVal}/75` : '-';
+                const catText = v.overallCategory ? ` (${v.overallCategory})` : '';
+                return '<tr>' +
+                  `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
+                  `<td style="text-align: right; font-weight: bold;">${teacherName}</td>` +
+                  `<td style="text-align: center;">${classGrade}${v.periodNumber ? ' - ح' + v.periodNumber : ''}</td>` +
+                  `<td style="text-align: center; font-mono;">${dateVal}</td>` +
+                  `<td style="text-align: right;">${topic}</td>` +
+                  `<td style="text-align: center; font-weight: bold; color: #2563eb;">${scoreText}${catText}</td>` +
+                '</tr>';
+              }).join('') +
+            '</tbody>' +
+          '</table>' +
+        '</div>'
+      ) : '') +
       ((record.includeComplaints && record.includedComplaints && record.includedComplaints.length > 0) ? (
         '<div style="margin-top: 8px; margin-bottom: 8px;">' +
           '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الشكاوى وملاحظات أولياء الأمور (' + record.includedComplaints.length + '):</div>' +
