@@ -266,9 +266,9 @@ export const LessonControlModal: React.FC = () => {
       if (isQuick) {
         const qId = targetStudent?.id || selectedLesson.studentId || selectedLesson.id || 'quick_student';
         setStudentAttendance({ [qId]: 'present' });
-        setStudentHomeworkDone({ [qId]: 'yes' });
-        setStudentDictationGrade({ [qId]: 100 });
-        setStudentExamGrade({ [qId]: 100 });
+        setStudentHomeworkDone({});
+        setStudentDictationGrade({});
+        setStudentExamGrade({});
       } else if (selectedLesson.groupId) {
         const initialAtt: Record<string, AttendanceStatus> = {};
         const groupSts = students.filter(s => s.groupId === selectedLesson.groupId);
@@ -574,16 +574,6 @@ export const LessonControlModal: React.FC = () => {
         delete finalStudentHomeworkDone[st.id];
         delete finalStudentDictationGrade[st.id];
         delete finalStudentExamGrade[st.id];
-      } else {
-        if (!finalStudentHomeworkDone[st.id]) {
-          finalStudentHomeworkDone[st.id] = 'yes';
-        }
-        if (finalStudentDictationGrade[st.id] === undefined) {
-          finalStudentDictationGrade[st.id] = -1; // -1 means "مكانش فيه", not 10!
-        }
-        if (finalStudentExamGrade[st.id] === undefined) {
-          finalStudentExamGrade[st.id] = -1; // -1 means "مكانش فيه", not 10!
-        }
       }
       if (finalStudentNotes[st.id] === undefined) {
         finalStudentNotes[st.id] = '';
@@ -609,9 +599,9 @@ export const LessonControlModal: React.FC = () => {
       previousHomeworkDescription: (lessonPreviousHomework || detectedPreviousHomework || '').trim() || undefined,
       recordingLink: lessonRecordingLink.trim() || undefined,
       recordingLink2: lessonRecordingLink2.trim() || undefined,
-      studentHomeworkDone: isQuick ? (isSingleStudentAbsent ? {} : (Object.keys(studentHomeworkDone).length > 0 ? studentHomeworkDone : { [qId]: 'yes' })) : finalStudentHomeworkDone,
-      studentDictationGrade: isQuick ? (isSingleStudentAbsent ? {} : (Object.keys(studentDictationGrade).length > 0 ? studentDictationGrade : { [qId]: -1 })) : finalStudentDictationGrade,
-      studentExamGrade: isQuick ? (isSingleStudentAbsent ? {} : (Object.keys(studentExamGrade).length > 0 ? studentExamGrade : { [qId]: -1 })) : finalStudentExamGrade,
+      studentHomeworkDone: isSingleStudentAbsent ? {} : finalStudentHomeworkDone,
+      studentDictationGrade: isSingleStudentAbsent ? {} : finalStudentDictationGrade,
+      studentExamGrade: isSingleStudentAbsent ? {} : finalStudentExamGrade,
       studentNotes: isQuick ? (Object.keys(studentNotes).length > 0 ? studentNotes : { [qId]: selectedLesson.quickNotes || '' }) : finalStudentNotes,
       studentPerformance,
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -1135,16 +1125,6 @@ export const LessonControlModal: React.FC = () => {
                   if (isQuick) return true; // Quick lesson can always be completed with instant defaults
                   if (!lessonWhatWasTaught.trim()) return false;
                   if (!lessonNextHomework.trim()) return false;
-                  
-                  // Check for each student
-                  for (const st of activeLessonStudents) {
-                    const att = studentAttendance[st.id] || 'present';
-                    if (att !== 'absent') {
-                      if (!studentHomeworkDone[st.id]) return false;
-                      if (studentDictationGrade[st.id] === undefined) return false;
-                      if (studentExamGrade[st.id] === undefined) return false;
-                    }
-                  }
                   return true;
                 })();
 
@@ -1536,9 +1516,9 @@ export const LessonControlModal: React.FC = () => {
                                   {lastSessionHwStatus && (
                                     <span className="text-[9.5px] text-text-muted mt-0.5 bg-slate-50 dark:bg-slate-800/50 px-1.5 py-0.5 rounded border border-slate-100 dark:border-slate-800/30 inline-block font-extrabold">
                                       {_t(
-                                        `🎒 واجب سابق: ${lastSessionHwStatus === 'yes' ? 'تم الحل 👍' : 'لم يتم 👎'}`,
-                                        `🎒 Prev HW: ${lastSessionHwStatus === 'yes' ? 'Done 👍' : 'Not Done 👎'}`,
-                                        `🎒 Letzte HA: ${lastSessionHwStatus === 'yes' ? 'Erledigt 👍' : 'Nicht erledigt 👎'}`
+                                        `🎒 واجب سابق: ${lastSessionHwStatus === 'yes' ? 'تم الحل 👍' : lastSessionHwStatus === 'no' ? 'لم يتم 👎' : 'لا يوجد'}`,
+                                        `🎒 Prev HW: ${lastSessionHwStatus === 'yes' ? 'Done 👍' : lastSessionHwStatus === 'no' ? 'Not Done 👎' : 'None'}`,
+                                        `🎒 Letzte HA: ${lastSessionHwStatus === 'yes' ? 'Erledigt 👍' : lastSessionHwStatus === 'no' ? 'Nicht erledigt 👎' : 'Keine'}`
                                       )}
                                     </span>
                                   )}
@@ -1589,7 +1569,7 @@ export const LessonControlModal: React.FC = () => {
                                   {/* Homework completed toggle */}
                                   <div className="space-y-1">
                                     <div className="flex items-center justify-between gap-1">
-                                      <span className="text-[10.5px] font-black text-text-main block">{t('auto_previous_homework_performance')} <span className="text-primary">*</span></span>
+                                      <span className="text-[10.5px] font-black text-text-main block">{t('auto_previous_homework_performance')}</span>
                                       {(lessonPreviousHomework || detectedPreviousHomework) && (
                                         <span className="text-[9.5px] font-bold text-primary truncate max-w-[190px]" title={lessonPreviousHomework || detectedPreviousHomework}>
                                           📋 كان: {lessonPreviousHomework || detectedPreviousHomework}
@@ -1601,29 +1581,67 @@ export const LessonControlModal: React.FC = () => {
                                         key={`hw-yes-${st.id}`}
                                         type="button"
                                         onClick={() => {
-                                          setStudentHomeworkDone(prev => ({ ...prev, [st.id]: 'yes' }));
+                                          setStudentHomeworkDone(prev => {
+                                            const next = { ...prev };
+                                            if (next[st.id] === 'yes') {
+                                              delete next[st.id];
+                                            } else {
+                                              next[st.id] = 'yes';
+                                            }
+                                            return next;
+                                          });
                                         }}
                                         className={`flex-1 py-1 rounded-md text-[10px] font-black cursor-pointer transition-all border ${
                                           stHw === 'yes'
-                                            ? 'bg-primary-soft text-primary border-primary-border shadow-2xs'
-                                            : 'bg-surface-hover text-text-muted border-surface-border'
+                                            ? 'bg-primary-soft text-primary border-primary-border shadow-2xs font-extrabold'
+                                            : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200 dark:hover:bg-slate-700'
                                         }`}
                                       >
-                                        {t('auto_completed_12')}
+                                        {_t('اتحل 👍', 'Completed 👍', 'Erledigt 👍')}
                                       </button>
                                       <button
                                         key={`hw-no-${st.id}`}
                                         type="button"
                                         onClick={() => {
-                                          setStudentHomeworkDone(prev => ({ ...prev, [st.id]: 'no' }));
+                                          setStudentHomeworkDone(prev => {
+                                            const next = { ...prev };
+                                            if (next[st.id] === 'no') {
+                                              delete next[st.id];
+                                            } else {
+                                              next[st.id] = 'no';
+                                            }
+                                            return next;
+                                          });
                                         }}
                                         className={`flex-1 py-1 rounded-md text-[10px] font-black cursor-pointer transition-all border ${
                                           stHw === 'no'
-                                            ? 'bg-red-50 text-red-600 border-red-100 shadow-2xs dark:bg-red-950/20 dark:border-red-900/50'
-                                            : 'bg-surface-hover text-text-muted border-surface-border'
+                                            ? 'bg-red-50 text-red-600 border-red-100 shadow-2xs dark:bg-red-950/20 dark:border-red-900/50 font-extrabold'
+                                            : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200 dark:hover:bg-slate-700'
                                         }`}
                                       >
-                                        {t('auto_not_completed_13')}
+                                        {_t('متحلش 👎', 'Not Completed 👎', 'Nicht erledigt 👎')}
+                                      </button>
+                                      <button
+                                        key={`hw-none-${st.id}`}
+                                        type="button"
+                                        onClick={() => {
+                                          setStudentHomeworkDone(prev => {
+                                            const next = { ...prev };
+                                            if (next[st.id] === 'none') {
+                                              delete next[st.id];
+                                            } else {
+                                              next[st.id] = 'none';
+                                            }
+                                            return next;
+                                          });
+                                        }}
+                                        className={`flex-1 py-1 rounded-md text-[10px] font-black cursor-pointer transition-all border ${
+                                          stHw === 'none'
+                                            ? 'bg-amber-500 text-white border-amber-500 shadow-2xs font-extrabold'
+                                            : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200 dark:hover:bg-slate-700'
+                                        }`}
+                                      >
+                                        {_t('لا يوجد', 'None', 'Keine')}
                                       </button>
                                     </div>
                                   </div>
@@ -1631,7 +1649,7 @@ export const LessonControlModal: React.FC = () => {
                                   {/* Dictation Score (مكانش فيه + 0 to 10 pills) */}
                                   <div className="space-y-1">
                                     <div className="flex items-center justify-between">
-                                      <span className="text-[10.5px] font-black text-text-main block">{t('auto_dictation_grade_out_of_10')} <span className="text-primary">*</span></span>
+                                      <span className="text-[10.5px] font-black text-text-main block">{t('auto_dictation_grade_out_of_10')}</span>
                                       {stDict === -1 && (
                                         <span className="text-[9.5px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded">
                                           {_t('مكانش فيه إملاء', 'No Dictation', 'Kein Diktat')}
@@ -1643,14 +1661,22 @@ export const LessonControlModal: React.FC = () => {
                                         key={`dict-${st.id}-none`}
                                         type="button"
                                         onClick={() => {
-                                          setStudentDictationGrade(prev => ({ ...prev, [st.id]: -1 }));
+                                          setStudentDictationGrade(prev => {
+                                            const next = { ...prev };
+                                            if (next[st.id] === -1) {
+                                              delete next[st.id];
+                                            } else {
+                                              next[st.id] = -1;
+                                            }
+                                            return next;
+                                          });
                                         }}
                                         className={`px-2 h-7 sm:h-6 rounded-lg sm:rounded-md text-[10.5px] sm:text-[9.5px] font-black flex items-center justify-center border transition-all cursor-pointer ${
                                           stDict === -1
                                             ? 'bg-amber-600 text-white border-amber-600 shadow-2xs scale-105'
                                             : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200 dark:hover:bg-slate-700'
                                         }`}
-                                        title={_t('لم يُعقد إملاء في هذه الحصة', 'No dictation held in this lesson', 'Kein Diktat')}
+                                        title={_t('لم يُعقد إملاء في هذه الحصة (انقر للإلغاء)', 'No dictation held in this lesson (Click to deselect)', 'Kein Diktat')}
                                       >
                                         {_t('مكانش فيه', 'None', 'Keins')}
                                       </button>
@@ -1659,7 +1685,15 @@ export const LessonControlModal: React.FC = () => {
                                           key={`dict-${st.id}-${score}`}
                                           type="button"
                                           onClick={() => {
-                                            setStudentDictationGrade(prev => ({ ...prev, [st.id]: score }));
+                                            setStudentDictationGrade(prev => {
+                                              const next = { ...prev };
+                                              if (next[st.id] === score) {
+                                                delete next[st.id];
+                                              } else {
+                                                next[st.id] = score;
+                                              }
+                                              return next;
+                                            });
                                           }}
                                           className={`w-7 h-7 sm:w-6 sm:h-6 rounded-lg sm:rounded-md text-xs sm:text-[10px] font-black flex items-center justify-center border transition-all cursor-pointer ${
                                             stDict === score
@@ -1676,7 +1710,7 @@ export const LessonControlModal: React.FC = () => {
                                   {/* Exam Score (مكانش فيه + 0 to 10 pills) */}
                                   <div className="space-y-1">
                                     <div className="flex items-center justify-between">
-                                      <span className="text-[10.5px] font-black text-text-main block">{t('auto_exam_quiz_grade_out_of_10')} <span className="text-primary">*</span></span>
+                                      <span className="text-[10.5px] font-black text-text-main block">{t('auto_exam_quiz_grade_out_of_10')}</span>
                                       {stExam === -1 && (
                                         <span className="text-[9.5px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded">
                                           {_t('مكانش فيه امتحان', 'No Exam', 'Keine Prüfung')}
@@ -1688,14 +1722,22 @@ export const LessonControlModal: React.FC = () => {
                                         key={`exam-${st.id}-none`}
                                         type="button"
                                         onClick={() => {
-                                          setStudentExamGrade(prev => ({ ...prev, [st.id]: -1 }));
+                                          setStudentExamGrade(prev => {
+                                            const next = { ...prev };
+                                            if (next[st.id] === -1) {
+                                              delete next[st.id];
+                                            } else {
+                                              next[st.id] = -1;
+                                            }
+                                            return next;
+                                          });
                                         }}
                                         className={`px-2 h-7 sm:h-6 rounded-lg sm:rounded-md text-[10.5px] sm:text-[9.5px] font-black flex items-center justify-center border transition-all cursor-pointer ${
                                           stExam === -1
                                             ? 'bg-amber-600 text-white border-amber-600 shadow-2xs scale-105'
                                             : 'bg-surface-hover text-text-muted border-surface-border hover:bg-slate-200 dark:hover:bg-slate-700'
                                         }`}
-                                        title={_t('لم يُعقد امتحان أو كويز في هذه الحصة', 'No exam held in this lesson', 'Keine Prüfung')}
+                                        title={_t('لم يُعقد امتحان أو كويز في هذه الحصة (انقر للإلغاء)', 'No exam held in this lesson (Click to deselect)', 'Keine Prüfung')}
                                       >
                                         {_t('مكانش فيه', 'None', 'Keins')}
                                       </button>
@@ -1704,7 +1746,15 @@ export const LessonControlModal: React.FC = () => {
                                           key={`exam-${st.id}-${score}`}
                                           type="button"
                                           onClick={() => {
-                                            setStudentExamGrade(prev => ({ ...prev, [st.id]: score }));
+                                            setStudentExamGrade(prev => {
+                                              const next = { ...prev };
+                                              if (next[st.id] === score) {
+                                                delete next[st.id];
+                                              } else {
+                                                next[st.id] = score;
+                                              }
+                                              return next;
+                                            });
                                           }}
                                           className={`w-7 h-7 sm:w-6 sm:h-6 rounded-lg sm:rounded-md text-xs sm:text-[10px] font-black flex items-center justify-center border transition-all cursor-pointer ${
                                             stExam === score
@@ -1761,24 +1811,6 @@ export const LessonControlModal: React.FC = () => {
                         <ul className="list-disc list-inside space-y-0.5 text-[10px] font-black pr-1">
                           {!lessonWhatWasTaught.trim() && <li>{t('auto_subject_taught_field')}</li>}
                           {!lessonNextHomework.trim() && <li>{t('auto_next_homework_field')}</li>}
-                          {activeLessonStudents.map(st => {
-                            const att = studentAttendance[st.id] || 'present';
-                            if (att !== 'absent') {
-                              const missing = [];
-                              if (studentHomeworkDone[st.id] === undefined) missing.push(t('auto_homework_status'));
-                              if (studentDictationGrade[st.id] === undefined) missing.push(t('auto_dictation_grade'));
-                              if (studentExamGrade[st.id] === undefined) missing.push(t('auto_exam_grade'));
-                              if (missing.length > 0) {
-                                return (
-                                  <li key={st.id}>
-                                    {t('auto_student_14')} <strong>{st.name}</strong>:{' '}
-                                    {t('auto_needs')} ({missing.join(t('auto'))})
-                                  </li>
-                                );
-                              }
-                            }
-                            return null;
-                          })}
                         </ul>
                       </div>
                     )}
@@ -1916,10 +1948,10 @@ export const LessonControlModal: React.FC = () => {
                 ? 'absent' 
                 : (selectedLesson.report?.attendanceStatus || attendance || 'present'),
               studentAttendance: Object.keys(studentAttendance).length > 0 ? studentAttendance : (selectedLesson.report?.studentAttendance || {}),
-              studentHomeworkDone: selectedLesson.report?.studentHomeworkDone || studentHomeworkDone,
-              studentDictationGrade: selectedLesson.report?.studentDictationGrade || studentDictationGrade,
-              studentExamGrade: selectedLesson.report?.studentExamGrade || studentExamGrade,
-              studentNotes: selectedLesson.report?.studentNotes || studentNotes,
+              studentHomeworkDone: (showReportForm || isEditingReport) ? studentHomeworkDone : (selectedLesson.report?.studentHomeworkDone || studentHomeworkDone),
+              studentDictationGrade: (showReportForm || isEditingReport) ? studentDictationGrade : (selectedLesson.report?.studentDictationGrade || studentDictationGrade),
+              studentExamGrade: (showReportForm || isEditingReport) ? studentExamGrade : (selectedLesson.report?.studentExamGrade || studentExamGrade),
+              studentNotes: (showReportForm || isEditingReport) ? studentNotes : (selectedLesson.report?.studentNotes || studentNotes),
               homeworkStatus,
               homeworkTitle: lessonNextHomework || homeworkTitle,
               homeworkDescription: lessonNextHomework || homeworkDescription,

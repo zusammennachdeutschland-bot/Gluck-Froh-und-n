@@ -637,6 +637,10 @@ export const rebuildAllNotificationSchedules = async (
     });
   };
 
+  const lang = language || 'en';
+  const isAr = lang === 'ar';
+  const isDe = lang === 'de';
+
   // -------------------------------------------------------------
   // A. LESSON REMINDERS, LESSON START & ATTENDANCE REMINDERS
   // -------------------------------------------------------------
@@ -651,7 +655,7 @@ export const rebuildAllNotificationSchedules = async (
 
     if (isNaN(lessonStartEpoch)) continue;
 
-    const lessonDisplayName = lesson.studentName || (lesson.groupName && lesson.groupName !== 'Quick Lesson' ? lesson.groupName : '') || lesson.title || 'الحصّة';
+    const lessonDisplayName = lesson.studentName || (lesson.groupName && lesson.groupName !== 'Quick Lesson' ? lesson.groupName : '') || lesson.title || (isAr ? 'الحصّة' : isDe ? 'Lektion' : 'Lesson');
 
     // 1. Lesson Reminder (X minutes before)
     if (settings.lessonReminder.enabled) {
@@ -659,10 +663,19 @@ export const rebuildAllNotificationSchedules = async (
       const reminderEpoch = lessonStartEpoch - minutesBefore * 60 * 1000;
       if (reminderEpoch > now) {
         const isAlarm = settings.alarmModeEnabled !== false;
+        const title = isAlarm
+          ? (isAr ? `⏰ منبه موعد الحصّة: ${lessonDisplayName}` : isDe ? `⏰ Alarm für Lektion: ${lessonDisplayName}` : `⏰ Lesson Alarm: ${lessonDisplayName}`)
+          : (isAr ? `⏰ تذكير بموعد الحصّة: ${lessonDisplayName}` : isDe ? `⏰ Erinnerung an Lektion: ${lessonDisplayName}` : `⏰ Lesson Reminder: ${lessonDisplayName}`);
+        const body = isAr
+          ? `حصّة ${lessonDisplayName} تبدأ بعد ${minutesBefore} دقيقة (الساعة ${lesson.time})`
+          : isDe
+          ? `Lektion ${lessonDisplayName} beginnt in ${minutesBefore} Minuten (${lesson.time} Uhr)`
+          : `Lesson ${lessonDisplayName} starts in ${minutesBefore} mins (at ${lesson.time})`;
+
         addNotification(
           generateDeterministicId(`rem_${lesson.id}`, 10000),
-          isAlarm ? `⏰ منبه موعد الحصّة: ${lessonDisplayName}` : `⏰ تذكير بموعد الحصّة: ${lessonDisplayName}`,
-          `حصّة ${lessonDisplayName} تبدأ بعد ${minutesBefore} دقيقة (الساعة ${lesson.time})`,
+          title,
+          body,
           new Date(reminderEpoch),
           isAlarm ? 'lesson_alarm' : 'lessons_reminders',
           'lessonReminder',
@@ -675,10 +688,21 @@ export const rebuildAllNotificationSchedules = async (
     // 2. Lesson Start Alert
     if (settings.lessonStart.enabled) {
       if (lessonStartEpoch > now) {
+        const startTitle = isAr
+          ? `🔔 حان موعد حصّة: ${lessonDisplayName}`
+          : isDe
+          ? `🔔 Zeit für Lektion: ${lessonDisplayName}`
+          : `🔔 Time for Lesson: ${lessonDisplayName}`;
+        const startBody = isAr
+          ? `بدأت الآن حصّة ${lessonDisplayName} (الساعة ${lesson.time})`
+          : isDe
+          ? `Lektion ${lessonDisplayName} startet jetzt (${lesson.time} Uhr)`
+          : `Lesson ${lessonDisplayName} is starting now (at ${lesson.time})`;
+
         addNotification(
           generateDeterministicId(`start_${lesson.id}`, 20000),
-          `🔔 حان موعد حصّة: ${lessonDisplayName}`,
-          `بدأت الآن حصّة ${lessonDisplayName} (الساعة ${lesson.time})`,
+          startTitle,
+          startBody,
           new Date(lessonStartEpoch),
           'lesson_start',
           'lessonStart',
@@ -693,10 +717,21 @@ export const rebuildAllNotificationSchedules = async (
       const duration = lesson.durationMinutes || 60;
       const attendanceRemEpoch = lessonStartEpoch + duration * 60 * 1000;
       if (attendanceRemEpoch > now) {
+        const attTitle = isAr
+          ? `📝 تذكير بتسجيل الحضور والغياب: ${lessonDisplayName}`
+          : isDe
+          ? `📝 Anwesenheit erfassen: ${lessonDisplayName}`
+          : `📝 Log Attendance: ${lessonDisplayName}`;
+        const attBody = isAr
+          ? `لا تنسَ تسجيل حضور وغياب الطلاب لحصّة ${lessonDisplayName}`
+          : isDe
+          ? `Vergessen Sie nicht, die Anwesenheit für ${lessonDisplayName} einzutragen.`
+          : `Don't forget to mark student attendance for ${lessonDisplayName}.`;
+
         addNotification(
           generateDeterministicId(`att_${lesson.id}`, 30000),
-          `📝 تذكير بتسجيل الحضور والغياب: ${lessonDisplayName}`,
-          `لا تنسَ تسجيل حضور وغياب الطلاب لحصّة ${lessonDisplayName}`,
+          attTitle,
+          attBody,
           new Date(attendanceRemEpoch),
           'attendance_reminder',
           'attendanceReminder',
@@ -722,10 +757,21 @@ export const rebuildAllNotificationSchedules = async (
       tomorrow10AM.setDate(tomorrow10AM.getDate() + 1);
       tomorrow10AM.setHours(10, 0, 0, 0);
 
+      const payTitle = isAr
+        ? `💰 تذكير بالمدفوعات المستحقة (${pendingStudents.length} طلاب)`
+        : isDe
+        ? `💰 Fällige Zahlungen (${pendingStudents.length} Schüler)`
+        : `💰 Pending Payments Due (${pendingStudents.length} students)`;
+      const payBody = isAr
+        ? `توجد مدفوعات وتجديدات اشتراك مستحقة لـ ${pendingStudents.length} من الطلاب.`
+        : isDe
+        ? `Es gibt fällige Zahlungen und Paket-Verlängerungen für ${pendingStudents.length} Schüler.`
+        : `There are pending fees and renewals due for ${pendingStudents.length} students.`;
+
       addNotification(
         40001,
-        `💰 تذكير بالمدفوعات المستحقة (${pendingStudents.length} طلاب)`,
-        `توجد مدفوعات وتجديدات اشتراك مستحقة لـ ${pendingStudents.length} من الطلاب.`,
+        payTitle,
+        payBody,
         tomorrow10AM,
         'payment_due',
         'paymentDue',
@@ -752,22 +798,24 @@ export const rebuildAllNotificationSchedules = async (
     const todayStr = formatLocalDate();
     const todayLessons = lessons.filter(l => l.date === todayStr);
 
-    let summaryText = 'ملخص اليوم: ';
+    let summaryText = isAr ? 'ملخص اليوم: ' : isDe ? 'Tagesübersicht: ' : 'Daily Summary: ';
     const parts: string[] = [];
 
     if (settings.dailySummaryIncludeLessons) {
-      parts.push(`${todayLessons.length} حصص اليوم`);
+      parts.push(isAr ? `${todayLessons.length} حصص اليوم` : isDe ? `${todayLessons.length} Lektionen heute` : `${todayLessons.length} lessons today`);
     }
     if (settings.dailySummaryIncludePendingPayments) {
       const pendingCount = students.filter(s => s.paymentStatus === 'pending').length;
-      parts.push(`${pendingCount} مدفوعات معلقة`);
+      parts.push(isAr ? `${pendingCount} مدفوعات معلقة` : isDe ? `${pendingCount} offene Zahlungen` : `${pendingCount} pending payments`);
     }
 
-    summaryText += parts.join(' • ') || 'تأكد من مراجعة جدول الغد';
+    summaryText += parts.join(' • ') || (isAr ? 'تأكد من مراجعة جدول الغد' : isDe ? 'Morgigen Zeitplan prüfen' : 'Check tomorrow’s schedule');
+
+    const sumTitle = isAr ? `📊 الملخص اليومي للمعلم` : isDe ? `📊 Tägliche Lehrerübersicht` : `📊 Teacher's Daily Summary`;
 
     addNotification(
       50001,
-      `📊 الملخص اليومي للمعلم`,
+      sumTitle,
       summaryText,
       summaryDate,
       'daily_summary',
@@ -921,10 +969,23 @@ export const setupNotificationActionListener = (
 /**
  * Triggers a test notification designed to pop up outside the app (Heads-Up Banner + Sound + Actions)
  */
-export const sendTestOutsideNotification = async () => {
+export const sendTestOutsideNotification = async (language?: string) => {
+  const isAr = language === 'ar';
+  const isDe = language === 'de';
+  const title = isAr
+    ? '⏰ تجربة منبه موعد الحصة خارج البرنامج'
+    : isDe
+    ? '⏰ Test-Alarm für Lektion außerhalb der App'
+    : '⏰ Test Lesson Alarm Outside App';
+  const body = isAr
+    ? 'هكذا يظهر منبه الحصة في أعلى الشاشة وعلى شاشة القفل عند تصغير التطبيق أو قفل الهاتف.'
+    : isDe
+    ? 'So erscheint der Lektionsalarm am oberen Bildschirmrand und auf dem Sperrbildschirm.'
+    : 'This is how the lesson alarm appears at the top banner and lock screen when minimized.';
+
   await sendSystemNotification(
-    '⏰ تجربة منبه موعد الحصة خارج البرنامج',
-    'هكذا يظهر منبه الحصة في أعلى الشاشة وعلى شاشة القفل عند تصغير التطبيق أو قفل الهاتف.',
+    title,
+    body,
     'lesson_alarm',
     { isTest: true },
     'LESSON_ALARM_ACTIONS'

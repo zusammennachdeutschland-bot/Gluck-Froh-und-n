@@ -17,6 +17,11 @@ import {
   UnifiedDayTimelineItem
 } from '../utils/schoolUtils';
 import { SchoolScheduleExportModal } from './SchoolScheduleExportModal';
+import { 
+  normalizeClassCode, 
+  CLASS_UNIFICATION_RULES_AR, 
+  CLASS_UNIFICATION_RULES_EN 
+} from '../utils/classNormalizer';
 
 export const SchoolScheduleView: React.FC = () => {
   const { profile, updateProfile, rebuildNotificationSchedules, language, _t, t } = useApp();
@@ -327,12 +332,11 @@ export const SchoolScheduleView: React.FC = () => {
 
   // AI Import Prompt Generator
   const generateAIPrompt = (): string => {
-    return `You are an expert school schedule parser and visual information extractor. 
-I am going to provide you with an image, text, PDF, or screenshot of my personal school teaching schedule.
+    return `أنت مساعد خبير وفائق الدقة في قراءة واستخراج جداول الحصص المدرسية لربطها بقوائم الطلاب.
+سأقوم بإرفاق صورة أو نص أو ملف لجدول الحصص المدرسي الأسبوعي الخاص بي.
+مهمتك استخراج الجدول وإخراجه بتنسيق JSON نظيف وصارم يطابق الـ Schema التالي تماماً:
 
-Your task is to extract this schedule and output a clean, strict JSON document matching the exact schema below.
-
-JSON SCHEMA:
+\`\`\`json
 {
   "presence": {
     "0": { "active": true, "arrivalTime": "07:30", "departureTime": "14:30" },
@@ -351,8 +355,8 @@ JSON SCHEMA:
   },
   "schedule": {
     "0": [
-      { "periodNumber": 1, "subjectName": "German Language", "className": "Class 10-A", "notes": "" },
-      { "periodNumber": 2, "subjectName": "German Language", "className": "Class 10-B", "notes": "" }
+      { "periodNumber": 1, "subjectName": "Deutsch", "className": "10A", "notes": "" },
+      { "periodNumber": 2, "subjectName": "Deutsch", "className": "10B", "notes": "" }
     ],
     "1": [],
     "2": [],
@@ -362,17 +366,17 @@ JSON SCHEMA:
     "6": []
   }
 }
+\`\`\`
 
-KEY CONSTRAINTS & RULES:
-1. Days of week keys range from "0" (Sunday) to "6" (Saturday). Activate ("active": true) only the days that are actual school teaching days.
-2. The arrival and departure times represent my overall presence block at the school, not just the duration of classes (e.g. Arrival 07:30, Departure 14:30).
-3. The classes must be indexed in "periodNumber" starting from 1 up to "periodsCount".
-4. There are NO gaps or breaks between periods. Period i end = Period i+1 start.
-5. If a period duration is different from the default (e.g. period 3 is 35 mins while default is 45), declare it in "customDurations" under "periodSettings": e.g., "customDurations": { "3": 35 }.
-6. Keep subject names, class/group identifiers, and notes highly accurate. Use Arabic or English or German depending on how they appear in the original schedule.
-7. Use 24-hour HH:MM formatting (e.g. "07:30", "13:15") for all times.
-8. If an information is completely blank, unclear or missing, represent it with null or omit it. Do not invent any records.
-9. ONLY output the valid JSON markdown block (with \`\`\`json and \`\`\`). No preamble, no conversational greetings, no extra explanation text.`;
+قواعد وشروط إلزامية بالغة الأهمية:
+1. ${CLASS_UNIFICATION_RULES_AR}
+2. أيام الأسبوع تمثل من "0" (الأحد) إلى "6" (السبت). فَعّل ("active": true) فقط أيام العمل والدراسة الفعلية.
+3. وقت الحضور ووقت الانصراف يمثلان فترة التواجد الإجمالية في المدرسة (مثال: الحضور 07:30 والانصراف 14:30).
+4. ترقيم الحصص "periodNumber" يبدأ من 1 تصاعدياً حتى "periodsCount".
+5. subjectName هو اسم المادة (يرجى توحيده لـ "Deutsch" لمادة اللغة الألمانية).
+6. className هو اسم الفصل ويجب كتابته بالصيغة القياسية الموحدة (مثل 10A, 11B, 7A...) بدون مسافات ليتطابق تماماً مع كشوف وفلاتر الطلاب.
+7. استخدم نظام التوقيت 24 ساعة (HH:MM) مثل "08:00" و "13:30".
+8. أخرج فقط كود JSON النظيف داخل وسم \`\`\`json و \`\`\` بدون أي نصوص تمهيدية أو شروحات.`;
   };
 
   const copyPromptToClipboard = () => {
@@ -515,8 +519,20 @@ KEY CONSTRAINTS & RULES:
   const confirmImport = () => {
     if (!validationResult || !validationResult.parsedData) return;
     
+    const normalizedData = { ...validationResult.parsedData };
+    if (normalizedData.schedule) {
+      const newSchedule: Record<string, any[]> = {};
+      Object.keys(normalizedData.schedule).forEach(dayKey => {
+        newSchedule[dayKey] = (normalizedData.schedule[dayKey] || []).map((p: any) => ({
+          ...p,
+          className: normalizeClassCode(p.className || '')
+        }));
+      });
+      normalizedData.schedule = newSchedule;
+    }
+
     updateProfile({
-      schoolSettings: validationResult.parsedData
+      schoolSettings: normalizedData
     });
 
     setImportText('');

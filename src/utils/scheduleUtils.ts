@@ -1,4 +1,5 @@
-import { Group, GroupScheduleSlot } from '../types';
+import { Group, GroupScheduleSlot, Lesson } from '../types';
+import { parseLocalDate, formatLocalDate } from './timeUtils';
 
 export const DAY_NAME_TO_NUM: Record<string, number> = {
   'so': 0, 'sonntag': 0, 'sun': 0, 'sunday': 0, 'الأحد': 0, 'الاحد': 0, '0': 0,
@@ -161,3 +162,85 @@ export function getUpcomingGroupSchedule(group: Partial<Group>): { day: string; 
     dayDisplay: nextSlotDayNum !== -1 ? NUM_TO_ARABIC_DAY[nextSlotDayNum] : nextSlot.day
   };
 }
+
+/**
+ * Projects recurring lessons indefinitely for active groups within any requested date range.
+ * Merges with explicit stored lessons, giving full priority to explicit records (including past/completed,
+ * custom edits, reschedule, attendance, notes, and deletions).
+ */
+export function getProjectedLessonsForRange(
+  startDateStr: string,
+  endDateStr: string,
+  groups: Group[],
+  explicitLessons: Lesson[],
+  defaultZoomLink?: string
+): Lesson[] {
+  const explicit = (explicitLessons || []).filter(l => !l.deleted);
+  const explicitKeys = new Set<string>();
+  const deletedKeys = new Set<string>();
+
+  (explicitLessons || []).forEach(l => {
+    if (l.groupId && l.date && l.time) {
+      const key = `${l.groupId}_${l.date}_${l.time}`;
+      if (l.deleted) {
+        deletedKeys.add(key);
+      } else {
+        explicitKeys.add(key);
+      }
+    }
+  });
+
+  const projected: Lesson[] = [];
+  const activeGroups = (groups || []).filter(g => !g.deleted && g.status !== 'archived');
+
+  const startD = parseLocalDate(startDateStr);
+  const endD = parseLocalDate(endDateStr);
+
+  activeGroups.forEach(group => {
+    const slots = getGroupScheduleSlots(group);
+    if (slots.length === 0) return;
+
+    const cursor = new Date(startD);
+    while (cursor <= endD) {
+      const dayNum = cursor.getDay();
+      const dateStr = formatLocalDate(cursor);
+
+      const matchingSlots = slots.filter(s => getDayNumber(s.day) === dayNum);
+      for (const slot of matchingSlots) {
+        const sessionTime = slot.time || group.scheduleTime || '17:00';
+        const key = `${group.id}_${dateStr}_${sessionTime}`;
+
+        if (!explicitKeys.has(key) && !deletedKeys.has(key)) {
+          const isPerLesson = group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session';
+          const perSessionPrice = isPerLesson && group.pricePerSession
+            ? group.pricePerSession
+            : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 8));
+
+          projected.push({
+            id: `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`,
+            groupId: group.id,
+            groupName: group.name,
+            title: `${group.name} Lektion`,
+            date: dateStr,
+            time: sessionTime,
+            durationMinutes: group.lessonDurationMinutes || 60,
+            type: group.type,
+            grade: group.grade,
+            sessionNumber: 1,
+            totalSessionsInPackage: group.sessionCount || 4,
+            status: 'scheduled',
+            paymentStatus: 'pending',
+            amountDue: perSessionPrice,
+            amountPaid: 0,
+            meetingLink: group.type === 'online' ? (group.zoomLink || defaultZoomLink) : undefined,
+            locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined
+          } as Lesson);
+        }
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  });
+
+  return [...explicit, ...projected];
+}
+

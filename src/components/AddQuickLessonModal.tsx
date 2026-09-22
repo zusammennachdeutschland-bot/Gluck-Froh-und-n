@@ -11,7 +11,7 @@ interface AddQuickLessonModalProps {
 }
 
 export const AddQuickLessonModal: React.FC<AddQuickLessonModalProps> = ({ onClose }) => {
-  const { addQuickLesson, profile, lessons, t } = useApp();
+  const { addQuickLesson, profile, lessons, t, _t } = useApp();
 
   const todayStr = formatLocalDate();
 
@@ -254,12 +254,12 @@ export const AddQuickLessonModal: React.FC<AddQuickLessonModalProps> = ({ onClos
               onChange={(e) => setGrade(e.target.value as GradeLevel)}
               className="w-full bg-surface-hover text-text-main text-xs font-bold p-2 rounded-lg border border-surface-border/80 dark:border-surface-border-soft/80 focus:bg-surface dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary-border transition-colors cursor-pointer"
             >
-              <optgroup label="مستويات الكورسات واللغات (Course Levels)">
+              <optgroup label={_t('مستويات الكورسات واللغات (Courses)', 'Course & Language Levels', 'Sprachniveaus')}>
                 {COURSE_LEVELS.map(g => (
                   <option key={g} value={g}>{g}</option>
                 ))}
               </optgroup>
-              <optgroup label="الصفوف المدرسية (School Grades)">
+              <optgroup label={_t('الصفوف المدرسية (School Grades)', 'School Grades', 'Schulklassen')}>
                 {SCHOOL_GRADES.map(g => (
                   <option key={g} value={g}>{g}</option>
                 ))}

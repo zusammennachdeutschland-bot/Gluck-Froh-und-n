@@ -3,6 +3,7 @@ import { Student, StudentSessionPerformance, PerformanceLevel, ParticipationLeve
 import { generateFeedback } from '../utils/feedbackGenerator';
 import { getStudentGender } from '../utils/genderUtils';
 import { RefreshCw, BarChart2 } from 'lucide-react';
+import { useApp } from '../context/AppContext';
 
 interface Props {
   performance?: StudentSessionPerformance;
@@ -12,60 +13,63 @@ interface Props {
   defaultGender?: 'male' | 'female';
 }
 
-const levels: { value: PerformanceLevel; label: string; color: string }[] = [
-  { value: 'excellent', label: 'ممتاز', color: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800' },
-  { value: 'very_good', label: 'جيد جدًا', color: 'bg-teal-100 text-teal-800 border-teal-300 dark:bg-teal-900/40 dark:text-teal-400 dark:border-teal-800' },
-  { value: 'good', label: 'جيد', color: 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-900/40 dark:text-sky-400 dark:border-sky-800' },
-  { value: 'developing', label: 'في تطور', color: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-400 dark:border-amber-800' },
-  { value: 'needs_support', label: 'يحتاج دعم', color: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-900/40 dark:text-red-400 dark:border-red-800' }
-];
-
-const participationOpts: { value: ParticipationLevel; label: string }[] = [
-  { value: 'active', label: 'نشط' },
-  { value: 'good', label: 'جيد' },
-  { value: 'quiet', label: 'هادئ' },
-  { value: 'needs_encouragement', label: 'يحتاج تشجيع' }
-];
-
-const understandingOpts: { value: UnderstandingLevel; label: string }[] = [
-  { value: 'excellent', label: 'ممتاز' },
-  { value: 'good', label: 'جيد' },
-  { value: 'developing', label: 'في تطور' },
-  { value: 'needs_review', label: 'يحتاج مراجعة' }
-];
-
-const speakingOpts: { value: SpeakingLevel; label: string }[] = [
-  { value: 'confident', label: 'واثق' },
-  { value: 'good', label: 'جيد' },
-  { value: 'improving', label: 'يتحسن' },
-  { value: 'needs_practice', label: 'يحتاج تدريب' }
-];
-
-const focusOpts: { value: FocusLevel; label: string }[] = [
-  { value: 'excellent', label: 'ممتاز' },
-  { value: 'good', label: 'جيد' },
-  { value: 'sometimes_distracted', label: 'يتشتت أحيانًا' },
-  { value: 'needs_more_focus', label: 'يحتاج تركيز' }
-];
-
-const progressOpts: { value: ProgressLevel; label: string }[] = [
-  { value: 'improved', label: '↑ تحسن' },
-  { value: 'stable', label: '→ مستقر' },
-  { value: 'needs_attention', label: '↓ تراجع' }
-];
-
 export const StudentSessionPerformanceSelector: React.FC<Props> = ({ 
   performance, 
   onChange, 
-  language = 'ar',
+  language: propLanguage,
   student,
   defaultGender
 }) => {
+  const { _t, language: appLanguage } = useApp();
+  const effectiveLang = propLanguage || appLanguage;
+  const lang: 'ar' | 'en' | 'de' = (effectiveLang === 'de' || effectiveLang === 'en') ? effectiveLang : 'ar';
+
+  const levels: { value: PerformanceLevel; label: string; color: string }[] = React.useMemo(() => [
+    { value: 'excellent', label: _t('ممتاز', 'Excellent', 'Ausgezeichnet'), color: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800' },
+    { value: 'very_good', label: _t('جيد جدًا', 'Very Good', 'Sehr gut'), color: 'bg-teal-100 text-teal-800 border-teal-300 dark:bg-teal-900/40 dark:text-teal-400 dark:border-teal-800' },
+    { value: 'good', label: _t('جيد', 'Good', 'Gut'), color: 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-900/40 dark:text-sky-400 dark:border-sky-800' },
+    { value: 'developing', label: _t('في تطور', 'Developing', 'In Entwicklung'), color: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-400 dark:border-amber-800' },
+    { value: 'needs_support', label: _t('يحتاج دعم', 'Needs Support', 'Braucht Förderung'), color: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-900/40 dark:text-red-400 dark:border-red-800' }
+  ], [_t]);
+
+  const participationOpts: { value: ParticipationLevel; label: string }[] = React.useMemo(() => [
+    { value: 'active', label: _t('نشط', 'Active', 'Aktiv') },
+    { value: 'good', label: _t('جيد', 'Good', 'Gut') },
+    { value: 'quiet', label: _t('هادئ', 'Quiet', 'Ruhig') },
+    { value: 'needs_encouragement', label: _t('يحتاج تشجيع', 'Needs Encouragement', 'Braucht Ermutigung') }
+  ], [_t]);
+
+  const understandingOpts: { value: UnderstandingLevel; label: string }[] = React.useMemo(() => [
+    { value: 'excellent', label: _t('ممتاز', 'Excellent', 'Ausgezeichnet') },
+    { value: 'good', label: _t('جيد', 'Good', 'Gut') },
+    { value: 'developing', label: _t('في تطور', 'Developing', 'In Entwicklung') },
+    { value: 'needs_review', label: _t('يحتاج مراجعة', 'Needs Review', 'Wiederholung nötig') }
+  ], [_t]);
+
+  const speakingOpts: { value: SpeakingLevel; label: string }[] = React.useMemo(() => [
+    { value: 'confident', label: _t('واثق', 'Confident', 'Selbstbewusst') },
+    { value: 'good', label: _t('جيد', 'Good', 'Gut') },
+    { value: 'improving', label: _t('يتحسن', 'Improving', 'Verbessert sich') },
+    { value: 'needs_practice', label: _t('يحتاج تدريب', 'Needs Practice', 'Braucht Übung') }
+  ], [_t]);
+
+  const focusOpts: { value: FocusLevel; label: string }[] = React.useMemo(() => [
+    { value: 'excellent', label: _t('ممتاز', 'Excellent', 'Ausgezeichnet') },
+    { value: 'good', label: _t('جيد', 'Good', 'Gut') },
+    { value: 'sometimes_distracted', label: _t('يتشتت أحيانًا', 'Sometimes Distracted', 'Manchmal abgelenkt') },
+    { value: 'needs_more_focus', label: _t('يحتاج تركيز', 'Needs Focus', 'Mehr Fokus nötig') }
+  ], [_t]);
+
+  const progressOpts: { value: ProgressLevel; label: string }[] = React.useMemo(() => [
+    { value: 'improved', label: _t('↑ تحسن', '↑ Improved', '↑ Verbessert') },
+    { value: 'stable', label: _t('→ مستقر', '→ Stable', '→ Stabil') },
+    { value: 'needs_attention', label: _t('↓ تراجع', '↓ Needs Attention', '↓ Nachholbedarf') }
+  ], [_t]);
+
   const perf = performance || {};
   // Automatically determine student's gender from profile settings or name
   const autoResolvedGender: 'male' | 'female' = defaultGender || (student ? getStudentGender(student) : 'male');
   const currentGender: 'male' | 'female' = perf.gender || autoResolvedGender;
-  const lang: 'ar' | 'en' | 'de' = (language === 'de' || language === 'en') ? language : 'ar';
 
   const handleUpdate = (updates: Partial<StudentSessionPerformance>) => {
     const activeGender = updates.gender !== undefined ? updates.gender : (perf.gender || autoResolvedGender);
@@ -104,12 +108,12 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
       <div className="bg-surface-border/40 px-3 py-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <BarChart2 className="w-3.5 h-3.5 text-text-muted" />
-          <span className="text-[10.5px] font-black text-text-main">أداء الحصة (Session Performance)</span>
+          <span className="text-[10.5px] font-black text-text-main">{_t('أداء الحصة', 'Session Performance', 'Lektionsleistung')}</span>
         </div>
 
         {/* Small subtle gender indicator (auto from student profile) */}
         <div className="flex items-center gap-1 text-[10px] font-bold text-text-muted bg-surface px-2 py-0.5 rounded-md border border-surface-border">
-          <span>{currentGender === 'female' ? '👧 طالبة (مؤنث)' : '👦 طالب (مذكر)'}</span>
+          <span>{currentGender === 'female' ? _t('👧 طالبة (مؤنث)', '👧 Female Student', '👧 Schülerin') : _t('👦 طالب (مذكر)', '👦 Male Student', '👦 Schüler')}</span>
         </div>
       </div>
       
@@ -137,7 +141,7 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
             {/* Factors */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="space-y-1">
-                <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">المشاركة</span>
+                <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">{_t('المشاركة', 'Participation', 'Beteiligung')}</span>
                 <div className="flex flex-wrap gap-1">
                   {participationOpts.map(o => (
                     <button
@@ -157,7 +161,7 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
               </div>
 
               <div className="space-y-1">
-                <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">الفهم</span>
+                <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">{_t('الفهم', 'Understanding', 'Verständnis')}</span>
                 <div className="flex flex-wrap gap-1">
                   {understandingOpts.map(o => (
                     <button
@@ -177,7 +181,7 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
               </div>
 
               <div className="space-y-1">
-                <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">التحدث</span>
+                <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">{_t('التحدث', 'Speaking', 'Sprechen')}</span>
                 <div className="flex flex-wrap gap-1">
                   {speakingOpts.map(o => (
                     <button
@@ -197,7 +201,7 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
               </div>
 
               <div className="space-y-1">
-                <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">التركيز</span>
+                <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">{_t('التركيز', 'Focus', 'Fokus')}</span>
                 <div className="flex flex-wrap gap-1">
                   {focusOpts.map(o => (
                     <button
@@ -219,7 +223,7 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
 
             {/* Progress */}
             <div className="space-y-1 pt-1">
-              <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">التقدم (مقارنة بالحصة السابقة)</span>
+              <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">{_t('التقدم (مقارنة بالحصة السابقة)', 'Progress (vs Previous Lesson)', 'Fortschritt (vgl. letzte Stunde)')}</span>
               <div className="flex flex-wrap gap-1">
                 {progressOpts.map(o => (
                   <button
@@ -242,17 +246,17 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
             {perf.generatedFeedback && (
               <div className="mt-2 bg-background border border-surface-border rounded-lg p-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2 pb-1.5 border-b border-surface-border/40">
-                  <span className="text-[9.5px] font-black text-text-muted">النص التلقائي (Generated Feedback)</span>
+                  <span className="text-[9.5px] font-black text-text-muted">{_t('النص التلقائي', 'Generated Feedback', 'Generiertes Feedback')}</span>
                   
                   {/* Regenerate Button */}
                   <button
                     type="button"
                     onClick={handleRegenerate}
                     className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-black text-primary bg-primary-soft hover:bg-primary/20 border border-primary-border transition-colors cursor-pointer"
-                    title="تغيير صياغة النص التلقائي"
+                    title={_t('تغيير صياغة النص التلقائي', 'Regenerate feedback wording', 'Formulierung neu generieren')}
                   >
                     <RefreshCw className="w-3 h-3" />
-                    <span>صياغة أخرى</span>
+                    <span>{_t('صياغة أخرى', 'Another phrasing', 'Neu formulieren')}</span>
                   </button>
                 </div>
 

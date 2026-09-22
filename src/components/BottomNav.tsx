@@ -154,7 +154,7 @@ export const BottomNav: React.FC = () => {
                         {t('quick_lesson_modal_title') || 'Schnell-Eintrag'}
                       </span>
                       <span className="block text-[9px] text-text-muted/70 font-medium truncate">
-                        {language === 'ar' ? 'جدولة حصة بسرعة' : 'Schnell eine Lektion planen'}
+                        {_t('جدولة حصة بسرعة', 'Quickly schedule a lesson', 'Schnell eine Lektion planen')}
                       </span>
                     </div>
                   </button>
@@ -169,10 +169,10 @@ export const BottomNav: React.FC = () => {
                     <Play className="w-4 h-4 text-primary mt-0.5 shrink-0 fill-primary/15" />
                     <div className="min-w-0">
                       <span className="block text-xs font-black text-slate-900 dark:text-slate-100">
-                        {t('sofort_title') || 'Start Lesson Now (Anytime)'}
+                        {t('sofort_title') || _t('بدء حصة الآن', 'Start Lesson Now', 'Lektion jetzt starten')}
                       </span>
                       <span className="block text-[9px] text-text-muted/70 font-medium truncate">
-                        {language === 'ar' ? 'تشغيل مؤقت فوري للحصة' : 'Sofort eine Live-Stoppuhr starten'}
+                        {_t('تشغيل مؤقت فوري للحصة', 'Start an instant lesson timer', 'Sofort eine Live-Stoppuhr starten')}
                       </span>
                     </div>
                   </button>

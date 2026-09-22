@@ -135,9 +135,9 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
         totalStudentsAdded++;
       });
 
-      // 3. Auto-generate schedule lessons with independent day times
+      // 3. Auto-generate schedule lessons with independent day times (52 weeks rolling)
       setTimeout(() => {
-        generateGroupScheduleLessons(newGroup.id, group.days, group.time, 4, group.dayTimes, newGroup);
+        generateGroupScheduleLessons(newGroup.id, group.days, group.time, 52, group.dayTimes, newGroup);
       }, 250 + gIdx * 100);
     });
 

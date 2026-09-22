@@ -241,7 +241,9 @@ export const QuickGenderAssignModal: React.FC<QuickGenderAssignModalProps> = ({
                     <span>
                       {_t('اقتراح الذكاء الاصطناعي من الاسم:', 'AI suggestion from name:', 'KI-Vorschlag:')}{' '}
                       <span className="font-extrabold underline decoration-emerald-400">
-                        {aiSuggestedGender === 'female' ? 'بنت 👧 (مؤنث)' : 'ولد 👦 (مذكر)'}
+                        {aiSuggestedGender === 'female' 
+                          ? _t('بنت 👧 (مؤنث)', 'Girl 👧 (Female)', 'Mädchen 👧 (Weiblich)')
+                          : _t('ولد 👦 (مذكر)', 'Boy 👦 (Male)', 'Junge 👦 (Männlich)')}
                       </span>
                     </span>
                   </div>
@@ -252,7 +254,9 @@ export const QuickGenderAssignModal: React.FC<QuickGenderAssignModalProps> = ({
                   <div className="text-[10.5px] text-text-muted font-bold">
                     {_t('المحدد حالياً:', 'Current selection:', 'Aktuell:')}{' '}
                     <span className="font-black text-primary">
-                      {currentStudent.gender === 'female' ? '👧 بنت' : '👦 ولد'}
+                      {currentStudent.gender === 'female' 
+                        ? _t('👧 بنت', '👧 Girl', '👧 Mädchen') 
+                        : _t('👦 ولد', '👦 Boy', '👦 Junge')}
                     </span>
                   </div>
                 )}
@@ -272,8 +276,8 @@ export const QuickGenderAssignModal: React.FC<QuickGenderAssignModalProps> = ({
                   }`}
                 >
                   <span className="text-2xl">👦</span>
-                  <span className="text-base font-black">ولد (طالب)</span>
-                  <span className="text-[10px] opacity-80 font-bold">اضغط للاختيار</span>
+                  <span className="text-base font-black">{_t('ولد (طالب)', 'Boy (Male)', 'Junge (Männlich)')}</span>
+                  <span className="text-[10px] opacity-80 font-bold">{_t('اضغط للاختيار', 'Click to Select', 'Klicken zum Auswählen')}</span>
                 </button>
 
                 {/* Girl Button */}
@@ -288,8 +292,8 @@ export const QuickGenderAssignModal: React.FC<QuickGenderAssignModalProps> = ({
                   }`}
                 >
                   <span className="text-2xl">👧</span>
-                  <span className="text-base font-black">بنت (طالبة)</span>
-                  <span className="text-[10px] opacity-80 font-bold">اضغط للاختيار</span>
+                  <span className="text-base font-black">{_t('بنت (طالبة)', 'Girl (Female)', 'Mädchen (Weiblich)')}</span>
+                  <span className="text-[10px] opacity-80 font-bold">{_t('اضغط للاختيار', 'Click to Select', 'Klicken zum Auswählen')}</span>
                 </button>
               </div>
 
@@ -352,7 +356,7 @@ export const QuickGenderAssignModal: React.FC<QuickGenderAssignModalProps> = ({
                             : 'bg-blue-100/70 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
                         }`}
                       >
-                        👦 ولد
+                        {_t('👦 ولد', '👦 Boy', '👦 Junge')}
                       </button>
                       <button
                         type="button"
@@ -363,7 +367,7 @@ export const QuickGenderAssignModal: React.FC<QuickGenderAssignModalProps> = ({
                             : 'bg-rose-100/70 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
                         }`}
                       >
-                        👧 بنت
+                        {_t('👧 بنت', '👧 Girl', '👧 Mädchen')}
                       </button>
                     </div>
                   </div>

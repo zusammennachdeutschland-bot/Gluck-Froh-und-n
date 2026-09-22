@@ -131,7 +131,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
     const val = parseInt(customMinutesInput, 10);
     if (!isNaN(val) && val > 0 && val <= 1440) {
       await updateNotificationSettings({ lessonReminderMinutesBefore: val });
-      setRebuildFeedback('تم حفظ توقيت التذكير المخصص');
+      setRebuildFeedback(_t('تم حفظ توقيت التذكير المخصص', 'Custom reminder timing saved', 'Benutzerdefinierte Erinnerungszeit gespeichert'));
       setTimeout(() => setRebuildFeedback(null), 3000);
     }
   };
@@ -142,28 +142,28 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
     try {
       const res = await rebuildNotificationSchedules();
       setIsRebuilding(false);
-      setRebuildFeedback(`تم إعادة بناء جدول الإشعارات بنجاح! عدد التنبيهات المجدولة: ${res.count}`);
+      setRebuildFeedback(_t(`تم إعادة بناء جدول الإشعارات بنجاح! عدد التنبيهات المجدولة: ${res.count}`, `Notification schedules rebuilt successfully! Scheduled alerts: ${res.count}`, `Benachrichtigungszeitpläne erfolgreich neu erstellt! Geplante Alarme: ${res.count}`));
       confetti({ particleCount: 50, spread: 50 });
       setTimeout(() => setRebuildFeedback(null), 4000);
     } catch {
       setIsRebuilding(false);
-      setRebuildFeedback('تعذر إعادة بناء الجدول، يرجى المحاولة مرة أخرى.');
+      setRebuildFeedback(_t('تعذر إعادة بناء الجدول، يرجى المحاولة مرة أخرى.', 'Could not rebuild schedules, please try again.', 'Fehler beim Neuerstellen der Zeitpläne, bitte erneut versuchen.'));
     }
   };
 
   const soundOptions: { id: NotificationSound; label: string }[] = [
-    { id: 'default', label: 'افتراضي النظام' },
-    { id: 'beep', label: 'صفارة قصيرة (Beep)' },
-    { id: 'chime', label: 'جرس هادئ (Chime)' },
-    { id: 'bell', label: 'جرس كلاسيكي (Bell)' },
-    { id: 'gentle', label: 'نغمة لطيفة (Gentle)' },
+    { id: 'default', label: _t('افتراضي النظام', 'System Default', 'Systemstandard') },
+    { id: 'beep', label: _t('صفارة قصيرة (Beep)', 'Short Beep', 'Kurzer Piepton') },
+    { id: 'chime', label: _t('جرس هادئ (Chime)', 'Gentle Chime', 'Sanfter Klingelton') },
+    { id: 'bell', label: _t('جرس كلاسيكي (Bell)', 'Classic Bell', 'Klassische Glocke') },
+    { id: 'gentle', label: _t('نغمة لطيفة (Gentle)', 'Gentle Melody', 'Sanfte Melodie') },
   ];
 
   const priorityOptions: { id: NotificationPriority; label: string; desc: string }[] = [
-    { id: 'low', label: 'منخفضة', desc: 'بدون صوت أو اهتزاز في شريط التنبيهات' },
-    { id: 'normal', label: 'عادية', desc: 'تظهر في شريط التنبيهات بصوت افتراضي' },
-    { id: 'high', label: 'عالية', desc: 'تنبيه منبثق أعلى الشاشة (Heads-up) مع صوت' },
-    { id: 'max', label: 'قصوى (إلحاح شديد)', desc: 'تنبيه بارز جداً لا يختفي بسهولة' },
+    { id: 'low', label: _t('منخفضة', 'Low', 'Niedrig'), desc: _t('بدون صوت أو اهتزاز في شريط التنبيهات', 'No sound or vibration in notification bar', 'Ohne Ton oder Vibration') },
+    { id: 'normal', label: _t('عادية', 'Normal', 'Normal'), desc: _t('تظهر في شريط التنبيهات بصوت افتراضي', 'Shows in notification bar with default sound', 'In Benachrichtigungsleiste mit Standardton') },
+    { id: 'high', label: _t('عالية', 'High', 'Hoch'), desc: _t('تنبيه منبثق أعلى الشاشة (Heads-up) مع صوت', 'Heads-up pop-up alert with sound', 'Pop-up-Banner mit Ton') },
+    { id: 'max', label: _t('قصوى (إلحاح شديد)', 'Urgent (Max)', 'Dringend (Max)'), desc: _t('تنبيه بارز جداً لا يختفي بسهولة', 'Very prominent alert that persists', 'Sehr auffälliger Alarm') },
   ];
 
   const nextScheduledItem = pendingScheduledNotifications.length > 0 ? pendingScheduledNotifications[0] : null;
@@ -234,19 +234,19 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
             </div>
             <div>
               <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
-                حالة إذن إشعارات النظام (خارج البرنامج)
+                {_t('حالة إذن إشعارات النظام (خارج البرنامج)', 'System Notification Permission (Background)', 'Systembenachrichtigungs-Berechtigung')}
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
                   permissionStatus === 'granted'
                     ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
                     : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
                 }`}>
-                  {permissionStatus === 'granted' ? 'مسموح بها ✓ (تظهر خارج البرنامج)' : permissionStatus === 'denied' ? 'محظورة ✕' : 'يتطلب الإذن'}
+                  {permissionStatus === 'granted' ? _t('مسموح بها ✓ (تظهر خارج البرنامج)', 'Allowed ✓ (Active outside app)', 'Erlaubt ✓') : permissionStatus === 'denied' ? _t('محظورة ✕', 'Blocked ✕', 'Blockiert ✕') : _t('يتطلب الإذن', 'Permission Required', 'Erforderlich')}
                 </span>
               </h3>
               <p className="text-xs text-text-muted mt-0.5">
                 {permissionStatus === 'granted'
-                  ? 'صلاحيات الإشعارات مفعلة ومصرح لها بالظهور خارج التطبيق، أعلى الشاشة (Heads-Up) وعلى شاشة القفل.'
-                  : 'الإشعارات غير مفعلة في النظام حالياً. اضغط على الزر لمنح الإذن كي تظهر التنبيهات خارج البرنامج.'}
+                  ? _t('صلاحيات الإشعارات مفعلة ومصرح لها بالظهور خارج التطبيق، أعلى الشاشة (Heads-Up) وعلى شاشة القفل.', 'Notification permissions are granted and authorized to show outside the app as heads-up banners and lock screen alerts.', 'Benachrichtigungen sind aktiv und erscheinen außerhalb der App.')
+                  : _t('الإشعارات غير مفعلة في النظام حالياً. اضغط على الزر لمنح الإذن كي تظهر التنبيهات خارج البرنامج.', 'Notifications are currently disabled in system settings. Click the button to grant permissions for background alerts.', 'Benachrichtigungen sind im System deaktiviert. Bitte Berechtigung erteilen.')}
               </p>
             </div>
           </div>
@@ -258,7 +258,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                 onClick={handleRequestPermission}
                 className="px-3.5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all cursor-pointer shadow-2xs"
               >
-                تفعيل الإذن الآن
+                {_t('تفعيل الإذن الآن', 'Enable Permission Now', 'Jetzt aktivieren')}
               </button>
             )}
             {!exactAlarmGranted && (
@@ -268,7 +268,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                 className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
               >
                 <AlarmClock className="w-3.5 h-3.5" />
-                إذن المنبهات الدقيقة (Android)
+                {_t('إذن المنبهات الدقيقة (Android)', 'Exact Alarm Permission (Android)', 'Genaue Alarme (Android)')}
               </button>
             )}
             <button
@@ -277,7 +277,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
               className="px-3.5 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-text-main text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
             >
               <Settings className="w-3.5 h-3.5" />
-              إعدادات التطبيق في Android
+              {_t('إعدادات التطبيق في Android', 'Android App Settings', 'Android App-Einstellungen')}
             </button>
           </div>
         </div>
@@ -286,15 +286,15 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
         <div className="pt-2 border-t border-surface-border/60 flex items-center justify-between text-xs text-text-muted">
           <span className="flex items-center gap-1.5">
             <Smartphone className="w-3.5 h-3.5 text-primary" />
-            <span>الظهور كإشعار منبثق فوق الشاشة وقفل الهاتف:</span>
-            <strong className="text-emerald-500 font-bold">مُفعل بأعلى أولوية (Heads-Up Banner)</strong>
+            <span>{_t('الظهور كإشعار منبثق فوق الشاشة وقفل الهاتف:', 'Banner display & Lockscreen alerts:', 'Banner-Anzeige & Sperrbildschirm:')}</span>
+            <strong className="text-emerald-500 font-bold">{_t('مُفعل بأعلى أولوية (Heads-Up Banner)', 'Enabled with Max Priority (Heads-Up)', 'Mit maximaler Priorität aktiviert')}</strong>
           </span>
           <button
             type="button"
             onClick={openExactAlarmSettings}
             className="text-[11px] text-primary hover:underline flex items-center gap-1 cursor-pointer"
           >
-            <span>ضبط المنبهات في النظام</span>
+            <span>{_t('ضبط المنبهات في النظام', 'Configure System Alarms', 'Systemalarme konfigurieren')}</span>
             <ExternalLink className="w-3 h-3" />
           </button>
         </div>
@@ -309,7 +309,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
             </div>
             <div>
               <span className="text-[10px] font-black uppercase tracking-wider text-primary dark:text-primary">
-                التنبيه القادم المجدول
+                {_t('التنبيه القادم المجدول', 'Next Scheduled Alert', 'Nächster geplanter Alarm')}
               </span>
               <h4 className="text-sm font-bold text-text-main">
                 {nextScheduledItem.title}
@@ -338,11 +338,11 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
               <BellOff className="w-5 h-5 text-text-muted/70" />
             )}
             <h3 className="text-base font-black">
-              المفتاح الرئيسي للتنبيهات (Master Switch)
+              {_t('المفتاح الرئيسي للتنبيهات (Master Switch)', 'Master Notification Switch', 'Hauptschalter für Benachrichtigungen')}
             </h3>
           </div>
           <p className="text-xs text-slate-300">
-            عند إيقاف هذا المفتاح، سيتم تعطيل وإلغاء جدولة جميع التنبيهات في التطبيق ونظام Android فوراً.
+            {_t('عند إيقاف هذا المفتاح، سيتم تعطيل وإلغاء جدولة جميع التنبيهات في التطبيق ونظام Android فوراً.', 'When disabled, all scheduled alerts in the app and Android system will be immediately deactivated.', 'Wenn deaktiviert, werden alle geplanten Benachrichtigungen im System deaktiviert.')}
           </p>
         </div>
 
@@ -369,10 +369,10 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
           <div>
             <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
               <Clock className="w-4 h-4 text-primary" />
-              توقيت التذكير المسبق بالحصة
+              {_t('توقيت التذكير المسبق بالحصة', 'Pre-Lesson Reminder Timing', 'Erinnerungszeit vor der Lektion')}
             </h3>
             <p className="text-xs text-text-muted mt-0.5">
-              حدد الوقت الذي تريد إرسال التنبيه فيه قبل موعد بدء الحصّة المجدولة.
+              {_t('حدد الوقت الذي تريد إرسال التنبيه فيه قبل موعد بدء الحصّة المجدولة.', 'Specify how many minutes before the scheduled lesson you want to be alerted.', 'Wählen Sie den Zeitpunkt vor Beginn der geplanten Lektion.')}
             </p>
           </div>
 
@@ -390,7 +390,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                       : 'bg-surface-hover text-text-main hover:bg-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
-                  قبل {mins} دقائق
+                  {_t(`قبل ${mins} دقائق`, `${mins} mins before`, `${mins} Min. vorher`)}
                 </button>
               );
             })}
@@ -404,7 +404,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                   : 'bg-surface-hover text-text-main hover:bg-slate-200 dark:hover:bg-slate-700'
               }`}
             >
-              قيمة مخصصة
+              {_t('قيمة مخصصة', 'Custom', 'Benutzerdefiniert')}
             </button>
           </div>
 
@@ -416,7 +416,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                 max="1440"
                 value={customMinutesInput}
                 onChange={e => setCustomMinutesInput(e.target.value)}
-                placeholder="أدخل عدد الدقائق..."
+                placeholder={_t('أدخل عدد الدقائق...', 'Enter minutes...', 'Minuten eingeben...')}
                 className="w-full px-3 py-2 rounded-xl bg-surface-hover border border-surface-border dark:border-surface-border-soft text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <button
@@ -424,7 +424,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                 onClick={handleCustomMinutesSave}
                 className="px-3 py-2 rounded-xl bg-primary hover:bg-primary text-white text-xs font-bold shrink-0 cursor-pointer shadow-2xs"
               >
-                حفظ
+                {_t('حفظ', 'Save', 'Speichern')}
               </button>
             </div>
           )}
@@ -576,7 +576,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                     </span>
                     <span className="text-[11px] text-text-muted">
                       {countdownOutsideTest !== null
-                        ? `⏳ قم بتصغير التطبيق أو قفل الهاتف الآن! سيظهر المنبه بعد (${countdownOutsideTest}) ثوانٍ...`
+                        ? _t(`⏳ قم بتصغير التطبيق أو قفل الهاتف الآن! سيظهر المنبه بعد (${countdownOutsideTest}) ثوانٍ...`, `⏳ Minimize or lock phone now! Alarm in (${countdownOutsideTest})s...`, `⏳ App minimieren oder sperren! Alarm in (${countdownOutsideTest})s...`)
                         : _t('يمنحك مهلة 3 ثوانٍ لتصغير التطبيق أو قفل الشاشة لمشاهدة ظهور المنبه فوق كل التطبيقات مع أزرار التحكم.', 'Gives you 3 seconds to minimize or lock device to see heads-up notification outside app.', 'Gibt 3 Sekunden Zeit zum Minimieren.')}
                     </span>
                   </div>
@@ -595,7 +595,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                   <Smartphone className="w-3.5 h-3.5" />
                   <span>
                     {countdownOutsideTest !== null
-                      ? `⏳ انتظر (${countdownOutsideTest}) ثوانٍ...`
+                      ? _t(`⏳ انتظر (${countdownOutsideTest}) ثوانٍ...`, `⏳ Wait (${countdownOutsideTest})s...`, `⏳ Warten (${countdownOutsideTest})s...`)
                       : _t('اختبر الظهور بالخارج الآن', 'Test Outside Now', 'Jetzt testen')}
                   </span>
                 </button>
@@ -610,10 +610,10 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
             <div>
               <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-primary" />
-                تنبيهات الملخص اليومي للمعلم (Daily Summary)
+                {_t('تنبيهات الملخص اليومي للمعلم (Daily Summary)', 'Daily Summary Notifications', 'Tägliche Zusammenfassung')}
               </h3>
               <p className="text-xs text-text-muted mt-0.5">
-                إرسال تقرير إشعار يومي ملخص لجدول اليوم، الحصص، والمستحقات المتبقية.
+                {_t('إرسال تقرير إشعار يومي ملخص لجدول اليوم، الحصص، والمستحقات المتبقية.', 'Send a daily summary notification of today’s schedule, lessons, and pending payments.', 'Täglicher zusammenfassender Bericht über heutigen Stundenplan und offene Zahlungen.')}
               </p>
             </div>
 
@@ -636,7 +636,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
             <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-surface-border animate-fadeIn">
               <div className="flex items-center justify-between max-w-sm">
                 <label className="text-xs font-bold text-text-main">
-                  وقت إرسال الملخص اليومي:
+                  {_t('وقت إرسال الملخص اليومي:', 'Daily summary dispatch time:', 'Uhrzeit für Zusammenfassung:')}
                 </label>
                 <input
                   type="time"
@@ -648,7 +648,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
 
               <div className="space-y-2">
                 <label className="text-xs font-bold text-text-main block">
-                  محتويات الملخص اليومي:
+                  {_t('محتويات الملخص اليومي:', 'Daily summary contents:', 'Inhalte der Zusammenfassung:')}
                 </label>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -659,7 +659,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                       onChange={e => updateNotificationSettings({ dailySummaryIncludeLessons: e.target.checked })}
                       className="rounded text-primary focus:ring-primary w-4 h-4"
                     />
-                    <span>حصص اليوم</span>
+                    <span>{_t('حصص اليوم', 'Today’s Lessons', 'Heutige Lektionen')}</span>
                   </label>
 
                   <label className="flex items-center gap-2 p-2.5 rounded-xl bg-surface-hover/60 border border-surface-border/60 dark:border-surface-border-soft/60 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
@@ -669,7 +669,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                       onChange={e => updateNotificationSettings({ dailySummaryIncludeIncome: e.target.checked })}
                       className="rounded text-primary focus:ring-primary w-4 h-4"
                     />
-                    <span>الإيراد المتوقع</span>
+                    <span>{_t('الإيراد المتوقع', 'Expected Income', 'Erwartetes Einkommen')}</span>
                   </label>
 
                   <label className="flex items-center gap-2 p-2.5 rounded-xl bg-surface-hover/60 border border-surface-border/60 dark:border-surface-border-soft/60 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
@@ -679,7 +679,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                       onChange={e => updateNotificationSettings({ dailySummaryIncludePendingPayments: e.target.checked })}
                       className="rounded text-primary focus:ring-primary w-4 h-4"
                     />
-                    <span>المدفوعات المعلقة</span>
+                    <span>{_t('المدفوعات المعلقة', 'Pending Payments', 'Offene Zahlungen')}</span>
                   </label>
                 </div>
               </div>
@@ -691,56 +691,64 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
         <div className="space-y-4">
           <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
             <Sliders className="w-4 h-4 text-primary" />
-            فئات الإشعارات وإعدادات الصوت والأولوية
+            {_t('فئات الإشعارات وإعدادات الصوت والأولوية', 'Notification Categories & Alert Priorities', 'Benachrichtigungskategorien & Prioritäten')}
           </h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Category 1: Lesson Reminder */}
             <CategoryCard
-              title="تنبيهات التذكير بالحصص"
-              description="إرسال تذكير مسبق للمعلم ببدء الحصّة القادمة."
+              title={_t('تنبيهات التذكير بالحصص', 'Lesson Reminder Alerts', 'Lektionserinnerung')}
+              description={_t('إرسال تذكير مسبق للمعلم ببدء الحصّة القادمة.', 'Send pre-lesson alert to the teacher before lesson begins.', 'Vorwarnung vor Beginn der nächsten Lektion.')}
               icon={Clock}
               iconColor="text-primary bg-primary/10"
               config={notificationSettings.lessonReminder}
               onChange={updates => handleCategoryChange('lessonReminder', updates)}
               soundOptions={soundOptions}
               priorityOptions={priorityOptions}
+              soundLabel={_t('صوت النغمة:', 'Tone:', 'Klingelton:')}
+              priorityLabel={_t('مستوى الأولوية:', 'Priority:', 'Priorität:')}
             />
 
             {/* Category 2: Lesson Start */}
             <CategoryCard
-              title="تنبيهات بدء الحصّة الآن"
-              description="إشعار بارز في الموعد المحدد للحصة مباشرة."
+              title={_t('تنبيهات بدء الحصّة الآن', 'Lesson Starting Now Alerts', 'Lektionsbeginn-Alarm')}
+              description={_t('إشعار بارز في الموعد المحدد للحصة مباشرة.', 'Prominent notification right at the scheduled start time.', 'Benachrichtigung direkt zum Lektionsbeginn.')}
               icon={Bell}
               iconColor="text-primary bg-primary/10"
               config={notificationSettings.lessonStart}
               onChange={updates => handleCategoryChange('lessonStart', updates)}
               soundOptions={soundOptions}
               priorityOptions={priorityOptions}
+              soundLabel={_t('صوت النغمة:', 'Tone:', 'Klingelton:')}
+              priorityLabel={_t('مستوى الأولوية:', 'Priority:', 'Priorität:')}
             />
 
             {/* Category 3: Payment Due */}
             <CategoryCard
-              title="تنبيهات المستحقات والاشتراكات"
-              description="تذكير بالطلاب المعلقة مدفوعاتهم وتجديدات الحزم."
+              title={_t('تنبيهات المستحقات والاشتراكات', 'Payment & Due Alerts', 'Fälligkeitserinnerungen')}
+              description={_t('تذكير بالطلاب المعلقة مدفوعاتهم وتجديدات الحزم.', 'Reminders for pending student dues and renewals.', 'Erinnerung an ausstehende Zahlungen und Verlängerungen.')}
               icon={DollarSign}
               iconColor="text-primary bg-primary/10"
               config={notificationSettings.paymentDue}
               onChange={updates => handleCategoryChange('paymentDue', updates)}
               soundOptions={soundOptions}
               priorityOptions={priorityOptions}
+              soundLabel={_t('صوت النغمة:', 'Tone:', 'Klingelton:')}
+              priorityLabel={_t('مستوى الأولوية:', 'Priority:', 'Priorität:')}
             />
 
             {/* Category 4: Attendance Reminder */}
             <CategoryCard
-              title="تنبيهات تسجيل الحضور والغياب"
-              description="تذكير لتأكيد وتسجيل حضور الطلاب بعد انتهاء زمن الحصة."
+              title={_t('تنبيهات تسجيل الحضور والغياب', 'Attendance Follow-up Alerts', 'Anwesenheits-Erinnerung')}
+              description={_t('تذكير لتأكيد وتسجيل حضور الطلاب بعد انتهاء زمن الحصة.', 'Reminder to confirm and record attendance after lesson ends.', 'Erinnerung zur Anwesenheitserfassung nach Lektionsende.')}
               icon={UserCheck}
               iconColor="text-primary bg-primary/10"
               config={notificationSettings.attendanceReminder}
               onChange={updates => handleCategoryChange('attendanceReminder', updates)}
               soundOptions={soundOptions}
               priorityOptions={priorityOptions}
+              soundLabel={_t('صوت النغمة:', 'Tone:', 'Klingelton:')}
+              priorityLabel={_t('مستوى الأولوية:', 'Priority:', 'Priorität:')}
             />
 
             {/* Category 5: School Lesson Reminder */}
@@ -750,9 +758,11 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
               icon={Clock}
               iconColor="text-primary bg-primary/10"
               config={notificationSettings.schoolLessonReminder || { enabled: true, sound: 'beep', priority: 'high' }}
-              onChange={updates => handleCategoryChange('schoolLessonReminder', updates)}
+              onChange={updates => handleCategoryChange('schoolLessonReminder' as any, updates)}
               soundOptions={soundOptions}
               priorityOptions={priorityOptions}
+              soundLabel={_t('صوت النغمة:', 'Tone:', 'Klingelton:')}
+              priorityLabel={_t('مستوى الأولوية:', 'Priority:', 'Priorität:')}
             />
           </div>
         </div>
@@ -763,10 +773,10 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
             <div>
               <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
                 <FileText className="w-4 h-4 text-primary" />
-                قائمة الإشعارات المجدولة الحالية ({pendingScheduledNotifications.length})
+                {_t(`قائمة الإشعارات المجدولة الحالية (${pendingScheduledNotifications.length})`, `Currently Scheduled Alerts (${pendingScheduledNotifications.length})`, `Geplante Benachrichtigungen (${pendingScheduledNotifications.length})`)}
               </h3>
               <p className="text-xs text-text-muted mt-0.5">
-                عرض جميع التنبيهات المجدولة في خلفية النظام مع إمكانية إلغاء أي إشعار.
+                {_t('عرض جميع التنبيهات المجدولة في خلفية النظام مع إمكانية إلغاء أي إشعار.', 'View all scheduled background alerts with ability to cancel any item.', 'Alle geplanten Benachrichtigungen im Hintergrund einsehen und verwalten.')}
               </p>
             </div>
 
@@ -777,7 +787,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                 className="px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary dark:text-primary text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                إلغاء كافة الإشعارات المجدولة
+                {_t('إلغاء كافة الإشعارات المجدولة', 'Cancel All Scheduled Alerts', 'Alle geplanten Alarme abbrechen')}
               </button>
             )}
           </div>
@@ -812,7 +822,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                       {item.body}
                     </p>
                     <p className="text-[10px] font-semibold text-primary dark:text-primary">
-                      📅 الموعد: {item.scheduledAt}
+                      📅 {_t('الموعد:', 'Scheduled for:', 'Geplant:')} {item.scheduledAt}
                     </p>
                   </div>
 
@@ -820,7 +830,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                     type="button"
                     onClick={() => cancelSingleScheduledNotification(item.id)}
                     className="p-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-primary hover:text-white text-slate-600 dark:text-slate-300 transition-all cursor-pointer shrink-0"
-                    title="إلغاء هذا الإشعار"
+                    title={_t('إلغاء هذا الإشعار', 'Cancel this alert', 'Diesen Alarm abbrechen')}
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -845,10 +855,12 @@ interface CategoryCardProps {
   onChange: (updates: Partial<CategoryNotificationConfig>) => void;
   soundOptions: { id: NotificationSound; label: string }[];
   priorityOptions: { id: NotificationPriority; label: string; desc: string }[];
+  soundLabel?: string;
+  priorityLabel?: string;
 }
 
 const CategoryCard: React.FC<CategoryCardProps> = ({
-  title, description, icon: Icon, iconColor, config, onChange, soundOptions, priorityOptions
+  title, description, icon: Icon, iconColor, config, onChange, soundOptions, priorityOptions, soundLabel, priorityLabel
 }) => {
   return (
     <div className="p-4 rounded-2xl bg-surface border border-surface-border/80 dark:border-surface-border space-y-3 shadow-2xs">
@@ -887,7 +899,7 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
           <div className="flex items-center justify-between gap-2">
             <label className="text-[11px] font-semibold text-text-muted flex items-center gap-1">
               <Volume2 className="w-3.5 h-3.5" />
-              صوت النغمة:
+              {soundLabel || 'Tone:'}
             </label>
             <select
               value={config.sound}
@@ -903,7 +915,7 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
           <div className="flex items-center justify-between gap-2">
             <label className="text-[11px] font-semibold text-text-muted flex items-center gap-1">
               <Shield className="w-3.5 h-3.5" />
-              مستوى الأولوية:
+              {priorityLabel || 'Priority:'}
             </label>
             <select
               value={config.priority}

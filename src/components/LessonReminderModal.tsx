@@ -17,15 +17,6 @@ interface LessonReminderModalProps {
   onClose: () => void;
 }
 
-const ARRIVAL_TIME_OPTIONS = [
-  '5 دقايق',
-  '10 دقايق',
-  '15 دقيقة',
-  '20 دقيقة',
-  '25 دقيقة',
-  'نص ساعة',
-];
-
 // Helper to format time to 12-hour clock (e.g. 18:00 -> 6:00)
 export const formatTimeTo12Hour = (timeStr?: string): string => {
   if (!timeStr) return '';
@@ -45,7 +36,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   recipientPhone,
   onClose,
 }) => {
-  const { groups, students, lessons, profile, updateGroup, updateProfile, t, _t } = useApp();
+  const { groups, students, lessons, profile, updateGroup, updateProfile, language, t, _t } = useApp();
 
   // Find associated group
   const targetGroup = group || (lesson?.groupId ? groups.find(g => g.id === lesson.groupId) : null);
@@ -175,12 +166,21 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     isMultiStudentGroup ? 'group' : (groupWhatsAppLink ? 'group' : 'individual')
   );
 
-  const [selectedArrivalTime, setSelectedArrivalTime] = useState('15 دقيقة');
+  const [selectedArrivalTime, setSelectedArrivalTime] = useState('15');
   const [zoomLink, setZoomLink] = useState(initialZoomLink);
   const [isSavingZoom, setIsSavingZoom] = useState(false);
   const [zoomSaveSuccess, setZoomSaveSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
   const [customMessage, setCustomMessage] = useState<string | null>(null);
+
+  const arrivalOptions = React.useMemo(() => [
+    { value: '5', label: _t('5 دقايق', '5 mins', '5 Min') },
+    { value: '10', label: _t('10 دقايق', '10 mins', '10 Min') },
+    { value: '15', label: _t('15 دقيقة', '15 mins', '15 Min') },
+    { value: '20', label: _t('20 دقيقة', '20 mins', '20 Min') },
+    { value: '25', label: _t('25 دقيقة', '25 mins', '25 Min') },
+    { value: '30', label: _t('نص ساعة', '30 mins', '30 Min') },
+  ], [_t]);
 
   // Cycle & Homework States
   const [includeCycle, setIncludeCycle] = useState<boolean>(hasCycle);
@@ -213,19 +213,19 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
 
   // Format lesson time cleanly for display (12-hour format with period)
   const formattedLessonTime = React.useMemo(() => {
-    if (!rawTime) return 'المحدد';
+    if (!rawTime) return _t('المحدد', 'Scheduled', 'Geplant');
     const [hStr, mStr] = rawTime.split(':');
     if (hStr && mStr) {
       let h = parseInt(hStr, 10);
       const isPm = h >= 12;
       if (h > 12) h -= 12;
       if (h === 0) h = 12;
-      const period = isPm ? 'مساءً' : 'صباحاً';
+      const period = isPm ? _t('مساءً', 'PM', 'Uhr') : _t('صباحاً', 'AM', 'Uhr');
       const timeDisplay = `${h}:${mStr} ${period}`;
-      return displayDay ? `يوم ${displayDay} الساعة ${timeDisplay}` : timeDisplay;
+      return displayDay ? `${_t('يوم', 'Day', 'Tag')} ${displayDay} ${_t('الساعة', 'at', 'um')} ${timeDisplay}` : timeDisplay;
     }
-    return displayDay ? `يوم ${displayDay} الساعة ${rawTime}` : rawTime;
-  }, [rawTime, displayDay]);
+    return displayDay ? `${displayDay} ${rawTime}` : rawTime;
+  }, [rawTime, displayDay, _t]);
 
   // Generate exact Arabic template according to requirements (Always 12-hour system)
   const generatedMessage = React.useMemo(() => {
@@ -234,20 +234,22 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
 
     // 1. Cycle Line (if enabled and applicable)
     const cycleLine = (hasCycle && includeCycle) 
-      ? `\n\n🔢 رقم الحصة: الحصة ${sessionNumber} من ${totalCycleSessions}`
+      ? `\n\n🔢 ${_t(`رقم الحصة: الحصة ${sessionNumber} من ${totalCycleSessions}`, `Session: ${sessionNumber} of ${totalCycleSessions}`, `Lektionsnummer: ${sessionNumber} von ${totalCycleSessions}`)}`
       : '';
 
     // 2. Previous Homework Line (if enabled and text exists)
     const homeworkLine = (includeHomework && previousHomework.trim())
-      ? `\n\n📝 واجب الحصة السابقة المطلوب تجهيزه:\n${previousHomework.trim()}`
+      ? `\n\n📝 ${_t('واجب الحصة السابقة المطلوب تجهيزه:', 'Previous Homework to prepare:', 'Hausaufgabe:')}\n${previousHomework.trim()}`
       : '';
+
+    const arrivalLabel = arrivalOptions.find(o => o.value === selectedArrivalTime)?.label || `${selectedArrivalTime} ${_t('دقيقة', 'mins', 'Min')}`;
 
     if (isOnline) {
       const intro = reminderStyle === 'immediate'
-        ? `السلام عليكم ورحمة الله وبركاته\n\nهنبدأ الحصة الآن إن شاء الله.`
-        : `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
+        ? _t('السلام عليكم ورحمة الله وبركاته\n\nهنبدأ الحصة الآن إن شاء الله.', 'Hello,\n\nWe will start the lesson now.', 'Hallo,\n\nWir beginnen jetzt mit der Lektion.')
+        : _t(`السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`, `Hello,\n\nReminder and confirmation for our lesson at ${time12}.`, `Hallo,\n\nErinnerung an unseren Termin um ${time12} Uhr.`);
 
-      const zoomPart = zoomLink.trim() ? `\n\n🔗 لينك الحصة:\n${zoomLink.trim()}` : '';
+      const zoomPart = zoomLink.trim() ? `\n\n🔗 ${_t('لينك الحصة:', 'Lesson Link:', 'Lektionslink:')}\n${zoomLink.trim()}` : '';
 
       return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
     } else {
@@ -255,12 +257,12 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       let intro = '';
       if (reminderStyle === 'immediate') {
         intro = isGroup
-          ? `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل للمجموعة خلال ${selectedArrivalTime} إن شاء الله.`
-          : `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${selectedArrivalTime} إن شاء الله.`;
+          ? _t(`السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل للمجموعة خلال ${arrivalLabel} إن شاء الله.`, `Hello,\n\nI am on my way and will arrive within ${arrivalLabel}.`, `Hallo,\n\nIch bin unterwegs und treffe in ${arrivalLabel} ein.`)
+          : _t(`السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${arrivalLabel} إن شاء الله.`, `Hello,\n\nI am on my way and will arrive within ${arrivalLabel}.`, `Hallo,\n\nIch bin unterwegs und treffe in ${arrivalLabel} ein.`);
       } else {
         intro = isGroup
-          ? `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصة المجموعة إن شاء الله الساعة ${time12}.`
-          : `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
+          ? _t(`السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصة المجموعة إن شاء الله الساعة ${time12}.`, `Hello,\n\nReminder for the group lesson at ${time12}.`, `Hallo,\n\nErinnerung an die Gruppenstunde um ${time12} Uhr.`)
+          : _t(`السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`, `Hello,\n\nReminder for our lesson at ${time12}.`, `Hallo,\n\nErinnerung an unsere Lektion um ${time12} Uhr.`);
       }
 
       return `${intro}${cycleLine}${homeworkLine}`;
@@ -279,7 +281,9 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     totalCycleSessions,
     includeHomework,
     previousHomework,
-    reminderStyle
+    reminderStyle,
+    arrivalOptions,
+    _t
   ]);
 
   const activeMessage = customMessage !== null ? customMessage : generatedMessage;
@@ -325,7 +329,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
 
   const handleSendWhatsApp = () => {
     if (isOnline && !zoomLink.trim()) {
-      alert('برجاء إضافة رابط الزووم أولاً قبل إرسال التذكير.');
+      alert(_t('برجاء إضافة رابط الزووم أولاً قبل إرسال التذكير.', 'Please add the Zoom link before sending the reminder.', 'Bitte fügen Sie zuerst den Zoom-Link hinzu.'));
       return;
     }
 
@@ -365,16 +369,16 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
 
   const handleSendToFirstParent = (studentToTarget = firstStudent) => {
     if (!studentToTarget) {
-      alert('لا يوجد طالب مسجل.');
+      alert(_t('لا يوجد طالب مسجل.', 'No student found.', 'Kein Schüler gefunden.'));
       return;
     }
     const resolved = resolveStudentWhatsAppContact(studentToTarget);
     if (!resolved.hasContact) {
-      alert(`بيانات التواصل (رقم هاتف أو يوزر نيم واتساب) لولي أمر الطالب (${studentToTarget.name}) غير مسجلة في بيانات الطالب.`);
+      alert(_t(`بيانات التواصل (رقم هاتف أو يوزر نيم واتساب) لولي أمر الطالب (${studentToTarget.name}) غير مسجلة في بيانات الطالب.`, `Contact information for parent of (${studentToTarget.name}) is missing.`, `Kontaktdaten für die Eltern von (${studentToTarget.name}) fehlen.`));
       return;
     }
     if (isOnline && !zoomLink.trim()) {
-      alert('برجاء إضافة رابط الزووم أولاً قبل إرسال التذكير.');
+      alert(_t('برجاء إضافة رابط الزووم أولاً قبل إرسال التذكير.', 'Please add the Zoom link before sending the reminder.', 'Bitte fügen Sie zuerst den Zoom-Link hinzu.'));
       return;
     }
 
@@ -412,14 +416,14 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <h3 className="text-sm font-black text-text-main truncate">
-                  {targetGroup?.name || targetStudent?.name || 'تأكيد موعد الحصة'}
+                  {targetGroup?.name || targetStudent?.name || _t('تأكيد موعد الحصة', 'Confirm Lesson Schedule', 'Terminbestätigung')}
                 </h3>
                 <span className="text-[10px] font-bold bg-primary-soft text-primary border border-primary-border px-1.5 py-0.5 rounded-md shrink-0">
-                  {isOnline ? 'أونلاين' : 'حضوري'} • {formattedLessonTime}
+                  {isOnline ? _t('أونلاين', 'Online', 'Online') : _t('حضوري', 'In-Person', 'Präsenz')} • {formattedLessonTime}
                 </span>
               </div>
               <p className="text-[11px] text-text-muted truncate mt-0.5">
-                تأكيد الموعد والتذكير عبر واتساب
+                {_t('تأكيد الموعد والتذكير عبر واتساب', 'Schedule Confirmation & Reminder via WhatsApp', 'Terminbestätigung via WhatsApp')}
               </p>
             </div>
           </div>
@@ -428,7 +432,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
             type="button"
             onClick={onClose}
             className="p-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main rounded-full transition-colors cursor-pointer shrink-0"
-            title="إغلاق"
+            title={_t('إغلاق', 'Close', 'Schließen')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -440,7 +444,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           {hasTimeMismatch && (
             <div className="mx-4 mt-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/25 rounded-xl text-[11px] text-amber-700 dark:text-amber-300 font-bold flex items-center gap-1.5 shrink-0">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-              <span>تنبيه: وقت الحصة ({lesson?.time}) يختلف عن موعد الجروب ({rawTime})، وتم اعتماد موعد الجروب.</span>
+              <span>{_t(`تنبيه: وقت الحصة (${lesson?.time}) يختلف عن موعد الجروب (${rawTime})، وتم اعتماد موعد الجروب.`, `Notice: Lesson time (${lesson?.time}) differs from group time (${rawTime}). Using group time.`, `Hinweis: Lektionszeit weicht vom Gruppenplan ab.`)}</span>
             </div>
           )}
 
@@ -451,23 +455,23 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
               {isMultiStudentGroup || sendMode === 'group' ? (
                 <>
                   <Users className="w-3.5 h-3.5 text-primary" />
-                  <span>الجروب:</span>
+                  <span>{_t('الجروب:', 'Group:', 'Gruppe:')}</span>
                 </>
               ) : (
                 <>
                   <Phone className="w-3.5 h-3.5 text-primary" />
-                  <span>ولي الأمر:</span>
+                  <span>{_t('ولي الأمر:', 'Parent:', 'Eltern:')}</span>
                 </>
               )}
             </span>
             <span className="font-semibold text-text-main truncate">
               {isMultiStudentGroup || sendMode === 'group' 
-                ? (targetGroup?.name || 'جروب الواتساب') 
-                : (targetStudent ? `${targetStudent.name} (${phone || 'غير مسجل'})` : phone)}
+                ? (targetGroup?.name || _t('جروب الواتساب', 'WhatsApp Group', 'WhatsApp-Gruppe')) 
+                : (targetStudent ? `${targetStudent.name} (${phone || _t('غير مسجل', 'Not set', 'Nicht hinterlegt')})` : phone)}
             </span>
             {isMultiStudentGroup && groupStudents.length > 0 && (
               <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.2 rounded shrink-0">
-                {groupStudents.length} طلاب
+                {groupStudents.length} {_t('طلاب', 'Students', 'Schüler')}
               </span>
             )}
           </div>
@@ -477,7 +481,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
             onClick={() => setShowRecipientSettings(!showRecipientSettings)}
             className="text-[11px] font-bold text-primary hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
           >
-            <span>{showRecipientSettings ? 'إخفاء' : 'تعديل'}</span>
+            <span>{showRecipientSettings ? _t('إخفاء', 'Hide', 'Ausblenden') : _t('تعديل', 'Edit', 'Bearbeiten')}</span>
           </button>
         </div>
 
@@ -493,7 +497,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                     sendMode === 'individual' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted'
                   }`}
                 >
-                  ولي الأمر
+                  {_t('ولي الأمر', 'Parent', 'Eltern')}
                 </button>
                 <button
                   type="button"
@@ -502,7 +506,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                     sendMode === 'group' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted'
                   }`}
                 >
-                  جروب الواتساب
+                  {_t('جروب الواتساب', 'WhatsApp Group', 'WhatsApp-Gruppe')}
                 </button>
               </div>
             )}
@@ -523,7 +527,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                   disabled={isSavingWhatsAppLink || !whatsAppGroupLinkInput.trim()}
                   className="bg-primary hover:bg-primary-hover text-white px-3 py-1.5 rounded-xl font-bold text-xs shrink-0 cursor-pointer disabled:opacity-50"
                 >
-                  {whatsAppSaveSuccess ? 'تم الحفظ' : 'حفظ'}
+                  {whatsAppSaveSuccess ? _t('تم الحفظ', 'Saved', 'Gespeichert') : _t('حفظ', 'Save', 'Speichern')}
                 </button>
               </div>
             ) : (
@@ -531,7 +535,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                 type="text"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                placeholder="010xxxxxxxx أو @username"
+                placeholder={_t('010xxxxxxxx أو @username', 'Phone or @username', 'Telefon oder @username')}
                 className="w-full bg-background border border-surface-border rounded-xl px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary"
                 dir="ltr"
               />
@@ -556,7 +560,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                     : 'text-text-muted hover:text-text-main'
                 }`}
               >
-                تأكيد الميعاد
+                {_t('تأكيد الميعاد', 'Confirm Time', 'Termin bestätigen')}
               </button>
               <button
                 type="button"
@@ -570,7 +574,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                     : 'text-text-muted hover:text-text-main'
                 }`}
               >
-                {isOnline ? 'بدء الآن' : 'في الطريق'}
+                {isOnline ? _t('بدء الآن', 'Start Now', 'Jetzt starten') : _t('في الطريق', 'On My Way', 'Unterwegs')}
               </button>
             </div>
 
@@ -590,10 +594,10 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                       setCustomMessage(null);
                     }}
                     className="flex items-center gap-1 cursor-pointer"
-                    title="تضمين رقم الحصة في السايكل"
+                    title={_t('تضمين رقم الحصة في السايكل', 'Include session number in cycle', 'Lektionsnummer einbinden')}
                   >
                     <Hash className="w-3.5 h-3.5" />
-                    <span>الحصة {sessionNumber}/{totalCycleSessions}</span>
+                    <span>{_t('الحصة', 'Lesson', 'Lektion')} {sessionNumber}/{totalCycleSessions}</span>
                   </button>
 
                   {includeCycle && (
@@ -606,7 +610,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                         }}
                         disabled={sessionNumber <= 1}
                         className="w-4 h-4 rounded hover:bg-primary/20 flex items-center justify-center text-xs font-black disabled:opacity-30 cursor-pointer"
-                        title="الحصة السابقة"
+                        title={_t('الحصة السابقة', 'Previous Session', 'Vorherige Lektion')}
                       >
                         -
                       </button>
@@ -618,7 +622,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                         }}
                         disabled={sessionNumber >= totalCycleSessions}
                         className="w-4 h-4 rounded hover:bg-primary/20 flex items-center justify-center text-xs font-black disabled:opacity-30 cursor-pointer"
-                        title="الحصة التالية"
+                        title={_t('الحصة التالية', 'Next Session', 'Nächste Lektion')}
                       >
                         +
                       </button>
@@ -640,19 +644,19 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                     setCustomMessage(null);
                   }}
                   className="flex items-center gap-1 cursor-pointer"
-                  title="تضمين واجب الحصة السابقة"
+                  title={_t('تضمين واجب الحصة السابقة', 'Include previous homework', 'Hausaufgabe einbinden')}
                 >
                   <BookOpen className="w-3.5 h-3.5" />
-                  <span>الواجب</span>
+                  <span>{_t('الواجب', 'Homework', 'Hausaufgabe')}</span>
                 </button>
                 {includeHomework && (
                   <button
                     type="button"
                     onClick={() => setShowHomeworkInput(!showHomeworkInput)}
                     className="text-[10px] underline cursor-pointer pr-0.5 hover:opacity-80"
-                    title="تعديل نص الواجب"
+                    title={_t('تعديل نص الواجب', 'Edit Homework', 'Hausaufgabe bearbeiten')}
                   >
-                    {previousHomework ? 'تعديل' : 'إضافة'}
+                    {previousHomework ? _t('تعديل', 'Edit', 'Bearbeiten') : _t('إضافة', 'Add', 'Hinzufügen')}
                   </button>
                 )}
               </div>
@@ -662,22 +666,22 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           {/* Conditional: Offline arrival times (only when 'في الطريق') */}
           {!isOnline && reminderStyle === 'immediate' && (
             <div className="flex items-center gap-1.5 overflow-x-auto py-1 text-xs">
-              <span className="text-[11px] font-bold text-text-muted shrink-0">الوصول خلال:</span>
-              {ARRIVAL_TIME_OPTIONS.map((timeOpt) => (
+              <span className="text-[11px] font-bold text-text-muted shrink-0">{_t('الوصول خلال:', 'Arrival in:', 'Ankunft in:')}</span>
+              {arrivalOptions.map((opt) => (
                 <button
-                  key={timeOpt}
+                  key={opt.value}
                   type="button"
                   onClick={() => {
-                    setSelectedArrivalTime(timeOpt);
+                    setSelectedArrivalTime(opt.value);
                     setCustomMessage(null);
                   }}
                   className={`px-2 py-0.5 rounded-lg text-xs font-bold shrink-0 transition-all cursor-pointer border ${
-                    selectedArrivalTime === timeOpt
+                    selectedArrivalTime === opt.value
                       ? 'bg-primary text-white border-primary shadow-2xs font-black'
                       : 'bg-surface border-surface-border text-text-muted hover:text-text-main'
                   }`}
                 >
-                  {timeOpt}
+                  {opt.label}
                 </button>
               ))}
             </div>
@@ -687,13 +691,13 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           {includeHomework && showHomeworkInput && (
             <div className="space-y-1 bg-surface-hover/60 border border-surface-border p-2 rounded-xl text-xs">
               <div className="flex items-center justify-between text-[11px] text-text-muted">
-                <span className="font-bold">نص واجب الحصة السابقة المطلوب تجهيزه:</span>
+                <span className="font-bold">{_t('نص واجب الحصة السابقة المطلوب تجهيزه:', 'Previous homework text:', 'Hausaufgabentext:')}</span>
                 <button
                   type="button"
                   onClick={() => setShowHomeworkInput(false)}
                   className="text-primary hover:underline font-bold"
                 >
-                  تم
+                  {_t('تم', 'Done', 'Fertig')}
                 </button>
               </div>
               <textarea
@@ -703,9 +707,9 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                   setCustomMessage(null);
                 }}
                 rows={2}
-                placeholder="اكتب تفاصيل الواجب هنا..."
+                placeholder={_t('اكتب تفاصيل الواجب هنا...', 'Type homework details here...', 'Hausaufgabendetails eingeben...')}
                 className="w-full bg-background border border-surface-border rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary resize-none text-text-main"
-                dir="rtl"
+                dir="auto"
               />
             </div>
           )}
@@ -715,7 +719,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
             <div className="bg-amber-500/10 border border-amber-500/25 p-2 rounded-xl flex items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-bold min-w-0 truncate">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">رابط الزووم غير مسجل</span>
+                <span className="truncate">{_t('رابط الزووم غير مسجل', 'Zoom Link Not Set', 'Zoom-Link fehlt')}</span>
               </div>
               <div className="flex gap-1.5 shrink-0">
                 <input
@@ -735,7 +739,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                   disabled={isSavingZoom || !zoomLink.trim()}
                   className="bg-primary text-white text-[11px] font-bold px-2 py-1 rounded-lg cursor-pointer disabled:opacity-50"
                 >
-                  حفظ
+                  {_t('حفظ', 'Save', 'Speichern')}
                 </button>
               </div>
             </div>
@@ -747,7 +751,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           <div className="flex items-center justify-between text-[11px] text-text-muted mb-1 px-1">
             <span className="font-bold flex items-center gap-1 text-text-main">
               <MessageSquare className="w-3.5 h-3.5 text-primary" />
-              <span>نص الرسالة (جاهز للإرسال على الواتساب):</span>
+              <span>{_t('نص الرسالة (جاهز للإرسال على الواتساب):', 'Message text (ready for WhatsApp):', 'Nachrichtenvorschau für WhatsApp:')}</span>
             </span>
             {customMessage !== null && (
               <button
@@ -755,7 +759,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                 onClick={() => setCustomMessage(null)}
                 className="text-primary hover:underline font-bold cursor-pointer"
               >
-                استعادة النص التلقائي
+                {_t('استعادة النص التلقائي', 'Reset to Auto Template', 'Zurücksetzen')}
               </button>
             )}
           </div>
@@ -766,10 +770,10 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
               value={activeMessage}
               onChange={(e) => setCustomMessage(e.target.value)}
               className="w-full flex-1 bg-transparent text-text-main font-medium text-xs sm:text-[13px] leading-relaxed resize-none focus:outline-none min-h-[80px]"
-              dir="rtl"
+              dir="auto"
             />
             <div className="flex items-center justify-between border-t border-primary-border/30 pt-1.5 text-[10px] text-text-muted select-none">
-              <span>يمكنك تعديل أي جزء من النص مباشرة ✍️</span>
+              <span>{_t('يمكنك تعديل أي جزء من النص مباشرة ✍️', 'You can edit any part of the text directly ✍️', 'Text kann direkt bearbeitet werden ✍️')}</span>
               <span className="font-mono dir-ltr font-bold text-primary">
                 {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ✓✓
               </span>
@@ -791,9 +795,9 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
               <span className="truncate">
                 {isMultiStudentGroup || (targetGroup && sendMode === 'group')
                   ? ((whatsAppGroupLinkInput.trim() || groupWhatsAppLink)
-                      ? `إرسال لجروب الواتساب (${targetGroup?.name || 'الجروب'})`
-                      : `فتح واتساب (${targetGroup?.name || 'الجروب'})`)
-                  : `إرسال عبر واتساب`}
+                      ? _t(`إرسال لجروب الواتساب (${targetGroup?.name || 'الجروب'})`, `Send to WhatsApp Group (${targetGroup?.name || 'Group'})`, `An WhatsApp-Gruppe senden (${targetGroup?.name || 'Gruppe'})`)
+                      : _t(`فتح واتساب (${targetGroup?.name || 'الجروب'})`, `Open WhatsApp (${targetGroup?.name || 'Group'})`, `WhatsApp öffnen (${targetGroup?.name || 'Gruppe'})`))
+                  : _t(`إرسال عبر واتساب`, `Send via WhatsApp`, `Über WhatsApp senden`)}
               </span>
             </button>
 
@@ -802,17 +806,17 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
               type="button"
               onClick={handleCopyText}
               className="bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs py-2.5 sm:py-3 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0 min-h-[44px]"
-              title="نسخ نص الرسالة"
+              title={_t('نسخ نص الرسالة', 'Copy message text', 'Nachrichtentext kopieren')}
             >
               {copied ? (
                 <>
                   <Check className="w-4 h-4 text-primary shrink-0" />
-                  <span className="text-primary font-bold">تم النسخ</span>
+                  <span className="text-primary font-bold">{_t('تم النسخ', 'Copied', 'Kopiert')}</span>
                 </>
               ) : (
                 <>
                   <Copy className="w-4 h-4 text-text-muted shrink-0" />
-                  <span>نسخ</span>
+                  <span>{_t('نسخ', 'Copy', 'Kopieren')}</span>
                 </>
               )}
             </button>
@@ -826,7 +830,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                 onClick={() => handleSendToFirstParent(firstStudent)}
                 className="text-[11px] font-bold text-text-muted hover:text-primary transition-colors cursor-pointer inline-flex items-center gap-1 truncate max-w-full"
               >
-                <span className="truncate">أو إرسال فردي لولي أمر ({firstStudent.name})</span>
+                <span className="truncate">{_t(`أو إرسال فردي لولي أمر (${firstStudent.name})`, `Or send individually to parent of (${firstStudent.name})`, `Oder einzeln an Eltern von (${firstStudent.name}) senden`)}</span>
               </button>
             </div>
           )}

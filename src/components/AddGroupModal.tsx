@@ -13,7 +13,7 @@ interface AddGroupModalProps {
 }
 
 export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
-  const { addGroup, addStudent, generateGroupScheduleLessons, profile, language, t } = useApp();
+  const { addGroup, addStudent, generateGroupScheduleLessons, profile, language, t, _t } = useApp();
 
   
   const [isAiImportOpen, setIsAiImportOpen] = useState(false);
@@ -34,7 +34,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
         return;
       }
       if (!studentParentPhone.trim()) {
-        alert(language === 'ar' ? 'رقم الهاتف أو اليوزر نيم لولي الأمر مطلوب' : 'Parent phone number or WhatsApp username is required');
+        alert(_t('رقم الهاتف أو اليوزر نيم لولي الأمر مطلوب', 'Parent phone number or WhatsApp username is required', 'Telefonnummer oder WhatsApp-Benutzername der Eltern ist erforderlich'));
         return;
       }
     }
@@ -207,7 +207,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
                 <div className="space-y-1.5 bg-surface p-2.5 rounded-xl border border-surface-border">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-text-main">
-                      {language === 'ar' ? 'هاتف / يوزر نيم ولي الأمر' : 'Parent Phone / Username'}
+                      {_t('هاتف / يوزر نيم ولي الأمر', 'Parent Phone / Username', 'Telefon / WhatsApp Benutzername')}
                     </label>
                     <div className="flex items-center bg-surface-hover border border-surface-border rounded-lg p-0.5 text-[10px] font-bold">
                       <button
@@ -223,7 +223,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
                         }`}
                       >
                         <Phone className="w-2.5 h-2.5" />
-                        <span>{language === 'ar' ? 'هاتف' : 'Phone'}</span>
+                        <span>{_t('هاتف', 'Phone', 'Telefon')}</span>
                       </button>
                       <button
                         type="button"
@@ -238,7 +238,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
                         }`}
                       >
                         <AtSign className="w-2.5 h-2.5" />
-                        <span>{language === 'ar' ? 'يوزر نيم' : 'Username'}</span>
+                        <span>{_t('يوزر نيم', 'Username', 'Benutzername')}</span>
                       </button>
                     </div>
                   </div>

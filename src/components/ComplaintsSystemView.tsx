@@ -6,7 +6,7 @@ import {
   Square, Sparkles, MessageSquare, AlertCircle, Layers
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { Complaint, HodGermanStudent, Teacher } from '../types';
+import { Complaint, HodGermanStudent, Teacher, VisitRecord } from '../types';
 import { storage } from '../services/storageService';
 import { generateStageManagerReportPrint } from '../utils/printComplaintUtils';
 import { normalizeClassCode, compareClassCodes } from '../utils/classNormalizer';
@@ -108,7 +108,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
   embeddedTeacherId,
   onUpdateComplaintsCount,
 }) => {
-  const { profile, updateProfile, _t } = useApp();
+  const { profile, updateProfile, language, _t } = useApp();
   const schoolSettings = profile?.schoolSettings || {};
 
   // Department Teachers list
@@ -145,6 +145,9 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
   const [isDispatchReportModalOpen, setIsDispatchReportModalOpen] = useState(false);
   const [selectedStageManagerId, setSelectedStageManagerId] = useState<string>('');
   const [dispatchReportType, setDispatchReportType] = useState<'weekly' | 'monthly' | 'termly'>('weekly');
+  const [includeVisitsInReport, setIncludeVisitsInReport] = useState<boolean>(true);
+  const [selectedVisitIdsForReport, setSelectedVisitIdsForReport] = useState<string[]>([]);
+  const [filterOnlyStageVisits, setFilterOnlyStageVisits] = useState<boolean>(true);
 
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -275,6 +278,52 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
       setSelectedStageManagerId(stageManagers[0].id);
     }
   }, [stageManagers, selectedStageManagerId]);
+
+  // Target Stage Manager for Dispatch
+  const currentTargetManager = useMemo(() => {
+    return stageManagers.find(m => m.id === selectedStageManagerId) || stageManagers[0] || null;
+  }, [stageManagers, selectedStageManagerId]);
+
+  // Available visits for report dispatch
+  const availableVisitsForReport = useMemo(() => {
+    const allVisits: VisitRecord[] = schoolSettings.visitRecords || [];
+    if (!filterOnlyStageVisits || !currentTargetManager) {
+      return allVisits;
+    }
+    const assigned = currentTargetManager.assignedGradeGroups || [];
+    const bandStr = (currentTargetManager as any).gradeBand || '';
+    if (assigned.length === 0 && !bandStr) {
+      return allVisits;
+    }
+
+    const matched = allVisits.filter(v => {
+      const cls = (v.className || (v as any).class || '').trim();
+      if (!cls) return true;
+      if (assigned.some((g: string) => cls.toLowerCase().includes(g.toLowerCase()) || g.toLowerCase().includes(cls.toLowerCase()))) {
+        return true;
+      }
+      if (bandStr && (cls.toLowerCase().includes(bandStr.toLowerCase()) || bandStr.toLowerCase().includes(cls.toLowerCase()))) {
+        return true;
+      }
+      const numMatch = cls.match(/\d+/);
+      if (numMatch) {
+        const num = numMatch[0];
+        if (assigned.some((g: string) => g.includes(num)) || bandStr.includes(num)) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    return matched.length > 0 ? matched : allVisits;
+  }, [schoolSettings.visitRecords, filterOnlyStageVisits, currentTargetManager]);
+
+  // Initialize selected visits whenever modal opens or target manager changes
+  useEffect(() => {
+    if (isDispatchReportModalOpen) {
+      setSelectedVisitIdsForReport(availableVisitsForReport.map(v => v.id));
+    }
+  }, [isDispatchReportModalOpen, selectedStageManagerId, availableVisitsForReport.length]);
 
   // Open Form Modal (New or Edit)
   const handleOpenAddModal = () => {
@@ -467,25 +516,53 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
 
     let targetComplaintsToPrint: Complaint[] = [];
 
+    // Selected visits to attach
+    const allVisits: VisitRecord[] = schoolSettings.visitRecords || [];
+    const selectedVisits = includeVisitsInReport
+      ? allVisits.filter(v => selectedVisitIdsForReport.includes(v.id))
+      : [];
+
     if (dispatchReportType === 'weekly') {
       // Weekly Report includes ONLY unsent complaints (weeklyReportSent === false)
       targetComplaintsToPrint = complaints.filter(c => !c.weeklyReportSent);
-      if (targetComplaintsToPrint.length === 0) {
-        showToast(_t('لا توجد أي شكاوى جديدة غير مدرجة بالتقرير الأسبوعي', 'No new unsent complaints found for weekly report', 'Keine neuen Beschwerden'));
+      if (targetComplaintsToPrint.length === 0 && selectedVisits.length === 0) {
+        showToast(_t('لا توجد أي شكاوى أو زيارات جديدة غير مدرجة بالتقرير الأسبوعي', 'No new unsent complaints or visits found for weekly report', 'Keine neuen Beschwerden oder Besuche'));
         return;
       }
 
       // Mark all dispatched complaints as sent
-      const dispatchedIds = new Set(targetComplaintsToPrint.map(c => c.id));
-      const nowIso = new Date().toISOString();
-      const updatedComplaints = complaints.map(c => 
-        dispatchedIds.has(c.id) 
-          ? { ...c, weeklyReportSent: true, weeklyReportDate: nowIso }
-          : c
-      );
+      if (targetComplaintsToPrint.length > 0) {
+        const dispatchedIds = new Set(targetComplaintsToPrint.map(c => c.id));
+        const nowIso = new Date().toISOString();
+        const updatedComplaints = complaints.map(c => 
+          dispatchedIds.has(c.id) 
+            ? { ...c, weeklyReportSent: true, weeklyReportDate: nowIso }
+            : c
+        );
 
-      persistComplaints(updatedComplaints);
-      showToast(_t(`تم اعتماد وإرسال ${targetComplaintsToPrint.length} شكوى لمدير المرحلة بنجاح`, `Dispatched ${targetComplaintsToPrint.length} complaints to Stage Manager`, `Bericht gesendet`));
+        persistComplaints(updatedComplaints);
+      }
+
+      // Mark weeklyReportSent on selected visits if weekly report
+      if (selectedVisits.length > 0) {
+        const nowIso = new Date().toISOString();
+        const selectedSet = new Set(selectedVisits.map(v => v.id));
+        const updatedVisits = allVisits.map(v => 
+          selectedSet.has(v.id)
+            ? { ...v, weeklyReportSent: true, weeklyReportDate: nowIso }
+            : v
+        );
+        if (profile) {
+          updateProfile({
+            schoolSettings: {
+              ...schoolSettings,
+              visitRecords: updatedVisits
+            }
+          });
+        }
+      }
+
+      showToast(_t(`تم اعتماد وإرسال تقرير مدير المرحلة بنجاح`, `Dispatched report to Stage Manager successfully`, `Bericht gesendet`));
     } else if (dispatchReportType === 'monthly') {
       // Monthly Report pulls ALL matching complaints for selected month
       targetComplaintsToPrint = monthFilter !== 'all'
@@ -509,6 +586,8 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
       complaints: targetComplaintsToPrint,
       reportType: dispatchReportType,
       settings: schoolSettings,
+      visits: selectedVisits,
+      includeVisits: includeVisitsInReport,
     });
 
     setIsDispatchReportModalOpen(false);
@@ -686,7 +765,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
               <option value="all">{_t('الفصل: الكل', 'Class: All', 'Klasse: Alle')}</option>
               {availableClasses.map(c => (
                 <option key={c} value={c}>
-                  🏫 الفصل: {c}
+                  🏫 {_t('الفصل:', 'Class:', 'Klasse:')} {c}
                 </option>
               ))}
             </select>
@@ -767,11 +846,11 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
                       <td className="py-2.5 px-3 text-center border-r border-surface-border/30">
                         {isTeacherToStudent ? (
                           <span className="px-2 py-0.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 rounded-lg text-[10px] font-black border border-rose-500/20 inline-block">
-                            👨‍🏫 معلم ضد طالب
+                            👨‍🏫 {_t('معلم ضد طالب', 'Teacher vs Student', 'Lehrer gegen Schüler')}
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 rounded-lg text-[10px] font-black border border-indigo-500/20 inline-block">
-                            👦 طالب ضد معلم
+                            👦 {_t('طالب ضد معلم', 'Student vs Teacher', 'Schüler gegen Lehrer')}
                           </span>
                         )}
                       </td>
@@ -812,15 +891,15 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
                         {c.weeklyReportSent ? (
                           <div className="space-y-0.5">
                             <span className="px-2 py-0.5 bg-blue-500/10 text-blue-700 dark:text-blue-300 rounded-md text-[10px] font-bold border border-blue-500/20 inline-block">
-                              📑 مدرجة بتقرير أسبوعي
+                              📑 {_t('مدرجة بتقرير أسبوعي', 'In Weekly Report', 'Im Wochenbericht')}
                             </span>
                             <div className="text-[9px] text-text-muted">
-                              {c.weeklyReportDate ? new Date(c.weeklyReportDate).toLocaleDateString('ar-EG') : formattedDate}
+                              {c.weeklyReportDate ? new Date(c.weeklyReportDate).toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US') : formattedDate}
                             </div>
                           </div>
                         ) : (
                           <span className="px-2 py-0.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded-md text-[10px] font-bold border border-amber-500/20 inline-block animate-pulse">
-                            🆕 بانتظار التقرير الأسبوعي
+                            🆕 {_t('بانتظار التقرير الأسبوعي', 'Pending Weekly Report', 'Ausstehend')}
                           </span>
                         )}
                       </td>
@@ -950,7 +1029,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
                     >
                       {teacherAssignedClasses.map(c => (
                         <option key={c} value={c}>
-                          🏫 الفصل: {c}
+                          🏫 {_t('الفصل:', 'Class:', 'Klasse:')} {c}
                         </option>
                       ))}
                     </select>
@@ -994,7 +1073,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
                     >
                       {availableClasses.map(c => (
                         <option key={c} value={c}>
-                          🏫 الفصل: {c}
+                          🏫 {_t('الفصل:', 'Class:', 'Klasse:')} {c}
                         </option>
                       ))}
                     </select>
@@ -1292,6 +1371,117 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
                     📊 {_t('تراكمي الفصل', 'Termly', 'Semester')}
                   </button>
                 </div>
+              </div>
+
+              {/* Visits Attachment Section (كل زيارة في صفحة مستقلة بعد الصفحة الأولى) */}
+              <div className="border-t border-surface-border pt-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={includeVisitsInReport}
+                      onChange={e => setIncludeVisitsInReport(e.target.checked)}
+                      className="w-4 h-4 text-emerald-600 rounded border-surface-border accent-emerald-600 cursor-pointer"
+                    />
+                    <span className="text-[11px] font-black text-text-main flex items-center gap-1.5">
+                      <BookOpen className="w-3.5 h-3.5 text-emerald-600" />
+                      {_t('إرفاق الزيارات الصفية المنفذة (كل زيارة في صفحة كاملة بعد الصفحة الأولى)', 'Attach Classroom Visits (1 Page Per Visit)', 'Unterrichtsbesuche anhängen')}
+                    </span>
+                  </label>
+
+                  {includeVisitsInReport && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (selectedVisitIdsForReport.length === availableVisitsForReport.length) {
+                            setSelectedVisitIdsForReport([]);
+                          } else {
+                            setSelectedVisitIdsForReport(availableVisitsForReport.map(v => v.id));
+                          }
+                        }}
+                        className="text-[10px] text-emerald-600 hover:underline font-bold cursor-pointer"
+                      >
+                        {selectedVisitIdsForReport.length === availableVisitsForReport.length
+                          ? _t('إلغاء تحديد الكل', 'Deselect All', 'Alle abwählen')
+                          : _t('تحديد الكل', 'Select All', 'Alle auswählen')}
+                      </button>
+                      <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                        {selectedVisitIdsForReport.length} / {availableVisitsForReport.length}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {includeVisitsInReport && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-[10px] text-text-muted px-1">
+                      <span>{_t('حدد الزيارات المراد إلحاقها بعد الصفحة الأولى:', 'Select visits to attach after page 1:', 'Wählen Sie die Besuche:')}</span>
+                      <button
+                        type="button"
+                        onClick={() => setFilterOnlyStageVisits(!filterOnlyStageVisits)}
+                        className="text-text-muted hover:text-text-main underline cursor-pointer"
+                      >
+                        {filterOnlyStageVisits ? _t('عرض كل الزيارات بالمدرسة', 'Show all school visits', 'Alle Besuche') : _t('حصر زيارات المرحلة فقط', 'Filter by stage only', 'Nur Stufenbesuche')}
+                      </button>
+                    </div>
+
+                    <div className="max-h-44 overflow-y-auto space-y-1.5 p-2 bg-surface-hover/40 border border-surface-border rounded-xl scrollbar-thin">
+                      {availableVisitsForReport.length === 0 ? (
+                        <div className="text-center py-3 text-text-muted text-[11px] font-medium">
+                          {_t('لا توجد أي زيارات صفية مسجلة لهذه المرحلة حالياً.', 'No visits recorded for this stage currently.', 'Keine Besuche vorhanden.')}
+                        </div>
+                      ) : (
+                        availableVisitsForReport.map(v => {
+                          const isSelected = selectedVisitIdsForReport.includes(v.id);
+                          return (
+                            <label
+                              key={v.id}
+                              className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer text-[11px] ${
+                                isSelected
+                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-text-main shadow-2xs'
+                                  : 'bg-surface border-surface-border text-text-muted hover:bg-surface-hover'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 overflow-hidden">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={e => {
+                                    if (e.target.checked) {
+                                      setSelectedVisitIdsForReport(prev => [...prev, v.id]);
+                                    } else {
+                                      setSelectedVisitIdsForReport(prev => prev.filter(id => id !== v.id));
+                                    }
+                                  }}
+                                  className="w-3.5 h-3.5 text-emerald-600 rounded border-surface-border accent-emerald-600 shrink-0 cursor-pointer"
+                                />
+                                <div className="truncate">
+                                  <span className="font-bold text-text-main">{v.teacherName}</span>
+                                  <span className="mx-1 text-emerald-600 font-extrabold">[{v.className || '-'}]</span>
+                                  <span className="text-[10px] text-text-muted">{v.visitedDate} {v.periodNumber ? `(${_t('حصة', 'Period', 'Stunde')} ${v.periodNumber})` : ''}</span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {v.overallScore !== undefined && (
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-600/10 text-emerald-700 text-[10px] font-black">
+                                    {v.overallScore}/75
+                                  </span>
+                                )}
+                                {v.weeklyReportSent && (
+                                  <span className="px-1 py-0.5 bg-blue-500/10 text-blue-600 text-[9px] font-bold rounded">
+                                    {_t('مدرجة سابقاً', 'Previously Included', 'Bereits enthalten')}
+                                  </span>
+                                )}
+                              </div>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Single-Cycle Rule Explanation Notice */}

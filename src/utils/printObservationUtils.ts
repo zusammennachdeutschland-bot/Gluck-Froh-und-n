@@ -7,12 +7,42 @@ import { Share } from '@capacitor/share';
 import { sanitizeModernCssColors } from './certificateExportUtils';
 import { getReportSchoolLogoHtml } from './alsunLogoData';
 
-export function generateStageFollowUpReportHtml(
+export function getVisitsForStageReport(
+  record: StageFollowUpRecord,
+  settings: SchoolSettings
+): VisitRecord[] {
+  if (record.includeVisits === false) {
+    return [];
+  }
+
+  const allVisits = settings.visitRecords || [];
+
+  // 1. If record.includedVisits is provided and has items
+  if (record.includedVisits && record.includedVisits.length > 0) {
+    return record.includedVisits.map(v => {
+      // Check if it already has deep evaluation fields
+      if (v.cm_organization !== undefined || v.ts_objectives !== undefined || v.overallCategory !== undefined) {
+        return v;
+      }
+      const found = allVisits.find(av => av.id === v.id);
+      return found || v;
+    });
+  }
+
+  // 2. If record.selectedVisitIds is provided
+  if (record.selectedVisitIds && record.selectedVisitIds.length > 0) {
+    const idSet = new Set(record.selectedVisitIds);
+    return allVisits.filter(v => idSet.has(v.id));
+  }
+
+  return [];
+}
+
+export function generateStageFollowUpFirstPageContentHtml(
   record: StageFollowUpRecord,
   settings: SchoolSettings,
   isRtl: boolean,
-  lang: string,
-  autoPrint: boolean = true
+  lang: string
 ): string {
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 48 });
   const flagHtml = '<div style="display: flex; flex-direction: column; width: 46px; height: 30px; border: 1px solid #000; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">' +
@@ -29,8 +59,6 @@ export function generateStageFollowUpReportHtml(
 
   const periodLabel = record.periodType === 'weekly' ? 'أسبوعية' : record.periodType === 'monthly' ? 'شهرية' : 'فصلية';
   const weekLabel = record.weekNumber ? ` - الأسبوع ${record.weekNumber}` : '';
-
-  const bodyLoadAttr = autoPrint ? 'onload="window.print(); window.onafterprint = function() { window.close(); }"' : 'onload="window.print()"';
 
   const teacherRowsHtml = record.teachersData.map((td, index) => {
     const evals = [
@@ -55,7 +83,244 @@ export function generateStageFollowUpReportHtml(
   }).join('');
 
   const formattedHodName = hodName.replace(/^أ[\.\/]\s*/, '');
-  const formattedManagerName = (record.stageManagerName || '').replace(/^أ[\.\/]\s*/, '');
+
+  return '<div class="header">' +
+    '<div class="header-logo">' + logoHtml + '</div>' +
+    '<div class="header-text">' +
+      '<h1>' + schoolName + '</h1>' +
+      '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
+    '</div>' +
+    '<div>' + flagHtml + '</div>' +
+  '</div>' +
+  '<div class="title">تقرير متابعة وتقييم معلمي المرحلة (' + periodLabel + weekLabel + ')</div>' +
+  '<div class="meta-grid">' +
+    '<div class="meta-item"><span class="meta-label">المرحلة / الصفوف:</span> ' + record.gradeBand + '</div>' +
+    '<div class="meta-item"><span class="meta-label">مدير المرحلة:</span> ' + (record.stageManagerName || '..................................') + '</div>' +
+    '<div class="meta-item"><span class="meta-label">نوع المتابعة:</span> متابعة ' + periodLabel + '</div>' +
+    '<div class="meta-item"><span class="meta-label">رقم الأسبوع:</span> الأسبوع ' + (record.weekNumber || 1) + '</div>' +
+    '<div class="meta-item"><span class="meta-label">تاريخ المتابعة:</span> ' + record.date + '</div>' +
+    '<div class="meta-item"><span class="meta-label">رئيس القسم:</span> ' + formattedHodName + '</div>' +
+    '<div class="meta-item" style="grid-column: span 2;"><span class="meta-label">عدد المعلمين التابعين:</span> ' + record.teachersData.length + ' معلم</div>' +
+  '</div>' +
+  '<table>' +
+    '<thead>' +
+      '<tr>' +
+        '<th style="width: 5%;">#</th>' +
+        '<th style="width: 22%;">اسم المعلم</th>' +
+        '<th style="width: 18%;">الفصول والحصص</th>' +
+        '<th style="width: 23%;">الزيارات والشكاوى</th>' +
+        '<th style="width: 32%;">التقييمات والملاحظات</th>' +
+      '</tr>' +
+    '</thead>' +
+    '<tbody>' +
+      teacherRowsHtml +
+    '</tbody>' +
+  '</table>' +
+  ((record.includeVisits && record.includedVisits && record.includedVisits.length > 0) ? (
+    '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+      '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الزيارات الصفية المعتمدة والمرفقة بالتقرير (' + record.includedVisits.length + ' زيارة - مفصلة بالصفحات التالية):</div>' +
+      '<table>' +
+        '<thead>' +
+          '<tr>' +
+            '<th style="width: 5%;">#</th>' +
+            '<th style="width: 22%;">اسم المعلم</th>' +
+            '<th style="width: 15%;">الصف والحصة</th>' +
+            '<th style="width: 15%;">تاريخ الزيارة</th>' +
+            '<th style="width: 25%;">موضوع الدرس / محور الزيارة</th>' +
+            '<th style="width: 18%;">التقييم العام</th>' +
+          '</tr>' +
+        '</thead>' +
+        '<tbody>' +
+          record.includedVisits.map((v: any, i) => {
+            const teacherName = v.teacherName || '-';
+            const classGrade = v.className || v.class || v.gradeClass || '-';
+            const dateVal = v.visitedDate || v.date || '-';
+            const topic = v.lessonTopic || v.topic || v.focusAreas || 'زيارة صفية دورية';
+            const scoreVal = v.overallScore ?? v.totalScore ?? v.score;
+            const scoreText = (scoreVal !== undefined && scoreVal !== null) ? `${scoreVal}/75` : '-';
+            const catText = v.overallCategory ? ` (${v.overallCategory})` : '';
+            return '<tr>' +
+              `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
+              `<td style="text-align: right; font-weight: bold;">${teacherName}</td>` +
+              `<td style="text-align: center;">${classGrade}${v.periodNumber ? ' - ح' + v.periodNumber : ''}</td>` +
+              `<td style="text-align: center; font-mono;">${dateVal}</td>` +
+              `<td style="text-align: right;">${topic}</td>` +
+              `<td style="text-align: center; font-weight: bold; color: #2563eb;">${scoreText}${catText}</td>` +
+            '</tr>';
+          }).join('') +
+        '</tbody>' +
+      '</table>' +
+    '</div>'
+  ) : '') +
+  ((record.includeComplaints && record.includedComplaints && record.includedComplaints.length > 0) ? (
+    '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+      '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الشكاوى وملاحظات أولياء الأمور (' + record.includedComplaints.length + '):</div>' +
+      '<table>' +
+        '<thead>' +
+          '<tr>' +
+            '<th style="width: 5%;">#</th>' +
+            '<th style="width: 25%;">اسم الطالب / الصف</th>' +
+            '<th style="width: 50%;">سبب الشكوى</th>' +
+            '<th style="width: 20%;">الحالة</th>' +
+          '</tr>' +
+        '</thead>' +
+        '<tbody>' +
+          record.includedComplaints.map((c, i) => {
+            const isResolved = c.actionTaken && c.actionTaken.includes('RESOLVED');
+            return '<tr>' +
+              `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
+              `<td style="text-align: right; font-weight: bold;">${c.studentNameAr || c.studentNameEn} (${c.gradeClass})</td>` +
+              `<td style="text-align: right;">${c.reason}</td>` +
+              `<td style="text-align: center; font-weight: bold;">${isResolved ? 'تم الحل' : 'قيد المتابعة'}</td>` +
+            '</tr>';
+          }).join('') +
+        '</tbody>' +
+      '</table>' +
+    '</div>'
+  ) : '') +
+  ((record.includeActionPlans && record.includedActionPlans && record.includedActionPlans.length > 0) ? (
+    '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+      '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">خطط الدعم الأكاديمي والعلاجية المشمولة (' + record.includedActionPlans.length + '):</div>' +
+      '<table>' +
+        '<thead>' +
+          '<tr>' +
+            '<th style="width: 5%;">#</th>' +
+            '<th style="width: 25%;">اسم الطالب والصف</th>' +
+            '<th style="width: 50%;">المعلم والضعف المرصود</th>' +
+            '<th style="width: 20%;">حالة الخطة</th>' +
+          '</tr>' +
+        '</thead>' +
+        '<tbody>' +
+          record.includedActionPlans.map((plan, i) => {
+            const isResolved = plan.status === 'RESOLVED';
+            return '<tr>' +
+              `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
+              `<td style="text-align: right; font-weight: bold;">${plan.studentNameAr || plan.studentNameEn} (${plan.gradeClass})</td>` +
+              `<td style="text-align: right;">أ/ ${plan.teacherName} — ${(plan.weaknessAreas || []).join('، ')}</td>` +
+              `<td style="text-align: center; font-weight: bold;">${isResolved ? 'مغلقة' : 'نشطة'}</td>` +
+            '</tr>';
+          }).join('') +
+        '</tbody>' +
+      '</table>' +
+    '</div>'
+  ) : '') +
+  ((record.includeAttendance !== false) ? (
+    record.periodType === 'weekly' ? (
+      '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+        '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">انضباط وحضور المعلمين (Teacher Attendance & Discipline):</div>' +
+        '<table>' +
+          '<thead>' +
+            '<tr>' +
+              '<th style="width: 5%;">#</th>' +
+              '<th style="width: 27%;">Teacher Name (اسم المعلم)</th>' +
+              '<th style="width: 14%;">Absences (الغياب)</th>' +
+              '<th style="width: 14%;">Late Arrivals (التأخير)</th>' +
+              '<th style="width: 14%;">Early Leaves (الانصراف)</th>' +
+              '<th style="width: 13%;">Delay Mins (دقائق)</th>' +
+              '<th style="width: 13%;">Score (الانضباط)</th>' +
+            '</tr>' +
+          '</thead>' +
+          '<tbody>' +
+            [...record.teachersData]
+              .sort((a, b) => {
+                const violsA = (a.absencesCount || 0) + (a.lateArrivalsCount || 0) + (a.earlyLeavesCount || 0);
+                const violsB = (b.absencesCount || 0) + (b.lateArrivalsCount || 0) + (b.earlyLeavesCount || 0);
+                return violsB - violsA;
+              })
+              .map((td, i) => {
+                const absences = td.absencesCount || 0;
+                const late = td.lateArrivalsCount || 0;
+                const early = td.earlyLeavesCount || 0;
+                const delayMins = td.delayMinutes || 0;
+                const score = td.disciplineScore !== undefined ? td.disciplineScore : 100;
+                return '<tr>' +
+                  `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
+                  `<td style="text-align: right; font-weight: bold; padding: 4px 6px;">${td.teacherName}</td>` +
+                  `<td style="text-align: center; color: ${absences > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold;">${absences}</td>` +
+                  `<td style="text-align: center; color: ${late > 0 ? '#d97706' : '#16a34a'}; font-weight: bold;">${late}</td>` +
+                  `<td style="text-align: center; color: ${early > 0 ? '#ea580c' : '#16a34a'}; font-weight: bold;">${early}</td>` +
+                  `<td style="text-align: center; font-weight: bold;">${delayMins}m</td>` +
+                  `<td style="text-align: center; font-weight: bold; color: ${score >= 90 ? '#16a34a' : score >= 75 ? '#d97706' : '#dc2626'};">${score}%</td>` +
+                '</tr>';
+              }).join('') +
+          '</tbody>' +
+        '</table>' +
+      '</div>'
+    ) : (
+      '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+        '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الحضور والانضباط الشهري (Monthly Staff Attendance Summary):</div>' +
+        '<table style="margin-bottom: 6px;">' +
+          '<thead>' +
+            '<tr>' +
+              '<th style="width: 20%;">Total Absences (الغياب)</th>' +
+              '<th style="width: 20%;">Total Late (التأخير)</th>' +
+              '<th style="width: 20%;">Early Leaves (الانصراف)</th>' +
+              '<th style="width: 20%;">Delay Mins (دقائق)</th>' +
+              '<th style="width: 20%;">Lost Hours (ساعات مفقودة)</th>' +
+            '</tr>' +
+          '</thead>' +
+          '<tbody>' +
+            '<tr>' +
+              `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #dc2626;">${record.attendanceSummary?.totalAbsences || 0}</td>` +
+              `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #d97706;">${record.attendanceSummary?.totalLateArrivals || 0}</td>` +
+              `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #ea580c;">${record.attendanceSummary?.totalEarlyLeaves || 0}</td>` +
+              `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #2563eb;">${record.attendanceSummary?.totalDelayMinutes || 0}m</td>` +
+              `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #4f46e5;">${record.attendanceSummary?.totalLostHours || 0}h</td>` +
+            '</tr>' +
+          '</tbody>' +
+        '</table>' +
+        '<div style="display: flex; gap: 6px; margin-top: 4px;">' +
+          '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
+            '<b style="color: #dc2626;">المعلمون الأكثر غياباً (Most Absent):</b><br/>' +
+            ((record.attendanceSummary?.mostAbsentTeachers && record.attendanceSummary.mostAbsentTeachers.length > 0)
+              ? record.attendanceSummary.mostAbsentTeachers.map(t => `${t.name} (${t.count} أيام)`).join('، ')
+              : 'لا توجد حالات غياب') +
+          '</div>' +
+          '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
+            '<b style="color: #d97706;">الأكثر تأخيراً (Most Late):</b><br/>' +
+            ((record.attendanceSummary?.mostLateTeachers && record.attendanceSummary.mostLateTeachers.length > 0)
+              ? record.attendanceSummary.mostLateTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
+              : 'لا توجد تأخيرات') +
+          '</div>' +
+          '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
+            '<b style="color: #ea580c;">الأكثر انصرافاً مبكراً (Early Leave):</b><br/>' +
+            ((record.attendanceSummary?.mostEarlyLeaveTeachers && record.attendanceSummary.mostEarlyLeaveTeachers.length > 0)
+              ? record.attendanceSummary.mostEarlyLeaveTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
+              : 'لا توجد حالات') +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    )
+  ) : '') +
+  (record.overallStageNotes ? (
+    '<div class="feedback-section">' +
+      '<div class="feedback-title">توصيات وملاحظات رئيس القسم العامة للمرحلة:</div>' +
+      '<div style="font-size: 8.5pt; font-weight: 500; line-height: 1.35; white-space: pre-wrap;">' + record.overallStageNotes + '</div>' +
+    '</div>'
+  ) : '') +
+  '<div class="signatures">' +
+    '<div class="sig-block">' +
+      '<div class="sig-job-title">رئيس قسم اللغة الألمانية</div>' +
+      '<div class="sig-person-name">أ/ ' + formattedHodName + '</div>' +
+      '<div class="sig-dotted-line">..................................</div>' +
+    '</div>' +
+    '<div class="sig-block">' +
+      '<div class="sig-job-title">مدير المرحلة</div>' +
+      '<div class="sig-person-name" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">' + (record.stageManagerName || '..................................') + '</div>' +
+      '<div class="sig-dotted-line">..................................</div>' +
+    '</div>' +
+  '</div>';
+}
+
+export function generateStageFollowUpFirstPageHtml(
+  record: StageFollowUpRecord,
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string,
+  autoPrint: boolean = false
+): string {
+  const page1Content = generateStageFollowUpFirstPageContentHtml(record, settings, isRtl, lang);
+  const bodyLoadAttr = autoPrint ? 'onload="window.print(); window.onafterprint = function() { window.close(); }"' : 'onload="window.print()"';
 
   return '<!DOCTYPE html>' +
     '<html lang="' + lang + '" dir="' + (isRtl ? 'rtl' : 'ltr') + '">' +
@@ -67,11 +332,11 @@ export function generateStageFollowUpReportHtml(
       '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
       '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
       '<style>' +
-        '@page { size: A4; margin: 10mm 12mm 15mm 12mm; }' +
+        '@page { size: A4; margin: 8mm 10mm; }' +
         '* { box-sizing: border-box; font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
         'html, body { height: 100%; margin: 0; padding: 0; background: #fff; }' +
         'body { color: #0f172a; line-height: 1.35; font-size: 8.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
-        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 6px; }' +
+        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 5px; margin-bottom: 6px; }' +
         '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 60px; }' +
         '.header-text { text-align: center; flex: 1; padding: 0 10px; }' +
         '.header h1 { font-size: 13pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
@@ -80,12 +345,12 @@ export function generateStageFollowUpReportHtml(
         '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
         '.meta-item { font-size: 8.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; text-align: ' + (isRtl ? 'right' : 'left') + '; color: #1e293b; }' +
         '.meta-label { font-weight: 800; margin-left: 5px; margin-right: 5px; display: inline-block; white-space: nowrap; color: #0f172a; }' +
-        'table { width: 100%; border-collapse: collapse; margin-bottom: 8px; table-layout: fixed; }' +
-        'th, td { border: 1px solid #0f172a; padding: 4px 6px; vertical-align: middle; font-size: 8.5pt; line-height: 1.3; word-break: break-word; overflow-wrap: break-word; }' +
+        'table { width: 100%; border-collapse: collapse; margin-bottom: 6px; table-layout: fixed; }' +
+        'th, td { border: 1px solid #0f172a; padding: 3px 5px; vertical-align: middle; font-size: 8.5pt; line-height: 1.25; word-break: break-word; overflow-wrap: break-word; }' +
         'th { background: #e2e8f0; font-weight: 800; font-size: 8.5pt; height: 22px; text-align: center; vertical-align: middle; color: #0f172a; }' +
         '.feedback-section { margin-top: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; min-height: 34px; background: #f8fafc; border-radius: 4px; }' +
         '.feedback-title { font-weight: 800; font-size: 8.5pt; margin-bottom: 3px; border-bottom: 1px dotted #0f172a; padding-bottom: 2px; line-height: 1.3; color: #0f172a; }' +
-        '.signatures { margin-top: 20px; display: flex; justify-content: space-between; align-items: flex-start; text-align: center; page-break-inside: avoid; break-inside: avoid; padding-bottom: 2.5rem; margin-bottom: 1.5rem; line-height: 1.6; }' +
+        '.signatures { margin-top: 14px; display: flex; justify-content: space-between; align-items: flex-start; text-align: center; page-break-inside: avoid; break-inside: avoid; padding-bottom: 1.5rem; line-height: 1.6; }' +
         '.sig-block { width: 44%; display: flex; flex-direction: column; align-items: center; page-break-inside: avoid; break-inside: avoid; }' +
         '.sig-job-title { font-weight: 900; font-size: 9.5pt; color: #0f172a; margin-bottom: 2px; line-height: 1.4; }' +
         '.sig-person-name { font-size: 9pt; font-weight: 700; color: #334155; margin-bottom: 8px; line-height: 1.4; }' +
@@ -93,234 +358,77 @@ export function generateStageFollowUpReportHtml(
       '</style>' +
     '</head>' +
     '<body ' + bodyLoadAttr + '>' +
-      '<div class="header">' +
-        '<div class="header-logo">' + logoHtml + '</div>' +
-        '<div class="header-text">' +
-          '<h1>' + schoolName + '</h1>' +
-          '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
-        '</div>' +
-        '<div>' + flagHtml + '</div>' +
+      page1Content +
+    '</body>' +
+    '</html>';
+}
+
+export function generateStageFollowUpReportHtml(
+  record: StageFollowUpRecord,
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string,
+  autoPrint: boolean = true
+): string {
+  const visitsToRender = getVisitsForStageReport(record, settings);
+  const page1Content = generateStageFollowUpFirstPageContentHtml(record, settings, isRtl, lang);
+  const bodyLoadAttr = autoPrint ? 'onload="window.print(); window.onafterprint = function() { window.close(); }"' : 'onload="window.print()"';
+
+  const visitPagesHtml = visitsToRender.map((visit, idx) => {
+    const isLast = idx === visitsToRender.length - 1;
+    const visitContent = generateObservationReportContentHtml(visit, settings, isRtl, lang);
+    return `<div class="report-page visit-page ${isLast ? 'last-page' : ''}">${visitContent}</div>`;
+  }).join('');
+
+  return '<!DOCTYPE html>' +
+    '<html lang="' + lang + '" dir="' + (isRtl ? 'rtl' : 'ltr') + '">' +
+    '<head>' +
+      '<meta charset="UTF-8">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+      '<title>Stage Follow-Up - ' + record.stageManagerName + '</title>' +
+      '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+      '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+      '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
+      '<style>' +
+        '@page { size: A4; margin: 8mm 10mm; }' +
+        '* { box-sizing: border-box; font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
+        'html, body { margin: 0; padding: 0; background: #fff; }' +
+        'body { color: #0f172a; line-height: 1.35; font-size: 8.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
+        '.report-page { page-break-after: always; break-after: page; width: 100%; background: #ffffff; padding: 0; margin-bottom: 25px; }' +
+        '.report-page.last-page { page-break-after: auto; break-after: auto; margin-bottom: 0; }' +
+        '@media print { .report-page { margin-bottom: 0; page-break-after: always; break-after: page; } .report-page.last-page { page-break-after: auto; break-after: auto; } }' +
+        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 5px; margin-bottom: 6px; }' +
+        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 60px; }' +
+        '.header-text { text-align: center; flex: 1; padding: 0 10px; }' +
+        '.header h1 { font-size: 13pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
+        '.header p { font-size: 8.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
+        '.title { text-align: center; font-size: 11.5pt; font-weight: 800; margin-bottom: 6px; text-decoration: underline; line-height: 1.3; color: #0f172a; }' +
+        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
+        '.meta-item { font-size: 8.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; text-align: ' + (isRtl ? 'right' : 'left') + '; color: #1e293b; }' +
+        '.meta-label { font-weight: 800; margin-left: 5px; margin-right: 5px; display: inline-block; white-space: nowrap; color: #0f172a; }' +
+        'table { width: 100%; border-collapse: collapse; margin-bottom: 6px; table-layout: fixed; }' +
+        'th, td { border: 1px solid #0f172a; padding: 3px 5px; vertical-align: middle; font-size: 8.5pt; line-height: 1.25; word-break: break-word; overflow-wrap: break-word; }' +
+        'th { background: #e2e8f0; font-weight: 800; font-size: 8.5pt; height: 22px; text-align: center; vertical-align: middle; color: #0f172a; }' +
+        '.criteria-col { text-align: ' + (isRtl ? 'right' : 'left') + '; width: 55%; font-weight: 700; vertical-align: middle; padding-left: 6px; padding-right: 6px; line-height: 1.3; color: #1e293b; }' +
+        '.rating-col { width: 9%; font-weight: bold; font-size: 9.5pt; text-align: center; vertical-align: middle; line-height: 1; }' +
+        '.category-title { font-size: 8.5pt; font-weight: 800; margin-top: 4px; margin-bottom: 2px; background: #e2e8f0; padding: 3px 6px; border: 1px solid #0f172a; border-bottom: none; line-height: 1.3; vertical-align: middle; color: #0f172a; }' +
+        '.feedback-section { margin-top: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; min-height: 34px; background: #f8fafc; border-radius: 4px; }' +
+        '.feedback-title { font-weight: 800; font-size: 8.5pt; margin-bottom: 3px; border-bottom: 1px dotted #0f172a; padding-bottom: 2px; line-height: 1.3; color: #0f172a; }' +
+        '.overall-box { margin-top: 6px; padding: 5px 8px; border: 1.5px solid #0f172a; font-weight: 800; text-align: center; font-size: 9.5pt; display: flex; justify-content: space-around; align-items: center; background: #f8fafc; line-height: 1.3; border-radius: 4px; }' +
+        '.signatures { margin-top: 14px; display: flex; justify-content: space-between; align-items: flex-start; text-align: center; page-break-inside: avoid; break-inside: avoid; padding-bottom: 1.5rem; line-height: 1.6; }' +
+        '.sig-block { width: 44%; display: flex; flex-direction: column; align-items: center; page-break-inside: avoid; break-inside: avoid; }' +
+        '.sig-job-title { font-weight: 900; font-size: 9.5pt; color: #0f172a; margin-bottom: 2px; line-height: 1.4; }' +
+        '.sig-person-name { font-size: 9pt; font-weight: 700; color: #334155; margin-bottom: 8px; line-height: 1.4; }' +
+        '.sig-dotted-line { width: 180px; text-align: center; color: #64748b; font-weight: normal; letter-spacing: 2px; font-size: 9.5pt; }' +
+        '.sig-title { font-weight: 800; font-size: 9pt; margin-bottom: 16px; line-height: 1.3; color: #0f172a; }' +
+        '.sig-line { border-top: 1px solid #0f172a; padding-top: 3px; font-size: 8.5pt; font-weight: 800; line-height: 1.3; color: #1e293b; }' +
+      '</style>' +
+    '</head>' +
+    '<body ' + bodyLoadAttr + '>' +
+      `<div class="report-page stage-first-page ${visitsToRender.length === 0 ? 'last-page' : ''}">` +
+        page1Content +
       '</div>' +
-      '<div class="title">تقرير متابعة وتقييم معلمي المرحلة (' + periodLabel + weekLabel + ')</div>' +
-      '<div class="meta-grid">' +
-        '<div class="meta-item"><span class="meta-label">المرحلة / الصفوف:</span> ' + record.gradeBand + '</div>' +
-        '<div class="meta-item"><span class="meta-label">مدير المرحلة:</span> ..................................</div>' +
-        '<div class="meta-item"><span class="meta-label">نوع المتابعة:</span> متابعة ' + periodLabel + '</div>' +
-        '<div class="meta-item"><span class="meta-label">رقم الأسبوع:</span> الأسبوع ' + (record.weekNumber || 1) + '</div>' +
-        '<div class="meta-item"><span class="meta-label">تاريخ المتابعة:</span> ' + record.date + '</div>' +
-        '<div class="meta-item"><span class="meta-label">رئيس القسم:</span> ' + formattedHodName + '</div>' +
-        '<div class="meta-item" style="grid-column: span 2;"><span class="meta-label">عدد المعلمين التابعين:</span> ' + record.teachersData.length + ' معلم</div>' +
-      '</div>' +
-      '<table>' +
-        '<thead>' +
-          '<tr>' +
-            '<th style="width: 5%;">#</th>' +
-            '<th style="width: 22%;">اسم المعلم</th>' +
-            '<th style="width: 18%;">الفصول والحصص</th>' +
-            '<th style="width: 23%;">الزيارات والشكاوى</th>' +
-            '<th style="width: 32%;">التقييمات والملاحظات</th>' +
-          '</tr>' +
-        '</thead>' +
-        '<tbody>' +
-          teacherRowsHtml +
-        '</tbody>' +
-      '</table>' +
-      ((record.includeVisits && record.includedVisits && record.includedVisits.length > 0) ? (
-        '<div style="margin-top: 8px; margin-bottom: 8px;">' +
-          '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">تفاصيل الزيارات الصفية المعتمدة والمرفقة (' + record.includedVisits.length + '):</div>' +
-          '<table>' +
-            '<thead>' +
-              '<tr>' +
-                '<th style="width: 5%;">#</th>' +
-                '<th style="width: 22%;">اسم المعلم</th>' +
-                '<th style="width: 15%;">الصف والحصة</th>' +
-                '<th style="width: 15%;">تاريخ الزيارة</th>' +
-                '<th style="width: 25%;">موضوع الدرس</th>' +
-                '<th style="width: 18%;">التقييم العام</th>' +
-              '</tr>' +
-            '</thead>' +
-            '<tbody>' +
-              record.includedVisits.map((v: any, i) => {
-                const teacherName = v.teacherName || '-';
-                const classGrade = v.className || v.class || v.gradeClass || '-';
-                const dateVal = v.visitedDate || v.date || '-';
-                const topic = v.lessonTopic || v.topic || v.focusAreas || 'زيارة صفية دورية';
-                const scoreVal = v.overallScore ?? v.totalScore ?? v.score;
-                const scoreText = (scoreVal !== undefined && scoreVal !== null) ? `${scoreVal}/75` : '-';
-                const catText = v.overallCategory ? ` (${v.overallCategory})` : '';
-                return '<tr>' +
-                  `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-                  `<td style="text-align: right; font-weight: bold;">${teacherName}</td>` +
-                  `<td style="text-align: center;">${classGrade}${v.periodNumber ? ' - ح' + v.periodNumber : ''}</td>` +
-                  `<td style="text-align: center; font-mono;">${dateVal}</td>` +
-                  `<td style="text-align: right;">${topic}</td>` +
-                  `<td style="text-align: center; font-weight: bold; color: #2563eb;">${scoreText}${catText}</td>` +
-                '</tr>';
-              }).join('') +
-            '</tbody>' +
-          '</table>' +
-        '</div>'
-      ) : '') +
-      ((record.includeComplaints && record.includedComplaints && record.includedComplaints.length > 0) ? (
-        '<div style="margin-top: 8px; margin-bottom: 8px;">' +
-          '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الشكاوى وملاحظات أولياء الأمور (' + record.includedComplaints.length + '):</div>' +
-          '<table>' +
-            '<thead>' +
-              '<tr>' +
-                '<th style="width: 5%;">#</th>' +
-                '<th style="width: 25%;">اسم الطالب / الصف</th>' +
-                '<th style="width: 50%;">سبب الشكوى</th>' +
-                '<th style="width: 20%;">الحالة</th>' +
-              '</tr>' +
-            '</thead>' +
-            '<tbody>' +
-              record.includedComplaints.map((c, i) => {
-                const isResolved = c.actionTaken && c.actionTaken.includes('RESOLVED');
-                return '<tr>' +
-                  `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-                  `<td style="text-align: right; font-weight: bold;">${c.studentNameAr || c.studentNameEn} (${c.gradeClass})</td>` +
-                  `<td style="text-align: right;">${c.reason}</td>` +
-                  `<td style="text-align: center; font-weight: bold;">${isResolved ? 'تم الحل' : 'قيد المتابعة'}</td>` +
-                '</tr>';
-              }).join('') +
-            '</tbody>' +
-          '</table>' +
-        '</div>'
-      ) : '') +
-      ((record.includeActionPlans && record.includedActionPlans && record.includedActionPlans.length > 0) ? (
-        '<div style="margin-top: 8px; margin-bottom: 8px;">' +
-          '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">خطط الدعم الأكاديمي والعلاجية المشمولة (' + record.includedActionPlans.length + '):</div>' +
-          '<table>' +
-            '<thead>' +
-              '<tr>' +
-                '<th style="width: 5%;">#</th>' +
-                '<th style="width: 25%;">اسم الطالب والصف</th>' +
-                '<th style="width: 50%;">المعلم والضعف المرصود</th>' +
-                '<th style="width: 20%;">حالة الخطة</th>' +
-              '</tr>' +
-            '</thead>' +
-            '<tbody>' +
-              record.includedActionPlans.map((plan, i) => {
-                const isResolved = plan.status === 'RESOLVED';
-                return '<tr>' +
-                  `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-                  `<td style="text-align: right; font-weight: bold;">${plan.studentNameAr || plan.studentNameEn} (${plan.gradeClass})</td>` +
-                  `<td style="text-align: right;">أ/ ${plan.teacherName} — ${(plan.weaknessAreas || []).join('، ')}</td>` +
-                  `<td style="text-align: center; font-weight: bold;">${isResolved ? 'مغلقة' : 'نشطة'}</td>` +
-                '</tr>';
-              }).join('') +
-            '</tbody>' +
-          '</table>' +
-        '</div>'
-      ) : '') +
-      ((record.includeAttendance !== false) ? (
-        record.periodType === 'weekly' ? (
-          /* Weekly HOD Report: Teacher Attendance & Discipline Table sorted by violations (Requirement 6) */
-          '<div style="margin-top: 8px; margin-bottom: 8px;">' +
-            '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">انضباط وحضور المعلمين (Teacher Attendance & Discipline):</div>' +
-            '<table>' +
-              '<thead>' +
-                '<tr>' +
-                  '<th style="width: 5%;">#</th>' +
-                  '<th style="width: 27%;">Teacher Name (اسم المعلم)</th>' +
-                  '<th style="width: 14%;">Absences (الغياب)</th>' +
-                  '<th style="width: 14%;">Late Arrivals (التأخير)</th>' +
-                  '<th style="width: 14%;">Early Leaves (الانصراف)</th>' +
-                  '<th style="width: 13%;">Delay Mins (دقائق)</th>' +
-                  '<th style="width: 13%;">Score (الانضباط)</th>' +
-                '</tr>' +
-              '</thead>' +
-              '<tbody>' +
-                [...record.teachersData]
-                  .sort((a, b) => {
-                    const violsA = (a.absencesCount || 0) + (a.lateArrivalsCount || 0) + (a.earlyLeavesCount || 0);
-                    const violsB = (b.absencesCount || 0) + (b.lateArrivalsCount || 0) + (b.earlyLeavesCount || 0);
-                    return violsB - violsA;
-                  })
-                  .map((td, i) => {
-                    const absences = td.absencesCount || 0;
-                    const late = td.lateArrivalsCount || 0;
-                    const early = td.earlyLeavesCount || 0;
-                    const delayMins = td.delayMinutes || 0;
-                    const score = td.disciplineScore !== undefined ? td.disciplineScore : 100;
-                    return '<tr>' +
-                      `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-                      `<td style="text-align: right; font-weight: bold; padding: 4px 6px;">${td.teacherName}</td>` +
-                      `<td style="text-align: center; color: ${absences > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold;">${absences}</td>` +
-                      `<td style="text-align: center; color: ${late > 0 ? '#d97706' : '#16a34a'}; font-weight: bold;">${late}</td>` +
-                      `<td style="text-align: center; color: ${early > 0 ? '#ea580c' : '#16a34a'}; font-weight: bold;">${early}</td>` +
-                      `<td style="text-align: center; font-weight: bold;">${delayMins}m</td>` +
-                      `<td style="text-align: center; font-weight: bold; color: ${score >= 90 ? '#16a34a' : score >= 75 ? '#d97706' : '#dc2626'};">${score}%</td>` +
-                    '</tr>';
-                  }).join('') +
-              '</tbody>' +
-            '</table>' +
-          '</div>'
-        ) : (
-          /* Monthly HOD Report: Monthly Staff Attendance Summary (Requirement 7) */
-          '<div style="margin-top: 8px; margin-bottom: 8px;">' +
-            '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الحضور والانضباط الشهري (Monthly Staff Attendance Summary):</div>' +
-            '<table style="margin-bottom: 6px;">' +
-              '<thead>' +
-                '<tr>' +
-                  '<th style="width: 20%;">Total Absences (الغياب)</th>' +
-                  '<th style="width: 20%;">Total Late (التأخير)</th>' +
-                  '<th style="width: 20%;">Early Leaves (الانصراف)</th>' +
-                  '<th style="width: 20%;">Delay Mins (دقائق)</th>' +
-                  '<th style="width: 20%;">Lost Hours (ساعات مفقودة)</th>' +
-                '</tr>' +
-              '</thead>' +
-              '<tbody>' +
-                '<tr>' +
-                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #dc2626;">${record.attendanceSummary?.totalAbsences || 0}</td>` +
-                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #d97706;">${record.attendanceSummary?.totalLateArrivals || 0}</td>` +
-                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #ea580c;">${record.attendanceSummary?.totalEarlyLeaves || 0}</td>` +
-                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #2563eb;">${record.attendanceSummary?.totalDelayMinutes || 0}m</td>` +
-                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #4f46e5;">${record.attendanceSummary?.totalLostHours || 0}h</td>` +
-                '</tr>' +
-              '</tbody>' +
-            '</table>' +
-            '<div style="display: flex; gap: 6px; margin-top: 4px;">' +
-              '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
-                '<b style="color: #dc2626;">المعلمون الأكثر غياباً (Most Absent):</b><br/>' +
-                ((record.attendanceSummary?.mostAbsentTeachers && record.attendanceSummary.mostAbsentTeachers.length > 0)
-                  ? record.attendanceSummary.mostAbsentTeachers.map(t => `${t.name} (${t.count} أيام)`).join('، ')
-                  : 'لا توجد حالات غياب') +
-              '</div>' +
-              '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
-                '<b style="color: #d97706;">الأكثر تأخيراً (Most Late):</b><br/>' +
-                ((record.attendanceSummary?.mostLateTeachers && record.attendanceSummary.mostLateTeachers.length > 0)
-                  ? record.attendanceSummary.mostLateTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
-                  : 'لا توجد تأخيرات') +
-              '</div>' +
-              '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
-                '<b style="color: #ea580c;">الأكثر انصرافاً مبكراً (Early Leave):</b><br/>' +
-                ((record.attendanceSummary?.mostEarlyLeaveTeachers && record.attendanceSummary.mostEarlyLeaveTeachers.length > 0)
-                  ? record.attendanceSummary.mostEarlyLeaveTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
-                  : 'لا توجد حالات') +
-              '</div>' +
-            '</div>' +
-          '</div>'
-        )
-      ) : '') +
-      (record.overallStageNotes ? (
-        '<div class="feedback-section">' +
-          '<div class="feedback-title">توصيات وملاحظات رئيس القسم العامة للمرحلة:</div>' +
-          '<div style="font-size: 8.5pt; font-weight: 500; line-height: 1.35; white-space: pre-wrap;">' + record.overallStageNotes + '</div>' +
-        '</div>'
-      ) : '') +
-      '<div class="signatures">' +
-        '<div class="sig-block">' +
-          '<div class="sig-job-title">رئيس قسم اللغة الألمانية</div>' +
-          '<div class="sig-person-name">أ/ ' + formattedHodName + '</div>' +
-          '<div class="sig-dotted-line">..................................</div>' +
-        '</div>' +
-        '<div class="sig-block">' +
-          '<div class="sig-job-title">مدير المرحلة</div>' +
-          '<div class="sig-person-name" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">..................................</div>' +
-          '<div class="sig-dotted-line">..................................</div>' +
-        '</div>' +
-      '</div>' +
+      visitPagesHtml +
     '</body>' +
     '</html>';
 }
@@ -331,7 +439,17 @@ export async function generateStageFollowUpPdfInstance(
   isRtl: boolean,
   lang: string
 ): Promise<jsPDF> {
-  const htmlStr = generateStageFollowUpReportHtml(record, settings, isRtl, lang, false);
+  const visitsToRender = getVisitsForStageReport(record, settings);
+
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+  });
+
+  const pdfWidth = pdf.internal.pageSize.getWidth(); // 210mm
+  const pdfHeight = pdf.internal.pageSize.getHeight(); // 297mm
 
   const container = document.createElement('div');
   container.style.position = 'absolute';
@@ -339,18 +457,22 @@ export async function generateStageFollowUpPdfInstance(
   container.style.left = '-9999px';
   container.style.width = '794px'; // 210mm at 96DPI
   container.style.background = '#ffffff';
-
-  const bodyMatch = htmlStr.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-  const styleMatch = htmlStr.match(/<style[^>]*>([\s\S]*)<\/style>/i);
-
-  const styleTag = styleMatch ? `<style>${styleMatch[1]}</style>` : '';
-  const bodyContent = bodyMatch ? bodyMatch[1] : htmlStr;
-
-  container.innerHTML = `${styleTag}<div style="width: 100%; background: #ffffff; color: #000000;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent}</div>`;
+  container.style.boxSizing = 'border-box';
+  container.style.padding = '15px 20px';
+  container.style.zIndex = '-9999';
   document.body.appendChild(container);
 
   try {
-    const canvas = await html2canvas(container, {
+    // 1. Render Page 1 (Stage Follow-Up Summary)
+    const page1Html = generateStageFollowUpFirstPageHtml(record, settings, isRtl, lang, false);
+    const bodyMatch1 = page1Html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    const styleMatch1 = page1Html.match(/<style[^>]*>([\s\S]*)<\/style>/i);
+    const styleTag1 = styleMatch1 ? `<style>${styleMatch1[1]}</style>` : '';
+    const bodyContent1 = bodyMatch1 ? bodyMatch1[1] : page1Html;
+
+    container.innerHTML = `${styleTag1}<div style="width: 100%; background: #ffffff; color: #000000;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent1}</div>`;
+
+    const canvas1 = await html2canvas(container, {
       scale: 2,
       useCORS: true,
       allowTaint: true,
@@ -369,27 +491,63 @@ export async function generateStageFollowUpPdfInstance(
       }
     });
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.95);
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4',
-      compress: true,
-    });
+    const imgData1 = canvas1.toDataURL('image/jpeg', 0.95);
+    const imgWidth1 = pdfWidth;
+    const imgHeight1 = (canvas1.height * pdfWidth) / canvas1.width;
 
-    const pdfWidth = pdf.internal.pageSize.getWidth(); // 210mm
-    const pdfHeight = pdf.internal.pageSize.getHeight(); // 297mm
-
-    const imgWidth = pdfWidth;
-    const imgHeight = (canvas.height * pdfWidth) / canvas.width;
-
-    if (imgHeight > pdfHeight) {
-      const scale = pdfHeight / imgHeight;
-      const finalWidth = imgWidth * scale;
+    if (imgHeight1 > pdfHeight) {
+      const scale = pdfHeight / imgHeight1;
+      const finalWidth = imgWidth1 * scale;
       const xMargin = (pdfWidth - finalWidth) / 2;
-      pdf.addImage(imgData, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
+      pdf.addImage(imgData1, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
     } else {
-      pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
+      pdf.addImage(imgData1, 'JPEG', 0, 0, imgWidth1, imgHeight1, undefined, 'FAST');
+    }
+
+    // 2. Render each selected visit on its own page (1 page per visit)
+    for (let i = 0; i < visitsToRender.length; i++) {
+      const visit = visitsToRender[i];
+      pdf.addPage('a4', 'portrait');
+
+      const visitHtml = generateObservationReportHtml(visit, settings, isRtl, lang, false);
+      const bodyMatchV = visitHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+      const styleMatchV = visitHtml.match(/<style[^>]*>([\s\S]*)<\/style>/i);
+      const styleTagV = styleMatchV ? `<style>${styleMatchV[1]}</style>` : '';
+      const bodyContentV = bodyMatchV ? bodyMatchV[1] : visitHtml;
+
+      container.innerHTML = `${styleTagV}<div style="width: 100%; background: #ffffff; color: #000000;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContentV}</div>`;
+
+      const canvasV = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        imageTimeout: 5000,
+        logging: false,
+        backgroundColor: '#ffffff',
+        width: 794,
+        windowWidth: 794,
+        onclone: (clonedDoc) => {
+          const styles = clonedDoc.querySelectorAll('style');
+          styles.forEach(s => {
+            if (s.textContent) {
+              s.textContent = sanitizeModernCssColors(s.textContent);
+            }
+          });
+        }
+      });
+
+      const imgDataV = canvasV.toDataURL('image/jpeg', 0.95);
+      const imgWidthV = pdfWidth;
+      const imgHeightV = (canvasV.height * pdfWidth) / canvasV.width;
+
+      if (imgHeightV > pdfHeight) {
+        const scale = pdfHeight / imgHeightV;
+        const finalWidth = imgWidthV * scale;
+        const xMargin = (pdfWidth - finalWidth) / 2;
+        pdf.addImage(imgDataV, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
+      } else {
+        pdf.addImage(imgDataV, 'JPEG', 0, 0, imgWidthV, imgHeightV, undefined, 'FAST');
+      }
     }
 
     return pdf;

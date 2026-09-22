@@ -1593,9 +1593,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     if (method === 'notification' || method === 'both') {
+      const inspTitle = _t('💡 الإلهام والامتنان | Glück', '💡 Daily Inspiration | Glück', '💡 Tägliche Inspiration | Glück');
+      const appNotifTitle = _t('💡 إلهام وامتنان اليوم', '💡 Today\'s Inspiration', '💡 Heutige Inspiration');
+
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
         try {
-          new Notification('💡 الإلهام والامتنان | Glück', {
+          new Notification(inspTitle, {
             body: selectedMsg.text,
             icon: '/icon.png'
           });
@@ -1604,9 +1607,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         }
       }
 
-      addAppNotification('💡 إلهام وامتنان اليوم', selectedMsg.text, 'system');
+      addAppNotification(appNotifTitle, selectedMsg.text, 'system');
     }
-  }, [inspirationSettings, inspirationMessages, isInspirationDismissedToday, activeInspirationCard, lessons]);
+  }, [inspirationSettings, inspirationMessages, isInspirationDismissedToday, activeInspirationCard, lessons, _t]);
 
   // Auto Trigger Effect for Inspiration Reminders (Guarded for single app-load trigger)
   const hasTriggeredInspirationLoadRef = useRef(false);
@@ -1647,13 +1650,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         if (diffMins >= 0 && diffMins <= 30 && !notifiedLessonAlerts[alertKey]) {
           setNotifiedLessonAlerts(prev => ({ ...prev, [alertKey]: true }));
 
-          const studentOrGroupName = lesson.studentName || (lesson.groupName && lesson.groupName !== 'Quick Lesson' ? lesson.groupName : '') || lesson.title || (language === 'ar' ? 'الحصّة' : 'Lektion');
+          const studentOrGroupName = lesson.studentName || (lesson.groupName && lesson.groupName !== 'Quick Lesson' ? lesson.groupName : '') || lesson.title || _t('الحصّة', 'Lesson', 'Lektion');
           const titleText = language === 'ar'
             ? `⏰ تذكير: حصّة قادمة (${diffMins === 0 ? 'الآن' : `بعد ${diffMins} دقيقة`})`
-            : `⏰ Lektion in Kürze (${diffMins === 0 ? 'Jetzt' : `${diffMins} Min`})`;
+            : language === 'de'
+            ? `⏰ Lektion in Kürze (${diffMins === 0 ? 'Jetzt' : `${diffMins} Min`})`
+            : `⏰ Upcoming Lesson (${diffMins === 0 ? 'Now' : `in ${diffMins} mins`})`;
           const bodyText = language === 'ar'
             ? `حصّة "${studentOrGroupName}" تبدأ ${diffMins === 0 ? 'الآن' : `بعد ${diffMins} دقيقة`} في تمام الساعة ${lesson.time}!`
-            : `Die Lektion "${studentOrGroupName}" beginnt ${diffMins === 0 ? 'jetzt' : `in ${diffMins} Minuten`} um ${lesson.time} Uhr!`;
+            : language === 'de'
+            ? `Die Lektion "${studentOrGroupName}" beginnt ${diffMins === 0 ? 'jetzt' : `in ${diffMins} Minuten`} um ${lesson.time} Uhr!`
+            : `Lesson "${studentOrGroupName}" starts ${diffMins === 0 ? 'now' : `in ${diffMins} mins`} at ${lesson.time}!`;
 
           if (profile.enableLessonAlerts !== false) {
             addAppNotification(titleText, bodyText, 'reminder', { lessonId: lesson.id });
@@ -1692,7 +1699,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const slots = getGroupScheduleSlots(group);
       if (slots.length === 0) return;
 
-      for (let dayOffset = 0; dayOffset < 28; dayOffset++) { // 4 weeks
+      for (let dayOffset = 0; dayOffset < 365; dayOffset++) { // 1 full year ahead
         const d = new Date();
         d.setDate(today.getDate() + dayOffset);
         const dayNum = d.getDay();
@@ -2137,7 +2144,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const today = new Date();
         const newGeneratedLessons: Lesson[] = [];
 
-        for (let dayOffset = 0; dayOffset < 28; dayOffset++) {
+        for (let dayOffset = 0; dayOffset < 365; dayOffset++) { // 1 full year ahead
           const d = new Date();
           d.setDate(today.getDate() + dayOffset);
           const dayNum = d.getDay();
@@ -2939,8 +2946,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const updateLesson = (id: string, updates: Partial<Lesson>) => {
-    const updater = (allLessons: Lesson[]) =>
-      allLessons.map(l => (l.id === id ? wrapMutation({ ...l, ...updates } as Lesson) : l));
+    const updater = (allLessons: Lesson[]) => {
+      let found = false;
+      const updated = allLessons.map(l => {
+        if (l.id === id) {
+          found = true;
+          return wrapMutation({ ...l, ...updates } as Lesson);
+        }
+        return l;
+      });
+      if (!found) {
+        const base = (selectedLesson && selectedLesson.id === id) 
+          ? selectedLesson 
+          : lessons.find(l => l.id === id);
+        if (base) {
+          return [wrapMutation({ ...base, ...updates } as Lesson), ...updated];
+        }
+      }
+      return updated;
+    };
     updateFullLessonsStorage(updater);
     if (selectedLesson && selectedLesson.id === id) {
       setSelectedLesson(prev => prev ? { ...prev, ...updates } : null);
@@ -2949,15 +2973,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const deleteLesson = (id: string) => {
-    const targetLesson = (fullLessonsRef.current || lessons).find(l => l.id === id);
+    const targetLesson = (fullLessonsRef.current || lessons).find(l => l.id === id) || (selectedLesson?.id === id ? selectedLesson : null);
     if (targetLesson) {
       setRecentlyDeleted(prev => ({
         ...prev,
         lessons: [{ item: targetLesson, deletedAt: new Date().toISOString() }, ...prev.lessons]
       }));
     }
-    const updater = (allLessons: Lesson[]) =>
-      allLessons.map(l => (l.id === id ? wrapDeletion(l) : l));
+    const updater = (allLessons: Lesson[]) => {
+      let found = false;
+      const updated = allLessons.map(l => {
+        if (l.id === id) {
+          found = true;
+          return wrapDeletion(l);
+        }
+        return l;
+      });
+      if (!found && targetLesson) {
+        return [wrapDeletion(targetLesson), ...updated];
+      }
+      return updated;
+    };
     updateFullLessonsStorage(updater);
     if (selectedLesson?.id === id) {
       closeLessonControl();
@@ -3020,36 +3056,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       ? students.filter(s => s.groupId === targetLesson.groupId)
       : [];
 
-    const reportUpdater = (allLessons: Lesson[]) => allLessons.map(l => {
-      if (l.id === lessonId) {
-        const updatedStudentPayments: Record<string, StudentPaymentDetail> = {};
-        if (report.studentPayments) {
-          Object.entries(report.studentPayments).forEach(([stId, pDet]) => {
-            const stObj = students.find(s => s.id === stId);
-            updatedStudentPayments[stId] = {
-              studentId: stId,
-              studentName: stObj?.name || 'Schüler',
-              paymentStatus: pDet.status,
-              amountPaid: pDet.amount,
-              amountDue: targetLesson.amountDue || 200
-            };
-          });
+    const reportUpdater = (allLessons: Lesson[]) => {
+      let found = false;
+      const updatedStudentPayments: Record<string, StudentPaymentDetail> = {};
+      if (report.studentPayments) {
+        Object.entries(report.studentPayments).forEach(([stId, pDet]) => {
+          const stObj = students.find(s => s.id === stId);
+          updatedStudentPayments[stId] = {
+            studentId: stId,
+            studentName: stObj?.name || 'Schüler',
+            paymentStatus: pDet.status,
+            amountPaid: pDet.amount,
+            amountDue: targetLesson.amountDue || 200
+          };
+        });
+      }
+
+      const updated = allLessons.map(l => {
+        if (l.id === lessonId) {
+          found = true;
+          return wrapMutation({
+            ...l,
+            status: 'completed',
+            sessionNumber: finalSessionNumber,
+            totalSessionsInPackage: updatedTotalSessions,
+            paymentStatus: report.paymentStatus,
+            amountPaid: finalAmountPaid,
+            recordingLink: report.recordingLink !== undefined ? report.recordingLink : l.recordingLink,
+            recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : l.recordingLink2,
+            studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : l.studentPayments,
+            report
+          } as Lesson);
         }
-        return wrapMutation({
-          ...l,
+        return l;
+      });
+
+      if (!found) {
+        const newCompleted: Lesson = wrapMutation({
+          ...targetLesson,
           status: 'completed',
           sessionNumber: finalSessionNumber,
           totalSessionsInPackage: updatedTotalSessions,
           paymentStatus: report.paymentStatus,
           amountPaid: finalAmountPaid,
-          recordingLink: report.recordingLink !== undefined ? report.recordingLink : l.recordingLink,
-          recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : l.recordingLink2,
-          studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : l.studentPayments,
+          recordingLink: report.recordingLink !== undefined ? report.recordingLink : targetLesson.recordingLink,
+          recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : targetLesson.recordingLink2,
+          studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : targetLesson.studentPayments,
           report
         } as Lesson);
+        return [newCompleted, ...updated];
       }
-      return l;
-    });
+      return updated;
+    };
 
     updateFullLessonsStorage(reportUpdater);
     autoSyncEngine.notifyMutation('lessons', lessonId);
@@ -3376,8 +3434,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     syncEventQueue.enqueue('session_cancelled', { lessonId, notes, timestamp: Date.now() });
 
     const updater = (allLessons: Lesson[]): Lesson[] => {
-      return allLessons.map(l => {
+      let found = false;
+      const updated = allLessons.map(l => {
         if (l.id === lessonId) {
+          found = true;
           const existingNotes = l.report?.teacherNotes || l.quickNotes || '';
           const combinedNotes = notes 
             ? (existingNotes ? `${existingNotes} | Absage-Notiz: ${notes}` : `Absage-Notiz: ${notes}`) 
@@ -3401,6 +3461,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         }
         return l;
       });
+
+      if (!found) {
+        const base = (selectedLesson && selectedLesson.id === lessonId) 
+          ? selectedLesson 
+          : lessons.find(l => l.id === lessonId);
+        if (base) {
+          const combinedNotes = notes ? `Absage-Notiz: ${notes}` : 'Lektion abgesagt';
+          const cancelledBase: Lesson = wrapMutation({
+            ...base,
+            status: 'cancelled' as LessonStatus,
+            report: {
+              attendanceStatus: 'absent' as AttendanceStatus,
+              homeworkStatus: 'not_completed' as HomeworkStatus,
+              paymentStatus: base.paymentStatus || 'pending',
+              teacherNotes: combinedNotes,
+              savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }
+          } as Lesson);
+          return [cancelledBase, ...updated];
+        }
+      }
+
+      return updated;
     };
 
     updateFullLessonsStorage(updater);
@@ -3426,7 +3509,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     autoSyncEngine.notifyMutation('lessons', lessonId);
   };
 
-  const generateGroupScheduleLessons = (groupId: string, days: string[], defaultTime: string, numWeeks: number = 4, customDayTimes?: Record<string, string>, groupOverride?: Group) => {
+  const generateGroupScheduleLessons = (groupId: string, days: string[], defaultTime: string, numWeeks: number = 52, customDayTimes?: Record<string, string>, groupOverride?: Group) => {
     const targetGroup = groupOverride || groups.find(g => g.id === groupId && !g.deleted);
     if (!targetGroup) return;
 

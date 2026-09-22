@@ -592,19 +592,20 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
       const hwDone = activeStudentId 
         ? (localReport?.studentHomeworkDone?.[activeStudentId] ?? lesson.report?.studentHomeworkDone?.[activeStudentId]) 
         : (lesson.report?.studentHomeworkDone?.[lesson.studentId || ''] ?? lesson.report?.studentHomeworkDone?.['single']);
-      homeworkOption = hwDone === 'yes' ? 'تم الحل بالكامل 👍' : hwDone === 'no' ? 'لم يتم الحل 👎' : 'مكانش فيه';
+      const hasHwStatus = hwDone === 'yes' || hwDone === 'no' || hwDone === 'none';
+      homeworkOption = hwDone === 'yes' ? 'تم الحل بالكامل 👍' : hwDone === 'no' ? 'لم يتم الحل 👎' : hwDone === 'none' ? 'لا يوجد واجب سابق' : '';
 
       const dictationGrade = activeStudentId 
         ? (localReport?.studentDictationGrade?.[activeStudentId] ?? lesson.report?.studentDictationGrade?.[activeStudentId]) 
         : (lesson.report?.studentDictationGrade?.[lesson.studentId || ''] ?? lesson.report?.studentDictationGrade?.['single']);
       const hasDictation = dictationGrade !== undefined && dictationGrade !== null && dictationGrade !== -1;
-      dictationScore = hasDictation ? `${dictationGrade} / 10` : 'مكانش فيه';
+      dictationScore = hasDictation ? `${dictationGrade} / 10` : '';
 
       const examGrade = activeStudentId 
         ? (localReport?.studentExamGrade?.[activeStudentId] ?? lesson.report?.studentExamGrade?.[activeStudentId]) 
         : (lesson.report?.studentExamGrade?.[lesson.studentId || ''] ?? lesson.report?.studentExamGrade?.['single']);
       const hasExam = examGrade !== undefined && examGrade !== null && examGrade !== -1;
-      examScore = hasExam ? `${examGrade} / 10` : 'مكانش فيه';
+      examScore = hasExam ? `${examGrade} / 10` : '';
 
       perfFeedback = activeStudentId 
         ? (localReport?.studentPerformance?.[activeStudentId]?.generatedFeedback?.parent || lesson.report?.studentPerformance?.[activeStudentId]?.generatedFeedback?.parent || '') 
@@ -640,6 +641,21 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
     const notesSection = cleanStudentNote ? `\n\n📌 ملاحظات المعلم:\n• ${cleanStudentNote}` : '';
     const recordingSection = formatRecordingsArabic(recordingLink, recordingLink2);
     const alertSection = attendanceAlert ? `\n\n${attendanceAlert}` : '';
+
+    const hwDone = activeStudentId 
+      ? (localReport?.studentHomeworkDone?.[activeStudentId] ?? lesson.report?.studentHomeworkDone?.[activeStudentId]) 
+      : (lesson.report?.studentHomeworkDone?.[lesson.studentId || ''] ?? lesson.report?.studentHomeworkDone?.['single']);
+    const hasHwStatus = !isAbsent && (hwDone === 'yes' || hwDone === 'no' || hwDone === 'none');
+
+    const dictationGrade = activeStudentId 
+      ? (localReport?.studentDictationGrade?.[activeStudentId] ?? lesson.report?.studentDictationGrade?.[activeStudentId]) 
+      : (lesson.report?.studentDictationGrade?.[lesson.studentId || ''] ?? lesson.report?.studentDictationGrade?.['single']);
+    const hasDictation = !isAbsent && dictationGrade !== undefined && dictationGrade !== null && dictationGrade !== -1;
+
+    const examGrade = activeStudentId 
+      ? (localReport?.studentExamGrade?.[activeStudentId] ?? lesson.report?.studentExamGrade?.[activeStudentId]) 
+      : (lesson.report?.studentExamGrade?.[lesson.studentId || ''] ?? lesson.report?.studentExamGrade?.['single']);
+    const hasExam = !isAbsent && examGrade !== undefined && examGrade !== null && examGrade !== -1;
 
     // EGYPTIAN DIALECT FORMULA (صيغة مصرية راقية ومحبوبة لأولياء الأمور)
     if (reportStyle === 'egyptian') {
@@ -690,9 +706,20 @@ ${selectedOutro}`;
         return;
       }
 
-      const prevHwEgyptian = previousHomework.trim()
-        ? `• الواجب كان: ${previousHomework.trim()}\n• حالة الحل: ${homeworkOption}`
-        : homeworkOption;
+      let prevHwSection = '';
+      if (hasHwStatus) {
+        if (hwDone === 'none') {
+          prevHwSection = `\n\n📋 الواجب السابق:\n• لا يوجد واجب سابق`;
+        } else {
+          const prevHwEgyptian = previousHomework.trim()
+            ? `• الواجب كان: ${previousHomework.trim()}\n• حالة الحل: ${homeworkOption}`
+            : homeworkOption;
+          prevHwSection = `\n\n📋 حل الواجب السابق:\n${prevHwEgyptian}`;
+        }
+      }
+
+      const dictationSection = hasDictation ? `\n\n✍️ درجة الإملاء:\n${dictationGrade} / 10` : '';
+      const examSection = hasExam ? `\n\n🎯 درجة الكويز (Quiz):\n${examGrade} / 10` : '';
 
       const generated = `${selectedGreeting}
 ${selectedIntro}
@@ -702,16 +729,7 @@ ${[dayDateLine, timeLine, cycleLine, codeLine].filter(Boolean).join('\n')}
 ${taughtToday}
 
 📝 الواجب المطلوب للمرة الجاية:
-${nextHomework}${recordingSection}
-
-📋 حل الواجب السابق:
-${prevHwEgyptian}
-
-✍️ درجة الإملاء:
-${dictationScore}
-
-🎯 درجة الكويز (Quiz):
-${examScore}${notesSection}${perfFeedback ? `\n\n🌟 مستوى وأداء الطالب اليوم:\n• ${perfFeedback}` : ''}${alertSection}
+${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfFeedback ? `\n\n🌟 مستوى وأداء الطالب اليوم:\n• ${perfFeedback}` : ''}${alertSection}
 
 ${selectedOutro}`;
 
@@ -737,20 +755,38 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
         return;
       }
 
-      const prevHwConcise = previousHomework.trim()
-        ? `${previousHomework.trim()} (${homeworkOption})`
-        : homeworkOption;
+      const evalLines: string[] = [];
+      if (hasHwStatus) {
+        if (hwDone === 'none') {
+          evalLines.push(`• الواجب السابق: لا يوجد`);
+        } else {
+          const prevHwConcise = previousHomework.trim()
+            ? `${previousHomework.trim()} (${homeworkOption})`
+            : homeworkOption;
+          evalLines.push(`• الواجب السابق: ${prevHwConcise}`);
+        }
+      }
+
+      if (hasExam && hasDictation) {
+        evalLines.push(`• الكويز: ${examGrade} / 10 | الإملاء: ${dictationGrade} / 10`);
+      } else if (hasExam) {
+        evalLines.push(`• الكويز: ${examGrade} / 10`);
+      } else if (hasDictation) {
+        evalLines.push(`• الإملاء: ${dictationGrade} / 10`);
+      }
+
+      if (attendanceAlert) {
+        evalLines.push(`• ${attendanceAlert}`);
+      }
+
+      const evalSection = evalLines.length > 0 ? `\n\n📊 التقييم:\n${evalLines.join('\n')}` : '';
 
       const generated = `🇩🇪 كبسولة تقرير حصة الألماني:
 👤 ${studentRoleLabel}: *${studentDisplayName}* ${activeStudentCode ? `(كود: ${activeStudentCode})` : ''}
 ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
 📖 ما تم شرحه: ${taughtToday}
-📝 الواجب: ${nextHomework}${recordingSection}
-📊 التقييم:
-• الواجب السابق: ${prevHwConcise}
-• الكويز: ${examScore} | الإملاء: ${dictationScore}${alertSection ? `\n• ${attendanceAlert}` : ''}
-${perfFeedback ? `🌟 التقييم: ${perfFeedback}` : ''}${cleanStudentNote ? `📌 ملاحظة: ${cleanStudentNote}` : ''}
+📝 الواجب: ${nextHomework}${recordingSection}${evalSection}${perfFeedback ? `\n\n🌟 التقييم: ${perfFeedback}` : ''}${cleanStudentNote ? `\n📌 ملاحظة: ${cleanStudentNote}` : ''}
 
 تحياتي، *${teacherSig}*`;
 
@@ -789,9 +825,20 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
       return;
     }
 
-    const prevHwStandard = previousHomework.trim()
-      ? `• موضوع الواجب: ${previousHomework.trim()}\n• حالة الإنجاز: ${homeworkOption}`
-      : homeworkOption;
+    let prevHwSection = '';
+    if (hasHwStatus) {
+      if (hwDone === 'none') {
+        prevHwSection = `\n\n📋 الواجب السابق:\n• لا يوجد واجب سابق`;
+      } else {
+        const prevHwStandard = previousHomework.trim()
+          ? `• موضوع الواجب: ${previousHomework.trim()}\n• حالة الإنجاز: ${homeworkOption}`
+          : homeworkOption;
+        prevHwSection = `\n\n📋 الواجب السابق:\n${prevHwStandard}`;
+      }
+    }
+
+    const dictationSection = hasDictation ? `\n\n✍️ درجة الإملاء:\n${dictationGrade} / 10` : '';
+    const examSection = hasExam ? `\n\n🎯 درجة الامتحان (Quiz):\n${examGrade} / 10` : '';
 
     const generated = `${headerParts}
 
@@ -799,16 +846,7 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
 ${taughtToday}
 
 📝 الواجب:
-${nextHomework}${recordingSection}
-
-📋 الواجب السابق:
-${prevHwStandard}
-
-✍️ درجة الإملاء:
-${dictationScore}
-
-🎯 درجة الامتحان (Quiz):
-${examScore}${notesSection}${perfFeedback ? `\n\n🌟 أداء الحصة:\n• ${perfFeedback}` : ''}${alertSection}
+${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfFeedback ? `\n\n🌟 أداء الحصة:\n• ${perfFeedback}` : ''}${alertSection}
 
 شكراً لكم،
 ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
@@ -1477,10 +1515,10 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                     setIsManualEdited(false);
                   }}
                   className="px-2 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-primary border border-surface-border rounded-lg text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer"
-                  title="تغيير صياغة التقرير"
+                  title={_t('تغيير صياغة التقرير', 'Cycle Report Phrasing', 'Formulierung ändern')}
                 >
                   <RefreshCw className="w-3 h-3" />
-                  <span>صيغة أخرى</span>
+                  <span>{_t('صيغة أخرى', 'Alternate Wording', 'Andere Formulierung')}</span>
                 </button>
 
                 <button

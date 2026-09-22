@@ -57,13 +57,17 @@ export const useLessonReminders = () => {
                 perm = granted ? 'granted' : 'denied';
               }
               if (perm === 'granted') {
-                const displayName = upcoming.groupName || upcoming.studentName || upcoming.title || 'Lektion';
+                const displayName = upcoming.groupName || upcoming.studentName || upcoming.title || (language === 'ar' ? 'الحصة' : language === 'de' ? 'Lektion' : 'Lesson');
                 const title = language === 'ar'
                   ? `⏰ تذكير بموعد الحصة: ${displayName}`
-                  : `⏰ Nächste Lektion in Kürze: ${displayName}`;
+                  : language === 'de'
+                  ? `⏰ Nächste Lektion in Kürze: ${displayName}`
+                  : `⏰ Upcoming Lesson Reminder: ${displayName}`;
                 const body = language === 'ar'
                   ? `تبدأ الساعة ${upcoming.time} (${upcoming.type === 'online' ? 'أونلاين' : 'حضوري'}). المنبه جاهز!`
-                  : `Startet um ${upcoming.time} Uhr (${upcoming.type === 'online' ? 'Online' : 'Präsenz'}).`;
+                  : language === 'de'
+                  ? `Startet um ${upcoming.time} Uhr (${upcoming.type === 'online' ? 'Online' : 'Präsenz'}).`
+                  : `Starts at ${upcoming.time} (${upcoming.type === 'online' ? 'Online' : 'Offline/In-person'}).`;
 
                 await sendSystemNotification(
                   title,
@@ -87,8 +91,16 @@ export const useLessonReminders = () => {
               const perm = await getNotificationPermission();
               if (perm === 'granted') {
                 sendSystemNotification(
-                  language === 'ar' ? `⚠️ حصص سابقة معلقة تتطلب تقريراً` : `⚠️ Offene Lektionen erfordern Bericht`,
-                  language === 'ar' ? `لديك ${pastPending.length} حصص ماضية لا تزال معلقة بحاجة للإكمال أو التقرير.` : `Sie haben ${pastPending.length} vergangene Lektionen, die noch als ausstehend markiert sind.`,
+                  language === 'ar' 
+                    ? `⚠️ حصص سابقة معلقة تتطلب تقريراً` 
+                    : language === 'de' 
+                    ? `⚠️ Offene Lektionen erfordern Bericht` 
+                    : `⚠️ Pending Past Lessons Require Report`,
+                  language === 'ar' 
+                    ? `لديك ${pastPending.length} حصص ماضية لا تزال معلقة بحاجة للإكمال أو التقرير.` 
+                    : language === 'de' 
+                    ? `Sie haben ${pastPending.length} vergangene Lektionen, die noch als ausstehend markiert sind.` 
+                    : `You have ${pastPending.length} past lessons pending completion or report.`,
                   'past-pending'
                 );
               }

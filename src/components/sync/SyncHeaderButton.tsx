@@ -1,6 +1,7 @@
 import React from 'react';
 import { MonitorSmartphone, RefreshCw } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useApp } from '../../context/AppContext';
 
 export interface SyncHeaderButtonProps {
   status: 'offline' | 'online' | 'connected' | 'syncing' | 'error';
@@ -15,6 +16,8 @@ export const SyncHeaderButton: React.FC<SyncHeaderButtonProps> = ({
   onClick,
   isOpen = false,
 }) => {
+  const { _t } = useApp();
+
   return (
     <motion.button
       whileHover={{ scale: 1.05 }}
@@ -27,7 +30,7 @@ export const SyncHeaderButton: React.FC<SyncHeaderButtonProps> = ({
           : 'bg-background dark:bg-background hover:bg-surface-hover text-text-main border-surface-border/80'
       }`}
       aria-label="Synchronization Center"
-      title="مزامنة الأجهزة"
+      title={_t('مزامنة الأجهزة', 'Device Synchronization', 'Geräte-Synchronisation')}
     >
       {status === 'syncing' ? (
         <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin ${isOpen ? 'text-white' : 'text-primary'}`} />

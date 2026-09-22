@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatLocalDate } from '../utils/timeUtils';
+import { getProjectedLessonsForRange } from '../utils/scheduleUtils';
 import { 
   X, Calendar as CalendarIcon, Download, Share2, CheckCircle2, ArrowRight, 
   BookOpen, Clock, Check, ShieldCheck 
@@ -81,13 +82,18 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
     // 1. Filter active groups (non-archived)
     const activeGroupIds = new Set(groups.filter(g => g.status !== 'archived').map(g => g.id));
 
-    // 2. Filter lessons for selected month & year
+    // 2. Filter lessons for selected month & year (including indefinitely projected active group schedules)
     const monthStr = String(selectedMonth + 1).padStart(2, '0');
     const yearMonthPrefix = `${selectedYear}-${monthStr}`;
+    const lastDayOfMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+    const monthStartStr = `${selectedYear}-${monthStr}-01`;
+    const monthEndStr = `${selectedYear}-${monthStr}-${String(lastDayOfMonth).padStart(2, '0')}`;
+
+    const monthAllLessons = getProjectedLessonsForRange(monthStartStr, monthEndStr, groups, lessons, profile.defaultZoomLink);
 
     const isCurrentMonthSelection = (selectedYear === currentYear && selectedMonth === currentMonthIndex);
 
-    const filteredLessons = lessons.filter(l => {
+    const filteredLessons = monthAllLessons.filter(l => {
       if (!l.date || !l.date.startsWith(yearMonthPrefix)) return false;
       if (l.groupId && !activeGroupIds.has(l.groupId)) return false;
 

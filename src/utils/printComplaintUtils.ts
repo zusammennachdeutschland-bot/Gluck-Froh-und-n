@@ -1,5 +1,6 @@
-import { Complaint, SchoolSettings } from '../types';
+import { Complaint, SchoolSettings, VisitRecord } from '../types';
 import { getReportSchoolLogoHtml } from './alsunLogoData';
+import { generateObservationReportContentHtml } from './printObservationUtils';
 
 export interface StageManagerReportData {
   stageManagerName: string;
@@ -11,6 +12,8 @@ export interface StageManagerReportData {
   complaints: Complaint[];
   reportType: 'weekly' | 'monthly' | 'termly';
   settings?: SchoolSettings;
+  visits?: VisitRecord[];
+  includeVisits?: boolean;
 }
 
 export const generateStageManagerReportPrint = (data: StageManagerReportData) => {
@@ -24,8 +27,11 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
     complaints,
     reportType,
     settings,
+    visits = [],
+    includeVisits = false,
   } = data;
 
+  const visitsToRender = (includeVisits && visits && visits.length > 0) ? visits : [];
   const schoolName = settings?.schoolName || '';
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 50 });
 
@@ -217,95 +223,314 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
         .no-print {
           display: block;
         }
+        .report-page {
+          width: 100%;
+          background: #ffffff;
+          box-sizing: border-box;
+        }
+        .page-break {
+          page-break-after: always;
+          break-after: page;
+        }
         @media print {
           .no-print {
             display: none !important;
           }
+          .page-break {
+            page-break-after: always;
+            break-after: page;
+          }
+        }
+
+        /* Observation Visit Report Styles */
+        .visit-page {
+          page-break-before: always;
+          break-before: page;
+          padding-top: 5px;
+          min-height: 100%;
+        }
+        .visit-page .report-single-page {
+          width: 100%;
+        }
+        .visit-page .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 2px solid #0f172a;
+          padding-bottom: 4px;
+          margin-bottom: 6px;
+        }
+        .visit-page .header-logo {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 60px;
+        }
+        .visit-page .header-text {
+          text-align: center;
+          flex: 1;
+          padding: 0 10px;
+        }
+        .visit-page .header h1 {
+          font-size: 13pt;
+          margin: 0 0 2px;
+          font-weight: 800;
+          line-height: 1.3;
+          color: #0f172a;
+        }
+        .visit-page .header p {
+          font-size: 8.5pt;
+          margin: 0;
+          font-weight: 700;
+          line-height: 1.3;
+          color: #334155;
+        }
+        .visit-page .title {
+          text-align: center;
+          font-size: 11pt;
+          font-weight: 800;
+          margin-bottom: 6px;
+          text-decoration: underline;
+          line-height: 1.3;
+          color: #0f172a;
+        }
+        .visit-page .meta-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 4px 12px;
+          margin-bottom: 6px;
+          border: 1.5px solid #0f172a;
+          padding: 5px 8px;
+          background: #f8fafc;
+          align-items: center;
+          border-radius: 4px;
+        }
+        .visit-page .meta-item {
+          font-size: 8.5pt;
+          font-weight: 600;
+          line-height: 1.3;
+          display: flex;
+          align-items: center;
+          color: #1e293b;
+        }
+        .visit-page .meta-label {
+          font-weight: 800;
+          margin-right: 5px;
+          margin-left: 5px;
+          display: inline-block;
+          color: #0f172a;
+          white-space: nowrap;
+        }
+        .visit-page .category-title {
+          font-size: 8.5pt;
+          font-weight: 800;
+          margin-top: 3px;
+          margin-bottom: 2px;
+          background: #e2e8f0;
+          padding: 2.5px 6px;
+          border: 1px solid #0f172a;
+          border-bottom: none;
+          line-height: 1.25;
+          vertical-align: middle;
+          color: #0f172a;
+        }
+        .visit-page table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 3px;
+          table-layout: fixed;
+        }
+        .visit-page th, .visit-page td {
+          border: 1px solid #0f172a;
+          padding: 2.5px 4px;
+          text-align: center;
+          vertical-align: middle;
+          font-size: 8pt;
+          line-height: 1.2;
+        }
+        .visit-page th {
+          background: #f1f5f9;
+          font-weight: 800;
+          font-size: 8pt;
+          height: 18px;
+          color: #0f172a;
+        }
+        .visit-page .criteria-col {
+          text-align: right;
+          width: 55%;
+          font-weight: 700;
+          vertical-align: middle;
+          padding-left: 6px;
+          padding-right: 6px;
+          line-height: 1.25;
+          color: #1e293b;
+        }
+        .visit-page .rating-col {
+          width: 9%;
+          font-weight: bold;
+          font-size: 9pt;
+          text-align: center;
+          vertical-align: middle;
+          line-height: 1;
+        }
+        .visit-page .feedback-section {
+          margin-top: 5px;
+          border: 1.5px solid #0f172a;
+          padding: 5px 8px;
+          min-height: 35px;
+          background: #f8fafc;
+          border-radius: 4px;
+        }
+        .visit-page .feedback-title {
+          font-weight: 800;
+          font-size: 8pt;
+          margin-bottom: 2px;
+          border-bottom: 1px dotted #0f172a;
+          padding-bottom: 2px;
+          line-height: 1.25;
+          color: #0f172a;
+        }
+        .visit-page .overall-box {
+          margin-top: 5px;
+          padding: 4px 6px;
+          border: 1.5px solid #0f172a;
+          font-weight: 800;
+          text-align: center;
+          font-size: 9pt;
+          display: flex;
+          justify-content: space-around;
+          align-items: center;
+          background: #f8fafc;
+          line-height: 1.25;
+          border-radius: 4px;
+        }
+        .visit-page .signatures {
+          margin-top: 10px;
+          display: flex;
+          justify-content: space-around;
+          align-items: flex-end;
+          text-align: center;
+          page-break-inside: avoid;
+        }
+        .visit-page .sig-block {
+          width: 40%;
+        }
+        .visit-page .sig-title {
+          font-weight: 800;
+          font-size: 8.5pt;
+          margin-bottom: 12px;
+          line-height: 1.25;
+          color: #0f172a;
+        }
+        .visit-page .sig-line {
+          border-top: 1px solid #0f172a;
+          padding-top: 3px;
+          font-size: 8pt;
+          font-weight: 800;
+          line-height: 1.25;
+          color: #1e293b;
         }
       </style>
     </head>
     <body>
       <div class="no-print" style="margin-bottom: 12px; background: #0f172a; color: #ffffff; padding: 10px 14px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-        <div style="font-weight: 700; font-size: 9.5pt;">📄 معاينة جاهزة للطباعة أو الحفظ كـ PDF</div>
+        <div style="font-weight: 700; font-size: 9.5pt;">
+          📄 معاينة جاهزة للطباعة أو الحفظ كـ PDF
+          ${visitsToRender.length > 0 ? `<span style="margin-right: 8px; background: rgba(59, 130, 246, 0.2); color: #93c5fd; padding: 2px 8px; border-radius: 4px; font-size: 8.5pt;">(الصفحة 1: تقرير المتابعة، والصفحات التالية: ${visitsToRender.length} زيارات صفية)</span>` : ''}
+        </div>
         <button onclick="window.print()" style="background: #2563eb; color: #ffffff; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 700; font-size: 9pt; cursor: pointer; display: flex; items-center; gap: 6px;">
           🖨️ طباعة / حفظ PDF
         </button>
       </div>
 
-      <div class="header-container">
-        <div class="header-logo">
-          ${logoHtml}
+      <!-- PAGE 1: STAGE MANAGER SUMMARY & COMPLAINTS -->
+      <div class="report-page stage-first-page ${visitsToRender.length > 0 ? 'page-break' : ''}">
+        <div class="header-container">
+          <div class="header-logo">
+            ${logoHtml}
+          </div>
+          <div class="header-title-box">
+            <div style="font-size: 13pt; font-weight: 900; color: #0f172a; margin-bottom: 2px;">${schoolName}</div>
+            <div class="dept-badge">🇩🇪 قسم اللغة الألمانية (Deutschabteilung)</div>
+            <div class="main-title">${titleText}</div>
+            <div class="sub-meta">المرحلة: ${stageName} | مدير المرحلة: <strong>..................................</strong></div>
+          </div>
+          <div style="text-align: left; font-size: 8.5pt; color: #475569;">
+            <div><strong>الفصل الدراسي:</strong> ${term}</div>
+            <div><strong>تاريخ التقرير:</strong> ${reportDate}</div>
+          </div>
         </div>
-        <div class="header-title-box">
-          <div style="font-size: 13pt; font-weight: 900; color: #0f172a; margin-bottom: 2px;">${schoolName}</div>
-          <div class="dept-badge">🇩🇪 قسم اللغة الألمانية (Deutschabteilung)</div>
-          <div class="main-title">${titleText}</div>
-          <div class="sub-meta">المرحلة: ${stageName} | مدير المرحلة: <strong>..................................</strong></div>
+
+        <!-- Quick Metrics -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-val">${complaints.length}</div>
+            <div class="stat-lbl">إجمالي الشكاوى المسجلة</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" style="color: #b91c1c;">${teacherToStudentCount}</div>
+            <div class="stat-lbl">شكاوى المعلمين ضد الطلاب</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" style="color: #4338ca;">${studentToTeacherCount}</div>
+            <div class="stat-lbl">شكاوى الطلاب/أولياء الأمور</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" style="color: #d97706;">${unsentCount}</div>
+            <div class="stat-lbl">غير مدرجة بتقرير سابق</div>
+          </div>
         </div>
-        <div style="text-align: left; font-size: 8.5pt; color: #475569;">
-          <div><strong>الفصل الدراسي:</strong> ${term}</div>
-          <div><strong>تاريخ التقرير:</strong> ${reportDate}</div>
+
+        <!-- Main Table -->
+        ${complaints.length === 0 ? `
+          <div style="text-align: center; padding: 30px; border: 2px dashed #cbd5e1; border-radius: 12px; color: #64748b; font-weight: bold;">
+            لا توجد أي شكاوى مسجلة في هذا التقرير للفترة المحددة.
+          </div>
+        ` : `
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 25px; text-align: center;">#</th>
+                <th style="width: 110px; text-align: center;">اتجاه الشكوى</th>
+                <th style="width: 120px;">المعلم المعني</th>
+                <th style="width: 140px;">الطالب (عربي / English)</th>
+                <th style="width: 50px; text-align: center;">الفصل</th>
+                <th>السبب / تفاصيل الملاحظة</th>
+                <th style="width: 130px;">الإجراء المتخذ</th>
+                <th style="width: 90px; text-align: center;">التاريخ/الحالة</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        `}
+
+        <!-- Footer Signatures: Right side = German HOD, Left side = Stage Manager with dotted lines -->
+        <div class="footer-sig">
+          <div class="sig-box">
+            <div class="sig-title">رئيس قسم اللغة الألمانية (Fachleiter)</div>
+            <div class="sig-sub">أ/ ${hodName}</div>
+            <div style="margin-top: 25px; font-size: 8.5pt; color: #64748b;">التوقيع: ................................</div>
+          </div>
+          <div class="sig-box">
+            <div class="sig-title">مدير المرحلة (Stage Manager)</div>
+            <div class="sig-sub" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">..................................</div>
+            <div style="margin-top: 25px; font-size: 8.5pt; color: #64748b;">التوقيع: ................................</div>
+          </div>
         </div>
       </div>
 
-      <!-- Quick Metrics -->
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-val">${complaints.length}</div>
-          <div class="stat-lbl">إجمالي الشكاوى المسجلة</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-val" style="color: #b91c1c;">${teacherToStudentCount}</div>
-          <div class="stat-lbl">شكاوى المعلمين ضد الطلاب</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-val" style="color: #4338ca;">${studentToTeacherCount}</div>
-          <div class="stat-lbl">شكاوى الطلاب/أولياء الأمور</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-val" style="color: #d97706;">${unsentCount}</div>
-          <div class="stat-lbl">غير مدرجة بتقرير سابق</div>
-        </div>
-      </div>
-
-      <!-- Main Table -->
-      ${complaints.length === 0 ? `
-        <div style="text-align: center; padding: 30px; border: 2px dashed #cbd5e1; border-radius: 12px; color: #64748b; font-weight: bold;">
-          لا توجد أي شكاوى مسجلة في هذا التقرير للفترة المحددة.
-        </div>
-      ` : `
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 25px; text-align: center;">#</th>
-              <th style="width: 110px; text-align: center;">اتجاه الشكوى</th>
-              <th style="width: 120px;">المعلم المعني</th>
-              <th style="width: 140px;">الطالب (عربي / English)</th>
-              <th style="width: 50px; text-align: center;">الفصل</th>
-              <th>السبب / تفاصيل الملاحظة</th>
-              <th style="width: 130px;">الإجراء المتخذ</th>
-              <th style="width: 90px; text-align: center;">التاريخ/الحالة</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml}
-          </tbody>
-        </table>
-      `}
-
-      <!-- Footer Signatures: Right side = German HOD, Left side = Stage Manager with dotted lines -->
-      <div class="footer-sig">
-        <div class="sig-box">
-          <div class="sig-title">رئيس قسم اللغة الألمانية (Fachleiter)</div>
-          <div class="sig-sub">أ/ ${hodName}</div>
-          <div style="margin-top: 25px; font-size: 8.5pt; color: #64748b;">التوقيع: ................................</div>
-        </div>
-        <div class="sig-box">
-          <div class="sig-title">مدير المرحلة (Stage Manager)</div>
-          <div class="sig-sub" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">..................................</div>
-          <div style="margin-top: 25px; font-size: 8.5pt; color: #64748b;">التوقيع: ................................</div>
-        </div>
-      </div>
+      <!-- PAGES 2+: ATTACHED CLASSROOM VISITS (EACH VISIT ON A SEPARATE PAGE) -->
+      ${visitsToRender.map((visit, idx) => {
+        const isLast = idx === visitsToRender.length - 1;
+        const visitContent = generateObservationReportContentHtml(visit, settings || ({} as any), true, 'ar');
+        return `
+          <div class="report-page visit-page ${!isLast ? 'page-break' : ''}">
+            ${visitContent}
+          </div>
+        `;
+      }).join('')}
 
       <script>
         window.onload = function() {

@@ -9,7 +9,8 @@ import { StageManager, StageFollowUpRecord, Complaint, StudentActionPlan, Teache
 import { 
   downloadStageFollowUpPdf, 
   shareStageFollowUpViaWhatsApp, 
-  printStageFollowUpReport 
+  printStageFollowUpReport,
+  generateObservationReportContentHtml
 } from '../utils/printObservationUtils';
 import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
 
@@ -48,6 +49,7 @@ export const StageCommunicationView: React.FC = () => {
 
   const [includeVisits, setIncludeVisits] = useState<boolean>(true);
   const [selectedVisitIds, setSelectedVisitIds] = useState<string[]>([]);
+  const [visitsScopeFilter, setVisitsScopeFilter] = useState<'all' | 'unsent'>('all');
 
   const [includeComplaints, setIncludeComplaints] = useState<boolean>(true);
   const [selectedComplaintIds, setSelectedComplaintIds] = useState<string[]>([]);
@@ -198,8 +200,8 @@ export const StageCommunicationView: React.FC = () => {
   // - Current Week & Unsent Visits: Includes visits for teachers/grades in this stage that have not yet been sent (weeklyReportSent !== true)
   const stageVisits = useMemo(() => {
     return visitRecords.filter(visit => {
-      // Must NOT have been dispatched in a previous report
-      if (visit.weeklyReportSent) return false;
+      // If user chose to filter only unsent visits
+      if (visitsScopeFilter === 'unsent' && visit.weeklyReportSent) return false;
 
       // Check match by grade / class
       const visitGradeClass = visit.className || (visit as any).class || (visit as any).gradeClass || '';
@@ -210,9 +212,12 @@ export const StageCommunicationView: React.FC = () => {
         return supervisedTeachers.some(t => t.id === visit.teacherId);
       }
 
+      // If stage has no specific assigned grades, match all
+      if (currentManagerGrades.length === 0) return true;
+
       return matchesStage(visitGradeClass);
     });
-  }, [visitRecords, currentManagerGrades, supervisedTeachers]);
+  }, [visitRecords, currentManagerGrades, supervisedTeachers, visitsScopeFilter]);
 
   // 1. Complaints Lifecycle Filtering:
   // - Pending/Open Complaints: Include all new complaints for the selected stage where weeklyReportSent === false
@@ -279,60 +284,26 @@ export const StageCommunicationView: React.FC = () => {
   const formattedManagerName = rawManagerName.replace(/^أ[\.\/]\s*/, '');
 
   // =========================================================================
-  // DISPATCH REPORT ACTION (After Dispatch Lifecycle Updates)
+  // MEMOIZED INCLUDED ITEMS & REPORT BUILDER
   // =========================================================================
-  const handleDispatchReport = () => {
-    if (!selectedManager) return;
-    setActiveLoadingAction({ id: selectedManager.id, type: 'dispatch' });
+  const includedVisitsList = useMemo(() => {
+    if (!includeVisits) return [];
+    return stageVisits.filter(v => selectedVisitIds.includes(v.id));
+  }, [includeVisits, stageVisits, selectedVisitIds]);
 
-    const nowIso = new Date().toISOString();
+  const includedComplaintsList = useMemo(() => {
+    if (!includeComplaints) return [];
+    return stageComplaints.filter(c => selectedComplaintIds.includes(c.id));
+  }, [includeComplaints, stageComplaints, selectedComplaintIds]);
 
-    const includedVisitsList = includeVisits
-      ? stageVisits.filter(v => selectedVisitIds.includes(v.id))
-      : [];
-    const includedComplaintsList = includeComplaints
-      ? stageComplaints.filter(c => selectedComplaintIds.includes(c.id))
-      : [];
-    const includedActionPlansList = includeActionPlans
-      ? stageActionPlans.filter(p => selectedActionPlanIds.includes(p.id))
-      : [];
+  const includedActionPlansList = useMemo(() => {
+    if (!includeActionPlans) return [];
+    return stageActionPlans.filter(p => selectedActionPlanIds.includes(p.id));
+  }, [includeActionPlans, stageActionPlans, selectedActionPlanIds]);
 
-    const includedVisitIdsSet = new Set(includedVisitsList.map(v => v.id));
-    const updatedVisitRecords = visitRecords.map(v => {
-      if (includedVisitIdsSet.has(v.id)) {
-        return {
-          ...v,
-          weeklyReportSent: true,
-          weeklyReportDate: nowIso
-        };
-      }
-      return v;
-    });
-
-    const includedComplaintIdsSet = new Set(includedComplaintsList.map(c => c.id));
-    const updatedComplaints = complaints.map(c => {
-      if (includedComplaintIdsSet.has(c.id)) {
-        return {
-          ...c,
-          weeklyReportSent: true,
-          weeklyReportDate: nowIso
-        };
-      }
-      return c;
-    });
-
-    const includedResolvedPlanIdsSet = new Set(
-      includedActionPlansList.filter(p => p.status === 'RESOLVED').map(p => p.id)
-    );
-    const updatedActionPlans = actionPlans.map(plan => {
-      if (includedResolvedPlanIdsSet.has(plan.id)) {
-        return {
-          ...plan,
-          reportedAsResolved: true
-        };
-      }
-      return plan;
-    });
+  // Build current active draft report object from form state
+  const buildCurrentDraftRecord = (): StageFollowUpRecord | null => {
+    if (!selectedManager) return null;
 
     const attendanceMetrics = calculateStaffAttendanceMetrics(
       schoolSettings.staffAttendanceRecords || [],
@@ -389,8 +360,8 @@ export const StageCommunicationView: React.FC = () => {
       };
     });
 
-    const newReportRecord: StageFollowUpRecord = {
-      id: Date.now().toString(),
+    return {
+      id: 'draft-current',
       stageManagerId: selectedManager.id,
       stageManagerName: selectedManager.name,
       gradeBand: (selectedManager.assignedGradeGroups || []).join(', ') || 'عام',
@@ -420,6 +391,64 @@ export const StageCommunicationView: React.FC = () => {
         mostLateTeachers: attendanceMetrics.mostLateTeachers,
         mostEarlyLeaveTeachers: attendanceMetrics.mostEarlyLeaveTeachers
       }
+    };
+  };
+
+  // =========================================================================
+  // DISPATCH REPORT ACTION (After Dispatch Lifecycle Updates)
+  // =========================================================================
+  const handleDispatchReport = () => {
+    if (!selectedManager) return;
+    setActiveLoadingAction({ id: selectedManager.id, type: 'dispatch' });
+
+    const nowIso = new Date().toISOString();
+
+    const includedVisitIdsSet = new Set(includedVisitsList.map(v => v.id));
+    const updatedVisitRecords = visitRecords.map(v => {
+      if (includedVisitIdsSet.has(v.id)) {
+        return {
+          ...v,
+          weeklyReportSent: true,
+          weeklyReportDate: nowIso
+        };
+      }
+      return v;
+    });
+
+    const includedComplaintIdsSet = new Set(includedComplaintsList.map(c => c.id));
+    const updatedComplaints = complaints.map(c => {
+      if (includedComplaintIdsSet.has(c.id)) {
+        return {
+          ...c,
+          weeklyReportSent: true,
+          weeklyReportDate: nowIso
+        };
+      }
+      return c;
+    });
+
+    const includedResolvedPlanIdsSet = new Set(
+      includedActionPlansList.filter(p => p.status === 'RESOLVED').map(p => p.id)
+    );
+    const updatedActionPlans = actionPlans.map(plan => {
+      if (includedResolvedPlanIdsSet.has(plan.id)) {
+        return {
+          ...plan,
+          reportedAsResolved: true
+        };
+      }
+      return plan;
+    });
+
+    const draftRecord = buildCurrentDraftRecord();
+    if (!draftRecord) {
+      setActiveLoadingAction(null);
+      return;
+    }
+
+    const newReportRecord: StageFollowUpRecord = {
+      ...draftRecord,
+      id: Date.now().toString()
     };
 
     const updatedFollowUps = [newReportRecord, ...stageFollowUps];
@@ -466,6 +495,18 @@ export const StageCommunicationView: React.FC = () => {
 
   const handlePrintReport = (record: StageFollowUpRecord) => {
     printStageFollowUpReport(record, schoolSettings, (language === 'ar'), language);
+  };
+
+  const handleDownloadDraftPdf = async () => {
+    const draft = buildCurrentDraftRecord();
+    if (!draft) return;
+    await handleDownloadPdf(draft);
+  };
+
+  const handlePrintDraftReport = () => {
+    const draft = buildCurrentDraftRecord();
+    if (!draft) return;
+    handlePrintReport(draft);
   };
 
   return (
@@ -674,6 +715,13 @@ export const StageCommunicationView: React.FC = () => {
                 </span>
               </label>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setVisitsScopeFilter(visitsScopeFilter === 'all' ? 'unsent' : 'all')}
+                  className="text-[10px] text-text-muted hover:text-text-main underline cursor-pointer"
+                >
+                  {visitsScopeFilter === 'all' ? _t('عرض غير المرسلة فقط', 'Show Unsent Only', 'Nur Ungesendete') : _t('عرض كل زيارات المرحلة', 'Show All Stage Visits', 'Alle Stufenbesuche')}
+                </button>
                 {stageVisits.length > 0 && includeVisits && (
                   <button
                     type="button"
@@ -684,7 +732,7 @@ export const StageCommunicationView: React.FC = () => {
                         setSelectedVisitIds(stageVisits.map(v => v.id));
                       }
                     }}
-                    className="text-[10px] text-primary hover:underline font-bold"
+                    className="text-[10px] text-primary hover:underline font-bold cursor-pointer"
                   >
                     {selectedVisitIds.length === stageVisits.length ? 'إلغاء تحديد الكل' : 'تحديد الكل'}
                   </button>
@@ -699,15 +747,17 @@ export const StageCommunicationView: React.FC = () => {
               <div className="p-3 bg-surface border border-surface-border rounded-xl space-y-2 max-h-52 overflow-y-auto">
                 {stageVisits.length === 0 ? (
                   <div className="text-[11px] text-text-muted text-center py-2">
-                    {_t('لا توجد زيارات صفية غير مبعوثة لهذه المرحلة حالياً', 'No unsent classroom visits found for this stage currently', 'Keine ungesendeten Unterrichtsbesuche vorhanden')}
+                    {visitsScopeFilter === 'unsent'
+                      ? _t('لا توجد زيارات صفية غير مبعوثة لهذه المرحلة حالياً (انقر على "عرض كل زيارات المرحلة")', 'No unsent visits found. Click "Show All Stage Visits"', 'Keine ungesendeten Besuche vorhanden')
+                      : _t('لا توجد أي زيارات صفية مسجلة لهذه المرحلة حالياً', 'No visits found for this stage currently', 'Keine Besuche vorhanden')}
                   </div>
                 ) : (
                   stageVisits.map(visit => {
                     const isChecked = selectedVisitIds.includes(visit.id);
                     const teacher = teachers.find(t => t.id === visit.teacherId);
                     const teacherName = teacher?.name || visit.teacherName || 'معلم غير محدد';
-                    const visitGrade = visit.class || (visit as any).gradeClass || 'صف غير محدد';
-                    const score = (visit as any).totalScore ?? (visit as any).score ?? 0;
+                    const visitGrade = visit.className || visit.class || (visit as any).gradeClass || 'صف غير محدد';
+                    const score = (visit as any).totalScore ?? (visit as any).overallScore ?? (visit as any).score ?? 0;
                     const maxScore = (visit as any).maxScore ?? 75;
 
                     return (
@@ -726,15 +776,20 @@ export const StageCommunicationView: React.FC = () => {
                             className="w-3.5 h-3.5 text-primary rounded border-surface-border accent-primary shrink-0"
                           />
                           <span className="font-bold text-text-main shrink-0">{teacherName}</span>
-                          <span className="text-text-muted shrink-0">({visitGrade})</span>
-                          {visit.date && (
-                            <span className="text-[10px] text-text-muted shrink-0">— {visit.date}</span>
+                          <span className="text-primary font-bold shrink-0">[{visitGrade}]</span>
+                          {(visit.date || (visit as any).visitedDate) && (
+                            <span className="text-[10px] text-text-muted shrink-0">— {visit.date || (visit as any).visitedDate}</span>
                           )}
                           {visit.focusAreas && (
                             <span className="text-text-muted text-[10px] truncate max-w-xs">— {visit.focusAreas}</span>
                           )}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                          {visit.weeklyReportSent && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">
+                              مدرجة سابقاً
+                            </span>
+                          )}
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-primary/10 text-primary">
                             {score}/{maxScore}
                           </span>
@@ -884,13 +939,36 @@ export const StageCommunicationView: React.FC = () => {
           </div>
 
           {/* ACTION BUTTONS */}
-          <div className="pt-2 flex flex-wrap items-center justify-end gap-1.5">
+          <div className="pt-2 flex flex-wrap items-center justify-end gap-2">
+            <button
+              onClick={handlePrintDraftReport}
+              className="px-3.5 h-10 bg-surface hover:bg-surface-hover text-text-main text-[11px] font-black rounded-xl border border-surface-border transition-all cursor-pointer shadow-2xs flex items-center gap-1.5 active:scale-98"
+              title="طباعة تقرير المرحلة كاملاً مع الزيارات المحددة (كل زيارة في صفحة)"
+            >
+              <Printer className="w-4 h-4 text-primary" />
+              <span>{_t('طباعة A4 مع الزيارات', 'Print A4 with Visits', 'Drucken mit Besuchen')}</span>
+            </button>
+
+            <button
+              onClick={handleDownloadDraftPdf}
+              disabled={activeLoadingAction?.type === 'download'}
+              className="px-3.5 h-10 bg-surface hover:bg-surface-hover text-text-main text-[11px] font-black rounded-xl border border-surface-border transition-all cursor-pointer shadow-2xs flex items-center gap-1.5 active:scale-98 disabled:opacity-50"
+              title="تحميل تقرير المرحلة بصيغة PDF متعدد الصفحات مع الزيارات المحددة"
+            >
+              {activeLoadingAction?.type === 'download' ? (
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+              ) : (
+                <Download className="w-4 h-4 text-primary" />
+              )}
+              <span>{_t('تحميل PDF متعدد الصفحات', 'Download Multi-page PDF', 'PDF herunterladen')}</span>
+            </button>
+
             <button
               onClick={() => setIsPreviewModalOpen(true)}
               className="px-5 h-10 bg-primary hover:bg-primary-hover text-white text-[11px] font-black rounded-xl transition-all cursor-pointer shadow-2xs flex items-center gap-2 active:scale-98"
             >
               <Sparkles className="w-4 h-4" />
-              <span>{_t('تقرير تقييم المعلمين القديم / معاينة واعتماد التقرير', 'Classic Teacher Evaluation & Dispatch', 'Klassischer Bericht')}</span>
+              <span>{_t('معاينة واعتماد التقرير', 'Preview & Dispatch Report', 'Vorschau & Genehmigung')}</span>
             </button>
           </div>
         </div>
@@ -980,11 +1058,26 @@ export const StageCommunicationView: React.FC = () => {
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => window.print()}
-                  className="px-2 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main text-[11px] font-bold rounded-xl border border-surface-border transition-all flex items-center gap-1.5 cursor-pointer"
+                  onClick={handlePrintDraftReport}
+                  className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main text-[11px] font-bold rounded-xl border border-surface-border transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="طباعة A4 شاملة الزيارات المحددة"
                 >
-                  <Printer className="w-4 h-4" />
-                  <span>طباعة A4</span>
+                  <Printer className="w-4 h-4 text-primary" />
+                  <span>طباعة A4 مع الزيارات</span>
+                </button>
+
+                <button
+                  onClick={handleDownloadDraftPdf}
+                  disabled={activeLoadingAction?.type === 'download'}
+                  className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main text-[11px] font-bold rounded-xl border border-surface-border transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  title="تحميل ملف PDF متعدد الصفحات"
+                >
+                  {activeLoadingAction?.type === 'download' ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                  ) : (
+                    <Download className="w-4 h-4 text-primary" />
+                  )}
+                  <span>تحميل PDF</span>
                 </button>
 
                 <button
@@ -1012,12 +1105,12 @@ export const StageCommunicationView: React.FC = () => {
             {/* Printable A4 Body Container */}
             <div className="p-8 overflow-y-auto flex-1 bg-white" id="printable-stage-communication-report">
               
-              {/* PRINT CSS STYLES FOR EXACT NO-CLIPPING LAYOUT */}
+              {/* PRINT CSS STYLES FOR EXACT MULTI-PAGE LAYOUT */}
               <style>{`
                 @media print {
                   @page {
                     size: A4 portrait;
-                    margin: 12mm 15mm 15mm 15mm;
+                    margin: 8mm 10mm;
                   }
                   body * {
                     visibility: hidden !important;
@@ -1041,18 +1134,67 @@ export const StageCommunicationView: React.FC = () => {
                     page-break-inside: avoid !important;
                     break-inside: avoid !important;
                   }
+                  .stage-first-page {
+                    page-break-after: always !important;
+                    break-after: page !important;
+                  }
+                  .visit-page-break {
+                    page-break-before: always !important;
+                    break-before: page !important;
+                    page-break-after: always !important;
+                    break-after: page !important;
+                    margin-top: 0 !important;
+                    padding-top: 0 !important;
+                    border-top: none !important;
+                  }
+                  .visit-page-break:last-child {
+                    page-break-after: auto !important;
+                    break-after: auto !important;
+                  }
                   .signature-container {
                     page-break-inside: avoid !important;
                     break-inside: avoid !important;
-                    padding-bottom: 2.5rem !important;
-                    margin-bottom: 1.5rem !important;
+                    padding-bottom: 2rem !important;
                     line-height: 1.6 !important;
                     display: flex !important;
                     justify-content: space-between !important;
                     align-items: flex-start !important;
                   }
                 }
+                .visit-page-break {
+                  color: #0f172a;
+                  line-height: 1.35;
+                  font-size: 8.5pt;
+                }
+                .visit-page-break .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 5px; margin-bottom: 6px; }
+                .visit-page-break .header-logo { display: flex; align-items: center; justify-content: center; min-width: 60px; }
+                .visit-page-break .header-text { text-align: center; flex: 1; padding: 0 10px; }
+                .visit-page-break .header h1 { font-size: 13pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }
+                .visit-page-break .header p { font-size: 8.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }
+                .visit-page-break .title { text-align: center; font-size: 11.5pt; font-weight: 800; margin-bottom: 6px; text-decoration: underline; line-height: 1.3; color: #0f172a; }
+                .visit-page-break .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; background: #f8fafc; align-items: center; border-radius: 4px; }
+                .visit-page-break .meta-item { font-size: 8.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; color: #1e293b; }
+                .visit-page-break .meta-label { font-weight: 800; margin-left: 5px; margin-right: 5px; display: inline-block; white-space: nowrap; color: #0f172a; }
+                .visit-page-break table { width: 100%; border-collapse: collapse; margin-bottom: 6px; table-layout: fixed; }
+                .visit-page-break th, .visit-page-break td { border: 1px solid #0f172a; padding: 3px 5px; vertical-align: middle; font-size: 8.5pt; line-height: 1.25; word-break: break-word; overflow-wrap: break-word; }
+                .visit-page-break th { background: #e2e8f0; font-weight: 800; font-size: 8.5pt; height: 22px; text-align: center; vertical-align: middle; color: #0f172a; }
+                .visit-page-break .criteria-col { text-align: right; width: 55%; font-weight: 700; vertical-align: middle; padding-left: 6px; padding-right: 6px; line-height: 1.3; color: #1e293b; }
+                .visit-page-break .rating-col { width: 9%; font-weight: bold; font-size: 9.5pt; text-align: center; vertical-align: middle; line-height: 1; }
+                .visit-page-break .category-title { font-size: 8.5pt; font-weight: 800; margin-top: 4px; margin-bottom: 2px; background: #e2e8f0; padding: 3px 6px; border: 1px solid #0f172a; border-bottom: none; line-height: 1.3; vertical-align: middle; color: #0f172a; }
+                .visit-page-break .feedback-section { margin-top: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; min-height: 34px; background: #f8fafc; border-radius: 4px; }
+                .visit-page-break .feedback-title { font-weight: 800; font-size: 8.5pt; margin-bottom: 3px; border-bottom: 1px dotted #0f172a; padding-bottom: 2px; line-height: 1.3; color: #0f172a; }
+                .visit-page-break .overall-box { margin-top: 6px; padding: 5px 8px; border: 1.5px solid #0f172a; font-weight: 800; text-align: center; font-size: 9.5pt; display: flex; justify-content: space-around; align-items: center; background: #f8fafc; line-height: 1.3; border-radius: 4px; }
+                .visit-page-break .signatures { margin-top: 14px; display: flex; justify-content: space-between; align-items: flex-start; text-align: center; page-break-inside: avoid; break-inside: avoid; padding-bottom: 1.5rem; line-height: 1.6; }
+                .visit-page-break .sig-block { width: 44%; display: flex; flex-direction: column; align-items: center; page-break-inside: avoid; break-inside: avoid; }
+                .visit-page-break .sig-job-title { font-weight: 900; font-size: 9.5pt; color: #0f172a; margin-bottom: 2px; line-height: 1.4; }
+                .visit-page-break .sig-person-name { font-size: 9pt; font-weight: 700; color: #334155; margin-bottom: 8px; line-height: 1.4; }
+                .visit-page-break .sig-dotted-line { width: 180px; text-align: center; color: #64748b; font-weight: normal; letter-spacing: 2px; font-size: 9.5pt; }
+                .visit-page-break .sig-title { font-weight: 800; font-size: 9pt; margin-bottom: 16px; line-height: 1.3; color: #0f172a; }
+                .visit-page-break .sig-line { border-top: 1px solid #0f172a; padding-top: 3px; font-size: 8.5pt; font-weight: 800; line-height: 1.3; color: #1e293b; }
               `}</style>
+
+              {/* FIRST PAGE: STAGE REPORT SUMMARY & EVALUATION */}
+              <div className="stage-first-page">
 
               {/* Header Info */}
               <div className="border-b-2 border-slate-900 pb-4 mb-4 flex items-center justify-between">
@@ -1322,6 +1464,40 @@ export const StageCommunicationView: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              </div>
+              {/* END OF FIRST PAGE (stage-first-page) */}
+
+              {/* ATTACHED CLASSROOM VISITS - 1 PAGE PER VISIT */}
+              {includeVisits && includedVisitsList.length > 0 && (
+                <div className="attached-visits-section">
+                  <div className="no-print my-6 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between text-blue-900">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-blue-600" />
+                      <span className="font-black text-xs">
+                        مرفقات التقرير: نماذج تقييم الزيارات الصفية المنفذة ({includedVisitsList.length} زيارة - كل زيارة في صفحة A4 مستقلة)
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-blue-700 font-bold">
+                      تبدأ بعد الصفحة الأولى، وتُطبع كل زيارة في صفحة كاملة بمفردها
+                    </span>
+                  </div>
+
+                  {includedVisitsList.map((visit, vIdx) => (
+                    <div
+                      key={visit.id || vIdx}
+                      className="visit-page-break pt-8 pb-4"
+                      style={{
+                        pageBreakBefore: 'always',
+                        breakBefore: 'page',
+                      }}
+                      dangerouslySetInnerHTML={{
+                        __html: generateObservationReportContentHtml(visit, schoolSettings, (language === 'ar'), language)
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
 
             </div>
 

@@ -13,7 +13,7 @@ interface AddLessonModalProps {
 }
 
 export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
-  const { groups, students, lessons, profile, addLesson, t } = useApp();
+  const { groups, students, lessons, profile, addLesson, t, _t } = useApp();
 
   const todayStr = formatLocalDate();
 
@@ -330,7 +330,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
               <div className="flex items-center gap-1.5">
                 <Video className="w-3.5 h-3.5 text-primary" />
                 <span className="text-xs font-bold text-text-main">
-                  {profile.language === 'ar' ? 'روابط تسجيل الحصة (اختياري)' : 'Session Recordings (Optional)'}
+                  {_t('روابط تسجيل الحصة (اختياري)', 'Session Recordings (Optional)', 'Lektionsaufnahmen (Optional)')}
                 </span>
               </div>
 
@@ -350,7 +350,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
             {/* Part 1 */}
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[10px] font-bold text-text-muted">
-                <span>{profile.language === 'ar' ? 'التسجيل الأول (الجزء 1)' : 'Recording 1 (Part 1)'}</span>
+                <span>{_t('التسجيل الأول (الجزء 1)', 'Recording 1 (Part 1)', 'Aufnahme 1 (Teil 1)')}</span>
                 {!showRecordingLink2 && !recordingLink2 && (
                   <button
                     type="button"
@@ -358,7 +358,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
                     className="text-[10px] font-bold text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
                   >
                     <Plus className="w-2.5 h-2.5" />
-                    <span>{profile.language === 'ar' ? '+ إضافة جزء ثانٍ' : '+ Add Part 2'}</span>
+                    <span>{_t('+ إضافة جزء ثانٍ', '+ Add Part 2', '+ Teil 2 hinzufügen')}</span>
                   </button>
                 )}
               </div>
@@ -376,7 +376,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
             {(showRecordingLink2 || recordingLink2.trim()) && (
               <div className="space-y-1 pt-1 border-t border-slate-100 dark:border-surface-border">
                 <div className="flex items-center justify-between text-[10px] font-bold text-text-muted">
-                  <span>{profile.language === 'ar' ? 'التسجيل الثاني (الجزء 2)' : 'Recording 2 (Part 2)'}</span>
+                  <span>{_t('التسجيل الثاني (الجزء 2)', 'Recording 2 (Part 2)', 'Aufnahme 2 (Teil 2)')}</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -386,7 +386,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
                     className="text-[10px] font-bold text-red-500 hover:underline flex items-center gap-0.5 cursor-pointer"
                   >
                     <X className="w-2.5 h-2.5" />
-                    <span>{profile.language === 'ar' ? 'إلغاء' : 'Remove'}</span>
+                    <span>{_t('إلغاء', 'Remove', 'Entfernen')}</span>
                   </button>
                 </div>
                 <input

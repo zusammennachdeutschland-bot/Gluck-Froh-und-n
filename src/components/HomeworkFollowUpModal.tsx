@@ -13,7 +13,7 @@ interface HomeworkFollowUpModalProps {
 }
 
 export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pendingFollowUps, initialGroupId, onClose }) => {
-  const { students, updateLesson, profile } = useApp();
+  const { students, updateLesson, profile, _t } = useApp();
   const [selectedGroup, setSelectedGroup] = useState<PendingFollowUp | null>(
     initialGroupId ? pendingFollowUps.find(p => p.groupId === initialGroupId) || null : null
   );
@@ -72,7 +72,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
       quickNotes || 
       topic || 
       rawTitle || 
-      'مراجعة وتطبيقات الدرس'
+      _t('مراجعة وتطبيقات الدرس', 'Lesson Review & Practice', 'Lektionswiederholung')
     ).trim();
 
     // 2. Resolve Homework Text (الواجب المطلوب)
@@ -93,7 +93,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
     }
 
     const resolvedHomework = (hwDesc || arabicHw || legacyHwStr || hwTitle || '').trim();
-    const homeworkText = resolvedHomework || 'متابعة ما تم شرحه وحل التدريبات والأنشطة المقررة';
+    const homeworkText = resolvedHomework || _t('متابعة ما تم شرحه وحل التدريبات والأنشطة المقررة', 'Follow up on lesson and complete assigned exercises', 'Lektion nacharbeiten und Hausaufgaben erledigen');
 
     const teacherSign = profile.displayNameAr || (profile.displayName ? `أ/ ${profile.displayName}` : '');
 
@@ -179,7 +179,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
                 onClick={() => setSelectedGroup(null)}
                 className="text-[10px] sm:text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-0.5 flex items-center hover:underline"
               >
-                ← عودة للقائمة
+                {_t('← عودة للقائمة', '← Back to list', '← Zurück zur Liste')}
               </button>
               <h2 className="text-xs sm:text-base font-black text-text-main flex items-center gap-1.5 truncate">
                 <BookOpen className="w-4 h-4 text-amber-500 shrink-0" />
@@ -197,17 +197,17 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-black text-amber-900 dark:text-amber-300 uppercase tracking-wide flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                  بيانات الواجب المطلوب (الدرس والواجب)
+                  {_t('بيانات الواجب المطلوب (الدرس والواجب)', 'Homework & Lesson Info', 'Hausaufgabe & Lektionsinfo')}
                 </h3>
               </div>
               
               <div className="space-y-2 text-xs bg-white/70 dark:bg-slate-900/60 p-3 rounded-lg border border-amber-100 dark:border-amber-900/40">
                 <div className="flex items-start gap-2">
-                  <span className="font-black text-amber-950 dark:text-amber-200 shrink-0">📖 عنوان الدرس:</span>
+                  <span className="font-black text-amber-950 dark:text-amber-200 shrink-0">{_t('📖 عنوان الدرس:', '📖 Lesson Topic:', '📖 Lektionsthema:')}</span>
                   <span className="font-bold text-text-main">{lessonTitle}</span>
                 </div>
                 <div className="flex items-start gap-2 pt-1 border-t border-amber-100/60 dark:border-slate-800">
-                  <span className="font-black text-amber-950 dark:text-amber-200 shrink-0">📝 الواجب:</span>
+                  <span className="font-black text-amber-950 dark:text-amber-200 shrink-0">{_t('📝 الواجب:', '📝 Homework:', '📝 Hausaufgabe:')}</span>
                   <span className="font-medium text-text-main whitespace-pre-wrap">{homeworkText}</span>
                 </div>
               </div>
@@ -215,7 +215,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
 
             <div className="space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <h3 className="text-sm font-black text-text-main">رسائل المتابعة لأولياء الأمور</h3>
+                <h3 className="text-sm font-black text-text-main">{_t('رسائل المتابعة لأولياء الأمور', 'Parent Follow-up Messages', 'Nachrichten an Eltern')}</h3>
                 
                 <div className="inline-flex items-center p-0.5 bg-surface border border-surface-border rounded-lg shadow-2xs">
                   <button
@@ -227,7 +227,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
                         : 'text-text-muted hover:text-text-main'
                     }`}
                   >
-                    🇪🇬 مصري راقي
+                    {_t('🇪🇬 مصري راقي', 'Casual', 'Umgangssprachlich')}
                   </button>
                   <button
                     type="button"
@@ -238,20 +238,20 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
                         : 'text-text-muted hover:text-text-main'
                     }`}
                   >
-                    📜 فصحى
+                    {_t('📜 فصحى', 'Formal', 'Formell')}
                   </button>
                 </div>
               </div>
               
               {messages.length === 0 ? (
-                <p className="text-sm text-text-muted">لا توجد أرقام هواتف أو يوزرات واتساب مسجلة للطلاب أو أولياء الأمور في هذه المجموعة.</p>
+                <p className="text-sm text-text-muted">{_t('لا توجد أرقام هواتف أو يوزرات واتساب مسجلة للطلاب أو أولياء الأمور في هذه المجموعة.', 'No phone numbers or WhatsApp contacts found for students in this group.', 'Keine Telefonnummern oder WhatsApp-Kontakte gefunden.')}</p>
               ) : (
                 messages.map((m, idx) => (
                   <div key={idx} className="border border-surface-border rounded-xl p-4 space-y-3 bg-surface">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 text-sm font-bold text-emerald-700 dark:text-emerald-400">
                         <User className="w-4 h-4" />
-                        <span>{m.names.join(' و ')}</span>
+                        <span>{m.names.join(_t(' و ', ', ', ', '))}</span>
                       </div>
                       <div className="flex items-center gap-1 text-xs font-mono text-text-muted bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md" dir="ltr">
                         {m.isUsername ? (
@@ -277,7 +277,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
                       className="w-full bg-primary hover:bg-primary-hover text-white font-black text-xs sm:text-sm py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
                     >
                       <Send className="w-4 h-4" />
-                      إرسال عبر WhatsApp ({m.display})
+                      {_t(`إرسال عبر WhatsApp (${m.display})`, `Send via WhatsApp (${m.display})`, `Per WhatsApp senden (${m.display})`)}
                     </button>
                   </div>
                 ))
@@ -291,7 +291,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
               className="w-full bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-sm py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <Check className="w-4 h-4 text-emerald-600" />
-              تحديد كمكتمل يدوياً (Mark Done)
+              {_t('تحديد كمكتمل يدوياً (Mark Done)', 'Mark as Done Manually', 'Manuell als erledigt markieren')}
             </button>
           </div>
         </div>
@@ -317,7 +317,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
         <div className="px-3.5 py-2.5 sm:p-4 flex items-center justify-between border-b border-surface-border sticky top-0 bg-surface z-10 shrink-0">
           <h2 className="text-xs sm:text-base font-black text-text-main flex items-center gap-2 truncate">
             <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 shrink-0" />
-            <span className="truncate">متابعة الواجبات</span>
+            <span className="truncate">{_t('متابعة الواجبات', 'Homework Follow-up', 'Hausaufgaben-Nachverfolgung')}</span>
           </h2>
           <button onClick={onClose} className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 rounded-full text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0">
             <X className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -333,7 +333,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
             >
               <span className="font-bold text-base text-text-main">{p.groupName}</span>
               <span className="text-xs font-black bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400 px-2 py-1 rounded-md">
-                {p.isToday ? 'اليوم' : p.isTomorrow ? 'غداً' : p.nextLessonDateStr}
+                {p.isToday ? _t('اليوم', 'Today', 'Heute') : p.isTomorrow ? _t('غداً', 'Tomorrow', 'Morgen') : p.nextLessonDateStr}
               </span>
             </div>
           ))}

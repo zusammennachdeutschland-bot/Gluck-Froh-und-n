@@ -314,11 +314,11 @@ export const StudentsView: React.FC = () => {
               onChange={(e) => setStudentSortBy(e.target.value as any)}
               className="flex-1 sm:flex-initial px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
             >
-              <option value="name">ترتيب: أبجدي (Name)</option>
-              <option value="attendance">ترتيب: نسبة الحضور (Attendance)</option>
-              <option value="homework">ترتيب: أداء الواجب (Homework)</option>
-              <option value="dictation">ترتيب: درجات الإملاء (Dictation)</option>
-              <option value="exam">ترتيب: درجات الاختبارات (Exams)</option>
+              <option value="name">{_t('ترتيب: أبجدي', 'Sort: Alphabetical', 'Sortierung: Alphabetisch')}</option>
+              <option value="attendance">{_t('ترتيب: نسبة الحضور', 'Sort: Attendance Rate', 'Sortierung: Anwesenheitsquote')}</option>
+              <option value="homework">{_t('ترتيب: أداء الواجب', 'Sort: Homework Completion', 'Sortierung: Hausaufgaben')}</option>
+              <option value="dictation">{_t('ترتيب: درجات الإملاء', 'Sort: Dictation Scores', 'Sortierung: Diktatnoten')}</option>
+              <option value="exam">{_t('ترتيب: درجات الاختبارات', 'Sort: Exam Scores', 'Sortierung: Prüfungsnoten')}</option>
             </select>
           )}
 

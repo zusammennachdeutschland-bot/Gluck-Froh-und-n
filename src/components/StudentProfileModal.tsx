@@ -93,22 +93,30 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
     const r2 = lesson.recordingLink2?.trim() || lesson.report?.recordingLink2?.trim();
     const targetPhone = student.studentPhone || student.parentPhone || '';
     
-    let msg = `🎥 *تسجيل الحصة للطالب/ة: ${student.name}*\n📅 التاريخ: ${lesson.date} (${lesson.time || ''})\n`;
+    let msg = _t(
+      `🎥 *تسجيل الحصة للطالب/ة: ${student.name}*\n📅 التاريخ: ${lesson.date} (${lesson.time || ''})\n`,
+      `🎥 *Lesson Recording for: ${student.name}*\n📅 Date: ${lesson.date} (${lesson.time || ''})\n`,
+      `🎥 *Lektionsaufnahme für: ${student.name}*\n📅 Datum: ${lesson.date} (${lesson.time || ''})\n`
+    );
     if (lesson.sessionNumber) {
-      msg += `🔢 الحصة رقم: ${lesson.sessionNumber}\n`;
+      msg += _t(`🔢 الحصة رقم: ${lesson.sessionNumber}\n`, `🔢 Session No: ${lesson.sessionNumber}\n`, `🔢 Lektionsnummer: ${lesson.sessionNumber}\n`);
     }
     const topic = (lesson.report?.homeworkTitle || lesson.title || '').trim();
     if (topic) {
-      msg += `📖 الموضوع: ${topic}\n`;
+      msg += _t(`📖 الموضوع: ${topic}\n`, `📖 Topic: ${topic}\n`, `📖 Thema: ${topic}\n`);
     }
     msg += `\n`;
 
     if (r1 && r2) {
-      msg += `🎥 *تسجيلات الحصة (جزئين):*\n• الجزء الأول: ${r1}\n• الجزء الثاني: ${r2}\n`;
+      msg += _t(
+        `🎥 *تسجيلات الحصة (جزئين):*\n• الجزء الأول: ${r1}\n• الجزء الثاني: ${r2}\n`,
+        `🎥 *Lesson Recordings (2 Parts):*\n• Part 1: ${r1}\n• Part 2: ${r2}\n`,
+        `🎥 *Lektionsaufnahmen (2 Teile):*\n• Teil 1: ${r1}\n• Teil 2: ${r2}\n`
+      );
     } else if (r1) {
-      msg += `🎥 *رابط تسجيل الحصة:* ${r1}\n`;
+      msg += _t(`🎥 *رابط تسجيل الحصة:* ${r1}\n`, `🎥 *Lesson Recording Link:* ${r1}\n`, `🎥 *Aufnahmelink:* ${r1}\n`);
     } else if (r2) {
-      msg += `🎥 *رابط تسجيل الحصة:* ${r2}\n`;
+      msg += _t(`🎥 *رابط تسجيل الحصة:* ${r2}\n`, `🎥 *Lesson Recording Link:* ${r2}\n`, `🎥 *Aufnahmelink:* ${r2}\n`);
     }
 
     const url = buildWhatsAppUrl(targetPhone, msg);
@@ -351,7 +359,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   }`}
                 >
                   <Send className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">واتساب</span>
+                  <span className="truncate">{_t('واتساب', 'WhatsApp', 'WhatsApp')}</span>
                 </a>
 
                 <a
@@ -387,30 +395,30 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
             <div className="p-2 sm:p-3 bg-surface border border-surface-border rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
               <div className="flex items-center gap-1 text-primary">
                 <Calendar className="w-3.5 h-3.5" />
-                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-text-muted">SITZUNGEN</span>
+                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-text-muted">{_t('الحصص', 'SESSIONS', 'SITZUNGEN')}</span>
               </div>
               <span className="text-sm sm:text-lg font-black text-text-main leading-tight font-mono">{studentLessons.length}</span>
-              <span className="text-[8px] sm:text-[9px] text-text-muted font-bold">الحصص الكلية</span>
+              <span className="text-[8px] sm:text-[9px] text-text-muted font-bold">{_t('الحصص الكلية', 'Total Sessions', 'Gesamt')}</span>
             </div>
 
             {/* ANWESEND */}
             <div className="p-2 sm:p-3 bg-surface border border-surface-border rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
               <div className="flex items-center gap-1 text-emerald-500">
                 <User className="w-3.5 h-3.5" />
-                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-text-muted">ANWESEND</span>
+                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-text-muted">{_t('الحضور', 'ATTENDED', 'ANWESEND')}</span>
               </div>
               <span className="text-sm sm:text-lg font-black text-text-main leading-tight font-mono">{presentCount}</span>
-              <span className="text-[8px] sm:text-[9px] text-text-muted font-bold">حضور الحصص</span>
+              <span className="text-[8px] sm:text-[9px] text-text-muted font-bold">{_t('حضور الحصص', 'Attended', 'Anwesend')}</span>
             </div>
 
             {/* PAKETZYKLUS */}
             <div className="p-2 sm:p-3 bg-surface border border-surface-border rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
               <div className="flex items-center gap-1 text-indigo-500">
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-text-muted">PAKETZYKLUS</span>
+                <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-text-muted">{_t('الدورة', 'CYCLE', 'PAKETZYKLUS')}</span>
               </div>
               <span className="text-sm sm:text-lg font-black text-text-main leading-tight font-mono">{currentCycleProgress}/{cycleLength}</span>
-              <span className="text-[8px] sm:text-[9px] text-text-muted font-bold">دورة الحساب</span>
+              <span className="text-[8px] sm:text-[9px] text-text-muted font-bold">{_t('دورة الحساب', 'Billing Cycle', 'Paketzyklus')}</span>
             </div>
           </div>
 
@@ -662,33 +670,33 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                         
                         {isStudentAbsent ? (
                           <div className="p-2 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 rounded-xl border border-red-200 dark:border-red-900/40 text-center font-bold text-[11px]">
-                            ❌ غائب عن الحصة (لم تسجل درجات أو واجبات)
+                            {_t('❌ غائب عن الحصة (لم تسجل درجات أو واجبات)', '❌ Absent from lesson (No grades recorded)', '❌ Fehlend')}
                           </div>
                         ) : (
                         <div className="grid grid-cols-2 gap-2 text-[11px] font-bold">
                           {hwDone !== undefined && (
                             <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
-                              <span className="text-slate-400">الواجب السابق:</span>
+                              <span className="text-slate-400">{_t('الواجب السابق:', 'Previous Homework:', 'Hausaufgabe:')}</span>
                               <span className={hwDone === 'yes' ? 'text-emerald-600' : 'text-red-500'}>
-                                {hwDone === 'yes' ? 'تم الحل 👍' : 'لم يحل 👎'}
+                                {hwDone === 'yes' ? _t('تم الحل 👍', 'Done 👍', 'Erledigt 👍') : _t('لم يحل 👎', 'Not Done 👎', 'Nicht erledigt 👎')}
                               </span>
                             </div>
                           )}
 
                           {dictationGrade !== undefined && (
                             <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
-                              <span className="text-slate-400">درجة الإملاء:</span>
+                              <span className="text-slate-400">{_t('درجة الإملاء:', 'Dictation:', 'Diktat:')}</span>
                               <span className={`font-mono ${dictationGrade === -1 ? 'text-amber-600 dark:text-amber-400 text-[10px] font-bold' : 'text-primary'}`}>
-                                {dictationGrade === -1 ? 'مكانش فيه' : `${dictationGrade} / 10`}
+                                {dictationGrade === -1 ? _t('مكانش فيه', 'None', 'Keine') : `${dictationGrade} / 10`}
                               </span>
                             </div>
                           )}
 
                           {examGrade !== undefined && (
                             <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
-                              <span className="text-slate-400">درجة الامتحان:</span>
+                              <span className="text-slate-400">{_t('درجة الامتحان:', 'Exam Grade:', 'Prüfungsnote:')}</span>
                               <span className={`font-mono ${examGrade === -1 ? 'text-amber-600 dark:text-amber-400 text-[10px] font-bold' : 'text-primary'}`}>
-                                {examGrade === -1 ? 'مكانش فيه' : `${examGrade} / 10`}
+                                {examGrade === -1 ? _t('مكانش فيه', 'None', 'Keine') : `${examGrade} / 10`}
                               </span>
                             </div>
                           )}
@@ -697,7 +705,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
                         {remark && (
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 italic pt-1">
-                            <span className="font-extrabold block text-[10px] text-slate-400 uppercase tracking-widest not-italic mb-0.5">ملاحظات الحصة</span>
+                            <span className="font-extrabold block text-[10px] text-slate-400 uppercase tracking-widest not-italic mb-0.5">{_t('ملاحظات الحصة', 'Session Notes', 'Notizen')}</span>
                             &ldquo;{remark}&rdquo;
                           </p>
                         )}
@@ -997,7 +1005,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="px-2 py-0.5 bg-primary/10 text-primary font-black text-[10px] rounded-md shrink-0 font-mono">
-                                {lesson.sessionNumber ? `حصة ${lesson.sessionNumber}` : `${lesson.date}`}
+                                {lesson.sessionNumber ? `${_t('حصة', 'Session', 'Lektion')} ${lesson.sessionNumber}` : `${lesson.date}`}
                               </span>
                               <span className="text-xs font-black text-slate-800 dark:text-white truncate">
                                 {lesson.title || lesson.groupName}
@@ -1013,7 +1021,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                                     ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400'
                                     : 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400'
                                 }`}>
-                                  {attStatus === 'present' ? 'حاضر' : attStatus === 'late' ? 'متأخر' : 'غائب'}
+                                  {attStatus === 'present' ? _t('حاضر', 'Present', 'Anwesend') : attStatus === 'late' ? _t('متأخر', 'Late', 'Verspätet') : _t('غائب', 'Absent', 'Abwesend')}
                                 </span>
                               )}
                               <span className="text-[10px] text-slate-400 font-bold font-mono">
@@ -1111,7 +1119,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   <div className="space-y-1">
                     <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center justify-between">
                       <span>{_t('كود الطالب (Portal Code)', 'Student Code', 'Schüler-Code')}</span>
-                      <span className="text-[10px] text-primary font-bold">لبوابة ولي الأمر</span>
+                      <span className="text-[10px] text-primary font-bold">{_t('لبوابة ولي الأمر', 'For Parent Portal', 'Für Elternportal')}</span>
                     </label>
                     <input
                       type="text"

@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
 import { parseLocalDate, formatLocalDate } from '../utils/timeUtils';
+import { getProjectedLessonsForRange } from '../utils/scheduleUtils';
 import { 
   Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, 
   Video, MapPin, CheckCircle2, AlertTriangle, Trash2, ArrowLeftRight, 
@@ -51,10 +52,23 @@ export const ScheduleView: React.FC = () => {
   const workingStart = profile.workingHours?.startTime || '09:00';
   const workingEnd = profile.workingHours?.endTime || '21:30';
 
-  // CONFLICT DETECTION
+  // CONFLICT DETECTION & INFINITE RECURRING CALENDAR PROJECTION
   const activeLessons = useMemo(() => {
-    return lessons.filter(l => !l.deleted);
-  }, [lessons]);
+    // Project recurring lessons indefinitely for active groups around the viewed date window (-6 months to +24 months around selectedDate)
+    const current = parseLocalDate(selectedDate);
+    const startRange = new Date(current);
+    startRange.setMonth(startRange.getMonth() - 6);
+    startRange.setDate(1);
+
+    const endRange = new Date(current);
+    endRange.setMonth(endRange.getMonth() + 24);
+    endRange.setDate(0);
+
+    const startDateStr = formatLocalDate(startRange);
+    const endDateStr = formatLocalDate(endRange);
+
+    return getProjectedLessonsForRange(startDateStr, endDateStr, groups, lessons, profile.defaultZoomLink);
+  }, [lessons, groups, selectedDate, profile.defaultZoomLink]);
 
   const conflictsMap = useMemo(() => {
     const map: Record<string, Lesson[]> = {};

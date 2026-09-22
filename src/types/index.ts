@@ -784,7 +784,7 @@ export interface LessonReport {
   arabicParentNotes?: string;
   arabicTemplateMessage?: string;
   arabicFullGeneratedReport?: string;
-  studentHomeworkDone?: Record<string, 'yes' | 'no'>;
+  studentHomeworkDone?: Record<string, 'yes' | 'no' | 'none'>;
   studentDictationGrade?: Record<string, number>;
   studentExamGrade?: Record<string, number>;
   studentNotes?: Record<string, string>;

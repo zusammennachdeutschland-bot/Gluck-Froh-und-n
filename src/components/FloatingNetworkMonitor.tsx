@@ -5,7 +5,7 @@ import { Activity, Wifi, WifiOff, X, ArrowUpRight, ArrowDownRight, RefreshCw, Za
 import { motion, AnimatePresence } from 'motion/react';
 
 export const FloatingNetworkMonitor: React.FC = () => {
-  const { activeLessonSession, language } = useApp();
+  const { activeLessonSession, language, _t } = useApp();
   const [metrics, setMetrics] = useState<NetworkMetrics>(() => networkMonitorService.getMetrics());
   const [showPopover, setShowPopover] = useState(false);
   const isArabic = language === 'ar';
@@ -70,40 +70,34 @@ export const FloatingNetworkMonitor: React.FC = () => {
   }
 
   // Quality Text & Color mapping
-  const qualityMap: Record<ConnectionQuality, { labelEn: string; labelAr: string; dotClass: string; badgeClass: string }> = {
+  const qualityMap: Record<ConnectionQuality, { label: string; dotClass: string; badgeClass: string }> = {
     excellent: {
-      labelEn: 'Excellent',
-      labelAr: 'ممتاز',
+      label: _t('ممتاز', 'Excellent', 'Ausgezeichnet'),
       dotClass: 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]',
       badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
     },
     good: {
-      labelEn: 'Good',
-      labelAr: 'جيد',
+      label: _t('جيد', 'Good', 'Gut'),
       dotClass: 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]',
       badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
     },
     fair: {
-      labelEn: 'Fair',
-      labelAr: 'مقبول',
+      label: _t('مقبول', 'Fair', 'Befriedigend'),
       dotClass: 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.7)]',
       badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
     },
     poor: {
-      labelEn: 'Poor',
-      labelAr: 'ضعيف',
+      label: _t('ضعيف', 'Poor', 'Schwach'),
       dotClass: 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.9)] animate-pulse',
       badgeClass: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
     },
     offline: {
-      labelEn: 'Offline',
-      labelAr: 'غير متصل',
+      label: _t('غير متصل', 'Offline', 'Offline'),
       dotClass: 'bg-slate-500',
       badgeClass: 'bg-slate-700/50 text-slate-300 border-slate-600'
     },
     unavailable: {
-      labelEn: 'Unavailable',
-      labelAr: 'غير متوفر',
+      label: _t('غير متوفر', 'Unavailable', 'Nicht verfügbar'),
       dotClass: 'bg-slate-400',
       badgeClass: 'bg-slate-700/50 text-slate-400 border-slate-600'
     }
@@ -202,7 +196,7 @@ export const FloatingNetworkMonitor: React.FC = () => {
         <div className="flex items-center gap-1 leading-none tracking-tight">
           {metrics.status === 'offline' ? (
             <span className="text-rose-400 font-sans text-[10.5px] font-black">
-              {isArabic ? 'غير متصل' : 'Offline'}
+              {_t('غير متصل', 'Offline', 'Offline')}
             </span>
           ) : metrics.currentPing !== null ? (
             <>
@@ -210,7 +204,7 @@ export const FloatingNetworkMonitor: React.FC = () => {
               <span className="text-[9.5px] text-slate-400 font-sans">ms</span>
               {metrics.connectionQuality === 'poor' && (
                 <span className="text-[9.5px] text-rose-400 font-sans font-bold ml-0.5">
-                  {isArabic ? 'ضعيف' : 'Poor'}
+                  {_t('ضعيف', 'Poor', 'Schwach')}
                 </span>
               )}
             </>
@@ -238,13 +232,13 @@ export const FloatingNetworkMonitor: React.FC = () => {
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <div className="flex items-center gap-1.5 font-bold text-slate-200">
                 <Activity className="w-3.5 h-3.5 text-primary" />
-                <span>{isArabic ? 'جودة الشبكة المباشرة' : 'Network Diagnostics'}</span>
+                <span>{_t('جودة الشبكة المباشرة', 'Network Diagnostics', 'Netzwerkdiagnose')}</span>
               </div>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={() => networkMonitorService.pingNow()}
-                  title={isArabic ? 'إعادة الفحص الآن' : 'Test Ping Now'}
+                  title={_t('إعادة الفحص الآن', 'Test Ping Now', 'Jetzt testen')}
                   className="p-1 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 transition-colors cursor-pointer"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
@@ -263,7 +257,7 @@ export const FloatingNetworkMonitor: React.FC = () => {
             <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
               <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800/80">
                 <span className="text-[10px] font-sans text-slate-400 block mb-0.5">
-                  {isArabic ? 'الاستجابة الحالية' : 'Current Ping'}
+                  {_t('الاستجابة الحالية', 'Current Ping', 'Aktueller Ping')}
                 </span>
                 <span className="text-sm font-extrabold text-white">
                   {metrics.currentPing !== null ? `${metrics.currentPing} ms` : '—'}
@@ -272,7 +266,7 @@ export const FloatingNetworkMonitor: React.FC = () => {
 
               <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800/80">
                 <span className="text-[10px] font-sans text-slate-400 block mb-0.5">
-                  {isArabic ? 'متوسط الحصة' : 'Average'}
+                  {_t('متوسط الحصة', 'Average', 'Durchschnitt')}
                 </span>
                 <span className="text-sm font-extrabold text-slate-200">
                   {metrics.averagePing !== null ? `${metrics.averagePing} ms` : '—'}
@@ -282,7 +276,7 @@ export const FloatingNetworkMonitor: React.FC = () => {
               <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800/80 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-sans text-slate-400 block mb-0.5">
-                    {isArabic ? 'الأقل (Min)' : 'Min'}
+                    {_t('الأقل (Min)', 'Min', 'Min')}
                   </span>
                   <span className="text-xs font-bold text-emerald-400">
                     {metrics.minPing !== null ? `${metrics.minPing} ms` : '—'}
@@ -294,7 +288,7 @@ export const FloatingNetworkMonitor: React.FC = () => {
               <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800/80 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-sans text-slate-400 block mb-0.5">
-                    {isArabic ? 'الأعلى (Max)' : 'Max'}
+                    {_t('الأعلى (Max)', 'Max', 'Max')}
                   </span>
                   <span className="text-xs font-bold text-amber-400">
                     {metrics.maxPing !== null ? `${metrics.maxPing} ms` : '—'}
@@ -307,24 +301,24 @@ export const FloatingNetworkMonitor: React.FC = () => {
             {/* Quality & Status Row */}
             <div className="space-y-1.5 pt-1 text-[11px]">
               <div className="flex items-center justify-between py-1 border-t border-slate-800/60">
-                <span className="text-slate-400">{isArabic ? 'تقييم الجودة' : 'Quality'}:</span>
+                <span className="text-slate-400">{_t('تقييم الجودة', 'Quality', 'Qualität')}:</span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${currentQualityInfo.badgeClass}`}>
-                  {isArabic ? currentQualityInfo.labelAr : currentQualityInfo.labelEn}
+                  {currentQualityInfo.label}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-1 border-t border-slate-800/60">
-                <span className="text-slate-400">{isArabic ? 'حالة الاتصال' : 'Status'}:</span>
+                <span className="text-slate-400">{_t('حالة الاتصال', 'Status', 'Status')}:</span>
                 <span className="font-bold flex items-center gap-1">
                   {metrics.status === 'online' ? (
                     <>
                       <Wifi className="w-3 h-3 text-emerald-400" />
-                      <span className="text-emerald-400">{isArabic ? 'متصل' : 'Online'}</span>
+                      <span className="text-emerald-400">{_t('متصل', 'Online', 'Online')}</span>
                     </>
                   ) : (
                     <>
                       <WifiOff className="w-3 h-3 text-rose-400" />
-                      <span className="text-rose-400">{isArabic ? 'غير متصل' : 'Offline'}</span>
+                      <span className="text-rose-400">{_t('غير متصل', 'Offline', 'Offline')}</span>
                     </>
                   )}
                 </span>
@@ -332,7 +326,7 @@ export const FloatingNetworkMonitor: React.FC = () => {
 
               {metrics.effectiveType && (
                 <div className="flex items-center justify-between py-1 border-t border-slate-800/60">
-                  <span className="text-slate-400">{isArabic ? 'نوع الشبكة' : 'Network Type'}:</span>
+                  <span className="text-slate-400">{_t('نوع الشبكة', 'Network Type', 'Netzwerktyp')}:</span>
                   <span className="font-mono font-bold text-slate-300">
                     {metrics.effectiveType} {metrics.downlink ? `• ${metrics.downlink} Mbps` : ''}
                   </span>
@@ -340,12 +334,12 @@ export const FloatingNetworkMonitor: React.FC = () => {
               )}
 
               <div className="flex items-center justify-between py-1 border-t border-slate-800/60 text-[10px] text-slate-400 font-mono">
-                <span>{isArabic ? 'آخر فحص' : 'Last check'}:</span>
+                <span>{_t('آخر فحص', 'Last check', 'Letzte Prüfung')}:</span>
                 <span>{metrics.lastCheckedAt || '—'}</span>
               </div>
 
               <div className="flex items-center justify-between py-1 border-t border-slate-800/60 text-[10px] text-slate-400 font-mono">
-                <span>{isArabic ? 'الفحوصات الفاشلة' : 'Failed checks'}:</span>
+                <span>{_t('الفحوصات الفاشلة', 'Failed checks', 'Fehlgeschlagen')}:</span>
                 <span className={metrics.failedChecks > 0 ? 'text-rose-400 font-bold' : 'text-slate-400'}>
                   {metrics.failedChecks}
                 </span>
@@ -354,7 +348,7 @@ export const FloatingNetworkMonitor: React.FC = () => {
 
             {/* Helpful tip footer */}
             <div className="text-[9.5px] text-slate-500 text-center pt-1 border-t border-slate-800/80">
-              {isArabic ? 'يتم التحديث كل ثانية خلال الحصة النشطة' : 'Live updates 1x/sec during active session'}
+              {_t('يتم التحديث كل ثانية خلال الحصة النشطة', 'Live updates 1x/sec during active session', 'Live-Aktualisierung im Minutentakt während der Lektion')}
             </div>
           </motion.div>
         )}
