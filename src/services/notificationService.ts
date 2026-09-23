@@ -360,7 +360,7 @@ export const sendSystemNotification = async (
             title,
             body,
             channelId,
-            schedule: { at: new Date(Date.now() + 100), allowWhileIdle: true },
+            schedule: { at: new Date(Date.now() + 100) },
             actionTypeId: actionTypeId || (tag.startsWith('upcoming-') || tag === 'lesson_alarm' ? 'LESSON_ALARM_ACTIONS' : undefined),
             extra: extra || {},
             autoCancel: true,
@@ -658,7 +658,7 @@ export const rebuildAllNotificationSchedules = async (
       title,
       body,
       channelId,
-      schedule: { at: scheduleDate, allowWhileIdle: true },
+      schedule: { at: scheduleDate },
       actionTypeId,
       extra: { ...extraData, category, atEpoch }
     });
@@ -921,7 +921,14 @@ export const rebuildAllNotificationSchedules = async (
   // -------------------------------------------------------------
   if (Capacitor.isNativePlatform() && nativeNotifsToSchedule.length > 0) {
     try {
-      await LocalNotifications.schedule({ notifications: nativeNotifsToSchedule });
+      const safeBatch = [...nativeNotifsToSchedule]
+        .sort((a, b) => {
+          const tA = a.schedule?.at ? new Date(a.schedule.at).getTime() : 0;
+          const tB = b.schedule?.at ? new Date(b.schedule.at).getTime() : 0;
+          return tA - tB;
+        })
+        .slice(0, 25);
+      await LocalNotifications.schedule({ notifications: safeBatch });
     } catch (err) {
       console.warn('Native LocalNotifications.schedule error:', err);
     }

@@ -112,11 +112,18 @@ export const useLessonReminders = () => {
         }
       };
 
-      checkReminders();
-      // Check every 20 seconds to catch exact reminder minutes reliably
-      const interval = setInterval(checkReminders, 20 * 1000);
+      // Defer initial check slightly so startup animation & data hydration complete cleanly
+      const initialTimer = setTimeout(() => {
+        checkReminders();
+      }, 3500);
 
-      return () => clearInterval(interval);
+      // Check every 30 seconds to catch exact reminder minutes reliably
+      const interval = setInterval(checkReminders, 30 * 1000);
+
+      return () => {
+        clearTimeout(initialTimer);
+        clearInterval(interval);
+      };
     } catch (err) {
       console.warn('useLessonReminders effect error:', err);
     }

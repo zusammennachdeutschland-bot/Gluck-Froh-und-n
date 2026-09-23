@@ -1267,7 +1267,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       rebuildAllNotificationSchedules(notificationSettings, lessons, groups, students, payments, profile, language)
         .then(() => getPendingScheduledNotifications().then(setPendingScheduledNotifications))
         .catch(err => console.warn('Auto notification schedule rebuild error:', err));
-    }, 1500);
+    }, 5000);
     return () => clearTimeout(timer);
   }, [lessons, students.length, groups.length, profile, language]);
 
@@ -4933,7 +4933,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     });
   }, [students, groups, lessons, payments]);
 
-  // Master Widget Sync Engine
+  // Master Widget Sync Engine (debounced to avoid startup contention)
   useEffect(() => {
     const timer = setTimeout(() => {
       syncAllWidgetsToNative({
@@ -4952,7 +4952,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           attendanceCount: 0
         } : null
       }).catch(err => console.warn('Master widget sync error:', err));
-    }, 1000);
+    }, 4000);
     return () => clearTimeout(timer);
   }, [lessons, students, payments, todos, groups, profile, activeLessonSession, financeInstallments, financeRecurring]);
 

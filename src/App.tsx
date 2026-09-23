@@ -317,6 +317,51 @@ function MainApp() {
     activeAlarmLesson
   ]);
 
+  const callbacksRef = useRef({
+    dismissLessonAlarm,
+    closeLessonControl,
+    setActiveTab,
+    setIsGlobalSearchOpen,
+    setIsRecentlyDeletedModalOpen,
+    setIsAddLessonModalOpen,
+    setIsAddQuickLessonModalOpen,
+    setIsStartLessonNowModalOpen,
+    setIsAddStudentModalOpen,
+    setIsAddGroupModalOpen,
+    setIsBackupModalOpen,
+    language
+  });
+
+  useEffect(() => {
+    callbacksRef.current = {
+      dismissLessonAlarm,
+      closeLessonControl,
+      setActiveTab,
+      setIsGlobalSearchOpen,
+      setIsRecentlyDeletedModalOpen,
+      setIsAddLessonModalOpen,
+      setIsAddQuickLessonModalOpen,
+      setIsStartLessonNowModalOpen,
+      setIsAddStudentModalOpen,
+      setIsAddGroupModalOpen,
+      setIsBackupModalOpen,
+      language
+    };
+  }, [
+    dismissLessonAlarm,
+    closeLessonControl,
+    setActiveTab,
+    setIsGlobalSearchOpen,
+    setIsRecentlyDeletedModalOpen,
+    setIsAddLessonModalOpen,
+    setIsAddQuickLessonModalOpen,
+    setIsStartLessonNowModalOpen,
+    setIsAddStudentModalOpen,
+    setIsAddGroupModalOpen,
+    setIsBackupModalOpen,
+    language
+  ]);
+
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       try {
@@ -327,8 +372,8 @@ function MainApp() {
       const backButtonListener = CapacitorApp.addListener('backButton', () => {
         try {
           const now = Date.now();
-          // Safeguard 1: Ignore any backButton events during the first 3.5 seconds after app mounting (prevents synthetic launch events from closing the app)
-          if (now - appMountTimeRef.current < 3500) {
+          // Safeguard 1: Ignore any backButton events during the first 6 seconds after app mounting (prevents synthetic launch events from closing the app)
+          if (now - appMountTimeRef.current < 6000) {
             console.log('[Android BackButton] Ignored during startup grace period.');
             return;
           }
@@ -347,46 +392,48 @@ function MainApp() {
             activeAlarmLesson: alarmActive
           } = stateRef.current;
 
+          const cb = callbacksRef.current;
+
           if (alarmActive) {
-            dismissLessonAlarm();
+            cb.dismissLessonAlarm();
             return;
           }
 
           if (searchOpen) {
-            setIsGlobalSearchOpen(false);
+            cb.setIsGlobalSearchOpen(false);
           } else if (deletedOpen) {
-            setIsRecentlyDeletedModalOpen(false);
+            cb.setIsRecentlyDeletedModalOpen(false);
           } else if (controlOpen) {
-            closeLessonControl();
+            cb.closeLessonControl();
           } else if (addLessonOpen) {
-            setIsAddLessonModalOpen(false);
+            cb.setIsAddLessonModalOpen(false);
           } else if (addQuickOpen) {
-            setIsAddQuickLessonModalOpen(false);
+            cb.setIsAddQuickLessonModalOpen(false);
           } else if (startNowOpen) {
-            setIsStartLessonNowModalOpen(false);
+            cb.setIsStartLessonNowModalOpen(false);
           } else if (addStudentOpen) {
-            setIsAddStudentModalOpen(false);
+            cb.setIsAddStudentModalOpen(false);
           } else if (addGroupOpen) {
-            setIsAddGroupModalOpen(false);
+            cb.setIsAddGroupModalOpen(false);
           } else if (backupOpen) {
-            setIsBackupModalOpen(false);
+            cb.setIsBackupModalOpen(false);
           } else {
             // Check for any open dialog/modal with a dedicated close button or dismiss via Escape
             const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true });
             document.dispatchEvent(escapeEvent);
 
             if (currentActiveTab !== 'home') {
-              setActiveTab('home');
+              cb.setActiveTab('home');
             } else {
-              // Double tap within 2500ms (and minimum 250ms apart to filter instantaneous synthetic bursts) to minimize
+              // Double tap within 2500ms (and minimum 400ms apart to filter instantaneous synthetic bursts) to minimize
               const delta = now - lastBackPressRef.current;
-              if (delta >= 250 && delta < 2500) {
+              if (delta >= 400 && delta < 2500) {
                 lastBackPressRef.current = 0;
                 CapacitorApp.minimizeApp().catch(() => {});
               } else {
                 lastBackPressRef.current = now;
                 Toast.show({
-                  text: language === 'ar' ? 'اضغط مرة أخرى للخروج من التطبيق' : language === 'de' ? 'Erneut tippen zum Beenden' : 'Press back again to exit',
+                  text: cb.language === 'ar' ? 'اضغط مرة أخرى للخروج من التطبيق' : cb.language === 'de' ? 'Erneut tippen zum Beenden' : 'Press back again to exit',
                   duration: 'short',
                   position: 'bottom'
                 }).catch(() => {});
@@ -402,7 +449,7 @@ function MainApp() {
         backButtonListener.then((listener) => listener.remove()).catch(() => {});
       };
     }
-  }, [dismissLessonAlarm, closeLessonControl, setActiveTab, setIsGlobalSearchOpen, setIsRecentlyDeletedModalOpen, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, setIsStartLessonNowModalOpen, setIsAddStudentModalOpen, setIsAddGroupModalOpen, setIsBackupModalOpen, language]);
+  }, []);
 
 
 

@@ -18,28 +18,34 @@ public class WidgetManagerPlugin extends Plugin {
     }
 
     private void updateAllWidgets() {
-        Class<?>[] widgetClasses = new Class<?>[] {
-            TodayLessonsWidget.class,
-            QuickActionsWidget.class,
-            CurrentLessonWidget.class,
-            PaymentsDueWidget.class,
-            TodoWidget.class,
-            RevenueWidget.class,
-            MiniDashboardWidget.class,
-            UpcomingLessonsWidget.class,
-            ContactReminderWidget.class,
-            ScheduleDayWidget.class,
-            InstallmentsPaymentsWidget.class,
-            QuickTransactionWidget.class
-        };
+        try {
+            Class<?>[] widgetClasses = new Class<?>[] {
+                TodayLessonsWidget.class,
+                QuickActionsWidget.class,
+                CurrentLessonWidget.class,
+                PaymentsDueWidget.class,
+                TodoWidget.class,
+                RevenueWidget.class,
+                MiniDashboardWidget.class,
+                UpcomingLessonsWidget.class,
+                ContactReminderWidget.class,
+                ScheduleDayWidget.class,
+                InstallmentsPaymentsWidget.class,
+                QuickTransactionWidget.class
+            };
 
-        for (Class<?> widgetClass : widgetClasses) {
-            Intent intent = new Intent(getContext(), widgetClass);
-            intent.setAction(AppWidgetManager.ACTION_APPWIDGET_UPDATE);
-            int[] ids = AppWidgetManager.getInstance(getContext())
-                    .getAppWidgetIds(new ComponentName(getContext(), widgetClass));
-            intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
-            getContext().sendBroadcast(intent);
-        }
+            for (Class<?> widgetClass : widgetClasses) {
+                try {
+                    Intent intent = new Intent(getContext(), widgetClass);
+                    intent.setAction(AppWidgetManager.ACTION_APPWIDGET_UPDATE);
+                    int[] ids = AppWidgetManager.getInstance(getContext())
+                            .getAppWidgetIds(new ComponentName(getContext(), widgetClass));
+                    if (ids != null && ids.length > 0) {
+                        intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+                        getContext().sendBroadcast(intent);
+                    }
+                } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
     }
 }
