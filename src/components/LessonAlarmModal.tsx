@@ -3,7 +3,8 @@ import { Lesson } from '../types';
 import { useApp } from '../context/AppContext';
 import { 
   BellRing, BellOff, Clock, PlayCircle, Video, MapPin, 
-  Users, User, ChevronRight, Volume2, Sparkles, AlertTriangle
+  Users, User, ChevronRight, Volume2, Sparkles, AlertTriangle,
+  Minimize2, Maximize2, ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -22,6 +23,7 @@ export const LessonAlarmModal: React.FC<LessonAlarmModalProps> = ({
 }) => {
   const { language, _t, notificationSettings } = useApp();
   const [secondsRinging, setSecondsRinging] = useState(0);
+  const [isMinimizedFloating, setIsMinimizedFloating] = useState(false);
 
   useEffect(() => {
     if (!lesson) return;
@@ -40,6 +42,74 @@ export const LessonAlarmModal: React.FC<LessonAlarmModalProps> = ({
   const durationSec = notificationSettings.alarmDurationSeconds || 60;
   const remainingSec = Math.max(0, durationSec - secondsRinging);
 
+  // Floating Mini Pill Mode (يعوم فوق الشاشات والتطبيقات)
+  if (isMinimizedFloating) {
+    return (
+      <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-[9999] animate-bounce-subtle">
+        <div className="flex items-center gap-2 p-2.5 sm:p-3 rounded-2xl bg-slate-900/95 text-white shadow-2xl border-2 border-primary backdrop-blur-md">
+          {/* Pulsing Bell */}
+          <button 
+            type="button"
+            onClick={() => setIsMinimizedFloating(false)}
+            className="p-2 rounded-xl bg-primary text-white relative animate-pulse cursor-pointer"
+            title={_t('تكبير المنبه العائم', 'Expand Floating Alarm', 'Wecker vergrößern')}
+          >
+            <BellRing className="w-5 h-5 animate-wiggle" />
+            <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping" />
+          </button>
+
+          {/* Info */}
+          <div 
+            className="cursor-pointer max-w-[150px] sm:max-w-[200px]"
+            onClick={() => setIsMinimizedFloating(false)}
+          >
+            <div className="text-[10px] font-black text-primary uppercase flex items-center gap-1">
+              <span>{_t('منبه عائم', 'Floating Alarm', 'Schwebender Wecker')}</span>
+              <span className="text-[9px] text-slate-300">({remainingSec}s)</span>
+            </div>
+            <p className="text-xs font-bold text-white truncate">{displayName}</p>
+            <p className="text-[10px] text-slate-300">🕒 {lesson.time}</p>
+          </div>
+
+          {/* Quick Actions */}
+          <div className="flex items-center gap-1.5 border-s border-slate-700 ps-2 ms-1">
+            <button
+              type="button"
+              onClick={() => onStartNow(lesson)}
+              className="px-2.5 py-1.5 rounded-lg bg-primary hover:bg-primary-hover text-white text-[11px] font-black cursor-pointer shadow-sm transition-all"
+            >
+              ▶️ {_t('بدء', 'Start', 'Start')}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSnooze(5)}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs cursor-pointer"
+              title={_t('غفوة 5 دقائق', 'Snooze 5m', '5m Schlummern')}
+            >
+              <Clock className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="p-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs cursor-pointer"
+              title={_t('إيقاف', 'Dismiss', 'Stoppen')}
+            >
+              <BellOff className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsMinimizedFloating(false)}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+              title={_t('تكبير', 'Expand', 'Vergrößern')}
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <AnimatePresence>
       <div 
@@ -55,6 +125,19 @@ export const LessonAlarmModal: React.FC<LessonAlarmModalProps> = ({
           transition={{ type: "spring", stiffness: 350, damping: 25 }}
           className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border-2 border-primary/40 dark:border-primary/50 overflow-hidden relative"
         >
+          {/* Top Floating Minimize Control Button */}
+          <div className="absolute top-3 end-3 z-20 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setIsMinimizedFloating(true)}
+              className="px-2.5 py-1 rounded-xl bg-slate-900/40 hover:bg-slate-900/60 dark:bg-slate-800/60 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all border border-white/20"
+              title={_t('تصغير لعائم فوق الشاشة', 'Float on top of screen', 'Als schwebendes Fenster minimieren')}
+            >
+              <Minimize2 className="w-3 h-3 text-primary" />
+              <span>{_t('عوم فوق التطبيق', 'Float on Top', 'Schwebend')}</span>
+            </button>
+          </div>
+
           {/* Top Pulsing Alarm Visual Header */}
           <div className="bg-linear-to-b from-primary/20 via-primary/10 to-transparent p-4 sm:p-6 pb-2 text-center relative overflow-hidden">
             {/* Animated Ringing Bell */}

@@ -241,6 +241,16 @@ export function getProjectedLessonsForRange(
     }
   });
 
-  return [...explicit, ...projected];
+  const combined = [...explicit, ...projected];
+  const seenIds = new Set<string>();
+  const uniqueLessons: Lesson[] = [];
+  for (const l of combined) {
+    if (!seenIds.has(l.id)) {
+      seenIds.add(l.id);
+      uniqueLessons.push(l);
+    }
+  }
+
+  return uniqueLessons;
 }
 

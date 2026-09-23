@@ -1,18 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { 
-  NotificationSettings, CategoryNotificationConfig, NotificationSound, NotificationPriority 
-} from '../types';
+import { NotificationSound } from '../types';
 import { 
   getNotificationPermission, requestNotificationPermission, 
   openAndroidNotificationSettings, checkExactAlarmPermission,
-  openExactAlarmSettings, sendTestOutsideNotification
+  openExactAlarmSettings, openOverlayPermissionSettings, sendTestOutsideNotification
 } from '../services/notificationService';
 import { 
   Bell, BellOff, Volume2, Shield, Clock, Calendar, DollarSign, 
-  UserCheck, FileText, RefreshCw, Trash2, CheckCircle2, AlertCircle, 
-  Smartphone, Settings, Sliders, Check, X, ArrowLeft, ArrowRight,
-  BellRing, AlarmClock, Play, Square, VolumeX, ExternalLink
+  UserCheck, RefreshCw, Trash2, ArrowLeft, ArrowRight,
+  Play, Square, Smartphone, Layers, Check, ExternalLink, ChevronDown, ChevronUp
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { alarmAudioService, AlarmTone } from '../services/alarmAudioService';
@@ -26,7 +23,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
     notificationSettings, updateNotificationSettings, 
     pendingScheduledNotifications, cancelSingleScheduledNotification,
     cancelAllPendingScheduledNotifications, rebuildNotificationSchedules,
-    language, t, _t 
+    language, _t 
   } = useApp();
 
   const isRtl = language === 'ar';
@@ -35,21 +32,18 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
   const [permissionStatus, setPermissionStatus] = useState<string>('checking');
   const [exactAlarmGranted, setExactAlarmGranted] = useState<boolean>(true);
   const [isRebuilding, setIsRebuilding] = useState<boolean>(false);
-  const [rebuildFeedback, setRebuildFeedback] = useState<string | null>(null);
-  const [customMinutesInput, setCustomMinutesInput] = useState<string>(
+  const [customMinutes, setCustomMinutes] = useState<string>(
     notificationSettings.lessonReminderMinutesBefore.toString()
   );
-  const [showCustomMinutes, setShowCustomMinutes] = useState<boolean>(
+  const [showCustomInput, setShowCustomInput] = useState<boolean>(
     ![5, 10, 15, 30, 60].includes(notificationSettings.lessonReminderMinutesBefore)
   );
-  const [isTestingAlarm, setIsTestingAlarm] = useState<boolean>(false);
-  const [countdownOutsideTest, setCountdownOutsideTest] = useState<number | null>(null);
+  const [isPlayingTest, setIsPlayingTest] = useState<boolean>(false);
+  const [showQueue, setShowQueue] = useState<boolean>(false);
 
   useEffect(() => {
     checkPermissions();
-    const unsub = alarmAudioService.onStop(() => {
-      setIsTestingAlarm(false);
-    });
+    const unsub = alarmAudioService.onStop(() => setIsPlayingTest(false));
     return () => {
       unsub();
       alarmAudioService.stopAlarm();
@@ -63,872 +57,442 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
     setExactAlarmGranted(exactStatus);
   };
 
-  const handleTestOutsideNotification = () => {
-    setCountdownOutsideTest(3);
-    let counter = 3;
-    const timer = setInterval(() => {
-      counter -= 1;
-      if (counter <= 0) {
-        clearInterval(timer);
-        setCountdownOutsideTest(null);
-        sendTestOutsideNotification();
-        alarmAudioService.startAlarm(
-          notificationSettings.alarmTone || 'digital',
-          15
-        );
-      } else {
-        setCountdownOutsideTest(counter);
-      }
-    }, 1000);
-  };
-
-  const handleToggleTestAlarm = () => {
-    if (isTestingAlarm) {
-      alarmAudioService.stopAlarm();
-      setIsTestingAlarm(false);
-    } else {
-      setIsTestingAlarm(true);
-      alarmAudioService.startAlarm(
-        notificationSettings.alarmTone || 'digital',
-        notificationSettings.alarmDurationSeconds || 60
-      );
-    }
-  };
-
-  const handleRequestPermission = async () => {
-    const granted = await requestNotificationPermission();
-    await checkPermissions();
-    if (granted) {
-      confetti({ particleCount: 40, spread: 40 });
-    }
-  };
-
   const handleToggleMaster = async () => {
-    const nextState = !notificationSettings.masterEnabled;
-    if (nextState && permissionStatus !== 'granted') {
+    const next = !notificationSettings.masterEnabled;
+    if (next && permissionStatus !== 'granted') {
       await requestNotificationPermission();
       await checkPermissions();
     }
-    await updateNotificationSettings({ masterEnabled: nextState });
+    await updateNotificationSettings({ masterEnabled: next });
   };
 
-  const handleCategoryChange = async (
-    categoryKey: keyof Pick<NotificationSettings, 'lessonReminder' | 'lessonStart' | 'paymentDue' | 'dailySummary' | 'attendanceReminder' | 'schoolLessonReminder'>,
-    updates: Partial<CategoryNotificationConfig>
-  ) => {
-    const currentCatConfig = notificationSettings[categoryKey];
-    const updatedCatConfig = { ...currentCatConfig, ...updates };
-    await updateNotificationSettings({ [categoryKey]: updatedCatConfig });
-  };
-
-  const handleReminderMinutesChange = async (mins: number) => {
-    setShowCustomMinutes(false);
-    setCustomMinutesInput(mins.toString());
-    await updateNotificationSettings({ lessonReminderMinutesBefore: mins });
-  };
-
-  const handleCustomMinutesSave = async () => {
-    const val = parseInt(customMinutesInput, 10);
-    if (!isNaN(val) && val > 0 && val <= 1440) {
-      await updateNotificationSettings({ lessonReminderMinutesBefore: val });
-      setRebuildFeedback(_t('تم حفظ توقيت التذكير المخصص', 'Custom reminder timing saved', 'Benutzerdefinierte Erinnerungszeit gespeichert'));
-      setTimeout(() => setRebuildFeedback(null), 3000);
+  const handleTestTone = () => {
+    if (isPlayingTest) {
+      alarmAudioService.stopAlarm();
+      setIsPlayingTest(false);
+    } else {
+      setIsPlayingTest(true);
+      alarmAudioService.startAlarm(notificationSettings.alarmTone || 'digital', 15);
     }
   };
 
-  const handleManualRebuild = async () => {
+  const handleRebuild = async () => {
     setIsRebuilding(true);
-    setRebuildFeedback(null);
     try {
-      const res = await rebuildNotificationSchedules();
+      await rebuildNotificationSchedules();
+      confetti({ particleCount: 30, spread: 35 });
+    } finally {
       setIsRebuilding(false);
-      setRebuildFeedback(_t(`تم إعادة بناء جدول الإشعارات بنجاح! عدد التنبيهات المجدولة: ${res.count}`, `Notification schedules rebuilt successfully! Scheduled alerts: ${res.count}`, `Benachrichtigungszeitpläne erfolgreich neu erstellt! Geplante Alarme: ${res.count}`));
-      confetti({ particleCount: 50, spread: 50 });
-      setTimeout(() => setRebuildFeedback(null), 4000);
-    } catch {
-      setIsRebuilding(false);
-      setRebuildFeedback(_t('تعذر إعادة بناء الجدول، يرجى المحاولة مرة أخرى.', 'Could not rebuild schedules, please try again.', 'Fehler beim Neuerstellen der Zeitpläne, bitte erneut versuchen.'));
     }
   };
 
-  const soundOptions: { id: NotificationSound; label: string }[] = [
-    { id: 'default', label: _t('افتراضي النظام', 'System Default', 'Systemstandard') },
-    { id: 'beep', label: _t('صفارة قصيرة (Beep)', 'Short Beep', 'Kurzer Piepton') },
-    { id: 'chime', label: _t('جرس هادئ (Chime)', 'Gentle Chime', 'Sanfter Klingelton') },
-    { id: 'bell', label: _t('جرس كلاسيكي (Bell)', 'Classic Bell', 'Klassische Glocke') },
-    { id: 'gentle', label: _t('نغمة لطيفة (Gentle)', 'Gentle Melody', 'Sanfte Melodie') },
+  const timingOptions = [5, 10, 15, 30, 60];
+  const tones: { id: AlarmTone; label: string }[] = [
+    { id: 'digital', label: _t('رقمي', 'Digital', 'Digital') },
+    { id: 'loud_bell', label: _t('جرس', 'Bell', 'Glocke') },
+    { id: 'radar', label: _t('رادار', 'Radar', 'Radar') },
+    { id: 'gentle_chime', label: _t('هادئ', 'Gentle', 'Sanft') },
   ];
-
-  const priorityOptions: { id: NotificationPriority; label: string; desc: string }[] = [
-    { id: 'low', label: _t('منخفضة', 'Low', 'Niedrig'), desc: _t('بدون صوت أو اهتزاز في شريط التنبيهات', 'No sound or vibration in notification bar', 'Ohne Ton oder Vibration') },
-    { id: 'normal', label: _t('عادية', 'Normal', 'Normal'), desc: _t('تظهر في شريط التنبيهات بصوت افتراضي', 'Shows in notification bar with default sound', 'In Benachrichtigungsleiste mit Standardton') },
-    { id: 'high', label: _t('عالية', 'High', 'Hoch'), desc: _t('تنبيه منبثق أعلى الشاشة (Heads-up) مع صوت', 'Heads-up pop-up alert with sound', 'Pop-up-Banner mit Ton') },
-    { id: 'max', label: _t('قصوى (إلحاح شديد)', 'Urgent (Max)', 'Dringend (Max)'), desc: _t('تنبيه بارز جداً لا يختفي بسهولة', 'Very prominent alert that persists', 'Sehr auffälliger Alarm') },
-  ];
-
-  const nextScheduledItem = pendingScheduledNotifications.length > 0 ? pendingScheduledNotifications[0] : null;
 
   return (
-    <div className="space-y-4  animate-fadeIn">
-      {/* Top Navigation Header */}
-      <div className="pb-3.5 mb-5 border-b border-surface-border/80 dark:border-surface-border">
-        <div className="flex items-center justify-between gap-3 min-w-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <button
-              type="button"
-              onClick={onBack}
-              className="lg:hidden p-2 rounded-xl bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main hover:text-primary transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-2xs border border-surface-border/60 active:scale-95"
-              title={_t('العودة للإعدادات', 'Back to Settings', 'العودة للإعدادات')}
-            >
-              <BackIcon className="w-4 h-4" />
-            </button>
-
-            <div className="p-2 rounded-xl bg-primary-soft text-primary dark:text-primary border border-primary-border/50 shrink-0">
-              <Bell className="w-4.5 h-4.5" />
-            </div>
-
-            <h2 className="text-base sm:text-lg font-black text-text-main truncate">
-              {_t('إعدادات الإشعارات والتنبيهات', 'Notification & Alert Settings', 'Benachrichtigungseinstellungen')}
-            </h2>
-          </div>
-
+    <div className="space-y-3.5 max-w-3xl mx-auto pb-8 text-xs select-none">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-surface-border">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={handleManualRebuild}
+            onClick={onBack}
+            className="lg:hidden p-1.5 rounded-lg bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main border border-surface-border cursor-pointer"
+          >
+            <BackIcon className="w-4 h-4" />
+          </button>
+          <div className="flex items-center gap-1.5 font-bold text-sm text-text-main">
+            <Bell className="w-4 h-4 text-primary" />
+            <span>{_t('إعدادات الإشعارات والتنبيهات', 'Notification Settings', 'Benachrichtigungen')}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleRebuild}
             disabled={isRebuilding}
-            className="px-3 py-2 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary dark:text-primary text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+            className="px-2.5 py-1 rounded-lg bg-surface hover:bg-surface-hover text-text-main border border-surface-border font-medium flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            title={_t('إعادة جدولة كل التنبيهات', 'Sync All Alarms', 'Synchronisieren')}
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRebuilding ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">{_t('تحديث الجدول', 'Sync Schedule', 'Zeitplan synchronisieren')}</span>
-          </button>
-        </div>
-
-        <p className="text-xs text-text-muted mt-1.5 leading-relaxed">
-          {_t('تخصيص جميع إشعارات النظام، مواعيد التذكير بالححص، وتصريحات Android', 'Customize all system notifications, lesson reminders, and device permissions', 'Systembenachrichtigungen, Lektionserinnerungen und Geräteeinstellungen anpassen')}
-        </p>
-      </div>
-
-      {/* Notification Rebuild Feedback Toast */}
-      {rebuildFeedback && (
-        <div className="p-3.5 rounded-2xl bg-primary/10 border border-primary-border dark:border-primary-border text-primary dark:text-primary text-xs font-semibold flex items-center justify-between animate-slideUp">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
-            <span>{rebuildFeedback}</span>
-          </div>
-          <button onClick={() => setRebuildFeedback(null)} className="p-1 hover:bg-primary/20 rounded-lg">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Android System Permission Banner */}
-      <div className="p-4 rounded-2xl bg-background/60 border border-surface-border/80 dark:border-surface-border space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl ${
-              permissionStatus === 'granted' 
-                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' 
-                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-            }`}>
-              <Smartphone className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
-                {_t('حالة إذن إشعارات النظام (خارج البرنامج)', 'System Notification Permission (Background)', 'Systembenachrichtigungs-Berechtigung')}
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                  permissionStatus === 'granted'
-                    ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                    : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
-                }`}>
-                  {permissionStatus === 'granted' ? _t('مسموح بها ✓ (تظهر خارج البرنامج)', 'Allowed ✓ (Active outside app)', 'Erlaubt ✓') : permissionStatus === 'denied' ? _t('محظورة ✕', 'Blocked ✕', 'Blockiert ✕') : _t('يتطلب الإذن', 'Permission Required', 'Erforderlich')}
-                </span>
-              </h3>
-              <p className="text-xs text-text-muted mt-0.5">
-                {permissionStatus === 'granted'
-                  ? _t('صلاحيات الإشعارات مفعلة ومصرح لها بالظهور خارج التطبيق، أعلى الشاشة (Heads-Up) وعلى شاشة القفل.', 'Notification permissions are granted and authorized to show outside the app as heads-up banners and lock screen alerts.', 'Benachrichtigungen sind aktiv und erscheinen außerhalb der App.')
-                  : _t('الإشعارات غير مفعلة في النظام حالياً. اضغط على الزر لمنح الإذن كي تظهر التنبيهات خارج البرنامج.', 'Notifications are currently disabled in system settings. Click the button to grant permissions for background alerts.', 'Benachrichtigungen sind im System deaktiviert. Bitte Berechtigung erteilen.')}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {permissionStatus !== 'granted' && (
-              <button
-                type="button"
-                onClick={handleRequestPermission}
-                className="px-3.5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all cursor-pointer shadow-2xs"
-              >
-                {_t('تفعيل الإذن الآن', 'Enable Permission Now', 'Jetzt aktivieren')}
-              </button>
-            )}
-            {!exactAlarmGranted && (
-              <button
-                type="button"
-                onClick={openExactAlarmSettings}
-                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
-              >
-                <AlarmClock className="w-3.5 h-3.5" />
-                {_t('إذن المنبهات الدقيقة (Android)', 'Exact Alarm Permission (Android)', 'Genaue Alarme (Android)')}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={openAndroidNotificationSettings}
-              className="px-3.5 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-text-main text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
-            >
-              <Settings className="w-3.5 h-3.5" />
-              {_t('إعدادات التطبيق في Android', 'Android App Settings', 'Android App-Einstellungen')}
-            </button>
-          </div>
-        </div>
-
-        {/* Heads-up outside the app info */}
-        <div className="pt-2 border-t border-surface-border/60 flex items-center justify-between text-xs text-text-muted">
-          <span className="flex items-center gap-1.5">
-            <Smartphone className="w-3.5 h-3.5 text-primary" />
-            <span>{_t('الظهور كإشعار منبثق فوق الشاشة وقفل الهاتف:', 'Banner display & Lockscreen alerts:', 'Banner-Anzeige & Sperrbildschirm:')}</span>
-            <strong className="text-emerald-500 font-bold">{_t('مُفعل بأعلى أولوية (Heads-Up Banner)', 'Enabled with Max Priority (Heads-Up)', 'Mit maximaler Priorität aktiviert')}</strong>
-          </span>
-          <button
-            type="button"
-            onClick={openExactAlarmSettings}
-            className="text-[11px] text-primary hover:underline flex items-center gap-1 cursor-pointer"
-          >
-            <span>{_t('ضبط المنبهات في النظام', 'Configure System Alarms', 'Systemalarme konfigurieren')}</span>
-            <ExternalLink className="w-3 h-3" />
+            <RefreshCw className={`w-3 h-3 text-primary ${isRebuilding ? 'animate-spin' : ''}`} />
+            <span>{_t('مزامنة', 'Sync', 'Sync')}</span>
           </button>
         </div>
       </div>
 
-      {/* Next Scheduled Notification Highlight Card */}
-      {nextScheduledItem && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-primary/10 via-primary/10 to-transparent border border-primary-border dark:border-primary-border flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-primary/20 text-primary dark:text-primary shrink-0">
-              <Clock className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <span className="text-[10px] font-black uppercase tracking-wider text-primary dark:text-primary">
-                {_t('التنبيه القادم المجدول', 'Next Scheduled Alert', 'Nächster geplanter Alarm')}
-              </span>
-              <h4 className="text-sm font-bold text-text-main">
-                {nextScheduledItem.title}
-              </h4>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                {nextScheduledItem.body}
-              </p>
-            </div>
+      {/* Master Toggle Bar */}
+      <div className="flex items-center justify-between p-3 rounded-xl bg-surface border border-surface-border shadow-2xs">
+        <div className="flex items-center gap-2.5">
+          <div className={`p-1.5 rounded-lg ${notificationSettings.masterEnabled ? 'bg-primary/10 text-primary' : 'bg-surface-hover text-text-muted'}`}>
+            {notificationSettings.masterEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
           </div>
-
-          <div className="text-right dir-ltr">
-            <span className="inline-block px-3 py-1 rounded-lg bg-surface/80 dark:bg-surface/80 border border-surface-border text-xs font-black text-primary dark:text-primary">
-              🕒 {nextScheduledItem.scheduledAt}
+          <div>
+            <span className="font-bold text-text-main text-xs block">
+              {_t('تفعيل التنبيهات والمنبهات', 'Enable Notifications & Alarms', 'Benachrichtigungen aktivieren')}
+            </span>
+            <span className="text-[11px] text-text-muted">
+              {notificationSettings.masterEnabled ? _t('نشط حالياً', 'Currently active', 'Aktiv') : _t('معطل بالكامل', 'Disabled', 'Deaktiviert')}
             </span>
           </div>
-        </div>
-      )}
-
-      {/* 1. Master Control Toggle Card */}
-      <div className="p-5 rounded-2xl bg-slate-900 text-white dark:bg-slate-800/90 shadow-md flex items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            {notificationSettings.masterEnabled ? (
-              <Bell className="w-5 h-5 text-primary" />
-            ) : (
-              <BellOff className="w-5 h-5 text-text-muted/70" />
-            )}
-            <h3 className="text-base font-black">
-              {_t('المفتاح الرئيسي للتنبيهات (Master Switch)', 'Master Notification Switch', 'Hauptschalter für Benachrichtigungen')}
-            </h3>
-          </div>
-          <p className="text-xs text-slate-300">
-            {_t('عند إيقاف هذا المفتاح، سيتم تعطيل وإلغاء جدولة جميع التنبيهات في التطبيق ونظام Android فوراً.', 'When disabled, all scheduled alerts in the app and Android system will be immediately deactivated.', 'Wenn deaktiviert, werden alle geplanten Benachrichtigungen im System deaktiviert.')}
-          </p>
         </div>
 
         <button
           type="button"
           onClick={handleToggleMaster}
-          className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-            notificationSettings.masterEnabled ? 'bg-primary' : 'bg-slate-700'
+          className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+            notificationSettings.masterEnabled ? 'bg-primary' : 'bg-slate-300 dark:bg-slate-700'
           }`}
         >
           <span
-            className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-surface shadow-lg ring-0 transition duration-200 ease-in-out ${
-              notificationSettings.masterEnabled ? 'translate-x-5' : 'translate-x-0'
+            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+              notificationSettings.masterEnabled ? 'ltr:translate-x-5 rtl:-translate-x-5' : 'translate-x-0'
             }`}
           />
         </button>
       </div>
 
-      {/* Main Settings Sections Grid (Disabled style if master is OFF) */}
-      <div className={`space-y-4 transition-all ${!notificationSettings.masterEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
+      <div className={`space-y-3 ${!notificationSettings.masterEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
         
-        {/* 2. REMINDER TIMING CONTROLS */}
-        <div className="p-5 rounded-2xl bg-surface border border-surface-border/80 dark:border-surface-border space-y-4 shadow-2xs">
-          <div>
-            <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
-              <Clock className="w-4 h-4 text-primary" />
-              {_t('توقيت التذكير المسبق بالحصة', 'Pre-Lesson Reminder Timing', 'Erinnerungszeit vor der Lektion')}
-            </h3>
-            <p className="text-xs text-text-muted mt-0.5">
-              {_t('حدد الوقت الذي تريد إرسال التنبيه فيه قبل موعد بدء الحصّة المجدولة.', 'Specify how many minutes before the scheduled lesson you want to be alerted.', 'Wählen Sie den Zeitpunkt vor Beginn der geplanten Lektion.')}
-            </p>
-          </div>
+        {/* Section 1: Pre-Lesson Timing & Alarm Options */}
+        <div className="p-3 rounded-xl bg-surface border border-surface-border space-y-3 shadow-2xs">
+          {/* Timing Chips */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <span className="font-bold text-text-main flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-primary" />
+              <span>{_t('وقت التنبيه المسبق للحصة:', 'Pre-Lesson Reminder:', 'Erinnerung vor Stunde:')}</span>
+            </span>
 
-          <div className="flex flex-wrap gap-2">
-            {[5, 10, 15, 30, 60].map(mins => {
-              const isActive = !showCustomMinutes && notificationSettings.lessonReminderMinutesBefore === mins;
-              return (
-                <button
-                  key={mins}
-                  type="button"
-                  onClick={() => handleReminderMinutesChange(mins)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-primary text-white shadow-xs'
-                      : 'bg-surface-hover text-text-main hover:bg-slate-200 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  {_t(`قبل ${mins} دقائق`, `${mins} mins before`, `${mins} Min. vorher`)}
-                </button>
-              );
-            })}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {timingOptions.map(m => {
+                const isSelected = !showCustomInput && notificationSettings.lessonReminderMinutesBefore === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => {
+                      setShowCustomInput(false);
+                      setCustomMinutes(m.toString());
+                      updateNotificationSettings({ lessonReminderMinutesBefore: m });
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
+                      isSelected
+                        ? 'bg-primary text-white shadow-2xs font-bold'
+                        : 'bg-surface-hover text-text-muted hover:text-text-main border border-surface-border'
+                    }`}
+                  >
+                    {_t(`${m} د`, `${m}m`, `${m}m`)}
+                  </button>
+                );
+              })}
 
-            <button
-              type="button"
-              onClick={() => setShowCustomMinutes(true)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                showCustomMinutes
-                  ? 'bg-primary text-white shadow-xs'
-                  : 'bg-surface-hover text-text-main hover:bg-slate-200 dark:hover:bg-slate-700'
-              }`}
-            >
-              {_t('قيمة مخصصة', 'Custom', 'Benutzerdefiniert')}
-            </button>
-          </div>
-
-          {showCustomMinutes && (
-            <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-surface-border max-w-xs animate-fadeIn">
-              <input
-                type="number"
-                min="1"
-                max="1440"
-                value={customMinutesInput}
-                onChange={e => setCustomMinutesInput(e.target.value)}
-                placeholder={_t('أدخل عدد الدقائق...', 'Enter minutes...', 'Minuten eingeben...')}
-                className="w-full px-3 py-2 rounded-xl bg-surface-hover border border-surface-border dark:border-surface-border-soft text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary"
-              />
               <button
                 type="button"
-                onClick={handleCustomMinutesSave}
-                className="px-3 py-2 rounded-xl bg-primary hover:bg-primary text-white text-xs font-bold shrink-0 cursor-pointer shadow-2xs"
+                onClick={() => setShowCustomInput(true)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
+                  showCustomInput
+                    ? 'bg-primary text-white shadow-2xs font-bold'
+                    : 'bg-surface-hover text-text-muted hover:text-text-main border border-surface-border'
+                }`}
               >
-                {_t('حفظ', 'Save', 'Speichern')}
+                {_t('مخصص', 'Custom', 'Eigener')}
+              </button>
+
+              {showCustomInput && (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="720"
+                    value={customMinutes}
+                    onChange={e => setCustomMinutes(e.target.value)}
+                    onBlur={() => {
+                      const v = parseInt(customMinutes, 10);
+                      if (v > 0) updateNotificationSettings({ lessonReminderMinutesBefore: v });
+                    }}
+                    className="w-14 px-1.5 py-1 text-center rounded-lg bg-surface-hover border border-surface-border font-mono font-bold text-text-main"
+                  />
+                  <span className="text-[10px] text-text-muted">{_t('دقيقة', 'min', 'Min')}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Alarm Mode & Tone Selection */}
+          <div className="pt-2.5 border-t border-surface-border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center justify-between sm:justify-start gap-3">
+              <span className="font-bold text-text-main">
+                {_t('وضع المنبه المستمر (Alarm)', 'Continuous Alarm', 'Dauerhafter Wecker')}
+              </span>
+              <button
+                type="button"
+                onClick={() => updateNotificationSettings({ alarmModeEnabled: notificationSettings.alarmModeEnabled === false ? true : false })}
+                className={`relative inline-flex h-4 w-8 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                  notificationSettings.alarmModeEnabled !== false ? 'bg-primary' : 'bg-slate-300 dark:bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${
+                    notificationSettings.alarmModeEnabled !== false ? 'ltr:translate-x-4 rtl:-translate-x-4' : 'translate-x-0'
+                  }`}
+                />
               </button>
             </div>
-          )}
+
+            {/* Tone selector */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {tones.map(tone => {
+                const isSelected = (notificationSettings.alarmTone || 'digital') === tone.id;
+                return (
+                  <button
+                    key={tone.id}
+                    type="button"
+                    onClick={() => updateNotificationSettings({ alarmTone: tone.id })}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-semibold cursor-pointer transition-all ${
+                      isSelected
+                        ? 'bg-primary/15 text-primary border border-primary/40 font-bold'
+                        : 'bg-surface-hover text-text-muted hover:text-text-main border border-surface-border'
+                    }`}
+                  >
+                    {tone.label}
+                  </button>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={handleTestTone}
+                className={`p-1 rounded-md text-white font-bold cursor-pointer transition-all flex items-center justify-center ${
+                  isPlayingTest ? 'bg-rose-500 animate-pulse' : 'bg-primary hover:bg-primary-hover'
+                }`}
+                title={_t('تجربة الصوت', 'Test Tone', 'Ton testen')}
+              >
+                {isPlayingTest ? <Square className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* CONTINUOUS ALARM MODE (وضع المنبه المستمر للحصص) */}
-        <div className="p-5 rounded-2xl bg-surface border-2 border-primary/20 dark:border-primary/30 space-y-4 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-black text-text-main flex items-center gap-2">
-                  <AlarmClock className="w-5 h-5 text-primary" />
-                  <span>{_t('وضع المنبه المستمر للتذكير بالحصص', 'Continuous Alarm Mode', 'Dauerhafter Lektions-Wecker')}</span>
-                </h3>
-                <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider">
-                  {_t('منبه حقيقي', 'Real Alarm', 'Echter Wecker')}
-                </span>
-              </div>
-              <p className="text-xs text-text-muted leading-relaxed">
-                {_t(
-                  'عند تفعيله، يرن التنبيه قبل موعد الحصة بصوت متواصل واهتزاز مثل منبه الهاتف الحقيقي تماماً حتى تقوم بإيقافه أو طلب غفوة، لتفادي تفويت الحصة.',
-                  'When enabled, the pre-lesson alert rings continuously with vibration like a real alarm clock until dismissed or snoozed.',
-                  'Läutet vor Lektionsbeginn durchgehend mit Vibration wie ein echter Wecker, bis er gestoppt oder geschlummert wird.'
-                )}
-              </p>
+        {/* Section 2: Clean Category Toggles */}
+        <div className="p-3 rounded-xl bg-surface border border-surface-border divide-y divide-surface-border shadow-2xs">
+          {/* Private Lessons */}
+          <div className="py-2 first:pt-0 last:pb-0 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span className="font-semibold text-text-main">
+                {_t('تنبيه الحصص الخاصة', 'Private Lesson Reminder', 'Private Lektionen')}
+              </span>
             </div>
-
-            <button
-              type="button"
-              onClick={() => updateNotificationSettings({ alarmModeEnabled: notificationSettings.alarmModeEnabled === false ? true : false })}
-              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                notificationSettings.alarmModeEnabled !== false ? 'bg-primary' : 'bg-slate-300 dark:bg-slate-700'
-              }`}
-            >
-              <span
-                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-surface shadow ring-0 transition duration-200 ease-in-out ${
-                  notificationSettings.alarmModeEnabled !== false ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
-            </button>
+            <input
+              type="checkbox"
+              checked={notificationSettings.lessonReminder?.enabled ?? true}
+              onChange={e => updateNotificationSettings({ lessonReminder: { ...notificationSettings.lessonReminder, enabled: e.target.checked } })}
+              className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+            />
           </div>
 
-          {notificationSettings.alarmModeEnabled !== false && (
-            <div className="pt-3 border-t border-surface-border/60 space-y-4 animate-in fade-in duration-200">
-              {/* Tone Selection */}
-              <div>
-                <label className="text-xs font-bold text-text-main flex items-center gap-1.5 mb-2">
-                  <Volume2 className="w-3.5 h-3.5 text-primary" />
-                  <span>{_t('نغمة وصوت المنبه', 'Alarm Tone', 'Weckerton')}</span>
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {[
-                    { id: 'digital', label: _t('منبه رقمي (Beep)', 'Digital Alarm', 'Digital-Wecker') },
-                    { id: 'loud_bell', label: _t('جرس قوي', 'Loud Bell', 'Laute Glocke') },
-                    { id: 'radar', label: _t('إنذار رادار', 'Radar Alert', 'Radar-Signal') },
-                    { id: 'gentle_chime', label: _t('نغمة هادئة', 'Gentle Chime', 'Sanfter Gong') }
-                  ].map(toneItem => {
-                    const isSelected = (notificationSettings.alarmTone || 'digital') === toneItem.id;
-                    return (
-                      <button
-                        key={toneItem.id}
-                        type="button"
-                        onClick={() => updateNotificationSettings({ alarmTone: toneItem.id as AlarmTone })}
-                        className={`p-2.5 rounded-xl border text-xs font-bold text-center transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-primary/10 border-primary text-primary shadow-xs font-black'
-                            : 'bg-surface-hover/70 border-surface-border text-text-muted hover:bg-surface-hover'
-                        }`}
-                      >
-                        {toneItem.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Duration Selection */}
-              <div>
-                <label className="text-xs font-bold text-text-main flex items-center gap-1.5 mb-2">
-                  <Clock className="w-3.5 h-3.5 text-primary" />
-                  <span>{_t('مدة رنين المنبه المستمر', 'Alarm Duration', 'Weckdauer')}</span>
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { sec: 30, label: _t('30 ثانية', '30 seconds', '30 Sekunden') },
-                    { sec: 60, label: _t('دقيقة واحدة (مستحسن)', '1 minute (Recommended)', '1 Minute (Empfohlen)') },
-                    { sec: 120, label: _t('دقيقتان', '2 minutes', '2 Minuten') }
-                  ].map(dur => {
-                    const isSelected = (notificationSettings.alarmDurationSeconds || 60) === dur.sec;
-                    return (
-                      <button
-                        key={dur.sec}
-                        type="button"
-                        onClick={() => updateNotificationSettings({ alarmDurationSeconds: dur.sec })}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-primary text-white shadow-xs'
-                            : 'bg-surface-hover text-text-main hover:bg-slate-200 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        {dur.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Test Alarm Ringing Button */}
-              <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-surface-hover/40 p-3 rounded-xl border border-surface-border/50">
-                <div className="text-xs text-text-muted flex items-center gap-2">
-                  <BellRing className={`w-4 h-4 ${isTestingAlarm ? 'text-rose-500 animate-wiggle' : 'text-primary'}`} />
-                  <span>
-                    {isTestingAlarm
-                      ? _t('المنبه يرن الآن بصوت متواصل...', 'Alarm is ringing continuously now...', 'Wecker klingelt jetzt...')
-                      : _t('جرّب سماع المنبه وقوته للتأكد من ملاءمته لك', 'Preview the continuous alarm sound & volume', 'Weckerton probehören')}
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleToggleTestAlarm}
-                  className={`px-4 py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95 ${
-                    isTestingAlarm
-                      ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-md shadow-rose-500/25 animate-pulse'
-                      : 'bg-primary hover:bg-primary-hover text-white shadow-xs'
-                  }`}
-                >
-                  {isTestingAlarm ? (
-                    <>
-                      <Square className="w-3.5 h-3.5 fill-current" />
-                      <span>{_t('إيقاف تجربة المنبه', 'Stop Preview', 'Stoppen')}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>{_t('تجربة صوت المنبه', 'Test Alarm Ringing', 'Wecker testen')}</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {/* Test Outside The App Notification Button */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/20 p-3.5 rounded-xl">
-                <div className="text-xs text-text-main flex items-start sm:items-center gap-2">
-                  <Smartphone className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
-                  <div>
-                    <span className="font-bold block text-text-main">
-                      {_t('تجربة ظهور المنبه كإشعار خارجي (خارج البرنامج)', 'Test Alarm Outside App (Heads-Up)', 'Außerhalb der App testen')}
-                    </span>
-                    <span className="text-[11px] text-text-muted">
-                      {countdownOutsideTest !== null
-                        ? _t(`⏳ قم بتصغير التطبيق أو قفل الهاتف الآن! سيظهر المنبه بعد (${countdownOutsideTest}) ثوانٍ...`, `⏳ Minimize or lock phone now! Alarm in (${countdownOutsideTest})s...`, `⏳ App minimieren oder sperren! Alarm in (${countdownOutsideTest})s...`)
-                        : _t('يمنحك مهلة 3 ثوانٍ لتصغير التطبيق أو قفل الشاشة لمشاهدة ظهور المنبه فوق كل التطبيقات مع أزرار التحكم.', 'Gives you 3 seconds to minimize or lock device to see heads-up notification outside app.', 'Gibt 3 Sekunden Zeit zum Minimieren.')}
-                    </span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleTestOutsideNotification}
-                  disabled={countdownOutsideTest !== null}
-                  className={`px-4 py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0 ${
-                    countdownOutsideTest !== null
-                      ? 'bg-amber-500 text-white animate-pulse'
-                      : 'bg-amber-500 hover:bg-amber-600 text-white shadow-xs'
-                  }`}
-                >
-                  <Smartphone className="w-3.5 h-3.5" />
-                  <span>
-                    {countdownOutsideTest !== null
-                      ? _t(`⏳ انتظر (${countdownOutsideTest}) ثوانٍ...`, `⏳ Wait (${countdownOutsideTest})s...`, `⏳ Warten (${countdownOutsideTest})s...`)
-                      : _t('اختبر الظهور بالخارج الآن', 'Test Outside Now', 'Jetzt testen')}
-                  </span>
-                </button>
-              </div>
+          {/* School Lessons */}
+          <div className="py-2 first:pt-0 last:pb-0 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span className="font-semibold text-text-main">
+                {_t('تنبيه حصص المدرسة (قبل 5 دقائق)', 'School Lessons Alert (5m)', 'Schulstunden (5m)')}
+              </span>
             </div>
-          )}
-        </div>
-
-        {/* 3. DAILY SUMMARY CONTROLS */}
-        <div className="p-5 rounded-2xl bg-surface border border-surface-border/80 dark:border-surface-border space-y-4 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-primary" />
-                {_t('تنبيهات الملخص اليومي للمعلم (Daily Summary)', 'Daily Summary Notifications', 'Tägliche Zusammenfassung')}
-              </h3>
-              <p className="text-xs text-text-muted mt-0.5">
-                {_t('إرسال تقرير إشعار يومي ملخص لجدول اليوم، الحصص، والمستحقات المتبقية.', 'Send a daily summary notification of today’s schedule, lessons, and pending payments.', 'Täglicher zusammenfassender Bericht über heutigen Stundenplan und offene Zahlungen.')}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => handleCategoryChange('dailySummary', { enabled: !notificationSettings.dailySummary.enabled })}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                notificationSettings.dailySummary.enabled ? 'bg-primary' : 'bg-slate-300 dark:bg-slate-700'
-              }`}
-            >
-              <span
-                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-surface shadow ring-0 transition duration-200 ease-in-out ${
-                  notificationSettings.dailySummary.enabled ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
-            </button>
+            <input
+              type="checkbox"
+              checked={notificationSettings.schoolLessonReminder?.enabled ?? true}
+              onChange={e => updateNotificationSettings({ schoolLessonReminder: { ...notificationSettings.schoolLessonReminder, enabled: e.target.checked } })}
+              className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+            />
           </div>
 
-          {notificationSettings.dailySummary.enabled && (
-            <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-surface-border animate-fadeIn">
-              <div className="flex items-center justify-between max-w-sm">
-                <label className="text-xs font-bold text-text-main">
-                  {_t('وقت إرسال الملخص اليومي:', 'Daily summary dispatch time:', 'Uhrzeit für Zusammenfassung:')}
-                </label>
+          {/* Lesson Start */}
+          <div className="py-2 first:pt-0 last:pb-0 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Bell className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span className="font-semibold text-text-main">
+                {_t('تنبيه بدء الحصة في موعدها', 'Lesson Start Alert', 'Lektionsbeginn')}
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={notificationSettings.lessonStart?.enabled ?? true}
+              onChange={e => updateNotificationSettings({ lessonStart: { ...notificationSettings.lessonStart, enabled: e.target.checked } })}
+              className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+            />
+          </div>
+
+          {/* Payments */}
+          <div className="py-2 first:pt-0 last:pb-0 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <DollarSign className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span className="font-semibold text-text-main">
+                {_t('تنبيهات المدفوعات والاشتراكات', 'Payment Reminders', 'Zahlungserinnerungen')}
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={notificationSettings.paymentDue?.enabled ?? true}
+              onChange={e => updateNotificationSettings({ paymentDue: { ...notificationSettings.paymentDue, enabled: e.target.checked } })}
+              className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+            />
+          </div>
+
+          {/* Attendance */}
+          <div className="py-2 first:pt-0 last:pb-0 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <UserCheck className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span className="font-semibold text-text-main">
+                {_t('تذكير تسجيل الحضور والغياب', 'Attendance Follow-up', 'Anwesenheitserfassung')}
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={notificationSettings.attendanceReminder?.enabled ?? true}
+              onChange={e => updateNotificationSettings({ attendanceReminder: { ...notificationSettings.attendanceReminder, enabled: e.target.checked } })}
+              className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+            />
+          </div>
+
+          {/* Daily Summary */}
+          <div className="py-2 first:pt-0 last:pb-0 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span className="font-semibold text-text-main">
+                {_t('الملخص اليومي الصباحي', 'Daily Summary Report', 'Tägliche Zusammenfassung')}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {notificationSettings.dailySummary?.enabled && (
                 <input
                   type="time"
-                  value={notificationSettings.dailySummaryTime}
+                  value={notificationSettings.dailySummaryTime || '07:30'}
                   onChange={e => updateNotificationSettings({ dailySummaryTime: e.target.value })}
-                  className="px-3 py-1.5 rounded-xl bg-surface-hover border border-surface-border dark:border-surface-border-soft text-xs font-bold text-text-main"
+                  className="px-1.5 py-0.5 rounded bg-surface-hover border border-surface-border text-[11px] font-mono font-bold text-text-main"
                 />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-text-main block">
-                  {_t('محتويات الملخص اليومي:', 'Daily summary contents:', 'Inhalte der Zusammenfassung:')}
-                </label>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <label className="flex items-center gap-2 p-2.5 rounded-xl bg-surface-hover/60 border border-surface-border/60 dark:border-surface-border-soft/60 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={notificationSettings.dailySummaryIncludeLessons}
-                      onChange={e => updateNotificationSettings({ dailySummaryIncludeLessons: e.target.checked })}
-                      className="rounded text-primary focus:ring-primary w-4 h-4"
-                    />
-                    <span>{_t('حصص اليوم', 'Today’s Lessons', 'Heutige Lektionen')}</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 p-2.5 rounded-xl bg-surface-hover/60 border border-surface-border/60 dark:border-surface-border-soft/60 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={notificationSettings.dailySummaryIncludeIncome}
-                      onChange={e => updateNotificationSettings({ dailySummaryIncludeIncome: e.target.checked })}
-                      className="rounded text-primary focus:ring-primary w-4 h-4"
-                    />
-                    <span>{_t('الإيراد المتوقع', 'Expected Income', 'Erwartetes Einkommen')}</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 p-2.5 rounded-xl bg-surface-hover/60 border border-surface-border/60 dark:border-surface-border-soft/60 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={notificationSettings.dailySummaryIncludePendingPayments}
-                      onChange={e => updateNotificationSettings({ dailySummaryIncludePendingPayments: e.target.checked })}
-                      className="rounded text-primary focus:ring-primary w-4 h-4"
-                    />
-                    <span>{_t('المدفوعات المعلقة', 'Pending Payments', 'Offene Zahlungen')}</span>
-                  </label>
-                </div>
-              </div>
+              )}
+              <input
+                type="checkbox"
+                checked={notificationSettings.dailySummary?.enabled ?? false}
+                onChange={e => updateNotificationSettings({ dailySummary: { ...notificationSettings.dailySummary, enabled: e.target.checked } })}
+                className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+              />
             </div>
-          )}
-        </div>
-
-        {/* 4. NOTIFICATION CATEGORIES LIST */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
-            <Sliders className="w-4 h-4 text-primary" />
-            {_t('فئات الإشعارات وإعدادات الصوت والأولوية', 'Notification Categories & Alert Priorities', 'Benachrichtigungskategorien & Prioritäten')}
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Category 1: Lesson Reminder */}
-            <CategoryCard
-              title={_t('تنبيهات التذكير بالحصص', 'Lesson Reminder Alerts', 'Lektionserinnerung')}
-              description={_t('إرسال تذكير مسبق للمعلم ببدء الحصّة القادمة.', 'Send pre-lesson alert to the teacher before lesson begins.', 'Vorwarnung vor Beginn der nächsten Lektion.')}
-              icon={Clock}
-              iconColor="text-primary bg-primary/10"
-              config={notificationSettings.lessonReminder}
-              onChange={updates => handleCategoryChange('lessonReminder', updates)}
-              soundOptions={soundOptions}
-              priorityOptions={priorityOptions}
-              soundLabel={_t('صوت النغمة:', 'Tone:', 'Klingelton:')}
-              priorityLabel={_t('مستوى الأولوية:', 'Priority:', 'Priorität:')}
-            />
-
-            {/* Category 2: Lesson Start */}
-            <CategoryCard
-              title={_t('تنبيهات بدء الحصّة الآن', 'Lesson Starting Now Alerts', 'Lektionsbeginn-Alarm')}
-              description={_t('إشعار بارز في الموعد المحدد للحصة مباشرة.', 'Prominent notification right at the scheduled start time.', 'Benachrichtigung direkt zum Lektionsbeginn.')}
-              icon={Bell}
-              iconColor="text-primary bg-primary/10"
-              config={notificationSettings.lessonStart}
-              onChange={updates => handleCategoryChange('lessonStart', updates)}
-              soundOptions={soundOptions}
-              priorityOptions={priorityOptions}
-              soundLabel={_t('صوت النغمة:', 'Tone:', 'Klingelton:')}
-              priorityLabel={_t('مستوى الأولوية:', 'Priority:', 'Priorität:')}
-            />
-
-            {/* Category 3: Payment Due */}
-            <CategoryCard
-              title={_t('تنبيهات المستحقات والاشتراكات', 'Payment & Due Alerts', 'Fälligkeitserinnerungen')}
-              description={_t('تذكير بالطلاب المعلقة مدفوعاتهم وتجديدات الحزم.', 'Reminders for pending student dues and renewals.', 'Erinnerung an ausstehende Zahlungen und Verlängerungen.')}
-              icon={DollarSign}
-              iconColor="text-primary bg-primary/10"
-              config={notificationSettings.paymentDue}
-              onChange={updates => handleCategoryChange('paymentDue', updates)}
-              soundOptions={soundOptions}
-              priorityOptions={priorityOptions}
-              soundLabel={_t('صوت النغمة:', 'Tone:', 'Klingelton:')}
-              priorityLabel={_t('مستوى الأولوية:', 'Priority:', 'Priorität:')}
-            />
-
-            {/* Category 4: Attendance Reminder */}
-            <CategoryCard
-              title={_t('تنبيهات تسجيل الحضور والغياب', 'Attendance Follow-up Alerts', 'Anwesenheits-Erinnerung')}
-              description={_t('تذكير لتأكيد وتسجيل حضور الطلاب بعد انتهاء زمن الحصة.', 'Reminder to confirm and record attendance after lesson ends.', 'Erinnerung zur Anwesenheitserfassung nach Lektionsende.')}
-              icon={UserCheck}
-              iconColor="text-primary bg-primary/10"
-              config={notificationSettings.attendanceReminder}
-              onChange={updates => handleCategoryChange('attendanceReminder', updates)}
-              soundOptions={soundOptions}
-              priorityOptions={priorityOptions}
-              soundLabel={_t('صوت النغمة:', 'Tone:', 'Klingelton:')}
-              priorityLabel={_t('مستوى الأولوية:', 'Priority:', 'Priorität:')}
-            />
-
-            {/* Category 5: School Lesson Reminder */}
-            <CategoryCard
-              title={_t('تذكير حصص المدرسة (قبل 5 دقائق)', 'School Lesson Reminder (5 mins before)', 'Schulstunden-Erinnerung (5 Min. vorher)')}
-              description={_t('تذكير تلقائي مجدول قبل كل حصة بـ 5 دقائق من جدول المدرسة.', 'Automatic reminder 5 minutes before each school lesson starts.', 'Automatische Erinnerung 5 Minuten vor Beginn jeder Schulstunde.')}
-              icon={Clock}
-              iconColor="text-primary bg-primary/10"
-              config={notificationSettings.schoolLessonReminder || { enabled: true, sound: 'beep', priority: 'high' }}
-              onChange={updates => handleCategoryChange('schoolLessonReminder' as any, updates)}
-              soundOptions={soundOptions}
-              priorityOptions={priorityOptions}
-              soundLabel={_t('صوت النغمة:', 'Tone:', 'Klingelton:')}
-              priorityLabel={_t('مستوى الأولوية:', 'Priority:', 'Priorität:')}
-            />
           </div>
         </div>
 
-        {/* 5. SCHEDULED NOTIFICATIONS MANAGEMENT QUEUE */}
-        <div className="p-5 rounded-2xl bg-surface border border-surface-border/80 dark:border-surface-border space-y-4 shadow-2xs">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
-                <FileText className="w-4 h-4 text-primary" />
-                {_t(`قائمة الإشعارات المجدولة الحالية (${pendingScheduledNotifications.length})`, `Currently Scheduled Alerts (${pendingScheduledNotifications.length})`, `Geplante Benachrichtigungen (${pendingScheduledNotifications.length})`)}
-              </h3>
-              <p className="text-xs text-text-muted mt-0.5">
-                {_t('عرض جميع التنبيهات المجدولة في خلفية النظام مع إمكانية إلغاء أي إشعار.', 'View all scheduled background alerts with ability to cancel any item.', 'Alle geplanten Benachrichtigungen im Hintergrund einsehen und verwalten.')}
-              </p>
-            </div>
+        {/* Section 3: System Permissions & Overlays (Compact Buttons) */}
+        <div className="p-3 rounded-xl bg-surface border border-surface-border flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <Shield className="w-3.5 h-3.5 text-primary" />
+            <span className="font-bold text-text-main">
+              {_t('صلاحيات النظام والتطبيقات:', 'System Permissions:', 'Systemberechtigungen:')}
+            </span>
+          </div>
 
-            {pendingScheduledNotifications.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {permissionStatus !== 'granted' ? (
               <button
                 type="button"
-                onClick={cancelAllPendingScheduledNotifications}
-                className="px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary dark:text-primary text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                onClick={async () => {
+                  await requestNotificationPermission();
+                  await checkPermissions();
+                }}
+                className="px-2.5 py-1 rounded-lg bg-primary text-white font-bold text-[11px] cursor-pointer"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                {_t('إلغاء كافة الإشعارات المجدولة', 'Cancel All Scheduled Alerts', 'Alle geplanten Alarme abbrechen')}
+                {_t('تفعيل الإشعارات', 'Enable Push', 'Aktivieren')}
               </button>
+            ) : (
+              <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] flex items-center gap-1">
+                <Check className="w-3 h-3" />
+                {_t('الإشعارات مفعلة', 'Push Granted', 'Aktiviert')}
+              </span>
             )}
+
+            <button
+              type="button"
+              onClick={openOverlayPermissionSettings}
+              className="px-2.5 py-1 rounded-lg bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main border border-surface-border font-semibold text-[11px] cursor-pointer flex items-center gap-1"
+            >
+              <Layers className="w-3 h-3 text-primary" />
+              <span>{_t('العوم فوق التطبيقات (Overlay)', 'Overlay Permission', 'Über anderen Apps')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={openExactAlarmSettings}
+              className="px-2.5 py-1 rounded-lg bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main border border-surface-border font-semibold text-[11px] cursor-pointer"
+            >
+              {_t('المنبهات الدقيقة', 'Exact Alarms', 'Genaue Alarme')}
+            </button>
           </div>
+        </div>
 
-          {pendingScheduledNotifications.length === 0 ? (
-            <div className="p-5 text-center rounded-xl bg-surface-hover/40 border border-dashed border-surface-border dark:border-surface-border-soft">
-              <CheckCircle2 className="w-8 h-8 text-text-muted/70 mx-auto mb-2" />
-              <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                {_t('لا توجد إشعارات معلقة في الانتظار حالياً', 'No pending scheduled notifications currently', 'Derzeit keine ausstehenden Benachrichtigungen')}
-              </p>
-              <p className="text-[11px] text-text-muted/70 mt-1">
-                {_t('اضغط على "إعادة بناء الجدول" لأداء فحص فوري وجدولة الحصص القادمة.', 'Click "Rebuild Schedules" to perform an immediate check and schedule upcoming lessons.', 'Klicken Sie auf "Zeitpläne neu erstellen", um anstehende Lektionen zu planen.')}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar pl-1">
-              {pendingScheduledNotifications.map(item => (
-                <div
-                  key={item.id}
-                  className="p-3 rounded-xl bg-surface-hover/60 border border-surface-border/60 dark:border-surface-border-soft/60 flex items-center justify-between gap-3 text-xs"
-                >
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-black text-text-main">
-                        {item.title}
-                      </span>
-                      <span className="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300">
-                        ID: {item.id}
-                      </span>
-                    </div>
-                    <p className="text-text-muted">
-                      {item.body}
-                    </p>
-                    <p className="text-[10px] font-semibold text-primary dark:text-primary">
-                      📅 {_t('الموعد:', 'Scheduled for:', 'Geplant:')} {item.scheduledAt}
-                    </p>
-                  </div>
+        {/* Section 4: Scheduled Alerts Queue (Collapsible) */}
+        <div className="p-3 rounded-xl bg-surface border border-surface-border space-y-2 shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setShowQueue(!showQueue)}
+            className="w-full flex items-center justify-between cursor-pointer text-text-main font-bold"
+          >
+            <span className="flex items-center gap-1.5">
+              <span>{_t('قائمة التنبيهات المجدولة', 'Scheduled Alerts Queue', 'Geplante Alarme')}</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted font-mono text-[10px]">
+                {pendingScheduledNotifications.length}
+              </span>
+            </span>
+            {showQueue ? <ChevronUp className="w-3.5 h-3.5 text-text-muted" /> : <ChevronDown className="w-3.5 h-3.5 text-text-muted" />}
+          </button>
 
-                  <button
-                    type="button"
-                    onClick={() => cancelSingleScheduledNotification(item.id)}
-                    className="p-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-primary hover:text-white text-slate-600 dark:text-slate-300 transition-all cursor-pointer shrink-0"
-                    title={_t('إلغاء هذا الإشعار', 'Cancel this alert', 'Diesen Alarm abbrechen')}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
+          {showQueue && (
+            <div className="pt-2 border-t border-surface-border space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar">
+              {pendingScheduledNotifications.length === 0 ? (
+                <div className="py-3 text-center text-text-muted text-[11px]">
+                  {_t('لا توجد تنبيهات مجدولة حالياً', 'No pending scheduled alerts', 'Keine ausstehenden Alarme')}
                 </div>
-              ))}
+              ) : (
+                <>
+                  <div className="flex justify-end pb-1">
+                    <button
+                      type="button"
+                      onClick={cancelAllPendingScheduledNotifications}
+                      className="text-rose-600 dark:text-rose-400 font-semibold text-[10px] hover:underline cursor-pointer flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>{_t('مسح الكل', 'Clear all', 'Alle löschen')}</span>
+                    </button>
+                  </div>
+                  {pendingScheduledNotifications.map((item, idx) => (
+                    <div
+                      key={`${item.id}_${item.category || ''}_${idx}`}
+                      className="p-2 rounded-lg bg-surface-hover flex items-center justify-between gap-2 text-[11px]"
+                    >
+                      <div className="truncate">
+                        <span className="font-semibold text-text-main block truncate">{item.title}</span>
+                        <span className="text-[10px] text-text-muted font-mono">{item.scheduledAt}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => cancelSingleScheduledNotification(item.id)}
+                        className="p-1 rounded text-text-muted hover:text-rose-500 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </div>
 
       </div>
-    </div>
-  );
-};
-
-// Internal Sub-component for each category options card
-interface CategoryCardProps {
-  title: string;
-  description: string;
-  icon: any;
-  iconColor: string;
-  config: CategoryNotificationConfig;
-  onChange: (updates: Partial<CategoryNotificationConfig>) => void;
-  soundOptions: { id: NotificationSound; label: string }[];
-  priorityOptions: { id: NotificationPriority; label: string; desc: string }[];
-  soundLabel?: string;
-  priorityLabel?: string;
-}
-
-const CategoryCard: React.FC<CategoryCardProps> = ({
-  title, description, icon: Icon, iconColor, config, onChange, soundOptions, priorityOptions, soundLabel, priorityLabel
-}) => {
-  return (
-    <div className="p-4 rounded-2xl bg-surface border border-surface-border/80 dark:border-surface-border space-y-3 shadow-2xs">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className={`p-2 rounded-xl ${iconColor}`}>
-            <Icon className="w-4 h-4" />
-          </div>
-          <div>
-            <h4 className="text-xs font-bold text-text-main">
-              {title}
-            </h4>
-            <p className="text-[11px] text-text-muted mt-0.5">
-              {description}
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => onChange({ enabled: !config.enabled })}
-          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-            config.enabled ? 'bg-primary' : 'bg-slate-300 dark:bg-slate-700'
-          }`}
-        >
-          <span
-            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-surface shadow ring-0 transition duration-200 ease-in-out ${
-              config.enabled ? 'translate-x-4' : 'translate-x-0'
-            }`}
-          />
-        </button>
-      </div>
-
-      {config.enabled && (
-        <div className="space-y-2.5 pt-2.5 border-t border-slate-100 dark:border-surface-border/80 animate-fadeIn text-xs">
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-[11px] font-semibold text-text-muted flex items-center gap-1">
-              <Volume2 className="w-3.5 h-3.5" />
-              {soundLabel || 'Tone:'}
-            </label>
-            <select
-              value={config.sound}
-              onChange={e => onChange({ sound: e.target.value as NotificationSound })}
-              className="px-2.5 py-1 rounded-lg bg-surface-hover border border-surface-border dark:border-surface-border-soft text-xs font-bold text-slate-800 dark:text-slate-200"
-            >
-              {soundOptions.map(s => (
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-[11px] font-semibold text-text-muted flex items-center gap-1">
-              <Shield className="w-3.5 h-3.5" />
-              {priorityLabel || 'Priority:'}
-            </label>
-            <select
-              value={config.priority}
-              onChange={e => onChange({ priority: e.target.value as NotificationPriority })}
-              className="px-2.5 py-1 rounded-lg bg-surface-hover border border-surface-border dark:border-surface-border-soft text-xs font-bold text-slate-800 dark:text-slate-200"
-            >
-              {priorityOptions.map(p => (
-                <option key={p.id} value={p.id}>{p.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

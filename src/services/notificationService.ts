@@ -269,9 +269,30 @@ export const requestNotificationPermission = async (): Promise<boolean> => {
 export const openAndroidNotificationSettings = async () => {
   if (Capacitor.isNativePlatform()) {
     try {
-      await LocalNotifications.requestPermissions();
+      if (typeof (LocalNotifications as any).changeExactNotificationSetting === 'function') {
+        await (LocalNotifications as any).changeExactNotificationSetting();
+      } else {
+        await LocalNotifications.requestPermissions();
+      }
     } catch (e) {
       console.warn('Could not open Android settings:', e);
+    }
+  }
+};
+
+/**
+ * Opens Android System Overlay Settings ("Display over other apps" / "الظهور فوق التطبيقات الأخرى")
+ */
+export const openOverlayPermissionSettings = async () => {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      if (typeof (LocalNotifications as any).changeExactNotificationSetting === 'function') {
+        await (LocalNotifications as any).changeExactNotificationSetting();
+      } else {
+        await LocalNotifications.requestPermissions();
+      }
+    } catch (e) {
+      console.warn('Could not open overlay settings:', e);
     }
   }
 };
@@ -487,16 +508,22 @@ export const getPendingScheduledNotifications = async (): Promise<ScheduledNotif
   if (Capacitor.isNativePlatform()) {
     try {
       const pending = await LocalNotifications.getPending();
-      return pending.notifications
-        .filter(n => n.id !== 9999) // Exclude persistent active timer
-        .map(n => ({
-          id: n.id,
-          title: n.title || 'تنبيه مجدول',
-          body: n.body || '',
-          scheduledAt: n.schedule?.at ? new Date(n.schedule.at).toLocaleString('ar-EG') : 'قريباً',
-          category: n.extra?.category || 'general',
-          extra: n.extra
-        }));
+      const seenIds = new Set<number>();
+      const result: ScheduledNotificationItem[] = [];
+      for (const n of pending.notifications) {
+        if (n.id !== 9999 && !seenIds.has(n.id)) {
+          seenIds.add(n.id);
+          result.push({
+            id: n.id,
+            title: n.title || 'تنبيه مجدول',
+            body: n.body || '',
+            scheduledAt: n.schedule?.at ? new Date(n.schedule.at).toLocaleString('ar-EG') : 'قريباً',
+            category: n.extra?.category || 'general',
+            extra: n.extra
+          });
+        }
+      }
+      return result;
     } catch (err) {
       console.warn('Failed to fetch pending native notifications:', err);
       return [];
@@ -508,8 +535,16 @@ export const getPendingScheduledNotifications = async (): Promise<ScheduledNotif
     if (!raw) return [];
     const items: ScheduledNotificationItem[] = JSON.parse(raw);
     const now = Date.now();
-    // Filter out past items
-    return items.filter(item => new Date(item.extra?.atEpoch || 0).getTime() > now);
+    const seenIds = new Set<number>();
+    const result: ScheduledNotificationItem[] = [];
+    // Filter out past items and deduplicate by ID
+    for (const item of items) {
+      if (new Date(item.extra?.atEpoch || 0).getTime() > now && !seenIds.has(item.id)) {
+        seenIds.add(item.id);
+        result.push(item);
+      }
+    }
+    return result;
   } catch {
     return [];
   }
@@ -590,6 +625,7 @@ export const rebuildAllNotificationSchedules = async (
 
   const nativeNotifsToSchedule: any[] = [];
   const webNotifsStore: ScheduledNotificationItem[] = [];
+  const scheduledIds = new Set<number>();
   const now = Date.now();
   let earliestEpoch: number | null = null;
 
@@ -611,8 +647,14 @@ export const rebuildAllNotificationSchedules = async (
       earliestEpoch = atEpoch;
     }
 
+    let uniqueId = id;
+    while (scheduledIds.has(uniqueId)) {
+      uniqueId += 1;
+    }
+    scheduledIds.add(uniqueId);
+
     nativeNotifsToSchedule.push({
-      id,
+      id: uniqueId,
       title,
       body,
       channelId,
@@ -622,7 +664,7 @@ export const rebuildAllNotificationSchedules = async (
     });
 
     webNotifsStore.push({
-      id,
+      id: uniqueId,
       title,
       body,
       scheduledAt: scheduleDate.toLocaleString('ar-EG', {
