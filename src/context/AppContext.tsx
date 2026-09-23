@@ -624,36 +624,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Initial state for fresh start with duplicate ID sanitization
   const [groups, setGroups] = useState<Group[]>(() => {
     const saved = initialData['dl_groups'];
-    const raw: Group[] = saved !== null && saved !== undefined ? saved : [];
+    const raw: Group[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
-    return raw.map((item, idx) => {
-      if (seen.has(item.id)) {
-        const newId = `${item.id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
-        return { ...item, id: newId };
-      }
-      seen.add(item.id);
-      return item;
-    });
+    return raw
+      .filter((item): item is Group => !!item && typeof item === 'object')
+      .map((item, idx) => {
+        const id = String(item.id || `grp_${idx}`);
+        if (seen.has(id)) {
+          const newId = `${id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+          return { ...item, id: newId };
+        }
+        seen.add(id);
+        return { ...item, id };
+      });
   });
 
   const [students, setStudents] = useState<Student[]>(() => {
     const saved = initialData['dl_students'];
-    const raw: Student[] = saved !== null && saved !== undefined ? saved : [];
+    const raw: Student[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
-    return raw.map((item, idx) => {
-      let st = item;
-      if (seen.has(st.id)) {
-        const newId = `${st.id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
-        st = { ...st, id: newId };
-      }
-      seen.add(st.id);
+    return raw
+      .filter((item): item is Student => !!item && typeof item === 'object')
+      .map((item, idx) => {
+        const id = String(item.id || `st_${idx}`);
+        let st: Student = { ...item, id };
+        if (seen.has(id)) {
+          const newId = `${id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+          st = { ...st, id: newId };
+        }
+        seen.add(st.id);
 
-      // Memory Optimization: Clear any Base64/url avatar strings
-      if (st.avatarUrl) {
-        st = { ...st, avatarUrl: '' };
-      }
-      return st;
-    });
+        // Memory Optimization: Clear any Base64/url avatar strings
+        if (st.avatarUrl) {
+          st = { ...st, avatarUrl: '' };
+        }
+        return st;
+      });
   });
 
   // Memory Optimization: Filter active lessons for global RAM state (current month / last 60 days + future / pending)
@@ -880,16 +886,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     const saved = initialData['dl_notifications'];
-    const raw: NotificationItem[] = saved !== null && saved !== undefined ? saved : [];
+    const raw: NotificationItem[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
-    return raw.map((item, idx) => {
-      if (seen.has(item.id)) {
-        const newId = `${item.id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
-        return { ...item, id: newId };
-      }
-      seen.add(item.id);
-      return item;
-    });
+    return raw
+      .filter((item): item is NotificationItem => !!item && typeof item === 'object')
+      .map((item, idx) => {
+        const id = String(item.id || `notif_${idx}`);
+        if (seen.has(id)) {
+          const newId = `${id}_fixed_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+          return { ...item, id: newId };
+        }
+        seen.add(id);
+        return { ...item, id };
+      });
   });
 
   const [certificates, setCertificates] = useState<CertificateRecord[]>(() => {
@@ -1290,7 +1299,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Dashboard Dismissed Lessons state
   const [dismissedDashboardLessonIds, setDismissedDashboardLessonIds] = useState<string[]>(() => {
     const saved = initialData['dl_dismissed_dashboard_lessons'];
-    return saved !== null && saved !== undefined ? saved : [];
+    return Array.isArray(saved) ? saved.filter((x): x is string => typeof x === 'string') : [];
   });
 
   const dismissLessonFromDashboard = (lessonId: string) => {
@@ -1310,7 +1319,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Recently Deleted State
   const [recentlyDeleted, setRecentlyDeleted] = useState<RecentlyDeletedData>(() => {
     const saved = initialData['dl_recently_deleted'];
-    return saved !== null && saved !== undefined ? saved : { students: [], groups: [], lessons: [] };
+    return {
+      students: (saved && Array.isArray(saved.students)) ? saved.students : [],
+      groups: (saved && Array.isArray(saved.groups)) ? saved.groups : [],
+      lessons: (saved && Array.isArray(saved.lessons)) ? saved.lessons : []
+    };
   });
 
   useEffect(() => {

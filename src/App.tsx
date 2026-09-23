@@ -56,6 +56,7 @@ import {
 } from './services/notificationService';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
+import { Toast } from '@capacitor/toast';
 
 function MainApp() {
   useLessonReminders();
@@ -85,18 +86,22 @@ function MainApp() {
 
   // Ensure notification channels and system permissions are properly configured for outside-the-app alerts
   useEffect(() => {
-    const initAlarmPermissions = async () => {
-      try {
-        await initNotificationChannels(notificationSettings);
-        const perm = await getNotificationPermission();
-        if (notificationSettings?.masterEnabled !== false && (perm === 'prompt' || perm === 'default')) {
-          await requestNotificationPermission();
+    const timer = setTimeout(() => {
+      const initAlarmPermissions = async () => {
+        try {
+          await initNotificationChannels(notificationSettings);
+          const perm = await getNotificationPermission();
+          if (notificationSettings?.masterEnabled !== false && (perm === 'prompt' || perm === 'default')) {
+            await requestNotificationPermission();
+          }
+        } catch (err) {
+          console.warn('Initial notification permissions setup notice:', err);
         }
-      } catch (err) {
-        console.warn('Initial notification permissions setup notice:', err);
-      }
-    };
-    initAlarmPermissions();
+      };
+      initAlarmPermissions();
+    }, 1200);
+
+    return () => clearTimeout(timer);
   }, [notificationSettings?.masterEnabled]);
 
   const [quickTransactionType, setQuickTransactionType] = useState<'income' | 'expense' | 'transfer' | null>(null);
@@ -266,6 +271,9 @@ function MainApp() {
     };
   }, []);
 
+  const appMountTimeRef = useRef<number>(Date.now());
+  const lastBackPressRef = useRef<number>(0);
+
   const stateRef = useRef({
     activeTab,
     isGlobalSearchOpen,
@@ -276,7 +284,8 @@ function MainApp() {
     isStartLessonNowModalOpen,
     isAddStudentModalOpen,
     isAddGroupModalOpen,
-    isBackupModalOpen
+    isBackupModalOpen,
+    activeAlarmLesson
   });
 
   // Keep state reference up to date for back button handler to avoid stale closures
@@ -291,7 +300,8 @@ function MainApp() {
       isStartLessonNowModalOpen,
       isAddStudentModalOpen,
       isAddGroupModalOpen,
-      isBackupModalOpen
+      isBackupModalOpen,
+      activeAlarmLesson
     };
   }, [
     activeTab,
@@ -303,73 +313,97 @@ function MainApp() {
     isStartLessonNowModalOpen,
     isAddStudentModalOpen,
     isAddGroupModalOpen,
-    isBackupModalOpen
+    isBackupModalOpen,
+    activeAlarmLesson
   ]);
 
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
-      StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
-      StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+      try {
+        StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
+        StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+      } catch {}
 
       const backButtonListener = CapacitorApp.addListener('backButton', () => {
-        const {
-          activeTab: currentActiveTab,
-          isGlobalSearchOpen: searchOpen,
-          isRecentlyDeletedModalOpen: deletedOpen,
-          isControlModalOpen: controlOpen,
-          isAddLessonModalOpen: addLessonOpen,
-          isAddQuickLessonModalOpen: addQuickOpen,
-          isStartLessonNowModalOpen: startNowOpen,
-          isAddStudentModalOpen: addStudentOpen,
-          isAddGroupModalOpen: addGroupOpen,
-          isBackupModalOpen: backupOpen
-        } = stateRef.current;
-
-        if (searchOpen) {
-          setIsGlobalSearchOpen(false);
-        } else if (deletedOpen) {
-          setIsRecentlyDeletedModalOpen(false);
-        } else if (controlOpen) {
-          closeLessonControl();
-        } else if (addLessonOpen) {
-          setIsAddLessonModalOpen(false);
-        } else if (addQuickOpen) {
-          setIsAddQuickLessonModalOpen(false);
-        } else if (startNowOpen) {
-          setIsStartLessonNowModalOpen(false);
-        } else if (addStudentOpen) {
-          setIsAddStudentModalOpen(false);
-        } else if (addGroupOpen) {
-          setIsAddGroupModalOpen(false);
-        } else if (backupOpen) {
-          setIsBackupModalOpen(false);
-        } else {
-          // Check for any DOM overlay / modal container
-          const overlays = document.querySelectorAll('.fixed.inset-0');
-          if (overlays.length > 0) {
-            const topOverlay = overlays[overlays.length - 1] as HTMLElement;
-            const closeBtn = topOverlay.querySelector('button') as HTMLButtonElement;
-            if (closeBtn) {
-              closeBtn.click();
-            } else {
-              topOverlay.click();
-            }
+        try {
+          const now = Date.now();
+          // Safeguard 1: Ignore any backButton events during the first 3.5 seconds after app mounting (prevents synthetic launch events from closing the app)
+          if (now - appMountTimeRef.current < 3500) {
+            console.log('[Android BackButton] Ignored during startup grace period.');
             return;
           }
 
-          if (currentActiveTab !== 'home') {
-            setActiveTab('home');
-          } else {
-            CapacitorApp.minimizeApp();
+          const {
+            activeTab: currentActiveTab,
+            isGlobalSearchOpen: searchOpen,
+            isRecentlyDeletedModalOpen: deletedOpen,
+            isControlModalOpen: controlOpen,
+            isAddLessonModalOpen: addLessonOpen,
+            isAddQuickLessonModalOpen: addQuickOpen,
+            isStartLessonNowModalOpen: startNowOpen,
+            isAddStudentModalOpen: addStudentOpen,
+            isAddGroupModalOpen: addGroupOpen,
+            isBackupModalOpen: backupOpen,
+            activeAlarmLesson: alarmActive
+          } = stateRef.current;
+
+          if (alarmActive) {
+            dismissLessonAlarm();
+            return;
           }
+
+          if (searchOpen) {
+            setIsGlobalSearchOpen(false);
+          } else if (deletedOpen) {
+            setIsRecentlyDeletedModalOpen(false);
+          } else if (controlOpen) {
+            closeLessonControl();
+          } else if (addLessonOpen) {
+            setIsAddLessonModalOpen(false);
+          } else if (addQuickOpen) {
+            setIsAddQuickLessonModalOpen(false);
+          } else if (startNowOpen) {
+            setIsStartLessonNowModalOpen(false);
+          } else if (addStudentOpen) {
+            setIsAddStudentModalOpen(false);
+          } else if (addGroupOpen) {
+            setIsAddGroupModalOpen(false);
+          } else if (backupOpen) {
+            setIsBackupModalOpen(false);
+          } else {
+            // Check for any open dialog/modal with a dedicated close button or dismiss via Escape
+            const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true });
+            document.dispatchEvent(escapeEvent);
+
+            if (currentActiveTab !== 'home') {
+              setActiveTab('home');
+            } else {
+              // Double tap within 2500ms (and minimum 250ms apart to filter instantaneous synthetic bursts) to minimize
+              const delta = now - lastBackPressRef.current;
+              if (delta >= 250 && delta < 2500) {
+                lastBackPressRef.current = 0;
+                CapacitorApp.minimizeApp().catch(() => {});
+              } else {
+                lastBackPressRef.current = now;
+                Toast.show({
+                  text: language === 'ar' ? 'اضغط مرة أخرى للخروج من التطبيق' : language === 'de' ? 'Erneut tippen zum Beenden' : 'Press back again to exit',
+                  duration: 'short',
+                  position: 'bottom'
+                }).catch(() => {});
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[Android BackButton Handler Error]:', err);
         }
       });
 
       return () => {
-        backButtonListener.then((listener) => listener.remove());
+        backButtonListener.then((listener) => listener.remove()).catch(() => {});
       };
     }
-  }, []);
+  }, [dismissLessonAlarm, closeLessonControl, setActiveTab, setIsGlobalSearchOpen, setIsRecentlyDeletedModalOpen, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, setIsStartLessonNowModalOpen, setIsAddStudentModalOpen, setIsAddGroupModalOpen, setIsBackupModalOpen, language]);
+
 
 
   return (
@@ -521,57 +555,128 @@ function MainApp() {
 
 import { migrateFromLocalStorageToIndexedDB } from './services/migrationService';
 import { storage } from './services/storageService';
+import { sanitizeInitialData, clearAllLocalDataAndReset } from './services/dataSanitizer';
 
 export default function App() {
   const [initialData, setInitialData] = useState<any>(null);
   const [loadError, setLoadError] = useState(false);
+  const [errorDetails, setErrorDetails] = useState('');
 
-  useEffect(() => {
-    let isMounted = true;
-    async function loadData() {
+  const runDataLoader = useCallback(async (isMounted: boolean) => {
+    try {
       try {
         await migrateFromLocalStorageToIndexedDB();
-        const keys = [
-          'dl_theme', 'dl_accent_color', 'dl_quick_todos', 'dl_language', 'dl_profile',
-          'dl_groups', 'dl_students', 'dl_lessons', 'dl_payments', 'dl_certificates',
-          'dl_notifications', 'dl_notification_settings', 'dl_inspiration_settings', 'dl_inspiration_messages',
-          'dl_last_backup_time', 'dl_dismissed_dashboard_lessons', 'dl_recently_deleted',
-          'dl_active_lesson_session', 'dl_notified_lesson_alerts', 'dl_local_backup_data',
-          'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records',
-          'dl_school_notes', 'dl_finance_accounts', 'dl_finance_categories', 'dl_finance_transactions',
-          'dl_finance_recurring', 'dl_finance_installments', 'dl_finance_notifications',
-          'dl_settings', 'dl_sync_state'
-        ];
-        
-        const values = await Promise.all(keys.map(k => storage.getItem(k)));
-        const data: any = {};
-        keys.forEach((key, idx) => {
-          data[key] = values[idx];
-        });
-        if (isMounted) {
-          setInitialData(data);
+      } catch (migErr) {
+        console.warn('Migration non-fatal notice:', migErr);
+      }
+
+      const keys = [
+        'dl_theme', 'dl_accent_color', 'dl_quick_todos', 'dl_language', 'dl_profile',
+        'dl_groups', 'dl_students', 'dl_lessons', 'dl_payments', 'dl_certificates',
+        'dl_notifications', 'dl_notification_settings', 'dl_inspiration_settings', 'dl_inspiration_messages',
+        'dl_last_backup_time', 'dl_dismissed_dashboard_lessons', 'dl_recently_deleted',
+        'dl_active_lesson_session', 'dl_notified_lesson_alerts', 'dl_local_backup_data',
+        'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records',
+        'dl_school_notes', 'dl_finance_accounts', 'dl_finance_categories', 'dl_finance_transactions',
+        'dl_finance_recurring', 'dl_finance_installments', 'dl_finance_notifications',
+        'dl_settings', 'dl_sync_state'
+      ];
+      
+      const values = await Promise.all(keys.map(async (k) => {
+        try {
+          return await storage.getItem(k);
+        } catch {
+          return null;
         }
-      } catch (err) {
-        console.error('Error during loadData initialisation:', err);
+      }));
+
+      const rawDict: any = {};
+      keys.forEach((key, idx) => {
+        rawDict[key] = values[idx];
+      });
+
+      // Self-healing: Sanitize all collections, arrays, and objects
+      const safeData = sanitizeInitialData(rawDict);
+
+      if (isMounted) {
+        setInitialData(safeData);
+        setLoadError(false);
+      }
+    } catch (err: any) {
+      console.error('Error during loadData initialization:', err);
+      // Resilient fallback: instead of crashing, try loading with sanitized empty data
+      try {
+        const fallbackData = sanitizeInitialData({});
         if (isMounted) {
+          setInitialData(fallbackData);
+          setLoadError(false);
+        }
+      } catch {
+        if (isMounted) {
+          setErrorDetails(err?.message || String(err));
           setLoadError(true);
         }
       }
     }
-    loadData();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    runDataLoader(isMounted);
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [runDataLoader]);
 
   if (loadError) {
     return (
-      <div className="h-[100dvh] w-screen flex flex-col items-center justify-center bg-background p-6 text-center space-y-4">
-        <div className="text-red-500 font-bold text-xl">System Error / Speicherfehler</div>
-        <p className="text-text-main text-sm max-w-md">
-          A critical error occurred while accessing the local database. The app has been halted to prevent data loss. 
-          Please try restarting the app or contact support.
-        </p>
+      <div className="h-[100dvh] w-screen flex flex-col items-center justify-center bg-slate-900 text-white p-6 text-center space-y-5 select-none font-sans">
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 text-2xl font-bold">
+          ⚠️
+        </div>
+        <div className="space-y-1">
+          <h2 className="text-lg font-bold text-slate-100">تم اكتشاف خطأ في قراءة البيانات القديمة</h2>
+          <p className="text-xs text-slate-400 max-w-sm leading-relaxed">
+            حدث تعارض في صيغة البيانات المحفوظة محلياً. تم إيقاف الإغلاق المفاجئ للتطبيق ويمكنك حل المشكلة بنقرة واحدة أدناه.
+          </p>
+        </div>
+
+        {errorDetails && (
+          <div className="p-3 bg-slate-800/80 border border-slate-700/60 rounded-xl text-[11px] font-mono text-rose-300 max-w-sm overflow-x-auto text-left w-full max-h-24">
+            {errorDetails}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-3 w-full max-w-xs pt-2">
+          <button
+            onClick={() => {
+              setLoadError(false);
+              const fallback = sanitizeInitialData({});
+              setInitialData(fallback);
+            }}
+            className="w-full py-3 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-95 transition-all"
+          >
+            <span>إصلاح وترميم البيانات والمتابعة</span>
+          </button>
+
+          <button
+            onClick={() => runDataLoader(true)}
+            className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+          >
+            <span>إعادة المحاولة</span>
+          </button>
+
+          <button
+            onClick={() => {
+              if (window.confirm('هل تريد تصفير البيانات القديمة التالفة والبدء من جديد مع الاحتفاظ بنسخة طوارئ احتياطية؟')) {
+                clearAllLocalDataAndReset();
+              }
+            }}
+            className="w-full py-2.5 px-4 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 font-medium text-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+          >
+            <span>تصفير البيانات التالفة وبدء جديد</span>
+          </button>
+        </div>
       </div>
     );
   }

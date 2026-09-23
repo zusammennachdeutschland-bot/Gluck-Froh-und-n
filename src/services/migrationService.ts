@@ -51,12 +51,14 @@ export async function migrateFromLocalStorageToIndexedDB(): Promise<void> {
           if (key === 'dl_theme' || key === 'dl_language' || key === 'dl_last_backup_time' || key === 'dl_local_backup_data') {
             await storage.setItem(key, value);
           } else {
-            await storage.setItem(key, JSON.parse(value));
+            const parsed = JSON.parse(value);
+            // Only set if valid non-null parsed object/array
+            if (parsed !== null && parsed !== undefined) {
+              await storage.setItem(key, parsed);
+            }
           }
         } catch (e) {
-          console.error(`Failed to migrate key ${key}`, e);
-          // Fallback to raw string if JSON parsing fails
-          await storage.setItem(key, value);
+          console.warn(`Failed to parse legacy JSON for key ${key}, skipping corrupted value:`, e);
         }
       }
     }
