@@ -225,7 +225,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
       onTouchStart={(e) => e.stopPropagation()}
       onTouchMove={(e) => e.stopPropagation()}
       onTouchEnd={(e) => e.stopPropagation()}
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden"
+      className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden"
     >
       <div
         onClick={(e) => e.stopPropagation()}

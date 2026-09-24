@@ -37,23 +37,26 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
 
   // CONFLICT DETECTION ALGORITHM:
   // Check if chosen date + time overlaps with any existing lesson
-  const checkConflict = (checkTime: string) => {
+  const findConflict = (checkTime: string): { conflictingLesson: typeof lessons[0]; conflictDate: string } | null => {
     if (isWeeklyRecurring) {
       for (let i = 0; i < repeatWeeks; i++) {
         const d = new Date(date);
         d.setDate(d.getDate() + (i * 7));
         const dateStr = formatLocalDate(d);
         const dummyLesson = { id: 'dummy', date: dateStr, time: checkTime, durationMinutes };
-        if (lessons.some(l => checkOverlap(dummyLesson, l))) return true;
+        const found = lessons.find(l => l.status !== 'cancelled' && checkOverlap(dummyLesson, l));
+        if (found) return { conflictingLesson: found, conflictDate: dateStr };
       }
-      return false;
+      return null;
     } else {
       const dummyLesson = { id: 'dummy', date, time: checkTime, durationMinutes };
-      return lessons.some(l => checkOverlap(dummyLesson, l));
+      const found = lessons.find(l => l.status !== 'cancelled' && checkOverlap(dummyLesson, l));
+      return found ? { conflictingLesson: found, conflictDate: date } : null;
     }
   };
 
-  const hasConflict = checkConflict(time);
+  const conflictInfo = findConflict(time);
+  const hasConflict = !!conflictInfo;
 
   // SUGGEST AVAILABLE SLOTS based on Working Hours & existing schedule
   const availableSlots = React.useMemo(() => {
@@ -263,13 +266,19 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
           </div>
 
           {/* CONFLICT DETECTION WARNING */}
-          {hasConflict && (
-            <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg p-2.5 flex items-start gap-1.5 text-xs text-red-800 dark:text-red-300">
-              <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold">Terminkonflikt erkannt!</p>
-                <p className="text-[10px] text-red-700 dark:text-red-400 mt-0.5">
-                  Es gibt bereits eine andere Lektion um {time} Uhr an diesem Tag.
+          {hasConflict && conflictInfo && (
+            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="font-black">
+                  {_t('تنبيه: يوجد تعارض في هذا الموعد!', 'Alert: Time conflict detected!', 'Achtung: Terminkonflikt erkannt!')}
+                </p>
+                <p className="text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                  {_t('يتعارض مع حصة:', 'Conflicts with session:', 'Kollidiert mit:')}{' '}
+                  <strong className="font-bold underline">
+                    {conflictInfo.conflictingLesson.studentName || conflictInfo.conflictingLesson.groupName || conflictInfo.conflictingLesson.title}
+                  </strong>{' '}
+                  ({conflictInfo.conflictingLesson.time}) {isWeeklyRecurring && conflictInfo.conflictDate !== date ? `[${conflictInfo.conflictDate}]` : ''}
                 </p>
               </div>
             </div>

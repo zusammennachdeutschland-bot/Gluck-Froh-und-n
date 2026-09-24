@@ -280,20 +280,46 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
 
         if (Capacitor.isNativePlatform()) {
           try {
+            // 1. Try saving directly into device Documents directory
+            try {
+              await Filesystem.writeFile({
+                path: fileName,
+                data: jsonString,
+                directory: Directory.Documents,
+                encoding: Encoding.UTF8
+              });
+            } catch (docErr) {
+              console.warn('Could not save directly to Documents, continuing with Cache:', docErr);
+            }
+
+            // 2. Write to Cache for sharing
             const savedFile = await Filesystem.writeFile({
               path: fileName,
               data: jsonString,
               directory: Directory.Cache,
               encoding: Encoding.UTF8
             });
-            await Share.share({
-              title: 'Glück Backup',
-              text: 'Backup Export Data (Glück)',
-              url: savedFile.uri,
-              dialogTitle: 'Export Backup JSON'
-            });
+
+            // 3. Prompt native share sheet with safe timeout race (never hang)
+            try {
+              await Promise.race([
+                Share.share({
+                  title: 'Glueck Backup',
+                  text: 'Backup Export Data (Glueck)',
+                  url: savedFile.uri,
+                  dialogTitle: 'Export Backup JSON'
+                }),
+                new Promise((resolve) => setTimeout(resolve, 2500))
+              ]);
+            } catch (shareErr) {
+              console.warn('Native share dismissed or failed:', shareErr);
+            }
           } catch (nativeErr) {
             console.warn('Native export failed, falling back to blob:', nativeErr);
+          }
+
+          // 4. Always trigger standard web download as guaranteed file export
+          try {
             const blob = new Blob([jsonString], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -303,7 +329,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-          }
+          } catch {}
         } else {
           // Download JSON
           const blob = new Blob([jsonString], { type: 'application/json' });
@@ -402,21 +428,60 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         };
 
         const jsonString = JSON.stringify(backupPayload, null, 2);
-        const fileName = `Glück_Quick_Backup_${formatLocalDate()}.json`;
+        const fileName = `Glueck_Quick_Backup_${formatLocalDate()}.json`;
 
         if (Capacitor.isNativePlatform()) {
-          const savedFile = await Filesystem.writeFile({
-            path: fileName,
-            data: jsonString,
-            directory: Directory.Cache,
-            encoding: Encoding.UTF8
-          });
-          await Share.share({
-            title: 'Glück Simple Backup',
-            text: 'Quick Backup Data (Glück)',
-            url: savedFile.uri,
-            dialogTitle: 'Save Backup File'
-          });
+          try {
+            // 1. Save directly into device Documents directory
+            try {
+              await Filesystem.writeFile({
+                path: fileName,
+                data: jsonString,
+                directory: Directory.Documents,
+                encoding: Encoding.UTF8
+              });
+            } catch (docErr) {
+              console.warn('Could not save to Documents, continuing with Cache:', docErr);
+            }
+
+            // 2. Write to Cache for sharing
+            const savedFile = await Filesystem.writeFile({
+              path: fileName,
+              data: jsonString,
+              directory: Directory.Cache,
+              encoding: Encoding.UTF8
+            });
+
+            // 3. Prompt native share sheet with safe timeout race (never hang)
+            try {
+              await Promise.race([
+                Share.share({
+                  title: 'Glueck Simple Backup',
+                  text: 'Quick Backup Data (Glueck)',
+                  url: savedFile.uri,
+                  dialogTitle: 'Save Backup File'
+                }),
+                new Promise((resolve) => setTimeout(resolve, 2500))
+              ]);
+            } catch (shareErr) {
+              console.warn('Native share dismissed or failed:', shareErr);
+            }
+          } catch (nativeErr) {
+            console.warn('Native simple export failed, falling back to blob:', nativeErr);
+          }
+
+          // 4. Always trigger standard web download as guaranteed file export
+          try {
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch {}
         } else {
           const blob = new Blob([jsonString], { type: 'application/json' });
           const url = URL.createObjectURL(blob);
@@ -430,7 +495,13 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         }
 
         performBackup(); // update last backup time
-        setSimpleSuccessMsg(t('auto_quick_backup_created_and_sav'));
+        setSimpleSuccessMsg(
+          _t(
+            'تم حفظ النسخة الاحتياطية بنجاح في مجلد المستندات / التنزيلات على جهازك!',
+            'Backup file saved successfully to your Documents / Downloads!',
+            'Backup-Datei erfolgreich in Dokumente/Downloads gespeichert!'
+          )
+        );
       } catch (e: any) {
         console.error('Simple backup failed:', e);
         setSimpleErrorMsg(t('auto_backup_failed') + (e.message || 'Error'));

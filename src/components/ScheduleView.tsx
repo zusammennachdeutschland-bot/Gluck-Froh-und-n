@@ -110,9 +110,18 @@ export const ScheduleView: React.FC = () => {
     return allConflicts.includes(lessonId);
   };
 
-  const checkTimeConflict = (date: string, time: string, excludeLessonId?: string) => {
+  const getConflictingLessonsForLesson = (lesson: Lesson) => {
+    if (lesson.status === 'cancelled') return [];
+    return dayLessons.filter(l => l.id !== lesson.id && l.status !== 'cancelled' && checkOverlap(lesson, l));
+  };
+
+  const findConflictingLesson = (date: string, time: string, excludeLessonId?: string) => {
     const dummy = { id: 'dummy', date, time, durationMinutes: 60 };
-    return activeLessons.some(l => l.id !== excludeLessonId && l.status !== 'cancelled' && checkOverlap(dummy, l));
+    return activeLessons.find(l => l.id !== excludeLessonId && l.status !== 'cancelled' && checkOverlap(dummy, l));
+  };
+
+  const checkTimeConflict = (date: string, time: string, excludeLessonId?: string) => {
+    return !!findConflictingLesson(date, time, excludeLessonId);
   };
 
   // DAY VIEW CALCULATIONS
@@ -126,6 +135,19 @@ export const ScheduleView: React.FC = () => {
   const selectedDayConflicts = useMemo(() => {
     return dayLessons.filter((l) => allConflicts.includes(l.id));
   }, [dayLessons, allConflicts]);
+
+  // Exact conflicting pairs for the selected day
+  const dayConflictPairs = useMemo(() => {
+    const pairs: { lessonA: Lesson; lessonB: Lesson }[] = [];
+    for (let i = 0; i < dayLessons.length; i++) {
+      for (let j = i + 1; j < dayLessons.length; j++) {
+        if (dayLessons[i].status !== 'cancelled' && dayLessons[j].status !== 'cancelled' && checkOverlap(dayLessons[i], dayLessons[j])) {
+          pairs.push({ lessonA: dayLessons[i], lessonB: dayLessons[j] });
+        }
+      }
+    }
+    return pairs;
+  }, [dayLessons]);
 
   // WEEK VIEW CALCULATIONS
   const weekDays = useMemo(() => {
@@ -576,10 +598,80 @@ export const ScheduleView: React.FC = () => {
               </span>
             ) : (
               <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1 text-[10px] font-bold">
-                <AlertTriangle className="w-3 h-3" /> {t('schedule_conflict')} ({selectedDayConflicts.length})
+                <AlertTriangle className="w-3.5 h-3.5 animate-pulse text-amber-500" /> {t('schedule_conflict')} ({selectedDayConflicts.length})
               </span>
             )}
           </div>
+
+          {/* Interactive Conflict Resolution Banner for Day View */}
+          {dayConflictPairs.length > 0 && (
+            <div className="bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 rounded-xl p-2.5 sm:p-3 space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 animate-bounce" />
+                  <span className="text-xs font-black text-amber-800 dark:text-amber-300">
+                    {_t(`يوجد تعارض في مواعيد اليوم (${dayConflictPairs.length})`, `Schedule Conflicts on this day (${dayConflictPairs.length})`, `Terminkonflikte an diesem Tag (${dayConflictPairs.length})`)}
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full shrink-0">
+                  {_t('يتطلب التدخل', 'Needs attention', 'Aktion erforderlich')}
+                </span>
+              </div>
+
+              <div className="space-y-1.5">
+                {dayConflictPairs.map((pair, idx) => (
+                  <div 
+                    key={idx} 
+                    className="bg-surface/90 dark:bg-slate-900/90 border border-amber-500/25 rounded-lg p-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openLessonControl(pair.lessonA)}
+                          className="font-black text-slate-800 dark:text-slate-100 hover:text-primary hover:underline text-start"
+                        >
+                          {pair.lessonA.studentName || pair.lessonA.groupName || pair.lessonA.title}
+                        </button>
+                        <span className="font-mono text-amber-700 dark:text-amber-300 font-bold bg-amber-500/15 px-1.5 py-0.2 rounded text-[11px]">
+                          {pair.lessonA.time}
+                        </span>
+                      </div>
+
+                      <span className="text-amber-600 dark:text-amber-400 font-bold text-[11px]">
+                        ⚡ {_t('يتعارض مع', 'conflicts with', 'kollidiert mit')}
+                      </span>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openLessonControl(pair.lessonB)}
+                          className="font-black text-slate-800 dark:text-slate-100 hover:text-primary hover:underline text-start"
+                        >
+                          {pair.lessonB.studentName || pair.lessonB.groupName || pair.lessonB.title}
+                        </button>
+                        <span className="font-mono text-amber-700 dark:text-amber-300 font-bold bg-amber-500/15 px-1.5 py-0.2 rounded text-[11px]">
+                          {pair.lessonB.time}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => openReschedule(pair.lessonB)}
+                        className="px-2 py-1 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                        title={_t('تغيير موعد الحصة لحل التعارض', 'Reschedule to resolve conflict', 'Termin ändern')}
+                      >
+                        <ArrowLeftRight className="w-3 h-3" />
+                        <span>{_t('تغيير الموعد', 'Reschedule', 'Verschieben')}</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* School Presence Block in Day View */}
           {(() => {
@@ -853,11 +945,46 @@ export const ScheduleView: React.FC = () => {
                           )}
 
                           {conflict && (
-                            <span className="text-[9px] font-bold uppercase bg-amber-500 text-white px-1.5 py-0.5 rounded-md shrink-0">
+                            <span className="text-[9px] font-bold uppercase bg-amber-500 text-white px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-1">
+                              <AlertTriangle className="w-2.5 h-2.5" />
                               {t('schedule_conflict')}
                             </span>
                           )}
                         </div>
+
+                        {/* Conflict Detail Notification Box on Card */}
+                        {conflict && (() => {
+                          const conflictingLessons = getConflictingLessonsForLesson(lesson);
+                          if (conflictingLessons.length === 0) return null;
+                          return (
+                            <div 
+                              onClick={(e) => e.stopPropagation()}
+                              className="bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/30 rounded-lg p-2 flex items-center justify-between gap-2 text-xs"
+                            >
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                                <div className="text-[11px] text-amber-900 dark:text-amber-200 truncate">
+                                  <span className="font-bold">{_t('يتعارض مع:', 'Conflicts with:', 'Konflikt mit:')}</span>{' '}
+                                  {conflictingLessons.map((cl, i) => (
+                                    <span key={cl.id}>
+                                      {i > 0 && '، '}
+                                      <strong className="font-black underline cursor-pointer" onClick={() => openLessonControl(cl)}>
+                                        {cl.studentName || cl.groupName || cl.title}
+                                      </strong> ({cl.time})
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => openReschedule(lesson)}
+                                className="px-2 py-0.5 text-[10px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-md transition-colors shrink-0 cursor-pointer"
+                              >
+                                {_t('حل التعارض', 'Resolve', 'Beheben')}
+                              </button>
+                            </div>
+                          );
+                        })()}
 
                         {/* Row 3: Custom Notes or Specific Topic (ONLY if distinct notes exist) */}
                         {(() => {
@@ -969,7 +1096,7 @@ export const ScheduleView: React.FC = () => {
                           onClick={() => openLessonControl(l)}
                           className={`p-1.5 rounded-lg border text-xs cursor-pointer transition-all hover:scale-[1.02] ${
                             conflict
-                              ? 'bg-primary-soft border-primary-border text-primary dark:bg-primary-soft dark:border-primary-border dark:text-primary'
+                              ? 'bg-amber-500/10 border-amber-500/50 text-amber-950 dark:text-amber-200 ring-1 ring-amber-400/30'
                               : l.type === 'online'
                               ? 'bg-primary-soft border-primary-border text-primary-hover dark:bg-primary-soft/50 dark:border-primary-border dark:text-primary/70'
                               : 'bg-primary-soft border-primary-border text-primary dark:bg-primary-soft dark:border-primary-border dark:text-primary'
@@ -977,7 +1104,14 @@ export const ScheduleView: React.FC = () => {
                         >
                           <div className="flex items-center justify-between font-mono font-bold text-[10px]">
                             <span>{l.time}</span>
-                            <span className="uppercase text-[9px] font-black">{l.type}</span>
+                            {conflict ? (
+                              <span className="inline-flex items-center gap-0.5 text-amber-700 dark:text-amber-300 text-[9px] font-black uppercase">
+                                <AlertTriangle className="w-2.5 h-2.5" />
+                                <span>{t('schedule_conflict')}</span>
+                              </span>
+                            ) : (
+                              <span className="uppercase text-[9px] font-black">{l.type}</span>
+                            )}
                           </div>
                           <p className="font-bold text-[11px] truncate mt-0.5">{l.title}</p>
                         </div>
@@ -1030,7 +1164,9 @@ export const ScheduleView: React.FC = () => {
                     setCalendarView('day');
                   }}
                   className={`min-h-[64px] p-1.5 rounded-xl border transition-all cursor-pointer active:scale-95 active:bg-surface-hover flex flex-col justify-between ${
-                    cell.isToday
+                    cell.hasConflict
+                      ? 'border-amber-500/50 bg-amber-500/5 dark:bg-amber-500/10'
+                      : cell.isToday
                       ? 'bg-primary-soft dark:bg-primary-soft/40 border-primary font-bold'
                       : isSelected
                       ? 'bg-primary-soft dark:bg-primary-soft border-primary-border'
@@ -1043,10 +1179,11 @@ export const ScheduleView: React.FC = () => {
                     </span>
 
                     {cell.lessons.length > 0 && (
-                      <span className={`text-[9px] font-black px-1.5 py-0.2 rounded-full ${
-                        cell.hasConflict ? 'bg-primary text-white' : 'bg-primary text-white'
+                      <span className={`text-[9px] font-black px-1.5 py-0.2 rounded-full flex items-center gap-0.5 ${
+                        cell.hasConflict ? 'bg-amber-600 text-white animate-pulse' : 'bg-primary text-white'
                       }`}>
-                        {cell.lessons.length}
+                        {cell.hasConflict && <AlertTriangle className="w-2.5 h-2.5" />}
+                        <span>{cell.lessons.length}</span>
                       </span>
                     )}
                   </div>
@@ -1056,7 +1193,7 @@ export const ScheduleView: React.FC = () => {
                       <span
                         key={l.id}
                         className={`w-2 h-2 rounded-full ${
-                          l.type === 'online' ? 'bg-primary' : 'bg-primary'
+                          hasConflict(l.id) ? 'bg-amber-500' : l.type === 'online' ? 'bg-primary' : 'bg-primary'
                         }`}
                         title={`${l.time} - ${l.title}`}
                       />
@@ -1127,12 +1264,22 @@ export const ScheduleView: React.FC = () => {
                 />
               </div>
 
-              {checkTimeConflict(newDate, newTime, rescheduleLesson?.id) && (
-                <div className="bg-primary-soft text-primary dark:bg-primary-soft dark:text-primary text-[11px] font-bold p-2.5 rounded-xl border border-primary-border dark:border-primary-border flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-primary shrink-0" />
-                  <span>{t('schedule_conflict_alert')}</span>
-                </div>
-              )}
+              {(() => {
+                const conflictingWith = findConflictingLesson(newDate, newTime, rescheduleLesson?.id);
+                if (!conflictingWith) return null;
+                return (
+                  <div className="bg-amber-500/10 dark:bg-amber-500/20 text-amber-900 dark:text-amber-200 text-xs font-bold p-3 rounded-xl border border-amber-500/30 flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <p className="font-black">{t('schedule_conflict_alert')}</p>
+                      <p className="text-[11px] font-normal text-amber-800 dark:text-amber-300">
+                        {_t('يتعارض مع حصة:', 'Conflicts with session:', 'Kollidiert mit:')}{' '}
+                        <strong className="font-bold underline">{conflictingWith.studentName || conflictingWith.groupName || conflictingWith.title}</strong> ({conflictingWith.time})
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2">

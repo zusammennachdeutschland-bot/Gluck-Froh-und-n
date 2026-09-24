@@ -4,13 +4,23 @@ import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
 import { formatLocalDate } from '../utils/timeUtils';
 import { 
-  CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin
+  CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GroupProfileModal } from './GroupProfileModal';
 
+const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string => {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return '';
+  const total = h * 60 + m + (durationMinutes || 60);
+  const endH = Math.floor(total / 60) % 24;
+  const endM = total % 60;
+  return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+};
+
 export const TodaysProgressTimeline: React.FC = () => {
-  const { lessons, groups, openLessonControl, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t } = useApp();
+  const { lessons, groups, students, openLessonControl, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t, language } = useApp();
   const [now, setNow] = useState(new Date());
   const [isPastPendingExpanded, setIsPastPendingExpanded] = useState(false);
   const [showAllPastPending, setShowAllPastPending] = useState(false);
@@ -218,7 +228,9 @@ export const TodaysProgressTimeline: React.FC = () => {
                           <span className="text-[9px] font-bold bg-primary/10 text-primary dark:text-primary px-1.5 py-0.5 rounded transition-colors group-hover:bg-primary/20">
                             {t('timeline_requires_action')}
                           </span>
-                          <ChevronRight className="w-3.5 h-3.5 text-primary dark:text-primary shrink-0 transition-transform group-hover:translate-x-0.5" />
+                          <ChevronRight className={`w-3.5 h-3.5 text-primary dark:text-primary shrink-0 transition-transform ${
+                            language === 'ar' ? 'rotate-180 group-hover:-translate-x-0.5' : 'group-hover:translate-x-0.5'
+                          }`} />
                         </div>
                       </div>
                     ))}
@@ -276,7 +288,7 @@ export const TodaysProgressTimeline: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs space-y-2.5">
+        <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs space-y-2">
           {/* Timeline Header */}
           <div className="flex items-center justify-between gap-1.5 sm:gap-2 whitespace-nowrap">
             <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
@@ -301,7 +313,7 @@ export const TodaysProgressTimeline: React.FC = () => {
             </div>
 
             {progressPercent === 100 && totalCount > 0 && (
-              <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 shrink-0 whitespace-nowrap animate-in fade-in duration-300">
+              <span className="text-[10px] sm:text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 shrink-0 whitespace-nowrap animate-in fade-in duration-300">
                 <span className="font-bold">✓</span>
                 <span>{_t('اكتمل اليوم', 'Day Completed', 'Tag abgeschlossen')}</span>
               </span>
@@ -309,8 +321,8 @@ export const TodaysProgressTimeline: React.FC = () => {
           </div>
 
           {/* Progress Bar Visualizer */}
-          <div className="space-y-1.5">
-            <div className="w-full bg-slate-100 dark:bg-slate-800/80 h-1.5 sm:h-2 rounded-full overflow-hidden flex relative">
+          <div className="space-y-1">
+            <div className="w-full bg-slate-100 dark:bg-slate-800/80 h-1.5 rounded-full overflow-hidden flex relative">
               {filledUnits > 0 && (
                 <div 
                   className="h-full rounded-full transition-all duration-700 ease-out shadow-xs relative overflow-hidden" 
@@ -323,8 +335,8 @@ export const TodaysProgressTimeline: React.FC = () => {
               )}
             </div>
 
-            {/* Status Count Summary Inline (Compact original size with new colors) */}
-            <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-bold px-0.5 pt-0.5">
+            {/* Status Count Summary Inline (Compact size) */}
+            <div className="flex items-center justify-between text-[10px] font-bold px-0.5 pt-0.5">
               {/* Completed (Green) */}
               <div 
                 className={`flex items-center gap-1 transition-colors ${
@@ -375,176 +387,170 @@ export const TodaysProgressTimeline: React.FC = () => {
             </div>
           </div>
 
-          {/* Chronological Timeline Nodes */}
-          <div className="relative pl-3 space-y-2 pt-0.5 border-l border-slate-200/70 dark:border-surface-border/80">
+          {/* Lessons List (Material 3 Compact Agenda Cards) */}
+          <div className="space-y-1.5">
             {processedLessons.map(({ lesson, state }) => {
-              const isGroup = !!lesson.groupId || lesson.groupName.includes('Gruppe') || (lesson.title && lesson.title.includes('Gruppe'));
+              const targetGroup = lesson.groupId ? groups.find(g => g.id === lesson.groupId) : null;
+              const groupStudents = targetGroup && students ? students.filter(s => s.groupId === targetGroup.id) : [];
               const isCompletedState = lesson.status === 'completed';
               const isCancelledState = lesson.status === 'cancelled';
+              const endTime = getLessonEndTime(lesson.time, lesson.durationMinutes || 60);
+              const isRtl = language === 'ar';
+
+              // Build clean, unboxed metadata items separated by typographic middots (Zero-pill discipline)
+              const metaParts: string[] = [];
+              if (lesson.grade) metaParts.push(lesson.grade);
+              if (lesson.type === 'online') {
+                metaParts.push(t('next_action_online'));
+              } else {
+                metaParts.push(lesson.location && lesson.location !== 'center' && lesson.location !== 'home' ? lesson.location : t('next_action_offline'));
+              }
+              if (targetGroup && groupStudents.length > 0) {
+                metaParts.push(`${groupStudents.length} ${_t('طلاب', 'students', 'Schüler')}`);
+              }
+              if (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) {
+                metaParts.push(`${_t('حصة', 'Session', 'Stunde')} ${lesson.sessionNumber}/${lesson.totalSessionsInPackage}`);
+              }
 
               return (
                 <div 
                   key={lesson.id}
                   onClick={() => openLessonControl(lesson)}
-                  className={`relative pl-3 transition-all cursor-pointer group rounded-lg p-2 sm:p-2.5 border ${
+                  className={`group relative flex items-center gap-2.5 px-2.5 py-2 rounded-xl border transition-all cursor-pointer ${
                     isCompletedState
-                      ? 'bg-emerald-500/[0.03] dark:bg-emerald-950/10 border-emerald-500/20 dark:border-emerald-900/30 opacity-75'
+                      ? 'bg-slate-50/50 dark:bg-slate-900/30 border-slate-200/50 dark:border-slate-800/50 opacity-75 hover:opacity-100'
                       : isCancelledState
-                      ? 'bg-rose-500/[0.04] dark:bg-rose-950/15 border-rose-500/25 dark:border-rose-900/35 opacity-75'
+                      ? 'bg-rose-500/[0.02] dark:bg-rose-950/10 border-rose-500/20 dark:border-rose-900/25 opacity-70 hover:opacity-95'
                       : state === 'active'
-                      ? 'bg-blue-50/70 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700 shadow-xs shadow-blue-500/10'
-                      : 'bg-background/30 dark:bg-slate-800/10 border-slate-100 dark:border-surface-border/60 hover:bg-slate-100/40'
+                      ? 'bg-blue-50/60 dark:bg-blue-950/25 border-blue-400/80 dark:border-blue-600/70 shadow-2xs shadow-blue-500/5 ring-1 ring-blue-500/20'
+                      : 'bg-white dark:bg-slate-900/70 border-slate-200/70 dark:border-surface-border/70 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-2xs'
                   }`}
                 >
+                  {/* Leading Event Accent Stripe (Material 3 Event Bar) */}
                   <div 
-                    className={`absolute -left-[16.5px] top-3.5 w-2 h-2 rounded-full border bg-surface flex items-center justify-center ${
+                    className={`w-1 self-stretch rounded-full shrink-0 transition-colors ${
                       isCompletedState
-                        ? 'border-emerald-400 bg-emerald-500 ring-2 ring-emerald-400/20'
+                        ? 'bg-emerald-500/70'
                         : isCancelledState
-                        ? 'border-rose-400 bg-rose-500 ring-2 ring-rose-400/20'
+                        ? 'bg-rose-400/70 dark:bg-rose-500/70'
                         : state === 'active'
-                        ? 'border-blue-500 bg-blue-500 ring-2 ring-blue-500/30 animate-pulse'
-                        : 'border-slate-300 dark:border-slate-600 bg-surface'
+                        ? 'bg-blue-600 animate-pulse'
+                        : 'bg-primary/70'
                     }`}
                   />
 
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="space-y-0.5 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-[11px] font-mono font-bold ${
-                          isCompletedState 
-                            ? 'text-text-muted/70 dark:text-slate-500 line-through' 
-                            : isCancelledState 
-                            ? 'text-rose-600/80 dark:text-rose-400/80 line-through font-semibold' 
-                            : state === 'active'
-                            ? 'text-blue-700 dark:text-blue-300 font-extrabold'
-                            : 'text-slate-800 dark:text-slate-200'
-                        }`}>
-                          {lesson.time}
-                        </span>
+                  {/* 1. Time Column (Crisp Tabular Typography) */}
+                  <div className="flex flex-col justify-center shrink-0 min-w-[46px] sm:min-w-[50px] text-start tabular-nums select-none">
+                    <span className={`text-xs sm:text-[13px] font-bold tracking-tight leading-none ${
+                      isCompletedState 
+                        ? 'text-text-muted line-through opacity-80' 
+                        : isCancelledState 
+                        ? 'text-rose-600/80 dark:text-rose-400/80 line-through' 
+                        : state === 'active'
+                        ? 'text-blue-700 dark:text-blue-300 font-extrabold'
+                        : 'text-text-main'
+                    }`}>
+                      {lesson.time}
+                    </span>
+                    <span className={`text-[10px] font-medium leading-none mt-1 ${
+                      state === 'active' ? 'text-blue-600/80 dark:text-blue-400/80' : 'text-text-muted/70'
+                    }`}>
+                      {endTime || `${lesson.durationMinutes || 60}m`}
+                    </span>
+                  </div>
 
-                        {state === 'active' && !isCompletedState && !isCancelledState && (
-                          <span className="text-[9px] font-bold bg-blue-600 text-white px-1.5 py-0.2 rounded flex items-center gap-1 shadow-xs">
-                            <span className="w-1 h-1 bg-white rounded-full animate-ping"></span>
-                            {t('timeline_live_now')}
-                          </span>
-                        )}
+                  {/* Hairline Divider between time & details */}
+                  <div className="w-px self-stretch bg-slate-200/60 dark:bg-slate-800 shrink-0 my-0.5" />
 
-                        {isCompletedState && (
-                          <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/60 px-1.5 py-0.2 rounded flex items-center gap-0.5">
-                            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
-                            {t('status_completed')}
-                          </span>
-                        )}
-
-                        {isCancelledState && (
-                          <span className="text-[9px] font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 border border-rose-200/80 dark:border-rose-800/60 px-1.5 py-0.2 rounded flex items-center gap-0.5">
-                            <XCircle className="w-2.5 h-2.5 text-rose-600 dark:text-rose-400" />
-                            {t('status_cancelled')}
-                          </span>
-                        )}
-                      </div>
-
-                      {lesson.groupId && groups.find(g => g.id === lesson.groupId) ? (
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* 2. Main Content (Clean Editorial Hierarchy, Compact & Full Visibility) */}
+                  <div className="flex-1 min-w-0 space-y-0.5">
+                    {/* Title Row */}
+                    <div className="flex items-center justify-between gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        {targetGroup ? (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedGroupForModal(groups.find(g => g.id === lesson.groupId) || null);
+                              setSelectedGroupForModal(targetGroup);
                             }}
-                            className="text-xs font-black text-text-main hover:text-primary dark:hover:text-primary hover:underline truncate text-start cursor-pointer inline-flex items-center gap-1"
-                            title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
-                          >
-                            <span className="truncate max-w-[180px] sm:max-w-xs">
-                              {groups.find(g => g.id === lesson.groupId)?.name}
-                            </span>
-                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-primary-soft text-primary border border-primary-border shrink-0">
-                              {_t('مجموعة', 'Group', 'Gruppe')}
-                            </span>
-                          </button>
-                          {lesson.studentName && lesson.studentName !== groups.find(g => g.id === lesson.groupId)?.name && (
-                            <span className="text-[10px] text-text-muted font-medium truncate">
-                              ({lesson.studentName})
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <h4 className={`text-xs font-bold line-clamp-1 transition-colors ${
-                          isCompletedState 
-                            ? 'line-through text-text-muted/70 dark:text-slate-500' 
-                            : isCancelledState
-                            ? 'line-through text-rose-700/80 dark:text-rose-300/80'
-                            : state === 'active'
-                            ? 'text-blue-900 dark:text-blue-100 font-black group-hover:text-blue-700'
-                            : 'text-text-main group-hover:text-primary dark:group-hover:text-primary'
-                        }`}>
-                          {lesson.studentName || lesson.groupName || lesson.title}
-                        </h4>
-                      )}
-                      <div className="flex items-center gap-1.5 text-[10px] text-text-muted flex-wrap font-medium">
-                        {lesson.grade && <span>{lesson.grade}</span>}
-                        {lesson.grade && <span>•</span>}
-                        {(lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) ? (
-                          <>
-                            <span className={`font-semibold ${
-                              isCancelledState
-                                ? 'text-rose-600/70 dark:text-rose-400/70'
+                            className={`text-xs sm:text-[13px] font-bold text-start cursor-pointer hover:underline hover:text-primary transition-colors break-words leading-tight ${
+                              isCompletedState
+                                ? 'line-through text-text-muted/80'
+                                : isCancelledState
+                                ? 'line-through text-rose-600/80 dark:text-rose-400/80'
                                 : state === 'active'
-                                ? 'text-blue-600 dark:text-blue-400'
-                                : 'text-primary dark:text-primary'
-                            }`}>
-                              S{lesson.sessionNumber}/{lesson.totalSessionsInPackage}
-                            </span>
-                            <span>•</span>
-                          </>
-                        ) : null}
-                        {lesson.type === 'online' ? (
-                          <span className={`flex items-center gap-0.5 ${
-                            isCancelledState
-                              ? 'text-rose-600/70 dark:text-rose-400/70'
-                              : state === 'active'
-                              ? 'text-blue-600 dark:text-blue-400'
-                              : 'text-primary dark:text-primary'
-                          }`}>
-                            <Video className="w-2.5 h-2.5" /> {t('next_action_online')}
-                          </span>
+                                ? 'text-blue-900 dark:text-blue-100'
+                                : 'text-text-main'
+                            }`}
+                            title={_t('انقر لفتح ملف المجموعة', 'Click to open group profile', 'Klicken für Gruppenprofil')}
+                          >
+                            {targetGroup.name}
+                          </button>
                         ) : (
-                          <span className={`flex items-center gap-0.5 ${
-                            isCancelledState
-                              ? 'text-rose-600/70 dark:text-rose-400/70'
+                          <h4 className={`text-xs sm:text-[13px] font-bold break-words leading-tight ${
+                            isCompletedState
+                              ? 'line-through text-text-muted/80'
+                              : isCancelledState
+                              ? 'line-through text-rose-600/80 dark:text-rose-400/80'
                               : state === 'active'
-                              ? 'text-blue-600 dark:text-blue-400'
-                              : 'text-primary dark:text-primary'
+                              ? 'text-blue-900 dark:text-blue-100'
+                              : 'text-text-main'
                           }`}>
-                            <MapPin className="w-2.5 h-2.5" /> {t('next_action_offline')}
-                          </span>
+                            {lesson.studentName || lesson.groupName || lesson.title}
+                          </h4>
                         )}
                       </div>
+
+                      {/* Quiet Live / Status Label */}
+                      {state === 'active' && !isCompletedState && !isCancelledState && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>
+                          <span>{t('timeline_live_now')}</span>
+                        </span>
+                      )}
+
+                      {isCompletedState && (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 opacity-80" />
+                      )}
+
+                      {isCancelledState && (
+                        <span className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 shrink-0">
+                          ({t('status_cancelled')})
+                        </span>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-1 shrink-0">
-                      {/* X Button STRICTLY ONLY for Completed or Cancelled lessons */}
-                      {(isCompletedState || isCancelledState) && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            dismissLessonFromDashboard(lesson.id);
-                          }}
-                          className={`p-1 rounded text-text-muted/70 transition-colors cursor-pointer ${
-                            isCancelledState
-                              ? 'hover:text-rose-600 hover:bg-rose-100/60 dark:hover:bg-rose-950/60'
-                              : 'hover:text-emerald-600 hover:bg-emerald-100/60 dark:hover:bg-emerald-950/60'
-                          }`}
-                          title={t('dismiss_from_dashboard')}
-                          aria-label="Hide from dashboard"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
-                      <ChevronRight className="w-3.5 h-3.5 text-text-muted/70 group-hover:text-primary shrink-0 transition-transform group-hover:translate-x-0.5" />
+                    {/* Metadata Row: Pure typographic elegance with middots, NO PILLS, compact leading */}
+                    <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 text-[11px] text-text-muted font-normal leading-tight">
+                      {metaParts.map((part, idx) => (
+                        <React.Fragment key={idx}>
+                          {idx > 0 && <span className="text-slate-300 dark:text-slate-600 text-[9px] select-none">·</span>}
+                          <span>{part}</span>
+                        </React.Fragment>
+                      ))}
                     </div>
+                  </div>
+
+                  {/* 3. Trailing Action Controls */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {(isCompletedState || isCancelledState) && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dismissLessonFromDashboard(lesson.id);
+                        }}
+                        className="p-1 rounded-lg text-text-muted/50 hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                        title={t('dismiss_from_dashboard')}
+                        aria-label="Hide from dashboard"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <ChevronRight className={`w-3.5 h-3.5 text-text-muted/40 group-hover:text-text-muted transition-transform ${
+                      isRtl ? 'rotate-180 group-hover:-translate-x-0.5' : 'group-hover:translate-x-0.5'
+                    }`} />
                   </div>
                 </div>
               );

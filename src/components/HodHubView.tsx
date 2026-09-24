@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Users, Calendar, BookOpen, FileText, CheckCircle2, AlertTriangle, Clock, Plus, Trash2, Edit3, Send, Sparkles, Printer, Check, X, Shield, FileCheck, Layers, ChevronRight, RefreshCw, RotateCcw, Upload, Phone, MessageCircle, Copy, MapPin, Eye, Target, ClipboardList, Award, BarChart3, Download, Loader2, GraduationCap, Tag, CheckSquare, Square, Pin, Search, MessageSquare, AlertCircle, Bookmark } from 'lucide-react';
+import { Users, Calendar, BookOpen, FileText, CheckCircle2, AlertTriangle, Clock, Plus, Trash2, Edit3, Send, Sparkles, Printer, Check, X, Shield, FileCheck, Layers, ChevronRight, RefreshCw, RotateCcw, Upload, Phone, MessageCircle, Copy, MapPin, Eye, Target, ClipboardList, Award, BarChart3, Download, Loader2, GraduationCap, Tag, CheckSquare, Square, Pin, Search, MessageSquare, AlertCircle, Bookmark, Coffee } from 'lucide-react';
 import { calculatePeriodsTimings, parseTimeToMinutes, getCustomSessionsForPeriod, getUnmatchedCustomSessions, getMergedDayScheduleItems } from '../utils/schoolUtils';
 import { 
   printObservationReport, 
@@ -5627,6 +5627,12 @@ export const HodHubView: React.FC = () => {
                     <span>{_t('توحيد أسماء الفصول مفعل تلقائياً: يوجه الـ AI لضبط الفصول قياسياً (10A, 11B, 7A...) لربط الجدول مع قائمة الطلاب.', 'Standardized Class Codes: Enforces (10A, 11B, 7A...) to match students roster.', 'Standardisierte Klassencodes aktiviert (10A, 11B, 7A...).')}</span>
                   </div>
 
+                  {/* Break Period indicator */}
+                  <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-center gap-1.5 text-[10px] text-amber-700 dark:text-amber-300 font-bold">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>{_t('احتساب الفسحة مدمج بالموجه: يوجه الـ AI لاحتساب الفسحة حصة واحدة دائماً في الترقيم لمنع ترحيل مواعيد الحصص التالية.', 'Break Period Rule: Prompts AI that break is always counted as exactly one period slot so subsequent periods remain accurately numbered.', 'Pause zählt immer genau als eine Stunde.')}</span>
+                  </div>
+
                   <button
                     onClick={copyPromptToClipboard}
                     className="w-full flex items-center justify-center gap-2 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl text-[11px] font-black transition-all cursor-pointer shadow-xs"
@@ -5696,6 +5702,108 @@ export const HodHubView: React.FC = () => {
                         <span>{warn}</span>
                       </div>
                     ))}
+
+                    {validationResult.isValid && validationResult.parsedData && (() => {
+                      const data = validationResult.parsedData;
+                      const teacherIds = Object.keys(data);
+                      let totalLessons = 0;
+                      let breakLessons = 0;
+                      const uniqueClassesSet = new Set<string>();
+                      const teacherSummaries: Array<{
+                        id: string;
+                        name: string;
+                        lessonsCount: number;
+                        classes: string[];
+                      }> = [];
+
+                      teacherIds.forEach(tId => {
+                        const sched = data[tId] || {};
+                        let tLessons = 0;
+                        const tClasses = new Set<string>();
+
+                        Object.keys(sched).forEach(dayKey => {
+                          const periods = sched[dayKey] || [];
+                          periods.forEach((p: any) => {
+                            const cls = p.className ? normalizeClassCode(p.className) : '';
+                            const isBreak = /فسحة|بريك|استراحة|break|pause/i.test(p.subjectName || '') || /فسحة|بريك|استراحة|break|pause/i.test(cls);
+                            if (isBreak) {
+                              breakLessons++;
+                            } else {
+                              totalLessons++;
+                              tLessons++;
+                              if (cls) {
+                                uniqueClassesSet.add(cls);
+                                tClasses.add(cls);
+                              }
+                            }
+                          });
+                        });
+
+                        const teacherName = tId === 'hod' 
+                          ? _t('رئيس القسم (جدولك الخاص)', 'Head of Department (You)', 'Fachleiter (Sie)')
+                          : (teachers.find(t => t.id === tId)?.name || tId);
+
+                        teacherSummaries.push({
+                          id: tId,
+                          name: teacherName,
+                          lessonsCount: tLessons,
+                          classes: Array.from(tClasses).sort()
+                        });
+                      });
+
+                      const uniqueClasses = Array.from(uniqueClassesSet).sort();
+
+                      return (
+                        <div className="p-3 bg-surface rounded-xl border border-surface-border space-y-2.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-[11px] font-black text-text-main flex items-center gap-1.5">
+                              <Layers className="w-3.5 h-3.5 text-primary" />
+                              <span>{_t('ملخص البيانات المستخرجة للاستيراد:', 'Extracted Data Summary:', 'Zusammenfassung der Daten:')}</span>
+                            </span>
+                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                              ✓ {_t('جاهز للحفظ', 'Ready to save', 'Bereit')}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="p-2 bg-surface-hover rounded-lg border border-surface-border">
+                              <span className="text-[9px] text-text-muted font-bold block">{_t('المعلمون', 'Teachers', 'Lehrer')}</span>
+                              <span className="text-xs font-black text-text-main">{teacherSummaries.length}</span>
+                            </div>
+                            <div className="p-2 bg-surface-hover rounded-lg border border-surface-border">
+                              <span className="text-[9px] text-text-muted font-bold block">{_t('الحصص', 'Lessons', 'Stunden')}</span>
+                              <span className="text-xs font-black text-text-main">{totalLessons}</span>
+                            </div>
+                            <div className="p-2 bg-surface-hover rounded-lg border border-surface-border">
+                              <span className="text-[9px] text-text-muted font-bold block">{_t('الفصول', 'Classes', 'Klassen')}</span>
+                              <span className="text-xs font-black text-text-main">{uniqueClasses.length}</span>
+                            </div>
+                          </div>
+
+                          {uniqueClasses.length > 0 && (
+                            <div className="space-y-1">
+                              <span className="text-[9px] text-text-muted font-bold block">{_t('الفصول الموحدة:', 'Normalized Classes:', 'Standardisierte Klassen:')}</span>
+                              <div className="flex flex-wrap gap-1">
+                                {uniqueClasses.map(c => (
+                                  <span key={c} className="px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/20 rounded text-[9px] font-mono font-bold">
+                                    {c}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-1 max-h-36 overflow-y-auto">
+                            {teacherSummaries.map(t => (
+                              <div key={t.id} className="p-1.5 bg-surface-hover/60 rounded-lg text-[10px] flex items-center justify-between border border-surface-border/50">
+                                <span className="font-bold text-text-main">{t.name}</span>
+                                <span className="text-text-muted font-semibold">{t.lessonsCount} {_t('حصة', 'lessons', 'Std.')} • {t.classes.length} {_t('فصل', 'classes', 'Klassen')}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <button
                       onClick={confirmImport}

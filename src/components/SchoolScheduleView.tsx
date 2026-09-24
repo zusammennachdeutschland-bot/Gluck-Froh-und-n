@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { SchoolSettings, SchoolPeriodRecord, SchoolPeriodSettings, SchoolDayPresence, CustomTimedSession } from '../types';
+import { SchoolSettings, SchoolPeriodRecord, SchoolPeriodSettings, SchoolDayPresence, CustomTimedSession, SchoolNote, SchoolNoteType } from '../types';
 import { 
   BookOpen, Sparkles, Copy, Check, Upload, AlertTriangle, Info,
   Plus, Trash2, Calendar, Clock, Edit3, X, CheckCircle2, RefreshCw, FileText,
-  Download, Share2, Tag, MapPin
+  Download, Share2, Tag, MapPin, Coffee, GraduationCap, Layers,
+  Users, BarChart3, Shield, MessageSquare, AlertCircle, Bookmark,
+  Phone, MessageCircle, ExternalLink, Filter, Search, Printer,
+  ArrowLeftRight, CheckSquare, Zap, ChevronRight, Eye
 } from 'lucide-react';
 import { 
   getSchoolSettings, 
@@ -24,7 +27,25 @@ import {
 } from '../utils/classNormalizer';
 
 export const SchoolScheduleView: React.FC = () => {
-  const { profile, updateProfile, rebuildNotificationSchedules, language, _t, t } = useApp();
+  const { 
+    profile, 
+    updateProfile, 
+    rebuildNotificationSchedules, 
+    students = [],
+    groups = [],
+    lessons = [],
+    hodStudents = [],
+    hodComplaints = [],
+    hodActionPlans = [],
+    hodVisits = [],
+    schoolNotes = [],
+    addSchoolNote,
+    deleteSchoolNote,
+    setActiveTab,
+    language, 
+    _t, 
+    t 
+  } = useApp();
   
   const currentSettings = getSchoolSettings(profile);
   const [selectedDay, setSelectedDay] = useState<string>('0'); // '0' = Sunday
@@ -63,6 +84,36 @@ export const SchoolScheduleView: React.FC = () => {
   const [isConfirmResetOpen, setIsConfirmResetOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // ===== NEW SYSTEM & HOD COMMAND BUTTONS STATE =====
+  const [highlightedClass, setHighlightedClass] = useState<string | null>(null);
+  const [isAnalyticsModalOpen, setIsAnalyticsModalOpen] = useState(false);
+  const [isHodStudentsModalOpen, setIsHodStudentsModalOpen] = useState(false);
+  const [selectedClassForHod, setSelectedClassForHod] = useState<string | null>(null);
+  const [isConflictCheckerModalOpen, setIsConflictCheckerModalOpen] = useState(false);
+  const [isSchoolNotesModalOpen, setIsSchoolNotesModalOpen] = useState(false);
+  const [isCopyDayModalOpen, setIsCopyDayModalOpen] = useState(false);
+  const [targetCopyDay, setTargetCopyDay] = useState<string>('1');
+
+  // Quick School Note State
+  const [noteFormText, setNoteFormText] = useState('');
+  const [noteFormClass, setNoteFormClass] = useState('');
+  const [noteFormPeriod, setNoteFormPeriod] = useState<number>(1);
+  const [noteFormTag, setNoteFormTag] = useState<string>('📝 واجب');
+
+  // Current Live Time for Live Class tracker
+  const [currentTimeMinutes, setCurrentTimeMinutes] = useState<number>(() => {
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
+  });
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const d = new Date();
+      setCurrentTimeMinutes(d.getHours() * 60 + d.getMinutes());
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   const handleOpenAddCustomSession = (prefillDayKey?: string) => {
     setEditingCustomSession(null);
@@ -330,6 +381,91 @@ export const SchoolScheduleView: React.FC = () => {
     });
   };
 
+  // 1. Copy Selected Day to Target Day
+  const handleCopyDaySchedule = (targetDayKey: string) => {
+    const sourceSchedule = currentSettings.schedule[selectedDay] || [];
+    const sourceCustoms = (currentSettings.customTimedSessions || []).filter(s => s.dayKey === selectedDay);
+    
+    // Copy periods
+    const updatedSchedule = {
+      ...currentSettings.schedule,
+      [targetDayKey]: JSON.parse(JSON.stringify(sourceSchedule))
+    };
+
+    // Also copy any custom timed sessions to the new day with new IDs
+    const otherCustoms = (currentSettings.customTimedSessions || []).filter(s => s.dayKey !== targetDayKey);
+    const copiedCustoms: CustomTimedSession[] = sourceCustoms.map(s => ({
+      ...s,
+      id: `custom_sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      dayKey: targetDayKey,
+      updatedAt: Date.now()
+    }));
+
+    updateProfile({
+      schoolSettings: {
+        ...currentSettings,
+        schedule: updatedSchedule,
+        customTimedSessions: [...otherCustoms, ...copiedCustoms]
+      }
+    });
+
+    const srcDayName = daysList.find(d => d.key === selectedDay)?.label || selectedDay;
+    const tgtDayName = daysList.find(d => d.key === targetDayKey)?.label || targetDayKey;
+    setIsCopyDayModalOpen(false);
+    setToastMessage(_t(`تم نسخ جدول يوم (${srcDayName}) إلى يوم (${tgtDayName}) بنجاح ✅`, `Schedule of ${srcDayName} copied to ${tgtDayName} successfully ✅`, `Tagesplan erfolgreich nach ${tgtDayName} kopiert ✅`));
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // 2. Clear Only Selected Day
+  const handleClearSelectedDay = () => {
+    const dayObj = daysList.find(d => d.key === selectedDay);
+    const dayLabel = dayObj ? dayObj.label : selectedDay;
+
+    const updatedSchedule = {
+      ...currentSettings.schedule,
+      [selectedDay]: []
+    };
+
+    const remainingCustoms = (currentSettings.customTimedSessions || []).filter(s => s.dayKey !== selectedDay);
+
+    updateProfile({
+      schoolSettings: {
+        ...currentSettings,
+        schedule: updatedSchedule,
+        customTimedSessions: remainingCustoms
+      }
+    });
+
+    setToastMessage(_t(`تم تفريغ حصص يوم (${dayLabel}) بنجاح 🗑️`, `Cleared schedule for ${dayLabel} 🗑️`, `Stunden für ${dayLabel} geleert 🗑️`));
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  // 3. Quick Print
+  const handleQuickPrint = () => {
+    window.print();
+  };
+
+  // 4. Quick Add School Note
+  const handleAddQuickSchoolNote = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!noteFormText.trim()) return;
+
+    addSchoolNote({
+      type: 'lesson',
+      text: noteFormText.trim(),
+      tags: [noteFormTag],
+      className: noteFormClass.trim() || undefined,
+      periodNumber: noteFormPeriod || undefined,
+      teacherId: profile?.id || 'hod',
+      teacherName: profile?.displayName || profile?.name || 'المعلم',
+      pinned: false
+    });
+
+    setNoteFormText('');
+    setToastMessage(_t('تم تسجيل الملاحظة المدرسية بنجاح 📝', 'School note saved successfully 📝', 'Schulnotiz erfolgreich gespeichert 📝'));
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
   // AI Import Prompt Generator
   const generateAIPrompt = (): string => {
     return `أنت مساعد خبير وفائق الدقة في قراءة واستخراج جداول الحصص المدرسية لربطها بقوائم الطلاب.
@@ -348,7 +484,7 @@ export const SchoolScheduleView: React.FC = () => {
     "6": { "active": false, "arrivalTime": "07:30", "departureTime": "14:30" }
   },
   "periodSettings": {
-    "periodsCount": 7,
+    "periodsCount": 8,
     "firstPeriodStart": "08:00",
     "defaultDuration": 45,
     "customDurations": {}
@@ -373,10 +509,17 @@ export const SchoolScheduleView: React.FC = () => {
 2. أيام الأسبوع تمثل من "0" (الأحد) إلى "6" (السبت). فَعّل ("active": true) فقط أيام العمل والدراسة الفعلية.
 3. وقت الحضور ووقت الانصراف يمثلان فترة التواجد الإجمالية في المدرسة (مثال: الحضور 07:30 والانصراف 14:30).
 4. ترقيم الحصص "periodNumber" يبدأ من 1 تصاعدياً حتى "periodsCount".
-5. subjectName هو اسم المادة (يرجى توحيده لـ "Deutsch" لمادة اللغة الألمانية).
-6. className هو اسم الفصل ويجب كتابته بالصيغة القياسية الموحدة (مثل 10A, 11B, 7A...) بدون مسافات ليتطابق تماماً مع كشوف وفلاتر الطلاب.
-7. استخدم نظام التوقيت 24 ساعة (HH:MM) مثل "08:00" و "13:30".
-8. أخرج فقط كود JSON النظيف داخل وسم \`\`\`json و \`\`\` بدون أي نصوص تمهيدية أو شروحات.`;
+5. ⚠️ قاعدة حاسمة بخصوص الفسحة / الاستراحة (Break / Recess):
+   - الفسحة تُحسب دائماً حصة واحدة فقط لا غير (موضع حصة واحدة بالضبط = Exactly 1 period slot)، ولا تأخذ أكثر من حصة واحدة أبداً.
+   - يجب احتساب الفسحة ضمن ترقيم الحصص التسلسلي (periodNumber) كحصة مفردة، بحيث:
+     * إذا كان الجدول يحتوي على 3 حصص ثم الفسحة، فإن الفسحة تكون دائماً هي "الحصة رقم 4" (حصة واحدة فقط).
+     * وتكون الحصة الدراسية التالية للفسحة مباشرة هي "الحصة رقم 5"، وتُحسب الفسحة كحصة واحدة ضمن إجمالي عدد الحصص (periodsCount).
+   - إذا رغبت بإدراج فترة الفسحة نفسها في مصفوفة schedule، يمكن وضع subjectName: "فسحة" أو "Break" وترك className فارغاً.
+   - إذا كانت مدة الفسحة مختلفة عن المدة الافتراضية (مثلاً 30 دقيقة والافتراضي 45 دقيقة)، يمكنك وضع مدة الفسحة بالدقائق في "customDurations" لرقم حصتها (مثال: "customDurations": { "4": 30 }).
+6. subjectName هو اسم المادة (يرجى توحيده لـ "Deutsch" لمادة اللغة الألمانية).
+7. className هو اسم الفصل ويجب كتابته بالصيغة القياسية الموحدة (مثل 10A, 11B, 7A...) بدون مسافات ليتطابق تماماً مع كشوف وفلاتر الطلاب.
+8. استخدم نظام التوقيت 24 ساعة (HH:MM) مثل "08:00" و "13:30".
+9. أخرج فقط كود JSON النظيف داخل وسم \`\`\`json و \`\`\` بدون أي نصوص تمهيدية أو شروحات.`;
   };
 
   const copyPromptToClipboard = () => {
@@ -591,53 +734,248 @@ export const SchoolScheduleView: React.FC = () => {
     });
   });
 
+  // 4. Detailed Class Workload Map
+  const classWorkloadMap = useMemo(() => {
+    const map: Record<string, { count: number; days: Set<string>; periods: Array<{ dayKey: string; periodNumber: number; subject?: string }> }> = {};
+    Object.entries(currentSettings.schedule).forEach(([dayKey, dayRecords]) => {
+      (dayRecords || []).forEach(record => {
+        if (record.className && record.className.trim()) {
+          const cls = normalizeClassCode(record.className.trim());
+          if (!map[cls]) {
+            map[cls] = { count: 0, days: new Set(), periods: [] };
+          }
+          map[cls].count += 1;
+          map[cls].days.add(dayKey);
+          map[cls].periods.push({ dayKey, periodNumber: record.periodNumber, subject: record.subjectName });
+        }
+      });
+    });
+    return map;
+  }, [currentSettings.schedule]);
+
+  // 5. Stage Workload Map
+  const stageWorkloadMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    Object.entries(classWorkloadMap).forEach(([cls, data]) => {
+      const stage = extractStage(cls);
+      map[stage] = (map[stage] || 0) + data.count;
+    });
+    return map;
+  }, [classWorkloadMap]);
+
+  // 6. Cross-reference Tutoring Conflicts Scanner
+  const tutoringConflictsList = useMemo(() => {
+    const conflicts: Array<{
+      lessonId: string;
+      studentOrGroup: string;
+      dayKey: string;
+      dayLabel: string;
+      lessonTime: string;
+      conflictType: 'presence' | 'period';
+      detail: string;
+    }> = [];
+
+    lessons.forEach(l => {
+      if (!l.date || !l.time) return;
+      const lDate = new Date(l.date);
+      const dayKey = String(lDate.getDay());
+      const dayPresence = currentSettings.presence[dayKey];
+      if (!dayPresence || !dayPresence.active) return;
+
+      const lessonStartMin = parseTimeToMinutes(l.time);
+      const lessonDuration = l.durationMinutes || 60;
+      const lessonEndMin = lessonStartMin + lessonDuration;
+
+      const presenceStart = parseTimeToMinutes(dayPresence.arrivalTime || '07:30');
+      const presenceEnd = parseTimeToMinutes(dayPresence.departureTime || '14:30');
+
+      if (lessonStartMin < presenceEnd && lessonEndMin > presenceStart) {
+        const daySchedule = currentSettings.schedule[dayKey] || [];
+        const overlappingPeriod = calculatedPeriods.find(p => {
+          const pStart = parseTimeToMinutes(p.startTime);
+          const pEnd = parseTimeToMinutes(p.endTime);
+          return lessonStartMin < pEnd && lessonEndMin > pStart;
+        });
+
+        const dayObj = daysList.find(d => d.key === dayKey);
+        const scheduledClass = overlappingPeriod 
+          ? daySchedule.find(r => r.periodNumber === overlappingPeriod.periodNumber) 
+          : null;
+
+        conflicts.push({
+          lessonId: l.id,
+          studentOrGroup: l.studentName || l.groupName || l.title || _t('درس خصوصي', 'Private Lesson', 'Privatunterricht'),
+          dayKey,
+          dayLabel: dayObj?.label || dayKey,
+          lessonTime: `${l.time} (${lessonDuration}m)`,
+          conflictType: scheduledClass?.className ? 'period' : 'presence',
+          detail: scheduledClass?.className 
+            ? _t(`يتعارض مباشرة مع الحصة ${overlappingPeriod?.periodNumber} (فصل ${scheduledClass.className})`, `Directly conflicts with period ${overlappingPeriod?.periodNumber} (class ${scheduledClass.className})`, `Kollidiert direkt mit Stunde ${overlappingPeriod?.periodNumber} (Klasse ${scheduledClass.className})`)
+            : _t(`يتعارض مع فترة التواجد المدرسي (${dayPresence.arrivalTime} - ${dayPresence.departureTime})`, `Conflicts with school presence hours (${dayPresence.arrivalTime} - ${dayPresence.departureTime})`, `Kollidiert mit Schulpräsenzzeit (${dayPresence.arrivalTime} - ${dayPresence.departureTime})`)
+        });
+      }
+    });
+
+    return conflicts;
+  }, [lessons, currentSettings.schedule, currentSettings.presence, calculatedPeriods, daysList, _t]);
+
+  // 7. Live Current Class / Session Detection
+  const liveCurrentSession = useMemo(() => {
+    const now = new Date();
+    const todayDayKey = String(now.getDay());
+    const dayPresence = currentSettings.presence[todayDayKey];
+    if (!dayPresence || !dayPresence.active) return null;
+
+    const currentMin = currentTimeMinutes;
+    
+    // Check standard periods
+    const activePeriodTiming = calculatedPeriods.find(p => {
+      const s = parseTimeToMinutes(p.startTime);
+      const e = parseTimeToMinutes(p.endTime);
+      return currentMin >= s && currentMin <= e;
+    });
+
+    if (activePeriodTiming) {
+      const daySchedule = currentSettings.schedule[todayDayKey] || [];
+      const rec = daySchedule.find(r => r.periodNumber === activePeriodTiming.periodNumber);
+      const endMin = parseTimeToMinutes(activePeriodTiming.endTime);
+      const minsRemaining = Math.max(0, endMin - currentMin);
+
+      return {
+        type: 'standard',
+        periodNumber: activePeriodTiming.periodNumber,
+        startTime: activePeriodTiming.startTime,
+        endTime: activePeriodTiming.endTime,
+        minsRemaining,
+        className: rec?.className || '',
+        subjectName: rec?.subjectName || '',
+        isBreak: !rec?.className && (rec?.subjectName?.includes('فسحة') || rec?.subjectName?.toLowerCase().includes('break'))
+      };
+    }
+
+    // Check custom timed sessions
+    const todaysCustoms = (currentSettings.customTimedSessions || []).filter(s => s.dayKey === todayDayKey);
+    for (const cs of todaysCustoms) {
+      const s = parseTimeToMinutes(cs.startTime);
+      const e = parseTimeToMinutes(cs.endTime);
+      if (currentMin >= s && currentMin <= e) {
+        const minsRemaining = Math.max(0, e - currentMin);
+        return {
+          type: 'custom',
+          periodNumber: null,
+          startTime: cs.startTime,
+          endTime: cs.endTime,
+          minsRemaining,
+          className: cs.className,
+          subjectName: cs.subjectName || '',
+          isBreak: false
+        };
+      }
+    }
+
+    return null;
+  }, [currentTimeMinutes, currentSettings.presence, currentSettings.schedule, currentSettings.customTimedSessions, calculatedPeriods]);
+
+  // 8. Class to HOD and System Students Link Map
+  const classStudentsMap = useMemo(() => {
+    const map: Record<string, {
+      hodStudentsList: typeof hodStudents;
+      systemStudentsList: typeof students;
+      actionPlansCount: number;
+      complaintsCount: number;
+    }> = {};
+
+    const allClassCodes = Object.keys(classWorkloadMap);
+
+    allClassCodes.forEach(cls => {
+      const normCls = normalizeClassCode(cls).toLowerCase();
+      const stage = extractStage(cls);
+
+      const matchingHod = hodStudents.filter(s => {
+        const sCls = normalizeClassCode(s.className || '').toLowerCase();
+        const sGrade = normalizeClassCode(s.grade || '').toLowerCase();
+        return sCls === normCls || sGrade === normCls || (stage && (sCls.includes(stage) || sGrade.includes(stage)));
+      });
+
+      const matchingSys = students.filter(s => {
+        const sGrade = (s.schoolGrade || '').toLowerCase();
+        const sNotes = (s.notes || '').toLowerCase();
+        return sGrade.includes(normCls) || sNotes.includes(normCls) || (stage && sGrade.includes(stage));
+      });
+
+      const hodStudentIds = new Set(matchingHod.map(h => h.id));
+      const matchingPlans = hodActionPlans.filter(p => hodStudentIds.has(p.studentId) || (p.className && normalizeClassCode(p.className).toLowerCase() === normCls));
+      const matchingComplaints = hodComplaints.filter(c => hodStudentIds.has(c.studentId) || (c.className && normalizeClassCode(c.className).toLowerCase() === normCls));
+
+      map[cls] = {
+        hodStudentsList: matchingHod,
+        systemStudentsList: matchingSys,
+        actionPlansCount: matchingPlans.length,
+        complaintsCount: matchingComplaints.length
+      };
+    });
+
+    return map;
+  }, [classWorkloadMap, hodStudents, students, hodActionPlans, hodComplaints]);
+
   const isEmpty = totalWeeklyLessons === 0 && !showTableEvenIfEmpty;
 
   return (
     <div className="space-y-3 pb-6" id="school-schedule-root">
-      {/* HEADER BAR WITH AI BUTTON & COMPACT OVERVIEW */}
-      <div className="flex flex-row items-center justify-between gap-1.5 sm:gap-2.5 flex-wrap" id="school-schedule-header">
-        {/* COMPACT OVERVIEW SUMMARY LINE */}
-        <div className="flex items-center gap-1 sm:gap-1.5 py-0.5 sm:py-1 px-2 sm:px-2.5 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-gray-850 text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 font-bold" id="school-overview-box">
-          <span>{totalUniqueClasses} {_t('فصول', 'Classes', 'Klassen')}</span>
-          <span className="text-slate-300 dark:text-slate-700">•</span>
-          <span>{totalUniqueStages} {_t('مراحل', 'Stages', 'Stufen')}</span>
-          <span className="text-slate-300 dark:text-slate-700">•</span>
-          <span className="text-primary font-black">{totalWeeklyLessons} {_t('حصة أسبوعية', 'Weekly Lessons', 'Wochenstunden')}</span>
+      {/* 1. LIVE SESSION BANNER (WHEN CLASS IS ONGOING) */}
+      {liveCurrentSession && (
+        <div className="p-3 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-primary/10 border border-emerald-500/30 rounded-2xl flex items-center justify-between gap-3 shadow-xs animate-pulse-subtle">
+          <div className="flex items-center gap-2.5">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-black uppercase text-emerald-700 dark:text-emerald-300">
+                  {_t('🔴 الحصة الحالية الآن:', '🔴 Live Session Now:', '🔴 Aktuelle Stunde:')}
+                </span>
+                <span className="text-xs font-black text-slate-900 dark:text-white">
+                  {liveCurrentSession.isBreak 
+                    ? _t('استراحة / فسحة ☕', 'Break / Recess ☕', 'Pause ☕') 
+                    : `${liveCurrentSession.className || _t('حصة مدرسية', 'School Period', 'Unterricht')} ${liveCurrentSession.subjectName ? `(${liveCurrentSession.subjectName})` : ''}`}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold font-mono">
+                {liveCurrentSession.startTime} - {liveCurrentSession.endTime} • {_t(`متبقي ${liveCurrentSession.minsRemaining} دقيقة على الجرس`, `${liveCurrentSession.minsRemaining} mins until bell`, `noch ${liveCurrentSession.minsRemaining} Min.`)}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {liveCurrentSession.className && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedClassForHod(liveCurrentSession.className);
+                  setIsHodStudentsModalOpen(true);
+                }}
+                className="px-2.5 py-1 bg-white dark:bg-gray-800 hover:bg-slate-50 border border-slate-200 dark:border-gray-700 text-slate-700 dark:text-slate-200 rounded-lg text-[10.5px] font-black shadow-2xs cursor-pointer flex items-center gap-1"
+              >
+                <Users className="w-3 h-3 text-primary" />
+                <span className="hidden sm:inline">{_t('طلاب الفصل', 'Students', 'Schüler')}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setNoteFormClass(liveCurrentSession.className);
+                setNoteFormPeriod(liveCurrentSession.periodNumber || 1);
+                setIsSchoolNotesModalOpen(true);
+              }}
+              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10.5px] font-black shadow-2xs cursor-pointer flex items-center gap-1"
+            >
+              <FileText className="w-3 h-3" />
+              <span>{_t('تسجيل ملاحظة', 'Log Note', 'Notiz')}</span>
+            </button>
+          </div>
         </div>
-
-        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
-          <button
-            onClick={() => handleOpenAddCustomSession(selectedDay)}
-            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 rounded-lg text-[10.5px] sm:text-xs font-bold transition-all active:scale-95 border border-indigo-200 dark:border-indigo-800 shrink-0 cursor-pointer shadow-2xs"
-            id="add-custom-session-btn"
-            title={_t('إضافة حصة بتوقيت مخصص (خارج الأوقات النمطية أو في وقت محدد)', 'Add custom timed session', 'Spezielle Stunde hinzufügen')}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            <span>{_t('+ حصة بتوقيت مخصص', '+ Custom Session', '+ Spezielle Stunde')}</span>
-          </button>
-
-          <button
-            onClick={() => setIsExportModalOpen(true)}
-            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 bg-surface hover:bg-surface-hover text-text-main rounded-lg text-[10.5px] sm:text-xs font-bold transition-all active:scale-95 border border-surface-border shrink-0 cursor-pointer shadow-2xs"
-            id="export-school-schedule-btn"
-            title={_t('تصدير الجدول الأسبوعي (PDF / PNG / JPG)', 'Export Weekly Schedule (PDF / PNG / JPG)', 'Wochenplan exportieren (PDF / PNG / JPG)')}
-          >
-            <Download className="w-3.5 h-3.5 text-primary" />
-            <span>{_t('تصدير', 'Export', 'Exportieren')}</span>
-          </button>
-
-          <button
-            onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 bg-primary-soft hover:bg-primary/20 text-primary rounded-lg text-[10.5px] sm:text-xs font-bold transition-all active:scale-95 border border-primary-border/60 shrink-0 cursor-pointer"
-            id="import-ai-btn"
-            title={_t('استيراد بالذكاء الاصطناعي', 'Import with AI', 'Mit KI importieren')}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>{_t('استيراد بالذكاء الاصطناعي', 'Import with AI', 'Mit KI importieren')}</span>
-          </button>
-        </div>
-      </div>
+      )}
 
       {isEmpty && (currentSettings.customTimedSessions || []).length === 0 ? (
         <div className="p-6 sm:p-8 rounded-2xl bg-white dark:bg-gray-900 border border-slate-150/60 dark:border-gray-850 text-center space-y-3 shadow-xs" id="school-empty-state">
@@ -779,60 +1117,82 @@ export const SchoolScheduleView: React.FC = () => {
                                 isCellSelected ? 'bg-primary-soft/30 dark:bg-primary-soft/15' : 'hover:bg-slate-50/40 dark:hover:bg-slate-800/20'
                               }`}
                             >
-                              <div className="flex flex-col gap-1 w-full">
-                                {isFilled && (
-                                  <div 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedDay(dayKey);
-                                      startEditPeriod(dayKey, period.periodNumber);
-                                    }}
-                                    className="p-1 sm:p-2 rounded-lg bg-primary-soft/50 dark:bg-primary-soft/25 border border-primary-border/60 text-center flex flex-col justify-center items-center min-h-[40px] sm:min-h-[46px] transition-all hover:bg-primary-soft/80 group/card overflow-hidden shadow-2xs"
-                                    title={`${record.className || ''} ${record.subjectName ? `- ${record.subjectName}` : ''}`}
-                                  >
-                                    {record.className ? (
-                                      <>
-                                        <div className="text-xs sm:text-sm font-black text-slate-950 dark:text-white leading-tight truncate max-w-full tracking-tight">
-                                          {record.className}
-                                        </div>
-                                        {record.subjectName && (
-                                          <div className="text-[7.5px] sm:text-[9px] font-bold text-primary leading-none truncate max-w-full mt-0.5 uppercase opacity-95">
-                                            {record.subjectName}
-                                          </div>
-                                        )}
-                                      </>
-                                    ) : (
-                                      <div className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-slate-100 truncate leading-tight">
-                                        {record.subjectName}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
+                                <div className="flex flex-col gap-1 w-full">
+                                {isFilled && (() => {
+                                  const isClassMatch = highlightedClass && record.className && normalizeClassCode(record.className) === normalizeClassCode(highlightedClass);
+                                  const isDimmed = highlightedClass && (!record.className || normalizeClassCode(record.className) !== normalizeClassCode(highlightedClass));
 
-                                {matchingCustoms.map(cs => (
-                                  <div
-                                    key={cs.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedDay(dayKey);
-                                      handleOpenEditCustomSession(cs);
-                                    }}
-                                    className="p-0.5 sm:p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-300 dark:border-indigo-700/60 text-center flex flex-col justify-center items-center min-h-[36px] sm:min-h-[40px] transition-all hover:bg-indigo-100 dark:hover:bg-indigo-900/60 group/card overflow-hidden shadow-2xs"
-                                    title={`${cs.className} (⏱️ ${cs.startTime} - ${cs.endTime}) ${cs.subjectName ? `- ${cs.subjectName}` : ''}`}
-                                  >
-                                    <div className="text-[10px] sm:text-[11.5px] font-black text-indigo-900 dark:text-indigo-200 leading-tight truncate max-w-full">
-                                      {cs.className}
+                                  return (
+                                    <div 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedDay(dayKey);
+                                        startEditPeriod(dayKey, period.periodNumber);
+                                      }}
+                                      className={`p-1 sm:p-2 rounded-lg text-center flex flex-col justify-center items-center min-h-[40px] sm:min-h-[46px] transition-all group/card overflow-hidden shadow-2xs ${
+                                        isClassMatch 
+                                          ? 'bg-amber-100 dark:bg-amber-950/80 border-2 border-amber-500 shadow-md ring-2 ring-amber-400/50 scale-[1.03]'
+                                          : isDimmed 
+                                            ? 'opacity-30 grayscale-[30%] bg-primary-soft/30 dark:bg-primary-soft/10 border border-primary-border/30'
+                                            : 'bg-primary-soft/50 dark:bg-primary-soft/25 border border-primary-border/60 hover:bg-primary-soft/80'
+                                      }`}
+                                      title={`${record.className || ''} ${record.subjectName ? `- ${record.subjectName}` : ''}`}
+                                    >
+                                      {record.className ? (
+                                        <>
+                                          <div className={`text-xs sm:text-sm font-black leading-tight truncate max-w-full tracking-tight ${isClassMatch ? 'text-amber-950 dark:text-amber-200' : 'text-slate-950 dark:text-white'}`}>
+                                            {record.className}
+                                          </div>
+                                          {record.subjectName && (
+                                            <div className={`text-[7.5px] sm:text-[9px] font-bold leading-none truncate max-w-full mt-0.5 uppercase opacity-95 ${isClassMatch ? 'text-amber-800 dark:text-amber-300' : 'text-primary'}`}>
+                                              {record.subjectName}
+                                            </div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <div className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-slate-100 truncate leading-tight">
+                                          {record.subjectName}
+                                        </div>
+                                      )}
                                     </div>
-                                    <div className="text-[7px] sm:text-[8px] font-mono font-bold text-indigo-600 dark:text-indigo-400 leading-none truncate max-w-full mt-0.5">
-                                      ⏱️ {cs.startTime}-{cs.endTime}
-                                    </div>
-                                    {cs.subjectName && (
-                                      <div className="text-[6.5px] sm:text-[7.5px] font-semibold text-indigo-700 dark:text-indigo-300 leading-none truncate max-w-full mt-0.5 hidden sm:block">
-                                        {cs.subjectName}
+                                  );
+                                })()}
+
+                                {matchingCustoms.map(cs => {
+                                  const isClassMatch = highlightedClass && cs.className && normalizeClassCode(cs.className) === normalizeClassCode(highlightedClass);
+                                  const isDimmed = highlightedClass && (!cs.className || normalizeClassCode(cs.className) !== normalizeClassCode(highlightedClass));
+
+                                  return (
+                                    <div
+                                      key={cs.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedDay(dayKey);
+                                        handleOpenEditCustomSession(cs);
+                                      }}
+                                      className={`p-0.5 sm:p-1.5 rounded-lg text-center flex flex-col justify-center items-center min-h-[36px] sm:min-h-[40px] transition-all group/card overflow-hidden shadow-2xs ${
+                                        isClassMatch 
+                                          ? 'bg-amber-100 dark:bg-amber-950/80 border-2 border-amber-500 shadow-md ring-2 ring-amber-400/50 scale-[1.03]'
+                                          : isDimmed 
+                                            ? 'opacity-30 grayscale-[30%] bg-indigo-50/30 dark:bg-indigo-950/20 border border-indigo-200/40'
+                                            : 'bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-300 dark:border-indigo-700/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60'
+                                      }`}
+                                      title={`${cs.className} (⏱️ ${cs.startTime} - ${cs.endTime}) ${cs.subjectName ? `- ${cs.subjectName}` : ''}`}
+                                    >
+                                      <div className={`text-[10px] sm:text-[11.5px] font-black leading-tight truncate max-w-full ${isClassMatch ? 'text-amber-950 dark:text-amber-200' : 'text-indigo-900 dark:text-indigo-200'}`}>
+                                        {cs.className}
                                       </div>
-                                    )}
-                                  </div>
-                                ))}
+                                      <div className="text-[7px] sm:text-[8px] font-mono font-bold text-indigo-600 dark:text-indigo-400 leading-none truncate max-w-full mt-0.5">
+                                        ⏱️ {cs.startTime}-{cs.endTime}
+                                      </div>
+                                      {cs.subjectName && (
+                                        <div className="text-[6.5px] sm:text-[7.5px] font-semibold text-indigo-700 dark:text-indigo-300 leading-none truncate max-w-full mt-0.5 hidden sm:block">
+                                          {cs.subjectName}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
 
                                 {!isFilled && matchingCustoms.length === 0 && (
                                   <div 
@@ -1430,6 +1790,13 @@ export const SchoolScheduleView: React.FC = () => {
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
                   {_t('انسخ الموجه الجاهز الذي يحتوي على تعليمات دقيقة و Schema مخصص وقدمه لـ ChatGPT / Gemini مع إرفاق صورة جدولك.', 'Copy our optimized prompt template containing strict format guidelines and schema, and feed it to Gemini/ChatGPT with your schedule photo.', 'Kopieren Sie unsere optimierte Prompt-Vorlage und fügen Sie sie in ChatGPT/Gemini mit Ihrem Stundenplan-Foto ein.')}
                 </p>
+
+                {/* Break period rule badge */}
+                <div className="p-2 bg-amber-500/10 border border-amber-500/25 rounded-xl flex items-center gap-1.5 text-[10px] text-amber-700 dark:text-amber-300 font-bold">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>{_t('قاعدة احتساب الفسحة مدمجة: البرومبت يوجّه الذكاء الاصطناعي لاحتساب الفسحة حصة واحدة دائماً في الترقيم لتفادي ترحيل مواعيد الحصص التالية.', 'Break period rule included: Instructs AI that break is always counted as exactly one period slot so subsequent lessons remain properly timed.', 'Pause zählt immer genau als eine Stunde.')}</span>
+                </div>
+
                 <button
                   type="button"
                   onClick={copyPromptToClipboard}
@@ -1535,34 +1902,223 @@ export const SchoolScheduleView: React.FC = () => {
                   </div>
                 )}
 
-                {/* PREVIEW OF THE IMPORT DATA */}
-                {validationResult.isValid && validationResult.parsedData && (
-                  <div className="pt-3 border-t border-slate-200 dark:border-gray-800 space-y-2">
-                    <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      {_t('معاينة الجدول المستخرج للتحقق البصري', 'Schedule Preview Summary', 'Vorschau-Zusammenfassung')}
-                    </h5>
+                {/* PREVIEW & SUMMARY OF THE IMPORT DATA */}
+                {validationResult.isValid && validationResult.parsedData && (() => {
+                  const data = validationResult.parsedData;
+                  const sched = data.schedule || {};
+                  const presence = data.presence || {};
+                  const pSettings = data.periodSettings || { periodsCount: 7, firstPeriodStart: '08:00', defaultDuration: 45 };
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-slate-400">
-                      <div>
-                        <strong>{_t('مجموع الحصص اليومية:', 'Daily period count:', 'Stundenanzahl:')}</strong> {validationResult.parsedData.periodSettings.periodsCount}
-                      </div>
-                      <div>
-                        <strong>{_t('بداية أول حصة:', 'First period start:', 'Beginn 1. Stunde:')}</strong> {validationResult.parsedData.periodSettings.firstPeriodStart}
-                      </div>
-                      <div>
-                        <strong>{_t('مدة الحصة الافتراضية:', 'Default duration:', 'Standard-Dauer:')}</strong> {validationResult.parsedData.periodSettings.defaultDuration} {_t('دقيقة', 'mins', 'Min.')}
-                      </div>
-                      <div>
-                        <strong>{_t('أيام المدرسة المفعلة:', 'Active school days:', 'Aktive Schultage:')}</strong> {
-                          Object.keys(validationResult.parsedData.presence)
-                            .filter(k => validationResult.parsedData!.presence[k].active)
-                            .map(k => daysList.find(d => d.key === k)?.short)
-                            .join(', ')
+                  let totalScheduledSlots = 0;
+                  let teachingLessonsCount = 0;
+                  let breakSlotsCount = 0;
+                  const uniqueClassesSet = new Set<string>();
+                  const activeDaysWithLessons: Array<{
+                    dayKey: string;
+                    dayLabel: string;
+                    lessons: Array<{ periodNumber: number; className: string; subjectName: string; isBreak: boolean }>;
+                  }> = [];
+
+                  const dayKeysOrder = ['0', '1', '2', '3', '4', '5', '6'];
+                  dayKeysOrder.forEach(dayKey => {
+                    const list = sched[dayKey] || [];
+                    const isDayActive = presence[dayKey]?.active;
+                    const sorted = [...list].sort((a, b) => (Number(a.periodNumber) || 0) - (Number(b.periodNumber) || 0));
+                    
+                    if (sorted.length > 0 || isDayActive) {
+                      const dayLessons = sorted.map(item => {
+                        const cls = normalizeClassCode(item.className || '');
+                        const subj = item.subjectName?.trim() || '';
+                        const isBreak = /فسحة|بريك|استراحة|break|pause/i.test(subj) || /فسحة|بريك|استراحة|break|pause/i.test(cls);
+                        
+                        totalScheduledSlots++;
+                        if (isBreak) {
+                          breakSlotsCount++;
+                        } else {
+                          teachingLessonsCount++;
+                          if (cls) uniqueClassesSet.add(cls);
                         }
+
+                        return {
+                          periodNumber: item.periodNumber,
+                          className: cls,
+                          subjectName: subj || (isBreak ? _t('فسحة', 'Break', 'Pause') : 'Deutsch'),
+                          isBreak
+                        };
+                      });
+
+                      if (dayLessons.length > 0) {
+                        const dayObj = daysList.find(d => d.key === dayKey);
+                        activeDaysWithLessons.push({
+                          dayKey,
+                          dayLabel: dayObj ? dayObj.label : `يوم ${dayKey}`,
+                          lessons: dayLessons
+                        });
+                      }
+                    }
+                  });
+
+                  const uniqueClasses = Array.from(uniqueClassesSet).sort();
+
+                  return (
+                    <div className="pt-3 border-t border-slate-200 dark:border-gray-800 space-y-3">
+                      {/* Summary Section Header */}
+                      <div className="flex items-center justify-between gap-2 flex-wrap bg-primary/5 dark:bg-primary/10 p-2.5 rounded-xl border border-primary/20">
+                        <div className="flex items-center gap-2">
+                          <Layers className="w-4 h-4 text-primary shrink-0" />
+                          <span className="text-xs font-black text-text-main">
+                            {_t('ملخص البيانات التي ستُضاف إلى جدولك:', 'Summary of data to be added to your schedule:', 'Zusammenfassung der hinzuzufügenden Daten:')}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/25">
+                          ✓ {_t('جاهز للحفظ', 'Ready to save', 'Bereit zum Speichern')}
+                        </span>
+                      </div>
+
+                      {/* Key Numerical Metrics */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="p-2.5 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-gray-700/80 shadow-2xs">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                            <BookOpen className="w-3.5 h-3.5 text-primary" />
+                            <span>{_t('الحصص الدراسية', 'Teaching Lessons', 'Unterrichtsstunden')}</span>
+                          </div>
+                          <div className="mt-1 text-base font-black text-text-main flex items-baseline gap-1">
+                            <span>{teachingLessonsCount}</span>
+                            <span className="text-[10px] font-semibold text-slate-400">{_t('حصة أسبوعياً', 'lessons/wk', 'Std./Woche')}</span>
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-gray-700/80 shadow-2xs">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                            <GraduationCap className="w-3.5 h-3.5 text-indigo-500" />
+                            <span>{_t('الفصول المستخرجة', 'Target Classes', 'Klassen')}</span>
+                          </div>
+                          <div className="mt-1 text-base font-black text-text-main flex items-baseline gap-1">
+                            <span>{uniqueClasses.length}</span>
+                            <span className="text-[10px] font-semibold text-slate-400">{_t('فصل مختلف', 'classes', 'Klassen')}</span>
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-gray-700/80 shadow-2xs">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                            <Calendar className="w-3.5 h-3.5 text-emerald-500" />
+                            <span>{_t('أيام التدريس', 'Teaching Days', 'Unterrichtstage')}</span>
+                          </div>
+                          <div className="mt-1 text-base font-black text-text-main flex items-baseline gap-1">
+                            <span>{activeDaysWithLessons.length}</span>
+                            <span className="text-[10px] font-semibold text-slate-400">{_t('أيام نشطة', 'active days', 'Tage')}</span>
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-gray-700/80 shadow-2xs">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                            <Coffee className="w-3.5 h-3.5 text-amber-500" />
+                            <span>{_t('الفسحة / البريك', 'Break / Recess', 'Pause')}</span>
+                          </div>
+                          <div className="mt-1 text-xs font-black text-amber-600 dark:text-amber-400 truncate">
+                            {breakSlotsCount > 0 
+                              ? _t(`${breakSlotsCount} فترة فسحة مدمجة`, `${breakSlotsCount} Break slot included`, `${breakSlotsCount} Pause gezählt`)
+                              : _t('محسوبة حصة واحدة', 'Counted as 1 period', 'Als 1 Stunde gezählt')
+                            }
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Unique Normalized Classes Pills */}
+                      {uniqueClasses.length > 0 && (
+                        <div className="p-2.5 bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 rounded-xl space-y-1.5">
+                          <div className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                            <Tag className="w-3 h-3 text-indigo-600" />
+                            <span>{_t('الفصول المستهدفة الموحدة (مطابقة لكشوف وفلاتر الطلاب):', 'Standardized classes to be added (matching student lists):', 'Extrahierte Klassen:')}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {uniqueClasses.map(c => (
+                              <span key={c} className="px-2 py-0.5 bg-indigo-600 text-white rounded-md text-[10px] font-mono font-bold shadow-2xs">
+                                {c}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Settings Details Row */}
+                      <div className="p-2.5 bg-slate-100/70 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-gray-800 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px] font-semibold text-slate-600 dark:text-slate-400">
+                        <div>
+                          <span className="text-slate-400">{_t('مجموع الحصص اليومية:', 'Daily period count:', 'Stundenanzahl:')} </span>
+                          <span className="font-bold text-text-main">{pSettings.periodsCount} {_t('حصص', 'periods', 'Stunden')}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">{_t('بداية الحصة الأولى:', '1st period start:', 'Beginn 1. Stunde:')} </span>
+                          <span className="font-bold text-text-main">{pSettings.firstPeriodStart}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">{_t('مدة الحصة الافتراضية:', 'Period duration:', 'Dauer:')} </span>
+                          <span className="font-bold text-text-main">{pSettings.defaultDuration} {_t('دقيقة', 'mins', 'Min.')}</span>
+                        </div>
+                      </div>
+
+                      {/* Day-by-Day Lessons Breakdown */}
+                      <div className="space-y-1.5">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                          <span>{_t('توزيع الحصص المضافة حسب الأيام:', 'Day-by-day lesson breakdown to be added:', 'Tägliche Stundenverteilung:')}</span>
+                          <span className="font-mono text-slate-400 font-semibold">{totalScheduledSlots} {_t('عنصر مجدول', 'scheduled slots', 'Einträge')}</span>
+                        </div>
+
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                          {activeDaysWithLessons.length === 0 ? (
+                            <div className="p-3 text-center text-[11px] text-slate-400 italic bg-white dark:bg-slate-800 rounded-xl border border-dashed border-slate-200 dark:border-gray-700">
+                              {_t('لم يتم العثور على حصص مجدولة بالأيام.', 'No scheduled lessons found in days.', 'Keine Stunden gefunden.')}
+                            </div>
+                          ) : (
+                            activeDaysWithLessons.map(day => (
+                              <div key={day.dayKey} className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-gray-700/80 space-y-1.5">
+                                <div className="flex items-center justify-between text-[11px] font-black text-text-main">
+                                  <span className="flex items-center gap-1.5">
+                                    <Calendar className="w-3 h-3 text-primary" />
+                                    <span>{day.dayLabel}</span>
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-bold bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-md">
+                                    {day.lessons.length} {_t('حصص', 'periods', 'Stunden')}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {day.lessons.map((lesson, idx) => (
+                                    <div
+                                      key={idx}
+                                      className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border transition-all ${
+                                        lesson.isBreak
+                                          ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25'
+                                          : 'bg-primary/10 text-primary border-primary/20'
+                                      }`}
+                                      title={lesson.isBreak ? _t('فترة الفسحة / الاستراحة', 'Break period', 'Pause') : `${lesson.className} (${lesson.subjectName})`}
+                                    >
+                                      <span className="opacity-75 font-mono text-[9px] bg-black/5 dark:bg-white/10 px-1 rounded">
+                                        #{lesson.periodNumber}
+                                      </span>
+                                      {lesson.isBreak ? (
+                                        <>
+                                          <Coffee className="w-2.5 h-2.5" />
+                                          <span>{_t('فسحة', 'Break', 'Pause')}</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className="font-black text-text-main">{lesson.className || _t('بدون فصل', 'No class', 'Keine Klasse')}</span>
+                                          {lesson.subjectName && lesson.subjectName !== 'Deutsch' && (
+                                            <span className="text-[9px] opacity-75">({lesson.subjectName})</span>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             )}
 
@@ -1663,6 +2219,531 @@ export const SchoolScheduleView: React.FC = () => {
                     <span>{_t('مسح الجدول بالكامل', 'Clear Entire Schedule', 'Plan vollständig löschen')}</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: WORKLOAD & ANALYTICS MODAL */}
+      {isAnalyticsModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl border border-slate-100 dark:border-gray-800 w-full max-w-2xl p-5 space-y-4 animate-scale-up shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-gray-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200/60 dark:border-indigo-800">
+                  <BarChart3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    {_t('تحليل النصاب والأعباء التدريسية', 'Teaching Workload & Schedule Analytics', 'Lehraufwand- & Stundenanalyse')}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-semibold">
+                    {_t('إحصائيات تفصيلية وتوزيع الحصص على الفصول والمراحل', 'Detailed statistics and distribution per class & stage', 'Detaillierte Statistiken und Verteilung nach Klasse & Stufe')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAnalyticsModalOpen(false)}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-gray-800 rounded-xl text-slate-400 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick KPI stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="p-3 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40 text-center space-y-0.5">
+                <span className="text-[10.5px] font-bold text-indigo-600 dark:text-indigo-400">{_t('إجمالي الحصص', 'Total Lessons', 'Gesamtstunden')}</span>
+                <p className="text-xl font-black text-indigo-950 dark:text-indigo-200">{totalWeeklyLessons}</p>
+                <span className="text-[9.5px] text-indigo-400 font-semibold">{_t('حصة / أسبوع', 'periods/wk', 'Std./Woche')}</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/40 text-center space-y-0.5">
+                <span className="text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400">{_t('عدد الفصول', 'Classes Count', 'Klassen')}</span>
+                <p className="text-xl font-black text-emerald-950 dark:text-emerald-200">{totalUniqueClasses}</p>
+                <span className="text-[9.5px] text-emerald-400 font-semibold">{_t('فصل مختلف', 'distinct classes', 'verschiedene Klassen')}</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-amber-50/50 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/40 text-center space-y-0.5">
+                <span className="text-[10.5px] font-bold text-amber-600 dark:text-amber-400">{_t('المراحل الدراسية', 'Stages Count', 'Stufen')}</span>
+                <p className="text-xl font-black text-amber-950 dark:text-amber-200">{totalUniqueStages}</p>
+                <span className="text-[9.5px] text-amber-400 font-semibold">{_t('مرحلة تعليمية', 'school stages', 'Schulstufen')}</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-purple-50/50 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40 text-center space-y-0.5">
+                <span className="text-[10.5px] font-bold text-purple-600 dark:text-purple-400">{_t('أيام التدريس', 'Active Days', 'Aktive Tage')}</span>
+                <p className="text-xl font-black text-purple-950 dark:text-purple-200">
+                  {daysList.filter(d => currentSettings.presence[d.key]?.active).length}
+                </p>
+                <span className="text-[9.5px] text-purple-400 font-semibold">{_t('يوم عمل أسبوعي', 'working days', 'Arbeitstage')}</span>
+              </div>
+            </div>
+
+            {/* Distribution by Class */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-primary" />
+                <span>{_t('توزيع النصاب لكل فصل / مجموعة', 'Workload Distribution per Class', 'Stundenverteilung nach Klasse')}</span>
+              </h4>
+              <div className="border border-slate-100 dark:border-gray-800 rounded-2xl overflow-hidden divide-y divide-slate-100 dark:divide-gray-800">
+                {Object.keys(classWorkloadMap).length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400 font-semibold">
+                    {_t('لم يتم إدخال فصول في الجدول حتى الآن', 'No classes registered yet in schedule', 'Noch keine Klassen im Plan eingetragen')}
+                  </div>
+                ) : (
+                  Object.entries(classWorkloadMap).map(([cls, data]) => {
+                    const pct = totalWeeklyLessons > 0 ? Math.round((data.count / totalWeeklyLessons) * 100) : 0;
+                    const linked = classStudentsMap[cls] || { hodStudentsList: [], systemStudentsList: [] };
+                    return (
+                      <div key={cls} className="p-3 flex items-center justify-between gap-3 bg-white dark:bg-gray-900 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-black text-slate-900 dark:text-white font-mono">{cls}</span>
+                            <span className="text-[10px] text-slate-400 font-bold">
+                              ({data.days.size} {_t('أيام في الأسبوع', 'days/wk', 'Tage/Woche')})
+                            </span>
+                            {(linked.hodStudentsList.length > 0 || linked.systemStudentsList.length > 0) && (
+                              <span className="text-[9.5px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800">
+                                {linked.hodStudentsList.length + linked.systemStudentsList.length} {_t('طالب مسجل', 'students linked', 'Schüler verknüpft')}
+                              </span>
+                            )}
+                          </div>
+                          <div className="w-48 sm:w-64 bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                            <div className="bg-primary h-full rounded-full transition-all" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+
+                        <div className="text-end shrink-0">
+                          <span className="text-sm font-black text-slate-900 dark:text-white font-mono">{data.count}</span>
+                          <span className="text-[10px] text-slate-400 ms-1 font-bold">{_t('حصة', 'periods', 'Std.')} ({pct}%)</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => setIsAnalyticsModalOpen(false)}
+                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black cursor-pointer"
+              >
+                {_t('إغلاق', 'Close', 'Schließen')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: SCHOOL CLASS STUDENTS & HOD INTEGRATION MODAL */}
+      {isHodStudentsModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl border border-slate-100 dark:border-gray-800 w-full max-w-2xl p-5 space-y-4 animate-scale-up shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-gray-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200/60 dark:border-emerald-800">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    {_t('طلاب الفصول وربط الإشراف (HOD Link)', 'Class Students & HOD Link', 'Klassenschüler & HOD-Verknüpfung')}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-semibold">
+                    {_t('عرض طلاب الفصل، خطط الدعم، الشكاوى، والملاحظات الإشرافية', 'View students, action plans, complaints, and notes per class', 'Schüler, Förderpläne und Beschwerden pro Klasse anzeigen')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsHodStudentsModalOpen(false)}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-gray-800 rounded-xl text-slate-400 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Class tabs */}
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                {_t('اختر الفصل لعرض تفاصيل طلابه:', 'Select class to inspect:', 'Klasse wählen:')}
+              </span>
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                {Object.keys(classWorkloadMap).map(cls => (
+                  <button
+                    key={cls}
+                    type="button"
+                    onClick={() => setSelectedClassForHod(cls)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer shrink-0 ${
+                      selectedClassForHod === cls
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    {cls}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Class HOD Detail Body */}
+            {selectedClassForHod && (() => {
+              const info = classStudentsMap[selectedClassForHod] || { hodStudentsList: [], systemStudentsList: [], actionPlansCount: 0, complaintsCount: 0 };
+              return (
+                <div className="space-y-3 pt-1">
+                  {/* Summary row for this class */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-gray-800 text-center">
+                      <span className="text-[10px] font-bold text-slate-400">{_t('طلاب HOD', 'HOD Students', 'HOD Schüler')}</span>
+                      <p className="text-base font-black text-slate-900 dark:text-white font-mono">{info.hodStudentsList.length}</p>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-gray-800 text-center">
+                      <span className="text-[10px] font-bold text-slate-400">{_t('خطط علاجية', 'Action Plans', 'Förderpläne')}</span>
+                      <p className="text-base font-black text-purple-600 font-mono">{info.actionPlansCount}</p>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-gray-800 text-center">
+                      <span className="text-[10px] font-bold text-slate-400">{_t('شكاوى وملاحظات', 'Complaints', 'Beschwerden')}</span>
+                      <p className="text-base font-black text-rose-600 font-mono">{info.complaintsCount}</p>
+                    </div>
+                  </div>
+
+                  {/* List HOD students */}
+                  <div className="space-y-1.5">
+                    <h5 className="text-xs font-black text-slate-800 dark:text-white flex items-center justify-between">
+                      <span>{_t('قائمة طلاب الفصل المسجلين:', 'Registered Class Students:', 'Eingetragene Schüler:')}</span>
+                      <span className="text-[10.5px] text-slate-400 font-semibold">{info.hodStudentsList.length} {_t('طالب', 'students', 'Schüler')}</span>
+                    </h5>
+
+                    {info.hodStudentsList.length === 0 ? (
+                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/30 border border-dashed border-slate-200 dark:border-gray-800 text-center space-y-1">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold">
+                          {_t(`لا يوجد طلاب HOD مسجلين باسم فصل (${selectedClassForHod}) حالياً.`, `No HOD students directly tagged with (${selectedClassForHod}) yet.`, `Keine HOD-Schüler für (${selectedClassForHod}) eingetragen.`)}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsHodStudentsModalOpen(false);
+                            setActiveTab('hod');
+                          }}
+                          className="text-[11px] font-black text-primary hover:underline cursor-pointer"
+                        >
+                          {_t('+ إضافة وإدارة الطلاب من قسم الإشراف (HOD Hub)', '+ Manage Students in HOD Hub', '+ Im HOD-Hub verwalten')}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="border border-slate-100 dark:border-gray-800 rounded-2xl overflow-hidden divide-y divide-slate-100 dark:divide-gray-800 max-h-56 overflow-y-auto">
+                        {info.hodStudentsList.map(st => (
+                          <div key={st.id} className="p-2.5 flex items-center justify-between gap-2 bg-white dark:bg-gray-900 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <div>
+                              <div className="text-xs font-black text-slate-900 dark:text-white">{st.name}</div>
+                              <div className="text-[10px] text-slate-400 font-semibold">
+                                {st.grade || selectedClassForHod} • {_t('المستوى:', 'Status:', 'Status:')} {st.status || _t('نشط', 'Active', 'Aktiv')}
+                              </div>
+                            </div>
+                            {st.gpa !== undefined && (
+                              <span className="text-xs font-mono font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-lg">
+                                {st.gpa}%
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsHodStudentsModalOpen(false);
+                  setActiveTab('hod');
+                }}
+                className="px-4 py-2 bg-primary-soft hover:bg-primary/20 text-primary border border-primary-border/60 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span>{_t('الذهاب إلى HOD Hub بالكامل', 'Open Full HOD Hub', 'Vollständigen HOD-Hub öffnen')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsHodStudentsModalOpen(false)}
+                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black cursor-pointer"
+              >
+                {_t('إغلاق', 'Close', 'Schließen')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: TUTORING CONFLICTS SCANNER MODAL */}
+      {isConflictCheckerModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl border border-slate-100 dark:border-gray-800 w-full max-w-xl p-5 space-y-4 animate-scale-up shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-gray-800">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
+                  tutoringConflictsList.length > 0
+                    ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-600 border-amber-300 dark:border-amber-700'
+                    : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 border-emerald-300 dark:border-emerald-700'
+                }`}>
+                  {tutoringConflictsList.length > 0 ? <AlertTriangle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    {_t('فحص تعارض الدروس مع الدوام المدرسي', 'Tutoring vs School Schedule Conflict Scanner', 'Kollisionsprüfung Unterricht vs Schule')}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-semibold">
+                    {_t('كاشف فوري للتعارض بين جدول الحصص المدرسية ومواعيد الدروس الخصوصية', 'Live detector for overlaps between school periods and private lessons', 'Live-Prüfung auf Überschneidungen')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsConflictCheckerModalOpen(false)}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-gray-800 rounded-xl text-slate-400 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {tutoringConflictsList.length === 0 ? (
+              <div className="p-6 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-center space-y-2">
+                <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto" />
+                <h4 className="text-sm font-black text-emerald-950 dark:text-emerald-200">
+                  {_t('ممتاز! لا يوجد أي تعارض زمني', 'Perfect! Zero Schedule Conflicts Detected', 'Keine Kollisionen gefunden')}
+                </h4>
+                <p className="text-xs text-emerald-700/80 dark:text-emerald-300 max-w-sm mx-auto">
+                  {_t('جميع دروسك الخصوصية تقع خارج أوقات الحصص المدرسية وأوقات التواجد في المدرسة.', 'All private lessons are scheduled outside of school presence and period timings.', 'Alle Privatstunden liegen außerhalb der Schulzeiten.')}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded-2xl text-xs text-amber-800 dark:text-amber-200 font-semibold">
+                  {_t(`تم رصد (${tutoringConflictsList.length}) درس خصوصي يتعارض مع جدول المدرسة:`, `Detected (${tutoringConflictsList.length}) private lessons overlapping with school time:`, `(${tutoringConflictsList.length}) Kollisionen mit Schulzeit entdeckt:`)}
+                </div>
+
+                <div className="border border-slate-100 dark:border-gray-800 rounded-2xl overflow-hidden divide-y divide-slate-100 dark:divide-gray-800 max-h-72 overflow-y-auto">
+                  {tutoringConflictsList.map(cf => (
+                    <div key={cf.lessonId} className="p-3 bg-white dark:bg-gray-900 space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black text-slate-900 dark:text-white">
+                          {cf.studentOrGroup}
+                        </span>
+                        <span className="text-[10.5px] font-mono font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-lg border border-amber-200 dark:border-amber-800">
+                          {cf.dayLabel} • {cf.lessonTime}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-rose-600 dark:text-rose-400 font-bold flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>{cf.detail}</span>
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => setIsConflictCheckerModalOpen(false)}
+                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black cursor-pointer"
+              >
+                {_t('إغلاق', 'Close', 'Schließen')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 7: SCHOOL NOTES & LESSON PREP MODAL */}
+      {isSchoolNotesModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl border border-slate-100 dark:border-gray-800 w-full max-w-xl p-5 space-y-4 animate-scale-up shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-gray-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-200/60 dark:border-blue-800">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    {_t('ملاحظات وتحضير الحصص المدرسية', 'School Notes & Lesson Log', 'Schulnotizen & Unterrichtsberichte')}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-semibold">
+                    {_t('تسجيل ملاحظات المتابعة والتحضير لكل حصة وفصل', 'Log follow-up notes and preparation per period & class', 'Notizen und Vorbereitung protokollieren')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSchoolNotesModalOpen(false)}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-gray-800 rounded-xl text-slate-400 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Add Form */}
+            <form onSubmit={handleAddQuickSchoolNote} className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-gray-800 space-y-2.5">
+              <span className="text-xs font-black text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5 text-blue-500" />
+                <span>{_t('تسجيل ملاحظة جديدة فوراً:', 'Log New Note:', 'Neue Notiz:')}</span>
+              </span>
+
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder={_t('الفصل (مثال: 10-A)', 'Class (e.g. 10-A)', 'Klasse (z.B. 10-A)')}
+                  value={noteFormClass}
+                  onChange={(e) => setNoteFormClass(e.target.value)}
+                  className="px-3 py-1.5 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700 rounded-xl text-xs font-bold text-slate-800 dark:text-white"
+                />
+                <select
+                  value={noteFormTag}
+                  onChange={(e) => setNoteFormTag(e.target.value)}
+                  className="px-3 py-1.5 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700 rounded-xl text-xs font-bold text-slate-800 dark:text-white"
+                >
+                  <option value="شرح">{_t('شرح وتحضير', 'Explanation/Prep', 'Erklärung')}</option>
+                  <option value="واجب">{_t('واجب / مهمة', 'Homework/Task', 'Hausaufgabe')}</option>
+                  <option value="سلوك">{_t('سلوك وملاحظة', 'Behavior/Note', 'Verhalten')}</option>
+                  <option value="اختبار">{_t('اختبار قصير', 'Quiz/Exam', 'Test')}</option>
+                </select>
+              </div>
+
+              <textarea
+                required
+                rows={2}
+                placeholder={_t('اكتب الملاحظة المدرسية هنا...', 'Type school note here...', 'Schulnotiz hier eingeben...')}
+                value={noteFormText}
+                onChange={(e) => setNoteFormText(e.target.value)}
+                className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-white resize-none"
+              />
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs"
+                >
+                  {_t('حفظ الملاحظة', 'Save Note', 'Notiz speichern')}
+                </button>
+              </div>
+            </form>
+
+            {/* List Existing Notes */}
+            <div className="space-y-1.5">
+              <h5 className="text-xs font-black text-slate-800 dark:text-white">
+                {_t('الملاحظات المسجلة سابقاً:', 'Logged Notes:', 'Bisherige Notizen:')} ({schoolNotes.length})
+              </h5>
+
+              {schoolNotes.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400 font-semibold border border-dashed border-slate-200 dark:border-gray-800 rounded-2xl">
+                  {_t('لا توجد ملاحظات مدرسية مسجلة حتى الآن.', 'No school notes recorded yet.', 'Noch keine Notizen.')}
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                  {schoolNotes.slice(0, 10).map((nt) => (
+                    <div key={nt.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-gray-800 space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black text-slate-900 dark:text-white">
+                          {nt.className ? `${_t('فصل', 'Class', 'Klasse')} ${nt.className}` : _t('ملاحظة عامة', 'General Note', 'Allgemein')}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {nt.tags?.map((tg: string) => (
+                            <span key={tg} className="px-1.5 py-0.2 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 rounded text-[9px] font-bold">
+                              {tg}
+                            </span>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => deleteSchoolNote(nt.id)}
+                            className="p-1 text-slate-400 hover:text-rose-500 rounded cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
+                        {nt.text}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => setIsSchoolNotesModalOpen(false)}
+                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black cursor-pointer"
+              >
+                {_t('إغلاق', 'Close', 'Schließen')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 8: COPY DAY SCHEDULE MODAL */}
+      {isCopyDayModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl border border-slate-100 dark:border-gray-800 w-full max-w-md p-5 space-y-4 animate-scale-up shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-gray-850">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center border border-purple-200/60 dark:border-purple-800">
+                  <Copy className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    {_t('نسخ جدول اليوم إلى يوم آخر', 'Copy Day Schedule', 'Tagesplan kopieren')}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-semibold">
+                    {_t(`نسخ حصص يوم (${daysList.find(d => d.key === selectedDay)?.label || selectedDay}) كاملة`, `Copy all lessons from selected day`, `Alle Stunden kopieren`)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCopyDayModalOpen(false)}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-gray-800 rounded-xl text-slate-400 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-black text-slate-700 dark:text-slate-200">
+                {_t('اختر اليوم الهدف للصق الحصص فيه:', 'Select target day to paste schedule into:', 'Zieltagesplan wählen:')}
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {daysList.filter(d => d.key !== selectedDay).map(d => (
+                  <button
+                    key={d.key}
+                    type="button"
+                    onClick={() => handleCopyDaySchedule(d.key)}
+                    className="p-3 text-start bg-slate-50 hover:bg-purple-50 dark:bg-slate-800/60 dark:hover:bg-purple-950/30 border border-slate-200 dark:border-gray-700 hover:border-purple-300 dark:hover:border-purple-700 rounded-xl transition-all cursor-pointer group"
+                  >
+                    <div className="text-xs font-black text-slate-900 dark:text-white group-hover:text-purple-600">
+                      {d.label}
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-semibold">
+                      {_t('استبدال جدول هذا اليوم', 'Overwrite target day', 'Diesen Tag überschreiben')}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => setIsCopyDayModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black cursor-pointer"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
               </button>
             </div>
           </div>

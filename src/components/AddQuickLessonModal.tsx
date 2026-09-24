@@ -38,11 +38,12 @@ export const AddQuickLessonModal: React.FC<AddQuickLessonModalProps> = ({ onClos
   const [meetingLink, setMeetingLink] = useState(profile.defaultZoomLink || 'https://zoom.us/j/123456789');
 
   
-  const checkConflict = (checkTime: string) => {
+  const findConflict = (checkTime: string) => {
     const dummyLesson = { id: 'dummy', date, time: checkTime, durationMinutes: 60 };
-    return lessons.some(l => checkOverlap(dummyLesson, l));
+    return lessons.find(l => l.status !== 'cancelled' && checkOverlap(dummyLesson, l));
   };
-  const hasConflict = checkConflict(time);
+  const conflictingLesson = findConflict(time);
+  const hasConflict = !!conflictingLesson;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,13 +170,19 @@ export const AddQuickLessonModal: React.FC<AddQuickLessonModalProps> = ({ onClos
           </div>
 
           {/* CONFLICT DETECTION WARNING */}
-          {hasConflict && (
-            <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg p-3 flex items-start gap-2 text-xs text-red-800 dark:text-red-300">
-              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold">Terminkonflikt erkannt! (Schedule Conflict)</p>
-                <p className="text-[11px] text-red-700 dark:text-red-400 mt-0.5">
-                  Es gibt bereits eine andere Lektion um {time} Uhr an diesem Tag. Bitte wählen Sie eine freie Zeit aus.
+          {hasConflict && conflictingLesson && (
+            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="font-black">
+                  {_t('تنبيه: يوجد تعارض في هذا الموعد!', 'Alert: Schedule conflict detected!', 'Achtung: Terminkonflikt erkannt!')}
+                </p>
+                <p className="text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                  {_t('يتعارض مع حصة:', 'Conflicts with session:', 'Kollidiert mit:')}{' '}
+                  <strong className="font-bold underline">
+                    {conflictingLesson.studentName || conflictingLesson.groupName || conflictingLesson.title}
+                  </strong>{' '}
+                  ({conflictingLesson.time})
                 </p>
               </div>
             </div>

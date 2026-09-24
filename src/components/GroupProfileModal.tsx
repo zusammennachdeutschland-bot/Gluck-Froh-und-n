@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Group, Lesson } from '../types';
+import { Group, Lesson, Student } from '../types';
 import { 
   X, Users, Trash2, Send, Save, Video, ExternalLink, Copy, Check, 
-  Sparkles, Calendar, Plus, Edit2, Play, FileText, UserPlus, UserMinus, Search, UserCheck
+  Sparkles, Calendar, Plus, Edit2, Play, FileText, UserPlus, UserMinus, Search, UserCheck, User
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
@@ -11,6 +11,7 @@ import { CascadeDeleteGroupModal } from './CascadeDeleteGroupModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { GroupForm, GroupFormData } from './GroupForm';
 import { AddStudentModal } from './AddStudentModal';
+import { StudentProfileModal } from './StudentProfileModal';
 import { getGroupCycleInfo } from '../utils/lessonUtils';
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
@@ -49,6 +50,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
   const [existingStudentSearch, setExistingStudentSearch] = useState('');
   const [isSubmittingStudent, setIsSubmittingStudent] = useState(false);
   const [studentActionSuccess, setStudentActionSuccess] = useState<string | null>(null);
+  const [selectedStudentForProfile, setSelectedStudentForProfile] = useState<Student | null>(null);
 
   const groupStudents = students.filter(s => s.groupId === group.id);
   const cycleInfo = getGroupCycleInfo(group, lessons, language);
@@ -575,18 +577,37 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                     groupStudents.map(s => (
                       <div 
                         key={s.id} 
-                        className="p-2.5 bg-surface-hover rounded-xl border border-surface-border/60 text-xs flex items-center justify-between gap-2 font-semibold hover:border-primary/30 transition-all"
+                        className="p-2.5 bg-surface-hover hover:bg-surface-border/40 rounded-xl border border-surface-border/60 hover:border-primary/40 text-xs flex items-center justify-between gap-2 font-semibold transition-all group/item"
                       >
-                        <div className="min-w-0">
-                          <span className="text-text-main font-bold block truncate">{s.name}</span>
-                          <span className="text-text-muted/80 text-[10px] font-mono block truncate">
-                            {s.parentPhone || _t('بدون هاتف', 'No phone', 'Keine Tel.')} {s.certificateName ? `• ${s.certificateName}` : ''}
-                          </span>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedStudentForProfile(s)}
+                          className="min-w-0 flex-1 text-right flex items-center justify-between gap-2 cursor-pointer focus:outline-none"
+                          title={_t('انقر لفتح صفحة ملف الطالب الكاملة', 'Click to open student profile', 'Klicken, um Schülerprofil zu öffnen')}
+                        >
+                          <div className="min-w-0">
+                            <span className="text-text-main font-bold block truncate group-hover/item:text-primary transition-colors flex items-center gap-1.5">
+                              <span>{s.name}</span>
+                              <span className="text-[10px] text-primary opacity-0 group-hover/item:opacity-100 transition-opacity">↗</span>
+                            </span>
+                            <span className="text-text-muted/80 text-[10px] font-mono block truncate">
+                              {s.parentPhone || _t('بدون هاتف', 'No phone', 'Keine Tel.')} {s.certificateName ? `• ${s.certificateName}` : ''}
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] font-bold text-primary bg-primary/10 group-hover/item:bg-primary group-hover/item:text-white px-2 py-1 rounded-lg shrink-0 transition-all flex items-center gap-1 shadow-2xs">
+                            <User className="w-3 h-3" />
+                            <span>{_t('فتح ملف الطالب', 'Open Profile', 'Profil öffnen')}</span>
+                          </div>
+                        </button>
+
                         <div className="flex items-center gap-1 shrink-0">
                           <button
                             type="button"
-                            onClick={() => handleRemoveStudentFromGroup(s.id, s.name)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveStudentFromGroup(s.id, s.name);
+                            }}
                             className="p-1.5 text-text-muted hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors cursor-pointer"
                             title={_t('إزالة الطالب من هذا الجروب', 'Remove student from this group', 'Aus Gruppe entfernen')}
                           >
@@ -927,6 +948,14 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
             setIsConfirmingCascade(false);
             onClose();
           }}
+        />
+      )}
+
+      {/* Student Profile Modal on top of Group Modal */}
+      {selectedStudentForProfile && (
+        <StudentProfileModal
+          student={students.find(st => st.id === selectedStudentForProfile.id) || selectedStudentForProfile}
+          onClose={() => setSelectedStudentForProfile(null)}
         />
       )}
     </div>
