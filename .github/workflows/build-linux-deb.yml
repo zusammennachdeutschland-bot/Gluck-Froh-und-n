@@ -1,0 +1,62 @@
+name: Build Linux DEB (Ubuntu / Kubuntu)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-linux-deb:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Cache Electron Binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-deb-cache-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-deb-cache-
+
+      - name: Install dependencies
+        run: npm ci || npm install --legacy-peer-deps
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Build DEB Package (.deb for Kubuntu / Ubuntu)
+        run: npx electron-builder --linux deb --x64 --publish never
+        env:
+          USE_HARD_LINKS: "false"
+          ELECTRON_BUILDER_COMPRESSION: "maximum"
+
+      - name: Verify DEB Generated
+        run: |
+          echo "=== Verifying DEB Package Artifacts ==="
+          if ! compgen -G "release/*.deb" > /dev/null; then
+            echo "::error::No .deb file found in release/ directory!"
+            echo "Directory contents of release/:"
+            ls -la release/ || true
+            exit 1
+          fi
+          echo "Found generated DEB package(s):"
+          ls -lh release/*.deb
+
+      - name: Upload DEB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gluck-linux-deb
+          path: release/*.deb
+          if-no-files-found: error

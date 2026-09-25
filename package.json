@@ -21,9 +21,20 @@
         {
           "target": "AppImage",
           "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
         }
       ],
-      "category": "Education"
+      "category": "Education",
+      "icon": "public/icon.png",
+      "synopsis": "AGS Teacher App for Kubuntu & Linux",
+      "description": "AGS Teacher App - German Learning & Classroom Management for Kubuntu, Ubuntu, and Debian"
+    },
+    "deb": {
+      "priority": "optional",
+      "packageCategory": "education"
     },
     "win": {
       "target": [
@@ -55,6 +66,8 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build:deb": "npm run build && electron-builder --linux deb --x64",
+    "build:linux": "npm run build && electron-builder --linux AppImage deb --x64",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
