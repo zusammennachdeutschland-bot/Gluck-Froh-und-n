@@ -18,6 +18,7 @@ import { calculateDuePaymentCycles } from '../../utils/paymentUtils';
 import { calculateHoldingMetrics } from '../../services/goldPrice/goldPriceTypes';
 import { BankCard } from './BankCard';
 import { GoldBullionCard } from './GoldBullionCard';
+import { AddGoldHoldingModal } from './investments/AddGoldHoldingModal';
 
 interface FinanceDashboardProps {
   onNavigateTab?: (tab: 'dashboard' | 'accounts' | 'investments' | 'transactions' | 'student-payments' | 'recurring' | 'installments') => void;
@@ -40,6 +41,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
 
   // Accounts Management
   const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
+  const [isAddGoldModalOpen, setIsAddGoldModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<FinanceAccount | undefined>();
   const [adjustingAccount, setAdjustingAccount] = useState<FinanceAccount | undefined>();
   const [viewingTxsAccountId, setViewingTxsAccountId] = useState<string | null>(null);
@@ -415,24 +417,6 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
               )}
             </div>
           </div>
-
-          {/* Quick Header Actions */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => setTxModalType('income')}
-              className="px-2.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer active:scale-95"
-            >
-              <ArrowDownLeft className="w-3.5 h-3.5" />
-              <span>{_t('إيداع', 'Income', 'Einnahme')}</span>
-            </button>
-            <button
-              onClick={() => setTxModalType('expense')}
-              className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer active:scale-95"
-            >
-              <ArrowUpRight className="w-3.5 h-3.5" />
-              <span>{_t('صرف', 'Expense', 'Ausgabe')}</span>
-            </button>
-          </div>
         </div>
       </div>
 
@@ -504,7 +488,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
               <CreditCard className="w-3.5 h-3.5 text-primary" />
               <h3 className="text-xs font-black text-text-main uppercase tracking-wider">
                 {activeGoldHoldings.length > 0 
-                  ? _t('البطاقات والحسابات والذهب', 'Cards, Accounts & Gold', 'Konten & Gold')
+                  ? _t('البطاقات والسبائك الذهبية', 'Cards & Gold Bullion', 'Konten & Gold')
                   : _t('البطاقات والحسابات', 'Cards & Accounts', 'Konten')}
               </h3>
             </div>
@@ -521,21 +505,90 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
               )}
             </div>
           </div>
-          <button 
-            onClick={() => { setEditingAccount(undefined); setIsAddAccountModalOpen(true); }}
-            className="flex items-center gap-1 text-primary text-xs font-bold hover:underline cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" /> {_t('إضافة بطاقة', 'Add Card', 'Karte')}
-          </button>
+
+          {/* Quick Add Buttons for both Cards and Gold Bullion */}
+          <div className="flex items-center gap-1.5">
+            <button 
+              onClick={() => { setEditingAccount(undefined); setIsAddAccountModalOpen(true); }}
+              className="flex items-center gap-1 px-2.5 py-1 bg-surface hover:bg-surface-hover border border-surface-border text-primary rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs active:scale-95"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{_t('إضافة بطاقة', 'Add Card', 'Karte')}</span>
+            </button>
+            <button 
+              onClick={() => setIsAddGoldModalOpen(true)}
+              className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-amber-500/15 to-yellow-500/15 hover:from-amber-500/25 hover:to-yellow-500/25 border border-amber-500/30 text-amber-700 dark:text-amber-300 rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs active:scale-95"
+            >
+              <span>🪙</span>
+              <span>{_t('إضافة سبيكة', 'Add Bullion', 'Goldbarren')}</span>
+            </button>
+          </div>
         </div>
 
         {activeAccounts.length === 0 && activeGoldHoldings.length === 0 ? (
-          <div className="p-4 bg-surface border border-surface-border rounded-xl text-center text-xs text-text-muted">
-            {_t('لا توجد حسابات بعد. أضف حسابك الأول.', 'No accounts yet. Add your first account.', 'Noch keine Konten.')}
+          <div className="flex overflow-x-auto snap-x snap-mandatory gap-2.5 pb-2 pt-1 hide-scrollbar w-full scroll-smooth">
+            <div className="w-[2vw] sm:hidden shrink-0" />
+
+            {/* Quick Starter Card 1: Add Bank/Cash Card */}
+            <div 
+              onClick={() => { setEditingAccount(undefined); setIsAddAccountModalOpen(true); }}
+              className="snap-center shrink-0 w-[85vw] sm:w-[340px] aspect-[1.586/1] rounded-2xl border-2 border-dashed border-primary/30 hover:border-primary/60 bg-primary/5 hover:bg-primary/10 p-5 flex flex-col justify-between cursor-pointer transition-all duration-200 group text-center select-none shadow-2xs"
+            >
+              <div className="flex justify-between items-start">
+                <div className="w-9 h-9 rounded-xl bg-primary/15 text-primary flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <CreditCard className="w-5 h-5" />
+                </div>
+                <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md">
+                  {_t('حساب مالي', 'Account', 'Konto')}
+                </span>
+              </div>
+              <div className="space-y-1 my-auto">
+                <h4 className="font-black text-sm text-text-main group-hover:text-primary transition-colors">
+                  {_t('+ إضافة أول بطاقة أو حساب', '+ Add First Card / Account', '+ Erstes Konto hinzufügen')}
+                </h4>
+                <p className="text-[11px] text-text-muted">
+                  {_t('خزينة كاش، محفظة إلكترونية، أو حساب بنكي', 'Cash, wallet, or bank account', 'Bargeld, Wallet oder Bankkonto')}
+                </p>
+              </div>
+              <div className="text-[11px] font-bold text-primary flex items-center justify-center gap-1">
+                <span>{_t('إضافة الآن', 'Add Now', 'Jetzt hinzufügen')}</span>
+                <Plus className="w-3.5 h-3.5" />
+              </div>
+            </div>
+
+            {/* Quick Starter Card 2: Add Gold Bullion */}
+            <div 
+              onClick={() => setIsAddGoldModalOpen(true)}
+              className="snap-center shrink-0 w-[85vw] sm:w-[340px] aspect-[1.586/1] rounded-2xl border-2 border-dashed border-amber-500/40 hover:border-amber-500/80 bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-amber-900/10 p-5 flex flex-col justify-between cursor-pointer transition-all duration-200 group text-center select-none shadow-2xs"
+            >
+              <div className="flex justify-between items-start">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg group-hover:scale-105 transition-transform">
+                  🪙
+                </div>
+                <span className="text-[10px] font-black text-amber-700 dark:text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded-md border border-amber-500/20">
+                  {_t('سبيكة ذهب', 'Gold Bullion', 'Goldbarren')}
+                </span>
+              </div>
+              <div className="space-y-1 my-auto">
+                <h4 className="font-black text-sm text-amber-800 dark:text-amber-300 group-hover:text-amber-600 transition-colors">
+                  {_t('+ إضافة سبيكة ذهب استثمارية', '+ Add Gold Bullion Bar', '+ Goldbarren hinzufügen')}
+                </h4>
+                <p className="text-[11px] text-text-muted">
+                  {_t('عيار 24 أو 21 - تُعرض بشكل واقعي وتُجمع على إجماليك', '24K or 21K - Minted bar added to total', '24K/21K Feingold')}
+                </p>
+              </div>
+              <div className="text-[11px] font-black text-amber-700 dark:text-amber-300 flex items-center justify-center gap-1">
+                <span>{_t('تدوين سبيكة جديدة', 'Register Bullion', 'Barren erfassen')}</span>
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              </div>
+            </div>
+
+            <div className="w-[2vw] sm:hidden shrink-0" />
           </div>
         ) : (
           <div className="flex overflow-x-auto snap-x snap-mandatory gap-2.5 pb-2 pt-1 hide-scrollbar w-full scroll-smooth">
             <div className="w-[2vw] sm:hidden shrink-0" />
+            
             {/* Bank Cards */}
             {activeAccounts.map(account => (
               <div key={account.id} className="snap-center shrink-0 w-[85vw] sm:w-[340px]">
@@ -558,6 +611,21 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
                 />
               </div>
             ))}
+
+            {/* Quick Add Bullion Card at end of slider */}
+            <div 
+              onClick={() => setIsAddGoldModalOpen(true)}
+              className="snap-center shrink-0 w-[140px] sm:w-[160px] aspect-[1.586/1] rounded-2xl border-2 border-dashed border-amber-500/30 hover:border-amber-500/70 bg-amber-500/5 hover:bg-amber-500/10 p-3 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition select-none text-center group"
+              title="إضافة سبيكة ذهب جديدة"
+            >
+              <div className="w-8 h-8 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center text-sm group-hover:scale-110 transition-transform">
+                🪙
+              </div>
+              <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 leading-tight">
+                {_t('+ سبيكة ذهب', '+ Add Bullion', '+ Goldbarren')}
+              </span>
+            </div>
+
             <div className="w-[2vw] sm:hidden shrink-0" />
           </div>
         )}
@@ -995,6 +1063,12 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
       {isCategoryManagerOpen && (
         <FinanceCategoryManagerModal
           onClose={() => setIsCategoryManagerOpen(false)}
+        />
+      )}
+
+      {isAddGoldModalOpen && (
+        <AddGoldHoldingModal
+          onClose={() => setIsAddGoldModalOpen(false)}
         />
       )}
     </div>

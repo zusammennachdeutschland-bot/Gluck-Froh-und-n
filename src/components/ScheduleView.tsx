@@ -5,7 +5,7 @@ import { Lesson, Group } from '../types';
 import { parseLocalDate, formatLocalDate } from '../utils/timeUtils';
 import { getProjectedLessonsForRange } from '../utils/scheduleUtils';
 import { 
-  Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, 
+  Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, ChevronDown,
   Video, MapPin, CheckCircle2, AlertTriangle, Trash2, ArrowLeftRight, 
   Download, X, Check, Zap, RefreshCw, Play, Send, BookOpen, Plus
 } from 'lucide-react';
@@ -33,6 +33,25 @@ export const ScheduleView: React.FC = () => {
   const [reminderLesson, setReminderLesson] = useState<Lesson | null>(null);
   const [lessonToDelete, setLessonToDelete] = useState<Lesson | null>(null);
   const [selectedGroupForModal, setSelectedGroupForModal] = useState<Group | null>(null);
+
+  // Unified Menu States
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
+  const addMenuRef = React.useRef<HTMLDivElement>(null);
+  const toolsMenuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setIsAddMenuOpen(false);
+      }
+      if (toolsMenuRef.current && !toolsMenuRef.current.contains(e.target as Node)) {
+        setIsToolsMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleRefreshCalendar = () => {
     refreshCalendarAndDashboard();
@@ -395,10 +414,28 @@ export const ScheduleView: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const goToPrevious = () => {
+    const current = parseLocalDate(selectedDate);
+    if (calendarView === 'day') current.setDate(current.getDate() - 1);
+    else if (calendarView === 'week') current.setDate(current.getDate() - 7);
+    else current.setMonth(current.getMonth() - 1);
+    setSelectedDate(formatLocalDate(current));
+  };
+
+  const goToNext = () => {
+    const current = parseLocalDate(selectedDate);
+    if (calendarView === 'day') current.setDate(current.getDate() + 1);
+    else if (calendarView === 'week') current.setDate(current.getDate() + 7);
+    else current.setMonth(current.getMonth() + 1);
+    setSelectedDate(formatLocalDate(current));
+  };
+
+  const isSelectedToday = selectedDate === todayStr;
+
   return (
-    <div className="space-y-4  font-sans">
-      {/* TOP HEADER */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="space-y-3 font-sans">
+      {/* 1. TOP HEADER: Title & Consolidated Actions */}
+      <div className="flex items-center justify-between gap-2.5">
         <div>
           <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5 sm:gap-2">
             <CalendarIcon className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
@@ -409,55 +446,138 @@ export const ScheduleView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-1 sm:gap-1.5 flex-nowrap overflow-x-auto no-scrollbar w-full sm:w-auto justify-start sm:justify-end py-0.5">
-          {/* Refresh Calendar Data */}
-          <button
-            onClick={handleRefreshCalendar}
-            title={t('schedule_refresh')}
-            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-[10px] sm:text-xs p-1.5 sm:px-2 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">{t('schedule_refresh')}</span>
-          </button>
+        {/* Action Group: Tools & Primary + Lesson */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Calendar Tools Menu (Export / Refresh) */}
+          <div className="relative" ref={toolsMenuRef}>
+            <button
+              onClick={() => {
+                setIsToolsMenuOpen(!isToolsMenuOpen);
+                setIsAddMenuOpen(false);
+              }}
+              title={_t('أدوات وتصدير التقويم', 'Calendar Tools & Export', 'Kalender-Tools')}
+              className="px-2 sm:px-2.5 py-1.5 bg-surface hover:bg-surface-hover text-text-main border border-surface-border rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs active:scale-95"
+            >
+              <Download className="w-3.5 h-3.5 text-text-muted" />
+              <span className="hidden sm:inline">{_t('تصدير وأدوات', 'Export', 'Exportieren')}</span>
+              <ChevronDown className="w-3 h-3 text-text-muted opacity-70" />
+            </button>
 
-          {/* Export iCal */}
-          <button
-            onClick={handleExportICS}
-            title={t('schedule_ical')}
-            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-[10px] sm:text-xs p-1.5 sm:px-2 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">{t('schedule_ical')}</span>
-          </button>
+            {isToolsMenuOpen && (
+              <div className="absolute end-0 mt-1.5 w-56 bg-surface border border-surface-border rounded-xl shadow-xl z-30 p-1.5 space-y-1 animate-scale-up">
+                <button
+                  onClick={() => {
+                    setIsExportMonthlyModalOpen(true);
+                    setIsToolsMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-start rounded-lg hover:bg-surface-hover text-xs font-bold text-text-main transition cursor-pointer"
+                >
+                  <CalendarIcon className="w-4 h-4 text-primary shrink-0" />
+                  <div>
+                    <div>{_t('تصدير تقويم الشهر (.ics)', 'Export Monthly (.ics)', 'Monatskalender exportieren')}</div>
+                    <div className="text-[10px] text-text-muted font-normal">{_t('لتقويم جوجل وآبل للشهر المختار', 'For Google & Apple Calendar', 'Für Kalender-App')}</div>
+                  </div>
+                </button>
 
-          {/* Export Monthly Calendar (.ics) */}
-          <button
-            onClick={() => setIsExportMonthlyModalOpen(true)}
-            title={_t('تصدير تقويم الشهر (.ics)', 'Export Monthly Calendar (.ics)', 'Monatskalender exportieren (.ics)')}
-            className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-bold text-[10px] sm:text-xs px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
-          >
-            <CalendarIcon className="w-3.5 h-3.5" />
-            <span>{_t('تقويم شهري (.ics)', 'Monthly (.ics)', 'Monatskalender (.ics)')}</span>
-          </button>
+                <button
+                  onClick={() => {
+                    handleExportICS();
+                    setIsToolsMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-start rounded-lg hover:bg-surface-hover text-xs font-bold text-text-main transition cursor-pointer"
+                >
+                  <Download className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <div>
+                    <div>{_t('تصدير كل المواعيد والحصص', 'Export All Lessons (.ics)', 'Alle Termine exportieren')}</div>
+                    <div className="text-[10px] text-text-muted font-normal">{_t('يشمل الدروس الخصوصية وجدول المدرسة', 'Includes tutoring & school', 'Inkl. Schulplan')}</div>
+                  </div>
+                </button>
 
-          {/* Quick Lesson */}
-          <button
-            type="button"
-            onClick={() => setIsAddQuickLessonModalOpen(true)}
-            className="bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border hover:bg-primary-soft/80 active:scale-95 font-bold text-[10px] sm:text-xs px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
-          >
-            <Zap className="w-3.5 h-3.5 fill-primary text-primary" />
-            <span>{t('nav_quickLesson')}</span>
-          </button>
+                <div className="border-t border-surface-border/60 my-1" />
 
-          {/* START LESSON NOW */}
-          <button
-            onClick={() => setShowStartLessonNowModal(true)}
-            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-[10px] sm:text-xs px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-primary/30 shrink-0 whitespace-nowrap"
-          >
-            <Play className="w-3.5 h-3.5 fill-white text-white" />
-            <span>{t('schedule_start_now')}</span>
-          </button>
+                <button
+                  onClick={() => {
+                    handleRefreshCalendar();
+                    setIsToolsMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-start rounded-lg hover:bg-surface-hover text-xs font-bold text-text-main transition cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4 text-slate-500 shrink-0" />
+                  <span>{_t('تحديث ومزامنة التقويم', 'Refresh & Sync', 'Aktualisieren')}</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Unified Primary "+ حصة" Dropdown Button */}
+          <div className="relative" ref={addMenuRef}>
+            <button
+              onClick={() => {
+                setIsAddMenuOpen(!isAddMenuOpen);
+                setIsToolsMenuOpen(false);
+              }}
+              className="px-3 sm:px-3.5 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm shadow-primary/20"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{_t('حصة', 'Lesson', 'Unterricht')}</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isAddMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isAddMenuOpen && (
+              <div className="absolute end-0 mt-1.5 w-60 sm:w-64 bg-surface border border-surface-border rounded-xl shadow-xl z-30 p-1.5 space-y-1 animate-scale-up">
+                {/* Option 1: Scheduled New Lesson */}
+                <button
+                  onClick={() => {
+                    setIsAddLessonModalOpen(true);
+                    setIsAddMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 text-start rounded-lg hover:bg-surface-hover text-xs font-bold text-text-main transition cursor-pointer group"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <CalendarIcon className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-text-main">{_t('حصة جديدة مجدولة', 'New Scheduled Lesson', 'Neuer Unterricht')}</div>
+                    <div className="text-[10px] text-text-muted font-normal">{_t('تحديد موعد مع طالب أو مجموعة', 'Schedule with student/group', 'Mit Schüler/Gruppe planen')}</div>
+                  </div>
+                </button>
+
+                {/* Option 2: Quick Lesson */}
+                <button
+                  onClick={() => {
+                    setIsAddQuickLessonModalOpen(true);
+                    setIsAddMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 text-start rounded-lg hover:bg-surface-hover text-xs font-bold text-text-main transition cursor-pointer group"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <Zap className="w-4 h-4 fill-amber-500" />
+                  </div>
+                  <div>
+                    <div className="text-text-main">{_t('حصة سريعة', 'Quick Lesson', 'Schnellunterricht')}</div>
+                    <div className="text-[10px] text-text-muted font-normal">{_t('تسجيل فوري بدون تفاصيل معقدة', 'Instant quick setup', 'Sofort ohne Aufwand')}</div>
+                  </div>
+                </button>
+
+                {/* Option 3: Start Lesson Now */}
+                <button
+                  onClick={() => {
+                    setShowStartLessonNowModal(true);
+                    setIsAddMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 text-start rounded-lg bg-primary/5 hover:bg-primary/10 text-xs font-bold text-primary transition cursor-pointer group border border-primary/20"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-primary text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-2xs">
+                    <Play className="w-3.5 h-3.5 fill-white" />
+                  </div>
+                  <div>
+                    <div className="text-primary font-black">{_t('بدء الحصة الآن', 'Start Lesson Now', 'Jetzt unterrichten')}</div>
+                    <div className="text-[10px] text-text-muted font-normal">{_t('تشغيل المؤقت والغياب فوراً', 'Live timer & attendance', 'Live-Timer & Anwesenheit')}</div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -479,7 +599,7 @@ export const ScheduleView: React.FC = () => {
 
       {/* CONFLICT ALERT BANNER */}
       {selectedDayConflicts.length > 0 && calendarView === 'day' && (
-        <div className="bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 rounded-lg p-2.5 flex items-center justify-between gap-2 animate-pulse">
+        <div className="bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 rounded-lg p-2 flex items-center justify-between gap-2 animate-pulse">
           <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 text-xs font-bold">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
             <span>
@@ -489,100 +609,101 @@ export const ScheduleView: React.FC = () => {
         </div>
       )}
 
-      {/* VIEW SWITCHER TABS & DATE NAVIGATION BANNER */}
-      <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-2.5 shadow-2xs space-y-2">
-        
-        {/* Row 1: View Switcher Tabs */}
-        <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-surface-border pb-2">
-          <div className="flex items-center bg-surface-hover p-0.5 rounded-lg text-xs font-bold gap-0.5">
-            <button
-              onClick={() => setCalendarView('day')}
-              className={`px-2 sm:px-2.5 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs ${
-                calendarView === 'day' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-slate-900'
-              }`}
-            >
-              {t('schedule_day_view')}
-            </button>
-            <button
-              onClick={() => setCalendarView('week')}
-              className={`px-2 sm:px-2.5 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs ${
-                calendarView === 'week' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-slate-900'
-              }`}
-            >
-              {t('schedule_week_view')}
-            </button>
-            <button
-              onClick={() => setCalendarView('month')}
-              className={`px-2 sm:px-2.5 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs ${
-                calendarView === 'month' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-slate-900'
-              }`}
-            >
-              {t('schedule_month_view')}
-            </button>
-          </div>
-
+      {/* 2. UNIFIED COMPACT CALENDAR TOOLBAR (Date Navigation & View Switcher) */}
+      <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs flex flex-wrap items-center justify-between gap-2">
+        {/* Date Navigation Cluster: (Previous Arrow -> Formatted Date Picker -> Next Arrow -> Today Button) */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Previous Arrow (RTL aware: points to previous date) */}
           <button
-            onClick={() => setSelectedDate(todayStr)}
-            className="text-xs font-bold text-primary dark:text-primary hover:underline cursor-pointer bg-primary-soft dark:bg-primary-soft/80 px-2 py-0.5 rounded-md border border-primary-border dark:border-primary-border"
+            onClick={goToPrevious}
+            title={calendarView === 'day' ? _t('اليوم السابق', 'Previous Day', 'Vorheriger Tag') : _t('السابق', 'Previous', 'Zurück')}
+            className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-surface-hover hover:bg-surface-border/60 text-text-main transition cursor-pointer active:scale-95 border border-surface-border/50"
           >
-            {t('schedule_today')}
-          </button>
-        </div>
-
-        {/* Row 2: Date Selector Header */}
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => {
-              const current = parseLocalDate(selectedDate);
-              if (calendarView === 'day') current.setDate(current.getDate() - 1);
-              else if (calendarView === 'week') current.setDate(current.getDate() - 7);
-              else current.setMonth(current.getMonth() - 1);
-              setSelectedDate(formatLocalDate(current));
-            }}
-            className="p-1.5 hover:bg-surface-hover rounded-lg cursor-pointer transition-all"
-          >
-            <ChevronLeft className="w-4 h-4 text-text-muted" />
+            <ChevronLeft className="w-4 h-4 rtl:rotate-180 text-text-main" />
           </button>
 
-          <div className="text-center">
-            {calendarView === 'day' && (
-              <>
+          {/* Interactive Date Picker & Formatted Label */}
+          <div className="relative flex items-center">
+            {calendarView === 'day' ? (
+              <label className="flex items-center gap-1.5 px-2.5 py-1 bg-surface-hover/80 hover:bg-surface-hover border border-surface-border rounded-lg cursor-pointer transition text-xs font-extrabold text-text-main select-none shadow-2xs">
+                <CalendarIcon className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span>
+                  {parseLocalDate(selectedDate).toLocaleDateString(language === 'ar' ? 'ar-EG' : undefined, {
+                    weekday: 'short',
+                    day: 'numeric',
+                    month: 'short'
+                  })}
+                </span>
+                {isSelectedToday && (
+                  <span className="text-[10px] font-black text-primary bg-primary/10 px-1.5 py-0.2 rounded">
+                    {_t('اليوم', 'Today', 'Heute')}
+                  </span>
+                )}
                 <input
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  className="text-xs sm:text-sm font-extrabold text-text-main bg-transparent border-none focus:outline-none cursor-pointer font-mono text-center"
+                  className="sr-only"
                 />
-                <span className="block text-[10px] text-primary dark:text-primary font-extrabold uppercase">
-                  {selectedDate === todayStr ? t('schedule_today') : parseLocalDate(selectedDate).toLocaleDateString(undefined, { weekday: 'long', day: '2-digit', month: 'long' })}
-                </span>
-              </>
-            )}
-
-            {calendarView === 'week' && (
-              <span className="text-xs font-extrabold text-text-main font-mono">
-                {weekDays[0].dateStr.substring(5)} — {weekDays[6].dateStr.substring(5)}
-              </span>
-            )}
-
-            {calendarView === 'month' && (
-              <span className="text-xs sm:text-sm font-extrabold text-text-main">
-                {monthData.monthName}
-              </span>
+              </label>
+            ) : calendarView === 'week' ? (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-surface-hover/80 border border-surface-border rounded-lg text-xs font-mono font-extrabold text-text-main shadow-2xs">
+                <CalendarIcon className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span>{weekDays[0].dateStr.substring(5)} — {weekDays[6].dateStr.substring(5)}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-surface-hover/80 border border-surface-border rounded-lg text-xs font-extrabold text-text-main shadow-2xs">
+                <CalendarIcon className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span>{monthData.monthName}</span>
+              </div>
             )}
           </div>
 
+          {/* Next Arrow (RTL aware: points to next date) */}
           <button
-            onClick={() => {
-              const current = parseLocalDate(selectedDate);
-              if (calendarView === 'day') current.setDate(current.getDate() + 1);
-              else if (calendarView === 'week') current.setDate(current.getDate() + 7);
-              else current.setMonth(current.getMonth() + 1);
-              setSelectedDate(formatLocalDate(current));
-            }}
-            className="p-1.5 hover:bg-surface-hover rounded-lg cursor-pointer transition-all"
+            onClick={goToNext}
+            title={calendarView === 'day' ? _t('اليوم التالي', 'Next Day', 'Nächster Tag') : _t('التالي', 'Next', 'Weiter')}
+            className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-surface-hover hover:bg-surface-border/60 text-text-main transition cursor-pointer active:scale-95 border border-surface-border/50"
           >
-            <ChevronRight className="w-4 h-4 text-text-muted" />
+            <ChevronRight className="w-4 h-4 rtl:rotate-180 text-text-main" />
+          </button>
+
+          {/* Today Shortcut Button */}
+          {!isSelectedToday && (
+            <button
+              onClick={() => setSelectedDate(todayStr)}
+              className="text-[11px] font-bold text-primary hover:text-primary-hover bg-primary-soft hover:bg-primary-soft/80 px-2 py-1 rounded-lg border border-primary-border transition cursor-pointer shadow-2xs active:scale-95"
+            >
+              {t('schedule_today')}
+            </button>
+          )}
+        </div>
+
+        {/* View Switcher Tabs (Day / Week / Month) */}
+        <div className="flex items-center bg-surface-hover p-0.5 rounded-lg text-xs font-bold gap-0.5 border border-surface-border/60">
+          <button
+            onClick={() => setCalendarView('day')}
+            className={`px-2.5 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs font-extrabold ${
+              calendarView === 'day' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-text-main'
+            }`}
+          >
+            {t('schedule_day_view')}
+          </button>
+          <button
+            onClick={() => setCalendarView('week')}
+            className={`px-2.5 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs font-extrabold ${
+              calendarView === 'week' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-text-main'
+            }`}
+          >
+            {t('schedule_week_view')}
+          </button>
+          <button
+            onClick={() => setCalendarView('month')}
+            className={`px-2.5 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs font-extrabold ${
+              calendarView === 'month' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-text-main'
+            }`}
+          >
+            {t('schedule_month_view')}
           </button>
         </div>
       </div>
