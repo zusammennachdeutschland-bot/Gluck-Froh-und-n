@@ -5,7 +5,10 @@
   "type": "module",
   "main": "electron/main.cjs",
   "description": "AGS Teacher App",
-  "author": "AGS",
+  "author": {
+    "name": "AGS",
+    "email": "zusammennachdeutschland@gmail.com"
+  },
   "build": {
     "appId": "com.ags.teacherapp",
     "productName": "AGS Teacher App",
@@ -27,12 +30,14 @@
           "arch": ["x64"]
         }
       ],
+      "maintainer": "AGS <zusammennachdeutschland@gmail.com>",
       "category": "Education",
       "icon": "public/icon.png",
       "synopsis": "AGS Teacher App for Kubuntu & Linux",
       "description": "AGS Teacher App - German Learning & Classroom Management for Kubuntu, Ubuntu, and Debian"
     },
     "deb": {
+      "maintainer": "AGS <zusammennachdeutschland@gmail.com>",
       "priority": "optional",
       "packageCategory": "education"
     },
