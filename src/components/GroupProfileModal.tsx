@@ -3,7 +3,8 @@ import { useApp } from '../context/AppContext';
 import { Group, Lesson, Student } from '../types';
 import { 
   X, Users, Trash2, Send, Save, Video, ExternalLink, Copy, Check, 
-  Sparkles, Calendar, Plus, Edit2, Play, FileText, UserPlus, UserMinus, Search, UserCheck, User
+  Sparkles, Calendar, Plus, Edit2, Play, FileText, UserPlus, UserMinus, Search, UserCheck, User,
+  GraduationCap, Clock, MapPin, CreditCard, MessageCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
@@ -75,22 +76,30 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
     const r1 = lesson.recordingLink?.trim() || lesson.report?.recordingLink?.trim();
     const r2 = lesson.recordingLink2?.trim() || lesson.report?.recordingLink2?.trim();
     
-    let msg = `🎥 *تسجيل حصة ${group.name}*\n📅 التاريخ: ${lesson.date} (${lesson.time || ''})\n`;
+    let msg = _t(
+      `🎥 *تسجيل حصة ${group.name}*\n📅 التاريخ: ${lesson.date} (${lesson.time || ''})\n`,
+      `🎥 *Lesson Recording for ${group.name}*\n📅 Date: ${lesson.date} (${lesson.time || ''})\n`,
+      `🎥 *Lektionsaufnahme für ${group.name}*\n📅 Datum: ${lesson.date} (${lesson.time || ''})\n`
+    );
     if (lesson.sessionNumber) {
-      msg += `🔢 الحصة رقم: ${lesson.sessionNumber}\n`;
+      msg += _t(`🔢 الحصة رقم: ${lesson.sessionNumber}\n`, `🔢 Session No: ${lesson.sessionNumber}\n`, `🔢 Lektionsnummer: ${lesson.sessionNumber}\n`);
     }
     const topic = (lesson.report?.homeworkTitle || lesson.title || '').trim();
     if (topic) {
-      msg += `📖 موضوع الحصة: ${topic}\n`;
+      msg += _t(`📖 موضوع الحصة: ${topic}\n`, `📖 Topic: ${topic}\n`, `📖 Thema: ${topic}\n`);
     }
     msg += `\n`;
 
     if (r1 && r2) {
-      msg += `🎥 *تسجيلات الحصة (جزئين):*\n• الجزء الأول: ${r1}\n• الجزء الثاني: ${r2}\n`;
+      msg += _t(
+        `🎥 *تسجيلات الحصة (جزئين):*\n• الجزء الأول: ${r1}\n• الجزء الثاني: ${r2}\n`,
+        `🎥 *Lesson Recordings (2 Parts):*\n• Part 1: ${r1}\n• Part 2: ${r2}\n`,
+        `🎥 *Lektionsaufnahmen (2 Teile):*\n• Teil 1: ${r1}\n• Teil 2: ${r2}\n`
+      );
     } else if (r1) {
-      msg += `🎥 *رابط تسجيل الحصة:* ${r1}\n`;
+      msg += _t(`🎥 *رابط تسجيل الحصة:* ${r1}\n`, `🎥 *Lesson Recording Link:* ${r1}\n`, `🎥 *Aufnahmelink:* ${r1}\n`);
     } else if (r2) {
-      msg += `🎥 *رابط تسجيل الحصة:* ${r2}\n`;
+      msg += _t(`🎥 *رابط تسجيل الحصة:* ${r2}\n`, `🎥 *Lesson Recording Link:* ${r2}\n`, `🎥 *Aufnahmelink:* ${r2}\n`);
     }
 
     if (group.whatsAppGroupLink) {
@@ -251,22 +260,109 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       >
         <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
         
-        {/* Header */}
-        <div className="bg-gradient-to-r from-primary to-primary-hover px-3.5 py-2.5 sm:p-4 text-white flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-            <div className="p-1.5 sm:p-2 bg-surface/20 rounded-lg sm:rounded-xl shrink-0">
-              <Users className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+        {/* Chic Modern Header (No harsh blue bar!) */}
+        <div className="bg-surface dark:bg-slate-900 border-b border-surface-border px-3.5 pt-2 pb-3 sm:px-5 sm:pt-3 sm:pb-3.5 shrink-0 space-y-2.5">
+          {/* Top Identity Row */}
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              {/* Group Avatar / Badge */}
+              <div 
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl flex items-center justify-center shrink-0 border shadow-2xs transition-transform"
+                style={{
+                  backgroundColor: group.color ? `${group.color}15` : 'rgba(59, 130, 246, 0.1)',
+                  borderColor: group.color ? `${group.color}35` : 'rgba(59, 130, 246, 0.25)',
+                  color: group.color || '#2563eb'
+                }}
+              >
+                <Users className="w-5 h-5" />
+              </div>
+
+              {/* Title & Group Category */}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm sm:text-base font-black text-text-main truncate tracking-tight">
+                    {group.name}
+                  </h2>
+                  <span className="text-[9.5px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-primary-soft text-primary border border-primary-border/60 shrink-0">
+                    {_t('مجموعة', 'Group', 'Gruppe')}
+                  </span>
+                </div>
+                <p className="text-[11px] text-text-muted font-medium truncate mt-0.5 flex items-center gap-1.5">
+                  <span>{group.grade || _t('بدون مرحلة', 'No Grade', 'Keine Stufe')}</span>
+                  <span>•</span>
+                  <span>{group.type === 'online' ? _t('أونلاين (Zoom / Meet)', 'Online', 'Online') : _t('حضوري', 'In-Person', 'Präsenz')}</span>
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h2 className="text-xs sm:text-sm font-black truncate">{group.name}</h2>
-              <p className="text-[10px] sm:text-xs text-primary-soft truncate mt-0.5 font-medium">
-                {group.grade} • {groupStudents.length} {language === 'ar' ? 'طلاب' : language === 'de' ? 'Schüler' : 'Students'} • {!cycleInfo.isPerLesson ? cycleInfo.label : _t('محاسبة بالحصة', 'Per Session', 'Pro Sitzung')}
-              </p>
+
+            {/* Actions: WhatsApp shortcut if link exists + Elegant Close */}
+            <div className="flex items-center gap-1 shrink-0">
+              {group.whatsAppGroupLink && (
+                <a
+                  href={group.whatsAppGroupLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1.5 sm:p-2 rounded-xl text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition-all flex items-center gap-1 text-[11px] font-bold"
+                  title={_t('فتح جروب واتساب للمجموعة', 'Open WhatsApp Group', 'WhatsApp-Gruppe öffnen')}
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span className="hidden sm:inline">{_t('جروب واتساب', 'WhatsApp', 'WhatsApp')}</span>
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-1.5 sm:p-2 rounded-xl text-text-muted hover:text-text-main hover:bg-surface-hover dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                title={_t('إغلاق', 'Close', 'Schließen')}
+              >
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
             </div>
           </div>
-          <button onClick={onClose} className="p-1 sm:p-1.5 hover:bg-surface/20 rounded-full transition-colors cursor-pointer shrink-0">
-            <X className="w-4 h-4 sm:w-5 sm:h-5" />
-          </button>
+
+          {/* Details Bar: Rich Chic Metadata Chips */}
+          <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+            {/* Students enrolled */}
+            <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-blue-50/80 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/60">
+              <Users className="w-3 h-3 shrink-0" />
+              <span>{groupStudents.length} {_t('طلاب مسجلين', 'Students', 'Schüler')}</span>
+            </span>
+
+            {/* Grade level */}
+            {group.grade && (
+              <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-violet-50/80 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 border border-violet-200/60 dark:border-violet-800/60">
+                <GraduationCap className="w-3 h-3 shrink-0" />
+                <span>{group.grade}</span>
+              </span>
+            )}
+
+            {/* Lesson Type */}
+            <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60">
+              {group.type === 'online' ? <Video className="w-3 h-3 shrink-0" /> : <MapPin className="w-3 h-3 shrink-0" />}
+              <span>{group.type === 'online' ? _t('أونلاين', 'Online', 'Online') : (group.address || _t('حضوري', 'In-Person', 'Präsenz'))}</span>
+            </span>
+
+            {/* Payment Model & Price */}
+            <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-amber-50/80 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60">
+              <CreditCard className="w-3 h-3 shrink-0" />
+              <span>
+                {group.paymentModel === 'per_session'
+                  ? `${group.pricePerSession ? `${group.pricePerSession} EGP / ` : ''}${_t('محاسبة بالحصة', 'Per Session', 'Pro Stunde')}`
+                  : `${group.monthlyPackagePrice ? `${group.monthlyPackagePrice} EGP • ` : ''}${!cycleInfo.isPerLesson ? cycleInfo.label : _t('باقة حصص', 'Package', 'Paket')}`}
+              </span>
+            </span>
+
+            {/* Schedule & Duration */}
+            {(group.scheduleDays?.length > 0 || group.lessonDurationMinutes) && (
+              <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                <Clock className="w-3 h-3 shrink-0" />
+                <span>
+                  {group.scheduleDays?.length ? `${group.scheduleDays.length} ${_t('أيام/أسبوع', 'days/wk', 'Tage/W.')}` : ''}
+                  {group.lessonDurationMinutes ? `${group.scheduleDays?.length ? ' • ' : ''}${group.lessonDurationMinutes} ${_t('دقيقة', 'min', 'Min.')}` : ''}
+                </span>
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Navigation Tabs (Details vs Recordings) */}

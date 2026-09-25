@@ -11,9 +11,10 @@ import { AddFinanceAccountModal } from './modals/AddFinanceAccountModal';
 import { BalanceAdjustmentModal } from './modals/BalanceAdjustmentModal';
 import { AddFinanceTransactionModal } from './modals/AddFinanceTransactionModal';
 import { calculateAccountPerformance } from '../../services/financeService';
+import { calculateHoldingMetrics } from '../../services/goldPrice/goldPriceTypes';
 
 export const FinanceAccounts: React.FC = () => {
-  const { _t, financeAccounts, financeTransactions, deleteFinanceAccount } = useApp();
+  const { _t, financeAccounts, financeTransactions, deleteFinanceAccount, goldHoldings, latestGoldPrice } = useApp();
   
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<FinanceAccount | undefined>();
@@ -22,6 +23,13 @@ export const FinanceAccounts: React.FC = () => {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
   const activeAccounts = financeAccounts.filter(a => !a.deleted);
+
+  // Gold value calculation
+  const current24KPrice = latestGoldPrice?.pricePerGram24K || 0;
+  const activeGoldHoldings = (goldHoldings || []).filter(h => !(h as any).deleted);
+  const totalGoldMarketValue = activeGoldHoldings.reduce((sum, h) => {
+    return sum + calculateHoldingMetrics(h, current24KPrice).currentValue;
+  }, 0);
 
   // Financial calculations
   const totalAssets = activeAccounts.reduce((sum, acc) => {
@@ -35,13 +43,13 @@ export const FinanceAccounts: React.FC = () => {
       return sum + (init + contrib + ret);
     }
     return sum + (acc.currentBalance || 0);
-  }, 0);
+  }, 0) + totalGoldMarketValue;
 
   const totalCreditDebt = activeAccounts
     .filter(a => a.type === 'credit')
     .reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
 
-  const totalInvestments = activeAccounts
+  const totalTraditionalInvestments = activeAccounts
     .filter(a => a.type === 'investment')
     .reduce((sum, acc) => {
       const current = typeof acc.currentBalance === 'number' ? acc.currentBalance : null;
@@ -51,6 +59,8 @@ export const FinanceAccounts: React.FC = () => {
       const ret = acc.accumulatedReturns || 0;
       return sum + (init + contrib + ret);
     }, 0);
+
+  const totalInvestments = totalTraditionalInvestments + totalGoldMarketValue;
 
   const netBalance = totalAssets - totalCreditDebt;
 
@@ -91,11 +101,19 @@ export const FinanceAccounts: React.FC = () => {
             </div>
             <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-text-muted">
               <span>{activeAccounts.length} {_t('حسابات', 'accounts', 'Konten')}</span>
-              {totalInvestments > 0 && (
+              {totalGoldMarketValue > 0 && (
+                <>
+                  <span>•</span>
+                  <span className="text-amber-500 font-bold">
+                    🪙 {_t('ذهب وسبائك', 'Gold Bullion', 'Gold')}: {totalGoldMarketValue.toLocaleString()} EGP
+                  </span>
+                </>
+              )}
+              {totalTraditionalInvestments > 0 && (
                 <>
                   <span>•</span>
                   <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                    {_t('استثمارات', 'Investments', 'Investitionen')}: {totalInvestments.toLocaleString()}
+                    {_t('استثمارات أخرى', 'Other Investments', 'Andere Investitionen')}: {totalTraditionalInvestments.toLocaleString()}
                   </span>
                 </>
               )}

@@ -5,6 +5,7 @@ import { X, Check, Send, BookOpen, User, Sparkles, AtSign, Phone } from 'lucide-
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getStudentRoleLabel, isLikelyFemaleStudent } from '../utils/genderUtils';
 import confetti from 'canvas-confetti';
+import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 interface HomeworkFollowUpModalProps {
   pendingFollowUps: PendingFollowUp[];
@@ -13,7 +14,8 @@ interface HomeworkFollowUpModalProps {
 }
 
 export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pendingFollowUps, initialGroupId, onClose }) => {
-  const { students, updateLesson, profile, _t } = useApp();
+  const { students, updateLesson, profile, _t, reportLanguage } = useApp();
+  const currentMsgLang = reportLanguage || 'ar';
   const [selectedGroup, setSelectedGroup] = useState<PendingFollowUp | null>(
     initialGroupId ? pendingFollowUps.find(p => p.groupId === initialGroupId) || null : null
   );
@@ -120,40 +122,70 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
       const isMultiple = names.length > 1;
       let message = '';
       
-      if (followUpStyle === 'egyptian') {
-        message += `أهلاً بحضرتك يا فندم 👋\n\n`;
+      if (currentMsgLang === 'en') {
+        message += `Hello,\n\n`;
         if (isMultiple) {
-          const targetStudents = groupStudents.filter(s => names.includes(s.name));
-          const allFemale = targetStudents.length > 0 && targetStudents.every(s => (s.gender === 'female' || (!s.gender && isLikelyFemaleStudent(s.name))));
-          message += allFemale ? `تذكير بمتابعة واجب الطالبات:\n` : `تذكير بمتابعة واجب الطلاب:\n`;
+          message += `Reminder to follow up on homework for:\n`;
           names.forEach(name => {
             message += `• ${name}\n`;
           });
         } else {
-          const singleStudent = groupStudents.find(s => s.name === names[0]);
-          const role = singleStudent ? getStudentRoleLabel(singleStudent) : 'الطالب';
-          message += `تذكير بمتابعة واجب ${role}: *${names[0]}* 🇩🇪\n`;
+          message += `Reminder to follow up on homework for: *${names[0]}*\n`;
         }
-        message += `\n📖 *اللي اتشرح في الحصة:* ${lessonTitle}\n📝 *الواجب المطلوب:* ${homeworkText}\n\nبرجاء التأكد من حل الواجب قبل موعد الحصة القادمة إن شاء الله.\nشكراً لمتابعة واهتمام حضرتك 🌸`;
+        message += `\n📖 *Lesson Topic:* ${lessonTitle}\n📝 *Required Homework:* ${homeworkText}\n\nPlease ensure the homework is completed before the next lesson.\nThank you! 🌸`;
+        if (teacherSign) {
+          message += `\n\nBest regards,\n*${profile.displayName || teacherSign}*`;
+        }
+      } else if (currentMsgLang === 'de') {
+        message += `Guten Tag,\n\n`;
+        if (isMultiple) {
+          message += `Erinnerung an die Hausaufgaben für:\n`;
+          names.forEach(name => {
+            message += `• ${name}\n`;
+          });
+        } else {
+          message += `Erinnerung an die Hausaufgabe von: *${names[0]}*\n`;
+        }
+        message += `\n📖 *Thema der Lektion:* ${lessonTitle}\n📝 *Hausaufgabe:* ${homeworkText}\n\nBitte stellen Sie sicher, dass die Hausaufgabe vor der nächsten Stunde erledigt wird.\nVielen Dank! 🌸`;
+        if (teacherSign) {
+          message += `\n\nMit freundlichen Grüßen,\n*${profile.displayName || teacherSign}*`;
+        }
       } else {
-        message += `السلام عليكم ورحمة الله وبركاته،\n\n`;
-        if (isMultiple) {
-          const targetStudents = groupStudents.filter(s => names.includes(s.name));
-          const allFemale = targetStudents.length > 0 && targetStudents.every(s => (s.gender === 'female' || (!s.gender && isLikelyFemaleStudent(s.name))));
-          message += allFemale ? `تذكير بمتابعة واجب الطالبات:\n` : `تذكير بمتابعة واجب الطلاب:\n`;
-          names.forEach(name => {
-            message += `• ${name}\n`;
-          });
+        if (followUpStyle === 'egyptian') {
+          message += `أهلاً بحضرتك يا فندم 👋\n\n`;
+          if (isMultiple) {
+            const targetStudents = groupStudents.filter(s => names.includes(s.name));
+            const allFemale = targetStudents.length > 0 && targetStudents.every(s => (s.gender === 'female' || (!s.gender && isLikelyFemaleStudent(s.name))));
+            message += allFemale ? `تذكير بمتابعة واجب الطالبات:\n` : `تذكير بمتابعة واجب الطلاب:\n`;
+            names.forEach(name => {
+              message += `• ${name}\n`;
+            });
+          } else {
+            const singleStudent = groupStudents.find(s => s.name === names[0]);
+            const role = singleStudent ? getStudentRoleLabel(singleStudent) : 'الطالب';
+            message += `تذكير بمتابعة واجب ${role}: *${names[0]}* 🇩🇪\n`;
+          }
+          message += `\n📖 *اللي اتشرح في الحصة:* ${lessonTitle}\n📝 *الواجب المطلوب:* ${homeworkText}\n\nبرجاء التأكد من حل الواجب قبل موعد الحصة القادمة إن شاء الله.\nشكراً لمتابعة واهتمام حضرتك 🌸`;
         } else {
-          const singleStudent = groupStudents.find(s => s.name === names[0]);
-          const role = singleStudent ? getStudentRoleLabel(singleStudent) : 'الطالب';
-          message += `تذكير بمتابعة واجب ${role}: *${names[0]}*\n`;
+          message += `السلام عليكم ورحمة الله وبركاته،\n\n`;
+          if (isMultiple) {
+            const targetStudents = groupStudents.filter(s => names.includes(s.name));
+            const allFemale = targetStudents.length > 0 && targetStudents.every(s => (s.gender === 'female' || (!s.gender && isLikelyFemaleStudent(s.name))));
+            message += allFemale ? `تذكير بمتابعة واجب الطالبات:\n` : `تذكير بمتابعة واجب الطلاب:\n`;
+            names.forEach(name => {
+              message += `• ${name}\n`;
+            });
+          } else {
+            const singleStudent = groupStudents.find(s => s.name === names[0]);
+            const role = singleStudent ? getStudentRoleLabel(singleStudent) : 'الطالب';
+            message += `تذكير بمتابعة واجب ${role}: *${names[0]}*\n`;
+          }
+          message += `\n📖 *عنوان الدرس:* ${lessonTitle}\n📝 *الواجب:* ${homeworkText}\n\nبرجاء التأكد من حل الواجب قبل موعد الحصة القادمة.\nشكراً لحضراتكم.`;
         }
-        message += `\n📖 *عنوان الدرس:* ${lessonTitle}\n📝 *الواجب:* ${homeworkText}\n\nبرجاء التأكد من حل الواجب قبل موعد الحصة القادمة.\nشكراً لحضراتكم.`;
-      }
 
-      if (teacherSign) {
-        message += `\n\nمع تحيات: *${teacherSign}*`;
+        if (teacherSign) {
+          message += `\n\nمع تحيات: *${teacherSign}*`;
+        }
       }
       return { contact, isUsername, display, message, names };
     });
@@ -186,9 +218,12 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
                 <span className="truncate">{selectedGroup.groupName}</span>
               </h2>
             </div>
-            <button onClick={onClose} className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 rounded-full text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0">
-              <X className="w-4 h-4 sm:w-5 sm:h-5" />
-            </button>
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <ReportLanguageToggle showLabel={false} />
+              <button onClick={onClose} className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 rounded-full text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0">
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+            </div>
           </div>
 
           <div className="p-3.5 sm:p-5 overflow-y-auto space-y-4">
@@ -319,9 +354,12 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
             <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 shrink-0" />
             <span className="truncate">{_t('متابعة الواجبات', 'Homework Follow-up', 'Hausaufgaben-Nachverfolgung')}</span>
           </h2>
-          <button onClick={onClose} className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 rounded-full text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0">
-            <X className="w-4 h-4 sm:w-5 sm:h-5" />
-          </button>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <ReportLanguageToggle showLabel={false} />
+            <button onClick={onClose} className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 rounded-full text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0">
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="p-2 overflow-y-auto">

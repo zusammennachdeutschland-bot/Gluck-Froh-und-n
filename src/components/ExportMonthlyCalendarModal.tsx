@@ -11,6 +11,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { getSchoolSettings } from '../utils/schoolUtils';
 import { generateMonthlySchoolScheduleIcsEvents } from '../utils/schoolScheduleIcsUtils';
+import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 interface ExportMonthlyCalendarModalProps {
   onClose: () => void;
@@ -27,7 +28,7 @@ const MONTH_NAMES_DISPLAY = [
 ];
 
 export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProps> = ({ onClose }) => {
-  const { lessons, groups, students, profile, language, _t } = useApp();
+  const { lessons, groups, students, profile, language, _t, reportLanguage } = useApp();
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -209,7 +210,7 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
         selectedMonth,
         {
           includePresence: includeSchoolPresence,
-          language: language as any,
+          language: (reportLanguage || language) as any,
           reminderMinutes: 15
         }
       );
@@ -333,12 +334,15 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-text-muted hover:bg-surface-hover dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <ReportLanguageToggle showLabel={false} />
+            <button
+              onClick={onClose}
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-text-muted hover:bg-surface-hover dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* CONTENT */}

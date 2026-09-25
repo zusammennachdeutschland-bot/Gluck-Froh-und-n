@@ -9,6 +9,7 @@ import {
   MapPin, Video, Sparkles, Phone, Users, CheckCircle2, AtSign, Plus, Hash, BookOpen 
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 interface LessonReminderModalProps {
   lesson?: Lesson | null;
@@ -36,7 +37,14 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   recipientPhone,
   onClose,
 }) => {
-  const { groups, students, lessons, profile, updateGroup, updateProfile, language, t, _t } = useApp();
+  const { groups, students, lessons, profile, updateGroup, updateProfile, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
+
+  const currentMsgLang = reportLanguage || 'ar';
+  const msgT = (ar: string, en: string, de?: string) => {
+    if (currentMsgLang === 'ar') return ar;
+    if (currentMsgLang === 'de') return de || en;
+    return en;
+  };
 
   // Find associated group
   const targetGroup = group || (lesson?.groupId ? groups.find(g => g.id === lesson.groupId) : null);
@@ -174,13 +182,13 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   const [customMessage, setCustomMessage] = useState<string | null>(null);
 
   const arrivalOptions = React.useMemo(() => [
-    { value: '5', label: _t('5 دقايق', '5 mins', '5 Min') },
-    { value: '10', label: _t('10 دقايق', '10 mins', '10 Min') },
-    { value: '15', label: _t('15 دقيقة', '15 mins', '15 Min') },
-    { value: '20', label: _t('20 دقيقة', '20 mins', '20 Min') },
-    { value: '25', label: _t('25 دقيقة', '25 mins', '25 Min') },
-    { value: '30', label: _t('نص ساعة', '30 mins', '30 Min') },
-  ], [_t]);
+    { value: '5', label: msgT('5 دقايق', '5 mins', '5 Min') },
+    { value: '10', label: msgT('10 دقايق', '10 mins', '10 Min') },
+    { value: '15', label: msgT('15 دقيقة', '15 mins', '15 Min') },
+    { value: '20', label: msgT('20 دقيقة', '20 mins', '20 Min') },
+    { value: '25', label: msgT('25 دقيقة', '25 mins', '25 Min') },
+    { value: '30', label: msgT('نص ساعة', '30 mins', '30 Min') },
+  ], [currentMsgLang]);
 
   // Cycle & Homework States
   const [includeCycle, setIncludeCycle] = useState<boolean>(hasCycle);
@@ -211,63 +219,117 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     }
   }, [detectedPreviousHomework]);
 
-  // Format lesson time cleanly for display (12-hour format with period)
+  // Format lesson time cleanly for display
   const formattedLessonTime = React.useMemo(() => {
-    if (!rawTime) return _t('المحدد', 'Scheduled', 'Geplant');
+    if (!rawTime) return msgT('المحدد', 'Scheduled', 'Geplant');
     const [hStr, mStr] = rawTime.split(':');
     if (hStr && mStr) {
       let h = parseInt(hStr, 10);
       const isPm = h >= 12;
       if (h > 12) h -= 12;
       if (h === 0) h = 12;
-      const period = isPm ? _t('مساءً', 'PM', 'Uhr') : _t('صباحاً', 'AM', 'Uhr');
-      const timeDisplay = `${h}:${mStr} ${period}`;
-      return displayDay ? `${_t('يوم', 'Day', 'Tag')} ${displayDay} ${_t('الساعة', 'at', 'um')} ${timeDisplay}` : timeDisplay;
+      const period = isPm ? msgT('مساءً', 'PM', 'Uhr') : msgT('صباحاً', 'AM', 'Uhr');
+      const timeDisplay = currentMsgLang === 'de' ? `${rawTime} Uhr` : `${h}:${mStr} ${period}`;
+      return displayDay 
+        ? `${msgT('يوم', 'Day', 'Am')} ${displayDay} ${msgT('الساعة', 'at', 'um')} ${timeDisplay}` 
+        : timeDisplay;
     }
     return displayDay ? `${displayDay} ${rawTime}` : rawTime;
-  }, [rawTime, displayDay, _t]);
+  }, [rawTime, displayDay, currentMsgLang]);
 
-  // Generate exact Arabic template according to requirements (Always 12-hour system)
+  // Generate template according to selected language (Arabic, English, German)
   const generatedMessage = React.useMemo(() => {
     const time12 = formatTimeTo12Hour(rawTime);
     const isGroup = isMultiStudentGroup || (targetGroup && sendMode === 'group');
+    const arrivalLabel = arrivalOptions.find(o => o.value === selectedArrivalTime)?.label || `${selectedArrivalTime} ${msgT('دقيقة', 'mins', 'Min')}`;
 
-    // 1. Cycle Line (if enabled and applicable)
+    if (currentMsgLang === 'en') {
+      const cycleLine = (hasCycle && includeCycle) 
+        ? `\n\n🔢 Lesson Number: Session ${sessionNumber} of ${totalCycleSessions}`
+        : '';
+      const homeworkLine = (includeHomework && previousHomework.trim())
+        ? `\n\n📝 Previous Homework to prepare:\n${previousHomework.trim()}`
+        : '';
+
+      if (isOnline) {
+        const intro = reminderStyle === 'immediate'
+          ? 'Hello,\n\nWe are starting our lesson now.'
+          : `Hello,\n\nReminder and confirmation for our lesson scheduled at ${time12}.`;
+        const zoomPart = zoomLink.trim() ? `\n\n🔗 Lesson Link:\n${zoomLink.trim()}` : '';
+        return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
+      } else {
+        let intro = '';
+        if (reminderStyle === 'immediate') {
+          intro = isGroup
+            ? `Hello,\n\nI am on my way and will arrive at the group in ${arrivalLabel}.`
+            : `Hello,\n\nI am on my way and will arrive in ${arrivalLabel}.`;
+        } else {
+          intro = isGroup
+            ? `Hello,\n\nReminder and confirmation for our group lesson scheduled at ${time12}.`
+            : `Hello,\n\nReminder and confirmation for our lesson scheduled at ${time12}.`;
+        }
+        return `${intro}${cycleLine}${homeworkLine}`;
+      }
+    }
+
+    if (currentMsgLang === 'de') {
+      const cycleLine = (hasCycle && includeCycle) 
+        ? `\n\n🔢 Unterrichtsstunde: Lektion ${sessionNumber} von ${totalCycleSessions}`
+        : '';
+      const homeworkLine = (includeHomework && previousHomework.trim())
+        ? `\n\n📝 Hausaufgabe zur Vorbereitung:\n${previousHomework.trim()}`
+        : '';
+
+      if (isOnline) {
+        const intro = reminderStyle === 'immediate'
+          ? 'Guten Tag,\n\nwir beginnen jetzt mit unserer Unterrichtsstunde.'
+          : `Guten Tag,\n\nErinnerung und Terminbestätigung für unsere Unterrichtsstunde um ${rawTime} Uhr.`;
+        const zoomPart = zoomLink.trim() ? `\n\n🔗 Link zur Stunde:\n${zoomLink.trim()}` : '';
+        return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
+      } else {
+        let intro = '';
+        if (reminderStyle === 'immediate') {
+          intro = isGroup
+            ? `Guten Tag,\n\nich bin unterwegs und treffe in ${arrivalLabel} bei der Gruppe ein.`
+            : `Guten Tag,\n\nich bin unterwegs und treffe in ${arrivalLabel} bei Ihnen ein.`;
+        } else {
+          intro = isGroup
+            ? `Guten Tag,\n\nErinnerung und Terminbestätigung für die Gruppenstunde um ${rawTime} Uhr.`
+            : `Guten Tag,\n\nErinnerung und Terminbestätigung für unsere Unterrichtsstunde um ${rawTime} Uhr.`;
+        }
+        return `${intro}${cycleLine}${homeworkLine}`;
+      }
+    }
+
+    // Default: Arabic
     const cycleLine = (hasCycle && includeCycle) 
-      ? `\n\n🔢 ${_t(`رقم الحصة: الحصة ${sessionNumber} من ${totalCycleSessions}`, `Session: ${sessionNumber} of ${totalCycleSessions}`, `Lektionsnummer: ${sessionNumber} von ${totalCycleSessions}`)}`
+      ? `\n\n🔢 رقم الحصة: الحصة ${sessionNumber} من ${totalCycleSessions}`
       : '';
-
-    // 2. Previous Homework Line (if enabled and text exists)
     const homeworkLine = (includeHomework && previousHomework.trim())
-      ? `\n\n📝 ${_t('واجب الحصة السابقة المطلوب تجهيزه:', 'Previous Homework to prepare:', 'Hausaufgabe:')}\n${previousHomework.trim()}`
+      ? `\n\n📝 واجب الحصة السابقة المطلوب تجهيزه:\n${previousHomework.trim()}`
       : '';
-
-    const arrivalLabel = arrivalOptions.find(o => o.value === selectedArrivalTime)?.label || `${selectedArrivalTime} ${_t('دقيقة', 'mins', 'Min')}`;
 
     if (isOnline) {
       const intro = reminderStyle === 'immediate'
-        ? _t('السلام عليكم ورحمة الله وبركاته\n\nهنبدأ الحصة الآن إن شاء الله.', 'Hello,\n\nWe will start the lesson now.', 'Hallo,\n\nWir beginnen jetzt mit der Lektion.')
-        : _t(`السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`, `Hello,\n\nReminder and confirmation for our lesson at ${time12}.`, `Hallo,\n\nErinnerung an unseren Termin um ${time12} Uhr.`);
-
-      const zoomPart = zoomLink.trim() ? `\n\n🔗 ${_t('لينك الحصة:', 'Lesson Link:', 'Lektionslink:')}\n${zoomLink.trim()}` : '';
-
+        ? 'السلام عليكم ورحمة الله وبركاته\n\nهنبدأ الحصة الآن إن شاء الله.'
+        : `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
+      const zoomPart = zoomLink.trim() ? `\n\n🔗 لينك الحصة:\n${zoomLink.trim()}` : '';
       return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
     } else {
-      // Offline
       let intro = '';
       if (reminderStyle === 'immediate') {
         intro = isGroup
-          ? _t(`السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل للمجموعة خلال ${arrivalLabel} إن شاء الله.`, `Hello,\n\nI am on my way and will arrive within ${arrivalLabel}.`, `Hallo,\n\nIch bin unterwegs und treffe in ${arrivalLabel} ein.`)
-          : _t(`السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${arrivalLabel} إن شاء الله.`, `Hello,\n\nI am on my way and will arrive within ${arrivalLabel}.`, `Hallo,\n\nIch bin unterwegs und treffe in ${arrivalLabel} ein.`);
+          ? `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل للمجموعة خلال ${arrivalLabel} إن شاء الله.`
+          : `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${arrivalLabel} إن شاء الله.`;
       } else {
         intro = isGroup
-          ? _t(`السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصة المجموعة إن شاء الله الساعة ${time12}.`, `Hello,\n\nReminder for the group lesson at ${time12}.`, `Hallo,\n\nErinnerung an die Gruppenstunde um ${time12} Uhr.`)
-          : _t(`السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`, `Hello,\n\nReminder for our lesson at ${time12}.`, `Hallo,\n\nErinnerung an unsere Lektion um ${time12} Uhr.`);
+          ? `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصة المجموعة إن شاء الله الساعة ${time12}.`
+          : `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
       }
-
       return `${intro}${cycleLine}${homeworkLine}`;
     }
   }, [
+    currentMsgLang,
     isOnline, 
     rawTime, 
     zoomLink, 
@@ -282,8 +344,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     includeHomework,
     previousHomework,
     reminderStyle,
-    arrivalOptions,
-    _t
+    arrivalOptions
   ]);
 
   const activeMessage = customMessage !== null ? customMessage : generatedMessage;
@@ -428,14 +489,20 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main rounded-full transition-colors cursor-pointer shrink-0"
-            title={_t('إغلاق', 'Close', 'Schließen')}
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <ReportLanguageToggle
+              showLabel={false}
+              onLanguageChange={() => setCustomMessage(null)}
+            />
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main rounded-full transition-colors cursor-pointer shrink-0"
+              title={_t('إغلاق', 'Close', 'Schließen')}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Content Body */}

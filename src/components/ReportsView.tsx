@@ -8,10 +8,11 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as 
 import { Lesson, PaymentRecord } from '../types';
 import { calculateOverallAttendance } from '../utils/lessonUtils';
 import { formatLocalDate } from '../utils/timeUtils';
+import { ReportLanguageToggle } from './ReportLanguageToggle';
 import confetti from 'canvas-confetti';
 
 export const ReportsView: React.FC = () => {
-  const { lessons: activeLessons, payments: activePayments, getHistoricalLessons, getHistoricalPayments, updateLesson, profile, openLessonControl, t, groups, students } = useApp();
+  const { lessons: activeLessons, payments: activePayments, getHistoricalLessons, getHistoricalPayments, updateLesson, profile, openLessonControl, t, reportLanguage, reportT, groups, students } = useApp();
 
   const [lessons, setLessons] = useState<Lesson[]>(activeLessons);
   const [payments, setPayments] = useState<PaymentRecord[]>(activePayments);
@@ -142,9 +143,9 @@ export const ReportsView: React.FC = () => {
   // Attendance breakdown
   const { presentCount, lateCount, absentCount } = calculateOverallAttendance(lessons, students);
   const attendanceData = [
-    { name: 'Anwesend', value: presentCount, color: '#10B981' },
-    { name: 'Verspätet', value: lateCount, color: '#F59E0B' },
-    { name: 'Abwesend', value: absentCount, color: '#EF4444' }
+    { name: reportT('حاضر', 'Present', 'Anwesend'), value: presentCount, color: '#10B981' },
+    { name: reportT('متأخر', 'Late', 'Verspätet'), value: lateCount, color: '#F59E0B' },
+    { name: reportT('غائب', 'Absent', 'Abwesend'), value: absentCount, color: '#EF4444' }
   ];
 
   const handlePrintReport = () => {
@@ -154,30 +155,39 @@ export const ReportsView: React.FC = () => {
   return (
     <div className="space-y-2.5 sm:space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between gap-2 sm:gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
         <div>
           <h2 className="text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5 sm:gap-2">
             <BarChart2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary dark:text-primary shrink-0" />
-            <span>{t ? t('reports_and_analyses') || 'Berichte & Analysen' : 'Berichte & Analysen'}</span>
+            <span>{reportT('التقارير والإحصائيات', 'Reports & Analytics', 'Berichte & Analysen')}</span>
           </h2>
           <p className="text-[10px] sm:text-[11px] text-slate-500 font-bold mt-0.5">
-            Sitzungen, wöchentliche Einnahmen & Bezahlungs-Kontrolle
+            {reportT(
+              'متابعة الحصص، الإيرادات الأسبوعية والتحصيل المالي',
+              'Sessions, weekly revenue & payment tracking',
+              'Sitzungen, wöchentliche Einnahmen & Bezahlungs-Kontrolle'
+            )}
           </p>
         </div>
 
-        <button
-          onClick={handlePrintReport}
-          className="bg-primary hover:bg-primary-hover text-white font-bold text-[10.5px] sm:text-xs px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
-        >
-          <Printer className="w-3.5 h-3.5" />
-          <span>Drucken / PDF</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <ReportLanguageToggle showLabel={false} />
+          <button
+            onClick={handlePrintReport}
+            className="bg-primary hover:bg-primary-hover text-white font-bold text-[10.5px] sm:text-xs px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            <span>{reportT('طباعة / PDF', 'Print / PDF', 'Drucken / PDF')}</span>
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
         <div className="bg-surface border border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs">
-          <span className="block text-[9px] font-bold text-text-muted/70 uppercase tracking-wider">{t('reports_collected_revenue')}</span>
+          <span className="block text-[9px] font-bold text-text-muted/70 uppercase tracking-wider">
+            {reportT('الإيرادات المحصلة', 'Collected Revenue', 'Eingenommene Gebühren')}
+          </span>
           <div className="flex items-baseline gap-1 mt-0.5">
             <span className="text-base sm:text-lg font-black font-mono text-primary dark:text-primary">
               +{totalCollectedRevenue.toLocaleString()}
@@ -185,12 +195,14 @@ export const ReportsView: React.FC = () => {
             <span className="text-[10px] font-bold text-slate-500">{profile.currency}</span>
           </div>
           <span className="text-[9px] text-primary font-bold flex items-center gap-1 mt-1">
-            <TrendingUp className="w-3 h-3" /> Aus Sitzungen bezahlt
+            <TrendingUp className="w-3 h-3" /> {reportT('مدفوع من الحصص', 'Paid from sessions', 'Aus Sitzungen bezahlt')}
           </span>
         </div>
 
         <div className="bg-surface border border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs">
-          <span className="block text-[9px] font-bold text-text-muted/70 uppercase tracking-wider">{t('reports_unpaid_amount')}</span>
+          <span className="block text-[9px] font-bold text-text-muted/70 uppercase tracking-wider">
+            {reportT('المبالغ المستحقة / المعلقة', 'Unpaid / Due Amount', 'Ausstehende Beträge')}
+          </span>
           <div className="flex items-baseline gap-1 mt-0.5">
             <span className="text-base sm:text-lg font-black font-mono text-primary dark:text-primary">
               {totalUnpaidAmount.toLocaleString()}
@@ -198,19 +210,23 @@ export const ReportsView: React.FC = () => {
             <span className="text-[10px] font-bold text-slate-500">{profile.currency}</span>
           </div>
           <span className="text-[9px] text-primary font-bold flex items-center gap-1 mt-1">
-            <Clock className="w-3 h-3" /> Ausstehende Zahlungen
+            <Clock className="w-3 h-3" /> {reportT('دفعات معلقة', 'Pending payments', 'Ausstehende Zahlungen')}
           </span>
         </div>
 
         <div className="bg-surface border border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs">
-          <span className="block text-[9px] font-bold text-text-muted/70 uppercase tracking-wider">{t('reports_sessions_completed')}</span>
+          <span className="block text-[9px] font-bold text-text-muted/70 uppercase tracking-wider">
+            {reportT('الحصص المكتملة', 'Completed Sessions', 'Abgeschlossene Sitzungen')}
+          </span>
           <div className="flex items-baseline gap-1 mt-0.5">
             <span className="text-base sm:text-lg font-black font-mono text-primary dark:text-primary">
               {completedSessionsCount}
             </span>
-            <span className="text-[10px] font-bold text-slate-500">Sitzungen</span>
+            <span className="text-[10px] font-bold text-slate-500">{reportT('حصة', 'Sessions', 'Sitzungen')}</span>
           </div>
-          <span className="text-[9px] text-slate-500 font-bold mt-1 block">{t('reports_total_conducted')}</span>
+          <span className="text-[9px] text-slate-500 font-bold mt-1 block">
+            {reportT('إجمالي الحصص المنفذة', 'Total conducted sessions', 'Gesamt durchgeführte Sitzungen')}
+          </span>
         </div>
 
         <div className={`border rounded-lg p-2 sm:p-2.5 shadow-2xs transition-all ${
@@ -219,17 +235,19 @@ export const ReportsView: React.FC = () => {
             : 'bg-surface border border-surface-border'
         }`}>
           <span className="block text-[9px] font-bold text-red-600 dark:text-red-400 uppercase tracking-wider">
-            Letzte Sitzung Unbezahlt
+            {reportT('آخر حصة غير مسددة', 'Last Session Unpaid', 'Letzte Sitzung Unbezahlt')}
           </span>
           <div className="flex items-baseline gap-1 mt-0.5">
             <span className="text-base sm:text-lg font-black font-mono text-red-600 dark:text-red-400">
               {unpaidLastSessionsCount}
             </span>
-            <span className="text-[10px] font-bold text-red-600/80">{t('reports_packages') || 'Pakete'}</span>
+            <span className="text-[10px] font-bold text-red-600/80">{reportT('باقات', 'Packages', 'Pakete')}</span>
           </div>
           <span className="text-[9px] text-red-700 dark:text-red-300 font-bold flex items-center gap-1 mt-1">
             <AlertTriangle className="w-3 h-3 text-red-600" />
-            {unpaidLastSessionsCount > 0 ? 'Dringend kassieren!' : 'Alles im grünen Bereich'}
+            {unpaidLastSessionsCount > 0 
+              ? reportT('يجب التحصيل فوراً!', 'Urgent collection needed!', 'Dringend kassieren!') 
+              : reportT('الوضع المالي ممتاز', 'All up to date', 'Alles im grünen Bereich')}
           </span>
         </div>
       </div>
@@ -240,10 +258,14 @@ export const ReportsView: React.FC = () => {
           <div>
             <h3 className="text-xs font-black text-text-main uppercase tracking-wider flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5 text-primary" />
-              <span>Wöchentliches Sitzungs- & Einnahmen-Protokoll</span>
+              <span>{reportT('سجل الحصص والإيرادات الأسبوعي', 'Weekly Sessions & Revenue Log', 'Wöchentliches Sitzungs- & Einnahmen-Protokoll')}</span>
             </h3>
             <p className="text-[10px] text-slate-500 font-bold mt-0.5">
-              Jede Sitzung mit erhaltenem Honorar und Bezahlungs-Warnungen
+              {reportT(
+                'عرض تفصيلي لكل حصة مع حالة التحصيل وتنبيهات السداد',
+                'Detailed session breakdown with payment and reminder alerts',
+                'Jede Sitzung mit erhaltenem Honorar und Bezahlungs-Warnungen'
+              )}
             </p>
           </div>
 
@@ -253,41 +275,41 @@ export const ReportsView: React.FC = () => {
               onClick={() => setActiveFilter('all')}
               className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
                 activeFilter === 'all'
-                  ? 'bg-surface text-text-main border border-surface-border dark:border-surface-border-soft shadow-2xs'
+                  ? 'bg-surface text-text-main border border-surface-border dark:border-surface-border-soft shadow-2xs font-black'
                   : 'text-text-muted border border-transparent'
               }`}
             >
-              Alle
+              {reportT('الكل', 'All', 'Alle')}
             </button>
             <button
               onClick={() => setActiveFilter('this_week')}
               className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
                 activeFilter === 'this_week'
-                  ? 'bg-surface text-primary dark:text-primary border border-surface-border dark:border-surface-border-soft shadow-2xs'
+                  ? 'bg-surface text-primary dark:text-primary border border-surface-border dark:border-surface-border-soft shadow-2xs font-black'
                   : 'text-text-muted border border-transparent'
               }`}
             >
-              Diese Woche
+              {reportT('هذا الأسبوع', 'This Week', 'Diese Woche')}
             </button>
             <button
               onClick={() => setActiveFilter('paid')}
               className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
                 activeFilter === 'paid'
-                  ? 'bg-primary text-white shadow-2xs'
+                  ? 'bg-primary text-white shadow-2xs font-black'
                   : 'text-text-muted'
               }`}
             >
-              Bezahlt
+              {reportT('مدفوع', 'Paid', 'Bezahlt')}
             </button>
             <button
               onClick={() => setActiveFilter('unpaid')}
               className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
                 activeFilter === 'unpaid'
-                  ? 'bg-red-600 text-white shadow-2xs'
+                  ? 'bg-red-600 text-white shadow-2xs font-black'
                   : 'text-text-muted'
               }`}
             >
-              Unbezahlt
+              {reportT('غير مدفوع', 'Unpaid', 'Unbezahlt')}
             </button>
           </div>
         </div>
@@ -295,7 +317,7 @@ export const ReportsView: React.FC = () => {
         {/* List grouped by week */}
         {Object.keys(weeksGrouped).length === 0 ? (
           <div className="text-center py-4 text-text-muted/70 text-xs font-bold italic">
-            Keine Sitzungen für die ausgewählte Filteroption gefunden.
+            {reportT('لا توجد حصص مطابقة لخيارات الفلترة الحالية.', 'No sessions found for the selected filter.', 'Keine Sitzungen für die ausgewählte Filteroption gefunden.')}
           </div>
         ) : (
           Object.entries(weeksGrouped).map(([weekTitle, weekLessons]) => {
@@ -325,7 +347,7 @@ export const ReportsView: React.FC = () => {
                       📅 {weekTitle}
                     </span>
                     <span className="text-[9px] bg-surface dark:bg-slate-700 px-1.5 py-0.2 rounded border border-surface-border/60 dark:border-slate-600 font-bold text-text-main">
-                      {weekLessons.length} Sitzungen
+                      {weekLessons.length} {reportT('حصة', 'Sessions', 'Sitzungen')}
                     </span>
                   </div>
 
@@ -336,7 +358,7 @@ export const ReportsView: React.FC = () => {
                     </span>
                     {weekUnpaid > 0 && (
                       <span className="text-primary dark:text-primary flex items-center gap-1 bg-primary-soft dark:bg-primary-soft px-1.5 py-0.2 rounded border border-primary-border text-[10px]">
-                        ⚠️ {weekUnpaid} {profile.currency} offen
+                        ⚠️ {weekUnpaid} {profile.currency} {reportT('متبقي', 'due', 'offen')}
                       </span>
                     )}
                   </div>
@@ -366,16 +388,16 @@ export const ReportsView: React.FC = () => {
                             </span>
 
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border font-mono">
-                              Sitzung {l.sessionNumber}/{l.totalSessionsInPackage}
+                              {reportT('حصة', 'Session', 'Sitzung')} {l.sessionNumber}/{l.totalSessionsInPackage}
                             </span>
 
                             {l.status === 'completed' ? (
                               <span className="text-[9px] font-bold text-primary bg-primary-soft dark:bg-primary-soft dark:text-primary px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                                <CheckCircle2 className="w-2.5 h-2.5" /> Absolviert
+                                <CheckCircle2 className="w-2.5 h-2.5" /> {reportT('مكتملة', 'Completed', 'Absolviert')}
                               </span>
                             ) : (
                               <span className="text-[9px] font-bold text-primary bg-primary-soft dark:bg-primary-soft/40 dark:text-primary/70 px-1.5 py-0.5 rounded flex items-center gap-0.5 active:scale-95 transition-all hover:bg-primary/20">
-                                <Clock className="w-2.5 h-2.5" /> Geplant
+                                <Clock className="w-2.5 h-2.5" /> {reportT('مجدولة', 'Scheduled', 'Geplant')}
                               </span>
                             )}
 
@@ -383,17 +405,17 @@ export const ReportsView: React.FC = () => {
                             {isUnpaidLastSession && (
                               <span className="text-[9px] font-bold text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-950/60 px-2 py-0.5 rounded flex items-center gap-1 animate-pulse">
                                 <AlertCircle className="w-3 h-3" />
-                                Letztes Honorar offen!
+                                {reportT('آخر دفعة مستحقة!', 'Last payment due!', 'Letztes Honorar offen!')}
                               </span>
                             )}
                           </div>
 
                           <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold">
-                            <span className="font-mono">{formatDateDisplay(l.date)} um {l.time} Uhr</span>
+                            <span className="font-mono">{formatDateDisplay(l.date)} {reportT('الساعة', 'at', 'um')} {l.time}</span>
                             <span>•</span>
                             <span>{l.grade}</span>
                             <span>•</span>
-                            <span>{l.type === 'online' ? 'Online' : 'Vor Ort'}</span>
+                            <span>{l.type === 'online' ? reportT('أونلاين', 'Online', 'Online') : reportT('حضوري', 'In-Person', 'Vor Ort')}</span>
                           </div>
                         </div>
 
@@ -406,7 +428,7 @@ export const ReportsView: React.FC = () => {
                                   +{l.amountPaid || l.amountDue} {profile.currency}
                                 </span>
                                 <span className="block text-[9px] font-bold text-primary uppercase">
-                                  ✓ Bezahlt
+                                  ✓ {reportT('تم السداد', 'Paid', 'Bezahlt')}
                                 </span>
                               </div>
                             ) : l.paymentStatus === 'partial' ? (
@@ -415,7 +437,7 @@ export const ReportsView: React.FC = () => {
                                   +{l.amountPaid} {profile.currency}
                                 </span>
                                 <span className="block text-[9px] font-bold text-primary uppercase">
-                                  Teilweise ({l.amountDue - l.amountPaid} offen)
+                                  {reportT('سداد جزئي', 'Partial', 'Teilweise')} ({l.amountDue - (l.amountPaid || 0)} {reportT('متبقي', 'due', 'offen')})
                                 </span>
                               </div>
                             ) : (
@@ -424,7 +446,7 @@ export const ReportsView: React.FC = () => {
                                   0 {profile.currency}
                                 </span>
                                 <span className="block text-[9px] font-bold text-red-600 uppercase">
-                                  ⚠️ Offen ({l.amountDue} {profile.currency})
+                                  ⚠️ {reportT('غير مسدد', 'Unpaid', 'Offen')} ({l.amountDue} {profile.currency})
                                 </span>
                               </div>
                             )}
@@ -435,10 +457,10 @@ export const ReportsView: React.FC = () => {
                             <button
                               onClick={(e) => handleMarkAsPaid(e, l)}
                               className="px-2 py-1 bg-primary hover:bg-primary-hover text-white rounded text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
-                              title="Als bezahlt markieren"
+                              title={reportT('تحديد كمسدد', 'Mark as paid', 'Als bezahlt markieren')}
                             >
                               <Check className="w-3 h-3" />
-                              <span>{t('payments_paid_btn')}</span>
+                              <span>{reportT('سداد', 'Pay', 'Bezahlen')}</span>
                             </button>
                           )}
                         </div>
@@ -458,7 +480,7 @@ export const ReportsView: React.FC = () => {
         <div className="bg-surface border border-surface-border rounded-xl p-4 shadow-2xs space-y-3">
           <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
             <TrendingUp className="w-4 h-4 text-primary" />
-            <span>Wöchentlicher Umsatz ({profile.currency})</span>
+            <span>{reportT('الإيرادات الأسبوعية', 'Weekly Revenue', 'Wöchentlicher Umsatz')} ({profile.currency})</span>
           </h3>
 
           <div className="h-48 w-full">
@@ -467,8 +489,8 @@ export const ReportsView: React.FC = () => {
                 <XAxis dataKey="name" stroke="var(--color-text-muted)" fontSize={10} />
                 <YAxis stroke="var(--color-text-muted)" fontSize={10} />
                 <Tooltip />
-                <Bar dataKey="Einnahmen" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Offen" fill="var(--color-text-muted)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Einnahmen" name={reportT('المحصل', 'Collected', 'Einnahmen')} fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Offen" name={reportT('المتبقي', 'Due', 'Offen')} fill="var(--color-text-muted)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -478,7 +500,7 @@ export const ReportsView: React.FC = () => {
         <div className="bg-surface border border-surface-border rounded-xl p-4 shadow-2xs space-y-3">
           <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
             <BarChart2 className="w-4 h-4 text-primary" />
-            <span>{t('reports_attendance_overview_title')}</span>
+            <span>{reportT('نظرة عامة على الحضور والغياب', 'Attendance Overview', 'Anwesenheitsübersicht')}</span>
           </h3>
 
           <div className="h-48 w-full flex items-center justify-center">

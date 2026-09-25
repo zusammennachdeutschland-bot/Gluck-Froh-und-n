@@ -17,6 +17,7 @@ import {
 } from '../services/schoolScheduleExportService';
 import { getSchoolSettings } from '../utils/schoolUtils';
 import { exportMasterSchedule } from '../services/masterScheduleExportService';
+import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 interface SchoolScheduleExportModalProps {
   onClose: () => void;
@@ -230,13 +231,16 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
               </p>
             </div>
           </div>
-          <button 
-            onClick={onClose}
-            disabled={isProcessing}
-            className="p-1 sm:p-1.5 rounded-lg sm:rounded-xl text-text-muted hover:text-text-main hover:bg-surface-border/40 transition-colors cursor-pointer shrink-0"
-          >
-            <X className="w-4 h-4 sm:w-5 sm:h-5" />
-          </button>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <ReportLanguageToggle showLabel={false} />
+            <button 
+              onClick={onClose}
+              disabled={isProcessing}
+              className="p-1 sm:p-1.5 rounded-lg sm:rounded-xl text-text-muted hover:text-text-main hover:bg-surface-border/40 transition-colors cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          </div>
         </div>
 
         {/* MODAL BODY */}

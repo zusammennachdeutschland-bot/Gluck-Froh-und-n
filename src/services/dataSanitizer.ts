@@ -192,6 +192,18 @@ export function sanitizeInitialData(rawData: Record<string, any>): Record<string
   sanitized['hod_visit_records'] = ensureArray('hod_visit_records', []).filter(v => v && typeof v === 'object');
   sanitized['dl_school_notes'] = ensureArray('dl_school_notes', []).filter(n => n && typeof n === 'object');
 
+  // 16. Gold Holdings & Settings (Defaults to empty array for privacy)
+  sanitized['gluck_gold_holdings'] = ensureArray('gluck_gold_holdings', []).filter(g => g && typeof g === 'object' && g.id !== 'gold_btc_5g_init');
+  sanitized['gluck_gold_settings'] = ensureObject('gluck_gold_settings', {
+    enabled: true,
+    autoUpdateEnabled: true,
+    updateIntervalMinutes: 60,
+    preferredProviderId: 'backend_proxy',
+    fallbackProviderId: 'gold_api_direct',
+    useCachedPriceWhenOffline: true,
+    maxCacheAgeHours: 72,
+  });
+
   // Asynchronously write back cleaned data if corruption or non-standard format was detected
   if (needsPersistCleaned) {
     console.log('[DataSanitizer] Repaired legacy data discrepancies. Persisting clean state to storage...');

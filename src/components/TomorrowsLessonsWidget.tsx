@@ -65,10 +65,10 @@ export const TomorrowsLessonsWidget: React.FC = () => {
   };
 
   return (
-    <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all">
+    <div className="bg-surface border border-surface-border rounded-xl p-1.5 sm:p-2 shadow-2xs transition-all">
       {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between mb-1.5 px-0.5">
+        <div className="flex items-center gap-1.5">
           <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border">
             <Calendar className="w-3.5 h-3.5" />
           </div>
@@ -89,17 +89,17 @@ export const TomorrowsLessonsWidget: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           {tomorrowsLessons.map((lesson) => {
             const displayName = lesson.title || lesson.studentName || lesson.groupName || (t('auto_lesson'));
             return (
               <div
                 key={lesson.id}
                 onClick={() => openLessonControl(lesson)}
-                className="group flex items-center justify-between p-2 rounded-lg bg-background/80 hover:bg-slate-100 dark:bg-background/60 dark:hover:bg-slate-800/80 border border-surface-border/60 dark:border-surface-border/80 transition-all cursor-pointer"
+                className="group flex items-center justify-between p-1.5 rounded-lg bg-background/80 hover:bg-slate-100 dark:bg-background/60 dark:hover:bg-slate-800/80 border border-surface-border/60 dark:border-surface-border/80 transition-all cursor-pointer"
               >
                 {/* Left: Time & Name */}
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0">
                   <div className="flex items-center gap-1 text-text-main text-[11px] font-mono font-bold shrink-0 bg-surface px-1.5 py-0.5 rounded border border-surface-border shadow-2xs">
                     <Clock className="w-2.5 h-2.5 text-primary" />
                     <span>{lesson.time}</span>
@@ -112,7 +112,7 @@ export const TomorrowsLessonsWidget: React.FC = () => {
                 </div>
 
                 {/* Right: Type Badge & Arrow */}
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1 shrink-0">
                   {getTypeBadge(lesson.type, lesson.location)}
                   <ChevronRight className="w-3 h-3 text-text-muted/70 group-hover:text-primary transition-colors" />
                 </div>

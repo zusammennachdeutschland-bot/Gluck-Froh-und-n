@@ -756,7 +756,7 @@ export const SchoolScheduleView: React.FC = () => {
   // 5. Stage Workload Map
   const stageWorkloadMap = useMemo(() => {
     const map: Record<string, number> = {};
-    Object.entries(classWorkloadMap).forEach(([cls, data]) => {
+    Object.entries(classWorkloadMap).forEach(([cls, data]: [string, { count: number; days: Set<string>; periods: any[] }]) => {
       const stage = extractStage(cls);
       map[stage] = (map[stage] || 0) + data.count;
     });
@@ -1376,31 +1376,31 @@ export const SchoolScheduleView: React.FC = () => {
                     return (
                       <div 
                         key={item.id}
-                        className={`p-2 sm:p-2.5 rounded-lg border transition-all duration-200 ${
+                        className={`p-1.5 sm:p-2 rounded-lg border transition-all duration-200 ${
                           isCustom 
                             ? 'bg-indigo-50/40 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800/60 shadow-2xs' 
                             : 'bg-primary-soft/20 dark:bg-primary-soft/10 border-primary-border/40'
                         }`}
                         id={`schedule-item-${item.id}`}
                       >
-                        <div className="flex items-start justify-between gap-2.5">
-                          <div className="flex gap-2 text-start">
+                        <div className="flex items-start justify-between gap-1.5 sm:gap-2">
+                          <div className="flex gap-1.5 sm:gap-2 text-start">
                             {isCustom ? (
-                              <span className="w-6 h-6 rounded-md bg-indigo-600 text-white flex items-center justify-center text-xs font-black shrink-0 shadow-2xs">
-                                <Clock className="w-3.5 h-3.5" />
+                              <span className="w-5 sm:w-6 h-5 sm:h-6 rounded-md bg-indigo-600 text-white flex items-center justify-center text-[11px] font-black shrink-0 shadow-2xs">
+                                <Clock className="w-3 h-3" />
                               </span>
                             ) : (
-                              <span className="w-6 h-6 rounded-md bg-primary text-white flex items-center justify-center text-xs font-black shrink-0 shadow-2xs">
+                              <span className="w-5 sm:w-6 h-5 sm:h-6 rounded-md bg-primary text-white flex items-center justify-center text-[11px] font-black shrink-0 shadow-2xs">
                                 {item.periodNumber}
                               </span>
                             )}
                             
                             <div className="space-y-0.5">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className={`text-xs font-black font-mono ${isCustom ? 'text-indigo-900 dark:text-indigo-200' : 'text-slate-800 dark:text-slate-200'}`}>
+                                <span className={`text-[11.5px] sm:text-xs font-black font-mono ${isCustom ? 'text-indigo-900 dark:text-indigo-200' : 'text-slate-800 dark:text-slate-200'}`}>
                                   {item.startTime} - {item.endTime}
                                 </span>
-                                <span className="text-[10px] text-slate-400 font-semibold">
+                                <span className="text-[9.5px] sm:text-[10px] text-slate-400 font-semibold">
                                   ({item.durationMinutes} {_t('دقيقة', 'mins', 'Min.')})
                                 </span>
                                 {isCustom && (
@@ -1410,14 +1410,14 @@ export const SchoolScheduleView: React.FC = () => {
                                 )}
                               </div>
 
-                              <div className="space-y-1 pt-0.5">
+                              <div className="space-y-0.5 pt-0.5">
                                 {item.className ? (
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm font-black text-slate-900 dark:text-white">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-xs sm:text-[13px] font-black text-slate-900 dark:text-white">
                                       {item.className}
                                     </span>
                                     {item.subjectName && (
-                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase border ${
+                                      <span className={`text-[9.5px] sm:text-[10px] font-bold px-1.5 py-0.2 rounded-md uppercase border ${
                                         isCustom 
                                           ? 'text-indigo-700 dark:text-indigo-300 bg-white dark:bg-surface border-indigo-200 dark:border-indigo-800' 
                                           : 'text-primary bg-primary-soft border-primary-border/60'
@@ -1426,7 +1426,7 @@ export const SchoolScheduleView: React.FC = () => {
                                       </span>
                                     )}
                                     {item.room && (
-                                      <span className="text-[10px] text-slate-500 font-mono">
+                                      <span className="text-[9.5px] sm:text-[10px] text-slate-500 font-mono">
                                         📍 {item.room}
                                       </span>
                                     )}
@@ -1437,7 +1437,7 @@ export const SchoolScheduleView: React.FC = () => {
                                   </div>
                                 )}
                                 {item.notes && (
-                                  <p className="text-[10px] text-slate-400 leading-relaxed font-medium bg-slate-50 dark:bg-slate-800 p-1.5 rounded-lg border border-slate-100 dark:border-gray-800">
+                                  <p className="text-[9.5px] sm:text-[10px] text-slate-400 leading-relaxed font-medium bg-slate-50 dark:bg-slate-800 p-1 rounded-lg border border-slate-100 dark:border-gray-800">
                                     {item.notes}
                                   </p>
                                 )}
@@ -2290,7 +2290,7 @@ export const SchoolScheduleView: React.FC = () => {
                     {_t('لم يتم إدخال فصول في الجدول حتى الآن', 'No classes registered yet in schedule', 'Noch keine Klassen im Plan eingetragen')}
                   </div>
                 ) : (
-                  Object.entries(classWorkloadMap).map(([cls, data]) => {
+                  Object.entries(classWorkloadMap).map(([cls, data]: [string, { count: number; days: Set<string>; periods: any[] }]) => {
                     const pct = totalWeeklyLessons > 0 ? Math.round((data.count / totalWeeklyLessons) * 100) : 0;
                     const linked = classStudentsMap[cls] || { hodStudentsList: [], systemStudentsList: [] };
                     return (

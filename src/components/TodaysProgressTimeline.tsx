@@ -147,7 +147,7 @@ export const TodaysProgressTimeline: React.FC = () => {
   };
 
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-1.5">
       {/* SECTION 2: PAST PENDING LESSONS (Collapsible by default) */}
       {pendingPastLessons.length > 0 && (
         <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-xl shadow-2xs overflow-hidden transition-all">
@@ -155,9 +155,9 @@ export const TodaysProgressTimeline: React.FC = () => {
             type="button"
             onClick={() => setIsPastPendingExpanded(prev => !prev)}
             aria-expanded={isPastPendingExpanded}
-            className="w-full p-2.5 sm:p-3 flex items-center justify-between gap-2 text-left cursor-pointer hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
+            className="w-full p-2 sm:p-2.5 flex items-center justify-between gap-1.5 text-left cursor-pointer hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
           >
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
               <span className="text-[11px] font-black uppercase text-primary dark:text-primary tracking-wider flex items-center gap-1.5 truncate">
                 <AlertCircle className="w-3.5 h-3.5 text-primary dark:text-primary shrink-0" />
                 <span className="truncate">{t('past_pending_lessons_title')} ({pendingPastLessons.length})</span>
@@ -185,20 +185,20 @@ export const TodaysProgressTimeline: React.FC = () => {
                 transition={{ duration: 0.18, ease: 'easeInOut' }}
                 className="overflow-hidden"
               >
-                <div className="px-2.5 sm:px-3 pb-2.5 sm:pb-3 pt-1 border-t border-primary-border/60 dark:border-primary-border/60">
-                  <div className="max-h-64 overflow-y-auto divide-y divide-primary-border/60 dark:divide-primary-border/60 pr-1">
+                <div className="px-2 sm:px-2.5 pb-2 pt-0.5 border-t border-primary-border/60 dark:border-primary-border/60">
+                  <div className="max-h-60 overflow-y-auto divide-y divide-primary-border/60 dark:divide-primary-border/60 pr-1">
                     {(showAllPastPending ? pendingPastLessons : pendingPastLessons.slice(0, 3)).map((pLesson) => (
                       <div
                         key={pLesson.id}
                         onClick={() => openLessonControl(pLesson)}
-                        className="py-1.5 flex items-center justify-between gap-2 cursor-pointer group transition-colors first:pt-0.5 last:pb-0"
+                        className="py-1 flex items-center justify-between gap-1.5 cursor-pointer group transition-colors first:pt-0.5 last:pb-0"
                       >
                         <div className="space-y-0.5 min-w-0">
                           <div className="flex items-center gap-1.5">
                             <span className="text-[9px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.2 rounded">
                               {pLesson.date}
                             </span>
-                            <span className="text-xs font-mono font-bold text-text-main">
+                            <span className="text-[11px] font-mono font-bold text-text-main">
                               {pLesson.time}
                             </span>
                           </div>
@@ -209,7 +209,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                                 e.stopPropagation();
                                 setSelectedGroupForModal(groups.find(g => g.id === pLesson.groupId) || null);
                               }}
-                              className="text-xs font-bold text-text-main hover:text-primary dark:hover:text-primary hover:underline truncate text-start cursor-pointer inline-flex items-center gap-1"
+                              className="text-xs font-bold text-text-main hover:text-primary dark:hover:text-primary hover:underline truncate text-start cursor-pointer inline-flex items-center gap-1 leading-snug"
                               title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
                             >
                               <span className="truncate">{groups.find(g => g.id === pLesson.groupId)?.name}</span>
@@ -218,7 +218,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                               </span>
                             </button>
                           ) : (
-                            <h4 className="text-xs font-bold text-text-main group-hover:text-primary dark:group-hover:text-primary truncate">
+                            <h4 className="text-xs font-bold text-text-main group-hover:text-primary dark:group-hover:text-primary truncate leading-snug">
                               {pLesson.studentName || pLesson.groupName || pLesson.title}
                             </h4>
                           )}
@@ -243,7 +243,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                         e.stopPropagation();
                         setShowAllPastPending(prev => !prev);
                       }}
-                      className="w-full mt-2 pt-2 border-t border-primary-border/40 dark:border-primary-border/40 text-[11px] font-extrabold text-primary dark:text-primary flex items-center justify-center gap-1.5 hover:underline cursor-pointer transition-colors"
+                      className="w-full mt-1.5 pt-1.5 border-t border-primary-border/40 dark:border-primary-border/40 text-[10.5px] font-extrabold text-primary dark:text-primary flex items-center justify-center gap-1 hover:underline cursor-pointer transition-colors"
                     >
                       {showAllPastPending ? (
                         <>
@@ -273,7 +273,7 @@ export const TodaysProgressTimeline: React.FC = () => {
 
       {/* SECTION 1: TODAY'S LESSONS */}
       {totalCount === 0 ? (
-        <div className="bg-surface border border-surface-border rounded-xl p-3 shadow-2xs space-y-1.5">
+        <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs space-y-1">
           <div className="flex items-center justify-between text-xs">
             <span className="font-bold text-text-main flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-primary" />
@@ -283,14 +283,14 @@ export const TodaysProgressTimeline: React.FC = () => {
               {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
-          <p className="text-xs text-text-muted text-center py-1.5 italic">
+          <p className="text-xs text-text-muted text-center py-1 italic">
             {t('timeline_no_lessons')}
           </p>
         </div>
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs space-y-2">
+        <div className="bg-surface border border-surface-border rounded-xl p-1.5 sm:p-2 shadow-2xs space-y-1.5">
           {/* Timeline Header */}
-          <div className="flex items-center justify-between gap-1.5 sm:gap-2 whitespace-nowrap">
+          <div className="flex items-center justify-between gap-1.5 sm:gap-2 whitespace-nowrap px-0.5">
             <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
               <Clock className="w-3.5 h-3.5 text-primary dark:text-primary shrink-0" />
               <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 whitespace-nowrap">
@@ -321,7 +321,7 @@ export const TodaysProgressTimeline: React.FC = () => {
           </div>
 
           {/* Progress Bar Visualizer */}
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <div className="w-full bg-slate-100 dark:bg-slate-800/80 h-1.5 rounded-full overflow-hidden flex relative">
               {filledUnits > 0 && (
                 <div 
@@ -336,7 +336,7 @@ export const TodaysProgressTimeline: React.FC = () => {
             </div>
 
             {/* Status Count Summary Inline (Compact size) */}
-            <div className="flex items-center justify-between text-[10px] font-bold px-0.5 pt-0.5">
+            <div className="flex items-center justify-between text-[9.5px] sm:text-[10px] font-bold px-0.5 pt-0.5">
               {/* Completed (Green) */}
               <div 
                 className={`flex items-center gap-1 transition-colors ${
@@ -388,7 +388,7 @@ export const TodaysProgressTimeline: React.FC = () => {
           </div>
 
           {/* Lessons List (Material 3 Compact Agenda Cards) */}
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             {processedLessons.map(({ lesson, state }) => {
               const targetGroup = lesson.groupId ? groups.find(g => g.id === lesson.groupId) : null;
               const groupStudents = targetGroup && students ? students.filter(s => s.groupId === targetGroup.id) : [];
@@ -408,15 +408,12 @@ export const TodaysProgressTimeline: React.FC = () => {
               if (targetGroup && groupStudents.length > 0) {
                 metaParts.push(`${groupStudents.length} ${_t('طلاب', 'students', 'Schüler')}`);
               }
-              if (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) {
-                metaParts.push(`${_t('حصة', 'Session', 'Stunde')} ${lesson.sessionNumber}/${lesson.totalSessionsInPackage}`);
-              }
 
               return (
                 <div 
                   key={lesson.id}
                   onClick={() => openLessonControl(lesson)}
-                  className={`group relative flex items-center gap-2.5 px-2.5 py-2 rounded-xl border transition-all cursor-pointer ${
+                  className={`group relative flex items-center gap-1.5 sm:gap-2 px-2 py-1 rounded-lg border transition-all cursor-pointer ${
                     isCompletedState
                       ? 'bg-slate-50/50 dark:bg-slate-900/30 border-slate-200/50 dark:border-slate-800/50 opacity-75 hover:opacity-100'
                       : isCancelledState
@@ -426,9 +423,9 @@ export const TodaysProgressTimeline: React.FC = () => {
                       : 'bg-white dark:bg-slate-900/70 border-slate-200/70 dark:border-surface-border/70 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-2xs'
                   }`}
                 >
-                  {/* Leading Event Accent Stripe (Material 3 Event Bar) */}
+                  {/* Leading Event Accent Stripe (Material 3 Event Bar - sleek height) */}
                   <div 
-                    className={`w-1 self-stretch rounded-full shrink-0 transition-colors ${
+                    className={`w-1 h-6 sm:h-7 rounded-full shrink-0 transition-colors self-center ${
                       isCompletedState
                         ? 'bg-emerald-500/70'
                         : isCancelledState
@@ -440,8 +437,8 @@ export const TodaysProgressTimeline: React.FC = () => {
                   />
 
                   {/* 1. Time Column (Crisp Tabular Typography) */}
-                  <div className="flex flex-col justify-center shrink-0 min-w-[46px] sm:min-w-[50px] text-start tabular-nums select-none">
-                    <span className={`text-xs sm:text-[13px] font-bold tracking-tight leading-none ${
+                  <div className="flex flex-col justify-center shrink-0 min-w-[38px] sm:min-w-[42px] text-start tabular-nums select-none">
+                    <span className={`text-[11px] sm:text-xs font-bold tracking-tight leading-none ${
                       isCompletedState 
                         ? 'text-text-muted line-through opacity-80' 
                         : isCancelledState 
@@ -452,21 +449,21 @@ export const TodaysProgressTimeline: React.FC = () => {
                     }`}>
                       {lesson.time}
                     </span>
-                    <span className={`text-[10px] font-medium leading-none mt-1 ${
+                    <span className={`text-[9px] sm:text-[9.5px] font-medium leading-none mt-0.5 ${
                       state === 'active' ? 'text-blue-600/80 dark:text-blue-400/80' : 'text-text-muted/70'
                     }`}>
                       {endTime || `${lesson.durationMinutes || 60}m`}
                     </span>
                   </div>
 
-                  {/* Hairline Divider between time & details */}
-                  <div className="w-px self-stretch bg-slate-200/60 dark:bg-slate-800 shrink-0 my-0.5" />
+                  {/* Hairline Divider between time & details (Compact height) */}
+                  <div className="w-px h-6 bg-slate-200/60 dark:bg-slate-800 shrink-0 self-center" />
 
                   {/* 2. Main Content (Clean Editorial Hierarchy, Compact & Full Visibility) */}
-                  <div className="flex-1 min-w-0 space-y-0.5">
+                  <div className="flex-1 min-w-0 py-0.5 space-y-0.5">
                     {/* Title Row */}
-                    <div className="flex items-center justify-between gap-1.5">
-                      <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1.5 min-w-0">
+                      <div className="min-w-0 flex-1 truncate">
                         {targetGroup ? (
                           <button
                             type="button"
@@ -474,7 +471,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                               e.stopPropagation();
                               setSelectedGroupForModal(targetGroup);
                             }}
-                            className={`text-xs sm:text-[13px] font-bold text-start cursor-pointer hover:underline hover:text-primary transition-colors break-words leading-tight ${
+                            className={`text-xs sm:text-[12.5px] font-bold text-start cursor-pointer hover:underline hover:text-primary transition-colors truncate block leading-tight ${
                               isCompletedState
                                 ? 'line-through text-text-muted/80'
                                 : isCancelledState
@@ -488,7 +485,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                             {targetGroup.name}
                           </button>
                         ) : (
-                          <h4 className={`text-xs sm:text-[13px] font-bold break-words leading-tight ${
+                          <h4 className={`text-xs sm:text-[12.5px] font-bold truncate leading-tight ${
                             isCompletedState
                               ? 'line-through text-text-muted/80'
                               : isCancelledState
@@ -502,38 +499,46 @@ export const TodaysProgressTimeline: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Quiet Live / Status Label */}
-                      {state === 'active' && !isCompletedState && !isCancelledState && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 shrink-0">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>
-                          <span>{t('timeline_live_now')}</span>
-                        </span>
-                      )}
+                      {/* Quiet Status / Session Count in Title Row (Preserves single-line metadata) */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 && (
+                          <span className="text-[9.5px] sm:text-[10px] font-mono font-bold text-primary bg-primary/10 dark:bg-primary/20 px-1.5 py-0.2 rounded shrink-0">
+                            {_t('حصة', 'Session', 'Std.')} {lesson.sessionNumber}/{lesson.totalSessionsInPackage}
+                          </span>
+                        )}
 
-                      {isCompletedState && (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 opacity-80" />
-                      )}
+                        {state === 'active' && !isCompletedState && !isCancelledState && (
+                          <span className="inline-flex items-center gap-1 text-[9px] sm:text-[9.5px] font-bold text-blue-600 dark:text-blue-400 shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>
+                            <span>{t('timeline_live_now')}</span>
+                          </span>
+                        )}
 
-                      {isCancelledState && (
-                        <span className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 shrink-0">
-                          ({t('status_cancelled')})
-                        </span>
-                      )}
+                        {isCompletedState && (
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0 opacity-80" />
+                        )}
+
+                        {isCancelledState && (
+                          <span className="text-[9px] sm:text-[9.5px] font-semibold text-rose-600 dark:text-rose-400 shrink-0">
+                            ({t('status_cancelled')})
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Metadata Row: Pure typographic elegance with middots, NO PILLS, compact leading */}
-                    <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 text-[11px] text-text-muted font-normal leading-tight">
+                    {/* Metadata Row: Pure typographic elegance with middots, NO PILLS, single compact line */}
+                    <div className="flex items-center gap-1.5 text-[10px] sm:text-[10.5px] text-text-muted font-normal leading-tight truncate">
                       {metaParts.map((part, idx) => (
                         <React.Fragment key={idx}>
-                          {idx > 0 && <span className="text-slate-300 dark:text-slate-600 text-[9px] select-none">·</span>}
-                          <span>{part}</span>
+                          {idx > 0 && <span className="text-slate-300 dark:text-slate-600 text-[8px] select-none shrink-0">·</span>}
+                          <span className="truncate">{part}</span>
                         </React.Fragment>
                       ))}
                     </div>
                   </div>
 
                   {/* 3. Trailing Action Controls */}
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-0.5 shrink-0">
                     {(isCompletedState || isCancelledState) && (
                       <button
                         type="button"
@@ -541,7 +546,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                           e.stopPropagation();
                           dismissLessonFromDashboard(lesson.id);
                         }}
-                        className="p-1 rounded-lg text-text-muted/50 hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                        className="p-0.5 rounded text-text-muted/50 hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                         title={t('dismiss_from_dashboard')}
                         aria-label="Hide from dashboard"
                       >

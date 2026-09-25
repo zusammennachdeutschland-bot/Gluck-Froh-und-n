@@ -28,6 +28,7 @@ import { HodStudentsView } from './HodStudentsView';
 import { ComplaintsSystemView } from './ComplaintsSystemView';
 import { ActionPlansView } from './ActionPlansView';
 import { StageCommunicationView } from './StageCommunicationView';
+import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { TeacherAttendanceModal } from './TeacherAttendanceModal';
 import { DetailedStaffAttendanceModal } from './DetailedStaffAttendanceModal';
 import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
@@ -57,7 +58,9 @@ export const HodHubView: React.FC = () => {
     language, 
     _t, 
     t, 
-    addAppNotification 
+    addAppNotification,
+    reportLanguage,
+    reportT
   } = useApp();
   const schoolSettings = profile?.schoolSettings || {} as any;
 
@@ -1980,7 +1983,8 @@ export const HodHubView: React.FC = () => {
   };
 
   const handlePrintStageFollowUp = (record: StageFollowUpRecord) => {
-    printStageFollowUpReport(record, schoolSettings, (language === 'ar'), language);
+    const effLang = reportLanguage || language || 'ar';
+    printStageFollowUpReport(record, schoolSettings, (effLang === 'ar'), effLang);
   };
 
   // Save changes to profile
@@ -2338,36 +2342,41 @@ export const HodHubView: React.FC = () => {
         </div>
       )}
 
-      {/* Tabs Navigation */}
-      <div className="flex w-full items-center justify-start sm:justify-center gap-1 bg-surface p-1 rounded-xl border border-surface-border shadow-2xs overflow-x-auto no-scrollbar">
-        {[
-          { id: 'overview', icon: BarChart3, title: _t('الرئيسية', 'Overview', 'Übersicht'), activeClass: 'bg-primary text-white' },
-          { id: 'stage_managers', icon: Shield, title: _t('المراحل', 'Stages', 'Stufen'), activeClass: 'bg-primary text-white' },
-          { id: 'staff', icon: Users, title: _t('المعلمين', 'Staff', 'Kollegium'), activeClass: 'bg-primary text-white' },
-          { id: 'timetables', icon: Calendar, title: _t('الجداول', 'Timetables', 'Pläne'), activeClass: 'bg-primary text-white' },
-          { id: 'plans', icon: CheckCircle2, title: _t('الخطة', 'Plans', 'Pläne'), activeClass: 'bg-primary text-white' },
-          { id: 'students', icon: GraduationCap, title: _t('الطلاب', 'Students', 'Schüler'), activeClass: 'bg-primary text-white' },
-          { id: 'action_plans', icon: Target, title: _t('الدعم', 'Support', 'Förder'), activeClass: 'bg-emerald-600 text-white' },
-          { id: 'complaints', icon: AlertTriangle, title: _t('الشكاوى', 'Complaints', 'Beschwerden'), activeClass: 'bg-rose-600 text-white' }
-        ].map(tab => {
-          const isActive = activeTab === tab.id;
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`h-8 sm:h-9 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer select-none ${
-                isActive 
-                  ? `${tab.activeClass} px-2 sm:px-3 gap-1 sm:gap-1.5 shadow-xs font-black shrink-0` 
-                  : 'w-7 sm:w-9 text-text-muted hover:bg-surface-hover hover:text-text-main shrink-0'
-              }`}
-              title={tab.title}
-            >
-              <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-              {isActive && <span className="text-[10px] sm:text-[11px] font-bold whitespace-nowrap overflow-hidden">{tab.title}</span>}
-            </button>
-          );
-        })}
+      {/* Tabs Navigation & Report Language Toggle */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-1.5">
+        <div className="flex flex-1 items-center justify-start sm:justify-center gap-1 bg-surface p-1 rounded-xl border border-surface-border shadow-2xs overflow-x-auto no-scrollbar">
+          {[
+            { id: 'overview', icon: BarChart3, title: _t('الرئيسية', 'Overview', 'Übersicht'), activeClass: 'bg-primary text-white' },
+            { id: 'stage_managers', icon: Shield, title: _t('المراحل', 'Stages', 'Stufen'), activeClass: 'bg-primary text-white' },
+            { id: 'staff', icon: Users, title: _t('المعلمين', 'Staff', 'Kollegium'), activeClass: 'bg-primary text-white' },
+            { id: 'timetables', icon: Calendar, title: _t('الجداول', 'Timetables', 'Pläne'), activeClass: 'bg-primary text-white' },
+            { id: 'plans', icon: CheckCircle2, title: _t('الخطة', 'Plans', 'Pläne'), activeClass: 'bg-primary text-white' },
+            { id: 'students', icon: GraduationCap, title: _t('الطلاب', 'Students', 'Schüler'), activeClass: 'bg-primary text-white' },
+            { id: 'action_plans', icon: Target, title: _t('الدعم', 'Support', 'Förder'), activeClass: 'bg-emerald-600 text-white' },
+            { id: 'complaints', icon: AlertTriangle, title: _t('الشكاوى', 'Complaints', 'Beschwerden'), activeClass: 'bg-rose-600 text-white' }
+          ].map(tab => {
+            const isActive = activeTab === tab.id;
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`h-8 sm:h-9 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer select-none ${
+                  isActive 
+                    ? `${tab.activeClass} px-2 sm:px-3 gap-1 sm:gap-1.5 shadow-xs font-black shrink-0` 
+                    : 'w-7 sm:w-9 text-text-muted hover:bg-surface-hover hover:text-text-main shrink-0'
+                }`}
+                title={tab.title}
+              >
+                <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                {isActive && <span className="text-[10px] sm:text-[11px] font-bold whitespace-nowrap overflow-hidden">{tab.title}</span>}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-end px-0.5 shrink-0">
+          <ReportLanguageToggle showLabel={false} />
+        </div>
       </div>
 
       {/* TAB OVERVIEW: HOD DASHBOARD */}

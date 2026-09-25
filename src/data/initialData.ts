@@ -160,3 +160,5 @@ export const INITIAL_FINANCE_TRANSACTIONS: any[] = [];
 export const INITIAL_FINANCE_RECURRING: any[] = [];
 export const INITIAL_FINANCE_INSTALLMENTS: any[] = [];
 export const INITIAL_FINANCE_NOTIFICATIONS: any[] = [];
+
+export const INITIAL_GOLD_HOLDINGS: any[] = [];

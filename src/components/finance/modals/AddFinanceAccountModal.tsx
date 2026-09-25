@@ -7,16 +7,17 @@ import { BankCard, CARD_THEMES, getDefaultThemeForType } from '../BankCard';
 interface AddFinanceAccountModalProps {
   onClose: () => void;
   existingAccount?: FinanceAccount;
+  defaultType?: FinanceAccount['type'];
 }
 
-export const AddFinanceAccountModal: React.FC<AddFinanceAccountModalProps> = ({ onClose, existingAccount }) => {
+export const AddFinanceAccountModal: React.FC<AddFinanceAccountModalProps> = ({ onClose, existingAccount, defaultType }) => {
   const { _t, addFinanceAccount, updateFinanceAccount } = useApp();
   
   const [name, setName] = useState(existingAccount?.name || '');
-  const [type, setType] = useState<FinanceAccount['type']>(existingAccount?.type || 'bank');
+  const [type, setType] = useState<FinanceAccount['type']>(existingAccount?.type || defaultType || 'bank');
   const [currency, setCurrency] = useState(existingAccount?.currency || 'EGP');
   const [bankName, setBankName] = useState(existingAccount?.bankName || '');
-  const [color, setColor] = useState<string>(existingAccount?.color || getDefaultThemeForType(existingAccount?.type || 'bank'));
+  const [color, setColor] = useState<string>(existingAccount?.color || getDefaultThemeForType(existingAccount?.type || defaultType || 'bank'));
   
   // Standard fields
   const [initialBalance, setInitialBalance] = useState(existingAccount?.initialBalance?.toString() || (existingAccount ? existingAccount.currentBalance.toString() : ''));

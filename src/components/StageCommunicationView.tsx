@@ -13,9 +13,11 @@ import {
   generateObservationReportContentHtml
 } from '../utils/printObservationUtils';
 import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
+import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 export const StageCommunicationView: React.FC = () => {
-  const { profile, updateProfile, language, _t } = useApp();
+  const { profile, updateProfile, language, _t, reportLanguage } = useApp();
+  const effectiveReportLang = reportLanguage || language || 'ar';
   const schoolSettings = useMemo(() => profile?.schoolSettings || {} as any, [profile?.schoolSettings]);
 
   // Stage Managers list
@@ -473,7 +475,7 @@ export const StageCommunicationView: React.FC = () => {
     if (activeLoadingAction) return;
     setActiveLoadingAction({ id: record.id, type: 'download' });
     try {
-      await downloadStageFollowUpPdf(record, schoolSettings, (language === 'ar'), language);
+      await downloadStageFollowUpPdf(record, schoolSettings, (effectiveReportLang === 'ar'), effectiveReportLang);
     } catch (err) {
       console.error('Download PDF error:', err);
     } finally {
@@ -485,7 +487,7 @@ export const StageCommunicationView: React.FC = () => {
     if (activeLoadingAction) return;
     setActiveLoadingAction({ id: record.id, type: 'share' });
     try {
-      await shareStageFollowUpViaWhatsApp(record, schoolSettings, (language === 'ar'), language);
+      await shareStageFollowUpViaWhatsApp(record, schoolSettings, (effectiveReportLang === 'ar'), effectiveReportLang);
     } catch (err) {
       console.error('Share WhatsApp error:', err);
     } finally {
@@ -494,7 +496,7 @@ export const StageCommunicationView: React.FC = () => {
   };
 
   const handlePrintReport = (record: StageFollowUpRecord) => {
-    printStageFollowUpReport(record, schoolSettings, (language === 'ar'), language);
+    printStageFollowUpReport(record, schoolSettings, (effectiveReportLang === 'ar'), effectiveReportLang);
   };
 
   const handleDownloadDraftPdf = async () => {
@@ -522,9 +524,12 @@ export const StageCommunicationView: React.FC = () => {
       {/* Stage Managers Selector Tabs */}
       {stageManagers.length > 0 ? (
         <div className="space-y-3">
-          <h2 className="text-[11px] font-black text-text-muted uppercase tracking-wider px-1">
-            {_t('اختر المرحلة الدراسية / مدير المرحلة:', 'Select Stage Manager:', 'Stufenleiter auswählen:')}
-          </h2>
+          <div className="flex items-center justify-between gap-2 flex-wrap px-1">
+            <h2 className="text-[11px] font-black text-text-muted uppercase tracking-wider">
+              {_t('اختر المرحلة الدراسية / مدير المرحلة:', 'Select Stage Manager:', 'Stufenleiter auswählen:')}
+            </h2>
+            <ReportLanguageToggle showLabel={false} />
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1.5">
             {stageManagers.map((mgr) => {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { PieChart, ArrowRightLeft, Landmark, Repeat, CreditCard, Bell, ChevronLeft, FileText, Wallet, Users } from 'lucide-react';
+import { PieChart, ArrowRightLeft, Landmark, Repeat, CreditCard, Bell, ChevronLeft, FileText, Wallet, Users, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { calculateDuePaymentCycles } from '../../utils/paymentUtils';
 
@@ -10,10 +10,11 @@ import { FinanceTransactions } from './FinanceTransactions';
 import { FinanceRecurring } from './FinanceRecurring';
 import { FinanceInstallments } from './FinanceInstallments';
 import { FinanceStudentPayments } from './FinanceStudentPayments';
+import { FinanceInvestmentsView } from './investments/FinanceInvestmentsView';
 
 export const FinanceView: React.FC = () => {
   const { _t, payments, financeRecurring, financeInstallments, financeNotifications, addFinanceNotification, markAllFinanceNotificationsAsRead, updateFinanceAccount, addFinanceTransaction, financeAccounts, students, groups, lessons } = useApp();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'accounts' | 'transactions' | 'student-payments' | 'recurring' | 'installments'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'accounts' | 'investments' | 'transactions' | 'student-payments' | 'recurring' | 'installments'>('dashboard');
 
   const pendingPayments = payments.filter(p => p.status === 'not_paid' || p.status === 'partial');
   
@@ -206,6 +207,7 @@ export const FinanceView: React.FC = () => {
   const tabs = [
     { id: 'dashboard', label: _t('نظرة', 'Overview', 'Übersicht'), icon: PieChart },
     { id: 'accounts', label: _t('الحسابات', 'Accounts', 'Konten'), icon: Wallet },
+    { id: 'investments', label: _t('الاستثمار والذهب', 'Investments & Gold', 'Investitionen'), icon: TrendingUp },
     { id: 'transactions', label: _t('المعاملات', 'History', 'Historie'), icon: ArrowRightLeft },
     { id: 'student-payments', label: _t('الطلاب', 'Students', 'Schüler'), icon: Users, badge: dueCount > 0 ? dueCount : null },
     { id: 'recurring', label: _t('متكرر', 'Recurring', 'Wiederkehrend'), icon: Repeat },
@@ -254,6 +256,7 @@ export const FinanceView: React.FC = () => {
           >
             {activeTab === 'dashboard' && <FinanceDashboard onNavigateTab={(tab) => setActiveTab(tab as any)} />}
             {activeTab === 'accounts' && <FinanceAccounts />}
+            {activeTab === 'investments' && <FinanceInvestmentsView />}
             {activeTab === 'transactions' && <FinanceTransactions />}
             {activeTab === 'student-payments' && <FinanceStudentPayments />}
             {activeTab === 'recurring' && <FinanceRecurring />}

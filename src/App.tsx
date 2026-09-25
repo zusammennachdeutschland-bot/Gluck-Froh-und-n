@@ -626,6 +626,7 @@ export default function App() {
         'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records',
         'dl_school_notes', 'dl_finance_accounts', 'dl_finance_categories', 'dl_finance_transactions',
         'dl_finance_recurring', 'dl_finance_installments', 'dl_finance_notifications',
+        'gluck_gold_holdings', 'gluck_gold_settings',
         'dl_settings', 'dl_sync_state'
       ];
       

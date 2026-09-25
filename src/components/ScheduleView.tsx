@@ -409,12 +409,12 @@ export const ScheduleView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 w-full sm:w-auto justify-start sm:justify-end">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-nowrap overflow-x-auto no-scrollbar w-full sm:w-auto justify-start sm:justify-end py-0.5">
           {/* Refresh Calendar Data */}
           <button
             onClick={handleRefreshCalendar}
             title={t('schedule_refresh')}
-            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-[10.5px] sm:text-xs px-2 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0"
+            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-[10px] sm:text-xs p-1.5 sm:px-2 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span className="hidden md:inline">{t('schedule_refresh')}</span>
@@ -424,7 +424,7 @@ export const ScheduleView: React.FC = () => {
           <button
             onClick={handleExportICS}
             title={t('schedule_ical')}
-            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-[10.5px] sm:text-xs px-2 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0"
+            className="bg-background hover:bg-surface-hover dark:hover:bg-slate-700/80 text-text-main border border-surface-border dark:border-surface-border-soft font-bold text-[10px] sm:text-xs p-1.5 sm:px-2 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
           >
             <Download className="w-3.5 h-3.5" />
             <span className="hidden md:inline">{t('schedule_ical')}</span>
@@ -434,7 +434,7 @@ export const ScheduleView: React.FC = () => {
           <button
             onClick={() => setIsExportMonthlyModalOpen(true)}
             title={_t('تصدير تقويم الشهر (.ics)', 'Export Monthly Calendar (.ics)', 'Monatskalender exportieren (.ics)')}
-            className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-bold text-[10.5px] sm:text-xs px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0"
+            className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-bold text-[10px] sm:text-xs px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
           >
             <CalendarIcon className="w-3.5 h-3.5" />
             <span>{_t('تقويم شهري (.ics)', 'Monthly (.ics)', 'Monatskalender (.ics)')}</span>
@@ -444,7 +444,7 @@ export const ScheduleView: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsAddQuickLessonModalOpen(true)}
-            className="bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border hover:bg-primary-soft/80 active:scale-95 font-bold text-[10.5px] sm:text-xs px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
+            className="bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border dark:border-primary-border hover:bg-primary-soft/80 active:scale-95 font-bold text-[10px] sm:text-xs px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
           >
             <Zap className="w-3.5 h-3.5 fill-primary text-primary" />
             <span>{t('nav_quickLesson')}</span>
@@ -453,7 +453,7 @@ export const ScheduleView: React.FC = () => {
           {/* START LESSON NOW */}
           <button
             onClick={() => setShowStartLessonNowModal(true)}
-            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-[10.5px] sm:text-xs px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-primary/30 shrink-0"
+            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-[10px] sm:text-xs px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-primary/30 shrink-0 whitespace-nowrap"
           >
             <Play className="w-3.5 h-3.5 fill-white text-white" />
             <span>{t('schedule_start_now')}</span>
@@ -497,7 +497,7 @@ export const ScheduleView: React.FC = () => {
           <div className="flex items-center bg-surface-hover p-0.5 rounded-lg text-xs font-bold gap-0.5">
             <button
               onClick={() => setCalendarView('day')}
-              className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs ${
                 calendarView === 'day' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-slate-900'
               }`}
             >
@@ -505,7 +505,7 @@ export const ScheduleView: React.FC = () => {
             </button>
             <button
               onClick={() => setCalendarView('week')}
-              className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs ${
                 calendarView === 'week' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-slate-900'
               }`}
             >
@@ -513,7 +513,7 @@ export const ScheduleView: React.FC = () => {
             </button>
             <button
               onClick={() => setCalendarView('month')}
-              className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs ${
                 calendarView === 'month' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-slate-900'
               }`}
             >

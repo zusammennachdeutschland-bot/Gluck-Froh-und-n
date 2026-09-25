@@ -9,6 +9,7 @@ import { StudentActionPlan, WeeklyPlanLog, HodGermanStudent } from '../types';
 import { storage } from '../services/storageService';
 import { printActionPlansReport, downloadActionPlansPdf } from '../utils/printObservationUtils';
 import { normalizeClassCode, compareClassCodes } from '../utils/classNormalizer';
+import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 // Arabic Selector Preset Options
 export const WEAKNESS_AREAS_PRESETS = [
@@ -66,7 +67,8 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
   embeddedStudentId,
   embeddedTeacherId
 }) => {
-  const { profile, _t, t } = useApp();
+  const { profile, _t, t, reportLanguage } = useApp();
+  const effectiveReportLang = reportLanguage || 'ar';
   const schoolSettings = profile?.schoolSettings || ({} as any);
 
   // Main State
@@ -461,7 +463,9 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
             </div>
 
             {/* Quick Action Buttons */}
-            <div className="grid grid-cols-4 gap-1.5 w-full sm:w-auto sm:flex sm:items-center sm:gap-1.5">
+            <div className="flex items-center gap-1.5 w-full sm:w-auto flex-wrap sm:flex-nowrap">
+              <ReportLanguageToggle showLabel={false} />
+
               <button
                 onClick={handleOpenCreateModal}
                 className="px-2 sm:px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] sm:text-[11px] font-black transition-all flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap"
@@ -475,8 +479,8 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                   stageName: selectedPrintStage,
                   stageManagerName: selectedPrintStageManager || schoolSettings.stageManagers?.[0]?.name || 'إدارة المرحلة',
                   statusFilter: printStatusFilter,
-                  isRtl: true,
-                  lang: 'ar'
+                  isRtl: effectiveReportLang === 'ar',
+                  lang: effectiveReportLang
                 })}
                 className="px-1.5 sm:px-2 py-1.5 bg-surface hover:bg-surface-hover text-text-main rounded-xl text-[10px] sm:text-[11px] font-bold border border-surface-border transition-all flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
                 title={_t('طباعة فورية A4', 'Print A4', 'Drucken A4')}
@@ -492,8 +496,8 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                     stageName: selectedPrintStage,
                     stageManagerName: selectedPrintStageManager || schoolSettings.stageManagers?.[0]?.name || 'إدارة المرحلة',
                     statusFilter: printStatusFilter,
-                    isRtl: true,
-                    lang: 'ar'
+                    isRtl: effectiveReportLang === 'ar',
+                    lang: effectiveReportLang
                   });
                   setIsDownloadingPdf(false);
                 }}

@@ -44,8 +44,14 @@ import {
   DEFAULT_NOTIFICATION_SETTINGS,
   INITIAL_TODOS, INITIAL_CERTIFICATES, INITIAL_SCHOOL_NOTES,
   INITIAL_HOD_STUDENTS, INITIAL_HOD_VISITS, INITIAL_HOD_ACTION_PLANS, INITIAL_HOD_COMPLAINTS,
-  INITIAL_FINANCE_TRANSACTIONS, INITIAL_FINANCE_ACCOUNTS, INITIAL_FINANCE_RECURRING, INITIAL_FINANCE_INSTALLMENTS, INITIAL_FINANCE_NOTIFICATIONS
+  INITIAL_FINANCE_TRANSACTIONS, INITIAL_FINANCE_ACCOUNTS, INITIAL_FINANCE_RECURRING, INITIAL_FINANCE_INSTALLMENTS, INITIAL_FINANCE_NOTIFICATIONS,
+  INITIAL_GOLD_HOLDINGS
 } from '../data/initialData';
+import { 
+  GoldHolding, GoldPriceResult, GoldPriceSettings, DEFAULT_GOLD_PRICE_SETTINGS
+} from '../services/goldPrice/goldPriceTypes';
+import { goldPriceService } from '../services/goldPrice/goldPriceService';
+
 import { alarmAudioService } from '../services/alarmAudioService';
 import confetti from 'canvas-confetti';
 import { Capacitor } from '@capacitor/core';
@@ -66,6 +72,9 @@ interface AppContextType {
   toggleTheme: () => void;
   language: AppLanguage;
   setLanguage: (lang: AppLanguage) => void;
+  reportLanguage: AppLanguage;
+  setReportLanguage: (lang: AppLanguage) => void;
+  reportT: (ar: string, en: string, de?: string) => string;
   accentColor: AccentColor;
   setAccentColor: (color: AccentColor) => void;
   t: (key: TranslationKey) => string;
@@ -348,6 +357,18 @@ interface AppContextType {
   markAllFinanceNotificationsAsRead: () => void;
   deleteFinanceNotification: (id: string) => void;
 
+  // Gold Investments & Price Auto-Update
+  goldHoldings: GoldHolding[];
+  setGoldHoldings: React.Dispatch<React.SetStateAction<GoldHolding[]>>;
+  addGoldHolding: (holding: Omit<GoldHolding, 'id' | 'createdAt' | 'updatedAt' | 'type' | 'currency'> & { id?: string; currency?: 'EGP' }) => GoldHolding;
+  updateGoldHolding: (id: string, updates: Partial<GoldHolding>) => void;
+  deleteGoldHolding: (id: string) => void;
+  latestGoldPrice: GoldPriceResult | null;
+  isRefreshingGoldPrice: boolean;
+  refreshGoldPrice: (force?: boolean) => Promise<GoldPriceResult>;
+  goldPriceSettings: GoldPriceSettings;
+  updateGoldPriceSettings: (updates: Partial<GoldPriceSettings>) => Promise<void>;
+
   addAppNotification: (title: string, message: string, type: 'system' | 'reminder' | 'payment', extraFields?: any) => void;
   getHistoricalLessons: () => Promise<Lesson[]>;
   getHistoricalPayments: () => Promise<PaymentRecord[]>;
@@ -619,6 +640,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const _t = useCallback((ar: string, en: string, de?: string): string => {
     return language === 'ar' ? ar : language === 'de' ? (de || en) : en;
   }, [language]);
+
+  // Unified Report Language State (Shared across all reports & reminder messages)
+  const [reportLanguage, setReportLanguageState] = useState<AppLanguage>(() => {
+    const saved = (initialData['dl_report_language'] || storage.getItem('dl_report_language')) as AppLanguage;
+    if (saved && ['ar', 'en', 'de'].includes(saved)) return saved;
+    return 'ar'; // Default report language is Arabic
+  });
+
+  const setReportLanguage = (lang: AppLanguage) => {
+    setReportLanguageState(lang);
+    storage.setItem('dl_report_language', lang);
+  };
+
+  const reportT = useCallback((ar: string, en: string, de?: string): string => {
+    return reportLanguage === 'ar' ? ar : reportLanguage === 'de' ? (de || en) : en;
+  }, [reportLanguage]);
 
   
   // Initial state for fresh start with duplicate ID sanitization
@@ -1119,6 +1156,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!isInitializedRef.current) return;
     storage.setItem('dl_finance_notifications', financeNotifications);
   }, [financeNotifications]);
+
+  // Gold Holdings State & Persistence (Empty by default, strictly private)
+  const [goldHoldings, setGoldHoldings] = useState<GoldHolding[]>(() => {
+    const raw = initialData['gluck_gold_holdings'];
+    if (Array.isArray(raw)) {
+      // Purge any sample/seed holding so user data is 100% private
+      const cleaned = raw.filter((h: any) => h && h.id !== 'gold_btc_5g_init');
+      if (cleaned.length !== raw.length) {
+        storage.setItem('gluck_gold_holdings', cleaned);
+      }
+      return cleaned;
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('gluck_gold_holdings', goldHoldings);
+  }, [goldHoldings]);
+
+  // Gold Price State
+  const [latestGoldPrice, setLatestGoldPrice] = useState<GoldPriceResult | null>(null);
+  const [isRefreshingGoldPrice, setIsRefreshingGoldPrice] = useState<boolean>(false);
+  const [goldPriceSettings, setGoldPriceSettings] = useState<GoldPriceSettings>(() => {
+    const raw = initialData['gluck_gold_settings'];
+    return raw && typeof raw === 'object' ? { ...DEFAULT_GOLD_PRICE_SETTINGS, ...raw } : DEFAULT_GOLD_PRICE_SETTINGS;
+  });
+
+  // Initialize Gold Price Service and subscribe to live changes
+  useEffect(() => {
+    goldPriceService.init().then(() => {
+      const current = goldPriceService.getCurrentPrice();
+      if (current) {
+        setLatestGoldPrice(current);
+      }
+    }).catch(err => {
+      console.warn('Failed to init gold price service:', err);
+    });
+
+    const unsubscribe = goldPriceService.subscribe((price) => {
+      setLatestGoldPrice(price);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   // Reconciliation: Ensure paid payments have transactions and default account exists
   const hasReconciledRef = useRef(false);
@@ -2839,6 +2923,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setFinanceNotifications(prev => (prev || []).map(n => n.id === id ? wrapMutation({ ...n, deleted: true }) : n));
   }, []);
 
+  // Gold Holdings CRUD & Price Refresh
+  const addGoldHolding = useCallback((data: Omit<GoldHolding, 'id' | 'createdAt' | 'updatedAt' | 'type' | 'currency'> & { id?: string; currency?: 'EGP' }) => {
+    const now = new Date().toISOString();
+    const newHolding: GoldHolding = {
+      ...data,
+      id: data.id || `gold_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      type: 'gold',
+      currency: 'EGP',
+      createdAt: now,
+      updatedAt: now,
+    };
+    setGoldHoldings(prev => [newHolding, ...(prev || [])]);
+    registerFinanceActivity();
+    return newHolding;
+  }, [registerFinanceActivity]);
+
+  const updateGoldHolding = useCallback((id: string, updates: Partial<GoldHolding>) => {
+    setGoldHoldings(prev => (prev || []).map(item => {
+      if (item.id !== id) return item;
+      return {
+        ...item,
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      };
+    }));
+    registerFinanceActivity();
+  }, [registerFinanceActivity]);
+
+  const deleteGoldHolding = useCallback((id: string) => {
+    setGoldHoldings(prev => (prev || []).filter(item => item.id !== id));
+    registerFinanceActivity();
+  }, [registerFinanceActivity]);
+
+  const refreshGoldPrice = useCallback(async (force = true): Promise<GoldPriceResult> => {
+    setIsRefreshingGoldPrice(true);
+    try {
+      const result = await goldPriceService.fetchLatestPrice({ force });
+      setLatestGoldPrice(result);
+      return result;
+    } finally {
+      setIsRefreshingGoldPrice(false);
+    }
+  }, []);
+
+  const updateGoldPriceSettings = useCallback(async (updates: Partial<GoldPriceSettings>) => {
+    const updated = await goldPriceService.updateSettings(updates);
+    setGoldPriceSettings(updated);
+  }, []);
+
   // Recently Deleted (Soft Delete Recovery)
   const restoreItem = (type: 'student' | 'group' | 'lesson', id: string) => {
     if (type === 'student') {
@@ -4468,6 +4601,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeTransactions,
       financeRecurring,
       financeInstallments,
+      goldHoldings,
       syncQueue: []
     };
 
@@ -4598,6 +4732,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (data.financeInstallments) {
         setFinanceInstallments(data.financeInstallments);
         await storage.setItem('dl_finance_installments', data.financeInstallments);
+      }
+      if (data.goldHoldings && Array.isArray(data.goldHoldings)) {
+        setGoldHoldings(data.goldHoldings);
+        await storage.setItem('gluck_gold_holdings', data.goldHoldings);
       }
 
       // Reconcile and safeguard synchronization metadata
@@ -5297,6 +5435,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         toggleTheme,
         language,
         setLanguage,
+        reportLanguage,
+        setReportLanguage,
+        reportT,
         accentColor,
         setAccentColor,
         t,
@@ -5481,6 +5622,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         markFinanceNotificationAsRead,
         markAllFinanceNotificationsAsRead,
         deleteFinanceNotification,
+
+        // Gold Investment & Prices
+        goldHoldings,
+        setGoldHoldings,
+        addGoldHolding,
+        updateGoldHolding,
+        deleteGoldHolding,
+        latestGoldPrice,
+        isRefreshingGoldPrice,
+        refreshGoldPrice,
+        goldPriceSettings,
+        updateGoldPriceSettings,
+
         addAppNotification,
         getHistoricalLessons,
         getHistoricalPayments,

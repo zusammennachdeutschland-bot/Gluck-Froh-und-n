@@ -1,4 +1,5 @@
 import { BuddyCustomization } from './buddy';
+import { GoldHolding } from '../services/goldPrice/goldPriceTypes';
 export * from './buddy';
 
 export type GradeLevel = 
@@ -934,6 +935,7 @@ export interface BackupData {
   financeRecurring?: FinanceRecurring[];
   financeInstallments?: FinanceInstallment[];
   financeNotifications?: FinanceNotification[];
+  goldHoldings?: GoldHolding[];
 }
 
 export type InspirationFrequency = 'disabled' | 'daily' | 'before_first_lesson' | 'random_daily';
@@ -1259,4 +1261,6 @@ export interface HodGermanStudent extends SyncableRecord {
   name?: string;
   createdAt?: string;
 }
+
+export * from '../services/goldPrice/goldPriceTypes';
 

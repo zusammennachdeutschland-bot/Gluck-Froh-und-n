@@ -23,6 +23,8 @@ import {
   printCombinedObservationReports,
   printObservationReport
 } from '../utils/printObservationUtils';
+import { useApp } from '../context/AppContext';
+import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 interface BulkObservationExportModalProps {
   isOpen: boolean;
@@ -47,10 +49,12 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
   onPreviewSingle,
   onMarkVisitsDownloaded
 }) => {
-  const isRtl = language === 'ar';
+  const { reportLanguage, reportT } = useApp();
+  const effectiveReportLang = reportLanguage || language || 'ar';
+  const isRtl = effectiveReportLang === 'ar';
   const _t = (ar: string, en: string, de: string) => {
-    if (language === 'ar') return ar;
-    if (language === 'de') return de;
+    if (effectiveReportLang === 'ar') return ar;
+    if (effectiveReportLang === 'de') return de;
     return en;
   };
 
@@ -158,7 +162,7 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
         selectedVisitsList,
         schoolSettings,
         isRtl,
-        language,
+        effectiveReportLang,
         (current, total) => {
           setExportProgress({ current, total });
         }
@@ -186,7 +190,7 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
         selectedVisitsList,
         schoolSettings,
         isRtl,
-        language
+        effectiveReportLang
       );
 
       // Automatically mark selected visits as downloaded/printed
@@ -226,12 +230,15 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 sm:p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg sm:rounded-xl transition-all cursor-pointer shrink-0"
-          >
-            <X className="w-4 h-4 sm:w-5 sm:h-5" />
-          </button>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <ReportLanguageToggle showLabel={false} />
+            <button
+              onClick={onClose}
+              className="p-1 sm:p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg sm:rounded-xl transition-all cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Filter Controls Bar - Compact Responsive Grid */}
