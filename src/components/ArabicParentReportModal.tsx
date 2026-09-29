@@ -1,5 +1,5 @@
 import { App as CapacitorApp } from '@capacitor/app';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Lesson, Student, TeacherProfile, LessonReport } from '../types';
 import { useApp } from '../context/AppContext';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay } from '../utils/phoneUtils';
@@ -7,6 +7,7 @@ import { getTeacherArabicName } from '../utils/teacherUtils';
 import { formatTimeDisplay, parseLocalDate } from '../utils/timeUtils';
 import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString } from '../utils/genderUtils';
 import { getStudentCode } from '../utils/studentCodeUtils';
+import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import { 
   X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen
 } from 'lucide-react';
@@ -108,7 +109,6 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
   const hasCycle = !isPerLesson;
   const totalCycleSessions = associatedGroup?.sessionCount || lesson.totalSessionsInPackage || 8;
-  const currentSessionNumber = lesson.sessionNumber || 1;
 
   // Find students associated with this lesson or group
   const groupStudents = lesson.groupId 
@@ -145,6 +145,15 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
   const activeStudent = students.find(s => s.id === selectedStudentId) || initialResolvedStudent;
 
+  // Dynamically compute the exact sequential session number strictly among NON-CANCELLED lessons
+  const currentSessionNumber = useMemo(() => {
+    return calculateSequentialSessionNumber(lesson, lessons || [], {
+      group: associatedGroup,
+      student: activeStudent,
+      students
+    });
+  }, [lesson, lessons, associatedGroup, activeStudent, students]);
+
   // Helper to find previous homework from earlier lesson or lesson report
   const detectedPreviousHomework = React.useMemo(() => {
     if (lesson.report?.arabicPreviousHomework?.trim()) {
@@ -162,6 +171,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     const candidateLessons = (lessons || []).filter(l => {
       if (l.id === lesson.id) return false;
       if (l.deleted) return false;
+      if (l.status === 'cancelled') return false;
 
       const matchGroup = groupId && l.groupId === groupId;
       const matchStudent = (studentId && (l.studentId === studentId || l.report?.studentAttendance?.[studentId] !== undefined)) ||

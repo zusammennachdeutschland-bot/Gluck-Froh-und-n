@@ -97,17 +97,22 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
       <style>
         @page {
           size: A4 portrait;
-          margin: 10mm 10mm 12mm 10mm;
+          margin: 8mm 10mm;
         }
         * {
           box-sizing: border-box;
           font-family: 'Cairo', 'Tajawal', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        body {
+        html, body {
+          height: 100%;
+          margin: 0;
+          padding: 0;
           background-color: #fff;
+        }
+        body {
           color: #0f172a;
           margin: 0;
-          padding: 10px;
+          padding: 0;
           direction: rtl;
           text-align: right;
           -webkit-print-color-adjust: exact;
@@ -143,38 +148,38 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
           margin-bottom: 4px;
         }
         .main-title {
-          font-size: 13pt;
+          font-size: 13.5pt;
           font-weight: 900;
           color: #0f172a;
           margin: 3px 0;
           line-height: 1.3;
         }
         .sub-meta {
-          font-size: 8.5pt;
+          font-size: 9pt;
           color: #475569;
           font-weight: 700;
         }
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
-          gap: 8px;
-          margin-bottom: 12px;
+          gap: 10px;
+          margin-bottom: 14px;
           text-align: center;
         }
         .stat-card {
           border: 1px solid #cbd5e1;
           border-radius: 6px;
-          padding: 6px 4px;
+          padding: 8px 6px;
           background-color: #f8fafc;
         }
         .stat-val {
-          font-size: 13pt;
+          font-size: 14pt;
           font-weight: 900;
           color: #0284c7;
           line-height: 1.2;
         }
         .stat-lbl {
-          font-size: 7.5pt;
+          font-size: 8pt;
           font-weight: 700;
           color: #64748b;
           margin-top: 2px;
@@ -187,27 +192,29 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
         th {
           background-color: #f1f5f9;
           color: #1e293b;
-          font-size: 8.5pt;
+          font-size: 9pt;
           font-weight: 800;
-          padding: 6px 4px;
+          padding: 7px 5px;
           border: 1px solid #cbd5e1;
           text-align: right;
         }
         td {
           border: 1px solid #e2e8f0;
           vertical-align: middle;
+          padding: 6px 6px;
+          font-size: 9pt;
         }
         .footer-sig {
-          margin-top: 25px;
+          margin-top: auto;
           display: flex;
-          justify-content: space-between;
-          padding: 0 20px;
+          justify-content: space-around;
+          padding: 20px 20px 6px 20px;
           page-break-inside: avoid;
         }
         .sig-box {
           text-align: center;
           width: 42%;
-          border-top: 1px solid #cbd5e1;
+          border-top: 1.5px solid #0f172a;
           padding-top: 8px;
         }
         .sig-title {
@@ -216,7 +223,7 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
           color: #1e293b;
         }
         .sig-sub {
-          font-size: 8.5pt;
+          font-size: 9pt;
           color: #64748b;
           margin-top: 4px;
         }
@@ -232,6 +239,20 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
           page-break-after: always;
           break-after: page;
         }
+        .report-page.stage-first-page {
+          min-height: 275mm;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          box-sizing: border-box;
+          padding: 0;
+        }
+        .stage-first-page-body {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+        }
         @media print {
           .no-print {
             display: none !important;
@@ -240,31 +261,45 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
             page-break-after: always;
             break-after: page;
           }
+          .report-page.stage-first-page {
+            min-height: 275mm;
+          }
         }
 
         /* Observation Visit Report Styles */
         .visit-page {
           page-break-before: always;
           break-before: page;
-          padding-top: 5px;
-          min-height: 100%;
+          padding: 0;
+          min-height: 275mm;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          box-sizing: border-box;
         }
         .visit-page .report-single-page {
           width: 100%;
+          min-height: 275mm;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          box-sizing: border-box;
         }
         .visit-page .header {
           display: flex;
           justify-content: space-between;
           align-items: center;
           border-bottom: 2px solid #0f172a;
-          padding-bottom: 4px;
-          margin-bottom: 6px;
+          padding-bottom: 6px;
+          margin-bottom: 8px;
         }
         .visit-page .header-logo {
           display: flex;
           align-items: center;
           justify-content: center;
-          min-width: 60px;
+          min-width: 65px;
         }
         .visit-page .header-text {
           text-align: center;
@@ -272,14 +307,14 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
           padding: 0 10px;
         }
         .visit-page .header h1 {
-          font-size: 13pt;
+          font-size: 14pt;
           margin: 0 0 2px;
           font-weight: 800;
           line-height: 1.3;
           color: #0f172a;
         }
         .visit-page .header p {
-          font-size: 8.5pt;
+          font-size: 9.5pt;
           margin: 0;
           font-weight: 700;
           line-height: 1.3;
@@ -287,28 +322,29 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
         }
         .visit-page .title {
           text-align: center;
-          font-size: 11pt;
+          font-size: 13pt;
           font-weight: 800;
-          margin-bottom: 6px;
+          margin-bottom: 8px;
           text-decoration: underline;
+          text-underline-offset: 3px;
           line-height: 1.3;
           color: #0f172a;
         }
         .visit-page .meta-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 4px 12px;
-          margin-bottom: 6px;
+          gap: 5px 14px;
+          margin-bottom: 8px;
           border: 1.5px solid #0f172a;
-          padding: 5px 8px;
+          padding: 7px 12px;
           background: #f8fafc;
           align-items: center;
           border-radius: 4px;
         }
         .visit-page .meta-item {
-          font-size: 8.5pt;
+          font-size: 9.5pt;
           font-weight: 600;
-          line-height: 1.3;
+          line-height: 1.35;
           display: flex;
           align-items: center;
           color: #1e293b;
@@ -322,90 +358,98 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
           white-space: nowrap;
         }
         .visit-page .category-title {
-          font-size: 8.5pt;
+          font-size: 9.5pt;
           font-weight: 800;
-          margin-top: 3px;
-          margin-bottom: 2px;
+          margin-top: 5px;
+          margin-bottom: 0px;
           background: #e2e8f0;
-          padding: 2.5px 6px;
-          border: 1px solid #0f172a;
+          padding: 4px 8px;
+          border: 1.5px solid #0f172a;
           border-bottom: none;
-          line-height: 1.25;
+          line-height: 1.3;
           vertical-align: middle;
           color: #0f172a;
         }
         .visit-page table {
           width: 100%;
           border-collapse: collapse;
-          margin-bottom: 3px;
+          margin-bottom: 4px;
           table-layout: fixed;
+          border: 1.5px solid #0f172a;
         }
         .visit-page th, .visit-page td {
           border: 1px solid #0f172a;
-          padding: 2.5px 4px;
+          padding: 4.5px 6px;
           text-align: center;
           vertical-align: middle;
-          font-size: 8pt;
-          line-height: 1.2;
+          font-size: 9.5pt;
+          line-height: 1.25;
         }
         .visit-page th {
           background: #f1f5f9;
           font-weight: 800;
-          font-size: 8pt;
-          height: 18px;
+          font-size: 9.5pt;
+          height: 24px;
           color: #0f172a;
         }
         .visit-page .criteria-col {
           text-align: right;
           width: 55%;
-          font-weight: 700;
+          font-weight: 600;
           vertical-align: middle;
-          padding-left: 6px;
-          padding-right: 6px;
-          line-height: 1.25;
+          padding-left: 8px;
+          padding-right: 8px;
+          line-height: 1.3;
           color: #1e293b;
         }
         .visit-page .rating-col {
           width: 9%;
           font-weight: bold;
-          font-size: 9pt;
+          font-size: 10.5pt;
           text-align: center;
           vertical-align: middle;
           line-height: 1;
         }
         .visit-page .feedback-section {
-          margin-top: 5px;
+          margin-top: 6px;
+          margin-bottom: 6px;
           border: 1.5px solid #0f172a;
-          padding: 5px 8px;
-          min-height: 35px;
+          padding: 7px 12px;
+          min-height: 65px;
+          flex: 1;
           background: #f8fafc;
           border-radius: 4px;
+          display: flex;
+          flex-direction: column;
         }
         .visit-page .feedback-title {
           font-weight: 800;
-          font-size: 8pt;
-          margin-bottom: 2px;
+          font-size: 9.5pt;
+          margin-bottom: 3px;
           border-bottom: 1px dotted #0f172a;
-          padding-bottom: 2px;
-          line-height: 1.25;
+          padding-bottom: 3px;
+          line-height: 1.3;
           color: #0f172a;
         }
         .visit-page .overall-box {
-          margin-top: 5px;
-          padding: 4px 6px;
+          margin-top: 6px;
+          margin-bottom: 6px;
+          padding: 6px 10px;
           border: 1.5px solid #0f172a;
           font-weight: 800;
           text-align: center;
-          font-size: 9pt;
+          font-size: 10.5pt;
           display: flex;
           justify-content: space-around;
           align-items: center;
           background: #f8fafc;
-          line-height: 1.25;
+          line-height: 1.3;
           border-radius: 4px;
         }
         .visit-page .signatures {
-          margin-top: 10px;
+          margin-top: auto;
+          padding-top: 14px;
+          padding-bottom: 2px;
           display: flex;
           justify-content: space-around;
           align-items: flex-end;
@@ -413,21 +457,21 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
           page-break-inside: avoid;
         }
         .visit-page .sig-block {
-          width: 40%;
+          width: 38%;
         }
         .visit-page .sig-title {
           font-weight: 800;
-          font-size: 8.5pt;
-          margin-bottom: 12px;
-          line-height: 1.25;
+          font-size: 9.5pt;
+          margin-bottom: 20px;
+          line-height: 1.3;
           color: #0f172a;
         }
         .visit-page .sig-line {
-          border-top: 1px solid #0f172a;
-          padding-top: 3px;
-          font-size: 8pt;
+          border-top: 1.5px solid #0f172a;
+          padding-top: 4px;
+          font-size: 9.5pt;
           font-weight: 800;
-          line-height: 1.25;
+          line-height: 1.3;
           color: #1e293b;
         }
       </style>
@@ -445,66 +489,68 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
 
       <!-- PAGE 1: STAGE MANAGER SUMMARY & COMPLAINTS -->
       <div class="report-page stage-first-page ${visitsToRender.length > 0 ? 'page-break' : ''}">
-        <div class="header-container">
-          <div class="header-logo">
-            ${logoHtml}
+        <div class="stage-first-page-body">
+          <div class="header-container">
+            <div class="header-logo">
+              ${logoHtml}
+            </div>
+            <div class="header-title-box">
+              <div style="font-size: 13pt; font-weight: 900; color: #0f172a; margin-bottom: 2px;">${schoolName}</div>
+              <div class="dept-badge">🇩🇪 قسم اللغة الألمانية (Deutschabteilung)</div>
+              <div class="main-title">${titleText}</div>
+              <div class="sub-meta">المرحلة: ${stageName} | مدير المرحلة: <strong>..................................</strong></div>
+            </div>
+            <div style="text-align: left; font-size: 8.5pt; color: #475569;">
+              <div><strong>الفصل الدراسي:</strong> ${term}</div>
+              <div><strong>تاريخ التقرير:</strong> ${reportDate}</div>
+            </div>
           </div>
-          <div class="header-title-box">
-            <div style="font-size: 13pt; font-weight: 900; color: #0f172a; margin-bottom: 2px;">${schoolName}</div>
-            <div class="dept-badge">🇩🇪 قسم اللغة الألمانية (Deutschabteilung)</div>
-            <div class="main-title">${titleText}</div>
-            <div class="sub-meta">المرحلة: ${stageName} | مدير المرحلة: <strong>..................................</strong></div>
-          </div>
-          <div style="text-align: left; font-size: 8.5pt; color: #475569;">
-            <div><strong>الفصل الدراسي:</strong> ${term}</div>
-            <div><strong>تاريخ التقرير:</strong> ${reportDate}</div>
-          </div>
-        </div>
 
-        <!-- Quick Metrics -->
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-val">${complaints.length}</div>
-            <div class="stat-lbl">إجمالي الشكاوى المسجلة</div>
+          <!-- Quick Metrics -->
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-val">${complaints.length}</div>
+              <div class="stat-lbl">إجمالي الشكاوى المسجلة</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" style="color: #b91c1c;">${teacherToStudentCount}</div>
+              <div class="stat-lbl">شكاوى المعلمين ضد الطلاب</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" style="color: #4338ca;">${studentToTeacherCount}</div>
+              <div class="stat-lbl">شكاوى الطلاب/أولياء الأمور</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" style="color: #d97706;">${unsentCount}</div>
+              <div class="stat-lbl">غير مدرجة بتقرير سابق</div>
+            </div>
           </div>
-          <div class="stat-card">
-            <div class="stat-val" style="color: #b91c1c;">${teacherToStudentCount}</div>
-            <div class="stat-lbl">شكاوى المعلمين ضد الطلاب</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-val" style="color: #4338ca;">${studentToTeacherCount}</div>
-            <div class="stat-lbl">شكاوى الطلاب/أولياء الأمور</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-val" style="color: #d97706;">${unsentCount}</div>
-            <div class="stat-lbl">غير مدرجة بتقرير سابق</div>
-          </div>
-        </div>
 
-        <!-- Main Table -->
-        ${complaints.length === 0 ? `
-          <div style="text-align: center; padding: 30px; border: 2px dashed #cbd5e1; border-radius: 12px; color: #64748b; font-weight: bold;">
-            لا توجد أي شكاوى مسجلة في هذا التقرير للفترة المحددة.
-          </div>
-        ` : `
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 25px; text-align: center;">#</th>
-                <th style="width: 110px; text-align: center;">اتجاه الشكوى</th>
-                <th style="width: 120px;">المعلم المعني</th>
-                <th style="width: 140px;">الطالب (عربي / English)</th>
-                <th style="width: 50px; text-align: center;">الفصل</th>
-                <th>السبب / تفاصيل الملاحظة</th>
-                <th style="width: 130px;">الإجراء المتخذ</th>
-                <th style="width: 90px; text-align: center;">التاريخ/الحالة</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rowsHtml}
-            </tbody>
-          </table>
-        `}
+          <!-- Main Table -->
+          ${complaints.length === 0 ? `
+            <div style="text-align: center; padding: 30px; border: 2px dashed #cbd5e1; border-radius: 12px; color: #64748b; font-weight: bold;">
+              لا توجد أي شكاوى مسجلة في هذا التقرير للفترة المحددة.
+            </div>
+          ` : `
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 25px; text-align: center;">#</th>
+                  <th style="width: 110px; text-align: center;">اتجاه الشكوى</th>
+                  <th style="width: 120px;">المعلم المعني</th>
+                  <th style="width: 140px;">الطالب (عربي / English)</th>
+                  <th style="width: 50px; text-align: center;">الفصل</th>
+                  <th>السبب / تفاصيل الملاحظة</th>
+                  <th style="width: 130px;">الإجراء المتخذ</th>
+                  <th style="width: 90px; text-align: center;">التاريخ/الحالة</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+            </table>
+          `}
+        </div>
 
         <!-- Footer Signatures: Right side = German HOD, Left side = Stage Manager with dotted lines -->
         <div class="footer-sig">

@@ -101,7 +101,7 @@ export const ReportsView: React.FC = () => {
   const cancelledSessionsCount = lessons.filter(l => l.status === 'cancelled').length;
 
   const unpaidLastSessionsCount = lessons.filter(
-    l => l.paymentStatus !== 'paid' && l.sessionNumber === l.totalSessionsInPackage
+    l => l.status !== 'cancelled' && l.paymentStatus !== 'paid' && l.sessionNumber === l.totalSessionsInPackage
   ).length;
 
   // Mark as paid quick handler
@@ -367,7 +367,7 @@ export const ReportsView: React.FC = () => {
                 {/* Session Rows */}
                 <div className="divide-y divide-slate-100 dark:divide-slate-850 p-0.5">
                   {weekLessons.map(l => {
-                    const isLastSession = l.sessionNumber === l.totalSessionsInPackage;
+                    const isLastSession = l.status !== 'cancelled' && l.sessionNumber === l.totalSessionsInPackage;
                     const isUnpaidLastSession = isLastSession && l.paymentStatus !== 'paid';
 
                     return (

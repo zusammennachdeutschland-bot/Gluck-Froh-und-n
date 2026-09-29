@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getUpcomingGroupSchedule } from '../utils/scheduleUtils';
-import { getGroupCycleInfo } from '../utils/lessonUtils';
+import { getGroupCycleInfo, calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import { 
   X, Send, Copy, Check, MessageSquare, AlertTriangle, Clock, Link as LinkIcon, 
   MapPin, Video, Sparkles, Phone, Users, CheckCircle2, AtSign, Plus, Hash, BookOpen 
@@ -99,7 +99,11 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   const sessionCount = targetGroup?.sessionCount || cycleInfo?.sessionCount || lesson?.totalSessionsInPackage || 4;
   const isPerLesson = targetGroup?.paymentCycle === 'per_lesson' || targetGroup?.paymentModel === 'per_session' || cycleInfo?.isPerLesson;
   const hasCycle = !isPerLesson && sessionCount > 1;
-  const defaultSessionNumber = lesson?.sessionNumber || cycleInfo?.currentSessionNumber || 1;
+  const defaultSessionNumber = calculateSequentialSessionNumber(lesson || upcomingLesson, lessons, {
+    group: targetGroup,
+    student: targetStudent,
+    students
+  });
 
   // Detect previous homework from previous lessons
   const detectedPreviousHomework = React.useMemo(() => {
@@ -119,6 +123,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     const candidates = (lessons || []).filter(l => {
       if (currentLesson && l.id === currentLesson.id) return false;
       if (l.deleted) return false;
+      if (l.status === 'cancelled') return false;
 
       const matchGroup = groupId && l.groupId === groupId;
       const matchStudent = studentId && (l.studentId === studentId || l.report?.studentAttendance?.[studentId] !== undefined);

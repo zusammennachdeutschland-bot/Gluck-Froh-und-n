@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Lesson, Student, TeacherProfile } from '../types';
 import { useApp } from '../context/AppContext';
 import { X, Copy, Check, MessageSquare, Phone, Send, Share2, Sparkles, Home, AtSign } from 'lucide-react';
@@ -6,6 +6,7 @@ import { ArabicParentReportModal } from './ArabicParentReportModal';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getTeacherEnglishName, getTeacherArabicName } from '../utils/teacherUtils';
+import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import confetti from 'canvas-confetti';
 
 interface ParentSummaryModalProps {
@@ -23,7 +24,7 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
   onClose,
   onGoToHomeScreen
 }) => {
-  const { students, reportLanguage, reportT, _t } = useApp();
+  const { groups, students, lessons, reportLanguage, reportT, _t } = useApp();
   const [copied, setCopied] = useState(false);
   const [showArabicModal, setShowArabicModal] = useState(false);
 
@@ -43,6 +44,16 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
   const isStudentUsername = isWhatsAppUsername(rawStudentPhone);
   const studentPhone = rawStudentPhone.trim();
 
+  // Dynamically compute exact session number excluding cancelled lessons
+  const currentSessionNumber = useMemo(() => {
+    const grp = lesson.groupId ? groups.find(g => g.id === lesson.groupId) : undefined;
+    return calculateSequentialSessionNumber(lesson, lessons || [], {
+      group: grp,
+      student: activeStudent,
+      students
+    });
+  }, [lesson, lessons, groups, activeStudent, students]);
+
   // Generate multilingual educational lesson summary message
   const generateSummaryText = () => {
     const perfFeedback = report?.studentPerformance?.[activeStudent?.id || '']?.generatedFeedback?.detailed || '';
@@ -54,7 +65,7 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
       const attendance = report?.attendanceStatus === 'present' ? 'حاضر ✅' : report?.attendanceStatus === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
       const homework = report?.homeworkStatus === 'completed' ? 'تم الحل بالكامل ✅' : report?.homeworkStatus === 'assigned' ? 'واجب جديد 📝' : 'لم يتم الحل ❌';
       const sessionLine = (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) 
-        ? `⏱️ رقم الحصة: الحصة ${lesson.sessionNumber} من ${lesson.totalSessionsInPackage}\n` 
+        ? `⏱️ رقم الحصة: الحصة ${currentSessionNumber} من ${lesson.totalSessionsInPackage}\n` 
         : '';
       let recordingLine = '';
       if (recLink1 && recLink2) {
@@ -86,7 +97,7 @@ ${getTeacherArabicName(profile, 'معلم اللغة الألمانية')} 🇩�
       const attendance = report?.attendanceStatus === 'present' ? 'Present ✅' : report?.attendanceStatus === 'late' ? 'Late ⚠️' : 'Absent ❌';
       const homework = report?.homeworkStatus === 'completed' ? 'Completed ✅' : report?.homeworkStatus === 'assigned' ? 'Assigned 📝' : 'Not completed ❌';
       const sessionLine = (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) 
-        ? `⏱️ Session: Session ${lesson.sessionNumber} of ${lesson.totalSessionsInPackage}\n` 
+        ? `⏱️ Session: Session ${currentSessionNumber} of ${lesson.totalSessionsInPackage}\n` 
         : '';
       let recordingLine = '';
       if (recLink1 && recLink2) {
@@ -118,7 +129,7 @@ German Language Department 🇩🇪`;
     const attendance = report?.attendanceStatus === 'present' ? 'Anwesend (Present) ✅' : report?.attendanceStatus === 'late' ? 'Verspätet (Late) ⚠️' : 'Abwesend (Absent) ❌';
     const homework = report?.homeworkStatus === 'completed' ? 'Vollständig erledigt (Completed) ✅' : report?.homeworkStatus === 'assigned' ? 'Neu aufgegeben (Assigned) 📝' : 'Nicht erledigt ❌';
     const sessionLine = (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) 
-      ? `⏱️ Sitzung: Session ${lesson.sessionNumber} von ${lesson.totalSessionsInPackage}\n` 
+      ? `⏱️ Sitzung: Session ${currentSessionNumber} von ${lesson.totalSessionsInPackage}\n` 
       : '';
     let recordingLine = '';
     if (recLink1 && recLink2) {

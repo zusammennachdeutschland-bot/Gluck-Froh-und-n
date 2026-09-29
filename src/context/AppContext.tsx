@@ -20,7 +20,7 @@ import { storage } from '../services/storageService';
 import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
 import { formatLocalDate } from '../utils/timeUtils';
-import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo } from '../utils/lessonUtils';
+import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import LiveTimer from '../services/liveTimerPlugin';
@@ -3094,10 +3094,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const updateLesson = (id: string, updates: Partial<Lesson>) => {
     const updater = (allLessons: Lesson[]) => {
       let found = false;
+      let targetItem: Lesson | undefined;
       const updated = allLessons.map(l => {
         if (l.id === id) {
           found = true;
-          return wrapMutation({ ...l, ...updates } as Lesson);
+          const mutated = wrapMutation({ ...l, ...updates } as Lesson);
+          targetItem = mutated;
+          return mutated;
         }
         return l;
       });
@@ -3106,9 +3109,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           ? selectedLesson 
           : lessons.find(l => l.id === id);
         if (base) {
-          return [wrapMutation({ ...base, ...updates } as Lesson), ...updated];
+          const mutated = wrapMutation({ ...base, ...updates } as Lesson);
+          targetItem = mutated;
+          updated.unshift(mutated);
         }
       }
+
+      if (updates.status === 'cancelled' && targetItem) {
+        const targetGroupId = targetItem.groupId;
+        const targetStudentId = targetItem.studentId;
+        const targetStudentName = targetItem.studentName;
+        const grp = groups.find(g => (targetGroupId && g.id === targetGroupId) || (targetItem?.groupName && g.name === targetItem?.groupName));
+        const st = students.find(s => (targetStudentId && s.id === targetStudentId) || (targetStudentName && s.name === targetStudentName));
+
+        updated.forEach((l, idx) => {
+          if (l.status === 'cancelled' || l.deleted) return;
+          const matchesGrp = targetGroupId ? l.groupId === targetGroupId : (grp?.id && l.groupId === grp.id);
+          const matchesSt = targetStudentId ? l.studentId === targetStudentId : (st?.id && l.studentId === st.id);
+          const matchesStName = targetStudentName ? (l.studentName === targetStudentName) : false;
+
+          if (matchesGrp || matchesSt || matchesStName) {
+            const expectedSessionNum = calculateSequentialSessionNumber(l, updated, {
+              group: grp,
+              student: st,
+              students
+            });
+            const cycleCount = grp?.sessionCount || l.totalSessionsInPackage || targetItem?.totalSessionsInPackage || 4;
+
+            if (l.sessionNumber !== expectedSessionNum || l.totalSessionsInPackage !== cycleCount) {
+              updated[idx] = wrapMutation({
+                ...l,
+                sessionNumber: expectedSessionNum,
+                totalSessionsInPackage: cycleCount
+              });
+            }
+          }
+        });
+      }
+
       return updated;
     };
     updateFullLessonsStorage(updater);
@@ -3581,6 +3619,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     const updater = (allLessons: Lesson[]): Lesson[] => {
       let found = false;
+      const target = allLessons.find(l => l.id === lessonId) || (selectedLesson?.id === lessonId ? selectedLesson : null);
+      const targetGroupId = target?.groupId;
+      const targetStudentId = target?.studentId;
+      const targetStudentName = target?.studentName;
+
       const updated = allLessons.map(l => {
         if (l.id === lessonId) {
           found = true;
@@ -3592,14 +3635,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return wrapMutation({
             ...l,
             status: 'cancelled' as LessonStatus,
+            paymentStatus: 'pending' as PaymentStatus,
             report: l.report ? {
               ...l.report,
+              attendanceStatus: undefined,
               teacherNotes: combinedNotes,
               savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             } : {
-              attendanceStatus: 'absent' as AttendanceStatus,
               homeworkStatus: 'not_completed' as HomeworkStatus,
-              paymentStatus: l.paymentStatus || 'pending',
+              paymentStatus: 'pending',
               teacherNotes: combinedNotes || 'Lektion abgesagt',
               savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             }
@@ -3608,26 +3652,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         return l;
       });
 
-      if (!found) {
-        const base = (selectedLesson && selectedLesson.id === lessonId) 
-          ? selectedLesson 
-          : lessons.find(l => l.id === lessonId);
-        if (base) {
-          const combinedNotes = notes ? `Absage-Notiz: ${notes}` : 'Lektion abgesagt';
-          const cancelledBase: Lesson = wrapMutation({
-            ...base,
-            status: 'cancelled' as LessonStatus,
-            report: {
-              attendanceStatus: 'absent' as AttendanceStatus,
-              homeworkStatus: 'not_completed' as HomeworkStatus,
-              paymentStatus: base.paymentStatus || 'pending',
-              teacherNotes: combinedNotes,
-              savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            }
-          } as Lesson);
-          return [cancelledBase, ...updated];
-        }
+      if (!found && target) {
+        const combinedNotes = notes ? `Absage-Notiz: ${notes}` : 'Lektion abgesagt';
+        const cancelledBase: Lesson = wrapMutation({
+          ...target,
+          status: 'cancelled' as LessonStatus,
+          paymentStatus: 'pending' as PaymentStatus,
+          report: {
+            homeworkStatus: 'not_completed' as HomeworkStatus,
+            paymentStatus: 'pending',
+            teacherNotes: combinedNotes,
+            savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        } as Lesson);
+        updated.unshift(cancelledBase);
       }
+
+      // Re-sequence ALL remaining non-cancelled lessons in the group or student so session numbering strictly stays continuous
+      const grp = groups.find(g => (targetGroupId && g.id === targetGroupId) || (target?.groupName && g.name === target?.groupName));
+      const st = students.find(s => (targetStudentId && s.id === targetStudentId) || (targetStudentName && s.name === targetStudentName));
+
+      updated.forEach((l, idx) => {
+        if (l.status === 'cancelled' || l.deleted) return;
+        
+        const matchesGrp = targetGroupId ? l.groupId === targetGroupId : (grp?.id && l.groupId === grp.id);
+        const matchesSt = targetStudentId ? l.studentId === targetStudentId : (st?.id && l.studentId === st.id);
+        const matchesStName = targetStudentName ? (l.studentName === targetStudentName) : false;
+
+        if (matchesGrp || matchesSt || matchesStName) {
+          // Re-compute expected sequential session number strictly excluding cancelled lessons
+          const expectedSessionNum = calculateSequentialSessionNumber(l, updated, {
+            group: grp,
+            student: st,
+            students
+          });
+          const cycleCount = grp?.sessionCount || l.totalSessionsInPackage || target?.totalSessionsInPackage || 4;
+
+          if (l.sessionNumber !== expectedSessionNum || l.totalSessionsInPackage !== cycleCount) {
+            updated[idx] = wrapMutation({
+              ...l,
+              sessionNumber: expectedSessionNum,
+              totalSessionsInPackage: cycleCount
+            });
+          }
+        }
+      });
 
       return updated;
     };
@@ -3640,11 +3709,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         status: 'cancelled',
         report: prev.report ? {
           ...prev.report,
+          attendanceStatus: undefined,
           teacherNotes: notes ? (prev.report.teacherNotes ? `${prev.report.teacherNotes} | Absage-Notiz: ${notes}` : `Absage-Notiz: ${notes}`) : prev.report.teacherNotes
         } : {
-          attendanceStatus: 'absent',
           homeworkStatus: 'not_completed',
-          paymentStatus: prev.paymentStatus || 'pending',
+          paymentStatus: 'pending',
           teacherNotes: notes ? `Absage-Notiz: ${notes}` : 'Lektion abgesagt',
           savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }

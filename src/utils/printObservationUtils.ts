@@ -75,239 +75,243 @@ export function generateStageFollowUpFirstPageContentHtml(
 
     return '<tr>' +
       `<td style="text-align: center; font-weight: bold; vertical-align: middle;">${index + 1}</td>` +
-      `<td style="text-align: right; font-weight: bold; padding: 4px 6px; vertical-align: middle;">${td.teacherName}</td>` +
-      `<td style="text-align: center; vertical-align: middle; padding: 4px;">${(td.assignedClasses || []).join(', ') || '-'}<br/><small style="color: #475569;">(${td.totalSessions || 0} حصة/أسبوع)</small></td>` +
-      `<td style="text-align: center; font-size: 8pt; vertical-align: middle; padding: 4px;"><div style="margin-bottom: 2px;">${visitsInfo}</div><div style="color: ${td.complaintsCount > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold;">${complaintsInfo}</div></td>` +
-      `<td style="text-align: right; font-size: 8pt; line-height: 1.3; padding: 4px 6px; vertical-align: middle;">${evals || 'لا توجد تقييمات مسجلة.'}</td>` +
+      `<td style="text-align: right; font-weight: bold; padding: 5px 6px; vertical-align: middle;">${td.teacherName}</td>` +
+      `<td style="text-align: center; vertical-align: middle; padding: 5px;">${(td.assignedClasses || []).join(', ') || '-'}<br/><small style="color: #475569;">(${td.totalSessions || 0} حصة/أسبوع)</small></td>` +
+      `<td style="text-align: center; font-size: 8.5pt; vertical-align: middle; padding: 5px;"><div style="margin-bottom: 2px;">${visitsInfo}</div><div style="color: ${td.complaintsCount > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold;">${complaintsInfo}</div></td>` +
+      `<td style="text-align: right; font-size: 8.5pt; line-height: 1.35; padding: 5px 6px; vertical-align: middle;">${evals || 'لا توجد تقييمات مسجلة.'}</td>` +
     '</tr>';
   }).join('');
 
   const formattedHodName = hodName.replace(/^أ[\.\/]\s*/, '');
 
-  return '<div class="header">' +
-    '<div class="header-logo">' + logoHtml + '</div>' +
-    '<div class="header-text">' +
-      '<h1>' + schoolName + '</h1>' +
-      '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
-    '</div>' +
-    '<div>' + flagHtml + '</div>' +
-  '</div>' +
-  '<div class="title">تقرير متابعة وتقييم معلمي المرحلة (' + periodLabel + weekLabel + ')</div>' +
-  '<div class="meta-grid">' +
-    '<div class="meta-item"><span class="meta-label">المرحلة / الصفوف:</span> ' + record.gradeBand + '</div>' +
-    '<div class="meta-item"><span class="meta-label">مدير المرحلة:</span> ' + (record.stageManagerName || '..................................') + '</div>' +
-    '<div class="meta-item"><span class="meta-label">نوع المتابعة:</span> متابعة ' + periodLabel + '</div>' +
-    '<div class="meta-item"><span class="meta-label">رقم الأسبوع:</span> الأسبوع ' + (record.weekNumber || 1) + '</div>' +
-    '<div class="meta-item"><span class="meta-label">تاريخ المتابعة:</span> ' + record.date + '</div>' +
-    '<div class="meta-item"><span class="meta-label">رئيس القسم:</span> ' + formattedHodName + '</div>' +
-    '<div class="meta-item" style="grid-column: span 2;"><span class="meta-label">عدد المعلمين التابعين:</span> ' + record.teachersData.length + ' معلم</div>' +
-  '</div>' +
-  '<table>' +
-    '<thead>' +
-      '<tr>' +
-        '<th style="width: 5%;">#</th>' +
-        '<th style="width: 22%;">اسم المعلم</th>' +
-        '<th style="width: 18%;">الفصول والحصص</th>' +
-        '<th style="width: 23%;">الزيارات والشكاوى</th>' +
-        '<th style="width: 32%;">التقييمات والملاحظات</th>' +
-      '</tr>' +
-    '</thead>' +
-    '<tbody>' +
-      teacherRowsHtml +
-    '</tbody>' +
-  '</table>' +
-  ((record.includeVisits && record.includedVisits && record.includedVisits.length > 0) ? (
-    '<div style="margin-top: 8px; margin-bottom: 8px;">' +
-      '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الزيارات الصفية المعتمدة والمرفقة بالتقرير (' + record.includedVisits.length + ' زيارة - مفصلة بالصفحات التالية):</div>' +
+  return '<div class="stage-report-single-page">' +
+    '<div class="stage-report-main-content">' +
+      '<div class="header">' +
+        '<div class="header-logo">' + logoHtml + '</div>' +
+        '<div class="header-text">' +
+          '<h1>' + schoolName + '</h1>' +
+          '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
+        '</div>' +
+        '<div>' + flagHtml + '</div>' +
+      '</div>' +
+      '<div class="title">تقرير متابعة وتقييم معلمي المرحلة (' + periodLabel + weekLabel + ')</div>' +
+      '<div class="meta-grid">' +
+        '<div class="meta-item"><span class="meta-label">المرحلة / الصفوف:</span> ' + record.gradeBand + '</div>' +
+        '<div class="meta-item"><span class="meta-label">مدير المرحلة:</span> ' + (record.stageManagerName || '..................................') + '</div>' +
+        '<div class="meta-item"><span class="meta-label">نوع المتابعة:</span> متابعة ' + periodLabel + '</div>' +
+        '<div class="meta-item"><span class="meta-label">رقم الأسبوع:</span> الأسبوع ' + (record.weekNumber || 1) + '</div>' +
+        '<div class="meta-item"><span class="meta-label">تاريخ المتابعة:</span> ' + record.date + '</div>' +
+        '<div class="meta-item"><span class="meta-label">رئيس القسم:</span> ' + formattedHodName + '</div>' +
+        '<div class="meta-item" style="grid-column: span 2;"><span class="meta-label">عدد المعلمين التابعين:</span> ' + record.teachersData.length + ' معلم</div>' +
+      '</div>' +
       '<table>' +
         '<thead>' +
           '<tr>' +
             '<th style="width: 5%;">#</th>' +
             '<th style="width: 22%;">اسم المعلم</th>' +
-            '<th style="width: 15%;">الصف والحصة</th>' +
-            '<th style="width: 15%;">تاريخ الزيارة</th>' +
-            '<th style="width: 25%;">موضوع الدرس / محور الزيارة</th>' +
-            '<th style="width: 18%;">التقييم العام</th>' +
+            '<th style="width: 18%;">الفصول والحصص</th>' +
+            '<th style="width: 23%;">الزيارات والشكاوى</th>' +
+            '<th style="width: 32%;">التقييمات والملاحظات</th>' +
           '</tr>' +
         '</thead>' +
         '<tbody>' +
-          record.includedVisits.map((v: any, i) => {
-            const teacherName = v.teacherName || '-';
-            const classGrade = v.className || v.class || v.gradeClass || '-';
-            const dateVal = v.visitedDate || v.date || '-';
-            const topic = v.lessonTopic || v.topic || v.focusAreas || 'زيارة صفية دورية';
-            const scoreVal = v.overallScore ?? v.totalScore ?? v.score;
-            const scoreText = (scoreVal !== undefined && scoreVal !== null) ? `${scoreVal}/75` : '-';
-            const catText = v.overallCategory ? ` (${v.overallCategory})` : '';
-            return '<tr>' +
-              `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-              `<td style="text-align: right; font-weight: bold;">${teacherName}</td>` +
-              `<td style="text-align: center;">${classGrade}${v.periodNumber ? ' - ح' + v.periodNumber : ''}</td>` +
-              `<td style="text-align: center; font-mono;">${dateVal}</td>` +
-              `<td style="text-align: right;">${topic}</td>` +
-              `<td style="text-align: center; font-weight: bold; color: #2563eb;">${scoreText}${catText}</td>` +
-            '</tr>';
-          }).join('') +
+          teacherRowsHtml +
         '</tbody>' +
       '</table>' +
-    '</div>'
-  ) : '') +
-  ((record.includeComplaints && record.includedComplaints && record.includedComplaints.length > 0) ? (
-    '<div style="margin-top: 8px; margin-bottom: 8px;">' +
-      '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الشكاوى وملاحظات أولياء الأمور (' + record.includedComplaints.length + '):</div>' +
-      '<table>' +
-        '<thead>' +
-          '<tr>' +
-            '<th style="width: 5%;">#</th>' +
-            '<th style="width: 25%;">اسم الطالب / الصف</th>' +
-            '<th style="width: 50%;">سبب الشكوى</th>' +
-            '<th style="width: 20%;">الحالة</th>' +
-          '</tr>' +
-        '</thead>' +
-        '<tbody>' +
-          record.includedComplaints.map((c, i) => {
-            const isResolved = c.actionTaken && c.actionTaken.includes('RESOLVED');
-            return '<tr>' +
-              `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-              `<td style="text-align: right; font-weight: bold;">${c.studentNameAr || c.studentNameEn} (${c.gradeClass})</td>` +
-              `<td style="text-align: right;">${c.reason}</td>` +
-              `<td style="text-align: center; font-weight: bold;">${isResolved ? 'تم الحل' : 'قيد المتابعة'}</td>` +
-            '</tr>';
-          }).join('') +
-        '</tbody>' +
-      '</table>' +
-    '</div>'
-  ) : '') +
-  ((record.includeActionPlans && record.includedActionPlans && record.includedActionPlans.length > 0) ? (
-    '<div style="margin-top: 8px; margin-bottom: 8px;">' +
-      '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">خطط الدعم الأكاديمي والعلاجية المشمولة (' + record.includedActionPlans.length + '):</div>' +
-      '<table>' +
-        '<thead>' +
-          '<tr>' +
-            '<th style="width: 5%;">#</th>' +
-            '<th style="width: 25%;">اسم الطالب والصف</th>' +
-            '<th style="width: 50%;">المعلم والضعف المرصود</th>' +
-            '<th style="width: 20%;">حالة الخطة</th>' +
-          '</tr>' +
-        '</thead>' +
-        '<tbody>' +
-          record.includedActionPlans.map((plan, i) => {
-            const isResolved = plan.status === 'RESOLVED';
-            return '<tr>' +
-              `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-              `<td style="text-align: right; font-weight: bold;">${plan.studentNameAr || plan.studentNameEn} (${plan.gradeClass})</td>` +
-              `<td style="text-align: right;">أ/ ${plan.teacherName} — ${(plan.weaknessAreas || []).join('، ')}</td>` +
-              `<td style="text-align: center; font-weight: bold;">${isResolved ? 'مغلقة' : 'نشطة'}</td>` +
-            '</tr>';
-          }).join('') +
-        '</tbody>' +
-      '</table>' +
-    '</div>'
-  ) : '') +
-  ((record.includeAttendance !== false) ? (
-    record.periodType === 'weekly' ? (
-      '<div style="margin-top: 8px; margin-bottom: 8px;">' +
-        '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">انضباط وحضور المعلمين (Teacher Attendance & Discipline):</div>' +
-        '<table>' +
-          '<thead>' +
-            '<tr>' +
-              '<th style="width: 5%;">#</th>' +
-              '<th style="width: 27%;">Teacher Name (اسم المعلم)</th>' +
-              '<th style="width: 14%;">Absences (الغياب)</th>' +
-              '<th style="width: 14%;">Late Arrivals (التأخير)</th>' +
-              '<th style="width: 14%;">Early Leaves (الانصراف)</th>' +
-              '<th style="width: 13%;">Delay Mins (دقائق)</th>' +
-              '<th style="width: 13%;">Score (الانضباط)</th>' +
-            '</tr>' +
-          '</thead>' +
-          '<tbody>' +
-            [...record.teachersData]
-              .sort((a, b) => {
-                const violsA = (a.absencesCount || 0) + (a.lateArrivalsCount || 0) + (a.earlyLeavesCount || 0);
-                const violsB = (b.absencesCount || 0) + (b.lateArrivalsCount || 0) + (b.earlyLeavesCount || 0);
-                return violsB - violsA;
-              })
-              .map((td, i) => {
-                const absences = td.absencesCount || 0;
-                const late = td.lateArrivalsCount || 0;
-                const early = td.earlyLeavesCount || 0;
-                const delayMins = td.delayMinutes || 0;
-                const score = td.disciplineScore !== undefined ? td.disciplineScore : 100;
+      ((record.includeVisits && record.includedVisits && record.includedVisits.length > 0) ? (
+        '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+          '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الزيارات الصفية المعتمدة والمرفقة بالتقرير (' + record.includedVisits.length + ' زيارة - مفصلة بالصفحات التالية):</div>' +
+          '<table>' +
+            '<thead>' +
+              '<tr>' +
+                '<th style="width: 5%;">#</th>' +
+                '<th style="width: 22%;">اسم المعلم</th>' +
+                '<th style="width: 15%;">الصف والحصة</th>' +
+                '<th style="width: 15%;">تاريخ الزيارة</th>' +
+                '<th style="width: 25%;">موضوع الدرس / محور الزيارة</th>' +
+                '<th style="width: 18%;">التقييم العام</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' +
+              record.includedVisits.map((v: any, i) => {
+                const teacherName = v.teacherName || '-';
+                const classGrade = v.className || v.class || v.gradeClass || '-';
+                const dateVal = v.visitedDate || v.date || '-';
+                const topic = v.lessonTopic || v.topic || v.focusAreas || 'زيارة صفية دورية';
+                const scoreVal = v.overallScore ?? v.totalScore ?? v.score;
+                const scoreText = (scoreVal !== undefined && scoreVal !== null) ? `${scoreVal}/75` : '-';
+                const catText = v.overallCategory ? ` (${v.overallCategory})` : '';
                 return '<tr>' +
                   `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-                  `<td style="text-align: right; font-weight: bold; padding: 4px 6px;">${td.teacherName}</td>` +
-                  `<td style="text-align: center; color: ${absences > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold;">${absences}</td>` +
-                  `<td style="text-align: center; color: ${late > 0 ? '#d97706' : '#16a34a'}; font-weight: bold;">${late}</td>` +
-                  `<td style="text-align: center; color: ${early > 0 ? '#ea580c' : '#16a34a'}; font-weight: bold;">${early}</td>` +
-                  `<td style="text-align: center; font-weight: bold;">${delayMins}m</td>` +
-                  `<td style="text-align: center; font-weight: bold; color: ${score >= 90 ? '#16a34a' : score >= 75 ? '#d97706' : '#dc2626'};">${score}%</td>` +
+                  `<td style="text-align: right; font-weight: bold;">${teacherName}</td>` +
+                  `<td style="text-align: center;">${classGrade}${v.periodNumber ? ' - ح' + v.periodNumber : ''}</td>` +
+                  `<td style="text-align: center; font-mono;">${dateVal}</td>` +
+                  `<td style="text-align: right;">${topic}</td>` +
+                  `<td style="text-align: center; font-weight: bold; color: #2563eb;">${scoreText}${catText}</td>` +
                 '</tr>';
               }).join('') +
-          '</tbody>' +
-        '</table>' +
-      '</div>'
-    ) : (
-      '<div style="margin-top: 8px; margin-bottom: 8px;">' +
-        '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الحضور والانضباط الشهري (Monthly Staff Attendance Summary):</div>' +
-        '<table style="margin-bottom: 6px;">' +
-          '<thead>' +
-            '<tr>' +
-              '<th style="width: 20%;">Total Absences (الغياب)</th>' +
-              '<th style="width: 20%;">Total Late (التأخير)</th>' +
-              '<th style="width: 20%;">Early Leaves (الانصراف)</th>' +
-              '<th style="width: 20%;">Delay Mins (دقائق)</th>' +
-              '<th style="width: 20%;">Lost Hours (ساعات مفقودة)</th>' +
-            '</tr>' +
-          '</thead>' +
-          '<tbody>' +
-            '<tr>' +
-              `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #dc2626;">${record.attendanceSummary?.totalAbsences || 0}</td>` +
-              `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #d97706;">${record.attendanceSummary?.totalLateArrivals || 0}</td>` +
-              `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #ea580c;">${record.attendanceSummary?.totalEarlyLeaves || 0}</td>` +
-              `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #2563eb;">${record.attendanceSummary?.totalDelayMinutes || 0}m</td>` +
-              `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #4f46e5;">${record.attendanceSummary?.totalLostHours || 0}h</td>` +
-            '</tr>' +
-          '</tbody>' +
-        '</table>' +
-        '<div style="display: flex; gap: 6px; margin-top: 4px;">' +
-          '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
-            '<b style="color: #dc2626;">المعلمون الأكثر غياباً (Most Absent):</b><br/>' +
-            ((record.attendanceSummary?.mostAbsentTeachers && record.attendanceSummary.mostAbsentTeachers.length > 0)
-              ? record.attendanceSummary.mostAbsentTeachers.map(t => `${t.name} (${t.count} أيام)`).join('، ')
-              : 'لا توجد حالات غياب') +
-          '</div>' +
-          '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
-            '<b style="color: #d97706;">الأكثر تأخيراً (Most Late):</b><br/>' +
-            ((record.attendanceSummary?.mostLateTeachers && record.attendanceSummary.mostLateTeachers.length > 0)
-              ? record.attendanceSummary.mostLateTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
-              : 'لا توجد تأخيرات') +
-          '</div>' +
-          '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
-            '<b style="color: #ea580c;">الأكثر انصرافاً مبكراً (Early Leave):</b><br/>' +
-            ((record.attendanceSummary?.mostEarlyLeaveTeachers && record.attendanceSummary.mostEarlyLeaveTeachers.length > 0)
-              ? record.attendanceSummary.mostEarlyLeaveTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
-              : 'لا توجد حالات') +
-          '</div>' +
-        '</div>' +
-      '</div>'
-    )
-  ) : '') +
-  (record.overallStageNotes ? (
-    '<div class="feedback-section">' +
-      '<div class="feedback-title">توصيات وملاحظات رئيس القسم العامة للمرحلة:</div>' +
-      '<div style="font-size: 8.5pt; font-weight: 500; line-height: 1.35; white-space: pre-wrap;">' + record.overallStageNotes + '</div>' +
-    '</div>'
-  ) : '') +
-  '<div class="signatures">' +
-    '<div class="sig-block">' +
-      '<div class="sig-job-title">رئيس قسم اللغة الألمانية</div>' +
-      '<div class="sig-person-name">أ/ ' + formattedHodName + '</div>' +
-      '<div class="sig-dotted-line">..................................</div>' +
+            '</tbody>' +
+          '</table>' +
+        '</div>'
+      ) : '') +
+      ((record.includeComplaints && record.includedComplaints && record.includedComplaints.length > 0) ? (
+        '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+          '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الشكاوى وملاحظات أولياء الأمور (' + record.includedComplaints.length + '):</div>' +
+          '<table>' +
+            '<thead>' +
+              '<tr>' +
+                '<th style="width: 5%;">#</th>' +
+                '<th style="width: 25%;">اسم الطالب / الصف</th>' +
+                '<th style="width: 50%;">سبب الشكوى</th>' +
+                '<th style="width: 20%;">الحالة</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' +
+              record.includedComplaints.map((c, i) => {
+                const isResolved = c.actionTaken && c.actionTaken.includes('RESOLVED');
+                return '<tr>' +
+                  `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
+                  `<td style="text-align: right; font-weight: bold;">${c.studentNameAr || c.studentNameEn} (${c.gradeClass})</td>` +
+                  `<td style="text-align: right;">${c.reason}</td>` +
+                  `<td style="text-align: center; font-weight: bold;">${isResolved ? 'تم الحل' : 'قيد المتابعة'}</td>` +
+                '</tr>';
+              }).join('') +
+            '</tbody>' +
+          '</table>' +
+        '</div>'
+      ) : '') +
+      ((record.includeActionPlans && record.includedActionPlans && record.includedActionPlans.length > 0) ? (
+        '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+          '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">خطط الدعم الأكاديمي والعلاجية المشمولة (' + record.includedActionPlans.length + '):</div>' +
+          '<table>' +
+            '<thead>' +
+              '<tr>' +
+                '<th style="width: 5%;">#</th>' +
+                '<th style="width: 25%;">اسم الطالب والصف</th>' +
+                '<th style="width: 50%;">المعلم والضعف المرصود</th>' +
+                '<th style="width: 20%;">حالة الخطة</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' +
+              record.includedActionPlans.map((plan, i) => {
+                const isResolved = plan.status === 'RESOLVED';
+                return '<tr>' +
+                  `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
+                  `<td style="text-align: right; font-weight: bold;">${plan.studentNameAr || plan.studentNameEn} (${plan.gradeClass})</td>` +
+                  `<td style="text-align: right;">أ/ ${plan.teacherName} — ${(plan.weaknessAreas || []).join('، ')}</td>` +
+                  `<td style="text-align: center; font-weight: bold;">${isResolved ? 'مغلقة' : 'نشطة'}</td>` +
+                '</tr>';
+              }).join('') +
+            '</tbody>' +
+          '</table>' +
+        '</div>'
+      ) : '') +
+      ((record.includeAttendance !== false) ? (
+        record.periodType === 'weekly' ? (
+          '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+            '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">انضباط وحضور المعلمين (Teacher Attendance & Discipline):</div>' +
+            '<table>' +
+              '<thead>' +
+                '<tr>' +
+                  '<th style="width: 5%;">#</th>' +
+                  '<th style="width: 27%;">Teacher Name (اسم المعلم)</th>' +
+                  '<th style="width: 14%;">Absences (الغياب)</th>' +
+                  '<th style="width: 14%;">Late Arrivals (التأخير)</th>' +
+                  '<th style="width: 14%;">Early Leaves (الانصراف)</th>' +
+                  '<th style="width: 13%;">Delay Mins (دقائق)</th>' +
+                  '<th style="width: 13%;">Score (الانضباط)</th>' +
+                '</tr>' +
+              '</thead>' +
+              '<tbody>' +
+                [...record.teachersData]
+                  .sort((a, b) => {
+                    const violsA = (a.absencesCount || 0) + (a.lateArrivalsCount || 0) + (a.earlyLeavesCount || 0);
+                    const violsB = (b.absencesCount || 0) + (b.lateArrivalsCount || 0) + (b.earlyLeavesCount || 0);
+                    return violsB - violsA;
+                  })
+                  .map((td, i) => {
+                    const absences = td.absencesCount || 0;
+                    const late = td.lateArrivalsCount || 0;
+                    const early = td.earlyLeavesCount || 0;
+                    const delayMins = td.delayMinutes || 0;
+                    const score = td.disciplineScore !== undefined ? td.disciplineScore : 100;
+                    return '<tr>' +
+                      `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
+                      `<td style="text-align: right; font-weight: bold; padding: 4px 6px;">${td.teacherName}</td>` +
+                      `<td style="text-align: center; color: ${absences > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold;">${absences}</td>` +
+                      `<td style="text-align: center; color: ${late > 0 ? '#d97706' : '#16a34a'}; font-weight: bold;">${late}</td>` +
+                      `<td style="text-align: center; color: ${early > 0 ? '#ea580c' : '#16a34a'}; font-weight: bold;">${early}</td>` +
+                      `<td style="text-align: center; font-weight: bold;">${delayMins}m</td>` +
+                      `<td style="text-align: center; font-weight: bold; color: ${score >= 90 ? '#16a34a' : score >= 75 ? '#d97706' : '#dc2626'};">${score}%</td>` +
+                    '</tr>';
+                  }).join('') +
+              '</tbody>' +
+            '</table>' +
+          '</div>'
+        ) : (
+          '<div style="margin-top: 8px; margin-bottom: 8px;">' +
+            '<div style="font-weight: bold; font-size: 8.5pt; margin-bottom: 3px; text-transform: uppercase;">ملخص الحضور والانضباط الشهري (Monthly Staff Attendance Summary):</div>' +
+            '<table style="margin-bottom: 6px;">' +
+              '<thead>' +
+                '<tr>' +
+                  '<th style="width: 20%;">Total Absences (الغياب)</th>' +
+                  '<th style="width: 20%;">Total Late (التأخير)</th>' +
+                  '<th style="width: 20%;">Early Leaves (الانصراف)</th>' +
+                  '<th style="width: 20%;">Delay Mins (دقائق)</th>' +
+                  '<th style="width: 20%;">Lost Hours (ساعات مفقودة)</th>' +
+                '</tr>' +
+              '</thead>' +
+              '<tbody>' +
+                '<tr>' +
+                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #dc2626;">${record.attendanceSummary?.totalAbsences || 0}</td>` +
+                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #d97706;">${record.attendanceSummary?.totalLateArrivals || 0}</td>` +
+                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #ea580c;">${record.attendanceSummary?.totalEarlyLeaves || 0}</td>` +
+                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #2563eb;">${record.attendanceSummary?.totalDelayMinutes || 0}m</td>` +
+                  `<td style="text-align: center; font-weight: bold; font-size: 10pt; color: #4f46e5;">${record.attendanceSummary?.totalLostHours || 0}h</td>` +
+                '</tr>' +
+              '</tbody>' +
+            '</table>' +
+            '<div style="display: flex; gap: 6px; margin-top: 4px;">' +
+              '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
+                '<b style="color: #dc2626;">المعلمون الأكثر غياباً (Most Absent):</b><br/>' +
+                ((record.attendanceSummary?.mostAbsentTeachers && record.attendanceSummary.mostAbsentTeachers.length > 0)
+                  ? record.attendanceSummary.mostAbsentTeachers.map(t => `${t.name} (${t.count} أيام)`).join('، ')
+                  : 'لا توجد حالات غياب') +
+              '</div>' +
+              '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
+                '<b style="color: #d97706;">الأكثر تأخيراً (Most Late):</b><br/>' +
+                ((record.attendanceSummary?.mostLateTeachers && record.attendanceSummary.mostLateTeachers.length > 0)
+                  ? record.attendanceSummary.mostLateTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
+                  : 'لا توجد تأخيرات') +
+              '</div>' +
+              '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
+                '<b style="color: #ea580c;">الأكثر انصرافاً مبكراً (Early Leave):</b><br/>' +
+                ((record.attendanceSummary?.mostEarlyLeaveTeachers && record.attendanceSummary.mostEarlyLeaveTeachers.length > 0)
+                  ? record.attendanceSummary.mostEarlyLeaveTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
+                  : 'لا توجد حالات') +
+              '</div>' +
+            '</div>' +
+          '</div>'
+        )
+      ) : '') +
+      (record.overallStageNotes ? (
+        '<div class="feedback-section">' +
+          '<div class="feedback-title">توصيات وملاحظات رئيس القسم العامة للمرحلة:</div>' +
+          '<div style="font-size: 9pt; font-weight: 500; line-height: 1.4; white-space: pre-wrap;">' + record.overallStageNotes + '</div>' +
+        '</div>'
+      ) : '') +
     '</div>' +
-    '<div class="sig-block">' +
-      '<div class="sig-job-title">مدير المرحلة</div>' +
-      '<div class="sig-person-name" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">' + (record.stageManagerName || '..................................') + '</div>' +
-      '<div class="sig-dotted-line">..................................</div>' +
+    '<div class="signatures">' +
+      '<div class="sig-block">' +
+        '<div class="sig-job-title">رئيس قسم اللغة الألمانية</div>' +
+        '<div class="sig-person-name">أ/ ' + formattedHodName + '</div>' +
+        '<div class="sig-dotted-line">..................................</div>' +
+      '</div>' +
+      '<div class="sig-block">' +
+        '<div class="sig-job-title">مدير المرحلة</div>' +
+        '<div class="sig-person-name" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">' + (record.stageManagerName || '..................................') + '</div>' +
+        '<div class="sig-dotted-line">..................................</div>' +
+      '</div>' +
     '</div>' +
   '</div>';
 }
@@ -332,29 +336,31 @@ export function generateStageFollowUpFirstPageHtml(
       '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
       '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
       '<style>' +
-        '@page { size: A4; margin: 8mm 10mm; }' +
+        '@page { size: A4 portrait; margin: 8mm 10mm; }' +
         '* { box-sizing: border-box; font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
         'html, body { height: 100%; margin: 0; padding: 0; background: #fff; }' +
-        'body { color: #0f172a; line-height: 1.35; font-size: 8.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
-        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 5px; margin-bottom: 6px; }' +
-        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 60px; }' +
+        'body { color: #0f172a; line-height: 1.35; font-size: 9pt; width: 100%; min-height: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
+        '.stage-report-single-page { display: flex; flex-direction: column; justify-content: space-between; width: 100%; min-height: 275mm; height: 100%; box-sizing: border-box; }' +
+        '.stage-report-main-content { flex: 1; display: flex; flex-direction: column; }' +
+        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 8px; }' +
+        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 65px; }' +
         '.header-text { text-align: center; flex: 1; padding: 0 10px; }' +
-        '.header h1 { font-size: 13pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
-        '.header p { font-size: 8.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
-        '.title { text-align: center; font-size: 11.5pt; font-weight: 800; margin-bottom: 6px; text-decoration: underline; line-height: 1.3; color: #0f172a; }' +
-        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
-        '.meta-item { font-size: 8.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; text-align: ' + (isRtl ? 'right' : 'left') + '; color: #1e293b; }' +
+        '.header h1 { font-size: 14pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
+        '.header p { font-size: 9.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
+        '.title { text-align: center; font-size: 12.5pt; font-weight: 800; margin-bottom: 8px; text-decoration: underline; text-underline-offset: 3px; line-height: 1.3; color: #0f172a; }' +
+        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 14px; margin-bottom: 8px; border: 1.5px solid #0f172a; padding: 7px 12px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
+        '.meta-item { font-size: 9pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; text-align: ' + (isRtl ? 'right' : 'left') + '; color: #1e293b; }' +
         '.meta-label { font-weight: 800; margin-left: 5px; margin-right: 5px; display: inline-block; white-space: nowrap; color: #0f172a; }' +
-        'table { width: 100%; border-collapse: collapse; margin-bottom: 6px; table-layout: fixed; }' +
-        'th, td { border: 1px solid #0f172a; padding: 3px 5px; vertical-align: middle; font-size: 8.5pt; line-height: 1.25; word-break: break-word; overflow-wrap: break-word; }' +
-        'th { background: #e2e8f0; font-weight: 800; font-size: 8.5pt; height: 22px; text-align: center; vertical-align: middle; color: #0f172a; }' +
-        '.feedback-section { margin-top: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; min-height: 34px; background: #f8fafc; border-radius: 4px; }' +
-        '.feedback-title { font-weight: 800; font-size: 8.5pt; margin-bottom: 3px; border-bottom: 1px dotted #0f172a; padding-bottom: 2px; line-height: 1.3; color: #0f172a; }' +
-        '.signatures { margin-top: 14px; display: flex; justify-content: space-between; align-items: flex-start; text-align: center; page-break-inside: avoid; break-inside: avoid; padding-bottom: 1.5rem; line-height: 1.6; }' +
-        '.sig-block { width: 44%; display: flex; flex-direction: column; align-items: center; page-break-inside: avoid; break-inside: avoid; }' +
-        '.sig-job-title { font-weight: 900; font-size: 9.5pt; color: #0f172a; margin-bottom: 2px; line-height: 1.4; }' +
-        '.sig-person-name { font-size: 9pt; font-weight: 700; color: #334155; margin-bottom: 8px; line-height: 1.4; }' +
-        '.sig-dotted-line { width: 180px; text-align: center; color: #64748b; font-weight: normal; letter-spacing: 2px; font-size: 9.5pt; }' +
+        'table { width: 100%; border-collapse: collapse; margin-bottom: 8px; table-layout: fixed; border: 1.5px solid #0f172a; }' +
+        'th, td { border: 1px solid #0f172a; padding: 5px 6px; vertical-align: middle; font-size: 9pt; line-height: 1.3; word-break: break-word; overflow-wrap: break-word; }' +
+        'th { background: #f1f5f9; font-weight: 800; font-size: 9pt; height: 26px; text-align: center; vertical-align: middle; color: #0f172a; }' +
+        '.feedback-section { margin-top: 8px; border: 1.5px solid #0f172a; padding: 8px 12px; min-height: 50px; background: #f8fafc; border-radius: 4px; }' +
+        '.feedback-title { font-weight: 800; font-size: 9.5pt; margin-bottom: 3px; border-bottom: 1px dotted #0f172a; padding-bottom: 3px; line-height: 1.3; color: #0f172a; }' +
+        '.signatures { margin-top: auto; padding-top: 18px; padding-bottom: 4px; display: flex; justify-content: space-around; align-items: flex-end; text-align: center; page-break-inside: avoid; break-inside: avoid; }' +
+        '.sig-block { width: 40%; display: flex; flex-direction: column; align-items: center; page-break-inside: avoid; break-inside: avoid; }' +
+        '.sig-job-title { font-weight: 900; font-size: 10pt; color: #0f172a; margin-bottom: 3px; line-height: 1.4; }' +
+        '.sig-person-name { font-size: 9.5pt; font-weight: 700; color: #334155; margin-bottom: 10px; line-height: 1.4; }' +
+        '.sig-dotted-line { width: 190px; text-align: center; color: #64748b; font-weight: normal; letter-spacing: 2px; font-size: 10pt; }' +
       '</style>' +
     '</head>' +
     '<body ' + bodyLoadAttr + '>' +
@@ -390,36 +396,47 @@ export function generateStageFollowUpReportHtml(
       '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
       '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
       '<style>' +
-        '@page { size: A4; margin: 8mm 10mm; }' +
+        '@page { size: A4 portrait; margin: 8mm 10mm; }' +
         '* { box-sizing: border-box; font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
-        'html, body { margin: 0; padding: 0; background: #fff; }' +
-        'body { color: #0f172a; line-height: 1.35; font-size: 8.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
+        'html, body { height: 100%; margin: 0; padding: 0; background: #fff; }' +
+        'body { color: #0f172a; line-height: 1.35; font-size: 9pt; width: 100%; min-height: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
         '.report-page { page-break-after: always; break-after: page; width: 100%; background: #ffffff; padding: 0; margin-bottom: 25px; }' +
         '.report-page.last-page { page-break-after: auto; break-after: auto; margin-bottom: 0; }' +
-        '@media print { .report-page { margin-bottom: 0; page-break-after: always; break-after: page; } .report-page.last-page { page-break-after: auto; break-after: auto; } }' +
-        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 5px; margin-bottom: 6px; }' +
-        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 60px; }' +
+        '.report-page.stage-first-page { min-height: 275mm; height: 100%; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }' +
+        '.report-page.stage-first-page .stage-report-single-page { min-height: 275mm; height: 100%; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }' +
+        '.report-page.visit-page { min-height: 275mm; height: 100%; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }' +
+        '.report-page.visit-page .report-single-page { min-height: 275mm; height: 100%; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }' +
+        '@media print { ' +
+          '.report-page { margin-bottom: 0; page-break-after: always; break-after: page; } ' +
+          '.report-page.last-page { page-break-after: auto; break-after: auto; } ' +
+          '.report-page.stage-first-page { min-height: 275mm; } ' +
+          '.report-page.visit-page { min-height: 275mm; } ' +
+        '}' +
+        '.stage-report-single-page { display: flex; flex-direction: column; justify-content: space-between; width: 100%; min-height: 275mm; height: 100%; box-sizing: border-box; }' +
+        '.stage-report-main-content { flex: 1; display: flex; flex-direction: column; }' +
+        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 8px; }' +
+        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 65px; }' +
         '.header-text { text-align: center; flex: 1; padding: 0 10px; }' +
-        '.header h1 { font-size: 13pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
-        '.header p { font-size: 8.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
-        '.title { text-align: center; font-size: 11.5pt; font-weight: 800; margin-bottom: 6px; text-decoration: underline; line-height: 1.3; color: #0f172a; }' +
-        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
-        '.meta-item { font-size: 8.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; text-align: ' + (isRtl ? 'right' : 'left') + '; color: #1e293b; }' +
+        '.header h1 { font-size: 14pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
+        '.header p { font-size: 9.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
+        '.title { text-align: center; font-size: 12.5pt; font-weight: 800; margin-bottom: 8px; text-decoration: underline; text-underline-offset: 3px; line-height: 1.3; color: #0f172a; }' +
+        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 14px; margin-bottom: 8px; border: 1.5px solid #0f172a; padding: 7px 12px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
+        '.meta-item { font-size: 9pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; text-align: ' + (isRtl ? 'right' : 'left') + '; color: #1e293b; }' +
         '.meta-label { font-weight: 800; margin-left: 5px; margin-right: 5px; display: inline-block; white-space: nowrap; color: #0f172a; }' +
-        'table { width: 100%; border-collapse: collapse; margin-bottom: 6px; table-layout: fixed; }' +
-        'th, td { border: 1px solid #0f172a; padding: 3px 5px; vertical-align: middle; font-size: 8.5pt; line-height: 1.25; word-break: break-word; overflow-wrap: break-word; }' +
-        'th { background: #e2e8f0; font-weight: 800; font-size: 8.5pt; height: 22px; text-align: center; vertical-align: middle; color: #0f172a; }' +
+        'table { width: 100%; border-collapse: collapse; margin-bottom: 8px; table-layout: fixed; border: 1.5px solid #0f172a; }' +
+        'th, td { border: 1px solid #0f172a; padding: 5px 6px; vertical-align: middle; font-size: 9pt; line-height: 1.3; word-break: break-word; overflow-wrap: break-word; }' +
+        'th { background: #f1f5f9; font-weight: 800; font-size: 9pt; height: 26px; text-align: center; vertical-align: middle; color: #0f172a; }' +
         '.criteria-col { text-align: ' + (isRtl ? 'right' : 'left') + '; width: 55%; font-weight: 700; vertical-align: middle; padding-left: 6px; padding-right: 6px; line-height: 1.3; color: #1e293b; }' +
         '.rating-col { width: 9%; font-weight: bold; font-size: 9.5pt; text-align: center; vertical-align: middle; line-height: 1; }' +
         '.category-title { font-size: 8.5pt; font-weight: 800; margin-top: 4px; margin-bottom: 2px; background: #e2e8f0; padding: 3px 6px; border: 1px solid #0f172a; border-bottom: none; line-height: 1.3; vertical-align: middle; color: #0f172a; }' +
-        '.feedback-section { margin-top: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; min-height: 34px; background: #f8fafc; border-radius: 4px; }' +
-        '.feedback-title { font-weight: 800; font-size: 8.5pt; margin-bottom: 3px; border-bottom: 1px dotted #0f172a; padding-bottom: 2px; line-height: 1.3; color: #0f172a; }' +
+        '.feedback-section { margin-top: 8px; border: 1.5px solid #0f172a; padding: 8px 12px; min-height: 50px; background: #f8fafc; border-radius: 4px; }' +
+        '.feedback-title { font-weight: 800; font-size: 9.5pt; margin-bottom: 3px; border-bottom: 1px dotted #0f172a; padding-bottom: 3px; line-height: 1.3; color: #0f172a; }' +
         '.overall-box { margin-top: 6px; padding: 5px 8px; border: 1.5px solid #0f172a; font-weight: 800; text-align: center; font-size: 9.5pt; display: flex; justify-content: space-around; align-items: center; background: #f8fafc; line-height: 1.3; border-radius: 4px; }' +
-        '.signatures { margin-top: 14px; display: flex; justify-content: space-between; align-items: flex-start; text-align: center; page-break-inside: avoid; break-inside: avoid; padding-bottom: 1.5rem; line-height: 1.6; }' +
-        '.sig-block { width: 44%; display: flex; flex-direction: column; align-items: center; page-break-inside: avoid; break-inside: avoid; }' +
-        '.sig-job-title { font-weight: 900; font-size: 9.5pt; color: #0f172a; margin-bottom: 2px; line-height: 1.4; }' +
-        '.sig-person-name { font-size: 9pt; font-weight: 700; color: #334155; margin-bottom: 8px; line-height: 1.4; }' +
-        '.sig-dotted-line { width: 180px; text-align: center; color: #64748b; font-weight: normal; letter-spacing: 2px; font-size: 9.5pt; }' +
+        '.signatures { margin-top: auto; padding-top: 18px; padding-bottom: 4px; display: flex; justify-content: space-around; align-items: flex-end; text-align: center; page-break-inside: avoid; break-inside: avoid; }' +
+        '.sig-block { width: 40%; display: flex; flex-direction: column; align-items: center; page-break-inside: avoid; break-inside: avoid; }' +
+        '.sig-job-title { font-weight: 900; font-size: 10pt; color: #0f172a; margin-bottom: 3px; line-height: 1.4; }' +
+        '.sig-person-name { font-size: 9.5pt; font-weight: 700; color: #334155; margin-bottom: 10px; line-height: 1.4; }' +
+        '.sig-dotted-line { width: 190px; text-align: center; color: #64748b; font-weight: normal; letter-spacing: 2px; font-size: 10pt; }' +
         '.sig-title { font-weight: 800; font-size: 9pt; margin-bottom: 16px; line-height: 1.3; color: #0f172a; }' +
         '.sig-line { border-top: 1px solid #0f172a; padding-top: 3px; font-size: 8.5pt; font-weight: 800; line-height: 1.3; color: #1e293b; }' +
       '</style>' +
@@ -453,13 +470,17 @@ export async function generateStageFollowUpPdfInstance(
 
   const container = document.createElement('div');
   container.style.position = 'absolute';
-  container.style.top = '-9999px';
   container.style.left = '-9999px';
-  container.style.width = '794px'; // 210mm at 96DPI
+  container.style.top = '0';
+  container.style.width = '794px'; // standard A4 width at 96dpi
+  container.style.height = '1123px'; // exact standard A4 height at 96dpi
+  container.style.minHeight = '1123px';
+  container.style.maxHeight = '1123px';
   container.style.background = '#ffffff';
   container.style.boxSizing = 'border-box';
-  container.style.padding = '15px 20px';
+  container.style.padding = '16px 20px';
   container.style.zIndex = '-9999';
+  container.style.overflow = 'hidden';
   document.body.appendChild(container);
 
   try {
@@ -470,7 +491,7 @@ export async function generateStageFollowUpPdfInstance(
     const styleTag1 = styleMatch1 ? `<style>${styleMatch1[1]}</style>` : '';
     const bodyContent1 = bodyMatch1 ? bodyMatch1[1] : page1Html;
 
-    container.innerHTML = `${styleTag1}<div style="width: 100%; background: #ffffff; color: #000000;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent1}</div>`;
+    container.innerHTML = `${styleTag1}<div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent1}</div>`;
 
     const canvas1 = await html2canvas(container, {
       scale: 2,
@@ -480,7 +501,9 @@ export async function generateStageFollowUpPdfInstance(
       logging: false,
       backgroundColor: '#ffffff',
       width: 794,
+      height: 1123,
       windowWidth: 794,
+      windowHeight: 1123,
       onclone: (clonedDoc) => {
         const styles = clonedDoc.querySelectorAll('style');
         styles.forEach(s => {
@@ -495,13 +518,15 @@ export async function generateStageFollowUpPdfInstance(
     const imgWidth1 = pdfWidth;
     const imgHeight1 = (canvas1.height * pdfWidth) / canvas1.width;
 
-    if (imgHeight1 > pdfHeight) {
+    if (Math.abs(imgHeight1 - pdfHeight) <= 3) {
+      pdf.addImage(imgData1, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+    } else if (imgHeight1 > pdfHeight) {
       const scale = pdfHeight / imgHeight1;
       const finalWidth = imgWidth1 * scale;
       const xMargin = (pdfWidth - finalWidth) / 2;
       pdf.addImage(imgData1, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
     } else {
-      pdf.addImage(imgData1, 'JPEG', 0, 0, imgWidth1, imgHeight1, undefined, 'FAST');
+      pdf.addImage(imgData1, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
     }
 
     // 2. Render each selected visit on its own page (1 page per visit)
@@ -509,13 +534,19 @@ export async function generateStageFollowUpPdfInstance(
       const visit = visitsToRender[i];
       pdf.addPage('a4', 'portrait');
 
+      container.style.height = '1123px';
+      container.style.minHeight = '1123px';
+      container.style.maxHeight = '1123px';
+      container.style.padding = '16px 20px';
+      container.style.overflow = 'hidden';
+
       const visitHtml = generateObservationReportHtml(visit, settings, isRtl, lang, false);
       const bodyMatchV = visitHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
       const styleMatchV = visitHtml.match(/<style[^>]*>([\s\S]*)<\/style>/i);
       const styleTagV = styleMatchV ? `<style>${styleMatchV[1]}</style>` : '';
       const bodyContentV = bodyMatchV ? bodyMatchV[1] : visitHtml;
 
-      container.innerHTML = `${styleTagV}<div style="width: 100%; background: #ffffff; color: #000000;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContentV}</div>`;
+      container.innerHTML = `${styleTagV}<div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContentV}</div>`;
 
       const canvasV = await html2canvas(container, {
         scale: 2,
@@ -525,7 +556,9 @@ export async function generateStageFollowUpPdfInstance(
         logging: false,
         backgroundColor: '#ffffff',
         width: 794,
+        height: 1123,
         windowWidth: 794,
+        windowHeight: 1123,
         onclone: (clonedDoc) => {
           const styles = clonedDoc.querySelectorAll('style');
           styles.forEach(s => {
@@ -540,13 +573,15 @@ export async function generateStageFollowUpPdfInstance(
       const imgWidthV = pdfWidth;
       const imgHeightV = (canvasV.height * pdfWidth) / canvasV.width;
 
-      if (imgHeightV > pdfHeight) {
+      if (Math.abs(imgHeightV - pdfHeight) <= 3) {
+        pdf.addImage(imgDataV, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+      } else if (imgHeightV > pdfHeight) {
         const scale = pdfHeight / imgHeightV;
         const finalWidth = imgWidthV * scale;
         const xMargin = (pdfWidth - finalWidth) / 2;
         pdf.addImage(imgDataV, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
       } else {
-        pdf.addImage(imgDataV, 'JPEG', 0, 0, imgWidthV, imgHeightV, undefined, 'FAST');
+        pdf.addImage(imgDataV, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
       }
     }
 
@@ -714,8 +749,8 @@ export function generateObservationReportContentHtml(
   isRtl: boolean,
   lang: string
 ): string {
-  const logoHtml = getReportSchoolLogoHtml(settings, { height: 50 });
-  const flagHtml = '<div style="display: flex; flex-direction: column; width: 48px; height: 32px; border: 1px solid #0f172a; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">' +
+  const logoHtml = getReportSchoolLogoHtml(settings, { height: 56 });
+  const flagHtml = '<div style="display: flex; flex-direction: column; width: 48px; height: 32px; border: 1.5px solid #0f172a; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">' +
     '<div style="flex: 1; background-color: #000;"></div>' +
     '<div style="flex: 1; background-color: #f00;"></div>' +
     '<div style="flex: 1; background-color: #fc0;"></div>' +
@@ -731,7 +766,7 @@ export function generateObservationReportContentHtml(
 
   const renderRow = (labelEn: string, labelAr: string, val: number | undefined) => {
     const score = val || 0;
-    const checkMark = '<span style="display: inline-block; vertical-align: middle; line-height: 1; font-weight: bold; font-size: 10pt;">✓</span>';
+    const checkMark = '<span style="display: inline-block; vertical-align: middle; line-height: 1; font-weight: 900; font-size: 11.5pt; color: #1d4ed8;">✓</span>';
     return '<tr>' +
       '<td class="criteria-col">' + (isRtl ? labelAr : labelEn) + '</td>' +
       '<td class="rating-col">' + (score === 5 ? checkMark : '') + '</td>' +
@@ -804,12 +839,12 @@ export function generateObservationReportContentHtml(
     '</div>' +
     categoriesHtml +
     '<div class="overall-box">' +
-      '<span>' + t('Total Score', 'النتيجة الكلية') + ': ' + (visit.overallScore || '-') + '/75</span>' +
-      '<span>' + t('Category', 'التقييم العام') + ': ' + (visit.overallCategory || '-') + '</span>' +
+      '<span>' + t('Total Score', 'النتيجة الكلية') + ': <b>' + (visit.overallScore || '-') + '/75</b></span>' +
+      '<span>' + t('Category', 'التقييم العام') + ': <b>' + (visit.overallCategory || '-') + '</b></span>' +
     '</div>' +
     '<div class="feedback-section">' +
       '<div class="feedback-title">' + t('Supervisor Notes & Recommendations', 'ملاحظات وتوصيات المشرف') + '</div>' +
-      '<div style="white-space: pre-wrap; margin-top: 3px; font-size: 8.5pt;">' + (visit.consolidatedNotes || 'لا توجد ملاحظات إضافية.') + '</div>' +
+      '<div class="feedback-content">' + (visit.consolidatedNotes || 'لا توجد ملاحظات إضافية.') + '</div>' +
     '</div>' +
     '<div class="signatures">' +
       '<div class="sig-block">' +
@@ -844,32 +879,34 @@ export function generateObservationReportHtml(
       '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
       '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
       '<style>' +
-        '@page { size: A4; margin: 8mm 8mm; }' +
+        '@page { size: A4 portrait; margin: 8mm 10mm; }' +
         '* { box-sizing: border-box; font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
         'html, body { height: 100%; margin: 0; padding: 0; background: #fff; }' +
-        'body { color: #0f172a; line-height: 1.3; font-size: 8.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
-        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 5px; margin-bottom: 6px; }' +
-        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 60px; }' +
+        'body { color: #0f172a; line-height: 1.35; font-size: 9.5pt; width: 100%; min-height: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
+        '.report-single-page { display: flex; flex-direction: column; justify-content: space-between; width: 100%; min-height: 275mm; height: 100%; box-sizing: border-box; }' +
+        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 8px; }' +
+        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 65px; }' +
         '.header-text { text-align: center; flex: 1; padding: 0 10px; }' +
-        '.header h1 { font-size: 13pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
-        '.header p { font-size: 8.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
-        '.title { text-align: center; font-size: 11.5pt; font-weight: 800; margin-bottom: 6px; text-decoration: underline; line-height: 1.3; color: #0f172a; }' +
-        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
-        '.meta-item { font-size: 8.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; color: #1e293b; }' +
+        '.header h1 { font-size: 14pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
+        '.header p { font-size: 9.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
+        '.title { text-align: center; font-size: 13pt; font-weight: 800; margin-bottom: 8px; text-decoration: underline; text-underline-offset: 3px; line-height: 1.3; color: #0f172a; }' +
+        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 14px; margin-bottom: 8px; border: 1.5px solid #0f172a; padding: 7px 12px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
+        '.meta-item { font-size: 9.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; color: #1e293b; }' +
         '.meta-label { font-weight: 800; margin-right: 5px; margin-left: 5px; display: inline-block; color: #0f172a; white-space: nowrap; }' +
-        '.category-title { font-size: 8.5pt; font-weight: 800; margin-top: 4px; margin-bottom: 2px; background: #e2e8f0; padding: 3px 6px; border: 1px solid #0f172a; border-bottom: none; line-height: 1.3; vertical-align: middle; color: #0f172a; }' +
-        'table { width: 100%; border-collapse: collapse; margin-bottom: 4px; table-layout: fixed; }' +
-        'th, td { border: 1px solid #0f172a; padding: 3px 4px; text-align: center; vertical-align: middle; font-size: 8.5pt; line-height: 1.25; }' +
-        'th { background: #f1f5f9; font-weight: 800; font-size: 8.5pt; height: 20px; color: #0f172a; }' +
-        '.criteria-col { text-align: ' + (isRtl ? 'right' : 'left') + '; width: 55%; font-weight: 700; vertical-align: middle; padding-left: 6px; padding-right: 6px; line-height: 1.3; color: #1e293b; }' +
-        '.rating-col { width: 9%; font-weight: bold; font-size: 9.5pt; text-align: center; vertical-align: middle; line-height: 1; }' +
-        '.feedback-section { margin-top: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; min-height: 40px; background: #f8fafc; border-radius: 4px; }' +
-        '.feedback-title { font-weight: 800; font-size: 8.5pt; margin-bottom: 2px; border-bottom: 1px dotted #0f172a; padding-bottom: 2px; line-height: 1.3; color: #0f172a; }' +
-        '.overall-box { margin-top: 6px; padding: 5px 8px; border: 1.5px solid #0f172a; font-weight: 800; text-align: center; font-size: 9.5pt; display: flex; justify-content: space-around; align-items: center; background: #f8fafc; line-height: 1.3; border-radius: 4px; }' +
-        '.signatures { margin-top: 14px; display: flex; justify-content: space-around; align-items: flex-end; text-align: center; page-break-inside: avoid; }' +
-        '.sig-block { width: 40%; }' +
-        '.sig-title { font-weight: 800; font-size: 9pt; margin-bottom: 16px; line-height: 1.3; color: #0f172a; }' +
-        '.sig-line { border-top: 1px solid #0f172a; padding-top: 3px; font-size: 8.5pt; font-weight: 800; line-height: 1.3; color: #1e293b; }' +
+        '.category-title { font-size: 9.5pt; font-weight: 800; margin-top: 5px; margin-bottom: 0px; background: #e2e8f0; padding: 4px 8px; border: 1.5px solid #0f172a; border-bottom: none; line-height: 1.3; vertical-align: middle; color: #0f172a; }' +
+        'table { width: 100%; border-collapse: collapse; margin-bottom: 4px; table-layout: fixed; border: 1.5px solid #0f172a; }' +
+        'th, td { border: 1px solid #0f172a; padding: 4.5px 6px; text-align: center; vertical-align: middle; font-size: 9.5pt; line-height: 1.25; }' +
+        'th { background: #f1f5f9; font-weight: 800; font-size: 9.5pt; height: 24px; color: #0f172a; }' +
+        '.criteria-col { text-align: ' + (isRtl ? 'right' : 'left') + '; width: 55%; font-weight: 600; vertical-align: middle; padding-left: 8px; padding-right: 8px; line-height: 1.3; color: #1e293b; }' +
+        '.rating-col { width: 9%; font-weight: bold; font-size: 10.5pt; text-align: center; vertical-align: middle; line-height: 1; }' +
+        '.overall-box { margin-top: 6px; margin-bottom: 6px; padding: 6px 10px; border: 1.5px solid #0f172a; font-weight: 800; text-align: center; font-size: 10.5pt; display: flex; justify-content: space-around; align-items: center; background: #f8fafc; line-height: 1.3; border-radius: 4px; }' +
+        '.feedback-section { margin-top: 6px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 7px 12px; min-height: 65px; flex: 1; background: #f8fafc; border-radius: 4px; display: flex; flex-direction: column; }' +
+        '.feedback-title { font-weight: 800; font-size: 9.5pt; margin-bottom: 3px; border-bottom: 1px dotted #0f172a; padding-bottom: 3px; line-height: 1.3; color: #0f172a; }' +
+        '.feedback-content { white-space: pre-wrap; margin-top: 3px; font-size: 9pt; line-height: 1.4; color: #1e293b; }' +
+        '.signatures { margin-top: auto; padding-top: 14px; padding-bottom: 2px; display: flex; justify-content: space-around; align-items: flex-end; text-align: center; page-break-inside: avoid; }' +
+        '.sig-block { width: 38%; }' +
+        '.sig-title { font-weight: 800; font-size: 9.5pt; margin-bottom: 20px; line-height: 1.3; color: #0f172a; }' +
+        '.sig-line { border-top: 1.5px solid #0f172a; padding-top: 4px; font-size: 9.5pt; font-weight: 800; line-height: 1.3; color: #1e293b; }' +
       '</style>' +
     '</head>' +
     '<body ' + bodyLoadAttr + '>' +
@@ -906,35 +943,37 @@ export function generateCombinedObservationReportsHtml(
       '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
       '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
       '<style>' +
-        '@page { size: A4; margin: 8mm 8mm; }' +
+        '@page { size: A4 portrait; margin: 8mm 10mm; }' +
         '* { box-sizing: border-box; font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }' +
         'html, body { margin: 0; padding: 0; background: #fff; }' +
-        'body { color: #0f172a; line-height: 1.3; font-size: 8.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
-        '.report-page { page-break-after: always; break-after: page; width: 100%; background: #ffffff; padding: 0; margin-bottom: 25px; }' +
+        'body { color: #0f172a; line-height: 1.35; font-size: 9.5pt; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; direction: ' + (isRtl ? 'rtl' : 'ltr') + '; text-align: ' + (isRtl ? 'right' : 'left') + '; -webkit-font-smoothing: antialiased; }' +
+        '.report-page { page-break-after: always; break-after: page; width: 100%; background: #ffffff; padding: 0; margin-bottom: 25px; min-height: 275mm; height: 100%; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }' +
         '.report-page.last-page { page-break-after: auto; break-after: auto; margin-bottom: 0; }' +
-        '@media print { .report-page { margin-bottom: 0; } }' +
-        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 5px; margin-bottom: 6px; }' +
-        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 60px; }' +
+        '@media print { .report-page { margin-bottom: 0; min-height: 275mm; page-break-after: always; break-after: page; } .report-page.last-page { page-break-after: auto; break-after: auto; } }' +
+        '.report-single-page { display: flex; flex-direction: column; justify-content: space-between; width: 100%; min-height: 275mm; height: 100%; box-sizing: border-box; }' +
+        '.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 8px; }' +
+        '.header-logo { display: flex; align-items: center; justify-content: center; min-width: 65px; }' +
         '.header-text { text-align: center; flex: 1; padding: 0 10px; }' +
-        '.header h1 { font-size: 13pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
-        '.header p { font-size: 8.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
-        '.title { text-align: center; font-size: 11.5pt; font-weight: 800; margin-bottom: 6px; text-decoration: underline; line-height: 1.3; color: #0f172a; }' +
-        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
-        '.meta-item { font-size: 8.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; color: #1e293b; }' +
+        '.header h1 { font-size: 14pt; margin: 0 0 2px; font-weight: 800; line-height: 1.3; color: #0f172a; }' +
+        '.header p { font-size: 9.5pt; margin: 0; font-weight: 700; line-height: 1.3; color: #334155; }' +
+        '.title { text-align: center; font-size: 13pt; font-weight: 800; margin-bottom: 8px; text-decoration: underline; text-underline-offset: 3px; line-height: 1.3; color: #0f172a; }' +
+        '.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 14px; margin-bottom: 8px; border: 1.5px solid #0f172a; padding: 7px 12px; background: #f8fafc; align-items: center; border-radius: 4px; }' +
+        '.meta-item { font-size: 9.5pt; font-weight: 600; line-height: 1.35; display: flex; align-items: center; color: #1e293b; }' +
         '.meta-label { font-weight: 800; margin-right: 5px; margin-left: 5px; display: inline-block; color: #0f172a; white-space: nowrap; }' +
-        '.category-title { font-size: 8.5pt; font-weight: 800; margin-top: 4px; margin-bottom: 2px; background: #e2e8f0; padding: 3px 6px; border: 1px solid #0f172a; border-bottom: none; line-height: 1.3; vertical-align: middle; color: #0f172a; }' +
-        'table { width: 100%; border-collapse: collapse; margin-bottom: 4px; table-layout: fixed; }' +
-        'th, td { border: 1px solid #0f172a; padding: 3px 4px; text-align: center; vertical-align: middle; font-size: 8.5pt; line-height: 1.25; }' +
-        'th { background: #f1f5f9; font-weight: 800; font-size: 8.5pt; height: 20px; color: #0f172a; }' +
-        '.criteria-col { text-align: ' + (isRtl ? 'right' : 'left') + '; width: 55%; font-weight: 700; vertical-align: middle; padding-left: 6px; padding-right: 6px; line-height: 1.3; color: #1e293b; }' +
-        '.rating-col { width: 9%; font-weight: bold; font-size: 9.5pt; text-align: center; vertical-align: middle; line-height: 1; }' +
-        '.feedback-section { margin-top: 6px; border: 1.5px solid #0f172a; padding: 6px 10px; min-height: 40px; background: #f8fafc; border-radius: 4px; }' +
-        '.feedback-title { font-weight: 800; font-size: 8.5pt; margin-bottom: 2px; border-bottom: 1px dotted #0f172a; padding-bottom: 2px; line-height: 1.3; color: #0f172a; }' +
-        '.overall-box { margin-top: 6px; padding: 5px 8px; border: 1.5px solid #0f172a; font-weight: 800; text-align: center; font-size: 9.5pt; display: flex; justify-content: space-around; align-items: center; background: #f8fafc; line-height: 1.3; border-radius: 4px; }' +
-        '.signatures { margin-top: 14px; display: flex; justify-content: space-around; align-items: flex-end; text-align: center; page-break-inside: avoid; }' +
-        '.sig-block { width: 40%; }' +
-        '.sig-title { font-weight: 800; font-size: 9pt; margin-bottom: 16px; line-height: 1.3; color: #0f172a; }' +
-        '.sig-line { border-top: 1px solid #0f172a; padding-top: 3px; font-size: 8.5pt; font-weight: 800; line-height: 1.3; color: #1e293b; }' +
+        '.category-title { font-size: 9.5pt; font-weight: 800; margin-top: 5px; margin-bottom: 0px; background: #e2e8f0; padding: 4px 8px; border: 1.5px solid #0f172a; border-bottom: none; line-height: 1.3; vertical-align: middle; color: #0f172a; }' +
+        'table { width: 100%; border-collapse: collapse; margin-bottom: 4px; table-layout: fixed; border: 1.5px solid #0f172a; }' +
+        'th, td { border: 1px solid #0f172a; padding: 4.5px 6px; text-align: center; vertical-align: middle; font-size: 9.5pt; line-height: 1.25; }' +
+        'th { background: #f1f5f9; font-weight: 800; font-size: 9.5pt; height: 24px; color: #0f172a; }' +
+        '.criteria-col { text-align: ' + (isRtl ? 'right' : 'left') + '; width: 55%; font-weight: 600; vertical-align: middle; padding-left: 8px; padding-right: 8px; line-height: 1.3; color: #1e293b; }' +
+        '.rating-col { width: 9%; font-weight: bold; font-size: 10.5pt; text-align: center; vertical-align: middle; line-height: 1; }' +
+        '.overall-box { margin-top: 6px; margin-bottom: 6px; padding: 6px 10px; border: 1.5px solid #0f172a; font-weight: 800; text-align: center; font-size: 10.5pt; display: flex; justify-content: space-around; align-items: center; background: #f8fafc; line-height: 1.3; border-radius: 4px; }' +
+        '.feedback-section { margin-top: 6px; margin-bottom: 6px; border: 1.5px solid #0f172a; padding: 7px 12px; min-height: 65px; flex: 1; background: #f8fafc; border-radius: 4px; display: flex; flex-direction: column; }' +
+        '.feedback-title { font-weight: 800; font-size: 9.5pt; margin-bottom: 3px; border-bottom: 1px dotted #0f172a; padding-bottom: 3px; line-height: 1.3; color: #0f172a; }' +
+        '.feedback-content { white-space: pre-wrap; margin-top: 3px; font-size: 9pt; line-height: 1.4; color: #1e293b; }' +
+        '.signatures { margin-top: auto; padding-top: 14px; padding-bottom: 2px; display: flex; justify-content: space-around; align-items: flex-end; text-align: center; page-break-inside: avoid; }' +
+        '.sig-block { width: 38%; }' +
+        '.sig-title { font-weight: 800; font-size: 9.5pt; margin-bottom: 20px; line-height: 1.3; color: #0f172a; }' +
+        '.sig-line { border-top: 1.5px solid #0f172a; padding-top: 4px; font-size: 9.5pt; font-weight: 800; line-height: 1.3; color: #1e293b; }' +
       '</style>' +
     '</head>' +
     '<body ' + bodyLoadAttr + '>' +
@@ -995,10 +1034,14 @@ export async function generateCombinedObservationReportsPdfInstance(
   container.style.left = '-9999px';
   container.style.top = '0';
   container.style.width = '794px'; // standard A4 width at 96dpi
+  container.style.height = '1123px'; // standard A4 height at 96dpi
+  container.style.minHeight = '1123px';
+  container.style.maxHeight = '1123px';
   container.style.backgroundColor = '#ffffff';
   container.style.boxSizing = 'border-box';
-  container.style.padding = '15px 20px';
+  container.style.padding = '16px 20px';
   container.style.zIndex = '-9999';
+  container.style.overflow = 'hidden';
   document.body.appendChild(container);
 
   try {
@@ -1019,7 +1062,7 @@ export async function generateCombinedObservationReportsPdfInstance(
       const styleTag = styleMatch ? `<style>${styleMatch[1]}</style>` : '';
       const bodyContent = bodyMatch ? bodyMatch[1] : htmlStr;
 
-      container.innerHTML = `${styleTag}<div style="width: 100%; background: #ffffff; color: #000000;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent}</div>`;
+      container.innerHTML = `${styleTag}<div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent}</div>`;
 
       const canvas = await html2canvas(container, {
         scale: 2,
@@ -1029,7 +1072,9 @@ export async function generateCombinedObservationReportsPdfInstance(
         logging: false,
         backgroundColor: '#ffffff',
         width: 794,
+        height: 1123,
         windowWidth: 794,
+        windowHeight: 1123,
         onclone: (clonedDoc) => {
           const styles = clonedDoc.querySelectorAll('style');
           styles.forEach(s => {
@@ -1044,13 +1089,15 @@ export async function generateCombinedObservationReportsPdfInstance(
       const imgWidth = pdfWidth;
       const imgHeight = (canvas.height * pdfWidth) / canvas.width;
 
-      if (imgHeight > pdfHeight) {
+      if (Math.abs(imgHeight - pdfHeight) <= 3) {
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+      } else if (imgHeight > pdfHeight) {
         const scale = pdfHeight / imgHeight;
         const finalWidth = imgWidth * scale;
         const xMargin = (pdfWidth - finalWidth) / 2;
         pdf.addImage(imgData, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
       } else {
-        pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
       }
     }
 
@@ -1163,10 +1210,14 @@ export async function generateObservationReportPdfInstance(
   container.style.left = '-9999px';
   container.style.top = '0';
   container.style.width = '794px'; // standard A4 width at 96dpi
+  container.style.height = '1123px'; // exact standard A4 height at 96dpi
+  container.style.minHeight = '1123px';
+  container.style.maxHeight = '1123px';
   container.style.backgroundColor = '#ffffff';
   container.style.boxSizing = 'border-box';
-  container.style.padding = '15px 20px';
+  container.style.padding = '16px 20px';
   container.style.zIndex = '-9999';
+  container.style.overflow = 'hidden';
 
   const htmlStr = generateObservationReportHtml(visit, settings, isRtl, lang, false);
   const bodyMatch = htmlStr.match(/<body[^>]*>([\s\S]*)<\/body>/i);
@@ -1175,7 +1226,7 @@ export async function generateObservationReportPdfInstance(
   const styleTag = styleMatch ? `<style>${styleMatch[1]}</style>` : '';
   const bodyContent = bodyMatch ? bodyMatch[1] : htmlStr;
 
-  container.innerHTML = `${styleTag}<div style="width: 100%; background: #ffffff; color: #000000;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent}</div>`;
+  container.innerHTML = `${styleTag}<div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent}</div>`;
   document.body.appendChild(container);
 
   try {
@@ -1187,7 +1238,9 @@ export async function generateObservationReportPdfInstance(
       logging: false,
       backgroundColor: '#ffffff',
       width: 794,
+      height: 1123,
       windowWidth: 794,
+      windowHeight: 1123,
       onclone: (clonedDoc) => {
         const styles = clonedDoc.querySelectorAll('style');
         styles.forEach(s => {
@@ -1212,14 +1265,15 @@ export async function generateObservationReportPdfInstance(
     const imgWidth = pdfWidth;
     const imgHeight = (canvas.height * pdfWidth) / canvas.width;
 
-    // Constrain height strictly to single A4 page
-    if (imgHeight > pdfHeight) {
+    if (Math.abs(imgHeight - pdfHeight) <= 3) {
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+    } else if (imgHeight > pdfHeight) {
       const scale = pdfHeight / imgHeight;
       const finalWidth = imgWidth * scale;
       const xMargin = (pdfWidth - finalWidth) / 2;
       pdf.addImage(imgData, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
     } else {
-      pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
     }
 
     return pdf;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
 import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, LessonReport, StudentSessionPerformance } from '../types';
@@ -16,6 +16,7 @@ import { GroupProfileModal } from './GroupProfileModal';
 import { getPendingHomeworkFollowUps } from '../utils/homeworkFollowUpUtils';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUtils';
+import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import confetti from 'canvas-confetti';
 
 export const LessonControlModal: React.FC = () => {
@@ -87,6 +88,7 @@ export const LessonControlModal: React.FC = () => {
     const candidateLessons = (lessons || []).filter(l => {
       if (l.id === selectedLesson.id) return false;
       if (l.deleted) return false;
+      if (l.status === 'cancelled') return false;
 
       const matchGroup = groupId && l.groupId === groupId;
       const matchStudent = (studentId && (l.studentId === studentId || l.report?.studentAttendance?.[studentId] !== undefined)) ||
@@ -151,13 +153,11 @@ export const LessonControlModal: React.FC = () => {
 
   // Cycle session override state
   const [isEditingSessionNumber, setIsEditingSessionNumber] = useState(false);
-  const [customSessionNumber, setCustomSessionNumber] = useState<number>(selectedLesson?.sessionNumber || 1);
+  const [customSessionNumber, setCustomSessionNumber] = useState<number | null>(null);
 
   useEffect(() => {
-    if (selectedLesson) {
-      setCustomSessionNumber(selectedLesson.sessionNumber || 1);
-    }
-  }, [selectedLesson?.id, selectedLesson?.sessionNumber]);
+    setCustomSessionNumber(null);
+  }, [selectedLesson?.id]);
 
   // Check pending follow-ups for this group
   const pendingFollowUps = getPendingHomeworkFollowUps(lessons, groups);
@@ -447,8 +447,17 @@ export const LessonControlModal: React.FC = () => {
   const cycleTotalSessions = targetGroup?.sessionCount || selectedLesson?.totalSessionsInPackage || 4;
   const hasCycle = Boolean(selectedLesson && !selectedLesson.isQuickLesson && !isPerLessonGroup && cycleTotalSessions > 1);
   
+  // Dynamically compute the sequential session number among NON-CANCELLED lessons in the group/student
+  const autoComputedSessionNumber = useMemo(() => {
+    return calculateSequentialSessionNumber(selectedLesson, lessons, {
+      group: targetGroup,
+      student: targetStudent,
+      students
+    });
+  }, [selectedLesson, lessons, targetGroup, targetStudent, students]);
+
   // Normalize session number strictly within 1 .. cycleTotalSessions
-  const rawSessionNumber = customSessionNumber || selectedLesson?.sessionNumber || 1;
+  const rawSessionNumber = customSessionNumber !== null ? customSessionNumber : autoComputedSessionNumber;
   const currentSessionNumber = rawSessionNumber > cycleTotalSessions
     ? (((rawSessionNumber - 1) % cycleTotalSessions) + 1)
     : Math.max(1, rawSessionNumber);

@@ -4,7 +4,7 @@ import { SchoolSettings, SchoolDayPresence, SchoolPeriodSettings, StageManager, 
 import { 
   Clock, Calendar, BookOpen, Save, CheckCircle2, 
   Plus, Trash2, ArrowRight, ArrowLeft,
-  Upload, User, Shield, Layers
+  Upload, User, Shield, Layers, RotateCcw, Sliders
 } from 'lucide-react';
 import { 
   getSchoolSettings, 
@@ -73,6 +73,34 @@ export const SchoolSettingsSection: React.FC<Props> = ({ onBack }) => {
   const [customDurations, setCustomDurations] = useState<Record<number, number>>(
     currentSettings.periodSettings.customDurations || {}
   );
+  const [periodViewMode, setPeriodViewMode] = useState<'cards' | 'table'>('cards');
+
+  const handlePeriodDurationChange = (periodNumber: number, durationMinutes: number) => {
+    const safeDuration = Math.max(10, Math.min(240, Math.round(durationMinutes)));
+    setCustomDurations(prev => {
+      const next = { ...prev };
+      if (safeDuration === defaultDuration) {
+        delete next[periodNumber];
+        delete (next as any)[String(periodNumber)];
+      } else {
+        next[periodNumber] = safeDuration;
+      }
+      return next;
+    });
+  };
+
+  const handleResetPeriodDuration = (periodNumber: number) => {
+    setCustomDurations(prev => {
+      const next = { ...prev };
+      delete next[periodNumber];
+      delete (next as any)[String(periodNumber)];
+      return next;
+    });
+  };
+
+  const handleResetAllDurations = () => {
+    setCustomDurations({});
+  };
   
   const [showToast, setShowToast] = useState(false);
   const isRtl = language === 'ar';
@@ -564,23 +592,48 @@ export const SchoolSettingsSection: React.FC<Props> = ({ onBack }) => {
       </div>
 
       {/* SECTION 5: Period Config */}
-      <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-4 shadow-2xs space-y-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-          <BookOpen className="w-3.5 h-3.5 text-primary" />
-          <span>{_t('إعداد الحصص المدرسية', 'School Period Structure', 'Schulstunden-Struktur')}</span>
-        </h3>
+      <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-4 shadow-2xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-surface-border/60">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-primary" />
+            <span>{_t('إعداد وتوقيتات الحصص المدرسية', 'School Period Structure & Timings', 'Schulstunden & Zeiten')}</span>
+          </h3>
 
+          {Object.keys(customDurations).length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                {_t(
+                  `تم تخصيص مدة ${Object.keys(customDurations).length} حصص يدوياً`,
+                  `${Object.keys(customDurations).length} periods with custom durations`,
+                  `${Object.keys(customDurations).length} Stunden manuell angepasst`
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={handleResetAllDurations}
+                className="text-[10px] font-bold text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 flex items-center gap-1 transition-colors cursor-pointer"
+                title={_t('إعادة ضبط جميع الحصص للمدة الافتراضية', 'Reset all periods to default duration', 'Alle Stunden auf Standarddauer zurücksetzen')}
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>{_t('استعادة الافتراضي للكل', 'Reset All', 'Alle zurücksetzen')}</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Global Period Parameters */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main">
-              {_t('عدد الحصص اليومية', 'Daily Periods Count', 'Tägliche Stundenanzahl')}
+            <label className="text-xs font-bold text-text-main flex items-center justify-between">
+              <span>{_t('عدد الحصص اليومية', 'Daily Periods Count', 'Tägliche Stundenanzahl')}</span>
+              <span className="text-[10px] font-normal text-text-muted">1 - 12</span>
             </label>
             <input
               type="number"
               min="1"
               max="12"
               value={periodsCount}
-              onChange={(e) => setPeriodsCount(parseInt(e.target.value) || 7)}
+              onChange={(e) => setPeriodsCount(Math.max(1, Math.min(12, parseInt(e.target.value) || 7)))}
               className="w-full px-3 py-2.5 sm:py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main font-mono"
             />
           </div>
@@ -592,46 +645,290 @@ export const SchoolSettingsSection: React.FC<Props> = ({ onBack }) => {
             <input
               type="time"
               value={firstPeriodStart}
-              onChange={(e) => setFirstPeriodStart(e.target.value)}
+              onChange={(e) => setFirstPeriodStart(e.target.value || '08:00')}
               className="w-full px-3 py-2.5 sm:py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main font-mono"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main">
-              {_t('مدة الحصة الافتراضية (دقيقة)', 'Default Duration (mins)', 'Standard-Dauer (Min.)')}
+            <label className="text-xs font-bold text-text-main flex items-center justify-between">
+              <span>{_t('مدة الحصة الافتراضية', 'Default Duration', 'Standard-Dauer')}</span>
+              <span className="text-[10px] font-normal text-text-muted">{_t('دقيقة', 'mins', 'Min.')}</span>
             </label>
-            <input
-              type="number"
-              min="15"
-              max="120"
-              value={defaultDuration}
-              onChange={(e) => setDefaultDuration(parseInt(e.target.value) || 45)}
-              className="w-full px-3 py-2.5 sm:py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main font-mono"
-            />
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min="15"
+                max="120"
+                value={defaultDuration}
+                onChange={(e) => setDefaultDuration(Math.max(15, Math.min(120, parseInt(e.target.value) || 45)))}
+                className="w-full px-3 py-2.5 sm:py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main font-mono"
+              />
+              <button
+                type="button"
+                onClick={handleResetAllDurations}
+                className="px-2.5 py-2.5 sm:py-2 text-[11px] font-bold bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main rounded-xl border border-surface-border whitespace-nowrap cursor-pointer transition-all"
+                title={_t('تطبيق هذه المدة على كافة الحصص وإلغاء التخصيص اليدوي', 'Apply to all periods & clear manual overrides', 'Auf alle anwenden')}
+              >
+                {_t('تطبيق للكل', 'Apply to All', 'Auf alle')}
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Generated Preview Table */}
-        <div className="pt-2">
-          <h4 className="text-xs font-bold text-text-main mb-2">
-            {_t('معاينة جدول أوقات الحصص اليومية:', 'Calculated Periods Timings Preview:', 'Vorschau der Stundenzeiten:')}
-          </h4>
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
-            {generatedPeriods.map((p) => (
-              <div key={p.periodNumber} className="bg-surface-hover border border-surface-border p-2.5 rounded-xl text-center space-y-1">
-                <div className="text-xs font-bold text-primary">
-                  {_t('الحصة', 'Period', 'Stunde')} {p.periodNumber}
-                </div>
-                <div className="text-[11px] font-mono font-bold text-text-main">
-                  {p.startTime} - {p.endTime}
-                </div>
-                <div className="text-[10px] text-text-muted">
-                  {p.duration} {_t('دقيقة', 'mins', 'Min.')}
-                </div>
-              </div>
-            ))}
+        {/* Interactive Manual Duration Editing & Live Preview */}
+        <div className="pt-2 space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h4 className="text-xs font-black text-text-main flex items-center gap-1.5">
+                <Sliders className="w-3.5 h-3.5 text-primary" />
+                <span>{_t('تعديل الوقت الإجمالي لكل حصة يدوياً:', 'Manual Period Duration Customization:', 'Manuelle Dauer jeder Stunde:')}</span>
+              </h4>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                {_t(
+                  'يمكنك كتابة أو تغيير مدة أي حصة بالدقائق مباشرة. يتم تلقائياً تحديث مواعيد البداية والنهاية لكافة الحصص اللاحقة وانعكاسها فورياً في الجداول والسيستم.',
+                  'Directly adjust the duration (mins) for each period. Start & end times recalculate dynamically across all tables and system.',
+                  'Passen Sie die Minutenzahl jeder Stunde an. Folgezeiten werden automatisch im System neu berechnet.'
+                )}
+              </p>
+            </div>
+
+            {/* View layout toggle: Cards or Table */}
+            <div className="flex items-center gap-1 bg-surface-hover p-0.5 rounded-lg border border-surface-border self-start sm:self-auto shrink-0">
+              <button
+                type="button"
+                onClick={() => setPeriodViewMode('cards')}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
+                  periodViewMode === 'cards' 
+                    ? 'bg-surface text-primary shadow-2xs font-black' 
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                {_t('بطاقات', 'Cards', 'Karten')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriodViewMode('table')}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
+                  periodViewMode === 'table' 
+                    ? 'bg-surface text-primary shadow-2xs font-black' 
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                {_t('جدول تفصيلي', 'Table', 'Tabelle')}
+              </button>
+            </div>
           </div>
+
+          {/* Cards View */}
+          {periodViewMode === 'cards' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 pt-1">
+              {generatedPeriods.map((p) => {
+                const isCustom = p.isCustom;
+                return (
+                  <div 
+                    key={p.periodNumber} 
+                    className={`p-3 rounded-xl border transition-all space-y-2 relative ${
+                      isCustom 
+                        ? 'bg-amber-500/5 dark:bg-amber-500/10 border-amber-500/40 dark:border-amber-500/50 shadow-xs' 
+                        : 'bg-surface-hover border-surface-border'
+                    }`}
+                  >
+                    {/* Top Row: Period Number & Custom Badge */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-black font-mono ${
+                          isCustom ? 'bg-amber-500 text-white' : 'bg-primary text-white'
+                        }`}>
+                          {p.periodNumber}
+                        </span>
+                        <span className="text-xs font-black text-text-main">
+                          {_t('الحصة', 'Period', 'Stunde')} {p.periodNumber}
+                        </span>
+                      </div>
+
+                      {isCustom ? (
+                        <div className="flex items-center gap-1">
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                            {_t('معدلة', 'Custom', 'Manuell')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleResetPeriodDuration(p.periodNumber)}
+                            className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer"
+                            title={_t(`استعادة المدة الافتراضية (${defaultDuration} دقيقة)`, `Reset to default (${defaultDuration}m)`, `Zurücksetzen (${defaultDuration}m)`)}
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[9px] text-text-muted font-medium">
+                          {_t('افتراضية', 'Default', 'Standard')}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Middle Row: Calculated Timings */}
+                    <div className="flex items-center justify-between bg-surface/80 dark:bg-surface/50 px-2.5 py-1.5 rounded-lg border border-surface-border/60">
+                      <span className="text-[10px] text-text-muted font-medium">
+                        {_t('التوقيت:', 'Timing:', 'Zeit:')}
+                      </span>
+                      <span className="text-xs font-mono font-black text-primary dir-ltr">
+                        {p.startTime} - {p.endTime}
+                      </span>
+                    </div>
+
+                    {/* Bottom Row: Duration Stepper / Number input */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="font-bold text-text-main">
+                          {_t('الوقت الإجمالي:', 'Total Duration:', 'Gesamtdauer:')}
+                        </span>
+                        <span className="font-mono text-text-muted font-bold">
+                          {p.duration} {_t('دقيقة', 'mins', 'Min.')}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handlePeriodDurationChange(p.periodNumber, p.duration - 5)}
+                          className="w-7 h-7 rounded-lg bg-surface hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main font-black text-xs border border-surface-border flex items-center justify-center cursor-pointer active:scale-95 transition-all shadow-2xs"
+                          title="-5 mins"
+                        >
+                          -5
+                        </button>
+                        
+                        <input
+                          type="number"
+                          min="10"
+                          max="180"
+                          step="1"
+                          value={p.duration}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            if (!isNaN(val)) {
+                              handlePeriodDurationChange(p.periodNumber, val);
+                            }
+                          }}
+                          className="flex-1 text-center font-mono font-black text-xs py-1 px-1 bg-surface border border-surface-border rounded-lg text-text-main shadow-2xs focus:ring-1 focus:ring-primary"
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => handlePeriodDurationChange(p.periodNumber, p.duration + 5)}
+                          className="w-7 h-7 rounded-lg bg-surface hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main font-black text-xs border border-surface-border flex items-center justify-center cursor-pointer active:scale-95 transition-all shadow-2xs"
+                          title="+5 mins"
+                        >
+                          +5
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Table View */}
+          {periodViewMode === 'table' && (
+            <div className="overflow-x-auto border border-surface-border rounded-xl">
+              <table className="w-full text-xs text-start">
+                <thead className="bg-surface-hover border-b border-surface-border text-text-muted font-bold">
+                  <tr>
+                    <th className="p-2.5 text-center w-14">#</th>
+                    <th className="p-2.5 text-start">{_t('الحصة', 'Period', 'Stunde')}</th>
+                    <th className="p-2.5 text-center">{_t('بداية الحصة', 'Start Time', 'Beginn')}</th>
+                    <th className="p-2.5 text-center">{_t('نهاية الحصة', 'End Time', 'Ende')}</th>
+                    <th className="p-2.5 text-center">{_t('الوقت الإجمالي (دقيقة)', 'Total Duration (mins)', 'Gesamtdauer (Min.)')}</th>
+                    <th className="p-2.5 text-center">{_t('الحالة', 'Status', 'Status')}</th>
+                    <th className="p-2.5 text-center">{_t('إجراء', 'Action', 'Aktion')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-surface-border">
+                  {generatedPeriods.map((p) => {
+                    const isCustom = p.isCustom;
+                    return (
+                      <tr 
+                        key={p.periodNumber}
+                        className={`hover:bg-surface-hover/60 transition-colors ${
+                          isCustom ? 'bg-amber-500/5 dark:bg-amber-500/10' : ''
+                        }`}
+                      >
+                        <td className="p-2.5 text-center font-mono font-bold text-primary">
+                          {p.periodNumber}
+                        </td>
+                        <td className="p-2.5 font-bold text-text-main">
+                          {_t('الحصة', 'Period', 'Stunde')} {p.periodNumber}
+                        </td>
+                        <td className="p-2.5 text-center font-mono font-bold text-text-main">
+                          {p.startTime}
+                        </td>
+                        <td className="p-2.5 text-center font-mono font-bold text-text-main">
+                          {p.endTime}
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <div className="flex items-center justify-center gap-1.5 max-w-[140px] mx-auto">
+                            <button
+                              type="button"
+                              onClick={() => handlePeriodDurationChange(p.periodNumber, p.duration - 5)}
+                              className="w-6 h-6 rounded bg-surface hover:bg-slate-200 dark:hover:bg-slate-700 border border-surface-border flex items-center justify-center text-[11px] font-bold cursor-pointer"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min="10"
+                              max="180"
+                              value={p.duration}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                if (!isNaN(val)) handlePeriodDurationChange(p.periodNumber, val);
+                              }}
+                              className="w-14 text-center py-1 font-mono font-black text-xs bg-surface border border-surface-border rounded shadow-2xs"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handlePeriodDurationChange(p.periodNumber, p.duration + 5)}
+                              className="w-6 h-6 rounded bg-surface hover:bg-slate-200 dark:hover:bg-slate-700 border border-surface-border flex items-center justify-center text-[11px] font-bold cursor-pointer"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {isCustom ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                              {_t('معدلة يدوياً', 'Customized', 'Manuell')}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-text-muted">
+                              {_t('افتراضية', 'Default', 'Standard')}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {isCustom ? (
+                            <button
+                              type="button"
+                              onClick={() => handleResetPeriodDuration(p.periodNumber)}
+                              className="px-2 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded transition-colors inline-flex items-center gap-1 cursor-pointer"
+                              title={_t('استعادة المدة الافتراضية', 'Reset to default duration', 'Auf Standard zurücksetzen')}
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>{_t('استعادة', 'Reset', 'Reset')}</span>
+                            </button>
+                          ) : (
+                            <span className="text-slate-300 dark:text-slate-700">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>

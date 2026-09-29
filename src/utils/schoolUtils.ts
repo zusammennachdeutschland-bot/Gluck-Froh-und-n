@@ -94,14 +94,20 @@ export interface CalculatedPeriod {
 }
 
 export function calculatePeriodsTimings(periodSettings: SchoolPeriodSettings): CalculatedPeriod[] {
-  const { periodsCount, firstPeriodStart, defaultDuration, customDurations = {} } = periodSettings;
+  if (!periodSettings) return [];
+  const { periodsCount = 7, firstPeriodStart = '08:00', defaultDuration = 45, customDurations = {} } = periodSettings;
   const list: CalculatedPeriod[] = [];
   
-  let currentMinutes = parseTimeToMinutes(firstPeriodStart);
+  let currentMinutes = parseTimeToMinutes(firstPeriodStart || '08:00');
+  const fallbackDuration = Number(defaultDuration) > 0 ? Number(defaultDuration) : 45;
+  const count = Math.max(1, Math.min(16, Number(periodsCount) || 7));
   
-  for (let i = 1; i <= periodsCount; i++) {
-    const isCustom = customDurations[i] !== undefined;
-    const duration = isCustom ? customDurations[i] : defaultDuration;
+  for (let i = 1; i <= count; i++) {
+    // Check both number and string keys (e.g., 1 and "1")
+    const rawVal = customDurations ? (customDurations[i] ?? (customDurations as any)[String(i)]) : undefined;
+    const parsedVal = rawVal !== undefined && rawVal !== null && !isNaN(Number(rawVal)) ? Number(rawVal) : null;
+    const isCustom = parsedVal !== null && parsedVal > 0;
+    const duration = isCustom ? parsedVal : fallbackDuration;
     
     const startTimeStr = formatMinutesToTime(currentMinutes);
     const endTimeStr = formatMinutesToTime(currentMinutes + duration);

@@ -11,7 +11,7 @@ import {
 import { ArabicParentReportModal } from './ArabicParentReportModal';
 
 export const SessionHistoryView: React.FC = () => {
-  const { lessons: activeLessons, getHistoricalLessons, students, groups, profile, openLessonControl, updateLesson, saveLessonReport, t } = useApp();
+  const { lessons: activeLessons, getHistoricalLessons, students, groups, profile, openLessonControl, updateLesson, saveLessonReport, t, language } = useApp();
 
   const [lessons, setLessons] = useState<Lesson[]>(activeLessons);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -110,7 +110,7 @@ export const SessionHistoryView: React.FC = () => {
   const completedCount = lessons.filter(l => l.status === 'completed').length;
   const cancelledCount = lessons.filter(l => l.status === 'cancelled').length;
   const pendingCount = lessons.filter(l => isPendingStatus(l.status)).length;
-  const totalHours = (lessons.reduce((acc, l) => acc + (l.durationMinutes || l.duration || 60), 0) / 60).toFixed(1);
+  const totalHours = (lessons.filter(l => l.status !== 'cancelled').reduce((acc, l) => acc + (l.durationMinutes || l.duration || 60), 0) / 60).toFixed(1);
 
   return (
     <div className="space-y-4  font-sans">
@@ -280,19 +280,36 @@ export const SessionHistoryView: React.FC = () => {
             const formattedDate = lesson.date ? lesson.date.split('-').reverse().join('/') : '';
             
             // Attendance Status formatting
-            const reportAtt = lesson.report?.attendanceStatus || (lesson.status === 'completed' ? 'present' : lesson.status === 'cancelled' ? 'absent' : 'present');
-            const attBadgeClass = 
-              reportAtt === 'present' ? 'bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border-primary-border dark:border-primary-border'
-              : reportAtt === 'late' ? 'bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border-primary-border dark:border-primary-border'
-              : 'bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border-primary-border dark:border-primary-border';
+            const isCancelled = lesson.status === 'cancelled';
+            const reportAtt = isCancelled 
+              ? 'cancelled' 
+              : (lesson.report?.attendanceStatus || (lesson.status === 'completed' ? 'present' : 'present'));
 
-            const attText = reportAtt === 'present' ? `${t('att_present')} ✓` : reportAtt === 'late' ? `${t('att_late')} ⚠️` : `${t('att_absent')} ✕`;
+            const attBadgeClass = isCancelled
+              ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
+              : reportAtt === 'present' ? 'bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border-primary-border dark:border-primary-border'
+              : reportAtt === 'late' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+              : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20';
+
+            const attText = isCancelled
+              ? `${t('status_cancelled')} ⚪`
+              : reportAtt === 'present' ? `${t('att_present')} ✓` 
+              : reportAtt === 'late' ? `${t('att_late')} ⚠️` 
+              : `${t('att_absent')} ✕`;
 
             // Payment badge
             const isPaid = lesson.paymentStatus === 'paid';
-            const payBadgeClass = isPaid
-              ? 'bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border'
-              : 'bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border';
+            const payBadgeClass = isCancelled
+              ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700'
+              : isPaid
+                ? 'bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary border border-primary-border'
+                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20';
+
+            const payText = isCancelled
+              ? (language === 'ar' ? 'ملغاة (غير محتسبة)' : 'Not billed')
+              : isPaid 
+                ? `${t('payments_paid')} ✓` 
+                : t('payments_unpaid');
 
             return (
               <div
@@ -317,7 +334,7 @@ export const SessionHistoryView: React.FC = () => {
                       {attText}
                     </span>
                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${payBadgeClass}`}>
-                      {isPaid ? `${t('payments_paid')} ✓` : t('payments_unpaid')}
+                      {payText}
                     </span>
                   </div>
                 </div>
@@ -343,7 +360,13 @@ export const SessionHistoryView: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold">
-                      <span>{t('lesson_session_num')} ({lesson.sessionNumber || 1} / {lesson.totalSessionsInPackage || 8})</span>
+                      {lesson.status === 'cancelled' ? (
+                        <span className="text-red-500 font-bold bg-red-50 dark:bg-red-950/30 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-900/40">
+                          {t('status_cancelled')}
+                        </span>
+                      ) : (
+                        <span>{t('lesson_session_num')} ({lesson.sessionNumber || 1} / {lesson.totalSessionsInPackage || 8})</span>
+                      )}
                       
                       {lesson.studentName && isGroup && (
                         <span className="text-text-muted/70">• {t('daily_stats_student')}: {lesson.studentName}</span>
