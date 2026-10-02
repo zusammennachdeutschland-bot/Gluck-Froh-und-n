@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatLocalDate } from '../utils/timeUtils';
+import { isPendingStatus } from '../utils/lessonUtils';
 import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -9,20 +10,22 @@ import { SyncCenterModal } from './sync/SyncCenterModal';
 import { pairWithPeer } from '../services/sync/syncClient';
 
 export const Header: React.FC = () => {
-  const { language } = useApp();
-  
   const { 
     activeTab,
     setActiveTab,
     profile, 
     notifications, 
     lessons, 
+    groups,
+    students,
+    dismissedDashboardLessonIds = [],
     openLessonControl, 
     refreshCalendarAndDashboard, 
     setIsRecentlyDeletedModalOpen,
     recentlyDeleted,
     t,
     _t,
+    language,
     syncState,
     isSyncReady,
     connectionState,
@@ -149,48 +152,98 @@ export const Header: React.FC = () => {
     addLog(`Renamed peer to ${newName}`);
   };
 
-  const urgent30MinLesson = useMemo(() => {
-    if (profile.enableLessonAlerts === false && profile.enableBrowserPush === false) return null;
-    const now = new Date();
-    const todayStr = formatLocalDate(now);
-    const nowMins = now.getHours() * 60 + now.getMinutes();
+  // Dynamic Time-of-Day Greeting with Teacher Name (e.g. "Good Evening, Amr! 👋" or "مساء الخير، عمرو! 👋")
+  const teacherName = useMemo(() => {
+    if (language === 'ar') {
+      return profile?.displayNameAr?.trim() || profile?.nameAr?.trim() || profile?.displayName?.trim() || profile?.displayNameEn?.trim() || profile?.nameEn?.trim() || '';
+    } else {
+      return profile?.displayNameEn?.trim() || profile?.nameEn?.trim() || profile?.displayName?.trim() || profile?.displayNameAr?.trim() || profile?.nameAr?.trim() || '';
+    }
+  }, [language, profile?.displayName, profile?.displayNameAr, profile?.displayNameEn, profile?.nameAr, profile?.nameEn]);
 
-    const upcoming = lessons.filter(l => {
-      if (l.date !== todayStr || l.status !== 'scheduled') return false;
-      const parts = l.time.split(':').map(n => parseInt(n, 10));
-      if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) return false;
-      const lMins = parts[0] * 60 + parts[1];
-      const diff = lMins - nowMins;
-      return diff >= 0 && diff <= 30;
+  const greetingText = useMemo(() => {
+    const hour = new Date().getHours();
+    const name = teacherName;
+    const enName = name ? `, ${name}!` : '';
+    const arName = name ? `، ${name}!` : '';
+    const deName = name ? `, ${name}!` : '';
+
+    if (hour < 12) {
+      return _t(`صباح الخير${arName} 👋`, `Good Morning${enName} 👋`, `Guten Morgen${deName} 👋`);
+    } else if (hour < 17) {
+      return _t(`مساء الخير${arName} 👋`, `Good Afternoon${enName} 👋`, `Guten Tag${deName} 👋`);
+    } else {
+      return _t(`مساء الخير${arName} 👋`, `Good Evening${enName} 👋`, `Guten Abend${deName} 👋`);
+    }
+  }, [_t, teacherName]);
+
+  // Today's Date String
+  const todayStr = useMemo(() => formatLocalDate(new Date()), []);
+
+  // Today's lessons
+  const todaysLessons = useMemo(() => {
+    return lessons.filter(l => l.date === todayStr && !dismissedDashboardLessonIds.includes(l.id));
+  }, [lessons, dismissedDashboardLessonIds, todayStr]);
+
+  // Total lessons count
+  const lessonsCount = todaysLessons.length;
+
+  // Unique students scheduled today (or total active students)
+  const todayStudentsCount = useMemo(() => {
+    const studentSet = new Set<string>();
+    todaysLessons.forEach(l => {
+      if (l.studentId) {
+        studentSet.add(l.studentId);
+      } else if (l.groupId && l.groupId !== 'quick_group') {
+        const groupStudents = students.filter(s => s.groupId === l.groupId);
+        if (groupStudents.length > 0) {
+          groupStudents.forEach(s => studentSet.add(s.id));
+        } else {
+          studentSet.add(`group_${l.groupId}`);
+        }
+      } else if (l.studentName) {
+        studentSet.add(l.studentName);
+      }
     });
+    return studentSet.size > 0 ? studentSet.size : (students?.length || 0);
+  }, [todaysLessons, students]);
 
-    return upcoming[0] || null;
-  }, [lessons, profile.enableLessonAlerts, profile.enableBrowserPush]);
+  // Completed / resolved count & percent done
+  const closedCount = useMemo(() => {
+    return todaysLessons.filter(l => l.status === 'completed' || l.status === 'cancelled').length;
+  }, [todaysLessons]);
+
+  const percentDone = useMemo(() => {
+    return lessonsCount > 0 ? Math.round((closedCount / lessonsCount) * 100) : 0;
+  }, [lessonsCount, closedCount]);
 
   return (
     <>
-      {/* Premium Safe Area Spacer for Android Status Bar */}
+      {/* Compact Safe Area Spacer for Android / iOS Status Bar */}
       <div 
         className="bg-surface dark:bg-black select-none max-w-lg mx-auto w-full shrink-0 transition-colors" 
-        style={{ height: 'max(24px, env(safe-area-inset-top, 24px))' }}
+        style={{ height: 'max(14px, env(safe-area-inset-top, 14px))' }}
       />
 
-      {/* Compact Header */}
+      {/* Uniform Compact Teacher Dashboard Header */}
       <header className="bg-surface dark:bg-black border-b border-surface-border/80 px-2.5 py-1.5 sm:px-3.5 sm:py-2 sticky top-0 z-30 transition-colors shadow-2xs">
         <div className="flex items-center justify-between gap-2 sm:gap-3 max-w-lg mx-auto">
           
-          {/* Start: Greeting / Active Tab Name */}
+          {/* Start: Greeting & Stats (Home) or Tab Title (Other tabs) */}
           <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
             <div className="leading-tight min-w-0 flex-1">
               {activeTab === 'home' ? (
                 <>
-                  <p className="text-[9.5px] sm:text-[10px] font-black uppercase tracking-wider text-primary dark:text-primary-hover flex items-center gap-1">
-                    <span>{_t('مرحباً بك', 'WELCOME', 'WILLKOMMEN')}</span>
-                    <span className="inline-block animate-wave text-[10px] sm:text-[11px]">👋</span>
-                  </p>
-                  <h1 className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-slate-100 leading-snug whitespace-normal break-words truncate">
-                    {profile.displayName || _t('المعلم', 'Teacher', 'Lehrer')}
+                  <h1 className="text-xs sm:text-[13px] font-bold text-slate-900 dark:text-slate-100 leading-tight truncate flex items-center gap-1">
+                    <span>{greetingText}</span>
                   </h1>
+                  <p className="text-[9.5px] sm:text-[10px] font-medium text-text-muted dark:text-slate-400 tracking-tight leading-tight truncate flex items-center gap-1 mt-0.5">
+                    <span>{lessonsCount} {_t('حصص', 'Lessons', 'Lektionen')}</span>
+                    <span className="text-slate-300 dark:text-slate-600 select-none">•</span>
+                    <span>{todayStudentsCount} {_t('طلاب', 'Students', 'Schüler')}</span>
+                    <span className="text-slate-300 dark:text-slate-600 select-none">•</span>
+                    <span className="font-semibold text-primary dark:text-primary-hover">{percentDone}% {_t('مكتمل', 'Done', 'Erledigt')}</span>
+                  </p>
                 </>
               ) : (
                 <>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   User, Mail, DollarSign, Calendar, Clock, Target, 
@@ -21,6 +21,15 @@ export const TeacherProfileSection: React.FC<Props> = ({ onBack }) => {
   const [displayNameAr, setDisplayNameAr] = useState(profile.displayNameAr || profile.nameAr || '');
   const [email, setEmail] = useState(profile.email || '');
   const [currency, setCurrency] = useState(profile.currency || 'EGP');
+
+  // Keep local state synced if profile updates externally
+  useEffect(() => {
+    setDisplayName(profile.displayName || '');
+    setDisplayNameEn(profile.displayNameEn || profile.nameEn || '');
+    setDisplayNameAr(profile.displayNameAr || profile.nameAr || '');
+    setEmail(profile.email || '');
+    setCurrency(profile.currency || 'EGP');
+  }, [profile.displayName, profile.displayNameEn, profile.displayNameAr, profile.nameEn, profile.nameAr, profile.email, profile.currency]);
 
   // Goals
   const [weeklyGoal, setWeeklyGoal] = useState<string>(
@@ -51,14 +60,16 @@ export const TeacherProfileSection: React.FC<Props> = ({ onBack }) => {
     const parsedWeekly = rawWeekly ? Math.max(0, parseFloat(rawWeekly)) : undefined;
     const parsedMonthly = rawMonthly ? Math.max(0, parseFloat(rawMonthly)) : undefined;
 
-    const primaryName = displayName.trim() || displayNameEn.trim() || displayNameAr.trim() || 'Teacher';
+    const cleanedEn = displayNameEn.trim();
+    const cleanedAr = displayNameAr.trim();
+    const primaryName = (language === 'ar' ? (cleanedAr || cleanedEn) : (cleanedEn || cleanedAr)) || displayName.trim() || 'Teacher';
 
     updateProfile({
       displayName: primaryName,
-      displayNameEn: displayNameEn.trim(),
-      displayNameAr: displayNameAr.trim(),
-      nameEn: displayNameEn.trim(),
-      nameAr: displayNameAr.trim(),
+      displayNameEn: cleanedEn || primaryName,
+      displayNameAr: cleanedAr || primaryName,
+      nameEn: cleanedEn || primaryName,
+      nameAr: cleanedAr || primaryName,
       email: email.trim(),
       currency,
       avatarUrl: undefined,
@@ -186,8 +197,9 @@ export const TeacherProfileSection: React.FC<Props> = ({ onBack }) => {
               type="text"
               value={displayNameEn}
               onChange={e => {
-                setDisplayNameEn(e.target.value);
-                if (!displayName) setDisplayName(e.target.value);
+                const val = e.target.value;
+                setDisplayNameEn(val);
+                if (language !== 'ar') setDisplayName(val);
               }}
               placeholder="e.g. Herr Omar Hassan"
               className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold focus:ring-1 focus:ring-primary outline-none transition-all"
@@ -208,8 +220,9 @@ export const TeacherProfileSection: React.FC<Props> = ({ onBack }) => {
               type="text"
               value={displayNameAr}
               onChange={e => {
-                setDisplayNameAr(e.target.value);
-                if (!displayName) setDisplayName(e.target.value);
+                const val = e.target.value;
+                setDisplayNameAr(val);
+                if (language === 'ar') setDisplayName(val);
               }}
               placeholder="مثال: أ. عمر حسن"
               dir="rtl"

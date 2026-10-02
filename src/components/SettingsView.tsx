@@ -170,12 +170,16 @@ export const SettingsView: React.FC = () => {
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanedEn = displayNameEn.trim();
+    const cleanedAr = displayNameAr.trim();
+    const primaryName = (language === 'ar' ? (cleanedAr || cleanedEn) : (cleanedEn || cleanedAr)) || displayName.trim() || 'Teacher';
+
     updateProfile({ 
-      displayName: displayName.trim() || 'Teacher', 
-      displayNameEn: displayNameEn.trim(),
-      displayNameAr: displayNameAr.trim(),
-      nameEn: displayNameEn.trim(),
-      nameAr: displayNameAr.trim(),
+      displayName: primaryName, 
+      displayNameEn: cleanedEn || primaryName,
+      displayNameAr: cleanedAr || primaryName,
+      nameEn: cleanedEn || primaryName,
+      nameAr: cleanedAr || primaryName,
       email, 
       currency,
       weeklyWorkingHours
