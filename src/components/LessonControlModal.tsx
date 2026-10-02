@@ -5,7 +5,7 @@ import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, Lesso
 import { 
   X, Play, Pause, Square, Video, MapPin, Send, Phone, CheckCircle2, Check,
   Clock, AlertCircle, Sparkles, FileText, Award, DollarSign, ExternalLink, Navigation,
-  Zap, UserPlus, XCircle, Ban, Edit2, Plus, Minus, ClipboardCheck
+  Zap, UserPlus, XCircle, Ban, Edit2, Plus, Minus, ClipboardCheck, Wallet, Landmark
 } from 'lucide-react';
 import { ParentSummaryModal } from './ParentSummaryModal';
 import { StudentSessionPerformanceSelector } from './StudentSessionPerformanceSelector';
@@ -17,6 +17,7 @@ import { getPendingHomeworkFollowUps } from '../utils/homeworkFollowUpUtils';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUtils';
 import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
+import { getStudentCyclePricing } from '../utils/paymentUtils';
 import confetti from 'canvas-confetti';
 
 export const LessonControlModal: React.FC = () => {
@@ -37,7 +38,10 @@ export const LessonControlModal: React.FC = () => {
     resumeActiveLessonTimer,
     endActiveLessonTimer,
     t,
-    _t
+    _t,
+    financeAccounts,
+    markCyclePaymentPaid,
+    payments
   } = useApp();
 
   // Cancel Lesson state
@@ -154,6 +158,16 @@ export const LessonControlModal: React.FC = () => {
   // Cycle session override state
   const [isEditingSessionNumber, setIsEditingSessionNumber] = useState(false);
   const [customSessionNumber, setCustomSessionNumber] = useState<number | null>(null);
+
+  // Payment Status & Receiving Account Controls (Integrated with Finance System)
+  const [isLessonPaid, setIsLessonPaid] = useState<boolean>(selectedLesson?.paymentStatus === 'paid');
+  const [paymentAmountInput, setPaymentAmountInput] = useState<number>(() => {
+    return selectedLesson?.amountPaid || selectedLesson?.amountDue || 200;
+  });
+  const [selectedReceivingAccountId, setSelectedReceivingAccountId] = useState<string>(() => {
+    return financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+  });
+  const [paymentToastMessage, setPaymentToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setCustomSessionNumber(null);
@@ -499,6 +513,67 @@ export const LessonControlModal: React.FC = () => {
     setIsEditingSessionNumber(false);
   };
 
+  // Synchronize payment details with current lesson & student pricing
+  useEffect(() => {
+    if (selectedLesson) {
+      const isPaid = selectedLesson.paymentStatus === 'paid' || selectedLesson.report?.paymentStatus === 'paid';
+      setIsLessonPaid(isPaid);
+      const pricing = targetStudent ? getStudentCyclePricing(targetStudent, targetGroup) : null;
+      const defaultAmt = selectedLesson.amountPaid || selectedLesson.amountDue || pricing?.amountDue || pricing?.pricePerSession || 200;
+      setPaymentAmountInput(defaultAmt);
+      if (targetGroup?.defaultFinanceAccountId && financeAccounts.some(a => a.id === targetGroup.defaultFinanceAccountId && !a.deleted)) {
+        setSelectedReceivingAccountId(targetGroup.defaultFinanceAccountId);
+      } else {
+        setSelectedReceivingAccountId(financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash');
+      }
+    }
+  }, [selectedLesson?.id]);
+
+  const handleTogglePaymentPaid = (markPaid: boolean) => {
+    setIsLessonPaid(markPaid);
+    if (!selectedLesson) return;
+
+    const studentId = targetStudent?.id || selectedLesson.studentId || selectedLesson.id || 'quick_student';
+    const studentName = targetStudent?.name || selectedLesson.studentName || selectedLesson.title;
+    const groupId = targetGroup?.id || selectedLesson.groupId || '';
+    const groupName = targetGroup?.name || selectedLesson.groupName || 'Gruppe';
+    const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+    const amount = paymentAmountInput > 0 ? paymentAmountInput : (selectedLesson.amountDue || 200);
+
+    if (markPaid) {
+      markCyclePaymentPaid({
+        studentId,
+        studentName,
+        groupId,
+        groupName,
+        amountDue: amount,
+        amountPaid: amount,
+        lessonDates: [selectedLesson.date],
+        lessonIds: [selectedLesson.id],
+        accountId: targetAcc,
+        notes: `سداد حصة: ${studentName} (${selectedLesson.date})`
+      });
+
+      updateLesson(selectedLesson.id, {
+        paymentStatus: 'paid',
+        amountPaid: amount,
+      });
+
+      setPaymentToastMessage(_t(`تم تسجيل سداد ${amount} EGP في المالية بنجاح! ✓`, `Recorded payment of ${amount} EGP in Finance! ✓`, `Zahlung von ${amount} EGP in Finanzen erfasst! ✓`));
+      setTimeout(() => setPaymentToastMessage(null), 3500);
+      try {
+        confetti({ particleCount: 60, spread: 65, origin: { y: 0.6 } });
+      } catch {}
+    } else {
+      updateLesson(selectedLesson.id, {
+        paymentStatus: 'pending',
+        amountPaid: 0,
+      });
+      setPaymentToastMessage(_t('تم تحويل حالة الحصة إلى معلقة (لم تسدد)', 'Payment marked as pending', 'Zahlung als ausstehend markiert'));
+      setTimeout(() => setPaymentToastMessage(null), 2500);
+    }
+  };
+
   // Recipient Contact Resolution (Parent Phone/Username > Student Phone/Username > Quick Lesson Contact)
   const resolvedRecipient = resolveStudentWhatsAppContact(targetStudent, {
     quickParentPhone: selectedLesson?.quickParentPhone,
@@ -628,10 +703,33 @@ export const LessonControlModal: React.FC = () => {
       status: 'completed',
       sessionNumber: currentSessionNumber,
       totalSessionsInPackage: cycleTotalSessions,
+      paymentStatus: isLessonPaid ? 'paid' : (selectedLesson.paymentStatus || 'pending'),
+      amountPaid: isLessonPaid ? paymentAmountInput : (selectedLesson.amountPaid || 0),
       recordingLink: lessonRecordingLink.trim() || undefined,
       recordingLink2: lessonRecordingLink2.trim() || undefined,
       report: reportData
     });
+
+    if (isLessonPaid && paymentAmountInput > 0 && selectedLesson.paymentStatus !== 'paid') {
+      const studentId = targetStudent?.id || selectedLesson.studentId || selectedLesson.id || 'quick_student';
+      const studentName = targetStudent?.name || selectedLesson.studentName || selectedLesson.title;
+      const groupId = targetGroup?.id || selectedLesson.groupId || '';
+      const groupName = targetGroup?.name || selectedLesson.groupName || 'Gruppe';
+      const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+
+      markCyclePaymentPaid({
+        studentId,
+        studentName,
+        groupId,
+        groupName,
+        amountDue: paymentAmountInput,
+        amountPaid: paymentAmountInput,
+        lessonDates: [selectedLesson.date],
+        lessonIds: [selectedLesson.id],
+        accountId: targetAcc,
+        notes: `سداد حصة: ${studentName} (${selectedLesson.date})`
+      });
+    }
     endActiveLessonTimer();
     storage.removeItem(`dl_draft_report_${selectedLesson.id}`);
     setIsEditingReport(false);
@@ -1818,6 +1916,133 @@ export const LessonControlModal: React.FC = () => {
                           );
                         })}
                       </div>
+                    </div>
+
+                    {/* PAYMENT COLLECTION & FINANCE RECORDING CARD */}
+                    <div className="p-3 bg-surface-hover/80 dark:bg-slate-800/60 border border-surface-border rounded-xl space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                            <Wallet className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-black text-text-main">
+                              {_t('حالة السداد والرسوم المالية', 'Payment & Finance Status', 'Zahlungsstatus & Honorar')}
+                            </h4>
+                            <span className="text-[10.5px] text-text-muted font-bold">
+                              {_t('المبلغ المقدر:', 'Calculated Fee:', 'Berechneter Betrag:')} {paymentAmountInput} {profile.currency || 'EGP'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <span className={`text-[10.5px] font-black px-2 py-0.5 rounded-full ${
+                          isLessonPaid 
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' 
+                            : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                        }`}>
+                          {isLessonPaid ? _t('تم الدفع في المالية ✓', 'Paid ✓', 'Bezahlt ✓') : _t('معلق (لم يسدد) ⏳', 'Pending ⏳', 'Ausstehend ⏳')}
+                        </span>
+                      </div>
+
+                      {/* Payment Status Toggle Buttons */}
+                      <div className="grid grid-cols-2 gap-1.5 p-1 bg-surface rounded-lg border border-surface-border">
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePaymentPaid(true)}
+                          className={`py-2 px-2 rounded-md text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                            isLessonPaid
+                              ? 'bg-emerald-600 text-white shadow-2xs scale-[1.02]'
+                              : 'text-text-muted hover:bg-surface-hover hover:text-text-main'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{_t('تم دفع الحصة (تسجيل بالمالية)', 'Mark as Paid (Finance)', 'Als bezahlt markieren')}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePaymentPaid(false)}
+                          className={`py-2 px-2 rounded-md text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                            !isLessonPaid
+                              ? 'bg-amber-600 text-white shadow-2xs scale-[1.02]'
+                              : 'text-text-muted hover:bg-surface-hover hover:text-text-main'
+                          }`}
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>{_t('لم تسدد بعد (معلقة)', 'Pending (Not Paid)', 'Noch ausstehend')}</span>
+                        </button>
+                      </div>
+
+                      {/* Feedback Toast Notice */}
+                      {paymentToastMessage && (
+                        <div className="py-1 px-2.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg text-[11px] font-black text-center animate-in fade-in">
+                          {paymentToastMessage}
+                        </div>
+                      )}
+
+                      {/* When Paid: Options for Receiving Account & Amount */}
+                      {isLessonPaid && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1.5 border-t border-surface-border/60 animate-in fade-in duration-200">
+                          <div className="space-y-1">
+                            <label className="text-[10.5px] font-bold text-text-muted flex items-center gap-1">
+                              <Landmark className="w-3 h-3 text-primary" />
+                              <span>{_t('حساب الإيداع في المالية:', 'Receiving Account:', 'Konto für Einzahlung:')}</span>
+                            </label>
+                            <select
+                              value={selectedReceivingAccountId}
+                              onChange={(e) => {
+                                setSelectedReceivingAccountId(e.target.value);
+                                if (isLessonPaid) {
+                                  // Re-sync with new account
+                                  const studentId = targetStudent?.id || selectedLesson.studentId || selectedLesson.id || 'quick_student';
+                                  const studentName = targetStudent?.name || selectedLesson.studentName || selectedLesson.title;
+                                  const groupId = targetGroup?.id || selectedLesson.groupId || '';
+                                  const groupName = targetGroup?.name || selectedLesson.groupName || 'Gruppe';
+                                  markCyclePaymentPaid({
+                                    studentId,
+                                    studentName,
+                                    groupId,
+                                    groupName,
+                                    amountDue: paymentAmountInput,
+                                    amountPaid: paymentAmountInput,
+                                    lessonDates: [selectedLesson.date],
+                                    lessonIds: [selectedLesson.id],
+                                    accountId: e.target.value,
+                                    notes: `سداد حصة: ${studentName} (${selectedLesson.date})`
+                                  });
+                                }
+                              }}
+                              className="w-full px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-bold text-text-main focus:ring-1 focus:ring-primary focus:outline-none"
+                            >
+                              {financeAccounts.filter(a => !a.deleted).map(acc => (
+                                <option key={acc.id} value={acc.id}>
+                                  {acc.name} ({acc.currentBalance.toLocaleString()} {acc.currency || 'EGP'})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10.5px] font-bold text-text-muted flex items-center gap-1">
+                              <DollarSign className="w-3 h-3 text-emerald-600" />
+                              <span>{_t('المبلغ المحصل:', 'Amount Collected:', 'Eingenommener Betrag:')}</span>
+                            </label>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                value={paymentAmountInput}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  setPaymentAmountInput(val);
+                                }}
+                                className="flex-1 px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-mono font-black text-text-main focus:ring-1 focus:ring-primary focus:outline-none"
+                                placeholder="0"
+                              />
+                              <span className="text-xs font-bold text-text-muted">{profile.currency || 'EGP'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Validation Alerts */}

@@ -341,27 +341,27 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
       {totalStudentsNeedingPayment > 0 && (
         <div 
           onClick={() => onNavigateTab?.('student-payments')}
-          className="bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/25 rounded-xl p-2.5 sm:p-3 flex items-center justify-between gap-3 cursor-pointer transition-all shadow-2xs group"
+          className="bg-primary/10 hover:bg-primary/15 border border-primary/25 rounded-xl p-2.5 sm:p-3 flex items-center justify-between gap-3 cursor-pointer transition-all shadow-2xs group"
         >
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-primary/20 text-primary flex items-center justify-center shrink-0">
               <Users className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                <h4 className="font-bold text-xs sm:text-sm text-text-main group-hover:text-amber-600 transition-colors">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                <h4 className="font-bold text-xs sm:text-sm text-text-main group-hover:text-primary transition-colors">
                   {_t('مستحقات طلاب بحاجة إلى تحصيل', 'Student Payments Due', 'Fällige Schülerzahlungen')}
                 </h4>
               </div>
               <p className="text-[11px] text-text-muted mt-0.5">
                 {totalStudentsNeedingPayment} {_t('طلاب لديهم حصص أو دورات مكتملة', 'students awaiting payment', 'ausstehende Zahlungen')}
                 {' • '}
-                <span className="font-bold text-amber-600 dark:text-amber-400 font-sans">{totalAmountDueFromStudents.toLocaleString()} EGP</span>
+                <span className="font-bold text-primary font-sans">{totalAmountDueFromStudents.toLocaleString()} EGP</span>
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1 text-[11px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/15 px-2.5 py-1 rounded-lg shrink-0 group-hover:bg-amber-500 group-hover:text-white transition shadow-2xs">
+          <div className="flex items-center gap-1 text-[11px] font-bold text-primary bg-primary/15 px-2.5 py-1 rounded-lg shrink-0 group-hover:bg-primary group-hover:text-white transition shadow-2xs">
             <span>{_t('تحصيل', 'Collect', 'Kassieren')}</span>
             <ChevronLeft className="w-3.5 h-3.5 rtl:rotate-0 ltr:rotate-180" />
           </div>

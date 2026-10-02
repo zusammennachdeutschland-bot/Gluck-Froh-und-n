@@ -152,18 +152,35 @@ export const Header: React.FC = () => {
     addLog(`Renamed peer to ${newName}`);
   };
 
-  // Dynamic Time-of-Day Greeting with Teacher Name (e.g. "Good Evening, Amr! 👋" or "مساء الخير، عمرو! 👋")
-  const teacherName = useMemo(() => {
+  // Extract first name (clearing optional titles like Herr, Mr., أ., د.)
+  const teacherFirstName = useMemo(() => {
+    let rawName = '';
     if (language === 'ar') {
-      return profile?.displayNameAr?.trim() || profile?.nameAr?.trim() || profile?.displayName?.trim() || profile?.displayNameEn?.trim() || profile?.nameEn?.trim() || '';
+      rawName = profile?.displayNameAr?.trim() || profile?.nameAr?.trim() || profile?.displayName?.trim() || profile?.displayNameEn?.trim() || profile?.nameEn?.trim() || '';
     } else {
-      return profile?.displayNameEn?.trim() || profile?.nameEn?.trim() || profile?.displayName?.trim() || profile?.displayNameAr?.trim() || profile?.nameAr?.trim() || '';
+      rawName = profile?.displayNameEn?.trim() || profile?.nameEn?.trim() || profile?.displayName?.trim() || profile?.displayNameAr?.trim() || profile?.nameAr?.trim() || '';
     }
+
+    if (!rawName) return '';
+
+    const parts = rawName.split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return '';
+
+    const titles = new Set([
+      'herr', 'frau', 'mr', 'mr.', 'mrs', 'mrs.', 'ms', 'ms.', 'dr', 'dr.', 'prof', 'prof.',
+      'أ.', 'أستاذ', 'أستاذة', 'الاستاذ', 'الأستاذ', 'الأستاذة', 'الاستاذة', 'د.', 'دكتور', 'دكتورة', 'معلم', 'معلمة', 'كابتن', 'سيد', 'سيدة'
+    ]);
+
+    if (parts.length > 1 && titles.has(parts[0].toLowerCase())) {
+      return parts[1];
+    }
+
+    return parts[0];
   }, [language, profile?.displayName, profile?.displayNameAr, profile?.displayNameEn, profile?.nameAr, profile?.nameEn]);
 
   const greetingText = useMemo(() => {
     const hour = new Date().getHours();
-    const name = teacherName;
+    const name = teacherFirstName;
     const enName = name ? `, ${name}!` : '';
     const arName = name ? `، ${name}!` : '';
     const deName = name ? `, ${name}!` : '';
@@ -175,7 +192,7 @@ export const Header: React.FC = () => {
     } else {
       return _t(`مساء الخير${arName} 👋`, `Good Evening${enName} 👋`, `Guten Abend${deName} 👋`);
     }
-  }, [_t, teacherName]);
+  }, [_t, teacherFirstName]);
 
   // Today's Date String
   const todayStr = useMemo(() => formatLocalDate(new Date()), []);

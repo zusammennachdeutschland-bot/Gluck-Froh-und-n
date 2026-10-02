@@ -4,7 +4,7 @@ import { formatLocalDate } from '../utils/timeUtils';
 import { CheckCircle2, XCircle, Clock, Wallet, CalendarDays, Target } from 'lucide-react';
 
 export const WeeklyOverviewWidget: React.FC = () => {
-  const { lessons, groups, students, payments, profile, language, t } = useApp();
+  const { lessons, groups, students, payments, profile, language, t, _t } = useApp();
 
   // Week calculation: Friday to Thursday
   const getWeekStats = () => {
@@ -23,14 +23,14 @@ export const WeeklyOverviewWidget: React.FC = () => {
     const friStr = formatLocalDate(friday);
     const thuStr = formatLocalDate(thursday);
 
-    const weekLessons = lessons.filter(l => l.date >= friStr && l.date <= thuStr);
+    const weekLessons = lessons.filter(l => l.date >= friStr && l.date <= thuStr && !l.deleted);
 
     const completed = weekLessons.filter(l => l.status === 'completed').length;
     const cancelled = weekLessons.filter(l => l.status === 'cancelled').length;
     const remaining = weekLessons.filter(l => l.status === 'scheduled' || l.status === 'in_progress').length;
 
     // Use actual payment records for accurate revenue tracking (matching Payments View)
-    const paidOnly = payments.filter(p => p.status === 'paid');
+    const paidOnly = payments.filter(p => p.status === 'paid' && !p.deleted);
     const weeklyPayments = paidOnly.filter(p => {
       const d = p.paidDate || p.dueDate;
       if (!d) return false;
@@ -39,128 +39,99 @@ export const WeeklyOverviewWidget: React.FC = () => {
     });
     const revenue = weeklyPayments.reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
 
-    return { completed, cancelled, remaining, revenue, friStr, thuStr };
+    const pendingOnly = payments.filter(p => p.status !== 'paid' && !p.deleted);
+    const weeklyPending = pendingOnly.filter(p => {
+      const d = p.dueDate;
+      if (!d) return false;
+      const dateOnly = d.substring(0, 10);
+      return dateOnly >= friStr && dateOnly <= thuStr;
+    });
+    const pendingRevenue = weeklyPending.reduce((sum, p) => sum + p.amountDue, 0);
+
+    return {
+      completed,
+      cancelled,
+      remaining,
+      revenue,
+      pendingRevenue,
+      totalExpected: revenue + pendingRevenue,
+      dateRange: `${friday.toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US', { day: 'numeric', month: 'short' })} - ${thursday.toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US', { day: 'numeric', month: 'short' })}`
+    };
   };
 
-  const { completed, cancelled, remaining, revenue } = getWeekStats();
-  const currency = profile.currency || (t('auto_egp'));
-
-  const weeklyGoal = profile.weeklyIncomeGoal && profile.weeklyIncomeGoal > 0 ? profile.weeklyIncomeGoal : null;
-  const hasWeeklyGoal = weeklyGoal !== null;
-  const weeklyPercent = hasWeeklyGoal ? Math.round((revenue / weeklyGoal) * 100) : 0;
-  const remainingToGoal = hasWeeklyGoal ? Math.max(0, weeklyGoal - revenue) : 0;
+  const stats = getWeekStats();
+  const targetGoal = profile.weeklyIncomeGoal || 0;
+  const goalPercent = targetGoal > 0 ? Math.min(100, Math.round((stats.revenue / targetGoal) * 100)) : 0;
 
   return (
-    <div className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-primary-soft dark:bg-primary-soft/80 text-primary dark:text-primary border border-primary-border dark:border-primary-border/60">
+    <div className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <div className="p-1 rounded-md bg-primary-soft text-primary">
             <CalendarDays className="w-3.5 h-3.5" />
           </div>
           <div>
-            <h3 className="text-xs font-black text-text-main uppercase tracking-wider">
+            <h3 className="text-xs font-bold text-text-main truncate">
               {t('weekly_overview_title')}
             </h3>
+            <span className="text-[10px] text-text-muted font-bold block">
+              {stats.dateRange}
+            </span>
           </div>
         </div>
-      </div>
 
-      {/* Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 text-center">
-        {/* Completed */}
-        <div className="bg-background dark:bg-background/60 p-1.5 rounded-lg border border-surface-border/80 dark:border-surface-border">
-          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-primary dark:text-primary mb-0.5">
-            <CheckCircle2 className="w-3 h-3 shrink-0" />
-            <span>{t('daily_stats_completed_short')}</span>
-          </div>
-          <span className="text-xs sm:text-sm font-black text-text-main font-mono">
-            {completed}
-          </span>
-        </div>
-
-        {/* Cancelled */}
-        <div className="bg-background dark:bg-background/60 p-1.5 rounded-lg border border-surface-border/80 dark:border-surface-border">
-          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-primary dark:text-primary mb-0.5">
-            <XCircle className="w-3 h-3 shrink-0" />
-            <span>{t('stat_cancelled')}</span>
-          </div>
-          <span className="text-xs sm:text-sm font-black text-text-main font-mono">
-            {cancelled}
-          </span>
-        </div>
-
-        {/* Remaining */}
-        <div className="bg-background dark:bg-background/60 p-1.5 rounded-lg border border-surface-border/80 dark:border-surface-border">
-          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-primary dark:text-primary mb-0.5">
-            <Clock className="w-3 h-3 shrink-0" />
-            <span>{t('stat_remaining')}</span>
-          </div>
-          <span className="text-xs sm:text-sm font-black text-text-main font-mono">
-            {remaining}
-          </span>
-        </div>
-
-        {/* Revenue */}
-        <div className="bg-background dark:bg-background/60 p-1.5 rounded-lg border border-surface-border/80 dark:border-surface-border">
-          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-primary dark:text-primary mb-0.5">
-            <Wallet className="w-3 h-3 shrink-0" />
-            <span>{t('daily_stats_revenue')}</span>
-          </div>
-          <span className="text-xs sm:text-sm font-black text-primary dark:text-primary font-mono">
-            {revenue.toLocaleString()} <span className="text-[9px] text-text-muted font-sans">{currency}</span>
-          </span>
-        </div>
-      </div>
-
-      {/* Financial Goal Section */}
-      <div className="mt-2.5 pt-2 border-t border-surface-border/80 dark:border-surface-border">
-        <div className="flex items-center justify-between mb-1.5">
-          <div className="flex items-center gap-1.5 text-xs font-black text-text-main">
-            <Target className="w-3.5 h-3.5 text-primary" />
-            <span>{t('goal_weekly_short')}</span>
-          </div>
-          <span className="text-[10px] font-bold text-text-muted">
-            {t('this_week')}
-          </span>
-        </div>
-
-        {hasWeeklyGoal ? (
-          <div className="space-y-1.5 bg-background dark:bg-background/60 p-2 rounded-lg border border-surface-border/80 dark:border-surface-border">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-text-muted font-bold text-[10px]">{t('goal_collected')}:</span>
-              <span className="font-mono font-black text-text-main text-[11px]">
-                {revenue.toLocaleString()} <span className="text-[9px] text-text-muted font-sans">{currency}</span>
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-text-muted font-bold text-[10px]">{t('goal_target')}:</span>
-              <span className="font-mono font-black text-text-main text-[11px]">
-                {weeklyGoal.toLocaleString()} <span className="text-[9px] text-text-muted font-sans">{currency}</span>
-              </span>
-            </div>
-
-            {/* Progress bar and percentage */}
-            <div className="space-y-1 pt-0.5">
-              <div className="flex items-center justify-between text-[10px] font-bold">
-                <span className="text-text-muted">{t('goal_remaining')}: <span className="font-mono text-text-main">{remainingToGoal.toLocaleString()} {currency}</span></span>
-                <span className="font-mono text-primary font-black">{weeklyPercent}%</span>
-              </div>
-              <div className="w-full bg-surface-border dark:bg-surface-border/60 h-1.5 rounded-full overflow-hidden">
-                <div 
-                  className="bg-primary h-full rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, weeklyPercent)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-background dark:bg-background/60 py-1.5 px-2.5 rounded-lg border border-surface-border/80 dark:border-surface-border flex items-center justify-between text-xs">
-            <span className="text-text-muted text-[10px] font-bold">{t('no_goal_set')}</span>
-            <span className="text-[10px] font-mono text-text-muted">—</span>
+        {targetGoal > 0 && (
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-hover border border-surface-border text-[10px] font-bold text-text-muted">
+            <Target className="w-3 h-3 text-primary" />
+            <span>{goalPercent}%</span>
           </div>
         )}
+      </div>
+
+      <div className="grid grid-cols-3 gap-1.5 text-center">
+        <div className="p-1.5 rounded-lg bg-surface-hover border border-surface-border/60">
+          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="w-3 h-3" />
+            <span>{t('status_completed')}</span>
+          </div>
+          <span className="text-sm font-black text-text-main mt-0.5 block">
+            {stats.completed}
+          </span>
+        </div>
+
+        <div className="p-1.5 rounded-lg bg-surface-hover border border-surface-border/60">
+          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-rose-600 dark:text-rose-400">
+            <XCircle className="w-3 h-3" />
+            <span>{t('status_cancelled')}</span>
+          </div>
+          <span className="text-sm font-black text-text-main mt-0.5 block">
+            {stats.cancelled}
+          </span>
+        </div>
+
+        <div className="p-1.5 rounded-lg bg-surface-hover border border-surface-border/60">
+          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400">
+            <Clock className="w-3 h-3" />
+            <span>{t('stat_remaining')}</span>
+          </div>
+          <span className="text-sm font-black text-text-main mt-0.5 block">
+            {stats.remaining}
+          </span>
+        </div>
+      </div>
+
+      {/* Financial Summary */}
+      <div className="pt-1.5 border-t border-surface-border/60 flex items-center justify-between text-xs">
+        <div className="flex items-center gap-1.5 text-text-muted font-bold text-[11px]">
+          <Wallet className="w-3.5 h-3.5 text-primary" />
+          <span>{_t('المحصل / المتوقع:', 'Collected / Expected:', 'Eingenommen / Erwartet:')}</span>
+        </div>
+        <div className="flex items-center gap-1 font-mono font-black text-xs">
+          <span className="text-emerald-600 dark:text-emerald-400">{stats.revenue}</span>
+          <span className="text-text-muted/60">/</span>
+          <span className="text-text-main">{stats.totalExpected}</span>
+          <span className="text-[10px] font-sans text-text-muted">{profile.currency || 'EGP'}</span>
+        </div>
       </div>
     </div>
   );

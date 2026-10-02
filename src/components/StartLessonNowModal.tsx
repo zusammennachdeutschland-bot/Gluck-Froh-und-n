@@ -309,10 +309,10 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
             <div className="space-y-2">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                 <label className="text-xs font-bold text-text-main">
-                  Wählen Sie die Gruppe:
+                  {_t('اختر المجموعة:', 'Select Group:', 'Gruppe auswählen:')}
                 </label>
                 <span className="text-[10px] text-violet-600 dark:text-violet-400 font-extrabold">
-                  {filteredGroups.length} von {activeGroups.length} Gruppen
+                  {filteredGroups.length} {_t(`من ${activeGroups.length} مجموعة`, `of ${activeGroups.length} groups`, `von ${activeGroups.length} Gruppen`)}
                 </span>
               </div>
 
@@ -327,7 +327,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
                       : 'bg-surface-hover border-surface-border/60 dark:border-surface-border-soft/60 text-text-muted hover:bg-slate-100 dark:hover:bg-slate-750'
                   }`}
                 >
-                  Alle Tage
+                  {_t('كل الأيام', 'All Days', 'Alle Tage')}
                 </button>
                 <button
                   type="button"
@@ -338,7 +338,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
                       : 'bg-primary-soft border-primary-border text-primary dark:bg-primary-soft dark:border-primary-border dark:text-primary hover:bg-primary-soft'
                   }`}
                 >
-                  <span>Heute</span>
+                  <span>{_t('اليوم', 'Today', 'Heute')}</span>
                   <span className="text-[9px] font-mono opacity-80">({GERMAN_WEEKDAYS.find(w => w.dayNum === new Date().getDay())?.short})</span>
                 </button>
                 {GERMAN_WEEKDAYS.map(w => (
@@ -360,7 +360,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
                 {filteredGroups.length === 0 ? (
                   <div className="col-span-2 p-4 text-center text-xs text-text-muted/70 bg-surface-hover/50 rounded-lg border border-slate-100 dark:border-surface-border">
-                    Keine Gruppen für den ausgewählten Tag gefunden.
+                    {_t('لا توجد مجموعات لهذا اليوم المحدد.', 'No groups found for the selected day.', 'Keine Gruppen für den ausgewählten Tag gefunden.')}
                   </div>
                 ) : (
                   filteredGroups.map((g) => {
