@@ -43,7 +43,10 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
   const [paymentCycle, setPaymentCycle] = useState<PaymentCycle>(initialData?.paymentCycle || 'monthly');
   const [monthlyPackagePrice, setMonthlyPackagePrice] = useState(initialData?.monthlyPackagePrice || 1200);
   const [pricePerSession, setPricePerSession] = useState(initialData?.pricePerSession || (initialData?.monthlyPackagePrice ? Math.round(initialData.monthlyPackagePrice / (initialData.sessionCount || 8)) : 150));
-  const [sessionCount, setSessionCount] = useState(initialData?.sessionCount || 8);
+  const initialSessionCount = (initialData?.sessionCount && initialData.sessionCount > 1) 
+    ? initialData.sessionCount 
+    : (initialData?.paymentCycle === 'monthly' ? 4 : (initialData?.sessionCount || 4));
+  const [sessionCount, setSessionCount] = useState<number>(initialSessionCount);
   const [startingSessionNumber, setStartingSessionNumber] = useState(initialData?.startingSessionNumber || 1);
   const { financeAccounts } = useApp();
   const [defaultFinanceAccountId, setDefaultFinanceAccountId] = useState(initialData?.defaultFinanceAccountId || (financeAccounts?.[0]?.id || ''));
@@ -85,15 +88,16 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
     }
 
     const isPerLesson = paymentCycle === 'per_lesson';
+    const effectiveSessionCount = isPerLesson ? 1 : Math.max(2, Number(sessionCount) || 4);
     onSubmit({
       name,
       grade,
       type,
-      paymentCycle,
+      paymentCycle: isPerLesson ? 'per_lesson' : 'monthly',
       monthlyPackagePrice: isPerLesson ? Number(pricePerSession) : Number(monthlyPackagePrice),
       pricePerSession: Number(pricePerSession),
-      sessionCount: isPerLesson ? 1 : Number(sessionCount),
-      startingSessionNumber: isPerLesson ? 1 : Number(startingSessionNumber),
+      sessionCount: effectiveSessionCount,
+      startingSessionNumber: isPerLesson ? 1 : Math.max(1, Number(startingSessionNumber) || 1),
       defaultFinanceAccountId,
       scheduleDays,
       scheduleTime,
@@ -192,7 +196,10 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
         <div className="grid grid-cols-2 gap-2 text-xs">
           <button
             type="button"
-            onClick={() => setPaymentCycle('monthly')}
+            onClick={() => {
+              setPaymentCycle('monthly');
+              if (sessionCount <= 1) setSessionCount(4);
+            }}
             className={`py-2.5 px-2 rounded-xl font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               paymentCycle === 'monthly'
                 ? 'bg-primary text-white border-primary-border shadow-xs'
@@ -204,7 +211,10 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
           </button>
           <button
             type="button"
-            onClick={() => setPaymentCycle('per_lesson')}
+            onClick={() => {
+              setPaymentCycle('per_lesson');
+              setSessionCount(1);
+            }}
             className={`py-2.5 px-2 rounded-xl font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               paymentCycle === 'per_lesson'
                 ? 'bg-primary text-white border-primary-border shadow-xs'
@@ -238,7 +248,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
                 Zahlungs-Zyklus (Package)
               </label>
               <select
-                value={sessionCount}
+                value={sessionCount <= 1 ? 4 : sessionCount}
                 onChange={(e) => setSessionCount(Number(e.target.value))}
                 className="w-full px-3 py-2 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-bold"
               >

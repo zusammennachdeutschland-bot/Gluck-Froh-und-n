@@ -1,5 +1,5 @@
 import React from 'react';
-import { Student, StudentSessionPerformance, PerformanceLevel, ParticipationLevel, UnderstandingLevel, SpeakingLevel, FocusLevel, ProgressLevel } from '../types';
+import { Student, StudentSessionPerformance, PerformanceLevel, ParticipationLevel, UnderstandingLevel, SpeakingLevel, ReadingLevel, WritingLevel, FocusLevel, ProgressLevel } from '../types';
 import { generateFeedback } from '../utils/feedbackGenerator';
 import { getStudentGender } from '../utils/genderUtils';
 import { RefreshCw, BarChart2 } from 'lucide-react';
@@ -48,6 +48,20 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
 
   const speakingOpts: { value: SpeakingLevel; label: string }[] = React.useMemo(() => [
     { value: 'confident', label: _t('واثق', 'Confident', 'Selbstbewusst') },
+    { value: 'good', label: _t('جيد', 'Good', 'Gut') },
+    { value: 'improving', label: _t('يتحسن', 'Improving', 'Verbessert sich') },
+    { value: 'needs_practice', label: _t('يحتاج تدريب', 'Needs Practice', 'Braucht Übung') }
+  ], [_t]);
+
+  const readingOpts: { value: ReadingLevel; label: string }[] = React.useMemo(() => [
+    { value: 'fluent', label: _t('ممتاز وطلاقة', 'Fluent', 'Fließend') },
+    { value: 'good', label: _t('جيد', 'Good', 'Gut') },
+    { value: 'improving', label: _t('يتحسن', 'Improving', 'Verbessert sich') },
+    { value: 'needs_practice', label: _t('يحتاج تدريب', 'Needs Practice', 'Braucht Übung') }
+  ], [_t]);
+
+  const writingOpts: { value: WritingLevel; label: string }[] = React.useMemo(() => [
+    { value: 'accurate', label: _t('دقيق وممتاز', 'Accurate', 'Präzise') },
     { value: 'good', label: _t('جيد', 'Good', 'Gut') },
     { value: 'improving', label: _t('يتحسن', 'Improving', 'Verbessert sich') },
     { value: 'needs_practice', label: _t('يحتاج تدريب', 'Needs Practice', 'Braucht Übung') }
@@ -190,6 +204,46 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
                       onClick={() => handleUpdate({ speaking: perf.speaking === o.value ? undefined : o.value })}
                       className={`px-2 py-0.5 rounded text-[9px] font-bold border transition-colors ${
                         perf.speaking === o.value 
+                          ? 'bg-primary-soft text-primary border-primary-border shadow-2xs' 
+                          : 'bg-surface border-surface-border text-text-muted hover:bg-surface-hover'
+                      }`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">{_t('القراءة', 'Reading', 'Lesen')}</span>
+                <div className="flex flex-wrap gap-1">
+                  {readingOpts.map(o => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => handleUpdate({ reading: perf.reading === o.value ? undefined : o.value })}
+                      className={`px-2 py-0.5 rounded text-[9px] font-bold border transition-colors ${
+                        perf.reading === o.value 
+                          ? 'bg-primary-soft text-primary border-primary-border shadow-2xs' 
+                          : 'bg-surface border-surface-border text-text-muted hover:bg-surface-hover'
+                      }`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider block">{_t('الكتابة', 'Writing', 'Schreiben')}</span>
+                <div className="flex flex-wrap gap-1">
+                  {writingOpts.map(o => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => handleUpdate({ writing: perf.writing === o.value ? undefined : o.value })}
+                      className={`px-2 py-0.5 rounded text-[9px] font-bold border transition-colors ${
+                        perf.writing === o.value 
                           ? 'bg-primary-soft text-primary border-primary-border shadow-2xs' 
                           : 'bg-surface border-surface-border text-text-muted hover:bg-surface-hover'
                       }`}

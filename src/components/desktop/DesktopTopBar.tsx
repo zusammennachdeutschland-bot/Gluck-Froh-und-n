@@ -334,7 +334,7 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
           >
             <Bell className="w-4 h-4" />
             {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white font-bold text-[9px] rounded-full flex items-center justify-center ring-2 ring-surface animate-pulse">
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white font-bold text-[9px] rounded-full flex items-center justify-center ring-2 ring-surface">
                 {unreadCount}
               </span>
             )}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Student, Group } from '../types';
 import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
@@ -6,7 +6,8 @@ import {
   Users, UserPlus, Search, Phone, Send, ChevronRight, Plus, MapPin, Video, 
   FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, 
   FileText, Award, DollarSign, Bot, ChevronDown, Filter, Sparkles, AtSign, 
-  Mars, Venus, CircleHelp, Copy, Check, ArrowRightLeft, UserX, CheckSquare, Square, AlertTriangle 
+  Mars, Venus, CircleHelp, Copy, Check, ArrowRightLeft, UserX, CheckSquare, Square, AlertTriangle,
+  BarChart3, GraduationCap
 } from 'lucide-react';
 import { StudentProfileModal } from './StudentProfileModal';
 import { GroupProfileModal } from './GroupProfileModal';
@@ -34,9 +35,10 @@ export const StudentsView: React.FC = () => {
   // Helper for inline translations
   
 
-  const [activeSegment, setActiveSegment] = useState<'students' | 'groups' | 'archive'>('students');
+  const [activeSegment, setActiveSegment] = useState<'summary' | 'students' | 'groups' | 'archive'>('summary');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGrade, setSelectedGrade] = useState<string>('all');
+  const [selectedMode, setSelectedMode] = useState<'all' | 'online' | 'offline'>('all');
   const [selectedGroupDay, setSelectedGroupDay] = useState<string>('all');
 
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
@@ -93,6 +95,122 @@ export const StudentsView: React.FC = () => {
   const activeGroups = groups.filter(g => g.status !== 'archived');
   const archivedGroups = groups.filter(g => g.status === 'archived');
 
+  // Ultra-compact student summary calculation (Gender, Grades, Groups, Totals, Online/Offline)
+  const studentSummary = useMemo(() => {
+    const totalActive = activeStudents.length;
+    let boysCount = 0;
+    let girlsCount = 0;
+    let onlineCount = 0;
+    let offlineCount = 0;
+    const gradeMap: Record<string, { total: number; boys: number; girls: number; online: number; offline: number }> = {};
+
+    const groupMap = new Map<string, Group>();
+    activeGroups.forEach(g => groupMap.set(g.id, g));
+
+    activeStudents.forEach(s => {
+      const isGirl = s.gender === 'female' || (!s.gender && isLikelyFemaleStudent(s.name));
+      if (s.gender === 'female') {
+        girlsCount++;
+      } else if (s.gender === 'male') {
+        boysCount++;
+      } else {
+        if (isGirl) girlsCount++;
+        else boysCount++;
+      }
+
+      // Check online / offline status
+      let isOnline = false;
+      if (s.groupId && groupMap.has(s.groupId)) {
+        isOnline = groupMap.get(s.groupId)?.type === 'online';
+      } else {
+        const studentLesson = lessons.find(l => 
+          (l.studentId === s.id || (Boolean(l.studentName) && Boolean(s.name) && l.studentName.trim().toLowerCase() === s.name.trim().toLowerCase())) && l.type
+        );
+        isOnline = studentLesson ? studentLesson.type === 'online' : false;
+      }
+
+      if (isOnline) {
+        onlineCount++;
+      } else {
+        offlineCount++;
+      }
+
+      const g = (s.grade && s.grade.trim()) || _t('بدون مرحلة', 'No Grade', 'Ohne Klasse');
+      if (!gradeMap[g]) {
+        gradeMap[g] = { total: 0, boys: 0, girls: 0, online: 0, offline: 0 };
+      }
+      gradeMap[g].total++;
+      if (isGirl) {
+        gradeMap[g].girls++;
+      } else {
+        gradeMap[g].boys++;
+      }
+      if (isOnline) {
+        gradeMap[g].online++;
+      } else {
+        gradeMap[g].offline++;
+      }
+    });
+
+    const groupStudentCountMap = new Map<string, number>();
+    activeStudents.forEach(s => {
+      if (s.groupId) {
+        groupStudentCountMap.set(s.groupId, (groupStudentCountMap.get(s.groupId) || 0) + 1);
+      }
+    });
+
+    let inGroups = 0; // Students in multi-student groups (>= 2 students)
+    let individual = 0; // Students in private 1-on-1 (group with 1 student or no group)
+
+    activeStudents.forEach(s => {
+      if (s.groupId && (groupStudentCountMap.get(s.groupId) || 0) >= 2) {
+        inGroups++;
+      } else {
+        individual++;
+      }
+    });
+
+    const multiStudentGroupsCount = activeGroups.filter(g => (groupStudentCountMap.get(g.id) || 0) >= 2).length;
+    const privateGroupsCount = activeGroups.filter(g => (groupStudentCountMap.get(g.id) || 0) <= 1).length;
+
+    const sortedGrades = Object.entries(gradeMap).sort((a, b) => b[1].total - a[1].total);
+
+    const boysPct = totalActive > 0 ? Math.round((boysCount / totalActive) * 100) : 0;
+    const girlsPct = totalActive > 0 ? 100 - boysPct : 0;
+
+    const onlinePct = totalActive > 0 ? Math.round((onlineCount / totalActive) * 100) : 0;
+    const offlinePct = totalActive > 0 ? 100 - onlinePct : 0;
+
+    const inGroupsPct = totalActive > 0 ? Math.round((inGroups / totalActive) * 100) : 0;
+    const individualPct = totalActive > 0 ? 100 - inGroupsPct : 0;
+
+    const onlineGroupsCount = activeGroups.filter(g => g.type === 'online').length;
+    const offlineGroupsCount = activeGroups.filter(g => g.type === 'offline').length;
+
+    return {
+      totalActive,
+      boysCount,
+      girlsCount,
+      boysPct,
+      girlsPct,
+      onlineCount,
+      offlineCount,
+      onlinePct,
+      offlinePct,
+      inGroups,
+      individual,
+      inGroupsPct,
+      individualPct,
+      onlineGroupsCount,
+      offlineGroupsCount,
+      multiStudentGroupsCount,
+      privateGroupsCount,
+      totalGroups: activeGroups.length,
+      archivedTotal: archivedStudents.length,
+      sortedGrades,
+    };
+  }, [activeStudents, activeGroups, archivedStudents, lessons, _t]);
+
   const [studentSortBy, setStudentSortBy] = useState<'name' | 'attendance' | 'homework' | 'dictation' | 'exam'>('name');
 
   const getStudentStats = (student: Student) => {
@@ -148,7 +266,19 @@ export const StudentsView: React.FC = () => {
                           (s.grade || '').toLowerCase().includes(term) ||
                           (studentGroup && (studentGroup.name || '').toLowerCase().includes(term));
     const matchesGrade = selectedGrade === 'all' || s.grade === selectedGrade;
-    return matchesSearch && matchesGrade;
+
+    let isOnline = false;
+    if (studentGroup) {
+      isOnline = studentGroup.type === 'online';
+    } else {
+      const studentLesson = lessons.find(l => 
+        (l.studentId === s.id || (Boolean(l.studentName) && Boolean(s.name) && l.studentName.trim().toLowerCase() === s.name.trim().toLowerCase())) && l.type
+      );
+      isOnline = studentLesson ? studentLesson.type === 'online' : false;
+    }
+    const matchesMode = selectedMode === 'all' || (selectedMode === 'online' ? isOnline : !isOnline);
+
+    return matchesSearch && matchesGrade && matchesMode;
   });
 
   const sortedStudents = [...filteredStudents].sort((a, b) => {
@@ -180,7 +310,8 @@ export const StudentsView: React.FC = () => {
                           (g.grade || '').toLowerCase().includes(term);
     const matchesGrade = selectedGrade === 'all' || g.grade === selectedGrade;
     const matchesDay = matchGroupDay(g, selectedGroupDay);
-    return matchesSearch && matchesGrade && matchesDay;
+    const matchesMode = selectedMode === 'all' || g.type === selectedMode;
+    return matchesSearch && matchesGrade && matchesDay && matchesMode;
   });
 
   const filteredArchivedStudents = archivedStudents.filter(s => {
@@ -232,10 +363,24 @@ export const StudentsView: React.FC = () => {
       </div>
 
       {/* Segment Switcher Tabs */}
-      <div className="grid grid-cols-3 gap-1 bg-surface-hover p-1 rounded-lg text-[11px] sm:text-xs font-bold">
+      <div className="grid grid-cols-4 gap-1 bg-surface-hover p-1 rounded-lg text-[10.5px] sm:text-xs font-bold">
         <button
+          type="button"
+          onClick={() => setActiveSegment('summary')}
+          className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer truncate ${
+            activeSegment === 'summary'
+              ? 'bg-surface text-primary dark:text-primary shadow-xs'
+              : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
+          }`}
+        >
+          <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+          <span>{_t('الملخص', 'Summary', 'Übersicht')}</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveSegment('students')}
-          className={`py-1 sm:py-1.5 rounded-lg transition-all cursor-pointer ${
+          className={`py-1 sm:py-1.5 rounded-lg transition-all cursor-pointer truncate ${
             activeSegment === 'students'
               ? 'bg-surface text-primary dark:text-primary shadow-xs'
               : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
@@ -245,8 +390,9 @@ export const StudentsView: React.FC = () => {
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveSegment('groups')}
-          className={`py-1 sm:py-1.5 rounded-lg transition-all cursor-pointer ${
+          className={`py-1 sm:py-1.5 rounded-lg transition-all cursor-pointer truncate ${
             activeSegment === 'groups'
               ? 'bg-surface text-primary dark:text-primary shadow-xs'
               : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
@@ -256,19 +402,21 @@ export const StudentsView: React.FC = () => {
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveSegment('archive')}
-          className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+          className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer truncate ${
             activeSegment === 'archive'
               ? 'bg-surface text-primary dark:text-primary shadow-xs'
               : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
           }`}
         >
-          <Archive className="w-3.5 h-3.5" />
+          <Archive className="w-3.5 h-3.5 shrink-0" />
           <span>{t('archive')} ({archivedStudents.length + archivedGroups.length})</span>
         </button>
       </div>
 
-      {/* Search & Grade Filter Bar */}
+      {/* Search & Grade Filter Bar (Hidden in Summary tab) */}
+      {activeSegment !== 'summary' && (
       <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
         <div className="relative flex-1 w-full">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-text-muted/70" />
@@ -308,6 +456,17 @@ export const StudentsView: React.FC = () => {
             </optgroup>
           </select>
 
+          <select
+            value={selectedMode}
+            onChange={(e) => setSelectedMode(e.target.value as any)}
+            className="px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer shrink-0"
+            title={_t('تصفية حسب نمط الحضور (أونلاين / حضوري)', 'Filter by learning mode (Online / Offline)', 'Nach Modus filtern')}
+          >
+            <option value="all">{_t('كل الأنماط', 'All Modes', 'Alle Modi')}</option>
+            <option value="online">{_t('🌐 أونلاين', '🌐 Online', '🌐 Online')}</option>
+            <option value="offline">{_t('📍 حضوري / سنتر', '📍 In-Person / Center', '📍 Vor Ort')}</option>
+          </select>
+
           {activeSegment === 'students' && (
             <select
               value={studentSortBy}
@@ -334,18 +493,19 @@ export const StudentsView: React.FC = () => {
               <span className="text-xs">👦👧</span>
               <span className="truncate">{_t('تحديد الجنس', 'Assign Gender', 'Geschlecht')}</span>
               {students.filter(s => s.status !== 'archived' && !s.gender).length > 0 && (
-                <span className="px-1.5 py-0.2 bg-rose-500 text-white text-[9.5px] font-black rounded-full animate-pulse">
+                <span className="px-1.5 py-0.2 bg-rose-500 text-white text-[9.5px] font-black rounded-full">
                   {students.filter(s => s.status !== 'archived' && !s.gender).length}
                 </span>
               )}
             </button>
           )}
 
-          {(searchTerm || selectedGrade !== 'all' || selectedGroupDay !== 'all') && (
+          {(searchTerm || selectedGrade !== 'all' || selectedMode !== 'all' || selectedGroupDay !== 'all') && (
             <button
               onClick={() => {
                 setSearchTerm('');
                 setSelectedGrade('all');
+                setSelectedMode('all');
                 setSelectedGroupDay('all');
                 setStudentSortBy('name');
               }}
@@ -357,6 +517,7 @@ export const StudentsView: React.FC = () => {
           )}
         </div>
       </div>
+      )}
 
       {/* DAILY FILTER FOR GROUPS */}
       {activeSegment === 'groups' && (
@@ -817,9 +978,8 @@ export const StudentsView: React.FC = () => {
             const cycleInfo = getGroupCycleInfo(group, lessons, language);
             const isPerLessonGroup = Boolean(
               cycleInfo.isPerLesson ||
-              group.paymentCycle === 'per_lesson' || 
-              group.paymentModel === 'per_session' || 
-              (group.sessionCount !== undefined && group.sessionCount <= 1)
+              (group.sessionCount !== undefined && group.sessionCount <= 1) ||
+              ((group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session') && (group.sessionCount === undefined || group.sessionCount <= 1))
             );
 
             const perSessionPrice = group.pricePerSession 
@@ -996,6 +1156,184 @@ export const StudentsView: React.FC = () => {
               </div>
             );
           }))}
+        </div>
+      )}
+
+      {/* SUMMARY SEGMENT - ULTRA COMPACT & ELEGANT */}
+      {activeSegment === 'summary' && (
+        <div className="space-y-2 sm:space-y-2.5 animate-fade-in text-xs select-none">
+          {/* 3 Unified Visual Ratio Bars (Theme-Adaptive) */}
+          <div className="space-y-2">
+            {/* 1. Groups vs Private Visual Bar */}
+            <div className="p-2.5 rounded-xl bg-surface border border-surface-border shadow-2xs space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="text-primary flex items-center gap-1">
+                  <span>🏫</span>
+                  <span>{_t('مجموعات:', 'Groups:', 'Gruppen:')} {studentSummary.inGroups}</span>
+                  <span className="text-[9.5px] font-normal font-mono opacity-80">({studentSummary.inGroupsPct}%)</span>
+                </span>
+                <span className="text-text-muted flex items-center gap-1">
+                  <span className="text-[9.5px] font-normal font-mono opacity-80">({studentSummary.individualPct}%)</span>
+                  <span>{_t('فردي (برايفت):', 'Private:', 'Privat:')} {studentSummary.individual}</span>
+                  <span>👤</span>
+                </span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                <div
+                  style={{ width: `${studentSummary.inGroupsPct}%` }}
+                  className="bg-primary transition-all duration-300"
+                  title={`مجموعات: ${studentSummary.inGroupsPct}%`}
+                />
+                <div
+                  style={{ width: `${studentSummary.individualPct}%` }}
+                  className="bg-slate-300 dark:bg-slate-700 transition-all duration-300"
+                  title={`فردي (برايفت): ${studentSummary.individualPct}%`}
+                />
+              </div>
+            </div>
+
+            {/* 2. Online vs Offline Visual Bar */}
+            <div className="p-2.5 rounded-xl bg-surface border border-surface-border shadow-2xs space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="text-primary flex items-center gap-1">
+                  <Video className="w-3 h-3" />
+                  <span>{_t('أونلاين:', 'Online:', 'Online:')} {studentSummary.onlineCount}</span>
+                  <span className="text-[9.5px] font-normal font-mono opacity-80">({studentSummary.onlinePct}%)</span>
+                </span>
+                <span className="text-text-muted flex items-center gap-1">
+                  <span className="text-[9.5px] font-normal font-mono opacity-80">({studentSummary.offlinePct}%)</span>
+                  <span>{_t('حضوري:', 'In-Person:', 'Vor Ort:')} {studentSummary.offlineCount}</span>
+                  <MapPin className="w-3 h-3" />
+                </span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                <div
+                  style={{ width: `${studentSummary.onlinePct}%` }}
+                  className="bg-primary transition-all duration-300"
+                  title={`أونلاين: ${studentSummary.onlinePct}%`}
+                />
+                <div
+                  style={{ width: `${studentSummary.offlinePct}%` }}
+                  className="bg-slate-300 dark:bg-slate-700 transition-all duration-300"
+                  title={`حضوري: ${studentSummary.offlinePct}%`}
+                />
+              </div>
+            </div>
+
+            {/* 3. Gender Ratio Visual Bar */}
+            <div className="p-2.5 rounded-xl bg-surface border border-surface-border shadow-2xs space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="text-primary flex items-center gap-1">
+                  <span>👦</span>
+                  <span>{_t('بنين:', 'Boys:', 'Jungen:')} {studentSummary.boysCount}</span>
+                  <span className="text-[9.5px] font-normal font-mono opacity-80">({studentSummary.boysPct}%)</span>
+                </span>
+                <span className="text-text-muted flex items-center gap-1">
+                  <span className="text-[9.5px] font-normal font-mono opacity-80">({studentSummary.girlsPct}%)</span>
+                  <span>{_t('بنات:', 'Girls:', 'Mädchen:')} {studentSummary.girlsCount}</span>
+                  <span>👧</span>
+                </span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                <div
+                  style={{ width: `${studentSummary.boysPct}%` }}
+                  className="bg-primary transition-all duration-300"
+                  title={`بنين: ${studentSummary.boysPct}%`}
+                />
+                <div
+                  style={{ width: `${studentSummary.girlsPct}%` }}
+                  className="bg-slate-300 dark:bg-slate-700 transition-all duration-300"
+                  title={`بنات: ${studentSummary.girlsPct}%`}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Grade Breakdown (كام واحد في كام جريد + تفاصيل الأونلاين والأوفلاين) */}
+          <div className="p-2.5 sm:p-3 rounded-xl bg-surface border border-surface-border shadow-2xs space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-black text-text-main flex items-center gap-1.5">
+                <GraduationCap className="w-4 h-4 text-primary" />
+                <span>{_t('توزيع الطلاب حسب المراحل والصفوف الدراسية', 'Distribution by Grade', 'Verteilung nach Klassen')}</span>
+              </h3>
+              <span className="text-[10px] font-bold text-text-muted font-mono bg-surface-hover px-2 py-0.5 rounded-md border border-surface-border">
+                {studentSummary.sortedGrades.length} {_t('صفوف / مستويات', 'grades/levels', 'Stufen')}
+              </span>
+            </div>
+
+            {studentSummary.sortedGrades.length === 0 ? (
+              <p className="text-center py-4 text-xs text-text-muted">
+                {_t('لا يوجد طلاب مسجلون حالياً', 'No students registered yet', 'Keine Schüler registriert')}
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">
+                {studentSummary.sortedGrades.map(([gradeName, gStat]) => {
+                  const pct = studentSummary.totalActive > 0 ? Math.round((gStat.total / studentSummary.totalActive) * 100) : 0;
+                  return (
+                    <div
+                      key={gradeName}
+                      onClick={() => {
+                        setSelectedGrade(gradeName);
+                        setActiveSegment('students');
+                      }}
+                      className="p-2 sm:p-2.5 rounded-xl bg-surface-hover/60 hover:bg-surface-hover border border-surface-border/70 transition-all cursor-pointer flex flex-col gap-1.5 group active:scale-[0.99]"
+                      title={_t(`انقر لعرض طلاب ${gradeName}`, `Click to view students in ${gradeName}`, `Klicken, um Schüler anzuzeigen`)}
+                    >
+                      <div className="flex items-center justify-between gap-1 text-xs">
+                        <span className="font-black text-text-main group-hover:text-primary transition-colors truncate">
+                          {gradeName}
+                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary font-black text-[10px] font-mono">
+                            {gStat.total} {_t('طالب', 'students', 'Schüler')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Sub-breakdown (Gender & Mode) */}
+                      <div className="flex items-center justify-between text-[10px] text-text-muted font-bold font-mono">
+                        <span className="flex items-center gap-1">
+                          <span className="text-text-main">👦 {gStat.boys}</span>
+                          <span>•</span>
+                          <span className="text-text-muted">👧 {gStat.girls}</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="text-primary">🌐 {gStat.online}</span>
+                          <span>•</span>
+                          <span className="text-text-muted">📍 {gStat.offline}</span>
+                        </span>
+                      </div>
+
+                      {/* Mini Percentage Bar */}
+                      <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden flex">
+                        <div
+                          style={{ width: `${pct}%` }}
+                          className="bg-primary rounded-full transition-all duration-300"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Quick Footer Stats & Gender Classification Shortcut */}
+          <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-surface-border flex items-center justify-between text-[10.5px] text-text-muted">
+            <span className="flex items-center gap-1 font-bold">
+              <span>📁 {_t('المؤرشفين:', 'Archived:', 'Archiviert:')}</span>
+              <span className="font-mono text-text-main font-black">{studentSummary.archivedTotal}</span>
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setIsGenderAssignModalOpen(true)}
+              className="text-primary hover:underline font-bold text-[10.5px] flex items-center gap-1 cursor-pointer"
+            >
+              <span>👦👧</span>
+              <span>{_t('تعديل تصنيف الجنس', 'Manage Gender Classification', 'Geschlecht verwalten')}</span>
+            </button>
+          </div>
         </div>
       )}
 

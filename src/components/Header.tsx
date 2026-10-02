@@ -1,8 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatLocalDate } from '../utils/timeUtils';
-import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X } from 'lucide-react';
-import { GlueckBuddyAvatar } from './buddy/GlueckBuddyAvatar';
+import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { SyncHeaderButton } from './sync/SyncHeaderButton';
@@ -173,32 +172,30 @@ export const Header: React.FC = () => {
       {/* Premium Safe Area Spacer for Android Status Bar */}
       <div 
         className="bg-surface dark:bg-black select-none max-w-lg mx-auto w-full shrink-0 transition-colors" 
-        style={{ height: 'max(20px, env(safe-area-inset-top, 20px))' }}
+        style={{ height: 'max(24px, env(safe-area-inset-top, 24px))' }}
       />
 
       {/* Compact Header */}
       <header className="bg-surface dark:bg-black border-b border-surface-border/80 px-2.5 py-1.5 sm:px-3.5 sm:py-2 sticky top-0 z-30 transition-colors shadow-2xs">
         <div className="flex items-center justify-between gap-2 sm:gap-3 max-w-lg mx-auto">
           
-          {/* Start: Profile Avatar & Greeting / Active Tab Name */}
+          {/* Start: Greeting / Active Tab Name */}
           <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
-            <GlueckBuddyAvatar />
-
             <div className="leading-tight min-w-0 flex-1">
               {activeTab === 'home' ? (
                 <>
                   <p className="text-[9.5px] sm:text-[10px] font-black uppercase tracking-wider text-primary dark:text-primary-hover flex items-center gap-1">
-                    <span>{t('greeting') || 'WELCOME'}</span>
+                    <span>{_t('مرحباً بك', 'WELCOME', 'WILLKOMMEN')}</span>
                     <span className="inline-block animate-wave text-[10px] sm:text-[11px]">👋</span>
                   </p>
                   <h1 className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-slate-100 leading-snug whitespace-normal break-words truncate">
-                    {profile.displayName}
+                    {profile.displayName || _t('المعلم', 'Teacher', 'Lehrer')}
                   </h1>
                 </>
               ) : (
                 <>
-                  <p className="text-[8.5px] sm:text-[9px] font-black uppercase tracking-widest text-primary dark:text-primary">
-                    Glück fröhlich und froh
+                  <p className="text-[8.5px] sm:text-[9px] font-bold text-text-muted flex items-center gap-1">
+                    <span>{_t('القسم الحالي', 'Section', 'Bereich')}</span>
                   </p>
                   <h1 className="text-xs sm:text-sm font-black text-slate-900 dark:text-slate-100 capitalize leading-snug whitespace-normal break-words truncate">
                     {activeTab === 'schedule' ? (t('nav_schedule') || 'Termine')
@@ -236,7 +233,7 @@ export const Header: React.FC = () => {
             >
               <Bell className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${showNotifications ? 'text-white' : 'text-primary'}`} />
               {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-red-500 text-white font-black text-[9px] rounded-full flex items-center justify-center ring-2 ring-white dark:ring-black animate-bounce">
+                <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-red-500 text-white font-black text-[9px] rounded-full flex items-center justify-center ring-2 ring-white dark:ring-black">
                   {unreadCount}
                 </span>
               )}
@@ -341,7 +338,7 @@ export const Header: React.FC = () => {
                   {[
                     { id: 'home', label: t('nav_home') || 'Startseite', icon: Sparkles },
                     { id: 'schedule', label: t('nav_schedule') || 'Termine', icon: Clock },
-                    { id: 'students', label: t('nav_students') || 'Schüler', icon: GlueckBuddyAvatar },
+                    { id: 'students', label: t('nav_students') || 'Schüler', icon: Users },
                     { id: 'payments', label: t('nav_payments') || 'Zahlungen', icon: BarChart2 },
                     { id: 'history', label: t('nav_history') || 'Sitzungen', icon: History },
                     { id: 'reports', label: t('nav_reports') || 'Berichte', icon: BarChart2 },
@@ -366,9 +363,7 @@ export const Header: React.FC = () => {
                             : 'text-text-main hover:bg-surface-hover dark:hover:bg-slate-900'
                         }`}
                       >
-                        {typeof Icon === 'function' && item.id !== 'students' ? (
-                          <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-primary'}`} />
-                        ) : null}
+                        <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-primary'}`} />
                         <span>{item.label}</span>
                       </button>
                     );
@@ -400,27 +395,6 @@ export const Header: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
- 
-      {/* Urgent 30-Min Lesson Alert Banner */}
-      {urgent30MinLesson && (
-        <div className="bg-primary dark:bg-primary text-white px-4 py-2.5 flex items-center justify-between gap-3 text-xs font-semibold animate-fade-in">
-          <div className="flex items-center gap-2 overflow-hidden">
-            <span className="p-1 bg-surface/20 rounded shrink-0">
-              <Clock className="w-3.5 h-3.5 text-white" />
-            </span>
-            <span className="truncate tracking-wide">
-              {urgent30MinLesson.time}: {urgent30MinLesson.title || urgent30MinLesson.groupName || urgent30MinLesson.studentName}
-            </span>
-          </div>
- 
-          <button
-            onClick={() => openLessonControl(urgent30MinLesson)}
-            className="px-2.5 py-1 bg-surface/20 hover:bg-surface/30 text-white font-bold rounded-md text-[10px] uppercase tracking-wider shrink-0 cursor-pointer shadow-2xs transition-colors"
-          >
-            {t('open') || 'Öffnen'}
-          </button>
-        </div>
-      )}
  
       {/* Refresh Toast Notification */}
       {showToast && (

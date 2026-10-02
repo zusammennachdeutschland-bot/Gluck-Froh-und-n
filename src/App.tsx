@@ -81,7 +81,8 @@ function MainApp() {
     activeAlarmLesson,
     dismissLessonAlarm,
     snoozeLessonAlarm,
-    notificationSettings
+    notificationSettings,
+    theme
   } = useApp();
 
   // Ensure notification channels and system permissions are properly configured for outside-the-app alerts
@@ -362,13 +363,45 @@ function MainApp() {
     language
   ]);
 
+  // Synchronize System Status Bar (Capacitor Android & Web Meta) with app theme
   useEffect(() => {
+    const isDark = theme === 'dark';
+    const bgColor = isDark ? '#020617' : '#FFFFFF';
+    // Capacitor Style.Light = Dark text/icons for light backgrounds
+    // Capacitor Style.Dark  = Light text/icons for dark backgrounds
+    const targetStyle = isDark ? Style.Dark : Style.Light;
+
     if (Capacitor.isNativePlatform()) {
       try {
-        StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
-        StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-      } catch {}
+        StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
+        StatusBar.setStyle({ style: targetStyle }).catch(() => {});
+        StatusBar.setBackgroundColor({ color: bgColor }).catch(() => {});
+      } catch (err) {
+        console.warn('Capacitor StatusBar sync failed:', err);
+      }
+    }
 
+    // Dynamic web meta tag sync
+    try {
+      const metas = document.querySelectorAll('meta[name="theme-color"]');
+      if (metas.length > 0) {
+        metas.forEach(meta => meta.setAttribute('content', bgColor));
+      } else {
+        const meta = document.createElement('meta');
+        meta.name = 'theme-color';
+        meta.id = 'theme-color-meta';
+        meta.content = bgColor;
+        document.head.appendChild(meta);
+      }
+      const metaApple = document.getElementById('status-bar-style-meta') || document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      if (metaApple) {
+        metaApple.setAttribute('content', isDark ? 'black-translucent' : 'default');
+      }
+    } catch {}
+  }, [theme]);
+
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
       const backButtonListener = CapacitorApp.addListener('backButton', () => {
         try {
           const now = Date.now();

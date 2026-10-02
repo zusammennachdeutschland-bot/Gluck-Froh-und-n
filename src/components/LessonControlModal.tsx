@@ -442,10 +442,17 @@ export const LessonControlModal: React.FC = () => {
     || (selectedLesson.groupName ? groups.find(g => g.name.trim().toLowerCase() === selectedLesson.groupName.trim().toLowerCase()) : undefined)
     || groups.find(g => g.name && selectedLesson.title.toLowerCase().includes(g.name.toLowerCase()))
     || groups.find(g => g.name && g.name.toLowerCase().includes(selectedLesson.title.replace(/Lektion|حصة|درس/gi, '').trim().toLowerCase()));
-  const isPerLessonGroup = Boolean(targetGroup && (targetGroup.paymentCycle === 'per_lesson' || targetGroup.paymentModel === 'per_session'));
+  const isPerLessonGroup = Boolean(
+    targetGroup && (
+      (targetGroup.sessionCount !== undefined && targetGroup.sessionCount <= 1) ||
+      ((targetGroup.paymentCycle === 'per_lesson' || targetGroup.paymentModel === 'per_session') && (targetGroup.sessionCount === undefined || targetGroup.sessionCount <= 1))
+    )
+  );
   // Each group already has its cycle session count recorded in its settings!
-  const cycleTotalSessions = targetGroup?.sessionCount || selectedLesson?.totalSessionsInPackage || 4;
-  const hasCycle = Boolean(selectedLesson && !selectedLesson.isQuickLesson && !isPerLessonGroup && cycleTotalSessions > 1);
+  const cycleTotalSessions = (targetGroup?.sessionCount && targetGroup.sessionCount > 1) 
+    ? targetGroup.sessionCount 
+    : (selectedLesson?.totalSessionsInPackage && selectedLesson.totalSessionsInPackage > 1 ? selectedLesson.totalSessionsInPackage : 4);
+  const hasCycle = Boolean(selectedLesson && !isPerLessonGroup && cycleTotalSessions > 1);
   
   // Dynamically compute the sequential session number among NON-CANCELLED lessons in the group/student
   const autoComputedSessionNumber = useMemo(() => {
@@ -645,7 +652,10 @@ export const LessonControlModal: React.FC = () => {
   const handleSendOfflineLessonStartMessage = () => {
     const teacherAr = getTeacherArabicName(profile, 'المعلم');
     const teacherSig = teacherAr.startsWith('أ.') || teacherAr.startsWith('الأستاذ') ? teacherAr : `أ. ${teacherAr}`;
-    const text = `السلام عليكم ورحمة الله وبركاته\n\nتم بدء الحصة الآن.\n\nنحيطكم علماً بأن الطالب بدأ الحصة في موعدها المحدد.\n\nمع تحيات\n${teacherSig}`;
+    const isFem = targetStudent ? (targetStudent.gender === 'female') : false;
+    const roleLabel = isFem ? 'الطالبة' : 'الطالب';
+    const stName = targetStudent?.name || selectedLesson.studentName || roleLabel;
+    const text = `السلام عليكم ورحمة الله وبركاته\n\nتم بدء الحصة الآن.\n\nأحيط حضرتك علماً بأن ${roleLabel} (${stName}) بدأ${isFem ? 'ت' : ''} الحصة في موعدها المحدد.\n\nمع تحيات\n${teacherSig}`;
     sendWhatsAppWithGroupCheck(text);
   };
 

@@ -202,6 +202,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
 
   const handleSubmit = (data: GroupFormData) => {
     const isPerLesson = data.paymentCycle === 'per_lesson';
+    const effectiveSessionCount = isPerLesson ? 1 : Math.max(2, Number(data.sessionCount) || 4);
     const pricePerSession = Number(data.pricePerSession) || 0;
     const calcMonthlyPrice = isPerLesson 
       ? pricePerSession 
@@ -217,12 +218,12 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       name: data.name,
       grade: data.grade,
       type: data.type,
-      paymentCycle: data.paymentCycle,
+      paymentCycle: isPerLesson ? 'per_lesson' : 'monthly',
       paymentModel: isPerLesson ? 'per_session' : 'package',
       monthlyPackagePrice: calcMonthlyPrice,
       pricePerSession: isPerLesson ? pricePerSession : undefined,
-      sessionCount: isPerLesson ? 1 : Number(data.sessionCount),
-      startingSessionNumber: isPerLesson ? 1 : Number(data.startingSessionNumber),
+      sessionCount: effectiveSessionCount,
+      startingSessionNumber: isPerLesson ? 1 : Math.max(1, Number(data.startingSessionNumber) || 1),
       defaultFinanceAccountId: data.defaultFinanceAccountId,
       scheduleDays: data.scheduleDays,
       scheduleTime: data.scheduleTime,

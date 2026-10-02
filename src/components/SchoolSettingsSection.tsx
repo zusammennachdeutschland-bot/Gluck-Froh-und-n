@@ -621,59 +621,116 @@ export const SchoolSettingsSection: React.FC<Props> = ({ onBack }) => {
           )}
         </div>
 
-        {/* Global Period Parameters */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main flex items-center justify-between">
-              <span>{_t('عدد الحصص اليومية', 'Daily Periods Count', 'Tägliche Stundenanzahl')}</span>
-              <span className="text-[10px] font-normal text-text-muted">1 - 12</span>
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="12"
-              value={periodsCount}
-              onChange={(e) => setPeriodsCount(Math.max(1, Math.min(12, parseInt(e.target.value) || 7)))}
-              className="w-full px-3 py-2.5 sm:py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main font-mono"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main">
-              {_t('بداية الحصة الأولى', 'First Period Start', 'Beginn 1. Stunde')}
-            </label>
-            <input
-              type="time"
-              value={firstPeriodStart}
-              onChange={(e) => setFirstPeriodStart(e.target.value || '08:00')}
-              className="w-full px-3 py-2.5 sm:py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main font-mono"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main flex items-center justify-between">
-              <span>{_t('مدة الحصة الافتراضية', 'Default Duration', 'Standard-Dauer')}</span>
-              <span className="text-[10px] font-normal text-text-muted">{_t('دقيقة', 'mins', 'Min.')}</span>
-            </label>
-            <div className="flex items-center gap-1.5">
+        {/* Global Period Parameters - Perfectly Balanced & Coordinated */}
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Field 1: Periods Count */}
+            <div className="bg-surface-hover/60 border border-surface-border rounded-xl p-3 space-y-1.5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-primary inline-block"></span>
+                  <span>{_t('عدد الحصص اليومية', 'Daily Periods Count', 'Tägliche Stundenanzahl')}</span>
+                </label>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface border border-surface-border text-text-muted">
+                  1 - 12 {_t('حصة', 'periods', 'Std.')}
+                </span>
+              </div>
               <input
                 type="number"
-                min="15"
-                max="120"
-                value={defaultDuration}
-                onChange={(e) => setDefaultDuration(Math.max(15, Math.min(120, parseInt(e.target.value) || 45)))}
-                className="w-full px-3 py-2.5 sm:py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main font-mono"
+                min="1"
+                max="12"
+                value={periodsCount}
+                onChange={(e) => setPeriodsCount(Math.max(1, Math.min(12, parseInt(e.target.value) || 7)))}
+                className="w-full px-3 py-2 bg-surface border border-surface-border focus:border-primary rounded-lg text-xs font-bold text-text-main font-mono shadow-2xs"
               />
-              <button
-                type="button"
-                onClick={handleResetAllDurations}
-                className="px-2.5 py-2.5 sm:py-2 text-[11px] font-bold bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main rounded-xl border border-surface-border whitespace-nowrap cursor-pointer transition-all"
-                title={_t('تطبيق هذه المدة على كافة الحصص وإلغاء التخصيص اليدوي', 'Apply to all periods & clear manual overrides', 'Auf alle anwenden')}
-              >
-                {_t('تطبيق للكل', 'Apply to All', 'Auf alle')}
-              </button>
+            </div>
+
+            {/* Field 2: First Period Start */}
+            <div className="bg-surface-hover/60 border border-surface-border rounded-xl p-3 space-y-1.5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-primary" />
+                  <span>{_t('بداية الحصة الأولى', 'First Period Start', 'Beginn 1. Stunde')}</span>
+                </label>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface border border-surface-border text-text-muted">
+                  {_t('توقيت البداية', 'Start Time', 'Start')}
+                </span>
+              </div>
+              <input
+                type="time"
+                value={firstPeriodStart}
+                onChange={(e) => setFirstPeriodStart(e.target.value || '08:00')}
+                className="w-full px-3 py-2 bg-surface border border-surface-border focus:border-primary rounded-lg text-xs font-bold text-text-main font-mono shadow-2xs"
+              />
+            </div>
+
+            {/* Field 3: Default Duration */}
+            <div className="bg-surface-hover/60 border border-surface-border rounded-xl p-3 space-y-1.5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-primary" />
+                  <span>{_t('مدة الحصة الافتراضية', 'Default Duration', 'Standard-Dauer')}</span>
+                </label>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface border border-surface-border text-text-muted">
+                  {_t('دقيقة', 'mins', 'Min.')}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min="15"
+                  max="120"
+                  value={defaultDuration}
+                  onChange={(e) => setDefaultDuration(Math.max(15, Math.min(120, parseInt(e.target.value) || 45)))}
+                  className="w-full px-3 py-2 bg-surface border border-surface-border focus:border-primary rounded-lg text-xs font-bold text-text-main font-mono shadow-2xs"
+                />
+                <button
+                  type="button"
+                  onClick={handleResetAllDurations}
+                  className="px-2.5 py-2 text-[11px] font-bold bg-surface hover:bg-primary hover:text-white text-text-main rounded-lg border border-surface-border hover:border-primary whitespace-nowrap cursor-pointer transition-all shadow-2xs"
+                  title={_t('تطبيق هذه المدة على كافة الحصص وإلغاء أي تخصيص يدوي', 'Apply to all periods & clear manual overrides', 'Auf alle anwenden')}
+                >
+                  {_t('تطبيق للكل', 'Apply All', 'Auf alle')}
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* Schedule Summary Banner */}
+          {generatedPeriods.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-xl text-xs">
+              <div className="flex items-center gap-2 text-primary font-bold">
+                <Clock className="w-4 h-4 shrink-0" />
+                <span>
+                  {_t(
+                    `ملخص اليوم المدرسي: من ${generatedPeriods[0]?.startTime || firstPeriodStart} إلى ${generatedPeriods[generatedPeriods.length - 1]?.endTime || ''} (${periodsCount} حصص)`,
+                    `School Day Summary: ${generatedPeriods[0]?.startTime || firstPeriodStart} to ${generatedPeriods[generatedPeriods.length - 1]?.endTime || ''} (${periodsCount} periods)`,
+                    `Schultag: ${generatedPeriods[0]?.startTime || firstPeriodStart} - ${generatedPeriods[generatedPeriods.length - 1]?.endTime || ''} (${periodsCount} Std.)`
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono font-bold text-text-muted">
+                  {_t(
+                    `إجمالي زمن الحصص: ${generatedPeriods.reduce((acc, p) => acc + p.duration, 0)} دقيقة`,
+                    `Total Periods Time: ${generatedPeriods.reduce((acc, p) => acc + p.duration, 0)} mins`,
+                    `Gesamtdauer: ${generatedPeriods.reduce((acc, p) => acc + p.duration, 0)} Min.`
+                  )}
+                </span>
+                {Object.keys(customDurations).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleResetAllDurations}
+                    className="text-[10.5px] font-bold text-rose-600 hover:text-rose-700 dark:text-rose-400 flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>{_t('استعادة الافتراضي للجميع', 'Reset All', 'Alle zurücksetzen')}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Interactive Manual Duration Editing & Live Preview */}

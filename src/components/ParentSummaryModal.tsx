@@ -60,12 +60,23 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
     const recLink1 = report?.recordingLink || lesson.recordingLink;
     const recLink2 = report?.recordingLink2 || lesson.recordingLink2;
     
+    const grp = lesson.groupId 
+      ? groups.find(g => g.id === lesson.groupId) 
+      : (activeStudent?.groupId ? groups.find(g => g.id === activeStudent.groupId) : undefined);
+    const totalCycleCount = (grp?.sessionCount && grp.sessionCount > 1) 
+      ? grp.sessionCount 
+      : (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 ? lesson.totalSessionsInPackage : 4);
+    const isPerLessonGroup = Boolean(
+      (grp && ((grp.sessionCount !== undefined && grp.sessionCount <= 1) || ((grp.paymentCycle === 'per_lesson' || grp.paymentModel === 'per_session') && (grp.sessionCount === undefined || grp.sessionCount <= 1))))
+    );
+    const hasCycleSession = !isPerLessonGroup && totalCycleCount > 1;
+
     // Arabic summary
     if (reportLanguage === 'ar') {
       const attendance = report?.attendanceStatus === 'present' ? 'حاضر ✅' : report?.attendanceStatus === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
       const homework = report?.homeworkStatus === 'completed' ? 'تم الحل بالكامل ✅' : report?.homeworkStatus === 'assigned' ? 'واجب جديد 📝' : 'لم يتم الحل ❌';
-      const sessionLine = (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) 
-        ? `⏱️ رقم الحصة: الحصة ${currentSessionNumber} من ${lesson.totalSessionsInPackage}\n` 
+      const sessionLine = hasCycleSession 
+        ? `⏱️ رقم الحصة: الحصة ${currentSessionNumber} من ${totalCycleCount}\n` 
         : '';
       let recordingLine = '';
       if (recLink1 && recLink2) {
@@ -96,8 +107,8 @@ ${getTeacherArabicName(profile, 'معلم اللغة الألمانية')} 🇩�
     if (reportLanguage === 'en') {
       const attendance = report?.attendanceStatus === 'present' ? 'Present ✅' : report?.attendanceStatus === 'late' ? 'Late ⚠️' : 'Absent ❌';
       const homework = report?.homeworkStatus === 'completed' ? 'Completed ✅' : report?.homeworkStatus === 'assigned' ? 'Assigned 📝' : 'Not completed ❌';
-      const sessionLine = (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) 
-        ? `⏱️ Session: Session ${currentSessionNumber} of ${lesson.totalSessionsInPackage}\n` 
+      const sessionLine = hasCycleSession 
+        ? `⏱️ Session: Session ${currentSessionNumber} of ${totalCycleCount}\n` 
         : '';
       let recordingLine = '';
       if (recLink1 && recLink2) {
@@ -106,7 +117,7 @@ ${getTeacherArabicName(profile, 'معلم اللغة الألمانية')} 🇩�
         recordingLine = `\n🎥 Lesson Recording:\n${recLink1}\n`;
       }
 
-      return `Hello / Greetings to the parents of ${lesson.studentName || 'Student'}! 🇩🇪
+      return `Hello / Greetings to the parent of ${lesson.studentName || 'Student'}! 🇩🇪
 
 Educational summary report for ${lesson.studentName || lesson.title} on ${lesson.date}:
 
@@ -128,8 +139,8 @@ German Language Department 🇩🇪`;
     // German summary (default)
     const attendance = report?.attendanceStatus === 'present' ? 'Anwesend (Present) ✅' : report?.attendanceStatus === 'late' ? 'Verspätet (Late) ⚠️' : 'Abwesend (Absent) ❌';
     const homework = report?.homeworkStatus === 'completed' ? 'Vollständig erledigt (Completed) ✅' : report?.homeworkStatus === 'assigned' ? 'Neu aufgegeben (Assigned) 📝' : 'Nicht erledigt ❌';
-    const sessionLine = (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) 
-      ? `⏱️ Sitzung: Session ${currentSessionNumber} von ${lesson.totalSessionsInPackage}\n` 
+    const sessionLine = hasCycleSession 
+      ? `⏱️ Sitzung: Session ${currentSessionNumber} von ${totalCycleCount}\n` 
       : '';
     let recordingLine = '';
     if (recLink1 && recLink2) {

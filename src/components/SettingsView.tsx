@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { AppLanguage } from '../types';
 import { 
-  Settings, Search, User, Globe, Moon, Sun, Clock, DollarSign, Check, Camera, CheckCircle2,
+  Settings, Search, User, Globe, Moon, Sun, Clock, DollarSign, Check, CheckCircle2,
   HardDrive, Download, Upload, Trash2, AlertTriangle, MessageSquare, ChevronRight,
   ArrowLeft, ArrowRight, Calendar, ShieldAlert, ShieldCheck, Info, Copy, Save, Phone, ExternalLink,
   BookOpen, FileText, Bell, CheckSquare, XCircle, Award, Sparkles, Star, Plus, Pencil, RotateCcw, Heart,
@@ -14,11 +14,7 @@ import { SmartBackupCenter } from './SmartBackupCenter';
 import { DataHealthCenterModal } from './DataHealthCenterModal';
 import { SchoolSettingsSection } from './SchoolSettingsSection';
 import { TeacherProfileSection } from './TeacherProfileSection';
-import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
-import { AvatarImage } from './AvatarImage';
 import { getEffectiveSchoolEndForDay, formatTime } from '../utils/timeUtils';
-import { BuddyCustomizer } from './buddy/BuddyCustomizer';
-import { BuddyCustomization, DEFAULT_BUDDY_CUSTOMIZATION } from '../types/buddy';
 
 type SettingsCategory = 
   | 'language'
@@ -33,12 +29,12 @@ type SettingsCategory =
   | 'danger';
 
 const DEFAULT_PARENT_TEMPLATES: Record<string, string> = {
-  homework: 'السلام عليكم ورحمة الله وبركاته،\n\nنود إحاطتكم علماً بأن الطالب/ة {student_name} (مجموعة: {group_name}) قد استلم واجب الدرس الجديد بتاريخ {date}. يرجى المتابعة وحل الواجب قبل الحصة القادمة.\n\nمع تحيات: {teacher_name}',
-  attendance: 'السلام عليكم ورحمة الله وبركاته،\n\nنفيدكم بحضور الطالب/ة {student_name} بحصة {group_name} اليوم {date}، وكان تفاعله ممتازاً مع الشرح.\n\nشكراً لمتابعتكم: {teacher_name}',
-  absence: 'السلام عليكم ورحمة الله وبركاته،\n\nنود إحاطتكم بعدم حضور الطالب/ة {student_name} لحصة {group_name} المقررة اليوم {date}. يرجى التواصل معنا للتنسيق والاطمئنان.\n\nمع تحيات: {teacher_name}',
-  payment: 'السلام عليكم ورحمة الله وبركاته،\n\nنود تذكيركم بموعد سداد الرسوم المستحقة للطالب/ة {student_name} عن حزمة دروس {group_name}.\nالمبلغ المطلوب: {amount}.\n\nشاكرين حسن تعاونكم: {teacher_name}',
+  homework: 'السلام عليكم ورحمة الله وبركاته،\n\nأود إحاطة حضرتك علماً بأن الطالب/ة {student_name} (مجموعة: {group_name}) قد استلم واجب الدرس الجديد بتاريخ {date}. يرجى المتابعة وحل الواجب قبل الحصة القادمة.\n\nمع تحيات: {teacher_name}',
+  attendance: 'السلام عليكم ورحمة الله وبركاته،\n\nأفيد حضرتك بحضور الطالب/ة {student_name} بحصة {group_name} اليوم {date}، وكان تفاعله ممتازاً مع الشرح.\n\nشكراً لمتابعة حضرتك: {teacher_name}',
+  absence: 'السلام عليكم ورحمة الله وبركاته،\n\nأود إحاطة حضرتك بعدم حضور الطالب/ة {student_name} لحصة {group_name} المقررة اليوم {date}. يرجى التواصل معنا للتنسيق والاطمئنان.\n\nمع تحيات: {teacher_name}',
+  payment: 'السلام عليكم ورحمة الله وبركاته،\n\nأود تذكير حضرتك بموعد سداد الرسوم المستحقة للطالب/ة {student_name} عن حزمة دروس {group_name}.\nالمبلغ المطلوب: {amount}.\n\nشاكراً لحضرتك حسن التعاون: {teacher_name}',
   exam: 'السلام عليكم ورحمة الله وبركاته،\n\nنتيجة اختبار الطالب/ة {student_name} في مجموعة {group_name}:\nحصل على أداء ممتاز وتم تكريمه في الحصة.\n\nمع خالص التقدير: {teacher_name}',
-  summary: 'السلام عليكم ورحمة الله وبركاته،\n\nملخص درس اليوم لمجموعة {group_name} ({date}):\nتم شرح أجزاء الهامة والتطبيق عليها، وأبدى الطلاب تفاعلاً طيباً.\n\nمع تحيات: {teacher_name}'
+  summary: 'السلام عليكم ورحمة الله وبركاته،\n\nملخص درس اليوم لمجموعة {group_name} ({date}):\nتم شرح الأجزاء الهامة والتطبيق عليها، وأبدى الطلاب تفاعلاً طيباً.\n\nمع تحيات: {teacher_name}'
 };
 
 export const SettingsView: React.FC = () => {
@@ -75,7 +71,6 @@ export const SettingsView: React.FC = () => {
   const [displayNameAr, setDisplayNameAr] = useState(profile.displayNameAr || profile.nameAr || '');
   const [email, setEmail] = useState(profile.email || '');
   const [currency, setCurrency] = useState(profile.currency || 'EGP');
-  const [buddyConfig, setBuddyConfig] = useState<BuddyCustomization>(() => profile.buddyCustomization || DEFAULT_BUDDY_CUSTOMIZATION);
   const [weeklyWorkingHours, setWeeklyWorkingHours] = useState(profile.weeklyWorkingHours || {
     0: { isOff: true, startTime: '09:00', endTime: '21:00' },
     1: { isOff: false, startTime: '09:00', endTime: '21:00' },
@@ -138,7 +133,7 @@ export const SettingsView: React.FC = () => {
 
   const handleSharePaymentInfo = () => {
     const arabicSignature = displayNameAr?.trim() || displayName || 'المعلم';
-    const text = `السلام عليكم ورحمة الله وبركاته\n\nبيانات التحويل والدفع:\n\n📱 رقم الهاتف:\n${phone || 'غير محدد'}\n\n💳 InstaPay:\n${instaPayId || 'غير محدد'}\n${vodafoneCashNumber ? `\n💸 فودافون كاش:\n${vodafoneCashNumber}\n` : ''}${bankAccount ? `\n🏦 الحساب البنكي:\n${bankAccount}\n` : ''}${paymentLink ? `\n🔗 رابط الدفع:\n${paymentLink}\n` : ''}${whatsappNumber ? `\n💬 واتساب:\n${whatsappNumber}\n` : ''}\nشكراً لحضراتكم.\n\nمع تحيات\nأ. ${arabicSignature}`;
+    const text = `السلام عليكم ورحمة الله وبركاته\n\nبيانات التحويل والدفع:\n\n📱 رقم الهاتف:\n${phone || 'غير محدد'}\n\n💳 InstaPay:\n${instaPayId || 'غير محدد'}\n${vodafoneCashNumber ? `\n💸 فودافون كاش:\n${vodafoneCashNumber}\n` : ''}${bankAccount ? `\n🏦 الحساب البنكي:\n${bankAccount}\n` : ''}${paymentLink ? `\n🔗 رابط الدفع:\n${paymentLink}\n` : ''}${whatsappNumber ? `\n💬 واتساب:\n${whatsappNumber}\n` : ''}\nشكراً لحضرتك.\n\nمع تحيات\nأ. ${arabicSignature}`;
     
     navigator.clipboard.writeText(text);
     setCopiedPaymentDetails(true);
@@ -183,7 +178,6 @@ export const SettingsView: React.FC = () => {
       nameAr: displayNameAr.trim(),
       email, 
       currency,
-      buddyCustomization: buddyConfig,
       weeklyWorkingHours
     });
     triggerSaveToast();

@@ -426,7 +426,10 @@ export const getStudentCyclePricing = (
 
   // Group settings take precedence
   if (group) {
-    const isPerLesson = group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session';
+    const isPerLesson = Boolean(
+      (group.sessionCount !== undefined && group.sessionCount <= 1) ||
+      ((group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session') && (group.sessionCount === undefined || group.sessionCount <= 1))
+    );
 
     if (isPerLesson) {
       const cycleLength = 1;

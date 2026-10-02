@@ -32,10 +32,10 @@ export const getGroupCycleInfo = (
     };
   }
 
+  // If group has an explicit package count > 1 (e.g. 4, 8, 12 sessions), it is strictly a cycle package, NOT per-lesson!
   const isPerLesson = Boolean(
-    group.paymentCycle === 'per_lesson' || 
-    group.paymentModel === 'per_session' || 
-    (group.sessionCount !== undefined && group.sessionCount <= 1)
+    (group.sessionCount !== undefined && group.sessionCount <= 1) ||
+    ((group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session') && (group.sessionCount === undefined || group.sessionCount <= 1))
   );
 
   if (isPerLesson) {
@@ -129,11 +129,11 @@ export const calculateSequentialSessionNumber = (
   if (!lesson) return 1;
 
   // Single lesson groups / per-lesson payments always have session number 1
+  // If group has an explicit package count > 1 (e.g. 4, 8, 12 sessions), it is strictly a cycle package!
   const isPerLesson = Boolean(
     options?.group && (
-      options.group.paymentCycle === 'per_lesson' ||
-      options.group.paymentModel === 'per_session' ||
-      (options.group.sessionCount !== undefined && options.group.sessionCount <= 1)
+      (options.group.sessionCount !== undefined && options.group.sessionCount <= 1) ||
+      ((options.group.paymentCycle === 'per_lesson' || options.group.paymentModel === 'per_session') && (options.group.sessionCount === undefined || options.group.sessionCount <= 1))
     )
   );
   if (isPerLesson) return 1;
@@ -159,10 +159,15 @@ export const calculateSequentialSessionNumber = (
     if (targetGroupId && l.groupId === targetGroupId) {
       return true;
     }
-    if (targetStudentId && l.studentId === targetStudentId) {
+    if (options?.group?.name) {
+      const gName = options.group.name.trim().toLowerCase();
+      if (l.groupName && l.groupName.trim().toLowerCase() === gName) return true;
+      if (l.title && l.title.toLowerCase().includes(gName)) return true;
+    }
+    if (!targetGroupId && targetStudentId && l.studentId === targetStudentId) {
       return true;
     }
-    if (targetStudentName) {
+    if (!targetGroupId && targetStudentName) {
       const lName = normalizeName(l.studentName || l.quickStudentName);
       if (lName && (lName === targetStudentName || lName.includes(targetStudentName) || targetStudentName.includes(lName))) {
         return true;
@@ -170,7 +175,7 @@ export const calculateSequentialSessionNumber = (
     }
     if (options?.students && targetStudentId && l.groupId) {
       const st = options.students.find(s => s.id === targetStudentId);
-      if (st && st.groupId === l.groupId) return true;
+      if (st && st.groupId === l.groupId && (!targetGroupId || l.groupId === targetGroupId)) return true;
     }
     return false;
   });

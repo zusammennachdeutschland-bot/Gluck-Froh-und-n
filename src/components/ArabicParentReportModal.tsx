@@ -9,7 +9,7 @@ import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString }
 import { getStudentCode } from '../utils/studentCodeUtils';
 import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import { 
-  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen
+  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen, Globe
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { GroupProfileModal } from './GroupProfileModal';
@@ -92,23 +92,27 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const [copied, setCopied] = useState(false);
   const [showGroupProfile, setShowGroupProfile] = useState(false);
 
-  // Find the associated group (if any)
-  const associatedGroup = groups.find(g => g.id === lesson.groupId);
+  // Find the associated group robustly (by groupId, student's groupId, groupName, or title match)
+  const associatedGroup = groups.find(g => g.id === lesson.groupId)
+    || (student?.groupId ? groups.find(g => g.id === student.groupId) : undefined)
+    || (lesson.groupName ? groups.find(g => g.name.trim().toLowerCase() === lesson.groupName.trim().toLowerCase()) : undefined)
+    || groups.find(g => g.name && lesson.title.toLowerCase().includes(g.name.toLowerCase()));
   const groupWhatsAppLink = associatedGroup?.whatsAppGroupLink || '';
 
   // Check if the lesson/group operates on a cycle package (not per-lesson / single session)
+  // If the group has sessionCount > 1 (e.g. 4, 8, 12 sessions), it is strictly a cycle package!
   const isPerLesson = Boolean(
-    lesson.isQuickLesson || 
     (associatedGroup && (
-      associatedGroup.paymentCycle === 'per_lesson' || 
-      associatedGroup.paymentModel === 'per_session' || 
-      (associatedGroup.sessionCount || 0) <= 1
+      (associatedGroup.sessionCount !== undefined && associatedGroup.sessionCount <= 1) ||
+      ((associatedGroup.paymentCycle === 'per_lesson' || associatedGroup.paymentModel === 'per_session') && (associatedGroup.sessionCount === undefined || associatedGroup.sessionCount <= 1))
     )) ||
-    (!associatedGroup && (!lesson.totalSessionsInPackage || lesson.totalSessionsInPackage <= 1))
+    (!associatedGroup && (lesson.isQuickLesson || !lesson.totalSessionsInPackage || lesson.totalSessionsInPackage <= 1))
   );
 
   const hasCycle = !isPerLesson;
-  const totalCycleSessions = associatedGroup?.sessionCount || lesson.totalSessionsInPackage || 8;
+  const totalCycleSessions = (associatedGroup?.sessionCount && associatedGroup.sessionCount > 1) 
+    ? associatedGroup.sessionCount 
+    : (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 ? lesson.totalSessionsInPackage : 4);
 
   // Find students associated with this lesson or group
   const groupStudents = lesson.groupId 
@@ -117,10 +121,8 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
   const isGroupLesson = (Boolean(lesson.groupId) || groupStudents.length > 0) && groupStudents.length > 1;
 
-  // Tabs: 'individual' | 'bulk'
-  const [activeTab, setActiveTab] = useState<'individual' | 'bulk'>(
-    isGroupLesson ? 'bulk' : 'individual'
-  );
+  // Tabs: 'individual' | 'bulk' - Default to individual student report so it speaks in singular directly to the parent
+  const [activeTab, setActiveTab] = useState<'individual' | 'bulk'>('individual');
 
   const initialResolvedStudent = student || 
     students.find(s => (lesson.studentId && s.id === lesson.studentId) || (lesson.studentName && s.name && s.name.trim().toLowerCase() === lesson.studentName.trim().toLowerCase())) || 
@@ -496,9 +498,9 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
     if (reportStyle === 'egyptian') {
       const egyptianGreetings = [
-        'مساء الخير يا فندم / أهلاً بحضراتكم 👋',
+        'مساء الخير يا فندم / أهلاً بحضرتك 👋',
         'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
-        'أهلاً بحضراتكم جميعاً 👋'
+        'أهلاً بحضرتك يا فندم 👋'
       ];
       const selectedGreeting = egyptianGreetings[styleSeed % egyptianGreetings.length];
       const groupTitle = associatedGroup?.name || lesson.title || 'مجموعة الألماني';
@@ -515,7 +517,7 @@ ${[dayDateLine, timeLine, cycleLine].filter(Boolean).join('\n')}
 📖 اللي اتشرح النهاردة في الحصة:
 ${taughtToday}
 
-📝 الواجب المطلوب من كل الطلاب:
+📝 الواجب المطلوب:
 ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق المطلوب كان:\n• ${previousHomework.trim()}` : ''}${recordingSection}
 `;
 
@@ -527,7 +529,7 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
         });
       }
 
-      text += `\nشكراً لمتابعتكم الكريمة واهتمامكم المستمر 🌸\nمع تحيات: *${teacherSig}* 🇩🇪`;
+      text += `\nمع تحيات: *${teacherSig}* 🇩🇪`;
       return text;
     }
 
@@ -552,7 +554,7 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
         });
       }
 
-      text += `\nتحياتي، *${teacherSig}*`;
+      text += `\nمع تحيات: *${teacherSig}* 🇩🇪`;
       return text;
     }
 
@@ -575,7 +577,7 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 📖 تم اليوم شرح:
 ${taughtToday}
 
-📝 الواجب لجميع الطلاب:
+📝 الواجب المقرر:
 ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق المطلوب كان:\n• ${previousHomework.trim()}` : ''}${recordingSection}
 `;
 
@@ -587,7 +589,7 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
       });
     }
 
-    text += `\nشكراً لكم،\n${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
+    text += `\nمع تحيات: *${teacherSig}* 🇩🇪`;
     return text;
   };
 
@@ -777,12 +779,12 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
         'أهلاً بحضرتك يا فندم 👋',
         'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
         'تحياتي لحضرتك يا فندم 👋',
-        'أهلاً بولي أمر الطالبة/الطالب العزيز 👋'
+        `أهلاً بولي أمر ${studentRoleLabel} العزيز${isFemale ? 'ة' : ''} 👋`
       ];
       const selectedGreeting = egyptianGreetings[styleSeed % egyptianGreetings.length];
       
       const egyptianIntros = [
-        `حبينا نبلغ حضرتك بتقرير حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* اليوم 🇩🇪:`,
+        `حبيت أبلغ حضرتك بتقرير حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* اليوم 🇩🇪:`,
         `تقرير حصة الألماني اليوم لـ ${studentRoleLabel} *${studentDisplayName}* 🇩🇪:`,
         `ملخص حصة الألماني ومستوى ${studentRoleLabel} *${studentDisplayName}* اليوم 🇩🇪:`,
         `تفاصيل ومتابعة حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* النهارده 🇩🇪:`,
@@ -791,10 +793,10 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
       const selectedIntro = egyptianIntros[styleSeed % egyptianIntros.length];
 
       const egyptianOutros = [
-        `شكراً لمتابعة حضرتك واهتمامك الدائم 🌸\nمع تحيات: *${teacherSig}* 🇩🇪`,
-        `شكراً جزيلاً لتعاونكم ومتابعتكم المستمرة 🌸\nمع أطيب التحيات: *${teacherSig}* 🇩🇪`,
-        `خالص الشكر والتقدير لحضرتك على المتابعة والحرص 🌸\nمع تحيات: *${teacherSig}* 🇩🇪`,
-        `ربنا يبارك فيه/فيها وتمنياتنا بدوام التميز والتفوق 🌸\nمع تحيات: *${teacherSig}* 🇩🇪`
+        `مع تحيات: *${teacherSig}* 🇩🇪`,
+        `مع أطيب التحيات: *${teacherSig}* 🇩🇪`,
+        `تحياتي لحضرتك: *${teacherSig}* 🇩🇪`,
+        `مع تحيات معلم المادة: *${teacherSig}* 🇩🇪`
       ];
       const selectedOutro = egyptianOutros[styleSeed % egyptianOutros.length];
 
@@ -805,7 +807,7 @@ ${selectedIntro}
 ${[dayDateLine, timeLine, cycleLine, codeLine].filter(Boolean).join('\n')}
 
 ❌ تنبيه الغياب:
-• ${studentRoleLabel} غائب${isFemale ? 'ة' : ''} عن الحصة اليوم، نتمنى ${isFemale ? 'لها' : 'له'} دوام الصحة والتوفيق ونرجو الاطمئنان ${isFemale ? 'عليها' : 'عليه'} 🌸
+• ${studentRoleLabel} غائب${isFemale ? 'ة' : ''} عن الحصة اليوم، أتمنى ${isFemale ? 'لها' : 'له'} دوام الصحة والتوفيق وأرجو الاطمئنان ${isFemale ? 'عليها' : 'عليه'} 🌸
 
 📖 اللي اتشرح النهاردة في الحصة (يرجى مذاكرته وتعويضه):
 ${taughtToday}
@@ -842,7 +844,7 @@ ${[dayDateLine, timeLine, cycleLine, codeLine].filter(Boolean).join('\n')}
 ${taughtToday}
 
 📝 الواجب المطلوب للمرة الجاية:
-${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfFeedback ? `\n\n🌟 مستوى وأداء الطالب اليوم:\n• ${perfFeedback}` : ''}${alertSection}
+${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfFeedback ? `\n\n🌟 مستوى وأداء ${studentRoleLabel} اليوم:\n• ${perfFeedback}` : ''}${alertSection}
 
 ${selectedOutro}`;
 
@@ -931,8 +933,7 @@ ${taughtToday}
 📝 الواجب المقرر للمرة القادمة:
 ${nextHomework}${recordingSection}${notesSection}
 
-شكراً لكم،
-${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
+مع تحيات: *${teacherSig}* 🇩🇪`;
 
       setFinalGeneratedText(generated);
       return;
@@ -961,8 +962,7 @@ ${taughtToday}
 📝 الواجب:
 ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfFeedback ? `\n\n🌟 أداء الحصة:\n• ${perfFeedback}` : ''}${alertSection}
 
-شكراً لكم،
-${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
+مع تحيات: *${teacherSig}* 🇩🇪`;
 
     setFinalGeneratedText(generated);
   }, [
@@ -1070,53 +1070,66 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
         <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
         
         {/* Header */}
-        <div className={`bg-surface px-3.5 py-2 sm:p-4 border-b border-surface-border flex items-center justify-between shrink-0 ${language === 'ar' ? 'flex-row' : 'flex-row-reverse'}`}>
-          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-            <div className="p-1.5 sm:p-2 bg-primary-soft text-primary rounded-lg sm:rounded-xl shrink-0">
-              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-xs sm:text-sm font-black text-text-main truncate">
-                {t('auto_share_session_report')}
-              </h2>
-              <div className="text-[10px] sm:text-xs text-text-muted truncate flex items-center gap-1 flex-wrap">
-                {associatedGroup ? (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowGroupProfile(true);
-                    }}
-                    className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
-                    title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
-                  >
-                    <span>{associatedGroup.name}</span>
-                    <Users className="w-3 h-3 opacity-80" />
-                  </button>
-                ) : (
-                  <span>{lesson.title}</span>
-                )}
-                {lesson.grade ? <span>• {lesson.grade}</span> : null}
-                {hasCycle ? <span>• الحصة {currentSessionNumber}/{totalCycleSessions}</span> : null}
-                {lesson.date ? <span>• {lesson.date}</span> : null}
+        <div className="bg-surface px-3.5 py-2.5 sm:px-5 sm:py-3.5 border-b border-surface-border shrink-0 space-y-2.5">
+          {/* Top Row: Title, Subtitle, and Close Button */}
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+              <div className="p-2 bg-primary-soft text-primary rounded-xl shrink-0 shadow-2xs border border-primary-border/40">
+                <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-xs sm:text-sm font-black text-text-main truncate">
+                  {t('auto_share_session_report')}
+                </h2>
+                <div className="text-[10px] sm:text-xs text-text-muted truncate flex items-center gap-1.5 flex-wrap mt-0.5">
+                  {associatedGroup ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowGroupProfile(true);
+                      }}
+                      className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1 cursor-pointer truncate"
+                      title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                    >
+                      <span className="truncate">{associatedGroup.name}</span>
+                      <Users className="w-3 h-3 opacity-80 shrink-0" />
+                    </button>
+                  ) : (
+                    <span className="truncate font-bold text-text-main">{lesson.title}</span>
+                  )}
+                  {lesson.grade ? <span className="opacity-70">• {lesson.grade}</span> : null}
+                  {hasCycle ? <span className="opacity-70">• {_t(`الحصة ${currentSessionNumber}/${totalCycleSessions}`, `Session ${currentSessionNumber}/${totalCycleSessions}`, `Std. ${currentSessionNumber}/${totalCycleSessions}`)}</span> : null}
+                  {lesson.date ? <span className="opacity-70 font-mono">• {lesson.date}</span> : null}
+                </div>
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <ReportLanguageToggle
-              showLabel={false}
-              onLanguageChange={() => setIsManualEdited(false)}
-            />
+
+            {/* Close Button */}
             <button 
               type="button" 
               onClick={(e) => {
                 e.stopPropagation();
                 onClose();
               }}
-              className="p-1 sm:p-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full text-text-muted hover:text-text-main transition-colors cursor-pointer shrink-0"
+              className="p-1.5 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-xl text-text-muted hover:text-text-main transition-all cursor-pointer shrink-0 border border-surface-border active:scale-95 shadow-2xs"
+              title={t('auto_cancel')}
             >
-              <X className="w-4 h-4 sm:w-5 sm:h-5" />
+              <X className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
             </button>
+          </div>
+
+          {/* Language Selection Bar */}
+          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-surface-border/50 bg-slate-50/70 dark:bg-slate-900/40 px-2.5 py-1.5 rounded-xl border border-surface-border/60">
+            <span className="text-[10px] sm:text-[11px] font-bold text-text-muted flex items-center gap-1.5 shrink-0">
+              <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span>{_t('لغة إرسال التقرير:', 'Report Language:', 'Sprache des Berichts:')}</span>
+            </span>
+            <ReportLanguageToggle
+              showLabel={false}
+              compact={false}
+              onLanguageChange={() => setIsManualEdited(false)}
+            />
           </div>
         </div>
 
@@ -1133,14 +1146,20 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                   setActiveTab('bulk');
                   setIsManualEdited(false);
                 }}
-                className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`py-2 px-2.5 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
                   activeTab === 'bulk'
                     ? 'bg-white dark:bg-slate-800 text-primary shadow-xs'
                     : 'text-text-muted hover:text-text-main'
                 }`}
               >
-                <Users className="w-4 h-4 text-emerald-500" />
-                <span>{t('auto_bulk_group_report_groups')}</span>
+                <Users className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className="truncate">
+                  {_t(
+                    `📊 تقرير مجمع (${groupStudents.length} طلاب)`,
+                    `📊 Bulk Group Report (${groupStudents.length} students)`,
+                    `📊 Sammelbericht (${groupStudents.length} Schüler)`
+                  )}
+                </span>
               </button>
 
               <button
@@ -1150,14 +1169,14 @@ ${teacherSig} - معلم اللغة الألمانية 🇩🇪`;
                   setActiveTab('individual');
                   setIsManualEdited(false);
                 }}
-                className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`py-2 px-2.5 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
                   activeTab === 'individual'
                     ? 'bg-white dark:bg-slate-800 text-primary shadow-xs'
                     : 'text-text-muted hover:text-text-main'
                 }`}
               >
-                <User className="w-4 h-4 text-primary" />
-                <span>{t('auto_individual_student_report')}</span>
+                <User className="w-4 h-4 text-primary shrink-0" />
+                <span className="truncate">{t('auto_individual_student_report')}</span>
               </button>
             </div>
           )}

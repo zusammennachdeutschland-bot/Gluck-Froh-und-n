@@ -826,6 +826,82 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
   }, [initialLessonDeduplication, initialPaymentDeduplication]);
 
+  // One-time startup healing: reconcile group billing cycles and synchronize session numbers
+  useEffect(() => {
+    let groupChanges = false;
+    const healedGroups = groups.map(g => {
+      // If group was edited to sessionCount > 1 (e.g. 4) or paymentCycle monthly, ensure flags are clean
+      const hasPackageCount = Boolean(g.sessionCount && g.sessionCount > 1);
+      const isMonthlyCycle = g.paymentCycle === 'monthly';
+      if ((hasPackageCount || isMonthlyCycle) && (g.paymentCycle === 'per_lesson' || g.paymentModel === 'per_session')) {
+        groupChanges = true;
+        return wrapMutation({
+          ...g,
+          paymentCycle: 'monthly',
+          paymentModel: 'package',
+          sessionCount: g.sessionCount && g.sessionCount > 1 ? g.sessionCount : 4
+        } as Group);
+      }
+      return g;
+    });
+
+    if (groupChanges) {
+      setGroups(healedGroups);
+      storage.setItem('dl_groups', healedGroups);
+    }
+
+    // Synchronize all lessons for cycle groups so totalSessionsInPackage and sessionNumber are strictly consistent
+    updateFullLessonsStorage(allLessons => {
+      let lessonChanges = false;
+      const updated = allLessons.map(l => {
+        if (!l.groupId || l.deleted) return l;
+        const grp = healedGroups.find(g => g.id === l.groupId);
+        if (!grp) return l;
+
+        const isCycleGroup = Boolean((grp.sessionCount && grp.sessionCount > 1) || (grp.paymentCycle === 'monthly' && grp.paymentModel !== 'per_session'));
+        if (isCycleGroup) {
+          const targetSessionCount = grp.sessionCount || 4;
+          if (l.totalSessionsInPackage !== targetSessionCount || l.isQuickLesson) {
+            lessonChanges = true;
+            return {
+              ...l,
+              totalSessionsInPackage: targetSessionCount,
+              isQuickLesson: false
+            };
+          }
+        }
+        return l;
+      });
+
+      // Recalculate sequential session numbers for all affected cycle groups
+      healedGroups.forEach(grp => {
+        const isCycleGroup = Boolean((grp.sessionCount && grp.sessionCount > 1) || (grp.paymentCycle === 'monthly' && grp.paymentModel !== 'per_session'));
+        if (!isCycleGroup) return;
+
+        const targetCount = grp.sessionCount || 4;
+        const startSeq = Math.min(targetCount, Math.max(1, grp.startingSessionNumber || 1));
+        const nonCancelled = updated
+          .filter(l => l.groupId === grp.id && !l.deleted && l.status !== 'cancelled')
+          .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+
+        nonCancelled.forEach((l, idx) => {
+          const expectedSeq = (((startSeq - 1 + idx) % targetCount) + 1);
+          const foundIdx = updated.findIndex(x => x.id === l.id);
+          if (foundIdx !== -1 && (updated[foundIdx].sessionNumber !== expectedSeq || updated[foundIdx].totalSessionsInPackage !== targetCount)) {
+            lessonChanges = true;
+            updated[foundIdx] = {
+              ...updated[foundIdx],
+              sessionNumber: expectedSeq,
+              totalSessionsInPackage: targetCount
+            };
+          }
+        });
+      });
+
+      return lessonChanges ? updated : allLessons;
+    });
+  }, []);
+
   // Asynchronous Database Query methods for historical views (SessionHistoryView & ReportsView)
   const getHistoricalLessons = useCallback(async (): Promise<Lesson[]> => {
     const full = await storage.getItem<Lesson[]>('dl_lessons');
@@ -1442,7 +1518,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Apply theme to DOM immediately on mount and whenever theme changes
   useEffect(() => {
-    if (theme === 'dark') {
+    const isDark = theme === 'dark';
+    const bgColor = isDark ? '#020617' : '#FFFFFF';
+    if (isDark) {
       document.documentElement.classList.add('dark');
       document.documentElement.setAttribute('data-theme', 'dark');
       document.documentElement.style.colorScheme = 'dark';
@@ -1451,6 +1529,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       document.documentElement.setAttribute('data-theme', 'light');
       document.documentElement.style.colorScheme = 'light';
     }
+
+    try {
+      const metas = document.querySelectorAll('meta[name="theme-color"]');
+      if (metas.length > 0) {
+        metas.forEach(meta => meta.setAttribute('content', bgColor));
+      } else {
+        const meta = document.createElement('meta');
+        meta.name = 'theme-color';
+        meta.id = 'theme-color-meta';
+        meta.content = bgColor;
+        document.head.appendChild(meta);
+      }
+      const metaApple = document.getElementById('status-bar-style-meta') || document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      if (metaApple) {
+        metaApple.setAttribute('content', isDark ? 'black-translucent' : 'default');
+      }
+    } catch {}
   }, [theme]);
 
   // Sync state changes to storage
@@ -1810,7 +1905,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const existsInNew = newAutoLessons.some(l => l.groupId === group.id && l.date === dateStr && l.time === sessionTime);
 
           if (!existsInLessons && !existsInNew) {
-            const isPerLesson = group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session';
+            const isPerLesson = Boolean(
+              (group.sessionCount !== undefined && group.sessionCount <= 1) ||
+              ((group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session') && (group.sessionCount === undefined || group.sessionCount <= 1))
+            );
             const perSessionPrice = isPerLesson && group.pricePerSession
               ? group.pricePerSession
               : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 8));
@@ -2143,8 +2241,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const existingGroup = groups.find(g => g.id === id);
     if (!existingGroup) return;
 
-    const isPerLesson = (updates.paymentCycle ?? existingGroup.paymentCycle) === 'per_lesson' ||
-                        (updates.paymentModel ?? existingGroup.paymentModel) === 'per_session';
+    let isPerLesson = false;
+    if (updates.paymentCycle === 'per_lesson' || updates.paymentModel === 'per_session') {
+      isPerLesson = true;
+    } else if (updates.paymentCycle === 'monthly' || updates.paymentModel === 'package' || (updates.sessionCount !== undefined && updates.sessionCount > 1)) {
+      isPerLesson = false;
+    } else if (existingGroup.sessionCount !== undefined && existingGroup.sessionCount > 1) {
+      isPerLesson = false;
+    } else {
+      isPerLesson = existingGroup.paymentCycle === 'per_lesson' || existingGroup.paymentModel === 'per_session';
+    }
+
+    const mergedSessionCount = isPerLesson ? 1 : Math.max(2, updates.sessionCount ?? existingGroup.sessionCount ?? 4);
+    const mergedStartingNumber = isPerLesson ? 1 : Math.max(1, updates.startingSessionNumber ?? existingGroup.startingSessionNumber ?? 1);
 
     const effectivePrice = isPerLesson
       ? (updates.pricePerSession ?? existingGroup.pricePerSession ?? updates.monthlyPackagePrice ?? existingGroup.monthlyPackagePrice ?? 0)
@@ -2154,10 +2263,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       ...existingGroup,
       ...updates,
       id,
-      paymentCycle: isPerLesson ? 'per_lesson' : ((updates.paymentCycle ?? existingGroup.paymentCycle) || 'monthly'),
-      paymentModel: isPerLesson ? 'per_session' : ((updates.paymentModel ?? existingGroup.paymentModel) || 'package'),
-      sessionCount: isPerLesson ? 1 : (updates.sessionCount ?? existingGroup.sessionCount ?? 4),
-      startingSessionNumber: isPerLesson ? 1 : (updates.startingSessionNumber ?? existingGroup.startingSessionNumber ?? 1),
+      paymentCycle: isPerLesson ? 'per_lesson' : 'monthly',
+      paymentModel: isPerLesson ? 'per_session' : 'package',
+      sessionCount: mergedSessionCount,
+      startingSessionNumber: mergedStartingNumber,
       pricePerSession: isPerLesson ? effectivePrice : (updates.pricePerSession ?? existingGroup.pricePerSession),
       monthlyPackagePrice: effectivePrice,
     };
@@ -2185,7 +2294,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     // 2. Synchronize lessons state atomically
     setLessons(prev => {
       // Step A: Update denormalized group fields on all lessons of this group
-      const updatedLessons = prev.map(l => {
+      let updatedLessons = prev.map(l => {
         if (l.groupId !== id) return l;
 
         const isDefaultTitle = !l.title || 
@@ -2201,9 +2310,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           type: updatedGroup.type || l.type,
           meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink || l.meetingLink) : undefined,
           locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || l.locationAddress) : undefined,
-          durationMinutes: updatedGroup.lessonDurationMinutes || l.durationMinutes || 60
+          durationMinutes: updatedGroup.lessonDurationMinutes || l.durationMinutes || 60,
+          totalSessionsInPackage: isPerLesson ? 1 : mergedSessionCount,
+          isQuickLesson: false
         } as Lesson);
       });
+
+      // Recalculate sequential session numbers for all non-cancelled lessons of this group
+      if (!isPerLesson) {
+        const groupNonCancelled = updatedLessons
+          .filter(l => l.groupId === id && !l.deleted && l.status !== 'cancelled')
+          .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+
+        groupNonCancelled.forEach((l, idx) => {
+          const expectedNum = (((mergedStartingNumber - 1 + idx) % mergedSessionCount) + 1);
+          const foundIdx = updatedLessons.findIndex(x => x.id === l.id);
+          if (foundIdx !== -1) {
+            updatedLessons[foundIdx] = wrapMutation({
+              ...updatedLessons[foundIdx],
+              sessionNumber: expectedNum,
+              totalSessionsInPackage: mergedSessionCount
+            } as Lesson);
+          }
+        });
+      }
 
       // Step B: If schedule slots changed, cleanly reconcile future scheduled sessions
       if (scheduleChanged) {
@@ -2233,7 +2363,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const startingNum = updatedGroup.startingSessionNumber || 1;
         const sessionCount = updatedGroup.sessionCount || 4;
 
-        const isPerLesson = updatedGroup.paymentCycle === 'per_lesson' || updatedGroup.paymentModel === 'per_session';
+        const isPerLesson = Boolean(
+          (updatedGroup.sessionCount !== undefined && updatedGroup.sessionCount <= 1) ||
+          ((updatedGroup.paymentCycle === 'per_lesson' || updatedGroup.paymentModel === 'per_session') && (updatedGroup.sessionCount === undefined || updatedGroup.sessionCount <= 1))
+        );
         const perSessionPrice = isPerLesson && updatedGroup.pricePerSession
           ? updatedGroup.pricePerSession
           : Math.round((updatedGroup.monthlyPackagePrice || 1200) / sessionCount);
@@ -2288,6 +2421,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
 
       return updatedLessons;
+    });
+
+    // Synchronize to persistent full lessons storage
+    updateFullLessonsStorage(all => {
+      const updated = all.map(l => {
+        if (l.groupId !== id) return l;
+        return {
+          ...l,
+          groupName: updatedGroup.name,
+          grade: updatedGroup.grade || l.grade,
+          type: updatedGroup.type || l.type,
+          meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink || l.meetingLink) : undefined,
+          locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || l.locationAddress) : undefined,
+          durationMinutes: updatedGroup.lessonDurationMinutes || l.durationMinutes || 60,
+          totalSessionsInPackage: isPerLesson ? 1 : mergedSessionCount,
+          isQuickLesson: false
+        };
+      });
+
+      if (!isPerLesson) {
+        const groupNonCancelled = updated
+          .filter(l => l.groupId === id && !l.deleted && l.status !== 'cancelled')
+          .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+
+        groupNonCancelled.forEach((l, idx) => {
+          const expectedNum = (((mergedStartingNumber - 1 + idx) % mergedSessionCount) + 1);
+          const foundIdx = updated.findIndex(x => x.id === l.id);
+          if (foundIdx !== -1) {
+            updated[foundIdx] = {
+              ...updated[foundIdx],
+              sessionNumber: expectedNum,
+              totalSessionsInPackage: mergedSessionCount
+            };
+          }
+        });
+      }
+      return updated;
     });
   };
 
@@ -3779,7 +3949,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         );
 
         if (!exists) {
-          const isPerLesson = targetGroup.paymentCycle === 'per_lesson' || targetGroup.paymentModel === 'per_session';
+          const isPerLesson = Boolean(
+            (targetGroup.sessionCount !== undefined && targetGroup.sessionCount <= 1) ||
+            ((targetGroup.paymentCycle === 'per_lesson' || targetGroup.paymentModel === 'per_session') && (targetGroup.sessionCount === undefined || targetGroup.sessionCount <= 1))
+          );
           const perSessionPrice = isPerLesson && targetGroup.pricePerSession
             ? targetGroup.pricePerSession
             : Math.round((targetGroup.monthlyPackagePrice || 1200) / (targetGroup.sessionCount || 8));

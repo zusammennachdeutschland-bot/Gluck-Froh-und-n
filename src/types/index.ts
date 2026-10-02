@@ -1,6 +1,4 @@
-import { BuddyCustomization } from './buddy';
 import { GoldHolding } from '../services/goldPrice/goldPriceTypes';
-export * from './buddy';
 
 export type GradeLevel = 
   | 'Grade 1' | 'Grade 2' | 'Grade 3' | 'Grade 4' 
@@ -300,7 +298,7 @@ export interface TeacherProfile {
   financeStreak?: number;
   financeLastActivityDate?: string;
   schoolSettings?: SchoolSettings;
-  buddyCustomization?: BuddyCustomization;
+  buddyCustomization?: any;
 }
 
 export interface SchoolDayPresence {
@@ -738,6 +736,8 @@ export type PerformanceLevel = 'needs_support' | 'developing' | 'good' | 'very_g
 export type ParticipationLevel = 'active' | 'good' | 'quiet' | 'needs_encouragement';
 export type UnderstandingLevel = 'excellent' | 'good' | 'developing' | 'needs_review';
 export type SpeakingLevel = 'confident' | 'good' | 'improving' | 'needs_practice';
+export type ReadingLevel = 'fluent' | 'good' | 'improving' | 'needs_practice';
+export type WritingLevel = 'accurate' | 'good' | 'improving' | 'needs_practice';
 export type FocusLevel = 'excellent' | 'good' | 'sometimes_distracted' | 'needs_more_focus';
 export type ProgressLevel = 'improved' | 'stable' | 'needs_attention';
 
@@ -752,6 +752,8 @@ export interface StudentSessionPerformance {
   participation?: ParticipationLevel;
   understanding?: UnderstandingLevel;
   speaking?: SpeakingLevel;
+  reading?: ReadingLevel;
+  writing?: WritingLevel;
   focus?: FocusLevel;
   progress?: ProgressLevel;
   gender?: 'male' | 'female';

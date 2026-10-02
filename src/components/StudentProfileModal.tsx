@@ -8,7 +8,7 @@ import { CARTOON_AVATARS, DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
 import { 
   X, Phone, Send, FileText, Upload, Trash2, Calendar, Award, DollarSign, 
-  BookOpen, CheckCircle2, AlertCircle, Download, FileCheck, User, Camera, Edit3, Save, Check, Sparkles,
+  BookOpen, CheckCircle2, AlertCircle, Download, FileCheck, User, Edit3, Save, Check, Sparkles,
   RefreshCw, Shield, Lock, MoreHorizontal, MessageSquare, Info, Star, GraduationCap, Users, Plus, Eye, Share2,
   AtSign, Video, ExternalLink, Copy, Play
 } from 'lucide-react';

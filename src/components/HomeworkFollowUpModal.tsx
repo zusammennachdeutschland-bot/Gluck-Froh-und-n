@@ -180,7 +180,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
             const role = singleStudent ? getStudentRoleLabel(singleStudent) : 'الطالب';
             message += `تذكير بمتابعة واجب ${role}: *${names[0]}*\n`;
           }
-          message += `\n📖 *عنوان الدرس:* ${lessonTitle}\n📝 *الواجب:* ${homeworkText}\n\nبرجاء التأكد من حل الواجب قبل موعد الحصة القادمة.\nشكراً لحضراتكم.`;
+          message += `\n📖 *عنوان الدرس:* ${lessonTitle}\n📝 *الواجب:* ${homeworkText}\n\nبرجاء التأكد من حل الواجب قبل موعد الحصة القادمة.\nشكراً لحضرتك.`;
         }
 
         if (teacherSign) {
