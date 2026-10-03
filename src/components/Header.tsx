@@ -180,6 +180,32 @@ export const Header: React.FC = () => {
     return parts[0];
   }, [language, profile?.displayName, profile?.displayNameAr, profile?.displayNameEn, profile?.nameAr, profile?.nameEn]);
 
+  const greetingPrefix = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) {
+      return _t('صباح الخير', 'Good Morning', 'Guten Morgen');
+    } else if (hour < 17) {
+      return _t('مساء الخير', 'Good Afternoon', 'Guten Tag');
+    } else {
+      return _t('مساء الخير', 'Good Evening', 'Guten Abend');
+    }
+  }, [_t]);
+
+  // Dynamically adapt font size to fit screen width and name length up to the buttons without clipping
+  const greetingFontSize = useMemo(() => {
+    const totalChars = (greetingPrefix + (teacherFirstName ? `, ${teacherFirstName}!` : '')).length;
+    if (totalChars > 26) {
+      return 'clamp(12.5px, 3.4vw, 15px)';
+    }
+    if (totalChars > 20) {
+      return 'clamp(13.5px, 3.7vw, 16.5px)';
+    }
+    if (totalChars > 14) {
+      return 'clamp(14.5px, 4.2vw, 18px)';
+    }
+    return 'clamp(16px, 4.8vw, 20px)';
+  }, [greetingPrefix, teacherFirstName]);
+
   const greetingText = useMemo(() => {
     const hour = new Date().getHours();
     const name = teacherFirstName;
@@ -275,38 +301,51 @@ export const Header: React.FC = () => {
 
   return (
     <>
-      {/* Compact Safe Area Spacer for Android / iOS Status Bar */}
-      <div 
-        className="bg-surface dark:bg-black select-none max-w-lg mx-auto w-full shrink-0 transition-colors" 
-        style={{ height: 'max(14px, env(safe-area-inset-top, 14px))' }}
-      />
-
-      {/* Uniform Compact Teacher Dashboard Header */}
-      <header className="bg-surface dark:bg-black border-b border-surface-border/80 px-2.5 py-1.5 sm:px-3.5 sm:py-2 sticky top-0 z-30 transition-colors shadow-2xs">
-        <div className="flex items-center justify-between gap-2 sm:gap-3 max-w-lg mx-auto">
+      {/* Uniform Compact Teacher Dashboard Header with Adaptive Android & iOS Safe Top */}
+      <header 
+        className="bg-surface dark:bg-black border-b border-surface-border/80 px-2.5 pb-2 sm:px-4 sm:pb-2.5 sticky top-0 z-30 transition-colors shadow-2xs shrink-0"
+        style={{
+          paddingTop: 'calc(0.5rem + env(safe-area-inset-top, 0px))',
+        }}
+      >
+        <div className="flex items-center justify-between gap-2 sm:gap-3.5 max-w-lg mx-auto w-full">
           
           {/* Start: Greeting & Stats (Home) or Tab Title (Other tabs) */}
-          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
-            <div className="leading-tight min-w-0 flex-1">
+          <div className="flex items-center min-w-0 flex-1 overflow-hidden">
+            <div className="leading-tight min-w-0 flex-1 pr-1 rtl:pr-0 rtl:pl-1">
               {activeTab === 'home' ? (
                 <>
-                  <h1 className="text-xs sm:text-[13px] font-bold text-slate-900 dark:text-slate-100 leading-tight truncate flex items-center gap-1">
-                    <span>{greetingText}</span>
+                  <h1 
+                    style={{ fontSize: greetingFontSize }}
+                    className="font-black text-slate-900 dark:text-slate-100 tracking-tight leading-snug truncate whitespace-nowrap"
+                  >
+                    <span className="font-extrabold text-slate-800 dark:text-slate-200">
+                      {greetingPrefix}{teacherFirstName ? (language === 'ar' ? '،' : ',') : ''}
+                    </span>
+                    {teacherFirstName && (
+                      <span className="font-black text-slate-950 dark:text-white">
+                        {' '}{teacherFirstName}!
+                      </span>
+                    )}
+                    <span className="inline-block select-none ml-1 rtl:mr-1">👋</span>
                   </h1>
-                  <p className="text-[9.5px] sm:text-[10px] font-medium text-text-muted dark:text-slate-400 tracking-tight leading-tight truncate flex items-center gap-1 mt-0.5">
-                    <span>{lessonsCount} {_t('حصص', 'Lessons', 'Lektionen')}</span>
+                  <p 
+                    style={{ fontSize: 'clamp(10.5px, 2.7vw, 12px)' }}
+                    className="font-medium text-text-muted dark:text-slate-400 tracking-tight leading-tight truncate flex items-center gap-1.5 mt-0.5"
+                  >
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">{lessonsCount} {_t('حصص', 'Lessons', 'Lektionen')}</span>
                     <span className="text-slate-300 dark:text-slate-600 select-none">•</span>
-                    <span>{todayStudentsCount} {_t('طلاب', 'Students', 'Schüler')}</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">{todayStudentsCount} {_t('طلاب', 'Students', 'Schüler')}</span>
                     <span className="text-slate-300 dark:text-slate-600 select-none">•</span>
-                    <span className="font-semibold text-primary dark:text-primary-hover">{percentDone}% {_t('مكتمل', 'Done', 'Erledigt')}</span>
+                    <span className="font-bold text-primary dark:text-primary-hover">{percentDone}% {_t('مكتمل', 'Done', 'Erledigt')}</span>
                   </p>
                 </>
               ) : (
                 <>
-                  <p className="text-[8.5px] sm:text-[9px] font-bold text-text-muted flex items-center gap-1">
+                  <p className="text-[9.5px] sm:text-[10px] font-bold text-text-muted flex items-center gap-1">
                     <span>{_t('القسم الحالي', 'Section', 'Bereich')}</span>
                   </p>
-                  <h1 className="text-xs sm:text-sm font-black text-slate-900 dark:text-slate-100 capitalize leading-snug whitespace-normal break-words truncate">
+                  <h1 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100 capitalize leading-snug whitespace-normal break-words truncate">
                     {activeTab === 'schedule' ? (t('nav_schedule') || 'Termine')
                      : activeTab === 'students' ? (t('nav_students') || 'Schüler')
                      : activeTab === 'history' ? (t('nav_history') || 'Sitzungen')

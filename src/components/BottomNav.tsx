@@ -64,8 +64,11 @@ export const BottomNav: React.FC = () => {
   return (
     <div className="absolute bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))] left-2 sm:left-4 right-2 sm:right-4 z-40 max-w-lg mx-auto select-none pointer-events-none">
       <div className="relative w-full flex justify-center">
-        {/* Floating Dock glassmorphism container */}
-        <div className="w-full bg-surface/90 dark:bg-background/95 backdrop-blur-md border border-surface-border/50 dark:border-surface-border/60 rounded-[24px] shadow-[0_12px_30px_rgba(0,0,0,0.08)] dark:shadow-[0_12px_30px_rgba(0,0,0,0.5)] px-2 sm:px-3 py-1.5 sm:py-2 flex items-center justify-between pointer-events-auto relative">
+        {/* Floating Dock near-transparent pure glass container */}
+        <div 
+          className="w-full bg-white/[0.06] dark:bg-black/[0.12] backdrop-blur-[6px] backdrop-saturate-125 border border-white/30 dark:border-white/10 rounded-[26px] shadow-[0_8px_30px_0_rgba(0,0,0,0.04),inset_0_1px_1px_0_rgba(255,255,255,0.4)] dark:shadow-[0_8px_30px_0_rgba(0,0,0,0.25),inset_0_1px_1px_0_rgba(255,255,255,0.08)] px-2 sm:px-3 py-1.5 sm:py-2 flex items-center justify-between pointer-events-auto relative transition-colors duration-200"
+          style={{ WebkitBackdropFilter: 'blur(6px) saturate(125%)' }}
+        >
           
           {/* LEFT TABS */}
           <div className="flex items-center gap-0.5 sm:gap-1">
@@ -81,9 +84,9 @@ export const BottomNav: React.FC = () => {
                   style={{ WebkitTapHighlightColor: 'transparent' }}
                   title={tab.label}
                 >
-                  {/* Active background Pill */}
+                  {/* Active background Pill with subtle glass tint */}
                   <div
-                    className={`absolute inset-0 bg-primary/10 dark:bg-primary-soft rounded-full -z-10 transition-all duration-150 ease-out ${
+                    className={`absolute inset-0 bg-primary/10 dark:bg-primary/20 border border-primary/20 dark:border-primary/30 shadow-[inset_0_1px_1px_0_rgba(255,255,255,0.3)] rounded-full -z-10 transition-all duration-150 ease-out ${
                       isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
                     }`}
                   />
@@ -93,7 +96,7 @@ export const BottomNav: React.FC = () => {
                       className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-150 ${
                         isActive
                           ? 'text-primary dark:text-primary'
-                          : 'text-text-muted/70 dark:text-slate-500 hover:text-slate-600 dark:hover:text-primary'
+                          : 'text-slate-700/80 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     />
                     
@@ -113,18 +116,18 @@ export const BottomNav: React.FC = () => {
 
           {/* CENTER Tactile Quick Action FAB */}
           <div className="relative flex items-center justify-center shrink-0 -mt-7 select-none">
-            {/* Soft background glow */}
-            <div className="absolute inset-[-2px] bg-primary/10 dark:bg-primary-soft rounded-full pointer-events-none" />
+            {/* Subtle glow */}
+            <div className="absolute inset-[-2px] bg-primary/15 dark:bg-primary/25 rounded-full blur-xs pointer-events-none" />
             
             <button
               onClick={() => {
                 setShowQuickMenu(prev => !prev);
                 setShowMoreMenu(false);
               }}
-              className={`w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-linear-to-tr from-primary to-primary-hover hover:from-primary hover:to-primary-hover text-white flex items-center justify-center shadow-lg shadow-primary/40 dark:shadow-primary/30 ring-[4px] sm:ring-[5px] ring-white dark:ring-black relative z-10 cursor-pointer focus:outline-none transition-transform duration-150 active:scale-90 ${
+              className={`w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-linear-to-tr from-primary to-primary-hover hover:from-primary hover:to-primary-hover text-white flex items-center justify-center shadow-lg shadow-primary/40 dark:shadow-primary/30 ring-[3.5px] sm:ring-[4px] ring-white/50 dark:ring-white/20 backdrop-blur-md relative z-10 cursor-pointer focus:outline-none transition-transform duration-150 active:scale-90 ${
                 showQuickMenu ? 'rotate-45' : 'rotate-0'
               }`}
-              style={{ WebkitTapHighlightColor: 'transparent' }}
+              style={{ WebkitTapHighlightColor: 'transparent', WebkitBackdropFilter: 'blur(12px)' }}
               aria-label="Schnell-Eintrag"
               title="Aktionen anzeigen"
             >
@@ -134,49 +137,60 @@ export const BottomNav: React.FC = () => {
             {/* Quick Action Popover Menu */}
             <AnimatePresence>
               {showQuickMenu && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: 8 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 8 }}
-                  transition={{ duration: 0.1, ease: 'easeOut' }}
-                  className="absolute bottom-16 left-1/2 -translate-x-1/2 w-60 bg-surface/95 dark:bg-background/95 backdrop-blur-md border border-surface-border/40 dark:border-surface-border/60 rounded-[20px] shadow-xl p-1.5 space-y-1 z-50 pointer-events-auto origin-bottom"
-                >
-                  <button
-                    onClick={() => {
-                      setIsAddQuickLessonModalOpen(true);
-                      setShowQuickMenu(false);
-                    }}
-                    className="w-full text-start flex items-start gap-2.5 px-3 py-2.5 rounded-xl hover:bg-background dark:hover:bg-slate-900 transition-colors cursor-pointer"
+                <>
+                  {/* Invisible click-away overlay - completely transparent with NO dark tint or shadow */}
+                  <div 
+                    className="fixed inset-0 z-40 bg-transparent cursor-pointer pointer-events-auto select-none"
+                    onClick={() => setShowQuickMenu(false)}
+                  />
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                    transition={{ duration: 0.12, ease: 'easeOut' }}
+                    className="absolute bottom-16 left-1/2 -translate-x-1/2 w-64 bg-surface dark:bg-slate-900 border border-surface-border/80 dark:border-slate-800 rounded-[22px] shadow-[0_10px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] p-1.5 space-y-1 z-50 pointer-events-auto origin-bottom"
                   >
-                    <Zap className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <span className="block text-xs font-black text-slate-900 dark:text-slate-100">
-                        {t('quick_lesson_modal_title') || 'Schnell-Eintrag'}
-                      </span>
-                      <span className="block text-[9px] text-text-muted/70 font-medium truncate">
-                        {_t('جدولة حصة بسرعة', 'Quickly schedule a lesson', 'Schnell eine Lektion planen')}
-                      </span>
-                    </div>
-                  </button>
+                    <button
+                      onClick={() => {
+                        setIsAddQuickLessonModalOpen(true);
+                        setShowQuickMenu(false);
+                      }}
+                      className="w-full text-start flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                        <Zap className="w-4.5 h-4.5 text-primary" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="block text-xs font-black text-slate-900 dark:text-slate-100">
+                          {t('quick_lesson_modal_title') || 'Schnell-Eintrag'}
+                        </span>
+                        <span className="block text-[10px] text-text-muted dark:text-slate-400 font-medium truncate">
+                          {_t('جدولة حصة بسرعة', 'Quickly schedule a lesson', 'Schnell eine Lektion planen')}
+                        </span>
+                      </div>
+                    </button>
 
-                  <button
-                    onClick={() => {
-                      setIsStartLessonNowModalOpen(true);
-                      setShowQuickMenu(false);
-                    }}
-                    className="w-full text-start flex items-start gap-2.5 px-3 py-2.5 rounded-xl hover:bg-background dark:hover:bg-slate-900 transition-colors cursor-pointer"
-                  >
-                    <Play className="w-4 h-4 text-primary mt-0.5 shrink-0 fill-primary/15" />
-                    <div className="min-w-0">
-                      <span className="block text-xs font-black text-slate-900 dark:text-slate-100">
-                        {t('sofort_title') || _t('بدء حصة الآن', 'Start Lesson Now', 'Lektion jetzt starten')}
-                      </span>
-                      <span className="block text-[9px] text-text-muted/70 font-medium truncate">
-                        {_t('تشغيل مؤقت فوري للحصة', 'Start an instant lesson timer', 'Sofort eine Live-Stoppuhr starten')}
-                      </span>
-                    </div>
-                  </button>
-                </motion.div>
+                    <button
+                      onClick={() => {
+                        setIsStartLessonNowModalOpen(true);
+                        setShowQuickMenu(false);
+                      }}
+                      className="w-full text-start flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center shrink-0">
+                        <Play className="w-4.5 h-4.5 text-emerald-600 dark:text-emerald-400 fill-emerald-500/30" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="block text-xs font-black text-slate-900 dark:text-slate-100">
+                          {t('sofort_title') || _t('بدء حصة الآن', 'Start Lesson Now', 'Lektion jetzt starten')}
+                        </span>
+                        <span className="block text-[10px] text-text-muted dark:text-slate-400 font-medium truncate">
+                          {_t('تشغيل مؤقت فوري للحصة', 'Start an instant lesson timer', 'Sofort eine Live-Stoppuhr starten')}
+                        </span>
+                      </div>
+                    </button>
+                  </motion.div>
+                </>
               )}
             </AnimatePresence>
           </div>
@@ -196,7 +210,7 @@ export const BottomNav: React.FC = () => {
                   title={tab.label}
                 >
                   <div
-                    className={`absolute inset-0 bg-primary/10 dark:bg-primary-soft rounded-full -z-10 transition-all duration-150 ease-out ${
+                    className={`absolute inset-0 bg-primary/10 dark:bg-primary/20 border border-primary/20 dark:border-primary/30 shadow-[inset_0_1px_1px_0_rgba(255,255,255,0.3)] rounded-full -z-10 transition-all duration-150 ease-out ${
                       isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
                     }`}
                   />
@@ -207,7 +221,7 @@ export const BottomNav: React.FC = () => {
                         className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-150 ${
                           isActive
                             ? 'text-primary dark:text-primary'
-                            : 'text-text-muted/70 dark:text-slate-500 hover:text-slate-600 dark:hover:text-primary'
+                            : 'text-slate-700/80 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       />
                       {(tab as any).badge && (

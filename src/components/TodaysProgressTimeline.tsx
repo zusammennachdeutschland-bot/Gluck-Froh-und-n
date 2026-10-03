@@ -142,8 +142,8 @@ export const TodaysProgressTimeline: React.FC = () => {
 
     const green = '#10B981';
     const greenDark = '#059669';
-    const blue = '#3B82F6';
-    const blueDark = '#2563EB';
+    const blue = 'var(--primary, #ec4899)';
+    const blueDark = 'var(--primary-hover, #db2777)';
     const red = '#F43F5E';
     const redDark = '#E11D48';
 
@@ -391,11 +391,11 @@ export const TodaysProgressTimeline: React.FC = () => {
                 <span>{completedCount} {t('status_completed')}</span>
               </div>
 
-              {/* In Progress (Blue) */}
+              {/* In Progress */}
               <div 
                 className={`flex items-center gap-1 transition-colors ${
                   activeCount > 0
-                    ? 'text-blue-600 dark:text-blue-400 font-bold'
+                    ? 'text-primary dark:text-primary-hover font-bold'
                     : 'text-text-muted/60 font-medium'
                 }`}
               >
@@ -461,7 +461,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                       : isCancelledState
                       ? 'bg-rose-500/[0.02] dark:bg-rose-950/10 border-rose-500/20 dark:border-rose-900/25 opacity-70 hover:opacity-95'
                       : state === 'active'
-                      ? 'bg-blue-50/60 dark:bg-blue-950/25 border-blue-400/80 dark:border-blue-600/70 shadow-2xs shadow-blue-500/5 ring-1 ring-blue-500/20'
+                      ? 'bg-primary/5 dark:bg-primary-soft border-primary/50 dark:border-primary/60 shadow-xs shadow-primary/10 ring-1 ring-primary/25'
                       : 'bg-white dark:bg-slate-900/70 border-slate-200/70 dark:border-surface-border/70 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-2xs'
                   }`}
                 >
@@ -473,7 +473,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                         : isCancelledState
                         ? 'bg-rose-400/70 dark:bg-rose-500/70'
                         : state === 'active'
-                        ? 'bg-blue-600 animate-pulse'
+                        ? 'bg-primary animate-pulse'
                         : 'bg-primary/70'
                     }`}
                   />
@@ -486,13 +486,13 @@ export const TodaysProgressTimeline: React.FC = () => {
                         : isCancelledState 
                         ? 'text-rose-600/80 dark:text-rose-400/80 line-through' 
                         : state === 'active'
-                        ? 'text-blue-700 dark:text-blue-300 font-extrabold'
+                        ? 'text-primary dark:text-primary-hover font-extrabold'
                         : 'text-text-main'
                     }`}>
                       {lesson.time}
                     </span>
                     <span className={`text-[9px] sm:text-[9.5px] font-medium leading-none mt-0.5 ${
-                      state === 'active' ? 'text-blue-600/80 dark:text-blue-400/80' : 'text-text-muted/70'
+                      state === 'active' ? 'text-primary/80 dark:text-primary/80 font-semibold' : 'text-text-muted/70'
                     }`}>
                       {endTime || `${lesson.durationMinutes || 60}m`}
                     </span>
@@ -519,7 +519,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                                 : isCancelledState
                                 ? 'line-through text-rose-600/80 dark:text-rose-400/80'
                                 : state === 'active'
-                                ? 'text-blue-900 dark:text-blue-100'
+                                ? 'text-slate-950 dark:text-white font-extrabold'
                                 : 'text-text-main'
                             }`}
                             title={_t('انقر لفتح ملف المجموعة', 'Click to open group profile', 'Klicken für Gruppenprofil')}
@@ -533,7 +533,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                               : isCancelledState
                               ? 'line-through text-rose-600/80 dark:text-rose-400/80'
                               : state === 'active'
-                              ? 'text-blue-900 dark:text-blue-100'
+                              ? 'text-slate-950 dark:text-white font-extrabold'
                               : 'text-text-main'
                           }`}>
                             {lesson.studentName || lesson.groupName || lesson.title}
@@ -550,8 +550,8 @@ export const TodaysProgressTimeline: React.FC = () => {
                         )}
 
                         {state === 'active' && !isCompletedState && !isCancelledState && (
-                          <span className="inline-flex items-center gap-1 text-[9px] sm:text-[9.5px] font-bold text-blue-600 dark:text-blue-400 shrink-0">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>
+                          <span className="inline-flex items-center gap-1 text-[9px] sm:text-[9.5px] font-bold text-primary dark:text-primary-hover bg-primary/10 dark:bg-primary/20 px-1.5 py-0.5 rounded-full shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
                             <span>{t('timeline_live_now')}</span>
                           </span>
                         )}
