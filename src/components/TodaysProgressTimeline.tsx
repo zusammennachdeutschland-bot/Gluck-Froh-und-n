@@ -1,8 +1,9 @@
 import { isPendingStatus } from "../utils/lessonUtils";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
-import { formatLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
+import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
 import { 
   CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check
 } from 'lucide-react';
@@ -36,15 +37,56 @@ export const TodaysProgressTimeline: React.FC = () => {
   const todayStr = formatLocalDate(now);
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
-  // 1. PAST PENDING LESSONS: Lessons from previous days with NO final status (neither completed nor cancelled)
-  const pendingPastLessons = lessons
-    .filter(l => l.date < todayStr && isPendingStatus(l.status) && !dismissedDashboardLessonIds.includes(l.id))
-    .sort((a, b) => b.date.localeCompare(a.date) || a.time.localeCompare(b.time));
+  // 1. PAST PENDING LESSONS: Lessons from previous days with NO final status (neither completed nor cancelled), excluding deleted
+  const pendingPastLessons = useMemo(() => {
+    return lessons
+      .filter(l => !l.deleted && l.date < todayStr && isPendingStatus(l.status) && !dismissedDashboardLessonIds.includes(l.id))
+      .sort((a, b) => b.date.localeCompare(a.date) || a.time.localeCompare(b.time));
+  }, [lessons, todayStr, dismissedDashboardLessonIds]);
 
-  // 2. TODAY'S LESSONS: Lessons scheduled for today, excluding dismissed items
-  const todaysLessons = lessons
-    .filter(l => l.date === todayStr && !dismissedDashboardLessonIds.includes(l.id))
-    .sort((a, b) => a.time.localeCompare(b.time));
+  // 2. TODAY'S LESSONS: Lessons scheduled for today, excluding deleted items & stale slots from changed group schedules
+  const todaysLessons = useMemo(() => {
+    const active = lessons
+      .filter(l => !l.deleted && l.date === todayStr && !dismissedDashboardLessonIds.includes(l.id))
+      .filter(l => {
+        // If it's a scheduled uncompleted lesson for a group, ensure it matches current schedule slots
+        if (
+          l.groupId && 
+          l.groupId !== 'quick_group' && 
+          l.status === 'scheduled' && 
+          (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes && !l.report.homeworkTitle && l.report.quizScore === undefined)) &&
+          (!l.studentPayments || Object.keys(l.studentPayments).length === 0) &&
+          (!l.amountPaid || l.amountPaid === 0)
+        ) {
+          const grp = groups.find(g => g.id === l.groupId && !g.deleted);
+          if (grp) {
+            const activeSlots = getGroupScheduleSlots(grp);
+            if (activeSlots.length > 0) {
+              const lDate = parseLocalDate(l.date);
+              const lDayNum = lDate.getDay();
+              const matchesSlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === l.time);
+              if (!matchesSlot) return false;
+            }
+          }
+        }
+        return true;
+      });
+
+    // Deduplicate: If multiple scheduled entries exist for the same group on this date, keep only the active matching slot
+    const seen = new Set<string>();
+    const deduplicated: Lesson[] = [];
+    active.forEach(l => {
+      const key = l.groupId && l.groupId !== 'quick_group'
+        ? `${l.groupId}_${l.date}_${l.time}`
+        : l.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(l);
+      }
+    });
+
+    return deduplicated.sort((a, b) => a.time.localeCompare(b.time));
+  }, [lessons, groups, todayStr, dismissedDashboardLessonIds]);
 
   const getLessonState = (lesson: Lesson): 'completed' | 'cancelled' | 'active' | 'upcoming' => {
     if (lesson.status === 'completed') return 'completed';

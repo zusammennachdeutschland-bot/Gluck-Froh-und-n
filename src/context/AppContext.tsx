@@ -2001,6 +2001,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const currentStudentNames = new Set(students.filter(s => !s.deleted && Boolean(s.name)).map(s => s.name.toLowerCase()));
     const todayStr = formatLocalDate();
 
+    const staleLessonIds = new Set<string>();
+
     // Clean up orphaned, duplicate, and stale lessons, and synchronize denormalized names
     setLessons(prev => {
       const filteredAndDeduplicated = filterActiveLessons(prev);
@@ -2009,13 +2011,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         .filter(lesson => {
           // If group lesson and group no longer exists
           if (lesson.groupId && lesson.groupId !== 'quick_group' && !currentGroupIds.has(lesson.groupId)) {
+            staleLessonIds.add(lesson.id);
             return false;
           }
           // If student lesson and student no longer exists
           if (lesson.studentId && !currentStudentIds.has(lesson.studentId)) {
+            staleLessonIds.add(lesson.id);
             return false;
           }
           if (lesson.studentName && !lesson.isQuickLesson && !currentStudentNames.has(lesson.studentName.toLowerCase()) && !lesson.groupId) {
+            staleLessonIds.add(lesson.id);
             return false;
           }
 
@@ -2038,6 +2043,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 const lDayNum = lDate.getDay();
                 const matchesAnySlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === lesson.time);
                 if (!matchesAnySlot) {
+                  staleLessonIds.add(lesson.id);
                   return false; // Safely purge stale future session from older schedule
                 }
               }
@@ -2077,6 +2083,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       return true;
     }));
+
+    if (staleLessonIds.size > 0) {
+      updateFullLessonsStorage(all => all.map(l => staleLessonIds.has(l.id) ? wrapDeletion(l) : l));
+    }
 
     // Trigger visual sync completion feedback
     setTimeout(() => {
@@ -2288,6 +2298,78 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     const todayStr = formatLocalDate();
 
+    // Locked / historical / active lessons that MUST NEVER BE MODIFIED OR DELETED:
+    const isHistoricalOrLocked = (l: Lesson) => {
+      if (l.groupId !== id) return true;
+      if (l.deleted) return true;
+      if (l.date < todayStr) return true;
+      if (l.status !== 'scheduled') return true;
+      if (l.report && (l.report.attendanceStatus || l.report.teacherNotes || l.report.homeworkTitle || l.report.quizScore !== undefined)) return true;
+      if (l.studentPayments && Object.keys(l.studentPayments).length > 0) return true;
+      if (l.amountPaid && l.amountPaid > 0) return true;
+      return false;
+    };
+
+    // Pre-calculate new generated lessons if schedule changed so both RAM & Storage stay in sync
+    const newGeneratedLessons: Lesson[] = [];
+    if (scheduleChanged && newSlots.length > 0) {
+      const pastGroupLessonsCount = lessons.filter(l => l.groupId === id && !l.deleted && (l.date < todayStr || isHistoricalOrLocked(l))).length;
+      const startingNum = updatedGroup.startingSessionNumber || 1;
+      const sessionCount = updatedGroup.sessionCount || 4;
+
+      const isPerLessonBool = Boolean(
+        (updatedGroup.sessionCount !== undefined && updatedGroup.sessionCount <= 1) ||
+        ((updatedGroup.paymentCycle === 'per_lesson' || updatedGroup.paymentModel === 'per_session') && (updatedGroup.sessionCount === undefined || updatedGroup.sessionCount <= 1))
+      );
+      const perSessionPrice = isPerLessonBool && updatedGroup.pricePerSession
+        ? updatedGroup.pricePerSession
+        : Math.round((updatedGroup.monthlyPackagePrice || 1200) / sessionCount);
+
+      const today = new Date();
+      for (let dayOffset = 0; dayOffset < 365; dayOffset++) { // 1 full year ahead
+        const d = new Date();
+        d.setDate(today.getDate() + dayOffset);
+        const dayNum = d.getDay();
+
+        const matchingSlot = newSlots.find(s => getDayNumber(s.day) === dayNum);
+        if (matchingSlot) {
+          const dateStr = formatLocalDate(d);
+          const sessionTime = matchingSlot.time || '17:00';
+
+          const alreadyExists = lessons.some(l => 
+            l.groupId === id && !l.deleted && l.date === dateStr && l.time === sessionTime
+          ) || newGeneratedLessons.some(nl => 
+            nl.groupId === id && nl.date === dateStr && nl.time === sessionTime
+          );
+
+          if (!alreadyExists) {
+            const currentSessionIndex = pastGroupLessonsCount + newGeneratedLessons.length;
+            const sessionNumber = ((startingNum - 1 + currentSessionIndex) % sessionCount) + 1;
+
+            newGeneratedLessons.push(wrapMutation({
+              id: `l_auto_${updatedGroup.id}_${dateStr}_${sessionTime.replace(':', '')}`,
+              groupId: updatedGroup.id,
+              groupName: updatedGroup.name,
+              title: `${updatedGroup.name} Lektion`,
+              date: dateStr,
+              time: sessionTime,
+              durationMinutes: updatedGroup.lessonDurationMinutes || 60,
+              type: updatedGroup.type,
+              grade: updatedGroup.grade,
+              sessionNumber,
+              totalSessionsInPackage: sessionCount,
+              status: 'scheduled',
+              paymentStatus: 'pending',
+              amountDue: perSessionPrice,
+              amountPaid: 0,
+              meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink) : undefined,
+              locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || 'Cairo Center') : undefined
+            } as Lesson));
+          }
+        }
+      }
+    }
+
     // 1. Update groups state
     setGroups(prev => prev.map(g => (g.id === id ? updatedGroup : g)));
 
@@ -2316,6 +2398,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         } as Lesson);
       });
 
+      // Step B: If schedule slots changed, cleanly remove stale future scheduled sessions
+      if (scheduleChanged) {
+        updatedLessons = updatedLessons.filter(l => {
+          if (l.groupId !== id) return true;
+          if (isHistoricalOrLocked(l)) return true;
+          return false;
+        });
+
+        if (newGeneratedLessons.length > 0) {
+          updatedLessons = [...updatedLessons, ...newGeneratedLessons];
+        }
+      }
+
       // Recalculate sequential session numbers for all non-cancelled lessons of this group
       if (!isPerLesson) {
         const groupNonCancelled = updatedLessons
@@ -2335,97 +2430,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
       }
 
-      // Step B: If schedule slots changed, cleanly reconcile future scheduled sessions
-      if (scheduleChanged) {
-        // Locked / historical / active lessons that MUST NEVER BE MODIFIED OR DELETED:
-        const isHistoricalOrLocked = (l: Lesson) => {
-          if (l.groupId !== id) return true;
-          if (l.deleted) return true;
-          if (l.date < todayStr) return true;
-          if (l.status !== 'scheduled') return true;
-          if (l.report && (l.report.attendanceStatus || l.report.teacherNotes || l.report.homeworkTitle || l.report.quizScore !== undefined)) return true;
-          if (l.studentPayments && Object.keys(l.studentPayments).length > 0) return true;
-          if (l.amountPaid && l.amountPaid > 0) return true;
-          return false;
-        };
-
-        // Reconcile future scheduled lessons of this group that don't match the new slots or were generated under old schedule
-        const reconciledLessons = updatedLessons.map(l => {
-          if (l.groupId !== id || isHistoricalOrLocked(l)) return l;
-          return wrapDeletion(l);
-        });
-
-        if (newSlots.length === 0) {
-          return reconciledLessons;
-        }
-
-        const pastGroupLessonsCount = reconciledLessons.filter(l => l.groupId === id && !l.deleted).length;
-        const startingNum = updatedGroup.startingSessionNumber || 1;
-        const sessionCount = updatedGroup.sessionCount || 4;
-
-        const isPerLesson = Boolean(
-          (updatedGroup.sessionCount !== undefined && updatedGroup.sessionCount <= 1) ||
-          ((updatedGroup.paymentCycle === 'per_lesson' || updatedGroup.paymentModel === 'per_session') && (updatedGroup.sessionCount === undefined || updatedGroup.sessionCount <= 1))
-        );
-        const perSessionPrice = isPerLesson && updatedGroup.pricePerSession
-          ? updatedGroup.pricePerSession
-          : Math.round((updatedGroup.monthlyPackagePrice || 1200) / sessionCount);
-
-        const today = new Date();
-        const newGeneratedLessons: Lesson[] = [];
-
-        for (let dayOffset = 0; dayOffset < 365; dayOffset++) { // 1 full year ahead
-          const d = new Date();
-          d.setDate(today.getDate() + dayOffset);
-          const dayNum = d.getDay();
-
-          const matchingSlot = newSlots.find(s => getDayNumber(s.day) === dayNum);
-          if (matchingSlot) {
-            const dateStr = formatLocalDate(d);
-            const sessionTime = matchingSlot.time || '17:00';
-
-            const alreadyExists = reconciledLessons.some(l => 
-              l.groupId === id && !l.deleted && l.date === dateStr && l.time === sessionTime
-            ) || newGeneratedLessons.some(nl => 
-              nl.groupId === id && nl.date === dateStr && nl.time === sessionTime
-            );
-
-            if (!alreadyExists) {
-              const currentSessionIndex = pastGroupLessonsCount + newGeneratedLessons.length;
-              const sessionNumber = ((startingNum - 1 + currentSessionIndex) % sessionCount) + 1;
-
-              newGeneratedLessons.push(wrapMutation({
-                id: `l_auto_${updatedGroup.id}_${dateStr}_${sessionTime.replace(':', '')}`,
-                groupId: updatedGroup.id,
-                groupName: updatedGroup.name,
-                title: `${updatedGroup.name} Lektion`,
-                date: dateStr,
-                time: sessionTime,
-                durationMinutes: updatedGroup.lessonDurationMinutes || 60,
-                type: updatedGroup.type,
-                grade: updatedGroup.grade,
-                sessionNumber,
-                totalSessionsInPackage: sessionCount,
-                status: 'scheduled',
-                paymentStatus: 'pending',
-                amountDue: perSessionPrice,
-                amountPaid: 0,
-                meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink) : undefined,
-                locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || 'Cairo Center') : undefined
-              } as Lesson));
-            }
-          }
-        }
-
-        return [...reconciledLessons, ...newGeneratedLessons];
-      }
-
       return updatedLessons;
     });
 
     // Synchronize to persistent full lessons storage
     updateFullLessonsStorage(all => {
-      const updated = all.map(l => {
+      let updated = all.map(l => {
         if (l.groupId !== id) return l;
         return {
           ...l,
@@ -2439,6 +2449,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           isQuickLesson: false
         };
       });
+
+      if (scheduleChanged) {
+        // Mark stale future/today uncompleted lessons of this group as deleted in storage too
+        updated = updated.map(l => {
+          if (l.groupId !== id) return l;
+          if (isHistoricalOrLocked(l)) return l;
+          return wrapDeletion(l);
+        });
+
+        // Add newly generated lessons to storage
+        if (newGeneratedLessons.length > 0) {
+          const existingKeys = new Set(updated.map(l => `${l.groupId}_${l.date}_${l.time}`));
+          const toAdd = newGeneratedLessons.filter(nl => !existingKeys.has(`${nl.groupId}_${nl.date}_${nl.time}`));
+          updated = [...updated, ...toAdd];
+        }
+      }
 
       if (!isPerLesson) {
         const groupNonCancelled = updated
@@ -2459,6 +2485,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       return updated;
     });
+
+    autoSyncEngine.notifyMutation('groups', id);
+    setTimeout(() => {
+      refreshCalendarAndDashboard();
+    }, 50);
   };
 
   const deleteGroup = async (id: string) => {

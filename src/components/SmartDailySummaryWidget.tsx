@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
-import { formatLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
+import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
 
 import { Sparkles, Clock, Users, BookOpen, AlertCircle, Wallet } from 'lucide-react';
 
@@ -14,9 +15,44 @@ export const SmartDailySummaryWidget: React.FC = () => {
   const todayStr = formatLocalDate();
 
   const summary = useMemo(() => {
-    const todaysLessons = lessons
-      .filter(l => l.date === todayStr && l.status !== 'cancelled')
-      .sort((a, b) => a.time.localeCompare(b.time));
+    const active = lessons
+      .filter(l => !l.deleted && l.date === todayStr && l.status !== 'cancelled')
+      .filter(l => {
+        if (
+          l.groupId && 
+          l.groupId !== 'quick_group' && 
+          l.status === 'scheduled' && 
+          (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes && !l.report.homeworkTitle && l.report.quizScore === undefined)) &&
+          (!l.studentPayments || Object.keys(l.studentPayments).length === 0) &&
+          (!l.amountPaid || l.amountPaid === 0)
+        ) {
+          const grp = groups.find(g => g.id === l.groupId && !g.deleted);
+          if (grp) {
+            const activeSlots = getGroupScheduleSlots(grp);
+            if (activeSlots.length > 0) {
+              const lDate = parseLocalDate(l.date);
+              const lDayNum = lDate.getDay();
+              const matchesSlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === l.time);
+              if (!matchesSlot) return false;
+            }
+          }
+        }
+        return true;
+      });
+
+    const seen = new Set<string>();
+    const todaysLessons: typeof lessons = [];
+    active.forEach(l => {
+      const key = l.groupId && l.groupId !== 'quick_group'
+        ? `${l.groupId}_${l.date}_${l.time}`
+        : l.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        todaysLessons.push(l);
+      }
+    });
+
+    todaysLessons.sort((a, b) => a.time.localeCompare(b.time));
 
     const todaysLessonsCount = todaysLessons.length;
 
