@@ -114,7 +114,11 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
       grade: selectedGroup?.grade || grade,
       status: 'scheduled',
       paymentStatus: 'pending',
-      amountDue: selectedGroup ? Math.round(selectedGroup.monthlyPackagePrice / selectedGroup.sessionCount) : 250,
+      amountDue: selectedGroup 
+        ? (selectedGroup.paymentCycle === 'per_lesson' || selectedGroup.paymentModel === 'per_session'
+            ? (selectedGroup.pricePerSession || 200)
+            : Math.round((selectedGroup.monthlyPackagePrice || 1200) / (selectedGroup.sessionCount || 4)))
+        : 250,
       amountPaid: 0,
       recordingLink: recordingLink.trim() || undefined,
       recordingLink2: recordingLink2.trim() || undefined,

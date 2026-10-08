@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Group, Lesson, Student } from '../types';
 import { 
@@ -52,6 +52,24 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
   const [isSubmittingStudent, setIsSubmittingStudent] = useState(false);
   const [studentActionSuccess, setStudentActionSuccess] = useState<string | null>(null);
   const [selectedStudentForProfile, setSelectedStudentForProfile] = useState<Student | null>(null);
+
+  // Lock body scroll while modal is active and handle Escape key
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
 
   const groupStudents = students.filter(s => s.groupId === group.id);
   const cycleInfo = getGroupCycleInfo(group, lessons, language);
@@ -127,6 +145,55 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
 
     setEditingLessonRecordingId(null);
     confetti({ particleCount: 30, spread: 30 });
+  };
+
+  const isPerLessonGroup = group.paymentModel === 'per_session' || group.paymentCycle === 'per_lesson';
+  const cycleTotalSessions = (group.sessionCount && group.sessionCount > 1) ? group.sessionCount : 4;
+  
+  // Find upcoming scheduled lessons for this group
+  const upcomingScheduledLessons = useMemo(() => {
+    return (lessons || [])
+      .filter(l => l.groupId === group.id && !l.deleted && l.status === 'scheduled')
+      .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+  }, [lessons, group.id]);
+
+  const nearestUpcomingLesson = upcomingScheduledLessons[0];
+  const detectedNextSessionNum = nearestUpcomingLesson?.sessionNumber 
+    ? nearestUpcomingLesson.sessionNumber 
+    : (group.startingSessionNumber || 1);
+
+  const [selectedUpcomingCycleNumber, setSelectedUpcomingCycleNumber] = useState<number>(detectedNextSessionNum);
+  const [cycleUpdateSuccessMsg, setCycleUpdateSuccessMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedUpcomingCycleNumber(detectedNextSessionNum);
+  }, [detectedNextSessionNum]);
+
+  const handleApplyUpcomingCycleNumber = (chosenNum: number) => {
+    if (chosenNum < 1 || chosenNum > cycleTotalSessions) return;
+    setSelectedUpcomingCycleNumber(chosenNum);
+
+    // 1. Update the group startingSessionNumber
+    updateGroup(group.id, {
+      ...group,
+      startingSessionNumber: chosenNum
+    });
+
+    // 2. Synchronize all upcoming scheduled lessons
+    upcomingScheduledLessons.forEach((upLesson, idx) => {
+      const nextSeqNum = (((chosenNum - 1 + idx) % cycleTotalSessions) + 1);
+      updateLesson(upLesson.id, {
+        sessionNumber: nextSeqNum,
+        totalSessionsInPackage: cycleTotalSessions
+      });
+    });
+
+    setCycleUpdateSuccessMsg(_t(
+      `✓ تم حفظ وضبط الحصة القادمة برقم (${chosenNum} من ${cycleTotalSessions}) وتحديث كافة مواعيد المجموعة بنجاح`,
+      `✓ Set upcoming session to (${chosenNum}/${cycleTotalSessions}) and updated all group lessons`,
+      `✓ Nächste Sitzung auf (${chosenNum}/${cycleTotalSessions}) gesetzt`
+    ));
+    setTimeout(() => setCycleUpdateSuccessMsg(null), 4000);
   };
 
   const handleAddNewStudentToGroup = (e: React.FormEvent) => {
@@ -405,7 +472,71 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
         {/* Body Content */}
         <div className="overflow-y-auto flex-1 p-3.5 sm:p-4">
           {activeTab === 'details' ? (
-            <GroupForm initialData={group} onSubmit={handleSubmit} isEdit={true} className="space-y-4 pb-2">
+            <div className="space-y-4">
+              {/* Dedicated Upcoming Cycle Adjuster Card */}
+              {!isPerLessonGroup && cycleTotalSessions > 1 && (
+                <div className="p-3 sm:p-3.5 bg-gradient-to-r from-primary/10 via-primary/5 to-surface border border-primary/30 rounded-2xl space-y-2.5 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-primary text-white flex items-center justify-center font-black text-xs shadow-2xs">
+                        {selectedUpcomingCycleNumber}
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-text-main flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                          <span>{_t('رقم السايكل / الحصة القادمة للمجموعة', 'Upcoming Session in Cycle', 'Nächste Sitzungsnummer')}</span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/20">
+                            {_t(`باقة ${cycleTotalSessions} حصص`, `${cycleTotalSessions} sessions`, `${cycleTotalSessions} Sitzungen`)}
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-text-muted mt-0.5">
+                          {_t('اختر رقم الحصة القادمة لضبط وترتيب جميع الحصص القادمة والتقارير المالية في كل البرنامج:', 'Choose next session number to sequence all scheduled lessons & reports:', 'Nächste Sitzung auswählen:')}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Quick Number Selector Pills */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                    {Array.from({ length: cycleTotalSessions }, (_, i) => i + 1).map(num => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => setSelectedUpcomingCycleNumber(num)}
+                        className={`min-w-[42px] h-8 px-2.5 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                          selectedUpcomingCycleNumber === num
+                            ? 'bg-primary text-white shadow-2xs scale-105 ring-2 ring-primary/30'
+                            : 'bg-surface hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main border border-surface-border'
+                        }`}
+                      >
+                        <span>{num === 1 ? '1 🌟' : num}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Apply & Save Button */}
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => handleApplyUpcomingCycleNumber(selectedUpcomingCycleNumber)}
+                      className="flex-1 py-2 px-3 bg-primary hover:bg-primary-hover text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-98"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{_t(`💾 حفظ وتطبيق رقم السايكل القادمة (${selectedUpcomingCycleNumber} من ${cycleTotalSessions})`, `Save & Apply Next Session (${selectedUpcomingCycleNumber}/${cycleTotalSessions})`, `Nächste Sitzung speichern (${selectedUpcomingCycleNumber})`)}</span>
+                    </button>
+                  </div>
+
+                  {/* Success Toast */}
+                  {cycleUpdateSuccessMsg && (
+                    <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs font-bold rounded-xl border border-emerald-200/60 dark:border-emerald-800/60 flex items-center gap-2 animate-scale-up">
+                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>{cycleUpdateSuccessMsg}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <GroupForm initialData={group} onSubmit={handleSubmit} isEdit={true} className="space-y-4 pb-2">
               {/* Students in group management */}
               <div className="space-y-3 pt-3 border-t border-surface-border mt-4">
                 <div className="flex items-center justify-between gap-2">
@@ -717,6 +848,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                 </div>
               </div>
             </GroupForm>
+            </div>
           ) : (
             /* RECORDINGS TAB */
             <div className="space-y-4">

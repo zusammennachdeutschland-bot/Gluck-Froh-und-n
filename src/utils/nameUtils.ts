@@ -129,3 +129,31 @@ export function transliterateArabicNameToEnglish(fullName: string): string {
     .filter(Boolean)
     .join(' ');
 }
+
+/**
+ * Normalizes text for forgiving search in Arabic, German, and English.
+ * Normalizes Arabic letters (أ/إ/آ/ٱ -> ا, ة -> ه, ى -> ي, removes diacritics/tashkeel),
+ * converts Eastern Arabic digits (٠-٩) and Persian digits (۰-۹) to standard ASCII (0-9), and lowercases.
+ */
+export function normalizeSearchText(text?: string | null): string {
+  if (!text) return '';
+  return text
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[٠۰]/g, '0')
+    .replace(/[١۱]/g, '1')
+    .replace(/[٢۲]/g, '2')
+    .replace(/[٣۳]/g, '3')
+    .replace(/[٤۴]/g, '4')
+    .replace(/[٥۵]/g, '5')
+    .replace(/[٦۶]/g, '6')
+    .replace(/[٧۷]/g, '7')
+    .replace(/[٨۸]/g, '8')
+    .replace(/[٩۹]/g, '9')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/[ة]/g, 'ه')
+    .replace(/[ى]/g, 'ي')
+    .replace(/[\u064B-\u065F\u0670]/g, '');
+}
+

@@ -99,11 +99,14 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   const sessionCount = targetGroup?.sessionCount || cycleInfo?.sessionCount || lesson?.totalSessionsInPackage || 4;
   const isPerLesson = targetGroup?.paymentCycle === 'per_lesson' || targetGroup?.paymentModel === 'per_session' || cycleInfo?.isPerLesson;
   const hasCycle = !isPerLesson && sessionCount > 1;
-  const defaultSessionNumber = calculateSequentialSessionNumber(lesson || upcomingLesson, lessons, {
-    group: targetGroup,
-    student: targetStudent,
-    students
-  });
+  const currentTargetLesson = lesson || upcomingLesson;
+  const defaultSessionNumber = (typeof currentTargetLesson?.sessionNumber === 'number' && currentTargetLesson.sessionNumber >= 1)
+    ? currentTargetLesson.sessionNumber
+    : calculateSequentialSessionNumber(currentTargetLesson, lessons, {
+        group: targetGroup,
+        student: targetStudent,
+        students
+      });
 
   // Detect previous homework from previous lessons
   const detectedPreviousHomework = React.useMemo(() => {

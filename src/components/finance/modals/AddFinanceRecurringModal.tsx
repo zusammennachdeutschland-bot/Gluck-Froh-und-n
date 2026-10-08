@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../../../context/AppContext';
 import { X, Save, Repeat, Bell, Wallet } from 'lucide-react';
 import { FinanceRecurring } from '../../../types';
+import { formatLocalDate } from '../../../utils/timeUtils';
 
 interface AddFinanceRecurringModalProps {
   onClose: () => void;
@@ -17,8 +18,8 @@ export const AddFinanceRecurringModal: React.FC<AddFinanceRecurringModalProps> =
   const [categoryId, setCategoryId] = useState(existingRecurring?.categoryId || (financeCategories.find(c => c.type === 'expense' && !c.deleted)?.id || ''));
   const [accountId, setAccountId] = useState(existingRecurring?.accountId || (financeAccounts.find(a => !a.deleted)?.id || ''));
   const [frequency, setFrequency] = useState<FinanceRecurring['frequency']>(existingRecurring?.frequency || 'monthly');
-  const [startDate, setStartDate] = useState(existingRecurring?.startDate || new Date().toISOString().split('T')[0]);
-  const [nextDueDate, setNextDueDate] = useState(existingRecurring?.nextDueDate || new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(existingRecurring?.startDate || formatLocalDate());
+  const [nextDueDate, setNextDueDate] = useState(existingRecurring?.nextDueDate || formatLocalDate());
   const [endDate, setEndDate] = useState(existingRecurring?.endDate || '');
   const [autoGenerateTransaction, setAutoGenerateTransaction] = useState(existingRecurring?.autoGenerateTransaction || false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(existingRecurring?.notificationsEnabled !== false);

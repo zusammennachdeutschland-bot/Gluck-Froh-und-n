@@ -24,6 +24,7 @@ import {
   ReplacementAssignment,
   SYSTEM_STAGES 
 } from '../utils/staffAttendanceUtils';
+import { formatLocalDate } from '../utils/timeUtils';
 
 const WEEKDAY_NAMES_MAP: Record<string, string> = {
   '0': 'الأحد',
@@ -97,7 +98,7 @@ export const TeacherAttendanceModal: React.FC<TeacherAttendanceModalProps> = ({
 
   // Date
   const [date, setDate] = useState<string>(
-    editingRecord?.date || new Date().toISOString().split('T')[0]
+    editingRecord?.date || formatLocalDate()
   );
 
   // Absence state

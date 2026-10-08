@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Trash2, RefreshCw, X, AlertTriangle, Users, BookOpen, Calendar, User } from 'lucide-react';
 
@@ -9,10 +9,23 @@ export const RecentlyDeletedModal: React.FC = () => {
     recentlyDeleted, 
     restoreItem, 
     permanentlyDeleteItem, 
-    clearRecentlyDeleted 
+    clearRecentlyDeleted,
+    _t
   } = useApp();
 
   const [activeType, setActiveType] = useState<'all' | 'students' | 'groups' | 'lessons'>('all');
+
+  // Handle Escape key
+  useEffect(() => {
+    if (!isRecentlyDeletedModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsRecentlyDeletedModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isRecentlyDeletedModalOpen, setIsRecentlyDeletedModalOpen]);
 
   if (!isRecentlyDeletedModalOpen) return null;
 
@@ -31,9 +44,11 @@ export const RecentlyDeletedModal: React.FC = () => {
               <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-xs sm:text-base font-bold text-text-main truncate">Zuletzt gelöscht ({totalCount})</h3>
+              <h3 className="text-xs sm:text-base font-bold text-text-main truncate">
+                {_t('سلة المحذوفات', 'Recently Deleted', 'Zuletzt gelöscht')} ({totalCount})
+              </h3>
               <p className="text-[10px] sm:text-xs text-text-muted truncate hidden sm:block">
-                Gelöschte Elemente wiederherstellen oder dauerhaft entfernen
+                {_t('استعادة العناصر المحذوفة أو حذفها بشكل نهائي', 'Restore deleted items or remove them permanently', 'Gelöschte Elemente wiederherstellen oder dauerhaft entfernen')}
               </p>
             </div>
           </div>
@@ -41,13 +56,13 @@ export const RecentlyDeletedModal: React.FC = () => {
             {totalCount > 0 && (
               <button
                 onClick={() => {
-                  if (window.confirm('Möchten Sie den Papierkorb wirklich leeren? Dies kann nicht rückgängig gemacht werden.')) {
+                  if (window.confirm(_t('هل تريد بالتأكيد إفراغ سلة المحذوفات نهائياً؟ لا يمكن التراجع عن هذا الإجراء.', 'Are you sure you want to permanently empty the trash? This cannot be undone.', 'Möchten Sie den Papierkorb wirklich leeren? Dies kann nicht rückgängig gemacht werden.'))) {
                     clearRecentlyDeleted();
                   }
                 }}
                 className="px-2 py-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-xs font-semibold text-primary hover:text-primary dark:text-primary hover:bg-primary-soft dark:hover:bg-primary-soft rounded-md sm:rounded-lg transition shrink-0"
               >
-                Papierkorb leeren
+                {_t('إفراغ السلة', 'Empty Trash', 'Papierkorb leeren')}
               </button>
             )}
             <button
@@ -69,7 +84,7 @@ export const RecentlyDeletedModal: React.FC = () => {
                 : 'text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
-            Alle ({totalCount})
+            {_t('الكل', 'All', 'Alle')} ({totalCount})
           </button>
           <button
             onClick={() => setActiveType('students')}
@@ -79,7 +94,7 @@ export const RecentlyDeletedModal: React.FC = () => {
                 : 'text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
-            Schüler ({recentlyDeleted.students.length})
+            {_t('الطلاب', 'Students', 'Schüler')} ({recentlyDeleted.students.length})
           </button>
           <button
             onClick={() => setActiveType('groups')}
@@ -89,7 +104,7 @@ export const RecentlyDeletedModal: React.FC = () => {
                 : 'text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
-            Gruppen ({recentlyDeleted.groups.length})
+            {_t('المجموعات', 'Groups', 'Gruppen')} ({recentlyDeleted.groups.length})
           </button>
           <button
             onClick={() => setActiveType('lessons')}
@@ -99,7 +114,7 @@ export const RecentlyDeletedModal: React.FC = () => {
                 : 'text-text-muted hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
-            Lektionen ({recentlyDeleted.lessons.length})
+            {_t('الحصص', 'Lessons', 'Lektionen')} ({recentlyDeleted.lessons.length})
           </button>
         </div>
 
@@ -108,8 +123,8 @@ export const RecentlyDeletedModal: React.FC = () => {
           {totalCount === 0 ? (
             <div className="py-12 text-center text-text-muted/70 dark:text-slate-500 space-y-2">
               <Trash2 className="w-10 h-10 mx-auto stroke-1 opacity-50" />
-              <p className="text-sm font-medium">Der Papierkorb ist leer.</p>
-              <p className="text-xs text-text-muted/70">Gelöschte Elemente erscheinen hier und können wiederhergestellt werden.</p>
+              <p className="text-sm font-medium">{_t('سلة المحذوفات فارغة', 'Trash is empty.', 'Der Papierkorb ist leer.')}</p>
+              <p className="text-xs text-text-muted/70">{_t('العناصر المحذوفة تظهر هنا ويمكنك استعادتها بأي وقت.', 'Deleted items appear here and can be restored.', 'Gelöschte Elemente erscheinen hier und können wiederhergestellt werden.')}</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -125,10 +140,10 @@ export const RecentlyDeletedModal: React.FC = () => {
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-text-main truncate">
-                        {item.name} <span className="text-xs font-normal text-slate-500">(Schüler)</span>
+                        {item.name} <span className="text-xs font-normal text-slate-500">({_t('طالب', 'Student', 'Schüler')})</span>
                       </p>
                       <p className="text-xs text-text-muted/70">
-                        Gelöscht am {new Date(deletedAt).toLocaleDateString()}
+                        {_t('حُذف بتاريخ', 'Deleted on', 'Gelöscht am')} {new Date(deletedAt).toLocaleDateString()}
                       </p>
                     </div>
                   </div>
@@ -138,12 +153,12 @@ export const RecentlyDeletedModal: React.FC = () => {
                       className="px-3 py-1.5 bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary hover:bg-primary-soft dark:hover:bg-primary-soft text-xs font-semibold rounded-lg flex items-center gap-1.5 transition"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      Wiederherstellen
+                      {_t('استعادة', 'Restore', 'Wiederherstellen')}
                     </button>
                     <button
                       onClick={() => permanentlyDeleteItem('student', item.id)}
                       className="p-1.5 text-text-muted/70 hover:text-primary dark:hover:text-primary rounded-lg transition"
-                      title="Endgültig löschen"
+                      title={_t('حذف نهائي', 'Delete permanently', 'Endgültig löschen')}
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -163,10 +178,10 @@ export const RecentlyDeletedModal: React.FC = () => {
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-text-main truncate">
-                        {item.name} <span className="text-xs font-normal text-slate-500">(Gruppe)</span>
+                        {item.name} <span className="text-xs font-normal text-slate-500">({_t('مجموعة', 'Group', 'Gruppe')})</span>
                       </p>
                       <p className="text-xs text-text-muted/70">
-                        Gelöscht am {new Date(deletedAt).toLocaleDateString()}
+                        {_t('حُذف بتاريخ', 'Deleted on', 'Gelöscht am')} {new Date(deletedAt).toLocaleDateString()}
                       </p>
                     </div>
                   </div>
@@ -176,12 +191,12 @@ export const RecentlyDeletedModal: React.FC = () => {
                       className="px-3 py-1.5 bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary hover:bg-primary-soft dark:hover:bg-primary-soft text-xs font-semibold rounded-lg flex items-center gap-1.5 transition"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      Wiederherstellen
+                      {_t('استعادة', 'Restore', 'Wiederherstellen')}
                     </button>
                     <button
                       onClick={() => permanentlyDeleteItem('group', item.id)}
                       className="p-1.5 text-text-muted/70 hover:text-primary dark:hover:text-primary rounded-lg transition"
-                      title="Endgültig löschen"
+                      title={_t('حذف نهائي', 'Delete permanently', 'Endgültig löschen')}
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -204,7 +219,7 @@ export const RecentlyDeletedModal: React.FC = () => {
                         {item.title} <span className="text-xs font-normal text-slate-500">({item.date})</span>
                       </p>
                       <p className="text-xs text-text-muted/70">
-                        Gelöscht am {new Date(deletedAt).toLocaleDateString()}
+                        {_t('حُذف بتاريخ', 'Deleted on', 'Gelöscht am')} {new Date(deletedAt).toLocaleDateString()}
                       </p>
                     </div>
                   </div>
@@ -214,12 +229,12 @@ export const RecentlyDeletedModal: React.FC = () => {
                       className="px-3 py-1.5 bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary hover:bg-primary-soft dark:hover:bg-primary-soft text-xs font-semibold rounded-lg flex items-center gap-1.5 transition"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      Wiederherstellen
+                      {_t('استعادة', 'Restore', 'Wiederherstellen')}
                     </button>
                     <button
                       onClick={() => permanentlyDeleteItem('lesson', item.id)}
                       className="p-1.5 text-text-muted/70 hover:text-primary dark:hover:text-primary rounded-lg transition"
-                      title="Endgültig löschen"
+                      title={_t('حذف نهائي', 'Delete permanently', 'Endgültig löschen')}
                     >
                       <X className="w-4 h-4" />
                     </button>

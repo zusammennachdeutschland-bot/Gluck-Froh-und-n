@@ -1,5 +1,16 @@
 apply plugin: 'com.android.application'
 
+// Automatically decode release.keystore from release.keystore.b64 if missing
+def keystoreFile = file('release.keystore')
+def keystoreB64File = file('release.keystore.b64')
+if (!keystoreFile.exists() && keystoreB64File.exists()) {
+    try {
+        keystoreFile.bytes = keystoreB64File.text.trim().decodeBase64()
+    } catch (Exception e) {
+        logger.warn("Could not auto-decode release.keystore.b64: " + e.message)
+    }
+}
+
 android {
     namespace = "com.glueck.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -8,7 +19,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode (System.getenv("GITHUB_RUN_NUMBER") ? 200 + System.getenv("GITHUB_RUN_NUMBER").toInteger() : 201)
-        versionName "2.0"
+        versionName "1.0.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -22,6 +33,10 @@ android {
             storePassword 'glueck2026'
             keyAlias 'glueckrelease'
             keyPassword 'glueck2026'
+            v1SigningEnabled true
+            v2SigningEnabled true
+            enableV3Signing true
+            enableV4Signing false
         }
     }
     buildTypes {

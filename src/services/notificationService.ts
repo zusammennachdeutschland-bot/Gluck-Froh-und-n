@@ -663,11 +663,12 @@ export const rebuildAllNotificationSchedules = async (
       extra: { ...extraData, category, atEpoch }
     });
 
+    const notifLocale = language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US';
     webNotifsStore.push({
       id: uniqueId,
       title,
       body,
-      scheduledAt: scheduleDate.toLocaleString('ar-EG', {
+      scheduledAt: scheduleDate.toLocaleString(notifLocale, {
         weekday: 'short',
         month: 'numeric',
         day: 'numeric',
@@ -888,7 +889,8 @@ export const rebuildAllNotificationSchedules = async (
           if (!period) continue;
           
           const startTime = period.startTime; // "HH:MM"
-          const lessonStartDate = getCairoDateWithTime(dateStr, startTime);
+          const cleanTime = startTime.includes(':') ? startTime : `${startTime}:00`;
+          const lessonStartDate = new Date(`${dateStr}T${cleanTime.padStart(5, '0')}:00`);
           
           // Reminder should be 5 minutes before start
           const reminderDate = new Date(lessonStartDate.getTime() - 5 * 60 * 1000);

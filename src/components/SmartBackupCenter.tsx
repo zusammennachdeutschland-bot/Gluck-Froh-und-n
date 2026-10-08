@@ -103,7 +103,13 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
   // Check for existing restore point & load history on mount
   useEffect(() => {
     const rp = localStorage.getItem('dl_restore_point_snapshot');
-    setHasRestorePoint(!!rp);
+    if (rp) {
+      setHasRestorePoint(true);
+    } else {
+      storage.getItem('dl_restore_point_snapshot').then(val => {
+        if (val) setHasRestorePoint(true);
+      }).catch(() => {});
+    }
 
     try {
       const histStr = localStorage.getItem('dl_restore_history');
@@ -552,7 +558,14 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         financeRecurring,
         financeInstallments
       };
-      localStorage.setItem('dl_restore_point_snapshot', JSON.stringify(currentSnapshot));
+      try {
+        await storage.setItem('dl_restore_point_snapshot', currentSnapshot);
+      } catch (storageErr) {
+        console.warn('Storage snapshot notice:', storageErr);
+      }
+      try {
+        localStorage.setItem('dl_restore_point_snapshot', JSON.stringify(currentSnapshot));
+      } catch {}
       setHasRestorePoint(true);
 
       setTimeout(async () => {
@@ -835,7 +848,14 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       financeInstallments
     };
 
-    localStorage.setItem('dl_restore_point_snapshot', JSON.stringify(currentSnapshot));
+    try {
+      await storage.setItem('dl_restore_point_snapshot', currentSnapshot);
+    } catch (storageErr) {
+      console.warn('Storage snapshot notice:', storageErr);
+    }
+    try {
+      localStorage.setItem('dl_restore_point_snapshot', JSON.stringify(currentSnapshot));
+    } catch {}
     setHasRestorePoint(true);
     setRestoreProgress(30);
 
@@ -1300,13 +1320,23 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
 
   // Rollback Action
   const handleUndoLastRestore = () => {
-    const rpStr = localStorage.getItem('dl_restore_point_snapshot');
-    if (!rpStr) return;
-
     setIsRollingBack(true);
     setTimeout(async () => {
       try {
-        const rp = JSON.parse(rpStr);
+        let rp: any = null;
+        const rpStr = localStorage.getItem('dl_restore_point_snapshot');
+        if (rpStr) {
+          try {
+            rp = JSON.parse(rpStr);
+          } catch {}
+        }
+        if (!rp) {
+          rp = await storage.getItem('dl_restore_point_snapshot');
+        }
+        if (!rp) {
+          setIsRollingBack(false);
+          return;
+        }
         if (rp.students) {
           setStudents(rp.students);
           await storage.setItem('dl_students', rp.students);

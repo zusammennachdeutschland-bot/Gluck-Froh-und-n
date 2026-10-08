@@ -73,14 +73,14 @@ export const ScheduleView: React.FC = () => {
 
   // CONFLICT DETECTION & INFINITE RECURRING CALENDAR PROJECTION
   const activeLessons = useMemo(() => {
-    // Project recurring lessons indefinitely for active groups around the viewed date window (-6 months to +24 months around selectedDate)
+    // Project recurring lessons for active groups around the viewed date window (-2 months to +4 months around selectedDate)
     const current = parseLocalDate(selectedDate);
     const startRange = new Date(current);
-    startRange.setMonth(startRange.getMonth() - 6);
+    startRange.setMonth(startRange.getMonth() - 2);
     startRange.setDate(1);
 
     const endRange = new Date(current);
-    endRange.setMonth(endRange.getMonth() + 24);
+    endRange.setMonth(endRange.getMonth() + 4);
     endRange.setDate(0);
 
     const startDateStr = formatLocalDate(startRange);

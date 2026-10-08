@@ -24,8 +24,8 @@ export const useLessonReminders = () => {
           const nowMins = now.getHours() * 60 + now.getMinutes();
           const minutesBefore = notificationSettings.lessonReminderMinutesBefore || 15;
 
-          // 1. Upcoming lesson starting soon (e.g. within minutesBefore)
-          const upcoming = lessons?.find(l => {
+          // 1. All upcoming lessons starting soon (e.g. within minutesBefore)
+          const upcomingLessons = lessons?.filter(l => {
             if (!l || !l.time || typeof l.time !== 'string') return false;
             if (l.date !== todayStr || l.status !== 'scheduled') return false;
             const parts = l.time.split(':').map(n => parseInt(n, 10));
@@ -33,9 +33,9 @@ export const useLessonReminders = () => {
             const lMins = parts[0] * 60 + parts[1];
             const diff = lMins - nowMins;
             return diff >= 0 && diff <= minutesBefore;
-          });
+          }) || [];
 
-          if (upcoming) {
+          for (const upcoming of upcomingLessons) {
             const notifKey = `rem_upcoming_${upcoming.id}_${todayStr}`;
             const isNotified = sessionStorage.getItem(notifKey);
             const snoozedUntil = snoozedLessonAlarmMap[upcoming.id];

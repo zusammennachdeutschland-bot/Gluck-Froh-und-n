@@ -46,6 +46,9 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
 
   // Dynamically compute exact session number excluding cancelled lessons
   const currentSessionNumber = useMemo(() => {
+    if (typeof lesson.sessionNumber === 'number' && lesson.sessionNumber >= 1) {
+      return lesson.sessionNumber;
+    }
     const grp = lesson.groupId ? groups.find(g => g.id === lesson.groupId) : undefined;
     return calculateSequentialSessionNumber(lesson, lessons || [], {
       group: grp,
@@ -67,7 +70,7 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
       ? grp.sessionCount 
       : (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 ? lesson.totalSessionsInPackage : 4);
     const isPerLessonGroup = Boolean(
-      (grp && ((grp.sessionCount !== undefined && grp.sessionCount <= 1) || ((grp.paymentCycle === 'per_lesson' || grp.paymentModel === 'per_session') && (grp.sessionCount === undefined || grp.sessionCount <= 1))))
+      grp && (grp.paymentCycle === 'per_lesson' || grp.paymentModel === 'per_session' || (grp.sessionCount !== undefined && grp.sessionCount <= 1))
     );
     const hasCycleSession = !isPerLessonGroup && totalCycleCount > 1;
 

@@ -317,7 +317,7 @@ export const SettingsView: React.FC = () => {
       description: t('auto_application_information_and_ve'),
       icon: Info,
       color: 'bg-primary/10 text-primary dark:text-primary border-primary-border dark:border-primary-border',
-      badge: 'v1.0.2 • Pro'
+      badge: 'v3.0 • Pro'
     }
   ];
 
@@ -1332,7 +1332,7 @@ export const SettingsView: React.FC = () => {
                     Glück fröhlich und froh
                   </h1>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-soft text-primary border border-primary-border">
-                    v1.0.2 Pro
+                    v3.0 Pro
                   </span>
                 </div>
                 <p className="text-xs text-primary font-bold">
@@ -1372,7 +1372,7 @@ export const SettingsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  const info = `Glück fröhlich und froh v1.0.2 • Mr. Abdul Rahman • Offline-First`;
+                  const info = `Glück fröhlich und froh v3.0 • Mr. Abdul Rahman • Offline-First`;
                   navigator.clipboard.writeText(info);
                   setCopiedBuildInfo(true);
                   setTimeout(() => setCopiedBuildInfo(false), 2000);
@@ -1514,7 +1514,7 @@ export const SettingsView: React.FC = () => {
 
           {/* 4. FOOTER INFO */}
           <div className="text-center pt-1 text-[11px] font-mono font-bold text-slate-500">
-            Glück fröhlich und froh • Version 1.0.2 Pro • Offline-First
+            Glück fröhlich und froh • Version 3.0 Pro • Offline-First
           </div>
         </div>
       )}

@@ -153,7 +153,7 @@ public class LiveTimerService extends Service {
                 .setWhen(startTime)
                 .setUsesChronometer(true)
                 .setProgress(durationMins, elapsedMins > durationMins ? durationMins : elapsedMins, false)
-                .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
+                .setCategory(NotificationCompat.CATEGORY_EVENT)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)

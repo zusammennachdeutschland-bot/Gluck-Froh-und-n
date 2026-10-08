@@ -103,8 +103,9 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   // If the group has sessionCount > 1 (e.g. 4, 8, 12 sessions), it is strictly a cycle package!
   const isPerLesson = Boolean(
     (associatedGroup && (
-      (associatedGroup.sessionCount !== undefined && associatedGroup.sessionCount <= 1) ||
-      ((associatedGroup.paymentCycle === 'per_lesson' || associatedGroup.paymentModel === 'per_session') && (associatedGroup.sessionCount === undefined || associatedGroup.sessionCount <= 1))
+      associatedGroup.paymentCycle === 'per_lesson' ||
+      associatedGroup.paymentModel === 'per_session' ||
+      (associatedGroup.sessionCount !== undefined && associatedGroup.sessionCount <= 1)
     )) ||
     (!associatedGroup && (lesson.isQuickLesson || !lesson.totalSessionsInPackage || lesson.totalSessionsInPackage <= 1))
   );
@@ -149,6 +150,9 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
   // Dynamically compute the exact sequential session number strictly among NON-CANCELLED lessons
   const currentSessionNumber = useMemo(() => {
+    if (typeof lesson.sessionNumber === 'number' && lesson.sessionNumber >= 1) {
+      return lesson.sessionNumber;
+    }
     return calculateSequentialSessionNumber(lesson, lessons || [], {
       group: associatedGroup,
       student: activeStudent,

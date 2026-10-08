@@ -14,6 +14,15 @@ export interface GroupCycleInfo {
 /**
  * Single source of truth for group cycle session calculations across the application.
  */
+export function isGroupPerLesson(group?: Partial<Group> | null): boolean {
+  if (!group) return false;
+  return Boolean(
+    group.paymentCycle === 'per_lesson' ||
+    group.paymentModel === 'per_session' ||
+    (group.sessionCount !== undefined && group.sessionCount <= 1)
+  );
+}
+
 export const getGroupCycleInfo = (
   group: Partial<Group> | null | undefined,
   lessons?: Lesson[],
@@ -32,11 +41,7 @@ export const getGroupCycleInfo = (
     };
   }
 
-  // If group has an explicit package count > 1 (e.g. 4, 8, 12 sessions), it is strictly a cycle package, NOT per-lesson!
-  const isPerLesson = Boolean(
-    (group.sessionCount !== undefined && group.sessionCount <= 1) ||
-    ((group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session') && (group.sessionCount === undefined || group.sessionCount <= 1))
-  );
+  const isPerLesson = isGroupPerLesson(group);
 
   if (isPerLesson) {
     const label = language === 'ar' 
@@ -77,12 +82,19 @@ export const getGroupCycleInfo = (
 
   let currentSessionNumber = startingSessionNumber;
 
-  if (inProgressLesson) {
+  if (inProgressLesson && typeof inProgressLesson.sessionNumber === 'number' && inProgressLesson.sessionNumber >= 1) {
+    currentSessionNumber = ((inProgressLesson.sessionNumber - 1) % sessionCount) + 1;
+  } else if (upcomingScheduled.length > 0 && typeof upcomingScheduled[0].sessionNumber === 'number' && upcomingScheduled[0].sessionNumber >= 1) {
+    currentSessionNumber = ((upcomingScheduled[0].sessionNumber - 1) % sessionCount) + 1;
+  } else if (inProgressLesson) {
     currentSessionNumber = ((startingSessionNumber - 1 + completedLessons.length) % sessionCount) + 1;
   } else if (completedLessons.length > 0) {
-    currentSessionNumber = ((startingSessionNumber - 1 + completedLessons.length) % sessionCount) + 1;
-  } else if (upcomingScheduled.length > 0 && upcomingScheduled[0].sessionNumber && upcomingScheduled[0].sessionNumber >= 1) {
-    currentSessionNumber = ((upcomingScheduled[0].sessionNumber - 1) % sessionCount) + 1;
+    const lastCompleted = completedLessons[completedLessons.length - 1];
+    if (typeof lastCompleted?.sessionNumber === 'number' && lastCompleted.sessionNumber >= 1) {
+      currentSessionNumber = (lastCompleted.sessionNumber % sessionCount) + 1;
+    } else {
+      currentSessionNumber = ((startingSessionNumber - 1 + completedLessons.length) % sessionCount) + 1;
+    }
   }
 
   const completedInCycle = currentSessionNumber - 1;
@@ -113,9 +125,9 @@ export const isPendingStatus = (status: string) => {
 
 /**
  * Calculates the exact sequential session number for any lesson,
- * strictly excluding cancelled lessons (status === 'cancelled') and deleted lessons.
- * This guarantees that if a lesson was cancelled, the subsequent lesson takes over
- * the session number without counting the cancelled session, matching Finance logic.
+ * strictly prioritizing explicit lesson.sessionNumber when present,
+ * and strictly excluding cancelled lessons (status === 'cancelled') and deleted lessons.
+ * This guarantees consistent cycle numbers across Finance, Reports, History, and Modals.
  */
 export const calculateSequentialSessionNumber = (
   lesson: Partial<Lesson> | null | undefined,
@@ -124,23 +136,28 @@ export const calculateSequentialSessionNumber = (
     group?: Partial<Group> | null;
     student?: { id?: string; name?: string; groupId?: string } | null;
     students?: Array<{ id: string; name: string; groupId?: string }>;
+    forceRecalculate?: boolean;
   }
 ): number => {
   if (!lesson) return 1;
 
   // Single lesson groups / per-lesson payments always have session number 1
-  // If group has an explicit package count > 1 (e.g. 4, 8, 12 sessions), it is strictly a cycle package!
-  const isPerLesson = Boolean(
-    options?.group && (
-      (options.group.sessionCount !== undefined && options.group.sessionCount <= 1) ||
-      ((options.group.paymentCycle === 'per_lesson' || options.group.paymentModel === 'per_session') && (options.group.sessionCount === undefined || options.group.sessionCount <= 1))
-    )
-  );
+  const isPerLesson = isGroupPerLesson(options?.group);
   if (isPerLesson) return 1;
 
   const cycleTotalSessions = (options?.group?.sessionCount && options.group.sessionCount > 1)
     ? options.group.sessionCount
     : (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 ? lesson.totalSessionsInPackage : 4);
+
+  // Priority 1: If the lesson ALREADY has a valid session number explicitly set, respect it!
+  if (
+    !options?.forceRecalculate &&
+    typeof lesson.sessionNumber === 'number' &&
+    lesson.sessionNumber >= 1 &&
+    lesson.sessionNumber <= cycleTotalSessions
+  ) {
+    return lesson.sessionNumber;
+  }
 
   const startingSessionNumber = Math.min(
     cycleTotalSessions,
@@ -199,6 +216,18 @@ export const calculateSequentialSessionNumber = (
       const lTime = `${l.date || ''}T${normalizeTime(l.time) || '00:00'}`;
       return lTime < currentLessonTime;
     }).length;
+  }
+
+  // Check if any preceding lesson in the chain has a known sessionNumber
+  if (index > 0) {
+    for (let i = index - 1; i >= 0; i--) {
+      const prev = nonCancelledLessons[i];
+      if (typeof prev.sessionNumber === 'number' && prev.sessionNumber >= 1 && prev.id !== lesson.id) {
+        const offset = index - i;
+        const computed = ((prev.sessionNumber - 1 + offset) % cycleTotalSessions) + 1;
+        return Math.max(1, Math.min(cycleTotalSessions, computed));
+      }
+    }
   }
 
   const computedNum = ((startingSessionNumber - 1 + Math.max(0, index)) % cycleTotalSessions) + 1;

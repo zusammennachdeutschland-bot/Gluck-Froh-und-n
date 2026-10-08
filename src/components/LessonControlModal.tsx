@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
 import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, LessonReport, StudentSessionPerformance } from '../types';
@@ -41,6 +41,7 @@ export const LessonControlModal: React.FC = () => {
     _t,
     financeAccounts,
     markCyclePaymentPaid,
+    updateLessonPaymentStatus,
     payments
   } = useApp();
 
@@ -158,6 +159,7 @@ export const LessonControlModal: React.FC = () => {
   // Cycle session override state
   const [isEditingSessionNumber, setIsEditingSessionNumber] = useState(false);
   const [customSessionNumber, setCustomSessionNumber] = useState<number | null>(null);
+  const [cycleSaveToast, setCycleSaveToast] = useState<string | null>(null);
 
   // Payment Status & Receiving Account Controls (Integrated with Finance System)
   const [isLessonPaid, setIsLessonPaid] = useState<boolean>(selectedLesson?.paymentStatus === 'paid');
@@ -170,7 +172,13 @@ export const LessonControlModal: React.FC = () => {
   const [paymentToastMessage, setPaymentToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setCustomSessionNumber(null);
+    if (selectedLesson?.sessionNumber && selectedLesson.sessionNumber >= 1) {
+      setCustomSessionNumber(selectedLesson.sessionNumber);
+    } else {
+      setCustomSessionNumber(null);
+    }
+    setIsEditingSessionNumber(false);
+    setCycleSaveToast(null);
   }, [selectedLesson?.id]);
 
   // Check pending follow-ups for this group
@@ -184,9 +192,24 @@ export const LessonControlModal: React.FC = () => {
     ? students.filter(s => s.groupId === selectedLesson.groupId)
     : [];
 
-  // Initialize report form if selected lesson already has a report
+  const lastInitializedLessonIdRef = useRef<string | null>(null);
+
+  // Initialize report form strictly when a NEW lesson is opened
   useEffect(() => {
-    if (selectedLesson?.report) {
+    if (!selectedLesson) {
+      lastInitializedLessonIdRef.current = null;
+      return;
+    }
+
+    // Guard: Only initialize form state when opening a new/different lesson!
+    // If the modal is already open for this lesson, NEVER reset or wipe user input
+    // when updating properties on the same lesson (e.g. editing session number, toggling payments, etc.)
+    if (lastInitializedLessonIdRef.current === selectedLesson.id) {
+      return;
+    }
+    lastInitializedLessonIdRef.current = selectedLesson.id;
+
+    if (selectedLesson.report) {
       setAttendance(selectedLesson.report.attendanceStatus || 'present');
       setLessonWhatWasTaught(selectedLesson.report.teacherNotes || '');
       setLessonNextHomework(selectedLesson.report.homeworkDescription || '');
@@ -350,7 +373,7 @@ export const LessonControlModal: React.FC = () => {
       }
       checkDraft();
     }
-  }, [selectedLesson, students, detectedPreviousHomework]);
+  }, [selectedLesson?.id]);
 
   // Auto-save report draft as teacher types
   useEffect(() => {
@@ -458,8 +481,9 @@ export const LessonControlModal: React.FC = () => {
     || groups.find(g => g.name && g.name.toLowerCase().includes(selectedLesson.title.replace(/Lektion|حصة|درس/gi, '').trim().toLowerCase()));
   const isPerLessonGroup = Boolean(
     targetGroup && (
-      (targetGroup.sessionCount !== undefined && targetGroup.sessionCount <= 1) ||
-      ((targetGroup.paymentCycle === 'per_lesson' || targetGroup.paymentModel === 'per_session') && (targetGroup.sessionCount === undefined || targetGroup.sessionCount <= 1))
+      targetGroup.paymentCycle === 'per_lesson' ||
+      targetGroup.paymentModel === 'per_session' ||
+      (targetGroup.sessionCount !== undefined && targetGroup.sessionCount <= 1)
     )
   );
   // Each group already has its cycle session count recorded in its settings!
@@ -478,7 +502,11 @@ export const LessonControlModal: React.FC = () => {
   }, [selectedLesson, lessons, targetGroup, targetStudent, students]);
 
   // Normalize session number strictly within 1 .. cycleTotalSessions
-  const rawSessionNumber = customSessionNumber !== null ? customSessionNumber : autoComputedSessionNumber;
+  const rawSessionNumber = customSessionNumber !== null 
+    ? customSessionNumber 
+    : ((typeof selectedLesson?.sessionNumber === 'number' && selectedLesson.sessionNumber >= 1) 
+        ? selectedLesson.sessionNumber 
+        : autoComputedSessionNumber);
   const currentSessionNumber = rawSessionNumber > cycleTotalSessions
     ? (((rawSessionNumber - 1) % cycleTotalSessions) + 1)
     : Math.max(1, rawSessionNumber);
@@ -487,9 +515,21 @@ export const LessonControlModal: React.FC = () => {
     if (!selectedLesson || newNumber < 1) return;
     const clampedNumber = Math.min(newNumber, cycleTotalSessions);
     setCustomSessionNumber(clampedNumber);
+
+    // Save in-progress draft immediately so user inputs are never lost
+    if (lessonWhatWasTaught || lessonNextHomework || lessonPreviousHomework) {
+      storage.setItem(`dl_draft_report_${selectedLesson.id}`, {
+        attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription,
+        quizScore, examScore, participationScore, teacherNotes: lessonWhatWasTaught || teacherNotes,
+        lessonWhatWasTaught, lessonNextHomework, lessonPreviousHomework, lessonRecordingLink, lessonRecordingLink2,
+        studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance
+      });
+    }
+
     updateLesson(selectedLesson.id, { 
       sessionNumber: clampedNumber,
-      totalSessionsInPackage: cycleTotalSessions 
+      totalSessionsInPackage: cycleTotalSessions,
+      ...(selectedLesson.report ? { report: { ...selectedLesson.report } } : {})
     });
 
     // Synchronize subsequent scheduled lessons for this group so the sequence remains continuous
@@ -501,7 +541,7 @@ export const LessonControlModal: React.FC = () => {
       
       upcoming.forEach((upLesson, idx) => {
         const nextSeqNum = (((clampedNumber - 1 + idx + 1) % cycleTotalSessions) + 1);
-        if (upLesson.sessionNumber !== nextSeqNum) {
+        if (upLesson.sessionNumber !== nextSeqNum || upLesson.totalSessionsInPackage !== cycleTotalSessions) {
           updateLesson(upLesson.id, {
             sessionNumber: nextSeqNum,
             totalSessionsInPackage: cycleTotalSessions
@@ -510,7 +550,11 @@ export const LessonControlModal: React.FC = () => {
       });
     }
 
-    setIsEditingSessionNumber(false);
+    setCycleSaveToast(_t(
+      `✓ تم حفظ تعديل الحصة (${clampedNumber} من ${cycleTotalSessions}) وتطبيق التسلسل على جميع الحصص بنجاح`,
+      `✓ Saved session (${clampedNumber}/${cycleTotalSessions}) & applied sequence to all lessons`,
+      `✓ Sitzungsnummer (${clampedNumber}/${cycleTotalSessions}) gespeichert`
+    ));
   };
 
   // Synchronize payment details with current lesson & student pricing
@@ -533,31 +577,13 @@ export const LessonControlModal: React.FC = () => {
     setIsLessonPaid(markPaid);
     if (!selectedLesson) return;
 
-    const studentId = targetStudent?.id || selectedLesson.studentId || selectedLesson.id || 'quick_student';
-    const studentName = targetStudent?.name || selectedLesson.studentName || selectedLesson.title;
     const groupId = targetGroup?.id || selectedLesson.groupId || '';
     const groupName = targetGroup?.name || selectedLesson.groupName || 'Gruppe';
     const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
     const amount = paymentAmountInput > 0 ? paymentAmountInput : (selectedLesson.amountDue || 200);
 
     if (markPaid) {
-      markCyclePaymentPaid({
-        studentId,
-        studentName,
-        groupId,
-        groupName,
-        amountDue: amount,
-        amountPaid: amount,
-        lessonDates: [selectedLesson.date],
-        lessonIds: [selectedLesson.id],
-        accountId: targetAcc,
-        notes: `سداد حصة: ${studentName} (${selectedLesson.date})`
-      });
-
-      updateLesson(selectedLesson.id, {
-        paymentStatus: 'paid',
-        amountPaid: amount,
-      });
+      updateLessonPaymentStatus(selectedLesson.id, 'paid', amount, targetAcc);
 
       setPaymentToastMessage(_t(`تم تسجيل سداد ${amount} EGP في المالية بنجاح! ✓`, `Recorded payment of ${amount} EGP in Finance! ✓`, `Zahlung von ${amount} EGP in Finanzen erfasst! ✓`));
       setTimeout(() => setPaymentToastMessage(null), 3500);
@@ -565,10 +591,7 @@ export const LessonControlModal: React.FC = () => {
         confetti({ particleCount: 60, spread: 65, origin: { y: 0.6 } });
       } catch {}
     } else {
-      updateLesson(selectedLesson.id, {
-        paymentStatus: 'pending',
-        amountPaid: 0,
-      });
+      updateLessonPaymentStatus(selectedLesson.id, 'pending', 0);
       setPaymentToastMessage(_t('تم تحويل حالة الحصة إلى معلقة (لم تسدد)', 'Payment marked as pending', 'Zahlung als ausstehend markiert'));
       setTimeout(() => setPaymentToastMessage(null), 2500);
     }
@@ -695,6 +718,8 @@ export const LessonControlModal: React.FC = () => {
       studentExamGrade: isSingleStudentAbsent ? {} : finalStudentExamGrade,
       studentNotes: isQuick ? (Object.keys(studentNotes).length > 0 ? studentNotes : { [qId]: selectedLesson.quickNotes || '' }) : finalStudentNotes,
       studentPerformance,
+      paymentStatus: isLessonPaid ? 'paid' : (selectedLesson.paymentStatus || 'pending'),
+      amountPaid: isLessonPaid ? paymentAmountInput : (selectedLesson.amountPaid || 0),
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
@@ -710,25 +735,11 @@ export const LessonControlModal: React.FC = () => {
       report: reportData
     });
 
-    if (isLessonPaid && paymentAmountInput > 0 && selectedLesson.paymentStatus !== 'paid') {
-      const studentId = targetStudent?.id || selectedLesson.studentId || selectedLesson.id || 'quick_student';
-      const studentName = targetStudent?.name || selectedLesson.studentName || selectedLesson.title;
-      const groupId = targetGroup?.id || selectedLesson.groupId || '';
-      const groupName = targetGroup?.name || selectedLesson.groupName || 'Gruppe';
-      const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
-
-      markCyclePaymentPaid({
-        studentId,
-        studentName,
-        groupId,
-        groupName,
-        amountDue: paymentAmountInput,
-        amountPaid: paymentAmountInput,
-        lessonDates: [selectedLesson.date],
-        lessonIds: [selectedLesson.id],
-        accountId: targetAcc,
-        notes: `سداد حصة: ${studentName} (${selectedLesson.date})`
-      });
+    const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+    if (isLessonPaid && paymentAmountInput > 0) {
+      updateLessonPaymentStatus(selectedLesson.id, 'paid', paymentAmountInput, targetAcc);
+    } else if (!isLessonPaid && selectedLesson.paymentStatus === 'paid') {
+      updateLessonPaymentStatus(selectedLesson.id, 'pending', 0);
     }
     endActiveLessonTimer();
     storage.removeItem(`dl_draft_report_${selectedLesson.id}`);
@@ -1369,6 +1380,37 @@ export const LessonControlModal: React.FC = () => {
                                   <Plus className="w-3 h-3" />
                                 </button>
                               </div>
+                            </div>
+
+                            {/* Explicit Save Cycle Edit Button & Feedback */}
+                            <div className="pt-2 border-t border-surface-border/60 space-y-2">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleUpdateSessionNumber(currentSessionNumber);
+                                    setIsEditingSessionNumber(false);
+                                  }}
+                                  className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-98"
+                                >
+                                  <Check className="w-4 h-4" />
+                                  <span>{_t('💾 حفظ تعديل السايكل وتطبيق التسلسل', 'Save Cycle Edit & Apply Sequence', 'Zyklusänderung speichern')}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsEditingSessionNumber(false)}
+                                  className="py-2 px-2.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted text-xs font-bold rounded-xl border border-surface-border transition-all cursor-pointer"
+                                >
+                                  {_t('إغلاق', 'Close', 'Schließen')}
+                                </button>
+                              </div>
+
+                              {cycleSaveToast && (
+                                <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs font-bold rounded-lg border border-emerald-200/60 dark:border-emerald-800/60 flex items-center gap-1.5 animate-scale-up">
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>{cycleSaveToast}</span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         )}

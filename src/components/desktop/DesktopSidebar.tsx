@@ -11,6 +11,7 @@ import { SyncHeaderButton } from '../sync/SyncHeaderButton';
 import { SyncCenterModal } from '../sync/SyncCenterModal';
 import { pairWithPeer } from '../../services/sync/syncClient';
 import { calculateDuePaymentCycles } from '../../utils/paymentUtils';
+import { formatLocalDate } from '../../utils/timeUtils';
 
 interface DesktopSidebarProps {
   onOpenSyncModal?: () => void;
@@ -181,7 +182,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
 
   const navItems = [
     { id: 'home', label: t('nav_home') || 'Startseite', icon: Home, badge: null },
-    { id: 'schedule', label: t('nav_schedule') || 'Termine & Unterricht', icon: Calendar, badge: lessons.filter(l => l.date === new Date().toISOString().split('T')[0] && l.status !== 'cancelled').length || null },
+    { id: 'schedule', label: t('nav_schedule') || 'Termine & Unterricht', icon: Calendar, badge: lessons.filter(l => l.date === formatLocalDate() && l.status !== 'cancelled').length || null },
     { id: 'students', label: t('nav_students') || 'Schüler & Gruppen', icon: Users, badge: `${activeStudentsCount}` },
     { id: 'payments', label: t('nav_payments') || 'Zahlungen & Finanzen', icon: Wallet, badge: unreadDueCount > 0 ? `${unreadDueCount}` : null },
     { id: 'history', label: t('nav_history') || 'Sitzungsverlauf', icon: History, badge: null },

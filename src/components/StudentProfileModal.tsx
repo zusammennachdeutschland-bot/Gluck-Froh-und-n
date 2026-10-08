@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { Student, GradeLevel, CertificateRecord } from '../types';
 import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
-import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
+import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { CARTOON_AVATARS, DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
 import { 
@@ -38,14 +38,23 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   const [isLatinSaved, setIsLatinSaved] = useState(false);
   const [copiedRecId, setCopiedRecId] = useState<string | null>(null);
 
-  // Lock body scroll while modal is active to prevent double scrollbars
+  // Lock body scroll while modal is active and handle Escape key
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
     return () => {
       document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [onClose]);
 
   // Editable Student Fields
   const studentCode = getStudentCode(student);
@@ -212,7 +221,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
     }
   };
 
-  const cleanParentPhone = student.parentPhone.replace(/[^0-9+]/g, '');
+  const cleanParentPhone = cleanPhoneNumberForTel(student.parentPhone);
 
   // Helper translations or fallback strings
   
@@ -429,7 +438,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
               { id: 'attendance' as const, title: _t('الحضور', 'Attendance', 'Anwesenheit'), icon: Calendar, count: presentCount + lateCount + absentCount, activeClass: 'bg-emerald-600 text-white' },
               { id: 'scores' as const, title: _t('الدرجات', 'Grades & HW', 'Noten'), icon: GraduationCap, count: undefined, activeClass: 'bg-indigo-600 text-white' },
               { id: 'payments' as const, title: _t('المالية', 'Payments', 'Zahlungen'), icon: DollarSign, count: undefined, activeClass: 'bg-amber-600 text-white' },
-              { id: 'files' as const, title: _t('الملفات', 'Files', 'Dateien'), icon: FileText, count: student.documents.length, activeClass: 'bg-blue-600 text-white' },
+              { id: 'files' as const, title: _t('الملفات', 'Files', 'Dateien'), icon: FileText, count: (student.documents || []).length, activeClass: 'bg-blue-600 text-white' },
               { id: 'certificates' as const, title: _t('الشهادات', 'Certificates', 'Zertifikate'), icon: Award, count: studentCertificates.length, activeClass: 'bg-yellow-600 text-white' },
               { id: 'recordings' as const, title: _t('التسجيلات', 'Recordings', 'Aufnahmen'), icon: Video, count: studentRecordings.length, activeClass: 'bg-purple-600 text-white' },
             ].map(tab => {
@@ -768,12 +777,12 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
                 {/* Uploaded Files List */}
                 <div className="space-y-2">
-                  {student.documents.length === 0 ? (
+                  {(student.documents || []).length === 0 ? (
                     <p className="text-xs text-text-muted/70 text-center py-4 italic">
                       Keine Dokumente hochgeladen.
                     </p>
                   ) : (
-                    student.documents.map((doc) => (
+                    (student.documents || []).map((doc) => (
                       <div
                         key={doc.id}
                         className="p-3 bg-slate-50/50 dark:bg-slate-800/30 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs"

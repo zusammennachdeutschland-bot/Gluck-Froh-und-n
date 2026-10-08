@@ -1,8 +1,13 @@
 import { WeeklyWorkingHours, Lesson, Group, TeacherProfile } from '../types';
 import { getSchoolSettings, calculatePeriodsTimings, parseTimeToMinutes } from './schoolUtils';
+import { normalizeDigits } from './phoneUtils';
 
 export const parseTime = (time: string): number => {
-  const [h, m] = time.split(':').map(Number);
+  if (!time) return 0;
+  const normalized = normalizeDigits(time.trim());
+  const parts = normalized.split(':');
+  const h = parseInt(parts[0], 10) || 0;
+  const m = parseInt(parts[1], 10) || 0;
   return h * 60 + m;
 };
 
@@ -14,12 +19,13 @@ export const formatTime = (minutes: number): string => {
 
 export const formatTimeDisplay = (time: string, language: string): string => {
   if (!time) return '';
-  const [hStr, mStr] = time.split(':');
+  const normalized = normalizeDigits(time.trim());
+  const [hStr, mStr] = normalized.split(':');
   let h = parseInt(hStr, 10);
   const ampm = h >= 12 ? (language === 'ar' ? 'م' : 'PM') : (language === 'ar' ? 'ص' : 'AM');
   h = h % 12;
   h = h ? h : 12;
-  return `${h}:${mStr} ${ampm}`;
+  return `${h}:${mStr || '00'} ${ampm}`;
 };
 
 export const getDayOfWeekIndex = (dateStr: string): number => {
@@ -29,13 +35,16 @@ export const getDayOfWeekIndex = (dateStr: string): number => {
 
 /**
  * Safely parses a 'YYYY-MM-DD' date string into a local Date object at 00:00:00 local time.
- * Prevents UTC timezone shifting.
+ * Prevents UTC timezone shifting and handles Arabic/Eastern numerals.
  */
 export const parseLocalDate = (dateStr: string): Date => {
   if (!dateStr) return new Date();
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return new Date(dateStr);
-  const [y, m, d] = parts.map(Number);
+  const normalized = normalizeDigits(dateStr.trim());
+  const parts = normalized.split('-');
+  if (parts.length !== 3) return new Date(normalized);
+  const y = parseInt(parts[0], 10) || new Date().getFullYear();
+  const m = parseInt(parts[1], 10) || 1;
+  const d = parseInt(parts[2], 10) || 1;
   return new Date(y, m - 1, d);
 };
 

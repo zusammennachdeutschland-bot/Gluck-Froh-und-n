@@ -605,7 +605,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     if (!l || typeof l !== 'object' || Array.isArray(l)) continue;
 
     const id = typeof l.id === 'string' && l.id.trim() ? l.id.trim() : `les_imp_${Date.now()}_${i}`;
-    const date = typeof l.date === 'string' ? l.date : new Date().toISOString().split('T')[0];
+    const date = typeof l.date === 'string' ? l.date : formatLocalDate();
     const validStatuses = ['scheduled', 'completed', 'cancelled', 'moved'];
     const status = validStatuses.includes(l.status) ? l.status : 'scheduled';
 
@@ -734,7 +734,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       template: c.template || 'classic',
       title: typeof c.title === 'string' ? c.title : 'Certificate of Achievement',
       description: typeof c.description === 'string' ? c.description : '',
-      issueDate: typeof c.issueDate === 'string' ? c.issueDate : new Date().toISOString().split('T')[0],
+      issueDate: typeof c.issueDate === 'string' ? c.issueDate : formatLocalDate(),
       createdAt: typeof c.createdAt === 'number' ? c.createdAt : Date.now()
     });
   }
@@ -786,7 +786,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       studentName: typeof c.studentName === 'string' ? c.studentName : '',
       className: typeof c.className === 'string' ? c.className : '',
       description: typeof c.description === 'string' ? c.description : '',
-      date: typeof c.date === 'string' ? c.date : new Date().toISOString().split('T')[0],
+      date: typeof c.date === 'string' ? c.date : formatLocalDate(),
       status: c.status || 'pending',
       updatedAt: typeof c.updatedAt === 'number' ? c.updatedAt : Date.now(),
       deleted: Boolean(c.deleted)
@@ -809,7 +809,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       className: typeof a.className === 'string' ? a.className : '',
       weaknessArea: typeof a.weaknessArea === 'string' ? a.weaknessArea : '',
       actionSteps: typeof a.actionSteps === 'string' ? a.actionSteps : '',
-      startDate: typeof a.startDate === 'string' ? a.startDate : new Date().toISOString().split('T')[0],
+      startDate: typeof a.startDate === 'string' ? a.startDate : formatLocalDate(),
       status: a.status || 'in_progress',
       updatedAt: typeof a.updatedAt === 'number' ? a.updatedAt : Date.now(),
       deleted: Boolean(a.deleted)
@@ -830,7 +830,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       teacherName: typeof v.teacherName === 'string' ? v.teacherName : 'Teacher',
       className: typeof v.className === 'string' ? v.className : '',
       term: v.term === 'term2' || v.term === 'summer' ? v.term : 'term1',
-      visitedDate: typeof v.visitedDate === 'string' ? v.visitedDate : new Date().toISOString().split('T')[0],
+      visitedDate: typeof v.visitedDate === 'string' ? v.visitedDate : formatLocalDate(),
       periodNumber: typeof v.periodNumber === 'number' ? v.periodNumber : 1,
       lessonTopic: typeof v.lessonTopic === 'string' ? v.lessonTopic : '',
       updatedAt: typeof v.updatedAt === 'number' ? v.updatedAt : Date.now(),
@@ -937,7 +937,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       accountId: typeof tx.accountId === 'string' ? tx.accountId : 'acc_main_cash',
       toAccountId: typeof tx.toAccountId === 'string' ? tx.toAccountId : undefined,
       categoryId: typeof tx.categoryId === 'string' ? tx.categoryId : undefined,
-      date: typeof tx.date === 'string' ? tx.date : new Date().toISOString().split('T')[0],
+      date: typeof tx.date === 'string' ? tx.date : formatLocalDate(),
       note: typeof tx.note === 'string' ? tx.note : '',
       relatedStudentId: typeof tx.relatedStudentId === 'string' ? tx.relatedStudentId : undefined,
       relatedPaymentId: typeof tx.relatedPaymentId === 'string' ? tx.relatedPaymentId : undefined,
@@ -986,7 +986,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     const totalCount = sanitizeNumber(inst.totalInstallments, 1);
     const paidCount = sanitizeNumber(inst.paidInstallments ?? inst.currentInstallment, 0);
     const remaining = Math.max(0, sanitizeNumber(inst.remainingAmount ?? inst.remainingBalance, orig ? Math.max(0, orig - down - paidCount * instAmt) : 0));
-    const dueDate = typeof inst.nextDueDate === 'string' ? inst.nextDueDate : (typeof inst.firstDueDate === 'string' ? inst.firstDueDate : (typeof inst.dueDate === 'string' ? inst.dueDate : new Date().toISOString().split('T')[0]));
+    const dueDate = typeof inst.nextDueDate === 'string' ? inst.nextDueDate : (typeof inst.firstDueDate === 'string' ? inst.firstDueDate : (typeof inst.dueDate === 'string' ? inst.dueDate : formatLocalDate()));
 
     sanitizedFinanceInstallments.push({
       ...inst,
@@ -1103,7 +1103,7 @@ export function sanitizeSchoolSettings(raw: any): SchoolSettings | undefined {
           teacherName: typeof v.teacherName === 'string' ? v.teacherName : 'Teacher',
           className: typeof v.className === 'string' ? v.className : '',
           term: v.term === 'term2' || v.term === 'summer' ? v.term : 'term1',
-          visitedDate: typeof v.visitedDate === 'string' ? v.visitedDate : new Date().toISOString().split('T')[0],
+          visitedDate: typeof v.visitedDate === 'string' ? v.visitedDate : formatLocalDate(),
           periodNumber: typeof v.periodNumber === 'number' ? v.periodNumber : 1,
           lessonTopic: typeof v.lessonTopic === 'string' ? v.lessonTopic : ''
         });
@@ -1176,7 +1176,7 @@ export function sanitizeSchoolSettings(raw: any): SchoolSettings | undefined {
           gradeBand: typeof f.gradeBand === 'string' ? f.gradeBand : '',
           periodType: f.periodType || 'weekly',
           weekNumber: typeof f.weekNumber === 'number' ? f.weekNumber : 1,
-          date: typeof f.date === 'string' ? f.date : new Date().toISOString().split('T')[0],
+          date: typeof f.date === 'string' ? f.date : formatLocalDate(),
           timestamp: typeof f.timestamp === 'number' ? f.timestamp : Date.now(),
           teachersData: Array.isArray(f.teachersData) ? f.teachersData : [],
           overallStageNotes: typeof f.overallStageNotes === 'string' ? f.overallStageNotes : '',
@@ -1240,7 +1240,7 @@ export function sanitizeSchoolSettings(raw: any): SchoolSettings | undefined {
           teacherName: typeof a.teacherName === 'string' ? a.teacherName : '',
           weaknessAreas: Array.isArray(a.weaknessAreas) ? a.weaknessAreas : [],
           actionSteps: Array.isArray(a.actionSteps) ? a.actionSteps : [],
-          startDate: typeof a.startDate === 'string' ? a.startDate : new Date().toISOString().split('T')[0],
+          startDate: typeof a.startDate === 'string' ? a.startDate : formatLocalDate(),
           term: a.term || 'term1',
           status: a.status || 'in_progress',
           weeklyLogs: Array.isArray(a.weeklyLogs) ? a.weeklyLogs : []
@@ -1260,7 +1260,7 @@ export function sanitizeSchoolSettings(raw: any): SchoolSettings | undefined {
           studentName: typeof p.studentName === 'string' ? p.studentName : '',
           className: typeof p.className === 'string' ? p.className : '',
           description: typeof p.description === 'string' ? p.description : '',
-          date: typeof p.date === 'string' ? p.date : new Date().toISOString().split('T')[0],
+          date: typeof p.date === 'string' ? p.date : formatLocalDate(),
           status: p.status || 'pending'
         });
       }
@@ -1276,7 +1276,7 @@ export function sanitizeSchoolSettings(raw: any): SchoolSettings | undefined {
           id: typeof a.id === 'string' && a.id.trim() ? a.id.trim() : `att_${Date.now()}_${idx}`,
           teacherId: typeof a.teacherId === 'string' ? a.teacherId : '',
           teacherName: typeof a.teacherName === 'string' ? a.teacherName : '',
-          date: typeof a.date === 'string' ? a.date : new Date().toISOString().split('T')[0],
+          date: typeof a.date === 'string' ? a.date : formatLocalDate(),
           type: a.type || 'absence',
           reason: typeof a.reason === 'string' ? a.reason : ''
         });

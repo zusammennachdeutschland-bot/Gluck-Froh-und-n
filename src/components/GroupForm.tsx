@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Group, GradeLevel, LessonType, PaymentCycle } from '../types';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { useApp } from '../context/AppContext';
-import { Video, MapPin, DollarSign, Calendar } from 'lucide-react';
+import { Video, MapPin, DollarSign, Calendar, Sparkles } from 'lucide-react';
 
 export interface GroupFormData {
   name: string;
@@ -272,11 +272,12 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
           </div>
         )}
 
-        {paymentCycle === 'monthly' ? (
-          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-surface-border dark:border-surface-border-soft">
+        {paymentCycle !== 'per_lesson' && (sessionCount > 1 || paymentCycle === 'monthly') ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-surface-border dark:border-surface-border-soft">
             <div className="space-y-1">
-              <label className="text-xs font-bold text-text-main">
-                {_t('رقم الحصة في السايكل (البداية)', 'Starting Session in Cycle', 'Erste Sitzungsnummer')}
+              <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span>{_t('رقم السايكل / الحصة القادمة', 'Upcoming Session in Cycle', 'Nächste Sitzungsnummer')}</span>
               </label>
               <select
                 value={Math.min(startingSessionNumber, Math.max(1, sessionCount || 4))}
@@ -285,10 +286,13 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
               >
                 {Array.from({ length: Math.max(1, sessionCount || 4) }, (_, i) => i + 1).map((num) => (
                   <option key={num} value={num}>
-                    {num === 1 ? `${num} (${_t('بداية السايكل', 'Start of Cycle', 'Start')})` : `${_t('الحصة', 'Session', 'Sitzung')} ${num}`}
+                    {num === 1 ? `${num} (${_t('بداية السايكل', 'Start of Cycle', 'Start')})` : `${_t('الحصة', 'Session', 'Sitzung')} ${num} ${_t(`من ${sessionCount || 4}`, `of ${sessionCount || 4}`, `von ${sessionCount || 4}`)}`}
                   </option>
                 ))}
               </select>
+              <p className="text-[10px] text-text-muted">
+                {_t('يحدد رقم الحصة القادمة ويضبط تسلسل الجدول والتقارير تلقائياً', 'Determines upcoming session and aligns reports automatically', 'Setzt nächste Sitzungsnummer')}
+              </p>
             </div>
 
             <div className="space-y-1">

@@ -10,6 +10,7 @@ import { storage } from '../services/storageService';
 import { printActionPlansReport, downloadActionPlansPdf } from '../utils/printObservationUtils';
 import { normalizeClassCode, compareClassCodes } from '../utils/classNormalizer';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
+import { formatLocalDate } from '../utils/timeUtils';
 
 // Arabic Selector Preset Options
 export const WEAKNESS_AREAS_PRESETS = [
@@ -123,11 +124,11 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
   const [selectedActionSteps, setSelectedActionSteps] = useState<string[]>([]);
   const [customActionStep, setCustomActionStep] = useState('');
   const [formTerm, setFormTerm] = useState(schoolSettings.currentTerm || 'الفصل الدراسي الأول');
-  const [formStartDate, setFormStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [formStartDate, setFormStartDate] = useState(() => formatLocalDate());
 
   // Form State for Weekly Log
   const [logWeekNumber, setLogWeekNumber] = useState(1);
-  const [logDate, setLogDate] = useState(new Date().toISOString().split('T')[0]);
+  const [logDate, setLogDate] = useState(() => formatLocalDate());
   const [logProgress, setLogProgress] = useState<'لم يتحسن' | 'تحسن تدريجي بسيط' | 'تحسن ملحوظ (تم الإغلاق)'>('تحسن تدريجي بسيط');
   const [logNotes, setLogNotes] = useState('');
 
@@ -209,7 +210,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
     setSelectedActionSteps([ACTION_STEPS_PRESETS[0]]);
     setCustomActionStep('');
     setFormTerm(schoolSettings.currentTerm || 'الفصل الدراسي الأول');
-    setFormStartDate(new Date().toISOString().split('T')[0]);
+    setFormStartDate(formatLocalDate());
     setIsCreateModalOpen(true);
   };
 
@@ -235,7 +236,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
     setCustomActionStep(customStep);
 
     setFormTerm(plan.term || 'الفصل الدراسي الأول');
-    setFormStartDate(plan.startDate || new Date().toISOString().split('T')[0]);
+    setFormStartDate(plan.startDate || formatLocalDate());
     setIsCreateModalOpen(true);
   };
 
@@ -351,7 +352,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
     setSelectedPlanForLog(plan);
     const nextWeek = (plan.weeklyLogs?.length || 0) + 1;
     setLogWeekNumber(nextWeek);
-    setLogDate(new Date().toISOString().split('T')[0]);
+    setLogDate(formatLocalDate());
     setLogProgress('تحسن تدريجي بسيط');
     setLogNotes('');
     setIsLogModalOpen(true);

@@ -1,7 +1,7 @@
 {
   "name": "glueck",
   "private": true,
-  "version": "1.0.2",
+  "version": "3.0.0",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "AGS Teacher App",

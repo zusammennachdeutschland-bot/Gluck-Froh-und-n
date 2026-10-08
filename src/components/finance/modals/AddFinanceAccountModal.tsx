@@ -3,6 +3,7 @@ import { useApp } from '../../../context/AppContext';
 import { X, Save, Landmark, CreditCard, Wallet, Banknote, TrendingUp, RefreshCw, Palette, Building2, Check } from 'lucide-react';
 import { FinanceAccount } from '../../../types';
 import { BankCard, CARD_THEMES, getDefaultThemeForType } from '../BankCard';
+import { formatLocalDate } from '../../../utils/timeUtils';
 
 interface AddFinanceAccountModalProps {
   onClose: () => void;
@@ -32,7 +33,7 @@ export const AddFinanceAccountModal: React.FC<AddFinanceAccountModalProps> = ({ 
   const [recurringContributionEnabled, setRecurringContributionEnabled] = useState(!!existingAccount?.recurringContributionAmount);
   const [recurringContributionAmount, setRecurringContributionAmount] = useState(existingAccount?.recurringContributionAmount?.toString() || '');
   const [recurringContributionFrequency, setRecurringContributionFrequency] = useState<'daily' | 'weekly' | 'monthly'>(existingAccount?.recurringContributionFrequency || 'monthly');
-  const [nextContributionDate, setNextContributionDate] = useState(existingAccount?.nextContributionDate || new Date().toISOString().split('T')[0]);
+  const [nextContributionDate, setNextContributionDate] = useState(existingAccount?.nextContributionDate || formatLocalDate());
 
   // When type changes and user hasn't explicitly customized color, suggest matching default
   const handleTypeChange = (newType: FinanceAccount['type']) => {

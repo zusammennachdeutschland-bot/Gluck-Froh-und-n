@@ -9,6 +9,7 @@ import { SyncCenterModal } from '../sync/SyncCenterModal';
 import { SyncHeaderButton } from '../sync/SyncHeaderButton';
 import { pairWithPeer } from '../../services/sync/syncClient';
 import { motion } from 'motion/react';
+import { formatLocalDate } from '../../utils/timeUtils';
 
 interface DesktopTopBarProps {
   onOpenSyncModal?: () => void;
@@ -162,7 +163,7 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
 
   // Check for upcoming lesson in 30 mins
   const urgent30MinLesson = React.useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = formatLocalDate();
     const now = new Date();
     const currentMins = now.getHours() * 60 + now.getMinutes();
 

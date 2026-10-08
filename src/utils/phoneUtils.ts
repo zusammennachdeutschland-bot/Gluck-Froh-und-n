@@ -4,6 +4,34 @@
  */
 
 /**
+ * Normalizes Eastern Arabic (٠-٩) and Persian (۰-۹) numerals into standard ASCII digits (0-9).
+ */
+export function normalizeDigits(input?: string | null): string {
+  if (!input) return '';
+  return input
+    .toString()
+    .replace(/[٠۰]/g, '0')
+    .replace(/[١۱]/g, '1')
+    .replace(/[٢۲]/g, '2')
+    .replace(/[٣۳]/g, '3')
+    .replace(/[٤۴]/g, '4')
+    .replace(/[٥۵]/g, '5')
+    .replace(/[٦۶]/g, '6')
+    .replace(/[٧۷]/g, '7')
+    .replace(/[٨۸]/g, '8')
+    .replace(/[٩۹]/g, '9');
+}
+
+/**
+ * Cleans a phone number for HTML `tel:` links, preserving leading + and converting Arabic digits.
+ */
+export function cleanPhoneNumberForTel(phone?: string | null): string {
+  if (!phone) return '';
+  const normalized = normalizeDigits(phone);
+  return normalized.replace(/[^0-9+]/g, '');
+}
+
+/**
  * Checks if a contact value is a WhatsApp username rather than a traditional phone number.
  * WhatsApp usernames typically start with '@' or contain alphabetic characters.
  */
@@ -50,7 +78,7 @@ export function formatContactDisplay(contact?: string | null): string {
  */
 export function formatWhatsAppPhone(phone?: string | null): string {
   if (!phone) return '';
-  const trimmed = phone.toString().trim();
+  const trimmed = normalizeDigits(phone.toString()).trim();
 
   // If it's a WhatsApp username, return cleaned username
   if (isWhatsAppUsername(trimmed)) {

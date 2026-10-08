@@ -16,9 +16,10 @@ import { AiImportModal } from './AiImportModal';
 import { CascadeDeleteGroupModal } from './CascadeDeleteGroupModal';
 import { QuickGenderAssignModal } from './QuickGenderAssignModal';
 import { formatGroupScheduleDisplay, getDayNumber } from '../utils/scheduleUtils';
-import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
+import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
 import { getStudentCode } from '../utils/studentCodeUtils';
+import { normalizeSearchText } from '../utils/nameUtils';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
 import { getGroupCycleInfo } from '../utils/lessonUtils';
@@ -257,14 +258,18 @@ export const StudentsView: React.FC = () => {
 
   const filteredStudents = activeStudents.filter(s => {
     const studentGroup = groups.find(g => g.id === s.groupId);
-    const term = (searchTerm || '').toLowerCase();
+    const term = normalizeSearchText(searchTerm);
+    const sCode = getStudentCode(s);
     const matchesSearch = !term ||
-                          (s.name || '').toLowerCase().includes(term) || 
-                          (s.parentName || '').toLowerCase().includes(term) ||
-                          (s.studentPhone || '').toLowerCase().includes(term) ||
-                          (s.parentPhone || '').toLowerCase().includes(term) ||
-                          (s.grade || '').toLowerCase().includes(term) ||
-                          (studentGroup && (studentGroup.name || '').toLowerCase().includes(term));
+                          normalizeSearchText(s.name).includes(term) || 
+                          normalizeSearchText(s.certificateName).includes(term) ||
+                          normalizeSearchText(s.parentName).includes(term) ||
+                          normalizeSearchText(s.studentPhone).includes(term) ||
+                          normalizeSearchText(s.parentPhone).includes(term) ||
+                          normalizeSearchText(s.grade).includes(term) ||
+                          normalizeSearchText(sCode).includes(term) ||
+                          normalizeSearchText(s.studentCode).includes(term) ||
+                          (studentGroup && normalizeSearchText(studentGroup.name).includes(term));
     const matchesGrade = selectedGrade === 'all' || s.grade === selectedGrade;
 
     let isOnline = false;
@@ -614,7 +619,7 @@ export const StudentsView: React.FC = () => {
           ) : (
             sortedStudents.map((student, idx) => {
               const studentGroup = groups.find(g => g.id === student.groupId);
-              const cleanParentPhone = student.parentPhone.replace(/[^0-9+]/g, '');
+              const cleanParentPhone = cleanPhoneNumberForTel(student.parentPhone);
               const studentCode = getStudentCode(student);
               const isSelected = selectedStudentIds.includes(student.id);
 
@@ -978,8 +983,9 @@ export const StudentsView: React.FC = () => {
             const cycleInfo = getGroupCycleInfo(group, lessons, language);
             const isPerLessonGroup = Boolean(
               cycleInfo.isPerLesson ||
-              (group.sessionCount !== undefined && group.sessionCount <= 1) ||
-              ((group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session') && (group.sessionCount === undefined || group.sessionCount <= 1))
+              group.paymentCycle === 'per_lesson' ||
+              group.paymentModel === 'per_session' ||
+              (group.sessionCount !== undefined && group.sessionCount <= 1)
             );
 
             const perSessionPrice = group.pricePerSession 

@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { Plus, Repeat, CalendarCheck, CheckCircle2, MoreVertical, Edit2, Trash2, CalendarDays, Wallet, AlertCircle, TrendingUp, TrendingDown, Bell } from 'lucide-react';
 import { FinanceRecurring as FinanceRecurringType } from '../../types';
 import { AddFinanceRecurringModal } from './modals/AddFinanceRecurringModal';
+import { parseLocalDate, formatLocalDate } from '../../utils/timeUtils';
 
 export const FinanceRecurring: React.FC = () => {
   const { 
@@ -21,19 +22,28 @@ export const FinanceRecurring: React.FC = () => {
     const accId = selectedAccountId || rec.accountId || financeAccounts.find(a => !a.deleted)?.id;
     if (!accId) return;
 
+    const todayStr = formatLocalDate();
     addFinanceTransaction({
       type: rec.type || 'expense',
       amount: rec.amount,
       accountId: accId,
       categoryId: rec.categoryId,
-      date: new Date().toISOString().split('T')[0],
+      date: todayStr,
       note: rec.name + ' - ' + _t('دفع متكرر', 'Recurring Payment', 'Wiederkehrende Zahlung')
     });
 
-    // Determine next due date based on frequency
-    let nextDue = new Date(rec.nextDueDate || rec.startDate || new Date());
+    // Determine next due date based on frequency using local calendar math
+    const baseDueStr = rec.nextDueDate || rec.startDate || todayStr;
+    const baseDate = parseLocalDate(baseDueStr);
+    const dayOfMonth = baseDate.getDate();
+
+    let nextDue = new Date(baseDate);
     if (rec.frequency === 'monthly') {
       nextDue.setMonth(nextDue.getMonth() + 1);
+      // If month rolled over too far (e.g. Jan 31 -> Mar 2), clamp to last day of expected month
+      if (nextDue.getDate() !== dayOfMonth) {
+        nextDue.setDate(0);
+      }
     } else if (rec.frequency === 'weekly') {
       nextDue.setDate(nextDue.getDate() + 7);
     } else if (rec.frequency === 'yearly') {
@@ -41,8 +51,8 @@ export const FinanceRecurring: React.FC = () => {
     }
 
     updateFinanceRecurring(rec.id, {
-      lastPaidDate: new Date().toISOString().split('T')[0],
-      nextDueDate: nextDue.toISOString().split('T')[0]
+      lastPaidDate: todayStr,
+      nextDueDate: formatLocalDate(nextDue)
     });
 
     setPayingId(null);

@@ -14,6 +14,7 @@ import {
 } from '../utils/printObservationUtils';
 import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
+import { formatLocalDate } from '../utils/timeUtils';
 
 export const StageCommunicationView: React.FC = () => {
   const { profile, updateProfile, language, _t, reportLanguage } = useApp();
@@ -369,7 +370,7 @@ export const StageCommunicationView: React.FC = () => {
       gradeBand: (selectedManager.assignedGradeGroups || []).join(', ') || 'عام',
       periodType: reportPeriodType,
       weekNumber: reportWeekNumber,
-      date: new Date().toISOString().split('T')[0],
+      date: formatLocalDate(),
       timestamp: Date.now(),
       teachersData: resolvedTeachersData.length > 0 ? resolvedTeachersData : Object.values(teachersEvalData),
       overallStageNotes: overallStageNotes.trim(),

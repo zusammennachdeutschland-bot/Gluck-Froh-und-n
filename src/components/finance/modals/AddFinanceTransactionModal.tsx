@@ -2,8 +2,8 @@
 import React, { useState, useMemo } from 'react';
 import { ArrowLeftRight, X, Save, Search, ChevronRight, Tag, Clock } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
-
 import { FinanceCategory } from '../../../types';
+import { formatLocalDate } from '../../../utils/timeUtils';
 
 interface Props {
   type: 'income' | 'expense' | 'transfer';
@@ -19,7 +19,7 @@ export const AddFinanceTransactionModal: React.FC<Props> = ({ type, onClose }) =
   const activeAccounts = useMemo(() => financeAccounts.filter(a => !a.deleted), [financeAccounts]);
   const [accountId, setAccountId] = useState(() => activeAccounts[0]?.id || '');
   const [toAccountId, setToAccountId] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(() => formatLocalDate());
   const [note, setNote] = useState('');
 
   // Auto-set account if empty but accounts exist

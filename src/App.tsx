@@ -451,9 +451,23 @@ function MainApp() {
           } else if (backupOpen) {
             cb.setIsBackupModalOpen(false);
           } else {
-            // Check for any open dialog/modal with a dedicated close button or dismiss via Escape
-            const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true });
-            document.dispatchEvent(escapeEvent);
+            // Check if any generic modal / dialog overlay is currently rendered in the DOM
+            const openModals = document.querySelectorAll('.fixed.inset-0');
+            if (openModals.length > 0) {
+              const topModal = openModals[openModals.length - 1];
+              // Dispatch Escape event to trigger component-level escape handlers
+              const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true });
+              window.dispatchEvent(escapeEvent);
+              document.dispatchEvent(escapeEvent);
+
+              // Also attempt to click the modal's close button if present
+              const closeBtn = topModal.querySelector('button:has(svg.lucide-x), button[aria-label="Close"], button[title*="Close"], button[title*="Schließen"]') as HTMLButtonElement | null;
+              if (closeBtn) {
+                closeBtn.click();
+              }
+              // Modal dismissal was handled, keep user on current view
+              return;
+            }
 
             if (currentActiveTab !== 'home') {
               cb.setActiveTab('home');

@@ -12,7 +12,7 @@ import { ReportLanguageToggle } from './ReportLanguageToggle';
 import confetti from 'canvas-confetti';
 
 export const ReportsView: React.FC = () => {
-  const { lessons: activeLessons, payments: activePayments, getHistoricalLessons, getHistoricalPayments, updateLesson, profile, openLessonControl, t, reportLanguage, reportT, groups, students } = useApp();
+  const { lessons: activeLessons, payments: activePayments, getHistoricalLessons, getHistoricalPayments, updateLesson, updateLessonPaymentStatus, profile, openLessonControl, t, reportLanguage, reportT, groups, students } = useApp();
 
   const [lessons, setLessons] = useState<Lesson[]>(activeLessons);
   const [payments, setPayments] = useState<PaymentRecord[]>(activePayments);
@@ -107,10 +107,13 @@ export const ReportsView: React.FC = () => {
   // Mark as paid quick handler
   const handleMarkAsPaid = (e: React.MouseEvent, lesson: Lesson) => {
     e.stopPropagation();
+    const due = lesson.amountDue || 200;
+    updateLessonPaymentStatus(lesson.id, 'paid', due);
     updateLesson(lesson.id, {
       paymentStatus: 'paid',
-      amountPaid: lesson.amountDue
+      amountPaid: due
     });
+    setLessons(prev => prev.map(l => l.id === lesson.id ? { ...l, paymentStatus: 'paid', amountPaid: due } : l));
     confetti({ particleCount: 50, spread: 40 });
   };
 

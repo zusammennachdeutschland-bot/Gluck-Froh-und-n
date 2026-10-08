@@ -8,7 +8,7 @@ import {
   DollarSign, CheckCircle2, Clock, Send, Search, 
   Check, X, Sparkles, History, Calendar, AlertCircle, TrendingUp, ChevronRight,
   Landmark, Wallet, CreditCard, Layers, BookOpen, ChevronDown, Coins, ShieldX, ShieldCheck, Minus, Plus,
-  Users, Filter, AtSign
+  Users, Filter, AtSign, Globe
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -17,7 +17,7 @@ export const FinanceStudentPayments: React.FC = () => {
     students, groups, lessons, payments, profile, 
     markCyclePaymentPaid, markCyclePaymentNotYet, updateLessonPaymentStatus,
     recordAdvancePayment, exemptCyclePayment, exemptSingleLesson,
-    t, _t, financeAccounts
+    t, _t, financeAccounts, reportLanguage, setReportLanguage
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'cycles' | 'single_lessons' | 'in_progress' | 'history'>('cycles');
@@ -70,6 +70,13 @@ export const FinanceStudentPayments: React.FC = () => {
   // WhatsApp Parent Message Modal state
   const [selectedCycleForWhatsApp, setSelectedCycleForWhatsApp] = useState<DuePaymentCycle | null>(null);
   const [copiedSuccess, setCopiedSuccess] = useState(false);
+  const [noticeLanguage, setNoticeLanguage] = useState<'ar' | 'en' | 'de'>(() => reportLanguage || 'ar');
+
+  React.useEffect(() => {
+    if (reportLanguage) {
+      setNoticeLanguage(reportLanguage);
+    }
+  }, [reportLanguage]);
 
   // Flexible Prorate Modal State
   const [prorateModalItem, setProrateModalItem] = useState<DuePaymentCycle | null>(null);
@@ -203,13 +210,25 @@ export const FinanceStudentPayments: React.FC = () => {
     // Map studentId -> Set of billed lesson IDs for fast lookup
     const studentBilledLessons = new Map<string, Set<string>>();
     payments.forEach(p => {
-      if (p.lessonIds && p.lessonIds.length > 0) {
+      const ids: string[] = [];
+      if (p.lessonIds && p.lessonIds.length > 0) ids.push(...p.lessonIds);
+      if (p.lessonId && !ids.includes(p.lessonId)) ids.push(p.lessonId);
+
+      if (ids.length > 0) {
         const stId = p.studentId;
         if (stId) {
           if (!studentBilledLessons.has(stId)) {
             studentBilledLessons.set(stId, new Set<string>());
           }
-          p.lessonIds.forEach(id => studentBilledLessons.get(stId)!.add(id));
+          ids.forEach(id => studentBilledLessons.get(stId)!.add(id));
+        } else if (p.groupId) {
+          const groupSts = students.filter(s => s.groupId === p.groupId);
+          groupSts.forEach(s => {
+            if (!studentBilledLessons.has(s.id)) {
+              studentBilledLessons.set(s.id, new Set<string>());
+            }
+            ids.forEach(id => studentBilledLessons.get(s.id)!.add(id));
+          });
         }
       }
     });
@@ -225,6 +244,7 @@ export const FinanceStudentPayments: React.FC = () => {
       // Collect all completed attended lessons for this student that have NOT been billed yet (neither paid nor unpaid)
       const stCompletedLessons = lessons.filter(l => {
         if (l.status !== 'completed') return false;
+        if (l.paymentStatus === 'exempted') return false;
         const matchesGroup = grp ? l.groupId === grp.id : false;
         const matchesStudent = l.studentId === st.id || l.studentName === st.name;
         if (!matchesGroup && !matchesStudent) return false;
@@ -235,6 +255,15 @@ export const FinanceStudentPayments: React.FC = () => {
 
         // Check if this lesson ID has already been billed
         if (billedIds.has(l.id)) return false;
+
+        // Also exclude if already paid directly on the lesson or in studentPayments
+        const stPaymentObj = l.studentPayments?.[st.id];
+        const repPaymentObj = l.report?.studentPayments?.[st.id] as any;
+        const isStudentPaidInLesson = (stPaymentObj?.paymentStatus === 'paid' || (stPaymentObj as any)?.status === 'paid') || 
+                                      (repPaymentObj?.paymentStatus === 'paid' || repPaymentObj?.status === 'paid');
+        const isLessonDirectlyPaid = (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') && 
+                                     (l.studentId ? l.studentId === st.id : true);
+        if (isStudentPaidInLesson || isLessonDirectlyPaid) return false;
 
         return true;
       });
@@ -378,6 +407,7 @@ export const FinanceStudentPayments: React.FC = () => {
   const unpaidSingleLessons = useMemo(() => {
     return lessons.filter(l => {
       if (l.deleted) return false;
+      if (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid' || l.paymentStatus === 'exempted') return false;
       const isUnpaid = l.paymentStatus === 'pending' || l.paymentStatus === 'not_paid' || l.paymentStatus === 'partial';
       const due = l.amountDue || 200;
       const paid = l.amountPaid || 0;
@@ -529,20 +559,30 @@ export const FinanceStudentPayments: React.FC = () => {
     setExemptNotes('');
   };
 
-  // WhatsApp Parent Message Generator
-  const generateWhatsAppMessage = (item: DuePaymentCycle) => {
+  // WhatsApp Parent Message Generator with dynamic language selection
+  const generateWhatsAppMessage = (item: DuePaymentCycle, lang: 'ar' | 'en' | 'de' = noticeLanguage) => {
     const datesFormatted = item.lessonDates.length > 0 
-      ? item.lessonDates.map(d => `• ${formatLessonDateChip(d)}`).join('\n')
-      : t('auto_completed_lesson_dates');
+      ? item.lessonDates.map(d => {
+          const chip = formatLessonDateChip(d);
+          if (lang === 'ar') {
+            return `• ${chip.replace(/Session/gi, 'حصة')}`;
+          }
+          if (lang === 'de') {
+            return `• ${chip.replace(/Session/gi, 'Lektion')}`;
+          }
+          return `• ${chip}`;
+        }).join('\n')
+      : (lang === 'ar' ? 'تواريخ الحصص المكتملة' : lang === 'en' ? 'Completed lesson dates' : 'Abgeschlossene Lektionstermine');
 
-    if (profile.language === 'en') {
+    const isSingle = item.cycleLength <= 1;
+
+    if (lang === 'en') {
       return `Dear Parent,
 
-Notice of Course Cycle Completion & Payment Due 📚
+Notice of ${isSingle ? 'Lesson Payment Due' : 'Course Cycle Completion & Payment Due'} 📚
 
 Student: ${item.studentName}
-Group: ${item.groupName}
-Amount Due: ${item.amountDue} ${currency} (${item.cycleLength} lessons)
+${item.groupName ? `Group: ${item.groupName}\n` : ''}Amount Due: ${item.amountDue} ${currency} (${item.cycleLength} lesson${item.cycleLength > 1 ? 's' : ''})
 
 Completed Lesson Dates:
 ${datesFormatted}
@@ -550,14 +590,13 @@ ${datesFormatted}
 Thank you for your cooperation!`;
     }
 
-    if (profile.language === 'de') {
+    if (lang === 'de') {
       return `Sehr geehrte Eltern,
 
-Benachrichtigung über Kurssitzungsabschluss & Fälligkeit 📚
+Benachrichtigung über ${isSingle ? 'Lektionsfälligkeit' : 'Kurssitzungsabschluss & Fälligkeit'} 📚
 
 Schüler/in: ${item.studentName}
-Gruppe: ${item.groupName}
-Fälliger Betrag: ${item.amountDue} ${currency} (${item.cycleLength} Lektionen)
+${item.groupName ? `Gruppe: ${item.groupName}\n` : ''}Fälliger Betrag: ${item.amountDue} ${currency} (${item.cycleLength} Lektion${item.cycleLength > 1 ? 'en' : ''})
 
 Abgeschlossene Termine:
 ${datesFormatted}
@@ -567,13 +606,12 @@ Vielen Dank für Ihre Zusammenarbeit!`;
 
     return `السلام عليكم ورحمة الله وبركاته،
 
-إشعار اكتمال الدورة الدراسية واستحقاق السداد 📚
+إشعار ${isSingle ? 'استحقاق سداد الحصة الدراسية' : 'اكتمال الدورة الدراسية واستحقاق السداد'} 📚
 
 الطالب/ة: ${item.studentName}
-المجموعة: ${item.groupName}
-المبلغ المستحق: ${item.amountDue} ${currency} (عدد ${item.cycleLength} حصص)
+${item.groupName ? `المجموعة: ${item.groupName}\n` : ''}المبلغ المستحق: ${item.amountDue} ${currency} (${item.cycleLength > 1 ? `عدد ${item.cycleLength} حصص` : 'حصة واحدة'})
 
-تاريخ الحصص المكتملة في هذه الدورة:
+تاريخ الحصص المكتملة:
 ${datesFormatted}
 
 شاكرين ومقدرين حسن تعاونكم معنا للتسديد.`;
@@ -765,8 +803,16 @@ ${datesFormatted}
                 const duration = grp?.duration || 60;
                 const rawDate = item.lessonDates[item.lessonDates.length - 1] || item.lessonDates[0] || todayStr;
                 const cleanDate = extractCleanDate(item.lessonDates.length > 0 ? item.lessonDates : rawDate);
+                const latestSessionNum = (() => {
+                  if (!item.lessonDates || item.lessonDates.length === 0) return item.cycleLength;
+                  const lastDate = item.lessonDates[item.lessonDates.length - 1];
+                  const match = lastDate.match(/Session (\d+)\//);
+                  if (match) return parseInt(match[1], 10);
+                  return Math.min(item.cycleLength, item.lessonDates.length);
+                })();
+
                 const sessionText = item.cycleLength > 1 
-                  ? `${item.cycleLength}/${item.cycleLength}`
+                  ? `${latestSessionNum}/${item.cycleLength}`
                   : '1/1';
 
                 return (
@@ -1363,8 +1409,9 @@ ${datesFormatted}
       {/* WHATSAPP RECEIPT / NOTICE MODAL */}
       {selectedCycleForWhatsApp && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0">
-          <div className="bg-surface rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 max-w-md w-full p-4 border border-surface-border shadow-2xl space-y-4 animate-scale-up">
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+          <div className="bg-surface rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 max-w-md w-full p-4 border border-surface-border shadow-2xl space-y-3.5 animate-scale-up">
+            <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-2 mb-1 sm:hidden shrink-0" />
+            
             <div className="flex items-center justify-between">
               <h2 className="text-base font-black text-text-main flex items-center gap-2">
                 <Send className="w-5 h-5 text-primary" />
@@ -1372,21 +1419,62 @@ ${datesFormatted}
               </h2>
               <button
                 onClick={() => setSelectedCycleForWhatsApp(null)}
-                className="p-1 rounded-xl text-text-muted/70 hover:bg-surface-hover cursor-pointer"
+                className="p-1.5 rounded-xl text-text-muted/70 hover:bg-surface-hover hover:text-text-main cursor-pointer transition-colors"
+                title={_t('إغلاق', 'Close', 'Schließen')}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-4 bg-primary-soft dark:bg-primary-soft rounded-lg border border-primary-border dark:border-primary-border text-text-main text-xs font-mono whitespace-pre-wrap leading-relaxed">
-              {generateWhatsAppMessage(selectedCycleForWhatsApp)}
+            {/* Language Selector Bar */}
+            <div className="flex items-center justify-between gap-1.5 p-1.5 bg-slate-100/80 dark:bg-slate-800/80 rounded-xl border border-surface-border">
+              <span className="text-[11px] font-bold text-text-muted flex items-center gap-1 px-1 shrink-0 select-none">
+                <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span>{_t('لغة التقرير:', 'Report Language:', 'Sprache:')}</span>
+              </span>
+              <div className="flex items-center gap-1">
+                {[
+                  { code: 'ar' as const, label: 'العربية', flag: '🇪🇬' },
+                  { code: 'de' as const, label: 'Deutsch', flag: '🇩🇪' },
+                  { code: 'en' as const, label: 'English', flag: '🇬🇧' },
+                ].map((opt) => {
+                  const isActive = noticeLanguage === opt.code;
+                  return (
+                    <button
+                      key={opt.code}
+                      type="button"
+                      onClick={() => {
+                        setNoticeLanguage(opt.code);
+                        setReportLanguage(opt.code);
+                      }}
+                      className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 active:scale-95 ${
+                        isActive
+                          ? 'bg-primary text-white shadow-2xs font-black'
+                          : 'bg-surface hover:bg-surface-hover text-text-muted hover:text-text-main border border-surface-border/50'
+                      }`}
+                    >
+                      <span className="text-[11px] leading-none">{opt.flag}</span>
+                      <span>{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 pt-2">
+            {/* Message Preview Box */}
+            <div 
+              dir={noticeLanguage === 'ar' ? 'rtl' : 'ltr'}
+              className="p-3.5 bg-primary-soft/60 dark:bg-primary-soft/40 rounded-xl border border-primary-border text-text-main text-xs font-mono whitespace-pre-wrap leading-relaxed max-h-[45vh] overflow-y-auto"
+            >
+              {generateWhatsAppMessage(selectedCycleForWhatsApp, noticeLanguage)}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => handleCopyMessage(generateWhatsAppMessage(selectedCycleForWhatsApp))}
-                className="flex-1 py-2.5 bg-surface-hover text-text-main rounded-xl font-bold text-xs cursor-pointer flex items-center justify-center gap-1.5"
+                onClick={() => handleCopyMessage(generateWhatsAppMessage(selectedCycleForWhatsApp, noticeLanguage))}
+                className="flex-1 py-2.5 bg-surface-hover hover:bg-surface text-text-main rounded-xl font-bold text-xs cursor-pointer border border-surface-border flex items-center justify-center gap-1.5 transition-colors active:scale-95"
               >
                 <span>{copiedSuccess ? `${t('reports_copied')} ✓` : t('payments_copy_text')}</span>
               </button>
@@ -1400,10 +1488,10 @@ ${datesFormatted}
                   });
                   handleOpenWhatsApp(
                     resolved.contact || selectedCycleForWhatsApp.parentPhone || '',
-                    generateWhatsAppMessage(selectedCycleForWhatsApp)
+                    generateWhatsAppMessage(selectedCycleForWhatsApp, noticeLanguage)
                   );
                 }}
-                className="flex-1 py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-bold text-xs cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
+                className="flex-1 py-2.5 bg-primary hover:bg-primary-hover active:scale-95 text-white rounded-xl font-bold text-xs cursor-pointer shadow-sm flex items-center justify-center gap-1.5 transition-all"
               >
                 <Send className="w-4 h-4" />
                 <span>

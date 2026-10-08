@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { PieChart, ArrowRightLeft, Landmark, Repeat, CreditCard, Bell, ChevronLeft, FileText, Wallet, Users, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { calculateDuePaymentCycles } from '../../utils/paymentUtils';
+import { formatLocalDate } from '../../utils/timeUtils';
 
 import { FinanceDashboard } from './FinanceDashboard';
 import { FinanceAccounts } from './FinanceAccounts';
@@ -50,7 +51,7 @@ export const FinanceView: React.FC = () => {
     if (hasProcessedInvestmentsRef.current) return;
     hasProcessedInvestmentsRef.current = true;
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = formatLocalDate();
     const todayDate = new Date();
 
     financeAccounts.filter(a => !a.deleted && a.type === 'investment').forEach(acc => {
@@ -165,7 +166,7 @@ export const FinanceView: React.FC = () => {
   useEffect(() => {
     if (hasCheckedNotificationsRef.current) return;
     hasCheckedNotificationsRef.current = true;
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatLocalDate();
     
     // Check due recurring
     dueRecurring.forEach(rec => {

@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Search, X, Users, BookOpen, Calendar, DollarSign, ArrowRight, User } from 'lucide-react';
+import { normalizeSearchText } from '../utils/nameUtils';
+import { getStudentCode } from '../utils/studentCodeUtils';
 
 export const GlobalSearchModal: React.FC = () => {
   const { 
@@ -16,32 +18,51 @@ export const GlobalSearchModal: React.FC = () => {
 
   const [query, setQuery] = useState('');
 
+  // Handle Escape key
+  useEffect(() => {
+    if (!isGlobalSearchOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsGlobalSearchOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isGlobalSearchOpen, setIsGlobalSearchOpen]);
+
   if (!isGlobalSearchOpen) return null;
 
-  const q = (query || '').toLowerCase().trim();
+  const q = normalizeSearchText(query);
 
-  const matchedStudents = q ? students.filter(s => 
-    (s.name || '').toLowerCase().includes(q) || 
-    (s.parentName || '').toLowerCase().includes(q) || 
-    (s.studentPhone || '').includes(q) || 
-    (s.parentPhone || '').includes(q)
-  ).slice(0, 5) : [];
+  const matchedStudents = q ? students.filter(s => {
+    const sCode = getStudentCode(s);
+    return (
+      normalizeSearchText(s.name).includes(q) || 
+      normalizeSearchText(s.certificateName).includes(q) || 
+      normalizeSearchText(s.parentName).includes(q) || 
+      normalizeSearchText(s.studentPhone).includes(q) || 
+      normalizeSearchText(s.parentPhone).includes(q) ||
+      normalizeSearchText(s.studentCode).includes(q) ||
+      normalizeSearchText(sCode).includes(q)
+    );
+  }).slice(0, 5) : [];
 
   const matchedGroups = q ? groups.filter(g => 
-    (g.name || '').toLowerCase().includes(q) || 
-    (g.grade || '').toLowerCase().includes(q)
+    normalizeSearchText(g.name).includes(q) || 
+    normalizeSearchText(g.grade).includes(q)
   ).slice(0, 5) : [];
 
   const matchedLessons = q ? lessons.filter(l => 
-    (l.title || '').toLowerCase().includes(q) || 
-    (l.groupName || '').toLowerCase().includes(q) || 
-    (l.date || '').includes(q)
+    normalizeSearchText(l.title).includes(q) || 
+    normalizeSearchText(l.groupName).includes(q) || 
+    normalizeSearchText(l.studentName).includes(q) || 
+    normalizeSearchText(l.date).includes(q)
   ).slice(0, 5) : [];
 
   const matchedPayments = q ? payments.filter(p => 
-    (p.studentName || '').toLowerCase().includes(q) || 
-    (p.groupName || '').toLowerCase().includes(q) || 
-    (p.notes || '').toLowerCase().includes(q)
+    normalizeSearchText(p.studentName).includes(q) || 
+    normalizeSearchText(p.groupName).includes(q) || 
+    normalizeSearchText(p.notes).includes(q)
   ).slice(0, 5) : [];
 
   const totalResults = matchedStudents.length + matchedGroups.length + matchedLessons.length + matchedPayments.length;

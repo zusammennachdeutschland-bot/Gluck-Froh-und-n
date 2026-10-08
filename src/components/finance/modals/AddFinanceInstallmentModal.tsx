@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../../../context/AppContext';
 import { X, Save, CreditCard, Bell } from 'lucide-react';
 import { FinanceInstallment } from '../../../types';
+import { formatLocalDate } from '../../../utils/timeUtils';
 
 interface AddFinanceInstallmentModalProps {
   onClose: () => void;
@@ -21,7 +22,7 @@ export const AddFinanceInstallmentModal: React.FC<AddFinanceInstallmentModalProp
   const [installmentAmount, setInstallmentAmount] = useState(existingInstallment?.installmentAmount?.toString() || '');
   
   const [frequency, setFrequency] = useState(existingInstallment?.frequency || 'monthly');
-  const [firstDueDate, setFirstDueDate] = useState(existingInstallment?.firstDueDate || new Date().toISOString().split('T')[0]);
+  const [firstDueDate, setFirstDueDate] = useState(existingInstallment?.firstDueDate || formatLocalDate());
   
   const [notes, setNotes] = useState(existingInstallment?.notes || '');
   const [notificationsEnabled, setNotificationsEnabled] = useState(existingInstallment?.notificationsEnabled !== false);
