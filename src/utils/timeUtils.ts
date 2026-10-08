@@ -34,18 +34,43 @@ export const getDayOfWeekIndex = (dateStr: string): number => {
 };
 
 /**
- * Safely parses a 'YYYY-MM-DD' date string into a local Date object at 00:00:00 local time.
+ * Normalizes any date string (DD/MM/YYYY, YYYY-MM-DD, ISO string) into canonical YYYY-MM-DD format.
+ */
+export const normalizeDateToISO = (dateStr: string): string => {
+  if (!dateStr || typeof dateStr !== 'string') return '';
+  const normalized = normalizeDigits(dateStr.trim());
+  const dmMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmMatch) {
+    const day = dmMatch[1].padStart(2, '0');
+    const month = dmMatch[2].padStart(2, '0');
+    const year = dmMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+  const isoMatch = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    const year = isoMatch[1];
+    const month = isoMatch[2].padStart(2, '0');
+    const day = isoMatch[3].padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  return normalized.substring(0, 10);
+};
+
+/**
+ * Safely parses a 'YYYY-MM-DD' or 'DD/MM/YYYY' date string into a local Date object at 00:00:00 local time.
  * Prevents UTC timezone shifting and handles Arabic/Eastern numerals.
  */
 export const parseLocalDate = (dateStr: string): Date => {
   if (!dateStr) return new Date();
-  const normalized = normalizeDigits(dateStr.trim());
-  const parts = normalized.split('-');
-  if (parts.length !== 3) return new Date(normalized);
-  const y = parseInt(parts[0], 10) || new Date().getFullYear();
-  const m = parseInt(parts[1], 10) || 1;
-  const d = parseInt(parts[2], 10) || 1;
-  return new Date(y, m - 1, d);
+  const iso = normalizeDateToISO(dateStr);
+  const parts = iso.split('-');
+  if (parts.length === 3) {
+    const y = parseInt(parts[0], 10) || new Date().getFullYear();
+    const m = parseInt(parts[1], 10) || 1;
+    const d = parseInt(parts[2], 10) || 1;
+    return new Date(y, m - 1, d);
+  }
+  return new Date(dateStr);
 };
 
 /**

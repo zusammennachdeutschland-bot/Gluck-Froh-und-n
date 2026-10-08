@@ -720,6 +720,14 @@ export const LessonControlModal: React.FC = () => {
       studentPerformance,
       paymentStatus: isLessonPaid ? 'paid' : (selectedLesson.paymentStatus || 'pending'),
       amountPaid: isLessonPaid ? paymentAmountInput : (selectedLesson.amountPaid || 0),
+      studentPayments: Object.keys(studentPayments).length > 0 
+        ? studentPayments
+        : (isLessonPaid && selectedLesson.studentId ? {
+            [selectedLesson.studentId]: {
+              status: 'paid' as PaymentStatus,
+              amount: paymentAmountInput
+            }
+          } : undefined),
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
@@ -730,6 +738,7 @@ export const LessonControlModal: React.FC = () => {
       totalSessionsInPackage: cycleTotalSessions,
       paymentStatus: isLessonPaid ? 'paid' : (selectedLesson.paymentStatus || 'pending'),
       amountPaid: isLessonPaid ? paymentAmountInput : (selectedLesson.amountPaid || 0),
+      studentPayments: reportData.studentPayments as any,
       recordingLink: lessonRecordingLink.trim() || undefined,
       recordingLink2: lessonRecordingLink2.trim() || undefined,
       report: reportData

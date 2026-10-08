@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { PaymentRecord, Student, Group, Lesson } from '../../types';
 import { getStudentCyclePricing, calculateDuePaymentCycles, DuePaymentCycle, getStudentAdvanceLessonCredits, calculateEstimatedPastDate } from '../../utils/paymentUtils';
-import { formatLocalDate } from '../../utils/timeUtils';
+import { formatLocalDate, normalizeDateToISO } from '../../utils/timeUtils';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../../utils/phoneUtils';
 import { 
   DollarSign, CheckCircle2, Clock, Send, Search, 
@@ -214,6 +214,24 @@ export const FinanceStudentPayments: React.FC = () => {
       if (p.lessonIds && p.lessonIds.length > 0) ids.push(...p.lessonIds);
       if (p.lessonId && !ids.includes(p.lessonId)) ids.push(p.lessonId);
 
+      // Also map dates from lessonDates to matching lessons
+      if (p.lessonDates && Array.isArray(p.lessonDates)) {
+        p.lessonDates.forEach(dStr => {
+          if (!dStr || typeof dStr !== 'string') return;
+          const match = dStr.match(/(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/);
+          if (match) {
+            const dateNormalized = normalizeDateToISO(match[1]);
+            const matchedLessons = lessons.filter(l => 
+              l.date === dateNormalized && 
+              ((p.studentId && (l.studentId === p.studentId || l.studentName === p.studentName)) || (p.groupId && l.groupId === p.groupId))
+            );
+            matchedLessons.forEach(ml => {
+              if (!ids.includes(ml.id)) ids.push(ml.id);
+            });
+          }
+        });
+      }
+
       if (ids.length > 0) {
         const stId = p.studentId;
         if (stId) {
@@ -405,9 +423,49 @@ export const FinanceStudentPayments: React.FC = () => {
 
   // Unpaid Individual Lessons calculation
   const unpaidSingleLessons = useMemo(() => {
+    const paidLessonIds = new Set<string>();
+    const paidDateSignatures = new Set<string>();
+
+    payments.forEach(p => {
+      if (!p.deleted && (p.status === 'paid' || p.status === 'exempted' || p.paymentType === 'exemption')) {
+        if (p.lessonId) paidLessonIds.add(p.lessonId);
+        if (p.lessonIds && Array.isArray(p.lessonIds)) {
+          p.lessonIds.forEach(id => {
+            if (!id.startsWith('virtual_')) paidLessonIds.add(id);
+          });
+        }
+        if (p.lessonDates && Array.isArray(p.lessonDates)) {
+          p.lessonDates.forEach(dStr => {
+            if (!dStr || typeof dStr !== 'string') return;
+            const match = dStr.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
+            if (match) {
+              const dIso = normalizeDateToISO(match[1]);
+              if (p.studentId) paidDateSignatures.add(`${p.studentId}_${dIso}`);
+              if (p.groupId) paidDateSignatures.add(`${p.groupId}_${dIso}`);
+            }
+          });
+        }
+      }
+    });
+
     return lessons.filter(l => {
       if (l.deleted) return false;
+      if (paidLessonIds.has(l.id)) return false;
       if (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid' || l.paymentStatus === 'exempted') return false;
+
+      // Check if student or group is paid by date signature
+      if (l.studentId && paidDateSignatures.has(`${l.studentId}_${l.date}`)) return false;
+      if (l.groupId && paidDateSignatures.has(`${l.groupId}_${l.date}`)) return false;
+
+      // Check if student is explicitly marked as paid in lesson object or lesson report
+      if (l.studentId) {
+        const stPaymentObj = l.studentPayments?.[l.studentId];
+        const repPaymentObj = l.report?.studentPayments?.[l.studentId] as any;
+        const isStudentPaid = (stPaymentObj?.paymentStatus === 'paid' || (stPaymentObj as any)?.status === 'paid') ||
+                              (repPaymentObj?.paymentStatus === 'paid' || repPaymentObj?.status === 'paid');
+        if (isStudentPaid) return false;
+      }
+
       const isUnpaid = l.paymentStatus === 'pending' || l.paymentStatus === 'not_paid' || l.paymentStatus === 'partial';
       const due = l.amountDue || 200;
       const paid = l.amountPaid || 0;

@@ -1,4 +1,5 @@
 import { Group, Lesson } from '../types';
+import { normalizeDateToISO } from './timeUtils';
 
 export interface GroupCycleInfo {
   sessionCount: number;
@@ -326,8 +327,16 @@ export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; dupl
     return 0;
   };
 
-  const score1 = statusScore(l1.status) + (l1.report ? 50 : 0) + ((l1.amountPaid || 0) > 0 ? 20 : 0);
-  const score2 = statusScore(l2.status) + (l2.report ? 50 : 0) + ((l2.amountPaid || 0) > 0 ? 20 : 0);
+  const hasPaidSP = (l: any) => {
+    if (!l.studentPayments || typeof l.studentPayments !== 'object') return false;
+    return Object.values(l.studentPayments).some((sp: any) => sp?.paymentStatus === 'paid' || sp?.status === 'paid');
+  };
+
+  const isL1Paid = l1.paymentStatus === 'paid' || l1.report?.paymentStatus === 'paid' || hasPaidSP(l1);
+  const isL2Paid = l2.paymentStatus === 'paid' || l2.report?.paymentStatus === 'paid' || hasPaidSP(l2);
+
+  const score1 = statusScore(l1.status) + (l1.report ? 50 : 0) + ((l1.amountPaid || 0) > 0 ? 30 : 0) + (isL1Paid ? 80 : 0);
+  const score2 = statusScore(l2.status) + (l2.report ? 50 : 0) + ((l2.amountPaid || 0) > 0 ? 30 : 0) + (isL2Paid ? 80 : 0);
 
   let survivor = score1 >= score2 ? { ...l1 } : { ...l2 };
   let duplicate = score1 >= score2 ? { ...l2 } : { ...l1 };
@@ -336,11 +345,47 @@ export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; dupl
   if (!survivor.report && duplicate.report) {
     survivor.report = duplicate.report;
   }
-  if (!survivor.studentPayments && duplicate.studentPayments) {
-    survivor.studentPayments = duplicate.studentPayments;
+  
+  // Merge studentPayments safely: if ANY student is marked paid in either record, they MUST remain paid!
+  const mergedStudentPayments: Record<string, any> = {};
+  const allStIds = new Set([
+    ...Object.keys(duplicate.studentPayments || {}),
+    ...Object.keys(survivor.studentPayments || {})
+  ]);
+  allStIds.forEach(stId => {
+    const spSurv = survivor.studentPayments?.[stId];
+    const spDupe = duplicate.studentPayments?.[stId];
+    if (spSurv && spDupe) {
+      const isPaid = spSurv.paymentStatus === 'paid' || spSurv.status === 'paid' ||
+                     spDupe.paymentStatus === 'paid' || spDupe.status === 'paid';
+      mergedStudentPayments[stId] = {
+        ...spDupe,
+        ...spSurv,
+        paymentStatus: isPaid ? 'paid' : (spSurv.paymentStatus || spDupe.paymentStatus || 'pending'),
+        status: isPaid ? 'paid' : (spSurv.status || spDupe.status || 'pending'),
+        amountPaid: Math.max(spSurv.amountPaid || spSurv.amount || 0, spDupe.amountPaid || spDupe.amount || 0)
+      };
+    } else {
+      mergedStudentPayments[stId] = spSurv || spDupe;
+    }
+  });
+  if (allStIds.size > 0) {
+    survivor.studentPayments = mergedStudentPayments;
   }
+
+  // Preserve paid status if either record was marked paid
+  if (duplicate.paymentStatus === 'paid' || isL1Paid || isL2Paid) {
+    survivor.paymentStatus = 'paid';
+    if (survivor.report) {
+      survivor.report = { ...survivor.report, paymentStatus: 'paid' };
+    }
+  }
+
   if ((duplicate.amountPaid || 0) > (survivor.amountPaid || 0)) {
     survivor.amountPaid = duplicate.amountPaid;
+    if (survivor.report) {
+      survivor.report.amountPaid = duplicate.amountPaid;
+    }
   }
   if (duplicate.status === 'completed' && survivor.status !== 'completed') {
     survivor.status = 'completed';
@@ -398,7 +443,6 @@ export const deduplicatePaymentsList = (
   }
 
   const removedIds = new Set<string>();
-  const cleaned: any[] = [];
   let modified = false;
 
   // 1. Remap lesson IDs if needed
@@ -415,39 +459,132 @@ export const deduplicatePaymentsList = (
     return p;
   });
 
-  // 2. Identify duplicate pending payments for the same student
+  // Separate valid paid and non-paid records
+  const paidPayments: any[] = [];
+  const pendingPayments: any[] = [];
+
   for (const p of mappedPayments) {
     if (!p || !p.id || p.deleted) continue;
+    if (p.status === 'paid' || p.status === 'exempted' || p.paymentType === 'exemption') {
+      paidPayments.push(p);
+    } else {
+      pendingPayments.push(p);
+    }
+  }
 
-    if (p.status !== 'paid') {
-      // Look for an existing pending payment for this student with same cycle / date / amount
-      const existingMatchIndex = cleaned.findIndex(c => {
-        if (c.studentId !== p.studentId || c.status === 'paid') return false;
-        // Same due date and same amount
-        if (c.dueDate === p.dueDate && c.amountDue === p.amountDue) return true;
-        // Or overlapping lesson IDs
-        if (Array.isArray(c.lessonIds) && Array.isArray(p.lessonIds) && c.lessonIds.length > 0 && p.lessonIds.length > 0) {
-          if (c.lessonIds.some((lid: string) => p.lessonIds.includes(lid))) return true;
-        }
-        return false;
+  // Deduplicate paid payments among themselves (keeping the most detailed / highest amount)
+  const dedupedPaid: any[] = [];
+  for (const p of paidPayments) {
+    const existingIdx = dedupedPaid.findIndex(d => {
+      if (d.id === p.id) return true;
+      if (d.studentId !== p.studentId) return false;
+      // Check if both reference the exact same lesson IDs
+      if (Array.isArray(d.lessonIds) && Array.isArray(p.lessonIds) && d.lessonIds.length > 0 && p.lessonIds.length > 0) {
+        const hasSameIds = d.lessonIds.length === p.lessonIds.length && d.lessonIds.every((id: string) => p.lessonIds.includes(id));
+        if (hasSameIds) return true;
+      }
+      if (d.dueDate && p.dueDate && d.dueDate === p.dueDate && d.bundleSize === p.bundleSize && d.amountDue === p.amountDue) {
+        return true;
+      }
+      return false;
+    });
+
+    if (existingIdx >= 0) {
+      const existing = dedupedPaid[existingIdx];
+      const winner = (p.amountPaid || 0) >= (existing.amountPaid || 0) ? p : existing;
+      const loser = winner === p ? existing : p;
+      dedupedPaid[existingIdx] = winner;
+      removedIds.add(loser.id);
+      modified = true;
+    } else {
+      dedupedPaid.push(p);
+    }
+  }
+
+  // Helper sets from paid records
+  const paidLessonIdSet = new Set<string>();
+  const paidDateSignatureSet = new Set<string>();
+  dedupedPaid.forEach(p => {
+    if (p.lessonId) paidLessonIdSet.add(p.lessonId);
+    if (Array.isArray(p.lessonIds)) {
+      p.lessonIds.forEach((id: string) => {
+        if (!id.startsWith('virtual_')) paidLessonIdSet.add(id);
       });
+    }
+    if (Array.isArray(p.lessonDates)) {
+      p.lessonDates.forEach((dStr: string) => {
+        const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
+        if (match) {
+          const iso = normalizeDateToISO(match[1]);
+          if (p.studentId) paidDateSignatureSet.add(`${p.studentId}_${iso}`);
+          if (p.groupId) paidDateSignatureSet.add(`${p.groupId}_${iso}`);
+        }
+      });
+    }
+  });
 
-      if (existingMatchIndex >= 0) {
-        // We found a duplicate pending payment record!
-        const existing = cleaned[existingMatchIndex];
-        // Keep the one with more information or higher amount paid
-        const winner = (p.amountPaid || 0) > (existing.amountPaid || 0) ? p : existing;
-        const loser = winner === p ? existing : p;
-        cleaned[existingMatchIndex] = winner;
-        removedIds.add(loser.id);
-        modified = true;
-        continue;
+  // Filter and deduplicate pending payments against PAID records and against each other
+  const dedupedPending: any[] = [];
+  for (const p of pendingPayments) {
+    // Check if this pending payment is ALREADY COVERED by any paid record
+    const realLessonIds = (p.lessonIds || []).filter((id: string) => !id.startsWith('virtual_'));
+    const isIdsCoveredByPaid = realLessonIds.length > 0 && realLessonIds.every((id: string) => paidLessonIdSet.has(id));
+    
+    // Check if dates are covered by paid records
+    let isDatesCoveredByPaid = false;
+    if (Array.isArray(p.lessonDates) && p.lessonDates.length > 0) {
+      const parsedDates: string[] = [];
+      p.lessonDates.forEach((dStr: string) => {
+        const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
+        if (match) parsedDates.push(normalizeDateToISO(match[1]));
+      });
+      if (parsedDates.length > 0 && parsedDates.every(dIso => 
+        (p.studentId && paidDateSignatureSet.has(`${p.studentId}_${dIso}`)) ||
+        (p.groupId && paidDateSignatureSet.has(`${p.groupId}_${dIso}`))
+      )) {
+        isDatesCoveredByPaid = true;
       }
     }
 
-    cleaned.push(p);
+    // Direct overlap with a paid payment of the same student
+    const matchesPaidPayment = dedupedPaid.some(paid => {
+      if (paid.studentId !== p.studentId) return false;
+      if (realLessonIds.length > 0 && paid.lessonIds?.some((id: string) => realLessonIds.includes(id))) return true;
+      if (p.lessonId && (paid.lessonId === p.lessonId || paid.lessonIds?.includes(p.lessonId))) return true;
+      if (p.dueDate && paid.dueDate && p.dueDate === paid.dueDate && p.amountDue === paid.amountDue) return true;
+      return false;
+    });
+
+    if (isIdsCoveredByPaid || isDatesCoveredByPaid || matchesPaidPayment) {
+      // This pending payment is obsolete / already paid! Remove it to prevent phantom due cards
+      removedIds.add(p.id);
+      modified = true;
+      continue;
+    }
+
+    // Deduplicate pending payments against other pending payments
+    const existingPendingIdx = dedupedPending.findIndex(c => {
+      if (c.studentId !== p.studentId) return false;
+      if (c.dueDate === p.dueDate && c.amountDue === p.amountDue) return true;
+      if (Array.isArray(c.lessonIds) && Array.isArray(p.lessonIds) && c.lessonIds.length > 0 && p.lessonIds.length > 0) {
+        if (c.lessonIds.some((lid: string) => p.lessonIds.includes(lid))) return true;
+      }
+      return false;
+    });
+
+    if (existingPendingIdx >= 0) {
+      const existing = dedupedPending[existingPendingIdx];
+      const winner = (p.amountPaid || 0) > (existing.amountPaid || 0) ? p : existing;
+      const loser = winner === p ? existing : p;
+      dedupedPending[existingPendingIdx] = winner;
+      removedIds.add(loser.id);
+      modified = true;
+    } else {
+      dedupedPending.push(p);
+    }
   }
 
+  const cleaned = [...dedupedPaid, ...dedupedPending];
   return { deduplicated: cleaned, removedIds, hasChanges: modified || removedIds.size > 0 };
 };
 

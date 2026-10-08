@@ -1,6 +1,7 @@
 import { Student, Group, Lesson, PaymentRecord } from '../types';
 import { areDuplicateLessons } from './lessonUtils';
 import { resolveStudentWhatsAppContact } from './phoneUtils';
+import { normalizeDateToISO } from './timeUtils';
 
 export interface CyclePricingResult {
   cycleLength: number;
@@ -136,6 +137,24 @@ export const calculateDuePaymentCycles = (
         ids.push(p.lessonId);
       }
 
+      // Also map dates from lessonDates to matching active lessons
+      if (p.lessonDates && Array.isArray(p.lessonDates)) {
+        p.lessonDates.forEach(dStr => {
+          if (!dStr || typeof dStr !== 'string') return;
+          const match = dStr.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
+          if (match) {
+            const dateNormalized = normalizeDateToISO(match[1]);
+            const matchedLessons = activeLessons.filter(l => 
+              l.date === dateNormalized && 
+              ((p.studentId && (l.studentId === p.studentId || l.studentName === p.studentName)) || (p.groupId && l.groupId === p.groupId))
+            );
+            matchedLessons.forEach(ml => {
+              if (!ids.includes(ml.id)) ids.push(ml.id);
+            });
+          }
+        });
+      }
+
       if (ids.length > 0) {
         const stId = p.studentId;
         if (stId) {
@@ -154,6 +173,38 @@ export const calculateDuePaymentCycles = (
           });
         }
       }
+    }
+  });
+
+  // Also collect all lessons that are directly marked as paid or studentPayments paid
+  activeLessons.forEach(l => {
+    if (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') {
+      if (l.studentId) {
+        if (!studentPaidLessons.has(l.studentId)) studentPaidLessons.set(l.studentId, new Set<string>());
+        studentPaidLessons.get(l.studentId)!.add(l.id);
+      } else if (l.groupId) {
+        const groupSts = activeStudents.filter(s => s.groupId === l.groupId);
+        groupSts.forEach(s => {
+          if (!studentPaidLessons.has(s.id)) studentPaidLessons.set(s.id, new Set<string>());
+          studentPaidLessons.get(s.id)!.add(l.id);
+        });
+      }
+    }
+    if (l.studentPayments && typeof l.studentPayments === 'object') {
+      Object.entries(l.studentPayments).forEach(([stId, sp]: [string, any]) => {
+        if (sp?.paymentStatus === 'paid' || sp?.status === 'paid') {
+          if (!studentPaidLessons.has(stId)) studentPaidLessons.set(stId, new Set<string>());
+          studentPaidLessons.get(stId)!.add(l.id);
+        }
+      });
+    }
+    if (l.report?.studentPayments && typeof l.report.studentPayments === 'object') {
+      Object.entries(l.report.studentPayments).forEach(([stId, sp]: [string, any]) => {
+        if (sp?.paymentStatus === 'paid' || sp?.status === 'paid') {
+          if (!studentPaidLessons.has(stId)) studentPaidLessons.set(stId, new Set<string>());
+          studentPaidLessons.get(stId)!.add(l.id);
+        }
+      });
     }
   });
 
@@ -176,16 +227,16 @@ export const calculateDuePaymentCycles = (
       // Check if lesson is marked as paid in payment records
       if (paidIds.has(l.id)) return false;
 
-      // Check if student is explicitly marked as paid in lesson object or lesson report (for per-lesson mode)
+      // Check if student is explicitly marked as paid in lesson object or lesson report
       const stPaymentObj = l.studentPayments?.[st.id];
       const repPaymentObj = l.report?.studentPayments?.[st.id] as any;
       const isStudentPaidInLesson = (stPaymentObj?.paymentStatus === 'paid' || (stPaymentObj as any)?.status === 'paid') || 
                                     (repPaymentObj?.paymentStatus === 'paid' || repPaymentObj?.status === 'paid');
       const isIndividualLessonPaid = (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') &&
-                                     (l.studentId ? l.studentId === st.id : !grp);
+                                     (l.studentId ? l.studentId === st.id : true);
 
-      // In per-lesson mode (cycleLength === 1), direct lesson payment marks it paid immediately
-      if (cycleLength === 1 && (isStudentPaidInLesson || isIndividualLessonPaid)) {
+      // If directly marked paid (per-lesson, in report, or on lesson itself), exclude immediately!
+      if (isStudentPaidInLesson || isIndividualLessonPaid || l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') {
         return false;
       }
 
@@ -296,12 +347,41 @@ export const calculateDuePaymentCycles = (
     }
 
     // Unpaid record in payments (excluding exempted or paid)
-    const unpaidRec = activePayments.find(p => 
+    const unpaidRecCandidate = activePayments.find(p => 
       p.studentId === st.id && 
       p.status !== 'paid' && 
       p.status !== 'exempted' && 
       p.paymentType !== 'exemption'
     );
+
+    // Verify unpaidRecCandidate is truly unpaid and not already covered by paid records or paid lessons
+    let isCandidateCovered = false;
+    if (unpaidRecCandidate) {
+      const uLessonIds = (unpaidRecCandidate.lessonIds || []).filter(id => !id.startsWith('virtual_'));
+      if (uLessonIds.length > 0 && uLessonIds.every(id => paidIds.has(id))) {
+        isCandidateCovered = true;
+      }
+      if (!isCandidateCovered && Array.isArray(unpaidRecCandidate.lessonDates) && unpaidRecCandidate.lessonDates.length > 0) {
+        const uDates: string[] = [];
+        unpaidRecCandidate.lessonDates.forEach(dStr => {
+          const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
+          if (match) uDates.push(normalizeDateToISO(match[1]));
+        });
+        if (uDates.length > 0 && uDates.every(dIso => {
+          return activePayments.some(paid =>
+            paid.studentId === st.id &&
+            (paid.status === 'paid' || paid.status === 'exempted' || paid.paymentType === 'exemption') &&
+            paid.lessonDates?.some(pd => {
+              const m = pd?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
+              return m && normalizeDateToISO(m[1]) === dIso;
+            })
+          );
+        })) {
+          isCandidateCovered = true;
+        }
+      }
+    }
+    const unpaidRec = isCandidateCovered ? undefined : unpaidRecCandidate;
 
     if (processedLessons.length >= cycleLength) {
       let remaining = [...processedLessons];
@@ -340,7 +420,7 @@ export const calculateDuePaymentCycles = (
         remaining = remaining.slice(cycleLength);
         chunkIndex++;
       }
-    } else if (unpaidRec && unlinkedAdvanceLessons === 0) {
+    } else if (unpaidRec && unlinkedAdvanceLessons === 0 && stCompletedLessons.length > 0) {
       // Format unpaid rec lesson dates if they don't have session numbers yet
       const lessonDates = (unpaidRec.lessonDates || []).map((d, idx) => {
         if (d.includes('Session')) return d;
@@ -368,6 +448,23 @@ export const calculateDuePaymentCycles = (
   const addedPaymentRecordIds = new Set(list.map(item => item.existingPaymentRecordId).filter(Boolean));
   activePayments.forEach(p => {
     if (p.status !== 'paid' && p.status !== 'exempted' && p.paymentType !== 'exemption' && !addedPaymentRecordIds.has(p.id)) {
+      // Check if p is already covered by paid payment records or studentPaidLessons
+      const pLessonIds = (p.lessonIds || []).filter(id => !id.startsWith('virtual_'));
+      const isIdsCovered = pLessonIds.length > 0 && pLessonIds.every(id => {
+        const paidSet = p.studentId ? studentPaidLessons.get(p.studentId) : null;
+        return paidSet ? paidSet.has(id) : false;
+      });
+      if (isIdsCovered) return;
+
+      // Check if another paid payment covers this student's cycle/dates
+      const isCoveredByPaidPayment = activePayments.some(paid => {
+        if (paid.studentId !== p.studentId || paid.status !== 'paid') return false;
+        if (pLessonIds.length > 0 && paid.lessonIds?.some(id => pLessonIds.includes(id))) return true;
+        if (p.dueDate && paid.dueDate && p.dueDate === paid.dueDate && p.amountDue === paid.amountDue) return true;
+        return false;
+      });
+      if (isCoveredByPaidPayment) return;
+
       // If this student has prepaid advance lessons, do not create an unpaid card
       const hasAdvanceCredit = activePayments.some(adv => 
         adv.studentId === p.studentId && 
