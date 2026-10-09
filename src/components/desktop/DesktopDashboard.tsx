@@ -18,17 +18,17 @@ export const DesktopDashboard: React.FC = () => {
         {/* Daily Inspiration */}
         <InspirationCardWidget />
 
+        {/* Homework Follow Up Card */}
+        <HomeworkFollowUpWidget />
+
         {/* Today's Progress Timeline */}
         <TodaysProgressTimeline />
 
         {/* Smart Daily Summary */}
         <SmartDailySummaryWidget />
 
-        {/* Tomorrow's Lessons & Homework Follow Up in 2 sub-cols on wide desktop */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <TomorrowsLessonsWidget />
-          <HomeworkFollowUpWidget />
-        </div>
+        {/* Tomorrow's Lessons */}
+        <TomorrowsLessonsWidget />
       </div>
 
       {/* Secondary Column: School Card, Stats, Financial Alerts, To-Dos, and Free Slots (5 cols) */}

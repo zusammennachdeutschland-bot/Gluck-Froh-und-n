@@ -11,7 +11,6 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { getSchoolSettings } from '../utils/schoolUtils';
 import { generateMonthlySchoolScheduleIcsEvents } from '../utils/schoolScheduleIcsUtils';
-import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 interface ExportMonthlyCalendarModalProps {
   onClose: () => void;
@@ -335,7 +334,6 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
             </div>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <ReportLanguageToggle showLabel={false} />
             <button
               onClick={onClose}
               className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-text-muted hover:bg-surface-hover dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"

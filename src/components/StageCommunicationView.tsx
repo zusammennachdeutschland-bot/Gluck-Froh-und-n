@@ -13,7 +13,6 @@ import {
   generateObservationReportContentHtml
 } from '../utils/printObservationUtils';
 import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
-import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { formatLocalDate } from '../utils/timeUtils';
 
 export const StageCommunicationView: React.FC = () => {
@@ -529,7 +528,6 @@ export const StageCommunicationView: React.FC = () => {
             <h2 className="text-[11px] font-black text-text-muted uppercase tracking-wider">
               {_t('اختر المرحلة الدراسية / مدير المرحلة:', 'Select Stage Manager:', 'Stufenleiter auswählen:')}
             </h2>
-            <ReportLanguageToggle showLabel={false} />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1.5">

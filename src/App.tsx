@@ -536,13 +536,14 @@ function MainApp() {
                 {/* School Today Card */}
                 <SchoolTodayCard />
 
+                {/* Homework Follow-up Reminder Card */}
+                <HomeworkFollowUpWidget />
+
                 {/* Today's Progress Timeline */}
                 <TodaysProgressTimeline />
 
                 {/* Compact Collapsible To-Do Widget */}
                 <QuickTodoWidget />
-
-                <HomeworkFollowUpWidget />
 
                 {/* Tomorrow's Lessons Compact Widget */}
                 <TomorrowsLessonsWidget />

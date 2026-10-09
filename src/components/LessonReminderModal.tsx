@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
+import { getTimeBasedGreeting } from '../utils/greetingUtils';
 
 interface LessonReminderModalProps {
   lesson?: Lesson | null;
@@ -258,23 +259,24 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       const homeworkLine = (includeHomework && previousHomework.trim())
         ? `\n\n📝 Previous Homework to prepare:\n${previousHomework.trim()}`
         : '';
+      const enGreeting = getTimeBasedGreeting('en', { isGroup });
 
       if (isOnline) {
         const intro = reminderStyle === 'immediate'
-          ? 'Hello,\n\nWe are starting our lesson now.'
-          : `Hello,\n\nReminder and confirmation for our lesson scheduled at ${time12}.`;
+          ? `${enGreeting}\n\nWe are starting our lesson now.`
+          : `${enGreeting}\n\nReminder and confirmation for our lesson scheduled at ${time12}.`;
         const zoomPart = zoomLink.trim() ? `\n\n🔗 Lesson Link:\n${zoomLink.trim()}` : '';
         return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
       } else {
         let intro = '';
         if (reminderStyle === 'immediate') {
           intro = isGroup
-            ? `Hello,\n\nI am on my way and will arrive at the group in ${arrivalLabel}.`
-            : `Hello,\n\nI am on my way and will arrive in ${arrivalLabel}.`;
+            ? `${enGreeting}\n\nI am on my way and will arrive at the group in ${arrivalLabel}.`
+            : `${enGreeting}\n\nI am on my way and will arrive in ${arrivalLabel}.`;
         } else {
           intro = isGroup
-            ? `Hello,\n\nReminder and confirmation for our group lesson scheduled at ${time12}.`
-            : `Hello,\n\nReminder and confirmation for our lesson scheduled at ${time12}.`;
+            ? `${enGreeting}\n\nReminder and confirmation for our group lesson scheduled at ${time12}.`
+            : `${enGreeting}\n\nReminder and confirmation for our lesson scheduled at ${time12}.`;
         }
         return `${intro}${cycleLine}${homeworkLine}`;
       }
@@ -287,23 +289,24 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       const homeworkLine = (includeHomework && previousHomework.trim())
         ? `\n\n📝 Hausaufgabe zur Vorbereitung:\n${previousHomework.trim()}`
         : '';
+      const deGreeting = getTimeBasedGreeting('de', { isGroup });
 
       if (isOnline) {
         const intro = reminderStyle === 'immediate'
-          ? 'Guten Tag,\n\nwir beginnen jetzt mit unserer Unterrichtsstunde.'
-          : `Guten Tag,\n\nErinnerung und Terminbestätigung für unsere Unterrichtsstunde um ${rawTime} Uhr.`;
+          ? `${deGreeting}\n\nwir beginnen jetzt mit unserer Unterrichtsstunde.`
+          : `${deGreeting}\n\nErinnerung und Terminbestätigung für unsere Unterrichtsstunde um ${rawTime} Uhr.`;
         const zoomPart = zoomLink.trim() ? `\n\n🔗 Link zur Stunde:\n${zoomLink.trim()}` : '';
         return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
       } else {
         let intro = '';
         if (reminderStyle === 'immediate') {
           intro = isGroup
-            ? `Guten Tag,\n\nich bin unterwegs und treffe in ${arrivalLabel} bei der Gruppe ein.`
-            : `Guten Tag,\n\nich bin unterwegs und treffe in ${arrivalLabel} bei Ihnen ein.`;
+            ? `${deGreeting}\n\nich bin unterwegs und treffe in ${arrivalLabel} bei der Gruppe ein.`
+            : `${deGreeting}\n\nich bin unterwegs und treffe in ${arrivalLabel} bei Ihnen ein.`;
         } else {
           intro = isGroup
-            ? `Guten Tag,\n\nErinnerung und Terminbestätigung für die Gruppenstunde um ${rawTime} Uhr.`
-            : `Guten Tag,\n\nErinnerung und Terminbestätigung für unsere Unterrichtsstunde um ${rawTime} Uhr.`;
+            ? `${deGreeting}\n\nErinnerung und Terminbestätigung für die Gruppenstunde um ${rawTime} Uhr.`
+            : `${deGreeting}\n\nErinnerung und Terminbestätigung für unsere Unterrichtsstunde um ${rawTime} Uhr.`;
         }
         return `${intro}${cycleLine}${homeworkLine}`;
       }
@@ -316,23 +319,24 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     const homeworkLine = (includeHomework && previousHomework.trim())
       ? `\n\n📝 واجب الحصة السابقة المطلوب تجهيزه:\n${previousHomework.trim()}`
       : '';
+    const arGreeting = getTimeBasedGreeting('ar', { style: 'egyptian', isGroup });
 
     if (isOnline) {
       const intro = reminderStyle === 'immediate'
-        ? 'السلام عليكم ورحمة الله وبركاته\n\nهنبدأ الحصة الآن إن شاء الله.'
-        : `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
+        ? `${arGreeting}\n\nهنبدأ الحصة الآن إن شاء الله.`
+        : `${arGreeting}\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
       const zoomPart = zoomLink.trim() ? `\n\n🔗 لينك الحصة:\n${zoomLink.trim()}` : '';
       return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
     } else {
       let intro = '';
       if (reminderStyle === 'immediate') {
         intro = isGroup
-          ? `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل للمجموعة خلال ${arrivalLabel} إن شاء الله.`
-          : `السلام عليكم ورحمة الله وبركاته\n\nأنا في الطريق وهوصل لحضرتك خلال ${arrivalLabel} إن شاء الله.`;
+          ? `${arGreeting}\n\nأنا في الطريق وهوصل للمجموعة خلال ${arrivalLabel} إن شاء الله.`
+          : `${arGreeting}\n\nأنا في الطريق وهوصل لحضرتك خلال ${arrivalLabel} إن شاء الله.`;
       } else {
         intro = isGroup
-          ? `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصة المجموعة إن شاء الله الساعة ${time12}.`
-          : `السلام عليكم ورحمة الله وبركاته\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
+          ? `${arGreeting}\n\nتذكير وتأكيد بموعد حصة المجموعة إن شاء الله الساعة ${time12}.`
+          : `${arGreeting}\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
       }
       return `${intro}${cycleLine}${homeworkLine}`;
     }

@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { SyncHeaderButton } from './sync/SyncHeaderButton';
 import { SyncCenterModal } from './sync/SyncCenterModal';
 import { pairWithPeer } from '../services/sync/syncClient';
+import { getCairoHour } from '../utils/greetingUtils';
 
 export const Header: React.FC = () => {
   const { 
@@ -181,7 +182,7 @@ export const Header: React.FC = () => {
   }, [language, profile?.displayName, profile?.displayNameAr, profile?.displayNameEn, profile?.nameAr, profile?.nameEn]);
 
   const greetingPrefix = useMemo(() => {
-    const hour = new Date().getHours();
+    const hour = getCairoHour();
     if (hour < 12) {
       return _t('صباح الخير', 'Good Morning', 'Guten Morgen');
     } else if (hour < 17) {
@@ -207,7 +208,7 @@ export const Header: React.FC = () => {
   }, [greetingPrefix, teacherFirstName]);
 
   const greetingText = useMemo(() => {
-    const hour = new Date().getHours();
+    const hour = getCairoHour();
     const name = teacherFirstName;
     const enName = name ? `, ${name}!` : '';
     const arName = name ? `، ${name}!` : '';

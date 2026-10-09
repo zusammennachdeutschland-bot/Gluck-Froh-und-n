@@ -151,7 +151,7 @@ export const AI_PROMPT_TEMPLATE_AR = `أنت مساعد إدخال بيانات 
 
 شروط هامة ونوع الحضور:
 * إذا كان نوع المجموعة "online":
-  - يجب توفير رابط زووم (zoom_link) إجبارياً!
+  - رابط زووم (zoom_link) اختياري غير إجباري.
   - العنوان (address) غير مطلوب.
 * إذا كان نوع المجموعة "offline":
   - يجب توفير عنوان المكان (address) إجبارياً!
@@ -252,7 +252,7 @@ followed by the next group.
 
 LOCATION / VIRTUAL LINK / WHATSAPP RULES:
 * If Attendance Type is "online":
-  - Zoom Link (zoom_link) is REQUIRED!
+  - Zoom Link (zoom_link) is optional.
   - Address is not required.
 * If Attendance Type is "offline":
   - Address / Location (address) is REQUIRED!
@@ -475,9 +475,7 @@ function parseIndividualGroupBlock(
   } else if (rawType !== 'online' && rawType !== 'offline') {
     errors.push(`${gTag}نوع المجموعة "${rawType}" غير صالح. يجب أن يكون "online" أو "offline".`);
   } else if (rawType === 'online') {
-    if (!rawZoomLink.trim()) {
-      errors.push(`${gTag}رابط زووم ("zoom_link=...") مطلوب للمجموعات الأونلاين.`);
-    }
+    // Zoom link is now optional
   } else if (rawType === 'offline') {
     if (!rawAddress.trim()) {
       errors.push(`${gTag}عنوان ومكان الحضور ("address=...") مطلوب للمجموعات الأوفلاين.`);

@@ -14,7 +14,6 @@ import {
   SYSTEM_STAGES 
 } from '../utils/staffAttendanceUtils';
 import { useApp } from '../context/AppContext';
-import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 interface DetailedStaffAttendanceModalProps {
   isOpen: boolean;
@@ -168,7 +167,6 @@ export const DetailedStaffAttendanceModal: React.FC<DetailedStaffAttendanceModal
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <ReportLanguageToggle showLabel={false} />
             <button
               onClick={handlePrint}
               className="p-1.5 sm:p-2 bg-surface-hover hover:bg-surface-border border border-surface-border rounded-lg sm:rounded-xl text-text-main font-bold text-xs flex items-center gap-1.5 cursor-pointer"

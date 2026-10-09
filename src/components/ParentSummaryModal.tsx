@@ -7,6 +7,7 @@ import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getTeacherEnglishName, getTeacherArabicName } from '../utils/teacherUtils';
 import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
+import { getTimeBasedGreeting } from '../utils/greetingUtils';
 import confetti from 'canvas-confetti';
 
 interface ParentSummaryModalProps {
@@ -74,6 +75,11 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
     );
     const hasCycleSession = !isPerLessonGroup && totalCycleCount > 1;
 
+    const englishStudentName = activeStudent?.certificateName || activeStudent?.displayNameEn || activeStudent?.nameEn;
+    const studentDisplayName = (reportLanguage === 'de' || reportLanguage === 'en')
+      ? (englishStudentName || activeStudent?.name || lesson.studentName || 'Student')
+      : (activeStudent?.displayNameAr || activeStudent?.nameAr || activeStudent?.name || lesson.studentName || 'الطالب');
+
     // Arabic summary
     if (reportLanguage === 'ar') {
       const attendance = report?.attendanceStatus === 'present' ? 'حاضر ✅' : report?.attendanceStatus === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
@@ -88,9 +94,10 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
         recordingLine = `\n🎥 تسجيل الحصة:\n${recLink1}\n`;
       }
 
-      return `السلام عليكم ورحمة الله وبركاته ${activeStudent?.parentName || 'ولي الأمر الكريم'} 👋 🇩🇪
+      const arG = getTimeBasedGreeting('ar', { style: 'egyptian', recipientName: activeStudent?.parentName || 'ولي الأمر الكريم' });
+      return `${arG} 🇩🇪
 
-تقرير ملخص الحصة لـ ${lesson.studentName || lesson.title} بتاريخ ${lesson.date}:
+تقرير ملخص الحصة لـ ${studentDisplayName || lesson.title} بتاريخ ${lesson.date}:
 
 📚 المادة: ${lesson.title} (${lesson.grade || ''})
 ${sessionLine}✅ الحضور: ${attendance}
@@ -120,9 +127,10 @@ ${getTeacherArabicName(profile, 'معلم اللغة الألمانية')} 🇩�
         recordingLine = `\n🎥 Lesson Recording:\n${recLink1}\n`;
       }
 
-      return `Hello / Greetings to the parent of ${lesson.studentName || 'Student'}! 🇩🇪
+      const enG = getTimeBasedGreeting('en', { recipientName: `parent of ${studentDisplayName}` });
+      return `${enG} 🇩🇪
 
-Educational summary report for ${lesson.studentName || lesson.title} on ${lesson.date}:
+Educational summary report for ${studentDisplayName} on ${lesson.date}:
 
 📚 Course: ${lesson.title} (${lesson.grade || ''})
 ${sessionLine}✅ Attendance: ${attendance}
@@ -154,9 +162,10 @@ German Language Department 🇩🇪`;
       recordingLine = `\n🎥 Aufnahme der Lektion (Recording):\n${recLink2}\n`;
     }
     
-    return `Guten Tag ${parentName}! 🇩🇪
+    const deG = getTimeBasedGreeting('de', { recipientName: parentName });
+    return `${deG} 🇩🇪
 
-Hier ist der Unterrichtsbericht für ${lesson.studentName || lesson.title} vom ${lesson.date}:
+Hier ist der Unterrichtsbericht für ${studentDisplayName} vom ${lesson.date}:
 
 📚 Kurs: ${lesson.title} (${lesson.grade})
 ${sessionLine}✅ Anwesenheit: ${attendance}

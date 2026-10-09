@@ -24,7 +24,6 @@ import {
   printObservationReport
 } from '../utils/printObservationUtils';
 import { useApp } from '../context/AppContext';
-import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 interface BulkObservationExportModalProps {
   isOpen: boolean;
@@ -231,7 +230,6 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
             </div>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <ReportLanguageToggle showLabel={false} />
             <button
               onClick={onClose}
               className="p-1 sm:p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg sm:rounded-xl transition-all cursor-pointer shrink-0"

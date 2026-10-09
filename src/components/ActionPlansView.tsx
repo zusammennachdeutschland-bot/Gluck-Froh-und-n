@@ -9,7 +9,6 @@ import { StudentActionPlan, WeeklyPlanLog, HodGermanStudent } from '../types';
 import { storage } from '../services/storageService';
 import { printActionPlansReport, downloadActionPlansPdf } from '../utils/printObservationUtils';
 import { normalizeClassCode, compareClassCodes } from '../utils/classNormalizer';
-import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { formatLocalDate } from '../utils/timeUtils';
 
 // Arabic Selector Preset Options
@@ -465,8 +464,6 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
 
             {/* Quick Action Buttons */}
             <div className="flex items-center gap-1.5 w-full sm:w-auto flex-wrap sm:flex-nowrap">
-              <ReportLanguageToggle showLabel={false} />
-
               <button
                 onClick={handleOpenCreateModal}
                 className="px-2 sm:px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-[10px] sm:text-[11px] font-black transition-all flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap"

@@ -28,7 +28,6 @@ import { HodStudentsView } from './HodStudentsView';
 import { ComplaintsSystemView } from './ComplaintsSystemView';
 import { ActionPlansView } from './ActionPlansView';
 import { StageCommunicationView } from './StageCommunicationView';
-import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { TeacherAttendanceModal } from './TeacherAttendanceModal';
 import { DetailedStaffAttendanceModal } from './DetailedStaffAttendanceModal';
 import { TermVisitPlannerView } from './TermVisitPlannerView';
@@ -2375,9 +2374,6 @@ export const HodHubView: React.FC = () => {
               </button>
             );
           })}
-        </div>
-        <div className="flex items-center justify-end px-0.5 shrink-0">
-          <ReportLanguageToggle showLabel={false} />
         </div>
       </div>
 

@@ -8,7 +8,6 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as 
 import { Lesson, PaymentRecord } from '../types';
 import { calculateOverallAttendance } from '../utils/lessonUtils';
 import { formatLocalDate } from '../utils/timeUtils';
-import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { Pagination } from './common/Pagination';
 import confetti from 'canvas-confetti';
 
@@ -238,7 +237,6 @@ export const ReportsView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <ReportLanguageToggle showLabel={false} />
           <button
             onClick={handlePrintReport}
             className="bg-primary hover:bg-primary-hover text-white font-bold text-[10.5px] sm:text-xs px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"

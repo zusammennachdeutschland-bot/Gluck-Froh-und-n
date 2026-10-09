@@ -73,3 +73,19 @@ export const getArabicAttendanceString = (
   }
   return status === 'present' ? 'حاضر ✅' : status === 'late' ? 'متأخر ⚠️' : 'غائب ❌';
 };
+
+/**
+ * Returns the effective student display name for messages & reports.
+ * Uses student.certificateName (Latin transliterated name) when lang is 'en' or 'de',
+ * falling back to student.name if certificateName is not set.
+ */
+export const getStudentDisplayName = (
+  student?: { name?: string; certificateName?: string } | null,
+  lang: string = 'ar'
+): string => {
+  if (!student) return '';
+  if ((lang === 'en' || lang === 'de') && student.certificateName && student.certificateName.trim().length > 0) {
+    return student.certificateName.trim();
+  }
+  return student.name || '';
+};

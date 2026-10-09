@@ -82,11 +82,6 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
     e.preventDefault();
     if (!name) return;
 
-    if (type === 'online' && !zoomLink.trim()) {
-      alert(t('auto_zoom_link_is_required_for_onli'));
-      return;
-    }
-
     if (type === 'offline' && !address.trim()) {
       alert(t('auto_address_location_is_required'));
       return;

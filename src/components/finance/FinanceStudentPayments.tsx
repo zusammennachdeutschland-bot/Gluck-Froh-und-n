@@ -4,6 +4,7 @@ import { PaymentRecord, Student, Group, Lesson } from '../../types';
 import { getStudentCyclePricing, calculateDuePaymentCycles, DuePaymentCycle, getStudentAdvanceLessonCredits, calculateEstimatedPastDate } from '../../utils/paymentUtils';
 import { formatLocalDate, normalizeDateToISO } from '../../utils/timeUtils';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../../utils/phoneUtils';
+import { getTimeBasedGreeting } from '../../utils/greetingUtils';
 import { 
   DollarSign, CheckCircle2, Clock, Send, Search, 
   Check, X, Sparkles, History, Calendar, AlertCircle, TrendingUp, ChevronRight,
@@ -679,46 +680,24 @@ export const FinanceStudentPayments: React.FC = () => {
       : (lang === 'ar' ? 'تواريخ الحصص المكتملة' : lang === 'en' ? 'Completed lesson dates' : 'Abgeschlossene Lektionstermine');
 
     const isSingle = item.cycleLength <= 1;
+    const stObj = students.find(s => s.id === item.studentId || (s.name && item.studentName && s.name.trim().toLowerCase() === item.studentName.trim().toLowerCase()));
+    const englishStudentName = stObj?.certificateName || stObj?.displayNameEn || stObj?.nameEn;
+    const studentDisplayName = (lang === 'en' || lang === 'de')
+      ? (englishStudentName || item.studentName)
+      : (stObj?.displayNameAr || stObj?.nameAr || item.studentName);
 
     if (lang === 'en') {
-      return `Dear Parent,
-
-Notice of ${isSingle ? 'Lesson Payment Due' : 'Course Cycle Completion & Payment Due'} 📚
-
-Student: ${item.studentName}
-${item.groupName ? `Group: ${item.groupName}\n` : ''}Amount Due: ${item.amountDue} ${currency} (${item.cycleLength} lesson${item.cycleLength > 1 ? 's' : ''})
-
-Completed Lesson Dates:
-${datesFormatted}
-
-Thank you for your cooperation!`;
+      const enG = getTimeBasedGreeting('en', { recipientName: 'Dear Parent' });
+      return `${enG}\n\nNotice of ${isSingle ? 'Lesson Payment Due' : 'Course Cycle Completion & Payment Due'} 📚\n\nStudent: ${studentDisplayName}\n${item.groupName ? `Group: ${item.groupName}\n` : ''}Amount Due: ${item.amountDue} ${currency} (${item.cycleLength} lesson${item.cycleLength > 1 ? 's' : ''})\n\nCompleted Lesson Dates:\n${datesFormatted}\n\nThank you for your cooperation!`;
     }
 
     if (lang === 'de') {
-      return `Sehr geehrte Eltern,
-
-Benachrichtigung über ${isSingle ? 'Lektionsfälligkeit' : 'Kurssitzungsabschluss & Fälligkeit'} 📚
-
-Schüler/in: ${item.studentName}
-${item.groupName ? `Gruppe: ${item.groupName}\n` : ''}Fälliger Betrag: ${item.amountDue} ${currency} (${item.cycleLength} Lektion${item.cycleLength > 1 ? 'en' : ''})
-
-Abgeschlossene Termine:
-${datesFormatted}
-
-Vielen Dank für Ihre Zusammenarbeit!`;
+      const deG = getTimeBasedGreeting('de', { recipientName: 'Sehr geehrte Eltern' });
+      return `${deG}\n\nBenachrichtigung über ${isSingle ? 'Lektionsfälligkeit' : 'Kurssitzungsabschluss & Fälligkeit'} 📚\n\nSchüler/in: ${studentDisplayName}\n${item.groupName ? `Gruppe: ${item.groupName}\n` : ''}Fälliger Betrag: ${item.amountDue} ${currency} (${item.cycleLength} Lektion${item.cycleLength > 1 ? 'en' : ''})\n\nAbgeschlossene Termine:\n${datesFormatted}\n\nVielen Dank für Ihre Zusammenarbeit!`;
     }
 
-    return `السلام عليكم ورحمة الله وبركاته،
-
-إشعار ${isSingle ? 'استحقاق سداد الحصة الدراسية' : 'اكتمال الدورة الدراسية واستحقاق السداد'} 📚
-
-الطالب/ة: ${item.studentName}
-${item.groupName ? `المجموعة: ${item.groupName}\n` : ''}المبلغ المستحق: ${item.amountDue} ${currency} (${item.cycleLength > 1 ? `عدد ${item.cycleLength} حصص` : 'حصة واحدة'})
-
-تاريخ الحصص المكتملة:
-${datesFormatted}
-
-شاكرين ومقدرين حسن تعاونكم معنا للتسديد.`;
+    const arG = getTimeBasedGreeting('ar', { style: 'egyptian' });
+    return `${arG}\n\nإشعار ${isSingle ? 'استحقاق سداد الحصة الدراسية' : 'اكتمال الدورة الدراسية واستحقاق السداد'} 📚\n\nالطالب/ة: ${studentDisplayName}\n${item.groupName ? `المجموعة: ${item.groupName}\n` : ''}المبلغ المستحق: ${item.amountDue} ${currency} (${item.cycleLength > 1 ? `عدد ${item.cycleLength} حصص` : 'حصة واحدة'})\n\nتاريخ الحصص المكتملة:\n${datesFormatted}\n\nشاكرين ومقدرين حسن تعاونكم معنا للتسديد.`;
   };
 
   const handleCopyMessage = (msg: string) => {

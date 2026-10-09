@@ -8,6 +8,7 @@ import { formatTimeDisplay, parseLocalDate } from '../utils/timeUtils';
 import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString } from '../utils/genderUtils';
 import { getStudentCode } from '../utils/studentCodeUtils';
 import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
+import { getTimeBasedGreeting, getCairoHour } from '../utils/greetingUtils';
 import { 
   X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen, Globe, Sun, Moon
 } from 'lucide-react';
@@ -259,9 +260,6 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const [isManualEdited, setIsManualEdited] = useState<boolean>(false);
   const [reportStyle, setReportStyle] = useState<'egyptian' | 'standard' | 'concise'>('egyptian');
   const [styleSeed, setStyleSeed] = useState<number>(0);
-  const [greetingPeriod, setGreetingPeriod] = useState<'morning' | 'evening'>(() => {
-    return new Date().getHours() < 12 ? 'morning' : 'evening';
-  });
   const [recordingLink, setRecordingLink] = useState<string>(
     lesson.report?.recordingLink || lesson.recordingLink || ''
   );
@@ -455,7 +453,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
     const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
 
-    const isMorning = greetingPeriod === 'morning';
+    const isMorning = getCairoHour() < 12;
 
     if (reportLanguage === 'en') {
       const groupTitle = associatedGroup?.name || lesson.title || 'German Group';
@@ -464,7 +462,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
         return stAtt !== 'present';
       });
 
-      const enGreeting = isMorning ? 'Good morning / Greetings 👋' : 'Hello / Greetings 👋';
+      const enGreeting = getTimeBasedGreeting('en', { isGroup: true });
       let text = `${enGreeting}\n📊 Group Session Report: *${groupTitle}* 🇩🇪\n`;
       if (lesson.date) text += `📅 Date: ${lesson.date}\n`;
       if (lesson.time) text += `⏰ Time: ${lesson.time}\n`;
@@ -475,7 +473,9 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
         text += `\n----------------------------------\n⚠️ Attendance Notes:\n`;
         absentsOrLates.forEach((st) => {
           const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || 'absent';
-          text += `• ${st.name}: ${stAtt === 'late' ? 'Late ⚠️' : 'Absent ❌'}\n`;
+          const stEnName = st.certificateName || st.displayNameEn || st.nameEn;
+          const stDisplayName = stEnName || st.name;
+          text += `• ${stDisplayName}: ${stAtt === 'late' ? 'Late ⚠️' : 'Absent ❌'}\n`;
         });
       }
       text += `\n\nThank you,\n${profile.displayName || teacherSig} - German Language Teacher 🇩🇪`;
@@ -489,7 +489,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
         return stAtt !== 'present';
       });
 
-      const deGreeting = isMorning ? 'Guten Morgen! Herzliche Grüße 👋' : 'Guten Tag! Herzliche Grüße 👋';
+      const deGreeting = getTimeBasedGreeting('de', { isGroup: true });
       let text = `${deGreeting}\n📊 Gruppenbericht: *${groupTitle}* 🇩🇪\n`;
       if (lesson.date) text += `📅 Datum: ${lesson.date}\n`;
       if (lesson.time) text += `⏰ Uhrzeit: ${lesson.time}\n`;
@@ -500,7 +500,9 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
         text += `\n----------------------------------\n⚠️ Anwesenheitshinweise:\n`;
         absentsOrLates.forEach((st) => {
           const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || 'absent';
-          text += `• ${st.name}: ${stAtt === 'late' ? 'Verspätet ⚠️' : 'Abwesend ❌'}\n`;
+          const stEnName = st.certificateName || st.displayNameEn || st.nameEn;
+          const stDisplayName = stEnName || st.name;
+          text += `• ${stDisplayName}: ${stAtt === 'late' ? 'Verspätet ⚠️' : 'Abwesend ❌'}\n`;
         });
       }
       text += `\n\nMit freundlichen Grüßen,\n${profile.displayName || teacherSig} - Deutschlehrer 🇩🇪`;
@@ -627,7 +629,10 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
     let perfFeedback = '';
     let attendanceAlert = '';
 
-    const studentDisplayName = activeStudent?.name || lesson.studentName || 'الطالب';
+    const englishStudentName = activeStudent?.certificateName || activeStudent?.displayNameEn || activeStudent?.nameEn;
+    const studentDisplayName = (reportLanguage === 'de' || reportLanguage === 'en')
+      ? (englishStudentName || activeStudent?.name || lesson.studentName || 'Student')
+      : (activeStudent?.displayNameAr || activeStudent?.nameAr || activeStudent?.name || lesson.studentName || 'الطالب');
     const activeStudentCode = activeStudent ? getStudentCode(activeStudent) : (lesson.studentId ? getStudentCode({ id: lesson.studentId, name: lesson.studentName || '' }) : '');
     const explicitGender = activeStudent ? (activeStudent.gender || lesson.report?.studentPerformance?.[activeStudent.id]?.gender) : undefined;
     const isFemale = isLikelyFemaleStudent(studentDisplayName, explicitGender);
@@ -736,13 +741,13 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
       : (lesson.report?.studentExamGrade?.[lesson.studentId || ''] ?? lesson.report?.studentExamGrade?.['single']);
     const hasExam = !isAbsent && examGrade !== undefined && examGrade !== null && examGrade !== -1;
 
-    const isMorning = greetingPeriod === 'morning';
+    const isMorning = getCairoHour() < 12;
 
     // ENGLISH REPORT FORMULA
     if (reportLanguage === 'en') {
       const attendanceStr = isAbsent ? '❌ Absent' : isLate ? '⚠️ Late' : '✅ Present';
       const hwStr = isAbsent ? 'Absent' : homeworkOption === 'تم الحل بالكامل 👍' ? 'Completed fully 👍' : homeworkOption === 'لم يتم الحل 👎' ? 'Not completed 👎' : 'None assigned';
-      const greeting = isMorning ? `Good morning / Greetings 👋` : `Hello / Greetings 👋`;
+      const greeting = getTimeBasedGreeting('en');
       const datePart = lesson.date ? `📅 Date: ${lesson.date}` : '';
       const timePart = lesson.time ? `⏰ Time: ${lesson.time}` : '';
       const cyclePart = hasCycle ? `🔢 Session: Session ${currentSessionNumber} of ${totalCycleSessions}` : '';
@@ -769,7 +774,7 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
     if (reportLanguage === 'de') {
       const attendanceStr = isAbsent ? '❌ Abwesend' : isLate ? '⚠️ Verspätet' : '✅ Anwesend';
       const hwStr = isAbsent ? 'Abwesend' : homeworkOption === 'تم الحل بالكامل 👍' ? 'Vollständig erledigt 👍' : homeworkOption === 'لم يتم الحل 👎' ? 'Nicht erledigt 👎' : 'Keine Hausaufgabe';
-      const greeting = isMorning ? `Guten Morgen! Herzliche Grüße 👋` : `Guten Tag! Herzliche Grüße 👋`;
+      const greeting = getTimeBasedGreeting('de');
       const datePart = lesson.date ? `📅 Datum: ${lesson.date}` : '';
       const timePart = lesson.time ? `⏰ Uhrzeit: ${lesson.time}` : '';
       const cyclePart = hasCycle ? `🔢 Unterrichtsstunde: Sitzung ${currentSessionNumber} von ${totalCycleSessions}` : '';
@@ -1017,7 +1022,6 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
     recordingLink2,
     reportStyle,
     styleSeed,
-    greetingPeriod,
     profile.displayName,
     profile.displayNameAr,
     profile.nameAr,
@@ -1697,31 +1701,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setGreetingPeriod(prev => prev === 'morning' ? 'evening' : 'morning');
-                    setIsManualEdited(false);
-                  }}
-                  className={`px-2 py-1 border rounded-lg text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer ${
-                    greetingPeriod === 'morning'
-                      ? 'bg-primary-soft text-primary border-primary/30 hover:bg-primary/20'
-                      : 'bg-primary-soft text-primary border-primary/30 hover:bg-primary/20'
-                  }`}
-                  title={_t('التبديل بين تحية الصباح (صباح الخير) والمساء (مساء الخير)', 'Toggle Morning/Evening greeting', 'Morgen-/Abendgruß umschalten')}
-                >
-                  {greetingPeriod === 'morning' ? (
-                    <>
-                      <Sun className="w-3 h-3 text-amber-500 shrink-0" />
-                      <span>{_t('صباح الخير', 'Morning', 'Morgen')}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Moon className="w-3 h-3 text-primary shrink-0" />
-                      <span>{_t('مساء الخير', 'Evening', 'Abend')}</span>
-                    </>
-                  )}
-                </button>
+
 
                 <button
                   type="button"

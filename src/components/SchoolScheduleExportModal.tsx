@@ -17,7 +17,6 @@ import {
 } from '../services/schoolScheduleExportService';
 import { getSchoolSettings } from '../utils/schoolUtils';
 import { exportMasterSchedule } from '../services/masterScheduleExportService';
-import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 interface SchoolScheduleExportModalProps {
   onClose: () => void;
@@ -232,7 +231,6 @@ export const SchoolScheduleExportModal: React.FC<SchoolScheduleExportModalProps>
             </div>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <ReportLanguageToggle showLabel={false} />
             <button 
               onClick={onClose}
               disabled={isProcessing}

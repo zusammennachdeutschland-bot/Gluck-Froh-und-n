@@ -10,7 +10,6 @@ import { Complaint, HodGermanStudent, Teacher, VisitRecord } from '../types';
 import { storage } from '../services/storageService';
 import { generateStageManagerReportPrint } from '../utils/printComplaintUtils';
 import { normalizeClassCode, compareClassCodes } from '../utils/classNormalizer';
-import { ReportLanguageToggle } from './ReportLanguageToggle';
 
 // Reason categories and quick options
 export const TEACHER_TO_STUDENT_REASONS = [
@@ -626,8 +625,6 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
 
             {/* Quick Actions */}
             <div className="flex items-center gap-1.5 w-full sm:w-auto flex-wrap sm:flex-nowrap sm:gap-2">
-              <ReportLanguageToggle showLabel={false} />
-
               <button
                 onClick={() => setIsDispatchReportModalOpen(true)}
                 className="px-2 sm:px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-[10.5px] sm:text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
