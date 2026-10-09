@@ -17,10 +17,39 @@ export interface GroupCycleInfo {
  */
 export function isGroupPerLesson(group?: Partial<Group> | null): boolean {
   if (!group) return false;
+  const gName = (group.name || '').toLowerCase();
+  const gNotes = ((group as any).notes || '').toLowerCase();
+  const pCycle = String(group.paymentCycle || '').toLowerCase();
+  const pModel = String(group.paymentModel || '').toLowerCase();
+  const pType = String((group as any).paymentType || (group as any).payment_type || '').toLowerCase();
+  const bType = String((group as any).billingType || (group as any).billingModel || '').toLowerCase();
+  const pPlan = String((group as any).paymentPlan || (group as any).payment_plan || '').toLowerCase();
+
   return Boolean(
-    group.paymentCycle === 'per_lesson' ||
-    group.paymentModel === 'per_session' ||
-    (group.sessionCount !== undefined && group.sessionCount <= 1)
+    pCycle === 'per_lesson' ||
+    pCycle === 'per_session' ||
+    pCycle === 'حصة' ||
+    pCycle === 'بالحصة' ||
+    pCycle.includes('per_lesson') ||
+    pCycle.includes('per_session') ||
+    pCycle.includes('بالحصة') ||
+    pModel === 'per_session' ||
+    pModel === 'per_lesson' ||
+    pType === 'per_lesson' ||
+    pType === 'per_session' ||
+    pType.includes('per_lesson') ||
+    pType.includes('per_session') ||
+    pType.includes('بالحصة') ||
+    bType === 'per_lesson' ||
+    bType === 'per_session' ||
+    pPlan === 'per_lesson' ||
+    pPlan === 'per_session' ||
+    (group.sessionCount !== undefined && group.sessionCount <= 1) ||
+    gName.includes('بالحصة') ||
+    gName.includes('حصة بحصة') ||
+    gName.includes('لكل حصة') ||
+    gNotes.includes('بالحصة') ||
+    gNotes.includes('حصة بحصة')
   );
 }
 
@@ -501,52 +530,71 @@ export const deduplicatePaymentsList = (
     }
   }
 
-  // Helper sets from paid records
-  const paidLessonIdSet = new Set<string>();
-  const paidDateSignatureSet = new Set<string>();
+  // Helper sets from paid records - indexed strictly per student so one student's payment never affects other students
+  const paidLessonIdsByStudent = new Map<string, Set<string>>();
+  const paidDateSignaturesByStudent = new Map<string, Set<string>>();
+
   dedupedPaid.forEach(p => {
-    if (p.lessonId) paidLessonIdSet.add(p.lessonId);
+    const stId = p.studentId;
+    if (!stId) return;
+
+    if (!paidLessonIdsByStudent.has(stId)) {
+      paidLessonIdsByStudent.set(stId, new Set<string>());
+    }
+    const stIdsSet = paidLessonIdsByStudent.get(stId)!;
+    if (p.lessonId) stIdsSet.add(p.lessonId);
     if (Array.isArray(p.lessonIds)) {
       p.lessonIds.forEach((id: string) => {
-        if (!id.startsWith('virtual_')) paidLessonIdSet.add(id);
+        if (!id.startsWith('virtual_')) stIdsSet.add(id);
       });
     }
+
+    if (!paidDateSignaturesByStudent.has(stId)) {
+      paidDateSignaturesByStudent.set(stId, new Set<string>());
+    }
+    const stDatesSet = paidDateSignaturesByStudent.get(stId)!;
     if (Array.isArray(p.lessonDates)) {
       p.lessonDates.forEach((dStr: string) => {
         const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
         if (match) {
           const iso = normalizeDateToISO(match[1]);
-          if (p.studentId) paidDateSignatureSet.add(`${p.studentId}_${iso}`);
-          if (p.groupId) paidDateSignatureSet.add(`${p.groupId}_${iso}`);
+          stDatesSet.add(`${stId}_${iso}`);
         }
       });
     }
   });
 
-  // Filter and deduplicate pending payments against PAID records and against each other
+  // Filter and deduplicate pending payments against PAID records of the SAME STUDENT and against each other
   const dedupedPending: any[] = [];
   for (const p of pendingPayments) {
-    // Check if this pending payment is ALREADY COVERED by any paid record
-    const realLessonIds = (p.lessonIds || []).filter((id: string) => !id.startsWith('virtual_'));
-    const isIdsCoveredByPaid = realLessonIds.length > 0 && realLessonIds.every((id: string) => paidLessonIdSet.has(id));
+    const stId = p.studentId;
+    const studentPaidLessonIds = stId ? paidLessonIdsByStudent.get(stId) : undefined;
+    const studentPaidDateSignatures = stId ? paidDateSignaturesByStudent.get(stId) : undefined;
+
+    // Check if this pending payment is ALREADY COVERED by any paid record OF THE SAME STUDENT
+    const realLessonIds = (p.lessonIds || []).filter((id: string) => typeof id === 'string' && !id.startsWith('virtual_'));
+    const isIdsCoveredByPaid = Boolean(
+      studentPaidLessonIds && 
+      studentPaidLessonIds instanceof Set &&
+      studentPaidLessonIds.size > 0 &&
+      realLessonIds.length > 0 && 
+      realLessonIds.every((id: string) => Boolean(studentPaidLessonIds?.has(id)))
+    );
     
-    // Check if dates are covered by paid records
+    // Check if dates are covered by paid records OF THE SAME STUDENT
     let isDatesCoveredByPaid = false;
-    if (Array.isArray(p.lessonDates) && p.lessonDates.length > 0) {
+    if (studentPaidDateSignatures && studentPaidDateSignatures instanceof Set && studentPaidDateSignatures.size > 0 && Array.isArray(p.lessonDates) && p.lessonDates.length > 0) {
       const parsedDates: string[] = [];
       p.lessonDates.forEach((dStr: string) => {
         const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
         if (match) parsedDates.push(normalizeDateToISO(match[1]));
       });
-      if (parsedDates.length > 0 && parsedDates.every(dIso => 
-        (p.studentId && paidDateSignatureSet.has(`${p.studentId}_${dIso}`)) ||
-        (p.groupId && paidDateSignatureSet.has(`${p.groupId}_${dIso}`))
-      )) {
+      if (parsedDates.length > 0 && parsedDates.every(dIso => Boolean(studentPaidDateSignatures?.has(`${stId}_${dIso}`)))) {
         isDatesCoveredByPaid = true;
       }
     }
 
-    // Direct overlap with a paid payment of the same student
+    // Direct overlap with a paid payment of the EXACT SAME student
     const matchesPaidPayment = dedupedPaid.some(paid => {
       if (paid.studentId !== p.studentId) return false;
       if (realLessonIds.length > 0 && paid.lessonIds?.some((id: string) => realLessonIds.includes(id))) return true;
@@ -556,7 +604,7 @@ export const deduplicatePaymentsList = (
     });
 
     if (isIdsCoveredByPaid || isDatesCoveredByPaid || matchesPaidPayment) {
-      // This pending payment is obsolete / already paid! Remove it to prevent phantom due cards
+      // This pending payment is obsolete / already paid for THIS student!
       removedIds.add(p.id);
       modified = true;
       continue;

@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications, Importance } from '@capacitor/local-notifications';
+import LiveTimer from './liveTimerPlugin';
 import { 
   NotificationSettings, Lesson, Group, Student, PaymentRecord, 
   ScheduledNotificationItem, NotificationPriority, NotificationSound 
@@ -281,18 +282,34 @@ export const openAndroidNotificationSettings = async () => {
 };
 
 /**
+ * Checks if "Display over other apps" (SYSTEM_ALERT_WINDOW) is granted on Android
+ */
+export const checkOverlayPermission = async (): Promise<boolean> => {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const res = await LiveTimer.checkOverlayPermission();
+      return !!res?.granted;
+    } catch {
+      return true;
+    }
+  }
+  return true;
+};
+
+/**
  * Opens Android System Overlay Settings ("Display over other apps" / "الظهور فوق التطبيقات الأخرى")
  */
 export const openOverlayPermissionSettings = async () => {
   if (Capacitor.isNativePlatform()) {
     try {
-      if (typeof (LocalNotifications as any).changeExactNotificationSetting === 'function') {
-        await (LocalNotifications as any).changeExactNotificationSetting();
-      } else {
-        await LocalNotifications.requestPermissions();
-      }
+      await LiveTimer.openOverlaySettings();
     } catch (e) {
-      console.warn('Could not open overlay settings:', e);
+      console.warn('Could not open overlay settings via LiveTimer:', e);
+      try {
+        if (typeof (LocalNotifications as any).changeExactNotificationSetting === 'function') {
+          await (LocalNotifications as any).changeExactNotificationSetting();
+        }
+      } catch {}
     }
   }
 };

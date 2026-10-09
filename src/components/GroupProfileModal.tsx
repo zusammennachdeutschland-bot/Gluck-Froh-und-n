@@ -13,7 +13,7 @@ import { LessonReminderModal } from './LessonReminderModal';
 import { GroupForm, GroupFormData } from './GroupForm';
 import { AddStudentModal } from './AddStudentModal';
 import { StudentProfileModal } from './StudentProfileModal';
-import { getGroupCycleInfo } from '../utils/lessonUtils';
+import { getGroupCycleInfo, isGroupPerLesson } from '../utils/lessonUtils';
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
 import { transliterateArabicNameToEnglish } from '../utils/nameUtils';
@@ -147,8 +147,8 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
     confetti({ particleCount: 30, spread: 30 });
   };
 
-  const isPerLessonGroup = group.paymentModel === 'per_session' || group.paymentCycle === 'per_lesson';
-  const cycleTotalSessions = (group.sessionCount && group.sessionCount > 1) ? group.sessionCount : 4;
+  const isPerLessonGroup = isGroupPerLesson(group);
+  const cycleTotalSessions = isPerLessonGroup ? 1 : ((group.sessionCount && group.sessionCount > 1) ? group.sessionCount : 4);
   
   // Find upcoming scheduled lessons for this group
   const upcomingScheduledLessons = useMemo(() => {
@@ -268,7 +268,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
   });
 
   const handleSubmit = (data: GroupFormData) => {
-    const isPerLesson = data.paymentCycle === 'per_lesson';
+    const isPerLesson = data.paymentCycle === 'per_lesson' || data.paymentModel === 'per_session';
     const effectiveSessionCount = isPerLesson ? 1 : Math.max(2, Number(data.sessionCount) || 4);
     const pricePerSession = Number(data.pricePerSession) || 0;
     const calcMonthlyPrice = isPerLesson 
@@ -370,7 +370,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                   href={group.whatsAppGroupLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="p-1.5 sm:p-2 rounded-xl text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition-all flex items-center gap-1 text-[11px] font-bold"
+                  className="p-1.5 sm:p-2 rounded-xl text-primary bg-primary-soft hover:bg-primary-soft/80 border border-primary-border/40 transition-all flex items-center gap-1 text-[11px] font-bold"
                   title={_t('فتح جروب واتساب للمجموعة', 'Open WhatsApp Group', 'WhatsApp-Gruppe öffnen')}
                 >
                   <MessageCircle className="w-4 h-4" />
@@ -388,33 +388,38 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
             </div>
           </div>
 
-          {/* Details Bar: Rich Chic Metadata Chips */}
-          <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+          {/* Details Bar: Clean Unboxed Metadata */}
+          <div className="flex items-center gap-2 flex-wrap pt-0.5 text-xs font-bold text-text-muted">
             {/* Students enrolled */}
-            <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-blue-50/80 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/60">
-              <Users className="w-3 h-3 shrink-0" />
+            <span className="inline-flex items-center gap-1">
+              <Users className="w-3.5 h-3.5 text-primary shrink-0" />
               <span>{groupStudents.length} {_t('طلاب مسجلين', 'Students', 'Schüler')}</span>
             </span>
 
             {/* Grade level */}
             {group.grade && (
-              <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-violet-50/80 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 border border-violet-200/60 dark:border-violet-800/60">
-                <GraduationCap className="w-3 h-3 shrink-0" />
-                <span>{group.grade}</span>
-              </span>
+              <>
+                <span className="text-text-muted/40">•</span>
+                <span className="inline-flex items-center gap-1">
+                  <GraduationCap className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span>{group.grade}</span>
+                </span>
+              </>
             )}
 
             {/* Lesson Type */}
-            <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60">
-              {group.type === 'online' ? <Video className="w-3 h-3 shrink-0" /> : <MapPin className="w-3 h-3 shrink-0" />}
+            <span className="text-text-muted/40">•</span>
+            <span className="inline-flex items-center gap-1">
+              {group.type === 'online' ? <Video className="w-3.5 h-3.5 text-primary shrink-0" /> : <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />}
               <span>{group.type === 'online' ? _t('أونلاين', 'Online', 'Online') : (group.address || _t('حضوري', 'In-Person', 'Präsenz'))}</span>
             </span>
 
             {/* Payment Model & Price */}
-            <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-amber-50/80 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60">
-              <CreditCard className="w-3 h-3 shrink-0" />
+            <span className="text-text-muted/40">•</span>
+            <span className="inline-flex items-center gap-1">
+              <CreditCard className="w-3.5 h-3.5 text-primary shrink-0" />
               <span>
-                {group.paymentModel === 'per_session'
+                {isPerLessonGroup
                   ? `${group.pricePerSession ? `${group.pricePerSession} EGP / ` : ''}${_t('محاسبة بالحصة', 'Per Session', 'Pro Stunde')}`
                   : `${group.monthlyPackagePrice ? `${group.monthlyPackagePrice} EGP • ` : ''}${!cycleInfo.isPerLesson ? cycleInfo.label : _t('باقة حصص', 'Package', 'Paket')}`}
               </span>
@@ -422,13 +427,16 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
 
             {/* Schedule & Duration */}
             {(group.scheduleDays?.length > 0 || group.lessonDurationMinutes) && (
-              <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                <Clock className="w-3 h-3 shrink-0" />
-                <span>
-                  {group.scheduleDays?.length ? `${group.scheduleDays.length} ${_t('أيام/أسبوع', 'days/wk', 'Tage/W.')}` : ''}
-                  {group.lessonDurationMinutes ? `${group.scheduleDays?.length ? ' • ' : ''}${group.lessonDurationMinutes} ${_t('دقيقة', 'min', 'Min.')}` : ''}
+              <>
+                <span className="text-text-muted/40">•</span>
+                <span className="inline-flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span>
+                    {group.scheduleDays?.length ? `${group.scheduleDays.length} ${_t('أيام/أسبوع', 'days/wk', 'Tage/W.')}` : ''}
+                    {group.lessonDurationMinutes ? `${group.scheduleDays?.length ? ' • ' : ''}${group.lessonDurationMinutes} ${_t('دقيقة', 'min', 'Min.')}` : ''}
+                  </span>
                 </span>
-              </span>
+              </>
             )}
           </div>
         </div>
@@ -756,7 +764,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                                   <button
                                     type="button"
                                     onClick={() => handleAddExistingStudentToGroup(s.id)}
-                                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0 shadow-2xs"
+                                    className="px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white font-bold text-[11px] rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0 shadow-2xs"
                                   >
                                     <Plus className="w-3 h-3" />
                                     <span>{_t('ضم للجروب', 'Assign', 'Hinzufügen')}</span>
@@ -853,11 +861,9 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
             /* RECORDINGS TAB */
             <div className="space-y-4">
               {/* Quick Grain Launch Bar */}
-              <div className="p-3 bg-gradient-to-r from-violet-500/10 via-purple-500/10 to-primary/10 border border-purple-200 dark:border-purple-900/40 rounded-xl flex items-center justify-between gap-2">
+              <div className="p-3 bg-primary-soft/40 border border-primary-border/40 rounded-xl flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="p-2 bg-purple-600 text-white rounded-lg shadow-2xs shrink-0">
-                    <Video className="w-4 h-4" />
-                  </div>
+                  <Video className="w-5 h-5 text-primary shrink-0" />
                   <div className="min-w-0">
                     <h4 className="text-xs font-black text-text-main truncate">
                       {_t('منصة التسجيلات الذكية Grain', 'Grain Video Recordings', 'Grain Video-Aufnahmen')}
@@ -872,7 +878,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                   href="https://grain.com/app/meetings"
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-black text-xs rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
+                  className="px-3 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>Open Grain</span>
@@ -1004,12 +1010,12 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                         {hasRecordings ? (
                           <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-surface-border/60">
                             {r1 && (
-                              <div className="inline-flex items-center gap-1 bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-900/50 rounded-lg p-1">
+                              <div className="inline-flex items-center gap-1 bg-primary-soft/40 border border-primary-border/40 rounded-lg p-1">
                                 <a
                                   href={r1}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="px-2 py-1 bg-violet-600 hover:bg-violet-700 text-white font-black text-[11px] rounded-md transition-all flex items-center gap-1 shadow-2xs"
+                                  className="px-2 py-1 bg-primary hover:bg-primary-hover text-white font-black text-[11px] rounded-md transition-all flex items-center gap-1 shadow-2xs"
                                 >
                                   <Play className="w-3 h-3 fill-white" />
                                   <span>{r2 ? _t('الجزء 1', 'Part 1', 'Teil 1') : _t('مشاهدة التسجيل', 'Watch Recording', 'Aufnahme ansehen')}</span>
@@ -1017,7 +1023,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                                 <button
                                   type="button"
                                   onClick={() => handleCopyLink(lesson, r1)}
-                                  className="p-1 hover:bg-violet-200 dark:hover:bg-violet-900/50 text-violet-700 dark:text-violet-300 rounded cursor-pointer transition-colors"
+                                  className="p-1 hover:bg-primary-soft text-primary rounded cursor-pointer transition-colors"
                                   title={_t('نسخ رابط الجزء 1', 'Copy Part 1 Link', 'Link kopieren')}
                                 >
                                   {copiedLessonId === `${lesson.id}_${r1}` ? (
@@ -1030,12 +1036,12 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                             )}
 
                             {r2 && (
-                              <div className="inline-flex items-center gap-1 bg-fuchsia-50 dark:bg-fuchsia-950/30 border border-fuchsia-200 dark:border-fuchsia-900/50 rounded-lg p-1">
+                              <div className="inline-flex items-center gap-1 bg-primary-soft/40 border border-primary-border/40 rounded-lg p-1">
                                 <a
                                   href={r2}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="px-2 py-1 bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-black text-[11px] rounded-md transition-all flex items-center gap-1 shadow-2xs"
+                                  className="px-2 py-1 bg-primary hover:bg-primary-hover text-white font-black text-[11px] rounded-md transition-all flex items-center gap-1 shadow-2xs"
                                 >
                                   <Play className="w-3 h-3 fill-white" />
                                   <span>{_t('الجزء 2', 'Part 2', 'Teil 2')}</span>
@@ -1043,7 +1049,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                                 <button
                                   type="button"
                                   onClick={() => handleCopyLink(lesson, r2)}
-                                  className="p-1 hover:bg-fuchsia-200 dark:hover:bg-fuchsia-900/50 text-fuchsia-700 dark:text-fuchsia-300 rounded cursor-pointer transition-colors"
+                                  className="p-1 hover:bg-primary-soft text-primary rounded cursor-pointer transition-colors"
                                   title={_t('نسخ رابط الجزء 2', 'Copy Part 2 Link', 'Link kopieren')}
                                 >
                                   {copiedLessonId === `${lesson.id}_${r2}` ? (
@@ -1059,7 +1065,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                             <button
                               type="button"
                               onClick={() => handleShareRecordingWhatsApp(lesson)}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs ml-auto"
+                              className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white font-bold text-[11px] rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs ml-auto"
                               title={_t('مشاركة التسجيل على الواتساب', 'Share Recording on WhatsApp', 'Auf WhatsApp teilen')}
                             >
                               <Send className="w-3 h-3" />
@@ -1107,7 +1113,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
               <button
                 type="button"
                 onClick={() => setShowReminderModal(true)}
-                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
               >
                 <Send className="w-3.5 h-3.5 fill-white shrink-0" />
                 <span className="truncate">{_t('تذكير الحصة', 'Send Reminder', 'Erinnerung')}</span>

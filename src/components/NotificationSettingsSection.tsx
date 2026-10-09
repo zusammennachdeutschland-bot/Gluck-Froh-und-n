@@ -4,7 +4,7 @@ import { NotificationSound } from '../types';
 import { 
   getNotificationPermission, requestNotificationPermission, 
   openAndroidNotificationSettings, checkExactAlarmPermission,
-  openExactAlarmSettings, openOverlayPermissionSettings, sendTestOutsideNotification
+  openExactAlarmSettings, checkOverlayPermission, openOverlayPermissionSettings, sendTestOutsideNotification
 } from '../services/notificationService';
 import { 
   Bell, BellOff, Volume2, Shield, Clock, Calendar, DollarSign, 
@@ -31,6 +31,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
 
   const [permissionStatus, setPermissionStatus] = useState<string>('checking');
   const [exactAlarmGranted, setExactAlarmGranted] = useState<boolean>(true);
+  const [overlayGranted, setOverlayGranted] = useState<boolean>(true);
   const [isRebuilding, setIsRebuilding] = useState<boolean>(false);
   const [customMinutes, setCustomMinutes] = useState<string>(
     notificationSettings.lessonReminderMinutesBefore.toString()
@@ -55,6 +56,8 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
     setPermissionStatus(status);
     const exactStatus = await checkExactAlarmPermission();
     setExactAlarmGranted(exactStatus);
+    const overlayStatus = await checkOverlayPermission();
+    setOverlayGranted(overlayStatus);
   };
 
   const handleToggleMaster = async () => {
@@ -102,7 +105,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
           <button
             type="button"
             onClick={onBack}
-            className="lg:hidden p-1.5 rounded-lg bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main border border-surface-border cursor-pointer"
+            className="lg:hidden p-1.5 rounded-lg bg-surface-hover hover:bg-surface-border text-text-main border border-surface-border cursor-pointer transition-colors"
           >
             <BackIcon className="w-4 h-4" />
           </button>
@@ -409,27 +412,45 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                 {_t('تفعيل الإشعارات', 'Enable Push', 'Aktivieren')}
               </button>
             ) : (
-              <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] flex items-center gap-1">
-                <Check className="w-3 h-3" />
+              <span className="text-text-muted font-bold text-[11px] flex items-center gap-1">
+                <Check className="w-3.5 h-3.5 text-primary" />
                 {_t('الإشعارات مفعلة', 'Push Granted', 'Aktiviert')}
               </span>
             )}
 
-            <button
-              type="button"
-              onClick={openOverlayPermissionSettings}
-              className="px-2.5 py-1 rounded-lg bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main border border-surface-border font-semibold text-[11px] cursor-pointer flex items-center gap-1"
-            >
-              <Layers className="w-3 h-3 text-primary" />
-              <span>{_t('العوم فوق التطبيقات (Overlay)', 'Overlay Permission', 'Über anderen Apps')}</span>
-            </button>
+            {overlayGranted ? (
+              <span className="text-text-muted font-bold text-[11px] flex items-center gap-1">
+                <Check className="w-3.5 h-3.5 text-primary" />
+                {_t('العوم فوق التطبيقات مفعّل', 'Overlay Granted', 'Über Apps aktiv')}
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={async () => {
+                  await openOverlayPermissionSettings();
+                  setTimeout(checkPermissions, 1500);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white font-bold text-[11px] cursor-pointer flex items-center gap-1 transition-colors shadow-2xs"
+                title={_t('فتح إعدادات الهاتف لمنح إذن الظهور فوق التطبيقات الأخرى', 'Open phone settings to grant overlay permission', 'Overlay-Berechtigung erteilen')}
+              >
+                <Layers className="w-3 h-3" />
+                <span>{_t('إذن العوم فوق التطبيقات', 'Grant Overlay Permission', 'Über anderen Apps')}</span>
+              </button>
+            )}
 
             <button
               type="button"
               onClick={openExactAlarmSettings}
-              className="px-2.5 py-1 rounded-lg bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main border border-surface-border font-semibold text-[11px] cursor-pointer"
+              className="px-2.5 py-1 rounded-lg bg-surface-hover hover:bg-surface-border text-text-main border border-surface-border font-semibold text-[11px] cursor-pointer transition-colors"
             >
-              {_t('المنبهات الدقيقة', 'Exact Alarms', 'Genaue Alarme')}
+              {exactAlarmGranted ? (
+                <span className="flex items-center gap-1">
+                  <Check className="w-3 h-3 text-primary" />
+                  {_t('المنبهات الدقيقة', 'Exact Alarms', 'Genaue Alarme')}
+                </span>
+              ) : (
+                _t('المنبهات الدقيقة', 'Exact Alarms', 'Genaue Alarme')
+              )}
             </button>
           </div>
         </div>

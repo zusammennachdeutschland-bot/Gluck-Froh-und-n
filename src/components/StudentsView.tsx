@@ -22,7 +22,8 @@ import { getStudentCode } from '../utils/studentCodeUtils';
 import { normalizeSearchText } from '../utils/nameUtils';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
-import { getGroupCycleInfo } from '../utils/lessonUtils';
+import { getGroupCycleInfo, isGroupPerLesson } from '../utils/lessonUtils';
+import { Pagination } from './common/Pagination';
 
 export const StudentsView: React.FC = () => {
   const { 
@@ -90,11 +91,43 @@ export const StudentsView: React.FC = () => {
     return group.scheduleDays.some(d => getDayNumber(d) === targetDayNum);
   };
 
-  const activeStudents = students.filter(s => s.status !== 'archived');
-  const archivedStudents = students.filter(s => s.status === 'archived');
+  const activeStudents = useMemo(() => students.filter(s => s.status !== 'archived'), [students]);
+  const archivedStudents = useMemo(() => students.filter(s => s.status === 'archived'), [students]);
 
-  const activeGroups = groups.filter(g => g.status !== 'archived');
-  const archivedGroups = groups.filter(g => g.status === 'archived');
+  const activeGroups = useMemo(() => groups.filter(g => g.status !== 'archived'), [groups]);
+  const archivedGroups = useMemo(() => groups.filter(g => g.status === 'archived'), [groups]);
+
+  const groupMap = useMemo(() => {
+    const map = new Map<string, Group>();
+    groups.forEach(g => map.set(g.id, g));
+    return map;
+  }, [groups]);
+
+  const groupStudentCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    activeStudents.forEach(s => {
+      if (s.groupId) {
+        map.set(s.groupId, (map.get(s.groupId) || 0) + 1);
+      }
+    });
+    return map;
+  }, [activeStudents]);
+
+  const studentLessonOnlineMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const l of lessons) {
+      if (l.type) {
+        const isOnline = l.type === 'online';
+        if (l.studentId) map.set(l.studentId, isOnline);
+        if (l.studentName) map.set(l.studentName.trim().toLowerCase(), isOnline);
+      }
+    }
+    return map;
+  }, [lessons]);
+
+  const unassignedGenderCount = useMemo(() => {
+    return activeStudents.filter(s => !s.gender).length;
+  }, [activeStudents]);
 
   // Ultra-compact student summary calculation (Gender, Grades, Groups, Totals, Online/Offline)
   const studentSummary = useMemo(() => {
@@ -104,9 +137,6 @@ export const StudentsView: React.FC = () => {
     let onlineCount = 0;
     let offlineCount = 0;
     const gradeMap: Record<string, { total: number; boys: number; girls: number; online: number; offline: number }> = {};
-
-    const groupMap = new Map<string, Group>();
-    activeGroups.forEach(g => groupMap.set(g.id, g));
 
     activeStudents.forEach(s => {
       const isGirl = s.gender === 'female' || (!s.gender && isLikelyFemaleStudent(s.name));
@@ -119,15 +149,12 @@ export const StudentsView: React.FC = () => {
         else boysCount++;
       }
 
-      // Check online / offline status
+      // Check online / offline status via O(1) maps
       let isOnline = false;
       if (s.groupId && groupMap.has(s.groupId)) {
         isOnline = groupMap.get(s.groupId)?.type === 'online';
       } else {
-        const studentLesson = lessons.find(l => 
-          (l.studentId === s.id || (Boolean(l.studentName) && Boolean(s.name) && l.studentName.trim().toLowerCase() === s.name.trim().toLowerCase())) && l.type
-        );
-        isOnline = studentLesson ? studentLesson.type === 'online' : false;
+        isOnline = studentLessonOnlineMap.get(s.id) || (Boolean(s.name) && studentLessonOnlineMap.get(s.name.trim().toLowerCase())) || false;
       }
 
       if (isOnline) {
@@ -150,13 +177,6 @@ export const StudentsView: React.FC = () => {
         gradeMap[g].online++;
       } else {
         gradeMap[g].offline++;
-      }
-    });
-
-    const groupStudentCountMap = new Map<string, number>();
-    activeStudents.forEach(s => {
-      if (s.groupId) {
-        groupStudentCountMap.set(s.groupId, (groupStudentCountMap.get(s.groupId) || 0) + 1);
       }
     });
 
@@ -210,124 +230,199 @@ export const StudentsView: React.FC = () => {
       archivedTotal: archivedStudents.length,
       sortedGrades,
     };
-  }, [activeStudents, activeGroups, archivedStudents, lessons, _t]);
+  }, [activeStudents, activeGroups, archivedStudents, groupMap, groupStudentCountMap, studentLessonOnlineMap, _t]);
 
   const [studentSortBy, setStudentSortBy] = useState<'name' | 'attendance' | 'homework' | 'dictation' | 'exam'>('name');
 
-  const getStudentStats = (student: Student) => {
-    // completed lessons where student is part of the group, or is the individual student
-    const studentLessons = lessons.filter(l => 
-      l.status === 'completed' && l.report && 
-      (l.groupId === student.groupId || (l.studentId ? l.studentId === student.id : (Boolean(l.studentName) && Boolean(student.name) && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())))
-    );
+  // Single-pass memoized student stats calculation
+  const studentStatsMap = useMemo(() => {
+    const map = new Map<string, { attendanceRate: number; homeworkRate: number; avgDictation: number; avgExam: number }>();
+    if (studentSortBy === 'name') return map;
 
-    const totalLessons = studentLessons.length;
-    if (totalLessons === 0) {
-      return { attendanceRate: 0, homeworkRate: 0, avgDictation: 0, avgExam: 0 };
+    const studentLessonsMap = new Map<string, typeof lessons>();
+    const completedLessons = lessons.filter(l => l.status === 'completed' && l.report);
+
+    const groupStudentsMap = new Map<string, string[]>();
+    activeStudents.forEach(s => {
+      if (s.groupId) {
+        const arr = groupStudentsMap.get(s.groupId) || [];
+        arr.push(s.id);
+        groupStudentsMap.set(s.groupId, arr);
+      }
+    });
+
+    for (const l of completedLessons) {
+      if (l.groupId && groupStudentsMap.has(l.groupId)) {
+        for (const sId of groupStudentsMap.get(l.groupId)!) {
+          const arr = studentLessonsMap.get(sId) || [];
+          arr.push(l);
+          studentLessonsMap.set(sId, arr);
+        }
+      } else if (l.studentId) {
+        const arr = studentLessonsMap.get(l.studentId) || [];
+        arr.push(l);
+        studentLessonsMap.set(l.studentId, arr);
+      }
     }
 
-    // Attendance rate
-    const presentCount = studentLessons.filter(l => {
-      const att = l.report?.studentAttendance?.[student.id] || l.report?.attendanceStatus || 'present';
-      return att === 'present' || att === 'late';
-    }).length;
-    const attendanceRate = (presentCount / totalLessons) * 100;
+    for (const s of activeStudents) {
+      const sLessons = studentLessonsMap.get(s.id) || [];
+      const total = sLessons.length;
+      if (total === 0) {
+        map.set(s.id, { attendanceRate: 0, homeworkRate: 0, avgDictation: 0, avgExam: 0 });
+        continue;
+      }
 
-    // Homework completion rate
-    const homeworkDoneCount = studentLessons.filter(l => l.report?.studentHomeworkDone?.[student.id] === 'yes').length;
-    const homeworkRate = (homeworkDoneCount / totalLessons) * 100;
+      let presentCount = 0;
+      let homeworkCount = 0;
+      let dictSum = 0;
+      let dictCount = 0;
+      let examSum = 0;
+      let examCount = 0;
 
-    // Avg Dictation score
-    const dictationGrades = studentLessons
-      .map(l => l.report?.studentDictationGrade?.[student.id])
-      .filter(g => g !== undefined && g !== null && g >= 0) as number[];
-    const avgDictation = dictationGrades.length > 0 
-      ? dictationGrades.reduce((sum, g) => sum + g, 0) / dictationGrades.length 
-      : 0;
+      for (const l of sLessons) {
+        const att = l.report?.studentAttendance?.[s.id] || l.report?.attendanceStatus || 'present';
+        if (att === 'present' || att === 'late') presentCount++;
+        if (l.report?.studentHomeworkDone?.[s.id] === 'yes') homeworkCount++;
+        const dg = l.report?.studentDictationGrade?.[s.id];
+        if (dg !== undefined && dg !== null && dg >= 0) {
+          dictSum += dg;
+          dictCount++;
+        }
+        const eg = l.report?.studentExamGrade?.[s.id];
+        if (eg !== undefined && eg !== null && eg >= 0) {
+          examSum += eg;
+          examCount++;
+        }
+      }
 
-    // Avg Exam score
-    const examGrades = studentLessons
-      .map(l => l.report?.studentExamGrade?.[student.id])
-      .filter(g => g !== undefined && g !== null && g >= 0) as number[];
-    const avgExam = examGrades.length > 0 
-      ? examGrades.reduce((sum, g) => sum + g, 0) / examGrades.length 
-      : 0;
+      map.set(s.id, {
+        attendanceRate: (presentCount / total) * 100,
+        homeworkRate: (homeworkCount / total) * 100,
+        avgDictation: dictCount > 0 ? dictSum / dictCount : 0,
+        avgExam: examCount > 0 ? examSum / examCount : 0,
+      });
+    }
 
-    return { attendanceRate, homeworkRate, avgDictation, avgExam };
-  };
+    return map;
+  }, [activeStudents, lessons, studentSortBy]);
 
-  const filteredStudents = activeStudents.filter(s => {
-    const studentGroup = groups.find(g => g.id === s.groupId);
+  const filteredStudents = useMemo(() => {
     const term = normalizeSearchText(searchTerm);
-    const sCode = getStudentCode(s);
-    const matchesSearch = !term ||
-                          normalizeSearchText(s.name).includes(term) || 
-                          normalizeSearchText(s.certificateName).includes(term) ||
-                          normalizeSearchText(s.parentName).includes(term) ||
-                          normalizeSearchText(s.studentPhone).includes(term) ||
-                          normalizeSearchText(s.parentPhone).includes(term) ||
-                          normalizeSearchText(s.grade).includes(term) ||
-                          normalizeSearchText(sCode).includes(term) ||
-                          normalizeSearchText(s.studentCode).includes(term) ||
-                          (studentGroup && normalizeSearchText(studentGroup.name).includes(term));
-    const matchesGrade = selectedGrade === 'all' || s.grade === selectedGrade;
+    return activeStudents.filter(s => {
+      const studentGroup = s.groupId ? groupMap.get(s.groupId) : undefined;
+      const sCode = getStudentCode(s);
+      const matchesSearch = !term ||
+                            normalizeSearchText(s.name).includes(term) || 
+                            normalizeSearchText(s.certificateName).includes(term) ||
+                            normalizeSearchText(s.parentName).includes(term) ||
+                            normalizeSearchText(s.studentPhone).includes(term) ||
+                            normalizeSearchText(s.parentPhone).includes(term) ||
+                            normalizeSearchText(s.grade).includes(term) ||
+                            normalizeSearchText(sCode).includes(term) ||
+                            normalizeSearchText(s.studentCode).includes(term) ||
+                            (studentGroup && normalizeSearchText(studentGroup.name).includes(term));
+      const matchesGrade = selectedGrade === 'all' || s.grade === selectedGrade;
 
-    let isOnline = false;
-    if (studentGroup) {
-      isOnline = studentGroup.type === 'online';
-    } else {
-      const studentLesson = lessons.find(l => 
-        (l.studentId === s.id || (Boolean(l.studentName) && Boolean(s.name) && l.studentName.trim().toLowerCase() === s.name.trim().toLowerCase())) && l.type
-      );
-      isOnline = studentLesson ? studentLesson.type === 'online' : false;
-    }
-    const matchesMode = selectedMode === 'all' || (selectedMode === 'online' ? isOnline : !isOnline);
+      let isOnline = false;
+      if (studentGroup) {
+        isOnline = studentGroup.type === 'online';
+      } else {
+        isOnline = studentLessonOnlineMap.get(s.id) || (Boolean(s.name) && studentLessonOnlineMap.get(s.name.trim().toLowerCase())) || false;
+      }
+      const matchesMode = selectedMode === 'all' || (selectedMode === 'online' ? isOnline : !isOnline);
 
-    return matchesSearch && matchesGrade && matchesMode;
-  });
+      return matchesSearch && matchesGrade && matchesMode;
+    });
+  }, [activeStudents, groupMap, studentLessonOnlineMap, searchTerm, selectedGrade, selectedMode]);
 
-  const sortedStudents = [...filteredStudents].sort((a, b) => {
+  const sortedStudents = useMemo(() => {
     if (studentSortBy === 'name') {
-      return (a.name || '').localeCompare(b.name || '');
+      return [...filteredStudents].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }
-    const statsA = getStudentStats(a);
-    const statsB = getStudentStats(b);
+    return [...filteredStudents].sort((a, b) => {
+      const statsA = studentStatsMap.get(a.id) || { attendanceRate: 0, homeworkRate: 0, avgDictation: 0, avgExam: 0 };
+      const statsB = studentStatsMap.get(b.id) || { attendanceRate: 0, homeworkRate: 0, avgDictation: 0, avgExam: 0 };
 
-    if (studentSortBy === 'attendance') {
-      return statsB.attendanceRate - statsA.attendanceRate;
-    }
-    if (studentSortBy === 'homework') {
-      return statsB.homeworkRate - statsA.homeworkRate;
-    }
-    if (studentSortBy === 'dictation') {
-      return statsB.avgDictation - statsA.avgDictation;
-    }
-    if (studentSortBy === 'exam') {
-      return statsB.avgExam - statsA.avgExam;
-    }
-    return 0;
-  });
+      if (studentSortBy === 'attendance') {
+        return statsB.attendanceRate - statsA.attendanceRate;
+      }
+      if (studentSortBy === 'homework') {
+        return statsB.homeworkRate - statsA.homeworkRate;
+      }
+      if (studentSortBy === 'dictation') {
+        return statsB.avgDictation - statsA.avgDictation;
+      }
+      if (studentSortBy === 'exam') {
+        return statsB.avgExam - statsA.avgExam;
+      }
+      return 0;
+    });
+  }, [filteredStudents, studentSortBy, studentStatsMap]);
 
-  const filteredGroups = activeGroups.filter(g => {
+  const filteredGroups = useMemo(() => {
     const term = (searchTerm || '').toLowerCase();
-    const matchesSearch = !term ||
-                          (g.name || '').toLowerCase().includes(term) ||
-                          (g.grade || '').toLowerCase().includes(term);
-    const matchesGrade = selectedGrade === 'all' || g.grade === selectedGrade;
-    const matchesDay = matchGroupDay(g, selectedGroupDay);
-    const matchesMode = selectedMode === 'all' || g.type === selectedMode;
-    return matchesSearch && matchesGrade && matchesDay && matchesMode;
-  });
+    return activeGroups.filter(g => {
+      const matchesSearch = !term ||
+                            (g.name || '').toLowerCase().includes(term) ||
+                            (g.grade || '').toLowerCase().includes(term);
+      const matchesGrade = selectedGrade === 'all' || g.grade === selectedGrade;
+      const matchesDay = matchGroupDay(g, selectedGroupDay);
+      const matchesMode = selectedMode === 'all' || g.type === selectedMode;
+      return matchesSearch && matchesGrade && matchesDay && matchesMode;
+    });
+  }, [activeGroups, searchTerm, selectedGrade, selectedGroupDay, selectedMode]);
 
-  const filteredArchivedStudents = archivedStudents.filter(s => {
+  const filteredArchivedStudents = useMemo(() => {
     const term = (searchTerm || '').toLowerCase();
-    return !term || (s.name || '').toLowerCase().includes(term) || (s.parentName || '').toLowerCase().includes(term);
-  });
+    return archivedStudents.filter(s => {
+      return !term || (s.name || '').toLowerCase().includes(term) || (s.parentName || '').toLowerCase().includes(term);
+    });
+  }, [archivedStudents, searchTerm]);
 
-  const filteredArchivedGroups = archivedGroups.filter(g => {
+  const filteredArchivedGroups = useMemo(() => {
     const term = (searchTerm || '').toLowerCase();
-    return !term || (g.name || '').toLowerCase().includes(term);
-  });
+    return archivedGroups.filter(g => {
+      return !term || (g.name || '').toLowerCase().includes(term);
+    });
+  }, [archivedGroups, searchTerm]);
+
+  // Pagination states
+  const [studentsPage, setStudentsPage] = useState(1);
+  const [studentsPageSize, setStudentsPageSize] = useState(15);
+
+  const [groupsPage, setGroupsPage] = useState(1);
+  const [groupsPageSize, setGroupsPageSize] = useState(12);
+
+  const [archivedStudentsPage, setArchivedStudentsPage] = useState(1);
+  const [archivedStudentsPageSize, setArchivedStudentsPageSize] = useState(15);
+
+  React.useEffect(() => {
+    setStudentsPage(1);
+    setGroupsPage(1);
+    setArchivedStudentsPage(1);
+  }, [searchTerm, selectedGrade, selectedMode, selectedGroupDay, studentSortBy]);
+
+  const totalStudentPages = Math.max(1, Math.ceil(sortedStudents.length / studentsPageSize));
+  const safeStudentsPage = Math.min(Math.max(1, studentsPage), totalStudentPages);
+  const paginatedStudents = useMemo(() => {
+    const start = (safeStudentsPage - 1) * studentsPageSize;
+    return sortedStudents.slice(start, start + studentsPageSize);
+  }, [sortedStudents, safeStudentsPage, studentsPageSize]);
+
+  const totalGroupPages = Math.max(1, Math.ceil(filteredGroups.length / groupsPageSize));
+  const safeGroupsPage = Math.min(Math.max(1, groupsPage), totalGroupPages);
+  const paginatedGroups = useMemo(() => {
+    const start = (safeGroupsPage - 1) * groupsPageSize;
+    return filteredGroups.slice(start, start + groupsPageSize);
+  }, [filteredGroups, safeGroupsPage, groupsPageSize]);
+
+  const totalArchivedStudentPages = Math.max(1, Math.ceil(filteredArchivedStudents.length / archivedStudentsPageSize));
+  const safeArchivedStudentsPage = Math.min(Math.max(1, archivedStudentsPage), totalArchivedStudentPages);
+  const paginatedArchivedStudents = useMemo(() => {
+    const start = (safeArchivedStudentsPage - 1) * archivedStudentsPageSize;
+    return filteredArchivedStudents.slice(start, start + archivedStudentsPageSize);
+  }, [filteredArchivedStudents, safeArchivedStudentsPage, archivedStudentsPageSize]);
 
   return (
     <div className="space-y-3 sm:space-y-4">
@@ -350,7 +445,7 @@ export const StudentsView: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsAddGroupModalOpen(true)}
-            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 active:scale-95 text-text-main border border-surface-border font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-surface-hover hover:bg-surface-border active:scale-95 text-text-main border border-surface-border font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
           >
             <Plus className="w-3.5 h-3.5 shrink-0 text-primary" />
             <span className="truncate">{t('students_add_group')}</span>
@@ -368,14 +463,14 @@ export const StudentsView: React.FC = () => {
       </div>
 
       {/* Segment Switcher Tabs */}
-      <div className="grid grid-cols-4 gap-1 bg-surface-hover p-1 rounded-lg text-[10.5px] sm:text-xs font-bold">
+      <div className="grid grid-cols-4 gap-1 bg-surface-hover p-1 rounded-lg text-[10.5px] sm:text-xs font-bold border border-surface-border">
         <button
           type="button"
           onClick={() => setActiveSegment('summary')}
           className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer truncate ${
             activeSegment === 'summary'
-              ? 'bg-surface text-primary dark:text-primary shadow-xs'
-              : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
+              ? 'bg-surface text-primary shadow-xs border border-surface-border'
+              : 'text-text-muted hover:text-text-main hover:bg-surface/50'
           }`}
         >
           <BarChart3 className="w-3.5 h-3.5 shrink-0" />
@@ -387,8 +482,8 @@ export const StudentsView: React.FC = () => {
           onClick={() => setActiveSegment('students')}
           className={`py-1 sm:py-1.5 rounded-lg transition-all cursor-pointer truncate ${
             activeSegment === 'students'
-              ? 'bg-surface text-primary dark:text-primary shadow-xs'
-              : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
+              ? 'bg-surface text-primary shadow-xs border border-surface-border'
+              : 'text-text-muted hover:text-text-main hover:bg-surface/50'
           }`}
         >
           {t('daily_stats_students')} ({activeStudents.length})
@@ -399,8 +494,8 @@ export const StudentsView: React.FC = () => {
           onClick={() => setActiveSegment('groups')}
           className={`py-1 sm:py-1.5 rounded-lg transition-all cursor-pointer truncate ${
             activeSegment === 'groups'
-              ? 'bg-surface text-primary dark:text-primary shadow-xs'
-              : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
+              ? 'bg-surface text-primary shadow-xs border border-surface-border'
+              : 'text-text-muted hover:text-text-main hover:bg-surface/50'
           }`}
         >
           {t('daily_stats_groups')} ({activeGroups.length})
@@ -411,8 +506,8 @@ export const StudentsView: React.FC = () => {
           onClick={() => setActiveSegment('archive')}
           className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer truncate ${
             activeSegment === 'archive'
-              ? 'bg-surface text-primary dark:text-primary shadow-xs'
-              : 'text-text-muted hover:text-slate-900 dark:hover:text-primary'
+              ? 'bg-surface text-primary shadow-xs border border-surface-border'
+              : 'text-text-muted hover:text-text-main hover:bg-surface/50'
           }`}
         >
           <Archive className="w-3.5 h-3.5 shrink-0" />
@@ -430,12 +525,12 @@ export const StudentsView: React.FC = () => {
             placeholder={activeSegment === 'students' ? t('students_search_placeholder') : t('students_search_group_placeholder')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-8 pr-7 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full pl-8 pr-7 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary text-text-main placeholder:text-text-muted/60"
           />
           {searchTerm && (
             <button
               onClick={() => setSearchTerm('')}
-              className="absolute right-2 top-2 text-text-muted/70 hover:text-slate-600 dark:hover:text-primary cursor-pointer"
+              className="absolute right-2 top-2 text-text-muted/70 hover:text-text-main cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -497,9 +592,9 @@ export const StudentsView: React.FC = () => {
             >
               <span className="text-xs">👦👧</span>
               <span className="truncate">{_t('تحديد الجنس', 'Assign Gender', 'Geschlecht')}</span>
-              {students.filter(s => s.status !== 'archived' && !s.gender).length > 0 && (
-                <span className="px-1.5 py-0.2 bg-rose-500 text-white text-[9.5px] font-black rounded-full">
-                  {students.filter(s => s.status !== 'archived' && !s.gender).length}
+              {unassignedGenderCount > 0 && (
+                <span className="px-1.5 py-0.2 bg-primary text-primary-contrast text-[9.5px] font-black rounded-full">
+                  {unassignedGenderCount}
                 </span>
               )}
             </button>
@@ -514,7 +609,7 @@ export const StudentsView: React.FC = () => {
                 setSelectedGroupDay('all');
                 setStudentSortBy('name');
               }}
-              className="px-2 py-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-text-main rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
+              className="px-2 py-1.5 bg-surface-hover hover:bg-surface-border border border-surface-border text-text-main rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
               title={t('students_reset_filters')}
             >
               {t('students_reset_filters')}
@@ -565,7 +660,7 @@ export const StudentsView: React.FC = () => {
                 setBulkMoveTargetGroupId(groups[0]?.id || '');
                 setIsBulkMoveModalOpen(true);
               }}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
             >
               <ArrowRightLeft className="w-3.5 h-3.5" />
               <span>{_t('نقل الطلاب المحددين إلى مجموعة', 'Move Selected to Group', 'In Gruppe verschieben')}</span>
@@ -579,7 +674,7 @@ export const StudentsView: React.FC = () => {
                   setSelectedStudentIds([]);
                 }
               }}
-              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>{_t('حذف المحددين', 'Delete Selected', 'Ausgewählte löschen')}</span>
@@ -604,7 +699,7 @@ export const StudentsView: React.FC = () => {
               <p className="text-xs font-bold text-text-main">
                 {t('auto_no_students_yet')}
               </p>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] text-text-muted">
                 {t('auto_add_your_first_student_to_trac')}
               </p>
               <button
@@ -617,7 +712,7 @@ export const StudentsView: React.FC = () => {
               </button>
             </div>
           ) : (
-            sortedStudents.map((student, idx) => {
+            paginatedStudents.map((student, idx) => {
               const studentGroup = groups.find(g => g.id === student.groupId);
               const cleanParentPhone = cleanPhoneNumberForTel(student.parentPhone);
               const studentCode = getStudentCode(student);
@@ -662,7 +757,7 @@ export const StudentsView: React.FC = () => {
 
                     <AvatarImage
                       name={student.name}
-                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg text-xs font-black border border-slate-100 dark:border-surface-border shrink-0"
+                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg text-xs font-black border border-surface-border shrink-0"
                     />
 
                     <div className="min-w-0 space-y-1 flex-1">
@@ -688,9 +783,9 @@ export const StudentsView: React.FC = () => {
                             }
                           >
                             {student.gender === 'female' ? (
-                              <Venus className="w-3.5 h-3.5 text-rose-500 dark:text-rose-400 stroke-[2.2]" />
+                              <Venus className="w-3.5 h-3.5 text-primary stroke-[2.2]" />
                             ) : (
-                              <Mars className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400 stroke-[2.2]" />
+                              <Mars className="w-3.5 h-3.5 text-primary stroke-[2.2]" />
                             )}
                           </button>
                         ) : (
@@ -709,7 +804,7 @@ export const StudentsView: React.FC = () => {
                         )}
 
                         {/* Grade Badge right next to name & gender */}
-                        <span className="text-[9.5px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft/40 border border-primary-border/50 dark:border-primary-border/30 px-1.5 py-0.2 rounded shrink-0">
+                        <span className="text-[9.5px] font-bold text-primary bg-primary-soft border border-primary-border/50 px-1.5 py-0.2 rounded shrink-0">
                           {student.grade}
                         </span>
                       </div>
@@ -723,35 +818,35 @@ export const StudentsView: React.FC = () => {
                               e.stopPropagation();
                               setSelectedGroup(studentGroup);
                             }}
-                            className="font-extrabold text-text-main hover:text-primary hover:underline bg-surface-hover border border-surface-border-soft px-1.5 py-0.2 rounded text-[9px] truncate max-w-[130px] sm:max-w-[220px] shrink-0 cursor-pointer transition-colors"
+                            className="font-extrabold text-text-main hover:text-primary hover:underline bg-surface-hover border border-surface-border px-1.5 py-0.2 rounded text-[9px] truncate max-w-[130px] sm:max-w-[220px] shrink-0 cursor-pointer transition-colors"
                             title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
                           >
                             {studentGroup.name}
                           </button>
                         ) : (
-                          <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1.5 py-0.2 rounded text-[9px] truncate max-w-[130px] sm:max-w-[220px] shrink-0">
+                          <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border px-1.5 py-0.2 rounded text-[9px] truncate max-w-[130px] sm:max-w-[220px] shrink-0">
                             Gruppe A1
                           </span>
                         )}
                         <span className="text-[10px] text-text-muted/70 inline-flex items-center gap-0.5 shrink-0">
                           • {isWhatsAppUsername(student.parentPhone) ? (
-                            <span className="inline-flex items-center gap-0.5 font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                            <span className="inline-flex items-center gap-0.5 font-bold text-primary font-mono">
                               <AtSign className="w-2.5 h-2.5" />
                               {formatContactDisplay(student.parentPhone)}
                             </span>
                           ) : (
-                            <span className="font-semibold text-slate-600 dark:text-slate-300 font-mono">{student.parentPhone}</span>
+                            <span className="font-semibold text-text-muted font-mono">{student.parentPhone}</span>
                           )}
                         </span>
                         {student.studentPhone && (
                           <span className="text-[10px] text-text-muted/70 hidden sm:inline-flex items-center gap-0.5 shrink-0">
                             • {isWhatsAppUsername(student.studentPhone) ? (
-                              <span className="inline-flex items-center gap-0.5 font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                              <span className="inline-flex items-center gap-0.5 font-bold text-primary font-mono">
                                 <AtSign className="w-2.5 h-2.5" />
                                 {formatContactDisplay(student.studentPhone)}
                               </span>
                             ) : (
-                              <span className="font-semibold text-slate-600 dark:text-slate-300 font-mono">{student.studentPhone}</span>
+                              <span className="font-semibold text-text-muted font-mono">{student.studentPhone}</span>
                             )}
                           </span>
                         )}
@@ -768,7 +863,7 @@ export const StudentsView: React.FC = () => {
                           e.stopPropagation();
                           setActiveMenuId(activeMenuId === `student_${student.id}` ? null : `student_${student.id}`);
                         }}
-                        className={`p-2 rounded-lg text-text-muted/70 hover:text-slate-800 dark:hover:text-primary transition-all hover:bg-background dark:hover:bg-slate-800 cursor-pointer ${
+                        className={`p-2 rounded-lg text-text-muted/70 hover:text-text-main transition-all hover:bg-surface-hover cursor-pointer ${
                           activeMenuId === `student_${student.id}` ? 'bg-surface-hover text-text-main' : ''
                         }`}
                         title={t('auto_options')}
@@ -788,7 +883,7 @@ export const StudentsView: React.FC = () => {
                           
                           <div
                             onClick={(e) => e.stopPropagation()}
-                            className="absolute ltr:right-0 ltr:left-auto rtl:left-0 rtl:right-auto mt-1 w-52 bg-surface border border-surface-border/80 dark:border-surface-border/80 rounded-xl shadow-xl z-50 py-1.5 animate-scale-up text-left rtl:text-right"
+                            className="absolute ltr:right-0 ltr:left-auto rtl:left-0 rtl:right-auto mt-1 w-52 bg-surface border border-surface-border rounded-xl shadow-xl z-50 py-1.5 animate-scale-up text-left rtl:text-right"
                           >
                             {/* View Profile link */}
                             <button
@@ -799,7 +894,7 @@ export const StudentsView: React.FC = () => {
                                 setSelectedStudentTab('overview');
                                 setActiveMenuId(null);
                               }}
-                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                             >
                               <User className="w-4 h-4 text-primary" />
                               <span>{t('auto_view_profile')}</span>
@@ -814,9 +909,9 @@ export const StudentsView: React.FC = () => {
                                 setTargetGroupIdForMove(student.groupId || (groups[0]?.id || ''));
                                 setActiveMenuId(null);
                               }}
-                              className="w-full px-4 py-2 text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                              className="w-full px-4 py-2 text-xs font-bold text-primary hover:bg-primary-soft flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                             >
-                              <ArrowRightLeft className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                              <ArrowRightLeft className="w-4 h-4 text-primary" />
                               <span>{_t('نقل إلى مجموعة / فصل آخر', 'Move to Another Group', 'In andere Gruppe verschieben')}</span>
                             </button>
 
@@ -829,7 +924,7 @@ export const StudentsView: React.FC = () => {
                                 setSelectedStudentTab('attendance');
                                 setActiveMenuId(null);
                               }}
-                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                             >
                               <FileText className="w-4 h-4 text-primary" />
                               <span>{t('auto_check_attendance')}</span>
@@ -844,7 +939,7 @@ export const StudentsView: React.FC = () => {
                                 setSelectedStudentTab('scores');
                                 setActiveMenuId(null);
                               }}
-                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                             >
                               <Award className="w-4 h-4 text-primary" />
                               <span>{t('auto_scores_homework')}</span>
@@ -859,7 +954,7 @@ export const StudentsView: React.FC = () => {
                                 setSelectedStudentTab('payments');
                                 setActiveMenuId(null);
                               }}
-                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                             >
                               <DollarSign className="w-4 h-4 text-primary" />
                               <span>{t('auto_payment_history')}</span>
@@ -874,13 +969,13 @@ export const StudentsView: React.FC = () => {
                                 setSelectedStudentTab('recordings');
                                 setActiveMenuId(null);
                               }}
-                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                              className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                             >
-                              <Video className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                              <Video className="w-4 h-4 text-primary" />
                               <span>{_t('تسجيلات الحصص', 'Lesson Recordings', 'Aufnahmen')}</span>
                             </button>
 
-                            <div className="border-t border-slate-100 dark:border-surface-border/80 my-1.5" />
+                            <div className="border-t border-surface-border my-1.5" />
 
                             {/* Send WhatsApp message & Phone Call */}
                             {(() => {
@@ -898,7 +993,7 @@ export const StudentsView: React.FC = () => {
                                         e.stopPropagation();
                                         setActiveMenuId(null);
                                       }}
-                                      className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                                      className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                                     >
                                       <Send className="w-4 h-4 text-primary" />
                                       <span>
@@ -916,7 +1011,7 @@ export const StudentsView: React.FC = () => {
                                         e.stopPropagation();
                                         setActiveMenuId(null);
                                       }}
-                                      className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                                      className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                                     >
                                       <Phone className="w-4 h-4 text-primary" />
                                       <span>{t('auto_call_phone')}</span>
@@ -926,7 +1021,7 @@ export const StudentsView: React.FC = () => {
                               );
                             })()}
 
-                            <div className="border-t border-slate-100 dark:border-surface-border/80 my-1.5" />
+                            <div className="border-t border-surface-border my-1.5" />
 
                             {/* Delete Student */}
                             <button
@@ -940,7 +1035,7 @@ export const StudentsView: React.FC = () => {
                                 });
                                 setActiveMenuId(null);
                               }}
-                              className="w-full px-4 py-2 text-xs font-bold text-primary hover:bg-primary-soft dark:hover:bg-primary-soft flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                              className="w-full px-4 py-2 text-xs font-bold text-primary hover:bg-primary-soft flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                             >
                               <Trash2 className="w-4 h-4 text-primary" />
                               <span>{t('auto_delete_archive')}</span>
@@ -954,6 +1049,23 @@ export const StudentsView: React.FC = () => {
               );
             })
           )}
+
+          {sortedStudents.length > 0 && (
+            <Pagination
+              currentPage={safeStudentsPage}
+              totalPages={totalStudentPages}
+              totalItems={sortedStudents.length}
+              pageSize={studentsPageSize}
+              onPageChange={(page) => setStudentsPage(page)}
+              onPageSizeChange={(size) => {
+                setStudentsPageSize(size);
+                setStudentsPage(1);
+              }}
+              pageSizeOptions={[12, 18, 30, 60]}
+              itemName={t('daily_stats_students')}
+              className="mt-3 col-span-full"
+            />
+          )}
         </div>
       )}
 
@@ -965,7 +1077,7 @@ export const StudentsView: React.FC = () => {
               <p className="text-sm font-bold text-text-main">
                 {t('auto_no_groups_yet')}
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-text-muted">
                 {t('auto_create_your_first_group_to_sta')}
               </p>
               <button
@@ -978,14 +1090,12 @@ export const StudentsView: React.FC = () => {
               </button>
             </div>
           ) : (
-            filteredGroups.map((group, idx) => {
-            const count = students.filter(s => s.groupId === group.id).length;
+            paginatedGroups.map((group, idx) => {
+            const count = groupStudentCountMap.get(group.id) || 0;
             const cycleInfo = getGroupCycleInfo(group, lessons, language);
             const isPerLessonGroup = Boolean(
-              cycleInfo.isPerLesson ||
-              group.paymentCycle === 'per_lesson' ||
-              group.paymentModel === 'per_session' ||
-              (group.sessionCount !== undefined && group.sessionCount <= 1)
+              isGroupPerLesson(group) ||
+              cycleInfo.isPerLesson
             );
 
             const perSessionPrice = group.pricePerSession 
@@ -994,25 +1104,21 @@ export const StudentsView: React.FC = () => {
                   ? Math.round(group.monthlyPackagePrice / group.sessionCount) 
                   : (group.monthlyPackagePrice || 0));
 
-            const packageSessionsCount = (group.sessionCount && group.sessionCount > 1) ? group.sessionCount : (cycleInfo.sessionCount || 4);
+            const packageSessionsCount = isPerLessonGroup ? 1 : ((group.sessionCount && group.sessionCount > 1) ? group.sessionCount : (cycleInfo.sessionCount || 4));
             const groupRecordingsCount = (lessons || []).filter(l => l.groupId === group.id && (l.recordingLink?.trim() || l.recordingLink2?.trim() || l.report?.recordingLink?.trim() || l.report?.recordingLink2?.trim())).length;
 
             return (
               <div
                 key={`${group.id}_${idx}`}
                 onClick={() => setSelectedGroup(group)}
-                className={`bg-surface border border-surface-border/60 dark:border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative ${
+                className={`bg-surface border border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs transition-all flex items-center justify-between gap-2.5 cursor-pointer group relative ${
                   activeMenuId === `group_${group.id}`
                     ? 'z-50'
                     : 'hover:shadow-xs active:scale-[0.99] active:bg-surface-hover z-0'
                 }`}
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center shrink-0 border transition-all ${
-                    group.type === 'online' 
-                      ? 'bg-primary-soft border-primary-border dark:bg-primary-soft dark:border-primary-border text-primary dark:text-primary' 
-                      : 'bg-primary-soft border-primary-border dark:bg-primary-soft dark:border-primary-border text-primary dark:text-primary'
-                  }`}>
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center shrink-0 border transition-all bg-primary-soft border-primary-border text-primary">
                     {group.type === 'online' ? <Video className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
                   </div>
 
@@ -1023,11 +1129,11 @@ export const StudentsView: React.FC = () => {
 
                     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-text-muted">
                       {group.grade && (
-                        <span className="text-[9px] font-black text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft border border-primary-border/50 dark:border-primary-border px-1.5 py-0.2 rounded shrink-0">
+                        <span className="text-[9px] font-black text-primary bg-primary-soft border border-primary-border/50 px-1.5 py-0.2 rounded shrink-0">
                           {group.grade}
                         </span>
                       )}
-                      <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border-soft px-1 py-0.2 rounded text-[9px] shrink-0">
+                      <span className="font-extrabold text-text-main bg-surface-hover border border-surface-border px-1 py-0.2 rounded text-[9px] shrink-0">
                         {count} {t('daily_stats_students')}
                       </span>
                       {groupRecordingsCount > 0 && (
@@ -1037,20 +1143,20 @@ export const StudentsView: React.FC = () => {
                             setSelectedGroup(group);
                             setSelectedGroupInitialTab('recordings');
                           }}
-                          className="font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900/40 px-1.5 py-0.2 rounded text-[9px] flex items-center gap-1 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/60 transition-all shrink-0"
+                          className="font-bold text-primary bg-primary-soft border border-primary-border px-1.5 py-0.2 rounded text-[9px] flex items-center gap-1 cursor-pointer hover:bg-primary-soft/80 transition-all shrink-0"
                           title={_t('عرض تسجيلات المجموعة', 'View Group Recordings', 'Aufnahmen der Gruppe anzeigen')}
                         >
-                          <Video className="w-2.5 h-2.5 text-purple-600" />
+                          <Video className="w-2.5 h-2.5 text-primary" />
                           <span>{groupRecordingsCount} {_t('تسجيلات', 'Recs', 'Aufn.')}</span>
                         </span>
                       )}
-                      <span className="font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft border border-primary-border/30 dark:border-primary-border px-1 py-0.2 rounded text-[9px] font-mono shrink-0">
+                      <span className="font-bold text-primary bg-primary-soft border border-primary-border/30 px-1 py-0.2 rounded text-[9px] font-mono shrink-0">
                         {isPerLessonGroup
                           ? `${perSessionPrice} ${profile.currency} / ${_t('حصة', 'Session', 'Sitzung')}`
                           : `${group.monthlyPackagePrice} ${profile.currency} / ${packageSessionsCount} ${_t('حصص', 'Sessions', 'Sitzungen')}`}
                       </span>
 
-                      <span className={`text-[10px] font-bold shrink-0 ${isPerLessonGroup ? 'text-amber-600 dark:text-amber-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                      <span className="text-[10px] font-bold text-primary shrink-0">
                         • {isPerLessonGroup
                             ? _t('محاسبة بالحصة', 'Per Session', 'Pro Sitzung')
                             : _t(`الحصة ${cycleInfo.currentSessionNumber} من ${cycleInfo.sessionCount}`, `Session ${cycleInfo.currentSessionNumber} of ${cycleInfo.sessionCount}`, `Sitzung ${cycleInfo.currentSessionNumber} von ${cycleInfo.sessionCount}`)}
@@ -1072,7 +1178,7 @@ export const StudentsView: React.FC = () => {
                         e.stopPropagation();
                         setActiveMenuId(activeMenuId === `group_${group.id}` ? null : `group_${group.id}`);
                       }}
-                      className={`p-2 rounded-lg text-text-muted/70 hover:text-slate-800 dark:hover:text-primary transition-all hover:bg-background dark:hover:bg-slate-800 cursor-pointer ${
+                      className={`p-2 rounded-lg text-text-muted/70 hover:text-text-main transition-all hover:bg-surface-hover cursor-pointer ${
                         activeMenuId === `group_${group.id}` ? 'bg-surface-hover text-text-main' : ''
                       }`}
                       title={t('auto_options')}
@@ -1092,7 +1198,7 @@ export const StudentsView: React.FC = () => {
                         
                         <div
                           onClick={(e) => e.stopPropagation()}
-                          className="absolute ltr:right-0 ltr:left-auto rtl:left-0 rtl:right-auto mt-1 w-48 bg-surface border border-surface-border/80 dark:border-surface-border/80 rounded-xl shadow-xl z-50 py-1.5 animate-scale-up text-left rtl:text-right"
+                          className="absolute ltr:right-0 ltr:left-auto rtl:left-0 rtl:right-auto mt-1 w-48 bg-surface border border-surface-border rounded-xl shadow-xl z-50 py-1.5 animate-scale-up text-left rtl:text-right"
                         >
                           <button
                             type="button"
@@ -1102,7 +1208,7 @@ export const StudentsView: React.FC = () => {
                               setSelectedGroupInitialTab('details');
                               setActiveMenuId(null);
                             }}
-                            className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                            className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                           >
                             <User className="w-4 h-4 text-primary" />
                             <span>{t('auto_view_details')}</span>
@@ -1116,13 +1222,13 @@ export const StudentsView: React.FC = () => {
                               setSelectedGroupInitialTab('recordings');
                               setActiveMenuId(null);
                             }}
-                            className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-background dark:hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                            className="w-full px-4 py-2 text-xs font-bold text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                           >
-                            <Video className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                            <Video className="w-4 h-4 text-primary" />
                             <span>{_t('تسجيلات الحصص', 'Lesson Recordings', 'Aufnahmen')} ({groupRecordingsCount})</span>
                           </button>
 
-                          <div className="border-t border-slate-100 dark:border-surface-border/80 my-1.5" />
+                          <div className="border-t border-surface-border my-1.5" />
 
                           {/* Clear / Delete All Students in Group */}
                           <button
@@ -1132,10 +1238,10 @@ export const StudentsView: React.FC = () => {
                               setGroupToClearStudents(group);
                               setActiveMenuId(null);
                             }}
-                            className="w-full px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                            className="w-full px-4 py-2 text-xs font-bold text-primary hover:bg-primary-soft flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                           >
-                            <UserX className="w-4 h-4 text-rose-600" />
-                            <span>{_t('مسح طلاب المجموعة', 'Delete Group Students', 'Schüler der Gruppe löschen')} ({students.filter(s => s.groupId === group.id).length})</span>
+                            <UserX className="w-4 h-4 text-primary" />
+                            <span>{_t('مسح طلاب المجموعة', 'Delete Group Students', 'Schüler der Gruppe löschen')} ({count})</span>
                           </button>
 
                           <button
@@ -1149,7 +1255,7 @@ export const StudentsView: React.FC = () => {
                               });
                               setActiveMenuId(null);
                             }}
-                            className="w-full px-4 py-2 text-xs font-bold text-primary hover:bg-primary-soft dark:hover:bg-primary-soft flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
+                            className="w-full px-4 py-2 text-xs font-bold text-primary hover:bg-primary-soft flex items-center gap-2.5 cursor-pointer text-left rtl:text-right"
                           >
                             <Trash2 className="w-4 h-4 text-primary" />
                             <span>{t('auto_delete_archive')}</span>
@@ -1162,6 +1268,23 @@ export const StudentsView: React.FC = () => {
               </div>
             );
           }))}
+
+          {filteredGroups.length > 0 && (
+            <Pagination
+              currentPage={safeGroupsPage}
+              totalPages={totalGroupPages}
+              totalItems={filteredGroups.length}
+              pageSize={groupsPageSize}
+              onPageChange={(page) => setGroupsPage(page)}
+              onPageSizeChange={(size) => {
+                setGroupsPageSize(size);
+                setGroupsPage(1);
+              }}
+              pageSizeOptions={[9, 15, 24, 48]}
+              itemName={t('daily_stats_groups')}
+              className="mt-3 col-span-full"
+            />
+          )}
         </div>
       )}
 
@@ -1184,7 +1307,7 @@ export const StudentsView: React.FC = () => {
                   <span>👤</span>
                 </span>
               </div>
-              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+              <div className="w-full h-2 rounded-full bg-surface-border overflow-hidden flex">
                 <div
                   style={{ width: `${studentSummary.inGroupsPct}%` }}
                   className="bg-primary transition-all duration-300"
@@ -1192,7 +1315,7 @@ export const StudentsView: React.FC = () => {
                 />
                 <div
                   style={{ width: `${studentSummary.individualPct}%` }}
-                  className="bg-slate-300 dark:bg-slate-700 transition-all duration-300"
+                  className="bg-primary/25 transition-all duration-300"
                   title={`فردي (برايفت): ${studentSummary.individualPct}%`}
                 />
               </div>
@@ -1212,7 +1335,7 @@ export const StudentsView: React.FC = () => {
                   <MapPin className="w-3 h-3" />
                 </span>
               </div>
-              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+              <div className="w-full h-2 rounded-full bg-surface-border overflow-hidden flex">
                 <div
                   style={{ width: `${studentSummary.onlinePct}%` }}
                   className="bg-primary transition-all duration-300"
@@ -1220,7 +1343,7 @@ export const StudentsView: React.FC = () => {
                 />
                 <div
                   style={{ width: `${studentSummary.offlinePct}%` }}
-                  className="bg-slate-300 dark:bg-slate-700 transition-all duration-300"
+                  className="bg-primary/25 transition-all duration-300"
                   title={`حضوري: ${studentSummary.offlinePct}%`}
                 />
               </div>
@@ -1240,7 +1363,7 @@ export const StudentsView: React.FC = () => {
                   <span>👧</span>
                 </span>
               </div>
-              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+              <div className="w-full h-2 rounded-full bg-surface-border overflow-hidden flex">
                 <div
                   style={{ width: `${studentSummary.boysPct}%` }}
                   className="bg-primary transition-all duration-300"
@@ -1248,7 +1371,7 @@ export const StudentsView: React.FC = () => {
                 />
                 <div
                   style={{ width: `${studentSummary.girlsPct}%` }}
-                  className="bg-slate-300 dark:bg-slate-700 transition-all duration-300"
+                  className="bg-primary/25 transition-all duration-300"
                   title={`بنات: ${studentSummary.girlsPct}%`}
                 />
               </div>
@@ -1311,7 +1434,7 @@ export const StudentsView: React.FC = () => {
                       </div>
 
                       {/* Mini Percentage Bar */}
-                      <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden flex">
+                      <div className="w-full h-1.5 rounded-full bg-surface-border overflow-hidden flex">
                         <div
                           style={{ width: `${pct}%` }}
                           className="bg-primary rounded-full transition-all duration-300"
@@ -1325,7 +1448,7 @@ export const StudentsView: React.FC = () => {
           </div>
 
           {/* Quick Footer Stats & Gender Classification Shortcut */}
-          <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-surface-border flex items-center justify-between text-[10.5px] text-text-muted">
+          <div className="p-2 rounded-xl bg-surface border border-surface-border flex items-center justify-between text-[10.5px] text-text-muted">
             <span className="flex items-center gap-1 font-bold">
               <span>📁 {_t('المؤرشفين:', 'Archived:', 'Archiviert:')}</span>
               <span className="font-mono text-text-main font-black">{studentSummary.archivedTotal}</span>
@@ -1346,8 +1469,8 @@ export const StudentsView: React.FC = () => {
       {/* ARCHIVE SEGMENT */}
       {activeSegment === 'archive' && (
         <div className="space-y-4">
-          <div className="bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-lg p-3.5 text-xs text-primary dark:text-primary flex items-center gap-2.5">
-            <Archive className="w-5 h-5 shrink-0 text-primary dark:text-primary" />
+          <div className="bg-primary-soft border border-primary-border rounded-lg p-3.5 text-xs text-primary flex items-center gap-2.5">
+            <Archive className="w-5 h-5 shrink-0 text-primary" />
             <span>
               {t('students_archive_info')}
             </span>
@@ -1364,59 +1487,78 @@ export const StudentsView: React.FC = () => {
                 {t('students_no_archived_students')}
               </div>
             ) : (
-              filteredArchivedStudents.map((student) => (
-                <div
-                  key={student.id}
-                  className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-3.5 flex items-center justify-between gap-3 opacity-80 hover:opacity-100 transition-all"
-                >
-                  <div className="flex items-center gap-3">
-                    <AvatarImage
-                      name={student.name}
-                      className="w-10 h-10 rounded-xl font-black text-xs opacity-70"
-                    />
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-xs font-bold text-text-main line-through">
-                          {student.name}
-                        </h4>
-                        <span className="text-[9px] font-bold text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.5 rounded">
-                          {t('students_archived')}
-                        </span>
+              <>
+                {paginatedArchivedStudents.map((student) => (
+                  <div
+                    key={student.id}
+                    className="bg-surface border border-surface-border rounded-lg p-3.5 flex items-center justify-between gap-3 opacity-80 hover:opacity-100 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <AvatarImage
+                        name={student.name}
+                        className="w-10 h-10 rounded-xl font-black text-xs opacity-70"
+                      />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-bold text-text-main line-through">
+                            {student.name}
+                          </h4>
+                          <span className="text-[9px] font-bold text-primary bg-primary-soft px-1.5 py-0.5 rounded">
+                            {t('students_archived')}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-text-muted/70">
+                          {t('students_parent_phone_label')}: {student.parentName}
+                        </p>
                       </div>
-                      <p className="text-[10px] text-text-muted/70">
-                        {t('students_parent_phone_label')}: {student.parentName}
-                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => updateStudent(student.id, { status: 'active' })}
+                        className="px-2.5 py-1.5 bg-primary-soft hover:bg-primary-soft/80 text-primary rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                        title={t('students_restore')}
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>{t('students_restore')}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteTarget({
+                            type: 'student',
+                            id: student.id,
+                            name: student.name
+                          });
+                        }}
+                        className="p-1.5 bg-primary-soft hover:bg-primary-soft/80 text-primary rounded-xl transition-all cursor-pointer"
+                        title={t('delete')}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
+                ))}
 
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => updateStudent(student.id, { status: 'active' })}
-                      className="px-2.5 py-1.5 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft text-primary dark:text-primary rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
-                      title={t('students_restore')}
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>{t('students_restore')}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDeleteTarget({
-                          type: 'student',
-                          id: student.id,
-                          name: student.name
-                        });
-                      }}
-                      className="p-1.5 bg-red-50 dark:bg-red-950 hover:bg-red-100 text-red-600 rounded-xl transition-all cursor-pointer"
-                      title={t('delete')}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))
+                {filteredArchivedStudents.length > 0 && (
+                  <Pagination
+                    currentPage={safeArchivedStudentsPage}
+                    totalPages={totalArchivedStudentPages}
+                    totalItems={filteredArchivedStudents.length}
+                    pageSize={archivedStudentsPageSize}
+                    onPageChange={(page) => setArchivedStudentsPage(page)}
+                    onPageSizeChange={(size) => {
+                      setArchivedStudentsPageSize(size);
+                      setArchivedStudentsPage(1);
+                    }}
+                    pageSizeOptions={[10, 15, 25, 50]}
+                    itemName={t('daily_stats_students')}
+                    className="mt-2"
+                  />
+                )}
+              </>
             )}
           </div>
 
@@ -1434,14 +1576,14 @@ export const StudentsView: React.FC = () => {
               filteredArchivedGroups.map((group) => (
                 <div
                   key={group.id}
-                  className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-3.5 flex items-center justify-between gap-3 opacity-80 hover:opacity-100 transition-all"
+                  className="bg-surface border border-surface-border rounded-lg p-3.5 flex items-center justify-between gap-3 opacity-80 hover:opacity-100 transition-all"
                 >
                   <div>
                     <div className="flex items-center gap-2">
                       <h4 className="text-xs font-bold text-text-main line-through">
                         {group.name}
                       </h4>
-                      <span className="text-[9px] font-bold text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.5 rounded">
+                      <span className="text-[9px] font-bold text-primary bg-primary-soft px-1.5 py-0.5 rounded">
                         {t('students_archived')}
                       </span>
                     </div>
@@ -1454,7 +1596,7 @@ export const StudentsView: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => updateGroup(group.id, { status: 'active' })}
-                      className="px-2.5 py-1.5 bg-primary-soft dark:bg-primary-soft hover:bg-primary-soft text-primary dark:text-primary rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                      className="px-2.5 py-1.5 bg-primary-soft hover:bg-primary-soft/80 text-primary rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                       title={t('students_restore')}
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
@@ -1470,7 +1612,7 @@ export const StudentsView: React.FC = () => {
                           name: group.name
                         });
                       }}
-                      className="p-1.5 bg-red-50 dark:bg-red-950 hover:bg-red-100 text-red-600 rounded-xl transition-all cursor-pointer"
+                      className="p-1.5 bg-primary-soft hover:bg-primary-soft/80 text-primary rounded-xl transition-all cursor-pointer"
                       title={t('delete')}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -1524,7 +1666,7 @@ export const StudentsView: React.FC = () => {
                   attendanceCount: lessons.filter(l => (l.studentId ? l.studentId === deleteTarget.id : l.studentName === deleteTarget.name) && l.report?.attendanceStatus).length,
                 }
               : {
-                  studentsCount: students.filter(s => s.groupId === deleteTarget.id).length,
+                  studentsCount: groupStudentCountMap.get(deleteTarget.id) || 0,
                   lessonsCount: lessons.filter(l => l.groupId === deleteTarget.id).length,
                   paymentsCount: payments.filter(p => p.groupId === deleteTarget.id).length,
                   attendanceCount: lessons.filter(l => l.groupId === deleteTarget.id && l.report?.attendanceStatus).length,
@@ -1582,7 +1724,7 @@ export const StudentsView: React.FC = () => {
           <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-surface-border">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20">
+                <div className="w-9 h-9 rounded-xl bg-primary-soft text-primary flex items-center justify-center border border-primary-border">
                   <ArrowRightLeft className="w-5 h-5" />
                 </div>
                 <div>
@@ -1597,7 +1739,7 @@ export const StudentsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setStudentToMove(null)}
-                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+                className="p-1 text-text-muted hover:text-text-main rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1611,19 +1753,19 @@ export const StudentsView: React.FC = () => {
                 <select
                   value={targetGroupIdForMove}
                   onChange={(e) => setTargetGroupIdForMove(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                  className="w-full px-3 py-2.5 bg-surface border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
                 >
                   <option value="">{_t('-- بدون مجموعة --', '-- No Group --', '-- Keine Gruppe --')}</option>
                   {groups.map(g => (
                     <option key={g.id} value={g.id}>
-                      {g.name} ({g.level}) - {students.filter(s => s.groupId === g.id).length} {_t('طلاب', 'students', 'Schüler')}
+                      {g.name} ({g.level}) - {groupStudentCountMap.get(g.id) || 0} {_t('طلاب', 'students', 'Schüler')}
                     </option>
                   ))}
                 </select>
               </div>
 
               {studentToMove.groupId && (
-                <div className="text-[11px] text-text-muted bg-surface-hover/50 p-2.5 rounded-lg border border-surface-border-soft flex items-center gap-2">
+                <div className="text-[11px] text-text-muted bg-surface-hover p-2.5 rounded-lg border border-surface-border flex items-center gap-2">
                   <span className="font-bold">{_t('المجموعة الحالية:', 'Current Group:', 'Aktuelle Gruppe:')}</span>
                   <span className="text-text-main font-bold">
                     {groups.find(g => g.id === studentToMove.groupId)?.name || studentToMove.groupId}
@@ -1636,7 +1778,7 @@ export const StudentsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setStudentToMove(null)}
-                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors cursor-pointer"
               >
                 {_t('إلغاء', 'Cancel', 'Abbrechen')}
               </button>
@@ -1646,7 +1788,7 @@ export const StudentsView: React.FC = () => {
                   moveStudent(studentToMove.id, targetGroupIdForMove || null);
                   setStudentToMove(null);
                 }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+                className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
               >
                 <ArrowRightLeft className="w-4 h-4" />
                 <span>{_t('تأكيد النقل', 'Confirm Move', 'Verschieben bestätigen')}</span>
@@ -1662,9 +1804,7 @@ export const StudentsView: React.FC = () => {
           <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-surface-border">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20">
-                  <ArrowRightLeft className="w-5 h-5" />
-                </div>
+                <ArrowRightLeft className="w-6 h-6 text-primary shrink-0" />
                 <div>
                   <h3 className="text-sm font-black text-text-main">
                     {_t('نقل الطلاب المحددين جماعياً', 'Bulk Move Selected Students', 'Ausgewählte Schüler verschieben')}
@@ -1677,7 +1817,7 @@ export const StudentsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsBulkMoveModalOpen(false)}
-                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+                className="p-1 text-text-muted hover:text-text-main rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1691,18 +1831,18 @@ export const StudentsView: React.FC = () => {
                 <select
                   value={bulkMoveTargetGroupId}
                   onChange={(e) => setBulkMoveTargetGroupId(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                  className="w-full px-3 py-2.5 bg-surface border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
                 >
                   <option value="">{_t('-- بدون مجموعة --', '-- No Group --', '-- Keine Gruppe --')}</option>
                   {groups.map(g => (
                     <option key={g.id} value={g.id}>
-                      {g.name} ({g.level}) - {students.filter(s => s.groupId === g.id).length} {_t('طلاب', 'students', 'Schüler')}
+                      {g.name} ({g.level}) - {groupStudentCountMap.get(g.id) || 0} {_t('طلاب', 'students', 'Schüler')}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="max-h-36 overflow-y-auto bg-surface-hover/50 p-2 rounded-lg border border-surface-border-soft space-y-1">
+              <div className="max-h-36 overflow-y-auto bg-surface-hover/50 p-2 rounded-lg border border-surface-border space-y-1">
                 {selectedStudentIds.map(id => {
                   const st = students.find(s => s.id === id);
                   return (
@@ -1721,7 +1861,7 @@ export const StudentsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsBulkMoveModalOpen(false)}
-                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors cursor-pointer"
               >
                 {_t('إلغاء', 'Cancel', 'Abbrechen')}
               </button>
@@ -1732,7 +1872,7 @@ export const StudentsView: React.FC = () => {
                   setSelectedStudentIds([]);
                   setIsBulkMoveModalOpen(false);
                 }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+                className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
               >
                 <ArrowRightLeft className="w-4 h-4" />
                 <span>{_t(`نقل (${selectedStudentIds.length}) طالب`, `Move (${selectedStudentIds.length}) students`, `(${selectedStudentIds.length}) Schüler verschieben`)}</span>
@@ -1748,11 +1888,11 @@ export const StudentsView: React.FC = () => {
           <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-surface-border">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center border border-rose-500/20">
+                <div className="w-9 h-9 rounded-xl bg-primary-soft text-primary flex items-center justify-center border border-primary-border">
                   <UserX className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-rose-600 dark:text-rose-400">
+                  <h3 className="text-sm font-black text-text-main">
                     {_t('مسح طلاب المجموعة / الفصل', 'Clear Group Students', 'Gruppenschüler löschen')}
                   </h3>
                   <p className="text-xs text-text-muted">
@@ -1763,15 +1903,15 @@ export const StudentsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setGroupToClearStudents(null)}
-                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+                className="p-1 text-text-muted hover:text-text-main rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl space-y-2 text-xs">
-              <div className="font-bold text-rose-700 dark:text-rose-300 flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
+            <div className="p-3 bg-surface border border-surface-border rounded-xl space-y-2 text-xs">
+              <div className="font-bold text-text-main flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-primary" />
                 <span>
                   {_t(
                     `هل أنت متأكد من حذف جميع طلاب فصل (${groupToClearStudents.name})؟`,
@@ -1780,11 +1920,11 @@ export const StudentsView: React.FC = () => {
                   )}
                 </span>
               </div>
-              <p className="text-rose-600/90 dark:text-rose-300/80 text-[11px] leading-relaxed">
+              <p className="text-text-muted text-[11px] leading-relaxed">
                 {_t(
-                  `سيتم حذف (${students.filter(s => s.groupId === groupToClearStudents.id).length}) طالب ونقلهم إلى المحذوفات مؤخراً ليمكن استرجاعهم عند الحاجة. لن يتم حذف المجموعة نفسها.`,
-                  `(${students.filter(s => s.groupId === groupToClearStudents.id).length}) students will be deleted and kept in Recently Deleted for recovery. The group itself will remain intact.`,
-                  `(${students.filter(s => s.groupId === groupToClearStudents.id).length}) Schüler werden gelöscht und in den Papierkorb verschoben.`
+                  `سيتم حذف (${groupStudentCountMap.get(groupToClearStudents.id) || 0}) طالب ونقلهم إلى المحذوفات مؤخراً ليمكن استرجاعهم عند الحاجة. لن يتم حذف المجموعة نفسها.`,
+                  `(${groupStudentCountMap.get(groupToClearStudents.id) || 0}) students will be deleted and kept in Recently Deleted for recovery. The group itself will remain intact.`,
+                  `(${groupStudentCountMap.get(groupToClearStudents.id) || 0}) Schüler werden gelöscht und in den Papierkorb verschoben.`
                 )}
               </p>
             </div>
@@ -1793,7 +1933,7 @@ export const StudentsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setGroupToClearStudents(null)}
-                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors cursor-pointer"
               >
                 {_t('إلغاء', 'Cancel', 'Abbrechen')}
               </button>
@@ -1803,7 +1943,7 @@ export const StudentsView: React.FC = () => {
                   deleteStudentsByGroup(groupToClearStudents.id);
                   setGroupToClearStudents(null);
                 }}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+                className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
                 <span>{_t('تأكيد مسح الطلاب', 'Confirm Delete Students', 'Schüler löschen')}</span>

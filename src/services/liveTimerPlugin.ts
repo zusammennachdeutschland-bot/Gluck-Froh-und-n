@@ -17,6 +17,16 @@ export interface LiveTimerPluginInterface {
    * Stops the native android Foreground Service and removes the notification
    */
   stopTimer(): Promise<void>;
+
+  /**
+   * Checks if the app has SYSTEM_ALERT_WINDOW (Display over other apps) permission
+   */
+  checkOverlayPermission(): Promise<{ granted: boolean }>;
+
+  /**
+   * Opens Android Settings to grant "Display over other apps" (SYSTEM_ALERT_WINDOW)
+   */
+  openOverlaySettings(): Promise<void>;
 }
 
 const LiveTimer = registerPlugin<LiveTimerPluginInterface>('LiveTimer', {
@@ -26,6 +36,12 @@ const LiveTimer = registerPlugin<LiveTimerPluginInterface>('LiveTimer', {
     },
     stopTimer: async () => {
       console.log('[LiveTimer Web Fallback] stopTimer called');
+    },
+    checkOverlayPermission: async () => {
+      return { granted: true };
+    },
+    openOverlaySettings: async () => {
+      console.log('[LiveTimer Web Fallback] openOverlaySettings called');
     },
   },
 });

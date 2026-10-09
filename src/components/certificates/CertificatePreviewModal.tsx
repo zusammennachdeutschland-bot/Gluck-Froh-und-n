@@ -269,7 +269,7 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
                 type="button"
                 onClick={handleWhatsAppShare}
                 disabled={isExporting}
-                className="px-3.5 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50 active:scale-95"
+                className="px-3.5 sm:px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl font-black text-xs flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50 active:scale-95"
                 title={_t('إرسال مباشر عبر واتساب لولي الأمر أو الطالب', 'Send directly via WhatsApp', 'Per WhatsApp senden')}
               >
                 <Share2 className="w-4 h-4" />

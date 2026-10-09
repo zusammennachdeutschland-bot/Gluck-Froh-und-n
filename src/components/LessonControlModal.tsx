@@ -5,7 +5,8 @@ import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, Lesso
 import { 
   X, Play, Pause, Square, Video, MapPin, Send, Phone, CheckCircle2, Check,
   Clock, AlertCircle, Sparkles, FileText, Award, DollarSign, ExternalLink, Navigation,
-  Zap, UserPlus, XCircle, Ban, Edit2, Plus, Minus, ClipboardCheck, Wallet, Landmark
+  Zap, UserPlus, XCircle, Ban, Edit2, Plus, Minus, ClipboardCheck, Wallet, Landmark,
+  MessageCircle, Users
 } from 'lucide-react';
 import { ParentSummaryModal } from './ParentSummaryModal';
 import { StudentSessionPerformanceSelector } from './StudentSessionPerformanceSelector';
@@ -16,7 +17,7 @@ import { GroupProfileModal } from './GroupProfileModal';
 import { getPendingHomeworkFollowUps } from '../utils/homeworkFollowUpUtils';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUtils';
-import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
+import { calculateSequentialSessionNumber, isGroupPerLesson } from '../utils/lessonUtils';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
 import confetti from 'canvas-confetti';
 
@@ -27,6 +28,7 @@ export const LessonControlModal: React.FC = () => {
     saveLessonReport, 
     cancelLesson, 
     updateLesson, 
+    updateGroup,
     students, 
     profile, 
     groups, 
@@ -480,16 +482,16 @@ export const LessonControlModal: React.FC = () => {
     || groups.find(g => g.name && selectedLesson.title.toLowerCase().includes(g.name.toLowerCase()))
     || groups.find(g => g.name && g.name.toLowerCase().includes(selectedLesson.title.replace(/Lektion|حصة|درس/gi, '').trim().toLowerCase()));
   const isPerLessonGroup = Boolean(
-    targetGroup && (
-      targetGroup.paymentCycle === 'per_lesson' ||
-      targetGroup.paymentModel === 'per_session' ||
-      (targetGroup.sessionCount !== undefined && targetGroup.sessionCount <= 1)
-    )
+    isGroupPerLesson(targetGroup) ||
+    (targetStudent && (targetStudent.paymentPlan === 'per_lesson' || targetStudent.bundleSize === 1)) ||
+    selectedLesson.totalSessionsInPackage === 1
   );
   // Each group already has its cycle session count recorded in its settings!
-  const cycleTotalSessions = (targetGroup?.sessionCount && targetGroup.sessionCount > 1) 
-    ? targetGroup.sessionCount 
-    : (selectedLesson?.totalSessionsInPackage && selectedLesson.totalSessionsInPackage > 1 ? selectedLesson.totalSessionsInPackage : 4);
+  const cycleTotalSessions = isPerLessonGroup
+    ? 1
+    : ((targetGroup?.sessionCount && targetGroup.sessionCount > 1) 
+        ? targetGroup.sessionCount 
+        : (selectedLesson?.totalSessionsInPackage && selectedLesson.totalSessionsInPackage > 1 ? selectedLesson.totalSessionsInPackage : 4));
   const hasCycle = Boolean(selectedLesson && !isPerLessonGroup && cycleTotalSessions > 1);
   
   // Dynamically compute the sequential session number among NON-CANCELLED lessons in the group/student
@@ -573,27 +575,69 @@ export const LessonControlModal: React.FC = () => {
     }
   }, [selectedLesson?.id]);
 
-  const handleTogglePaymentPaid = (markPaid: boolean) => {
+  const handleTogglePaymentPaid = (markPaid: boolean, stId?: string) => {
+    if (stId) {
+      const targetSt = students.find(s => s.id === stId);
+      const pricing = targetSt ? getStudentCyclePricing(targetSt, targetGroup) : null;
+      const fee = pricing?.pricePerSession || 200;
+      setStudentPayments(prev => ({
+        ...prev,
+        [stId]: {
+          status: markPaid ? 'paid' : 'pending',
+          amount: markPaid ? fee : 0
+        }
+      }));
+      const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+      if (selectedLesson) {
+        updateLessonPaymentStatus(selectedLesson.id, markPaid ? 'paid' : 'pending', markPaid ? fee : 0, targetAcc, stId);
+      }
+      setPaymentToastMessage(_t(
+        markPaid ? `تم تسجيل سداد الطالب (${targetSt?.name}) بنجاح! ✓` : `تم تحويل حالة الطالب (${targetSt?.name}) إلى معلقة`,
+        markPaid ? `Recorded payment for ${targetSt?.name}! ✓` : `Payment marked pending for ${targetSt?.name}`,
+        markPaid ? `Zahlung für ${targetSt?.name} erfasst! ✓` : `Zahlung für ${targetSt?.name} ausstehend`
+      ));
+      setTimeout(() => setPaymentToastMessage(null), 3000);
+      return;
+    }
+
     setIsLessonPaid(markPaid);
     if (!selectedLesson) return;
 
-    const groupId = targetGroup?.id || selectedLesson.groupId || '';
-    const groupName = targetGroup?.name || selectedLesson.groupName || 'Gruppe';
     const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
     const amount = paymentAmountInput > 0 ? paymentAmountInput : (selectedLesson.amountDue || 200);
 
-    if (markPaid) {
-      updateLessonPaymentStatus(selectedLesson.id, 'paid', amount, targetAcc);
+    const isGroup = Boolean(selectedLesson.groupId && activeLessonStudents.length > 1);
+    if (isGroup) {
+      const newMap: Record<string, { status: PaymentStatus; amount: number }> = {};
+      activeLessonStudents.forEach(st => {
+        const pricing = getStudentCyclePricing(st, targetGroup);
+        const fee = pricing?.pricePerSession || 200;
+        newMap[st.id] = {
+          status: markPaid ? 'paid' : 'pending',
+          amount: markPaid ? fee : 0
+        };
+        updateLessonPaymentStatus(selectedLesson.id, markPaid ? 'paid' : 'pending', markPaid ? fee : 0, targetAcc, st.id);
+      });
+      setStudentPayments(newMap);
+    } else {
+      const targetStId = selectedLesson.studentId || targetStudent?.id;
+      if (markPaid) {
+        updateLessonPaymentStatus(selectedLesson.id, 'paid', amount, targetAcc, targetStId);
+      } else {
+        updateLessonPaymentStatus(selectedLesson.id, 'pending', 0, undefined, targetStId);
+      }
+    }
 
-      setPaymentToastMessage(_t(`تم تسجيل سداد ${amount} EGP في المالية بنجاح! ✓`, `Recorded payment of ${amount} EGP in Finance! ✓`, `Zahlung von ${amount} EGP in Finanzen erfasst! ✓`));
-      setTimeout(() => setPaymentToastMessage(null), 3500);
+    setPaymentToastMessage(_t(
+      markPaid ? `تم تسجيل سداد ${amount} EGP في المالية بنجاح! ✓` : 'تم تحويل حالة السداد إلى معلقة (لم تسدد)',
+      markPaid ? `Recorded payment of ${amount} EGP in Finance! ✓` : 'Payment marked as pending',
+      markPaid ? `Zahlung von ${amount} EGP in Finanzen erfasst! ✓` : 'Zahlung als ausstehend markiert'
+    ));
+    setTimeout(() => setPaymentToastMessage(null), 3500);
+    if (markPaid) {
       try {
         confetti({ particleCount: 60, spread: 65, origin: { y: 0.6 } });
       } catch {}
-    } else {
-      updateLessonPaymentStatus(selectedLesson.id, 'pending', 0);
-      setPaymentToastMessage(_t('تم تحويل حالة الحصة إلى معلقة (لم تسدد)', 'Payment marked as pending', 'Zahlung als ausstehend markiert'));
-      setTimeout(() => setPaymentToastMessage(null), 2500);
     }
   };
 
@@ -604,8 +648,87 @@ export const LessonControlModal: React.FC = () => {
   });
   const recipientPhone = resolvedRecipient.contact;
 
-  const isGroupLesson = targetGroup && students.filter(s => s.groupId === targetGroup.id).length > 1;
+  const isGroupLesson = Boolean(
+    targetGroup && (
+      (targetGroup.type && targetGroup.type === 'group') ||
+      students.filter(s => s.groupId === targetGroup.id).length > 1 ||
+      activeLessonStudents.length > 1 ||
+      !selectedLesson.studentId
+    )
+  );
   const groupWhatsAppLink = targetGroup?.whatsAppGroupLink || '';
+
+  const [showGroupWhatsAppModal, setShowGroupWhatsAppModal] = useState<boolean>(false);
+  const [groupWhatsAppLinkInput, setGroupWhatsAppLinkInput] = useState<string>('');
+
+  useEffect(() => {
+    if (targetGroup?.whatsAppGroupLink) {
+      setGroupWhatsAppLinkInput(targetGroup.whatsAppGroupLink);
+    } else {
+      setGroupWhatsAppLinkInput('');
+    }
+  }, [targetGroup?.whatsAppGroupLink]);
+
+  const handleWhatsAppClick = () => {
+    if (isGroupLesson) {
+      if (groupWhatsAppLink) {
+        let link = groupWhatsAppLink.trim();
+        if (!link.startsWith('http://') && !link.startsWith('https://')) {
+          link = `https://${link}`;
+        }
+        window.open(link, '_blank');
+      } else {
+        setShowGroupWhatsAppModal(true);
+      }
+    } else {
+      // Single student / 1-on-1 private lesson
+      if (recipientPhone) {
+        const url = buildWhatsAppUrl(recipientPhone);
+        window.open(url, '_blank');
+      } else {
+        alert(
+          _t(
+            'لا يوجد رقم هاتف مسجل لولي الأمر لإرسال رسالة واتساب',
+            'No parent phone number registered to send a WhatsApp message',
+            'Keine Telefonnummer der Eltern für WhatsApp hinterlegt'
+          )
+        );
+      }
+    }
+  };
+
+  const handleParentWhatsAppClick = () => {
+    if (isGroupLesson && activeLessonStudents.length > 1) {
+      setShowGroupWhatsAppModal(true);
+    } else {
+      if (recipientPhone) {
+        const url = buildWhatsAppUrl(recipientPhone);
+        window.open(url, '_blank');
+      } else {
+        alert(
+          _t(
+            'لا يوجد رقم هاتف مسجل لولي الأمر لإرسال رسالة واتساب',
+            'No parent phone number registered to send a WhatsApp message',
+            'Keine Telefonnummer der Eltern für WhatsApp hinterlegt'
+          )
+        );
+      }
+    }
+  };
+
+  const handleSaveAndOpenGroupWhatsApp = () => {
+    let link = groupWhatsAppLinkInput.trim();
+    if (link && !link.startsWith('http://') && !link.startsWith('https://')) {
+      link = `https://${link}`;
+    }
+    if (targetGroup?.id) {
+      updateGroup(targetGroup.id, { whatsAppGroupLink: link });
+    }
+    if (link) {
+      window.open(link, '_blank');
+    }
+    setShowGroupWhatsAppModal(false);
+  };
 
   const sendWhatsAppWithGroupCheck = (text: string) => {
     if (isGroupLesson) {
@@ -718,16 +841,34 @@ export const LessonControlModal: React.FC = () => {
       studentExamGrade: isSingleStudentAbsent ? {} : finalStudentExamGrade,
       studentNotes: isQuick ? (Object.keys(studentNotes).length > 0 ? studentNotes : { [qId]: selectedLesson.quickNotes || '' }) : finalStudentNotes,
       studentPerformance,
-      paymentStatus: isLessonPaid ? 'paid' : (selectedLesson.paymentStatus || 'pending'),
-      amountPaid: isLessonPaid ? paymentAmountInput : (selectedLesson.amountPaid || 0),
-      studentPayments: Object.keys(studentPayments).length > 0 
-        ? studentPayments
-        : (isLessonPaid && selectedLesson.studentId ? {
-            [selectedLesson.studentId]: {
-              status: 'paid' as PaymentStatus,
-              amount: paymentAmountInput
-            }
-          } : undefined),
+      paymentStatus: (activeLessonStudents.length > 1)
+        ? (activeLessonStudents.every(st => studentPayments[st.id]?.status === 'paid') ? 'paid' : (activeLessonStudents.some(st => studentPayments[st.id]?.status === 'paid') ? 'partial' : 'pending'))
+        : (isLessonPaid ? 'paid' : (selectedLesson.paymentStatus || 'pending')),
+      amountPaid: (activeLessonStudents.length > 1)
+        ? Object.values(studentPayments).reduce((sum, sp: any) => sum + (sp?.status === 'paid' ? (sp.amount || 0) : 0), 0)
+        : (isLessonPaid ? paymentAmountInput : (selectedLesson.amountPaid || 0)),
+      studentPayments: (activeLessonStudents.length > 1)
+        ? (() => {
+            const finalMap: Record<string, { status: PaymentStatus; amount: number }> = {};
+            activeLessonStudents.forEach(st => {
+              const p = studentPayments[st.id];
+              const pricing = getStudentCyclePricing(st, targetGroup);
+              const fee = pricing?.pricePerSession || 200;
+              finalMap[st.id] = {
+                status: p?.status || 'pending',
+                amount: p?.status === 'paid' ? (p.amount || fee) : 0
+              };
+            });
+            return finalMap;
+          })()
+        : (Object.keys(studentPayments).length > 0 
+            ? studentPayments
+            : (isLessonPaid && selectedLesson.studentId ? {
+                [selectedLesson.studentId]: {
+                  status: 'paid' as PaymentStatus,
+                  amount: paymentAmountInput
+                }
+              } : undefined)),
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
@@ -736,8 +877,8 @@ export const LessonControlModal: React.FC = () => {
       status: 'completed',
       sessionNumber: currentSessionNumber,
       totalSessionsInPackage: cycleTotalSessions,
-      paymentStatus: isLessonPaid ? 'paid' : (selectedLesson.paymentStatus || 'pending'),
-      amountPaid: isLessonPaid ? paymentAmountInput : (selectedLesson.amountPaid || 0),
+      paymentStatus: reportData.paymentStatus,
+      amountPaid: reportData.amountPaid,
       studentPayments: reportData.studentPayments as any,
       recordingLink: lessonRecordingLink.trim() || undefined,
       recordingLink2: lessonRecordingLink2.trim() || undefined,
@@ -745,10 +886,20 @@ export const LessonControlModal: React.FC = () => {
     });
 
     const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
-    if (isLessonPaid && paymentAmountInput > 0) {
-      updateLessonPaymentStatus(selectedLesson.id, 'paid', paymentAmountInput, targetAcc);
-    } else if (!isLessonPaid && selectedLesson.paymentStatus === 'paid') {
-      updateLessonPaymentStatus(selectedLesson.id, 'pending', 0);
+    if (activeLessonStudents.length > 1) {
+      // In group lesson, update individual student payments safely
+      activeLessonStudents.forEach(st => {
+        const sp = reportData.studentPayments?.[st.id];
+        if (sp?.status === 'paid' && sp.amount > 0) {
+          updateLessonPaymentStatus(selectedLesson.id, 'paid', sp.amount, targetAcc, st.id);
+        }
+      });
+    } else {
+      if (isLessonPaid && paymentAmountInput > 0) {
+        updateLessonPaymentStatus(selectedLesson.id, 'paid', paymentAmountInput, targetAcc, selectedLesson.studentId || targetStudent?.id);
+      } else if (!isLessonPaid && selectedLesson.paymentStatus === 'paid') {
+        updateLessonPaymentStatus(selectedLesson.id, 'pending', 0, undefined, selectedLesson.studentId || targetStudent?.id);
+      }
     }
     endActiveLessonTimer();
     storage.removeItem(`dl_draft_report_${selectedLesson.id}`);
@@ -1043,7 +1194,7 @@ export const LessonControlModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowLessonReminderModal(true)}
-                  className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs min-w-0"
+                  className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs min-w-0"
                 >
                   <Send className="w-3.5 h-3.5 fill-white shrink-0" />
                   <span className="truncate">{t('auto_send_lesson_reminder')}</span>
@@ -1139,7 +1290,7 @@ export const LessonControlModal: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleSaveReport()}
-                            className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             <span>{t('auto_end_session')}</span>
@@ -1180,7 +1331,7 @@ export const LessonControlModal: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleSaveReport()}
-                            className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2 px-3 rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             <span>{t('auto_end_session')}</span>
@@ -1277,7 +1428,7 @@ export const LessonControlModal: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handleSaveReport()}
-                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
+                          className="px-2.5 py-1 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
                           title={_t('حفظ البيانات والتعديلات فوراً (زر الصح)', 'Save Changes Now (Checkmark)', 'Speichern')}
                         >
                           <Check className="w-3.5 h-3.5 stroke-[3]" />
@@ -1400,7 +1551,7 @@ export const LessonControlModal: React.FC = () => {
                                     handleUpdateSessionNumber(currentSessionNumber);
                                     setIsEditingSessionNumber(false);
                                   }}
-                                  className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-98"
+                                  className="flex-1 py-2 px-3 bg-primary hover:bg-primary-hover text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-98"
                                 >
                                   <Check className="w-4 h-4" />
                                   <span>{_t('💾 حفظ تعديل السايكل وتطبيق التسلسل', 'Save Cycle Edit & Apply Sequence', 'Zyklusänderung speichern')}</span>
@@ -1978,51 +2129,140 @@ export const LessonControlModal: React.FC = () => {
                           </div>
                           <div>
                             <h4 className="text-xs font-black text-text-main">
-                              {_t('حالة السداد والرسوم المالية', 'Payment & Finance Status', 'Zahlungsstatus & Honorar')}
+                              {activeLessonStudents.length > 1
+                                ? _t('سداد رسوم طلاب المجموعة', 'Group Students Payment', 'Gruppenzahlungsstatus')
+                                : _t('حالة السداد والرسوم المالية', 'Payment & Finance Status', 'Zahlungsstatus & Honorar')}
                             </h4>
                             <span className="text-[10.5px] text-text-muted font-bold">
-                              {_t('المبلغ المقدر:', 'Calculated Fee:', 'Berechneter Betrag:')} {paymentAmountInput} {profile.currency || 'EGP'}
+                              {activeLessonStudents.length > 1
+                                ? _t(
+                                    `مسدد: ${activeLessonStudents.filter(s => studentPayments[s.id]?.status === 'paid').length} من ${activeLessonStudents.length} طلاب`,
+                                    `Paid: ${activeLessonStudents.filter(s => studentPayments[s.id]?.status === 'paid').length}/${activeLessonStudents.length} students`,
+                                    `Bezahlt: ${activeLessonStudents.filter(s => studentPayments[s.id]?.status === 'paid').length}/${activeLessonStudents.length}`
+                                  )
+                                : `${_t('المبلغ المقدر:', 'Calculated Fee:', 'Berechneter Betrag:')} ${paymentAmountInput} ${profile.currency || 'EGP'}`}
                             </span>
                           </div>
                         </div>
 
-                        <span className={`text-[10.5px] font-black px-2 py-0.5 rounded-full ${
-                          isLessonPaid 
-                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' 
-                            : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
-                        }`}>
-                          {isLessonPaid ? _t('تم الدفع في المالية ✓', 'Paid ✓', 'Bezahlt ✓') : _t('معلق (لم يسدد) ⏳', 'Pending ⏳', 'Ausstehend ⏳')}
-                        </span>
+                        {activeLessonStudents.length > 1 ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePaymentPaid(true)}
+                              className="px-2 py-1 rounded-md text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50 hover:bg-emerald-100 transition-colors cursor-pointer"
+                            >
+                              {_t('الكل دفع ✓', 'All Paid', 'Alle bezahlt')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePaymentPaid(false)}
+                              className="px-2 py-1 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 hover:bg-amber-100 transition-colors cursor-pointer"
+                            >
+                              {_t('الكل معلق ⏳', 'All Pending', 'Alle offen')}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className={`text-[10.5px] font-black px-2 py-0.5 rounded-full ${
+                            isLessonPaid 
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' 
+                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                          }`}>
+                            {isLessonPaid ? _t('تم الدفع في المالية ✓', 'Paid ✓', 'Bezahlt ✓') : _t('معلق (لم يسدد) ⏳', 'Pending ⏳', 'Ausstehend ⏳')}
+                          </span>
+                        )}
                       </div>
 
-                      {/* Payment Status Toggle Buttons */}
-                      <div className="grid grid-cols-2 gap-1.5 p-1 bg-surface rounded-lg border border-surface-border">
-                        <button
-                          type="button"
-                          onClick={() => handleTogglePaymentPaid(true)}
-                          className={`py-2 px-2 rounded-md text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                            isLessonPaid
-                              ? 'bg-emerald-600 text-white shadow-2xs scale-[1.02]'
-                              : 'text-text-muted hover:bg-surface-hover hover:text-text-main'
-                          }`}
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>{_t('تم دفع الحصة (تسجيل بالمالية)', 'Mark as Paid (Finance)', 'Als bezahlt markieren')}</span>
-                        </button>
+                      {/* If Multi-student Group Lesson: Show Per-Student Payment Controls */}
+                      {activeLessonStudents.length > 1 ? (
+                        <div className="space-y-1.5 pt-1">
+                          {activeLessonStudents.map(st => {
+                            const stPricing = getStudentCyclePricing(st, targetGroup);
+                            const stFee = stPricing?.pricePerSession || 200;
+                            const isPaid = studentPayments[st.id]?.status === 'paid';
+                            return (
+                              <div
+                                key={st.id}
+                                className="flex items-center justify-between gap-2 p-2 bg-surface rounded-lg border border-surface-border"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-black text-text-main truncate">
+                                      {st.name}
+                                    </span>
+                                    <span className={`text-[9.5px] font-bold px-1.5 py-0.2 rounded ${
+                                      isPaid 
+                                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' 
+                                        : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                    }`}>
+                                      {isPaid ? _t('مسدد ✓', 'Paid', 'Bezahlt') : _t('معلق ⏳', 'Pending', 'Offen')}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] text-text-muted font-bold font-mono">
+                                    {stFee} {profile.currency || 'EGP'}
+                                  </span>
+                                </div>
 
-                        <button
-                          type="button"
-                          onClick={() => handleTogglePaymentPaid(false)}
-                          className={`py-2 px-2 rounded-md text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                            !isLessonPaid
-                              ? 'bg-amber-600 text-white shadow-2xs scale-[1.02]'
-                              : 'text-text-muted hover:bg-surface-hover hover:text-text-main'
-                          }`}
-                        >
-                          <Clock className="w-3.5 h-3.5" />
-                          <span>{_t('لم تسدد بعد (معلقة)', 'Pending (Not Paid)', 'Noch ausstehend')}</span>
-                        </button>
-                      </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTogglePaymentPaid(true, st.id)}
+                                    className={`px-2 py-1 rounded-md text-[10.5px] font-black transition-all cursor-pointer flex items-center gap-1 ${
+                                      isPaid
+                                        ? 'bg-emerald-600 text-white shadow-2xs'
+                                        : 'bg-surface-hover text-text-muted hover:text-text-main border border-surface-border'
+                                    }`}
+                                  >
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    <span>{_t('دفع ✓', 'Paid', 'Bezahlt')}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTogglePaymentPaid(false, st.id)}
+                                    className={`px-2 py-1 rounded-md text-[10.5px] font-black transition-all cursor-pointer flex items-center gap-1 ${
+                                      !isPaid
+                                        ? 'bg-amber-600 text-white shadow-2xs'
+                                        : 'bg-surface-hover text-text-muted hover:text-text-main border border-surface-border'
+                                    }`}
+                                  >
+                                    <Clock className="w-3 h-3" />
+                                    <span>{_t('معلق ⏳', 'Pending', 'Offen')}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        /* Single Student Lesson Controls */
+                        <div className="grid grid-cols-2 gap-1.5 p-1 bg-surface rounded-lg border border-surface-border">
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePaymentPaid(true)}
+                            className={`py-2 px-2 rounded-md text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                              isLessonPaid
+                                ? 'bg-emerald-600 text-white shadow-2xs scale-[1.02]'
+                                : 'text-text-muted hover:bg-surface-hover hover:text-text-main'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>{_t('تم دفع الحصة (تسجيل بالمالية)', 'Mark as Paid (Finance)', 'Als bezahlt markieren')}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePaymentPaid(false)}
+                            className={`py-2 px-2 rounded-md text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                              !isLessonPaid
+                                ? 'bg-amber-600 text-white shadow-2xs scale-[1.02]'
+                                : 'text-text-muted hover:bg-surface-hover hover:text-text-main'
+                            }`}
+                          >
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>{_t('لم تسدد بعد (معلقة)', 'Pending (Not Paid)', 'Noch ausstehend')}</span>
+                          </button>
+                        </div>
+                      )}
 
                       {/* Feedback Toast Notice */}
                       {paymentToastMessage && (
@@ -2149,7 +2389,7 @@ export const LessonControlModal: React.FC = () => {
               {t('auto_parent_communication')}
             </p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+            <div className={`grid ${isGroupLesson ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'} gap-1.5`}>
               <button
                 type="button"
                 disabled={selectedLesson.status !== 'completed'}
@@ -2170,21 +2410,73 @@ export const LessonControlModal: React.FC = () => {
                 <span className="truncate">تقرير ولي الأمر</span>
               </button>
 
+              {isGroupLesson ? (
+                <>
+                  {/* Group WhatsApp */}
+                  <button
+                    type="button"
+                    onClick={handleWhatsAppClick}
+                    className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer shadow-2xs truncate"
+                    title={_t('إرسال رسالة لواتساب الجروب', 'Send WhatsApp message to group', 'WhatsApp-Nachricht an Gruppe senden')}
+                  >
+                    <Users className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">واتساب الجروب</span>
+                  </button>
+
+                  {/* Parent WhatsApp */}
+                  <button
+                    type="button"
+                    onClick={handleParentWhatsAppClick}
+                    className="bg-primary-soft hover:bg-primary/20 text-primary border border-primary/30 active:scale-95 font-black text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer shadow-2xs truncate"
+                    title={_t('إرسال رسالة واتساب لولي الأمر', 'Send WhatsApp message to parent', 'WhatsApp-Nachricht an Eltern senden')}
+                  >
+                    <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">واتساب ولي الأمر</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleWhatsAppClick}
+                  className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer shadow-2xs truncate"
+                  title={_t('إرسال رسالة واتساب لولي الأمر', 'Send WhatsApp message to parent', 'WhatsApp-Nachricht an Eltern senden')}
+                >
+                  <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">واتساب ولي الأمر</span>
+                </button>
+              )}
+
               <a
-                href={targetStudent?.parentPhone || selectedLesson?.quickParentPhone ? `tel:${(targetStudent?.parentPhone || selectedLesson?.quickParentPhone || '').replace(/[^0-9+]/g, '')}` : '#'}
+                href={
+                  isGroupLesson && activeLessonStudents.length > 1 && !targetStudent?.parentPhone
+                    ? '#'
+                    : (targetStudent?.parentPhone || selectedLesson?.quickParentPhone
+                        ? `tel:${(targetStudent?.parentPhone || selectedLesson?.quickParentPhone || '').replace(/[^0-9+]/g, '')}`
+                        : '#')
+                }
                 onClick={(e) => {
-                  if (!targetStudent?.parentPhone && !selectedLesson?.quickParentPhone) {
+                  if (isGroupLesson && activeLessonStudents.length > 1 && !targetStudent?.parentPhone) {
+                    e.preventDefault();
+                    setShowGroupWhatsAppModal(true);
+                  } else if (!targetStudent?.parentPhone && !selectedLesson?.quickParentPhone) {
                     e.preventDefault();
                     alert(t('alert_no_parent_phone'));
                   }
                 }}
-                className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center cursor-pointer border border-surface-border truncate"
+                className={`bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center cursor-pointer border border-surface-border truncate ${
+                  !targetStudent?.phone ? 'col-span-2 sm:col-span-1' : ''
+                }`}
               >
                 <Phone className="w-3 h-3 text-primary shrink-0" />
-                <span className="truncate">Anruf Eltern</span>
+                <span className="truncate">
+                  {isGroupLesson && activeLessonStudents.length > 1
+                    ? _t('أرقام الأولياء', 'Parents Contacts', 'Anruf Eltern')
+                    : 'Anruf Eltern'
+                  }
+                </span>
               </a>
 
-              {targetStudent?.phone && (
+              {targetStudent?.phone && !isGroupLesson && (
                 <a
                   href={`tel:${targetStudent.phone}`}
                   className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center border border-surface-border truncate col-span-2 sm:col-span-1"
@@ -2317,6 +2609,145 @@ export const LessonControlModal: React.FC = () => {
           group={targetGroup}
           onClose={() => setShowGroupProfile(false)}
         />
+      )}
+
+      {/* Group WhatsApp & Parents Contacts Modal */}
+      {showGroupWhatsAppModal && targetGroup && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs animate-in fade-in"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowGroupWhatsAppModal(false);
+          }}
+        >
+          <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            {/* Header */}
+            <div className="p-3.5 border-b border-surface-border flex items-center justify-between bg-surface-hover/50">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-primary-soft text-primary">
+                  <MessageCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-text-main flex items-center gap-1.5">
+                    <span>{_t('تواصل واتساب المجموعة', 'Group WhatsApp Communication', 'WhatsApp-Gruppenkommunikation')}</span>
+                  </h3>
+                  <p className="text-[11px] text-text-muted font-bold truncate max-w-[220px]">
+                    {targetGroup.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGroupWhatsAppModal(false)}
+                className="p-1.5 text-text-muted hover:text-text-main rounded-lg hover:bg-surface-hover cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 space-y-4 overflow-y-auto">
+              {/* Section 1: WhatsApp Group Link */}
+              <div className="p-3 rounded-xl bg-primary-soft/40 border border-primary-border/40 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-text-main flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-primary" />
+                    {_t('رابط جروب الواتساب الرسمي', 'Official WhatsApp Group Link', 'Offizieller WhatsApp-Gruppenlink')}
+                  </span>
+                  {targetGroup.whatsAppGroupLink && (
+                    <span className="text-[10px] font-bold text-text-muted">
+                      • {_t('مسجل', 'Registered', 'Hinterlegt')}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={groupWhatsAppLinkInput}
+                    onChange={(e) => setGroupWhatsAppLinkInput(e.target.value)}
+                    placeholder="https://chat.whatsapp.com/..."
+                    className="flex-1 bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 text-xs text-text-main focus:outline-none focus:ring-1 focus:ring-primary font-sans"
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveAndOpenGroupWhatsApp}
+                    className="px-3 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>{_t('حفظ وفتح', 'Save & Open', 'Speichern & Öffnen')}</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-text-muted">
+                  {_t('يتم حفظ الرابط تلقائياً لفتحه بنقرة واحدة لاحقاً', 'Link is saved in group settings to open in 1-click', 'Wird für 1-Klick-Zugriff gespeichert')}
+                </p>
+              </div>
+
+              {/* Section 2: Individual Parent WhatsApp & Phone Contacts */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-black text-text-main flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-primary" />
+                  {_t('أولياء أمور طلاب المجموعة', 'Group Students Parents', 'Eltern der Gruppenmitglieder')}
+                  <span className="text-[10px] text-text-muted font-normal">({activeLessonStudents.length})</span>
+                </h4>
+
+                {activeLessonStudents.length === 0 ? (
+                  <p className="text-xs text-text-muted text-center py-4">
+                    {_t('لا يوجد طلاب مسجلين في هذه المجموعة حالياً', 'No students registered in this group yet', 'Keine Schüler in dieser Gruppe')}
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                    {activeLessonStudents.map(st => {
+                      const resolved = resolveStudentWhatsAppContact(st);
+                      const parentPhone = st.parentPhone || '';
+                      const studentPhone = st.studentPhone || st.phone || '';
+
+                      return (
+                        <div
+                          key={st.id}
+                          className="p-2.5 rounded-xl border border-surface-border bg-surface hover:bg-surface-hover/50 transition-colors flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-xs text-text-main truncate">
+                              {st.name}
+                            </div>
+                            <div className="text-[10px] text-text-muted truncate">
+                              {st.parentName ? `${st.parentName} • ` : ''}
+                              {parentPhone || studentPhone || _t('بدون هاتف', 'No phone', 'Kein Telefon')}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            {(parentPhone || resolved.hasContact) && (
+                              <a
+                                href={buildWhatsAppUrl(resolved.contact || parentPhone)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="p-1.5 rounded-lg bg-primary-soft text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+                                title={_t('إرسال واتساب لولي الأمر', 'WhatsApp Parent', 'WhatsApp Eltern')}
+                              >
+                                <MessageCircle className="w-4 h-4" />
+                              </a>
+                            )}
+
+                            {parentPhone && (
+                              <a
+                                href={`tel:${parentPhone.replace(/[^0-9+]/g, '')}`}
+                                className="p-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+                                title={_t('اتصال بولي الأمر', 'Call Parent', 'Anruf Eltern')}
+                              >
+                                <Phone className="w-4 h-4" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

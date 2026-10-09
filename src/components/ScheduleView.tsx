@@ -710,31 +710,31 @@ export const ScheduleView: React.FC = () => {
 
       {/* 1. DAY VIEW */}
       {calendarView === 'day' && (
-        <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs space-y-2">
-          <div className="flex items-center justify-between text-xs font-bold border-b border-slate-100 dark:border-surface-border pb-1.5">
-            <span className="text-slate-500 uppercase text-[11px]">({dayLessons.length}) {t('schedule_title')}</span>
+        <div className="bg-surface border border-surface-border rounded-lg p-2 sm:p-2.5 shadow-2xs space-y-2">
+          <div className="flex items-center justify-between text-xs font-bold border-b border-surface-border pb-1.5">
+            <span className="text-text-muted uppercase text-[11px]">({dayLessons.length}) {t('schedule_title')}</span>
             {selectedDayConflicts.length === 0 ? (
-              <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 text-[10px] font-bold">
+              <span className="text-primary flex items-center gap-1 text-[10px] font-bold">
                 <CheckCircle2 className="w-3 h-3" /> {t('schedule_no_conflicts')}
               </span>
             ) : (
-              <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1 text-[10px] font-bold">
-                <AlertTriangle className="w-3.5 h-3.5 animate-pulse text-amber-500" /> {t('schedule_conflict')} ({selectedDayConflicts.length})
+              <span className="text-primary flex items-center gap-1 text-[10px] font-bold">
+                <AlertTriangle className="w-3.5 h-3.5 animate-pulse text-primary" /> {t('schedule_conflict')} ({selectedDayConflicts.length})
               </span>
             )}
           </div>
 
           {/* Interactive Conflict Resolution Banner for Day View */}
           {dayConflictPairs.length > 0 && (
-            <div className="bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 rounded-xl p-2.5 sm:p-3 space-y-2 shadow-2xs">
+            <div className="bg-primary-soft border border-primary-border rounded-xl p-2.5 sm:p-3 space-y-2 shadow-2xs">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 animate-bounce" />
-                  <span className="text-xs font-black text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="w-4 h-4 text-primary shrink-0 animate-bounce" />
+                  <span className="text-xs font-black text-text-main">
                     {_t(`يوجد تعارض في مواعيد اليوم (${dayConflictPairs.length})`, `Schedule Conflicts on this day (${dayConflictPairs.length})`, `Terminkonflikte an diesem Tag (${dayConflictPairs.length})`)}
                   </span>
                 </div>
-                <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full shrink-0">
+                <span className="text-[10px] font-bold text-primary bg-surface px-2 py-0.5 rounded-full border border-primary-border/40 shrink-0">
                   {_t('يتطلب التدخل', 'Needs attention', 'Aktion erforderlich')}
                 </span>
               </div>
@@ -743,23 +743,23 @@ export const ScheduleView: React.FC = () => {
                 {dayConflictPairs.map((pair, idx) => (
                   <div 
                     key={idx} 
-                    className="bg-surface/90 dark:bg-slate-900/90 border border-amber-500/25 rounded-lg p-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                    className="bg-surface border border-primary-border/40 rounded-lg p-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
                   >
                     <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
                           onClick={() => openLessonControl(pair.lessonA)}
-                          className="font-black text-slate-800 dark:text-slate-100 hover:text-primary hover:underline text-start"
+                          className="font-black text-text-main hover:text-primary hover:underline text-start cursor-pointer"
                         >
                           {pair.lessonA.studentName || pair.lessonA.groupName || pair.lessonA.title}
                         </button>
-                        <span className="font-mono text-amber-700 dark:text-amber-300 font-bold bg-amber-500/15 px-1.5 py-0.2 rounded text-[11px]">
+                        <span className="font-mono text-primary font-bold bg-primary-soft px-1.5 py-0.2 rounded text-[11px] border border-primary-border/30">
                           {pair.lessonA.time}
                         </span>
                       </div>
 
-                      <span className="text-amber-600 dark:text-amber-400 font-bold text-[11px]">
+                      <span className="text-primary font-bold text-[11px]">
                         ⚡ {_t('يتعارض مع', 'conflicts with', 'kollidiert mit')}
                       </span>
 
@@ -767,11 +767,11 @@ export const ScheduleView: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => openLessonControl(pair.lessonB)}
-                          className="font-black text-slate-800 dark:text-slate-100 hover:text-primary hover:underline text-start"
+                          className="font-black text-text-main hover:text-primary hover:underline text-start cursor-pointer"
                         >
                           {pair.lessonB.studentName || pair.lessonB.groupName || pair.lessonB.title}
                         </button>
-                        <span className="font-mono text-amber-700 dark:text-amber-300 font-bold bg-amber-500/15 px-1.5 py-0.2 rounded text-[11px]">
+                        <span className="font-mono text-primary font-bold bg-primary-soft px-1.5 py-0.2 rounded text-[11px] border border-primary-border/30">
                           {pair.lessonB.time}
                         </span>
                       </div>
@@ -781,7 +781,7 @@ export const ScheduleView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => openReschedule(pair.lessonB)}
-                        className="px-2 py-1 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                        className="px-2 py-1 text-[11px] font-bold bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
                         title={_t('تغيير موعد الحصة لحل التعارض', 'Reschedule to resolve conflict', 'Termin ändern')}
                       >
                         <ArrowLeftRight className="w-3 h-3" />
@@ -814,29 +814,27 @@ export const ScheduleView: React.FC = () => {
               .filter(item => item.hasContent);
 
             return (
-              <div className="p-2.5 sm:p-3 rounded-xl bg-indigo-50/20 dark:bg-indigo-950/10 border border-indigo-100/40 dark:border-indigo-900/20 space-y-2 shadow-2xs">
+              <div className="p-2.5 sm:p-3 rounded-xl bg-primary-soft/30 border border-primary-border/40 space-y-2 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-indigo-600 text-white rounded-lg">
-                      <BookOpen className="w-4 h-4" />
-                    </div>
+                    <BookOpen className="w-5 h-5 text-primary shrink-0" />
                     <div>
-                      <h4 className="text-xs font-black text-slate-850 dark:text-white">
+                      <h4 className="text-xs font-black text-text-main">
                         {_t('فترة التواجد بالمدرسة', 'School Presence Block', 'Schulpräsenzzeit')}
                       </h4>
-                      <p className="text-[10px] text-slate-500 font-mono">
+                      <p className="text-[10px] text-text-muted font-mono">
                         {presence.arrivalTime} ← {presence.departureTime}
                       </p>
                     </div>
                   </div>
-                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/5 px-2 py-0.5 rounded-md">
+                  <span className="text-[10.5px] font-bold text-primary">
                     {_t('يوم عمل مدرسة', 'School Day', 'Schultag')}
                   </span>
                 </div>
 
                 {scheduledPeriods.length > 0 && (
-                  <div className="space-y-1.5 pt-2 border-t border-indigo-100/20 dark:border-indigo-900/20">
-                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                  <div className="space-y-1.5 pt-2 border-t border-primary-border/30">
+                    <div className="text-[10px] font-black text-text-muted uppercase tracking-wider">
                       {_t('الحصص والنشاط المدرسي اليوم', 'Periods & School Activities Today', 'Tägliche Schulstunden')}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -850,13 +848,13 @@ export const ScheduleView: React.FC = () => {
                               {p.periodNumber}
                             </span>
                             <div className="min-w-0">
-                              <div className="font-bold text-slate-700 dark:text-slate-300 font-mono tracking-wider">
+                              <div className="font-bold text-text-main font-mono tracking-wider">
                                 {p.startTime}-{p.endTime}
                               </div>
-                              <div className="font-semibold text-slate-500 dark:text-slate-400 truncate text-[10px]">
+                              <div className="font-semibold text-text-muted truncate text-[10px]">
                                 {rec?.className ? (
                                   <span>
-                                    <strong className="font-black text-slate-850 dark:text-white text-[11px]">{rec.className}</strong>
+                                    <strong className="font-black text-text-main text-[11px]">{rec.className}</strong>
                                     {rec.subjectName && (
                                       <span className="text-[9px] font-bold text-primary ms-1 uppercase">
                                         ({rec.subjectName})
@@ -880,11 +878,11 @@ export const ScheduleView: React.FC = () => {
 
           {dayLessons.length === 0 ? (
             <div className="text-center py-10 space-y-2">
-              <Clock className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
+              <Clock className="w-8 h-8 text-text-muted/40 mx-auto" />
               <p className="text-xs font-bold text-text-muted">{t('schedule_no_lessons_day')}</p>
               <button
                 onClick={() => setIsAddLessonModalOpen(true)}
-                className="text-xs font-bold text-primary dark:text-primary hover:underline cursor-pointer"
+                className="text-xs font-bold text-primary hover:underline cursor-pointer"
               >
                 + {t('schedule_add_lesson_for')}
               </button>
@@ -903,7 +901,7 @@ export const ScheduleView: React.FC = () => {
                   >
                     {/* Time Column on Timeline */}
                     <div className={`w-11 sm:w-12 text-end text-xs font-bold font-mono shrink-0 pt-2 ${
-                      isCompleted ? 'text-text-muted/70 dark:text-slate-500 line-through' : 'text-text-main'
+                      isCompleted ? 'text-text-muted line-through' : 'text-text-main'
                     }`}>
                       {lesson.time}
                     </div>
@@ -912,25 +910,25 @@ export const ScheduleView: React.FC = () => {
                     <div className="flex flex-col items-center shrink-0 self-stretch relative">
                       <div className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 z-10 mt-2 transition-all ${
                         conflict
-                          ? 'border-amber-500 bg-amber-100 ring-2 ring-amber-400/40 animate-bounce'
+                          ? 'border-primary bg-primary/20 ring-2 ring-primary/40 animate-bounce'
                           : isCompleted
-                          ? 'border-slate-400 bg-slate-200 ring-2 ring-slate-200 dark:ring-slate-800'
+                          ? 'border-surface-border bg-surface-hover ring-2 ring-surface-border'
                           : isCancelled
-                          ? 'border-rose-400 bg-rose-100 ring-2 ring-rose-300'
+                          ? 'border-text-muted bg-surface-hover ring-2 ring-surface-border'
                           : 'border-primary bg-primary/20 ring-2 ring-primary/20'
                       }`} />
-                      <div className="w-0.5 bg-slate-200/80 dark:bg-slate-800 flex-1 -mt-0.5 min-h-[46px] group-last:hidden" />
+                      <div className="w-0.5 bg-surface-border flex-1 -mt-0.5 min-h-[46px] group-last:hidden" />
                     </div>
 
                     {/* Compact Session Card (72-80px Height) */}
                     <div className={`flex-1 min-w-0 border rounded-xl p-2 sm:p-2.5 transition-all shadow-2xs ${
                       conflict
-                        ? 'border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10'
+                        ? 'border-primary/40 bg-primary-soft/30'
                         : isCompleted
-                        ? 'bg-slate-100/70 dark:bg-slate-800/30 border-surface-border/80 opacity-80'
+                        ? 'bg-surface-hover/50 border-surface-border opacity-80'
                         : isCancelled
-                        ? 'bg-rose-500/5 dark:bg-rose-500/10 border-rose-500/20 opacity-75'
-                        : 'bg-surface hover:bg-surface-hover/60 border-surface-border/90 dark:border-surface-border hover:border-primary/40'
+                        ? 'bg-surface-hover/30 border-surface-border opacity-70'
+                        : 'bg-surface hover:bg-surface-hover/60 border-surface-border hover:border-primary/40'
                     }`}>
                       <div className="space-y-1.5">
                         {/* Row 1: Student/Group Name + Actions */}
@@ -961,9 +959,9 @@ export const ScheduleView: React.FC = () => {
                             ) : (
                               <h4 className={`text-sm sm:text-[15px] font-black truncate transition-colors ${
                                 isCompleted
-                                  ? 'line-through text-text-muted/70 dark:text-slate-500'
+                                  ? 'line-through text-text-muted/70'
                                   : isCancelled
-                                  ? 'line-through text-rose-500'
+                                  ? 'line-through text-text-muted'
                                   : 'text-text-main group-hover:text-primary'
                               }`}>
                                 {lesson.studentName || lesson.groupName || lesson.title}
@@ -986,7 +984,7 @@ export const ScheduleView: React.FC = () => {
                               type="button"
                               onClick={() => openReschedule(lesson)}
                               title="إعادة جدولة الحصة"
-                              className="p-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                              className="p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg transition-all cursor-pointer"
                             >
                               <ArrowLeftRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             </button>
@@ -995,7 +993,7 @@ export const ScheduleView: React.FC = () => {
                               type="button"
                               onClick={() => setLessonToDelete(lesson)}
                               title="حذف الحصة"
-                              className="p-1.5 text-rose-400 hover:text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-all cursor-pointer"
+                              className="p-1.5 text-text-muted hover:text-primary hover:bg-primary-soft rounded-lg transition-all cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             </button>
@@ -1053,20 +1051,20 @@ export const ScheduleView: React.FC = () => {
 
                           {/* Status Badges */}
                           {isCompleted && (
-                            <span className="text-[9px] font-bold uppercase bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 shrink-0">
-                              <CheckCircle2 className="w-2.5 h-2.5 text-slate-500" />
+                            <span className="text-[9px] font-bold uppercase bg-surface-border text-text-muted px-1.5 py-0.5 rounded-md flex items-center gap-0.5 shrink-0">
+                              <CheckCircle2 className="w-2.5 h-2.5 text-text-muted" />
                               {t('status_completed')}
                             </span>
                           )}
 
                           {isCancelled && (
-                            <span className="text-[9px] font-bold uppercase bg-rose-500/10 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded-md shrink-0">
+                            <span className="text-[9px] font-bold uppercase bg-surface-hover text-text-muted px-1.5 py-0.5 rounded-md shrink-0">
                               {t('status_cancelled')}
                             </span>
                           )}
 
                           {conflict && (
-                            <span className="text-[9px] font-bold uppercase bg-amber-500 text-white px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-1">
+                            <span className="text-[9px] font-bold uppercase bg-primary text-white px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-1">
                               <AlertTriangle className="w-2.5 h-2.5" />
                               {t('schedule_conflict')}
                             </span>
@@ -1080,16 +1078,16 @@ export const ScheduleView: React.FC = () => {
                           return (
                             <div 
                               onClick={(e) => e.stopPropagation()}
-                              className="bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/30 rounded-lg p-2 flex items-center justify-between gap-2 text-xs"
+                              className="bg-primary-soft border border-primary-border/40 rounded-lg p-2 flex items-center justify-between gap-2 text-xs"
                             >
                               <div className="flex items-center gap-1.5 min-w-0">
-                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                                <div className="text-[11px] text-amber-900 dark:text-amber-200 truncate">
+                                <AlertTriangle className="w-3.5 h-3.5 text-primary shrink-0" />
+                                <div className="text-[11px] text-text-main truncate">
                                   <span className="font-bold">{_t('يتعارض مع:', 'Conflicts with:', 'Konflikt mit:')}</span>{' '}
                                   {conflictingLessons.map((cl, i) => (
                                     <span key={cl.id}>
                                       {i > 0 && '، '}
-                                      <strong className="font-black underline cursor-pointer" onClick={() => openLessonControl(cl)}>
+                                      <strong className="font-black underline cursor-pointer text-primary" onClick={() => openLessonControl(cl)}>
                                         {cl.studentName || cl.groupName || cl.title}
                                       </strong> ({cl.time})
                                     </span>
@@ -1099,7 +1097,7 @@ export const ScheduleView: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => openReschedule(lesson)}
-                                className="px-2 py-0.5 text-[10px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-md transition-colors shrink-0 cursor-pointer"
+                                className="px-2 py-0.5 text-[10px] font-bold bg-primary hover:bg-primary-hover text-white rounded-md transition-colors shrink-0 cursor-pointer"
                               >
                                 {_t('حل التعارض', 'Resolve', 'Beheben')}
                               </button>
@@ -1118,7 +1116,7 @@ export const ScheduleView: React.FC = () => {
                           return (
                             <div
                               onClick={() => openLessonControl(lesson)}
-                              className="cursor-pointer text-[11px] text-text-muted dark:text-slate-400 font-normal leading-tight pt-0.5 truncate"
+                              className="cursor-pointer text-[11px] text-text-muted font-normal leading-tight pt-0.5 truncate"
                             >
                               📝 {lesson.notes}
                             </div>
@@ -1159,17 +1157,17 @@ export const ScheduleView: React.FC = () => {
                     : 'border-surface-border/90 dark:border-surface-border'
                 }`}
               >
-                <div className="flex items-center justify-between border-b border-slate-100 dark:border-surface-border pb-1.5">
+                <div className="flex items-center justify-between border-b border-surface-border pb-1.5">
                   <div>
                     <span className="text-[11px] font-black text-text-muted uppercase block">
                       {day.dayName}
                     </span>
-                    <span className={`text-sm font-black font-mono ${day.isToday ? 'text-primary dark:text-primary' : 'text-text-main'}`}>
+                    <span className={`text-sm font-black font-mono ${day.isToday ? 'text-primary' : 'text-text-main'}`}>
                       {day.dayNumber}. {day.monthName}
                     </span>
                   </div>
 
-                  <span className="text-[10px] font-extrabold bg-surface-hover text-text-main px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] font-extrabold bg-surface-hover text-text-main px-2 py-0.5 rounded-full border border-surface-border">
                     {day.lessons.length}
                   </span>
                 </div>
@@ -1186,8 +1184,8 @@ export const ScheduleView: React.FC = () => {
                   const activePeriodsCount = schedule.filter(s => s.subjectName || s.className).length;
 
                   return (
-                    <div className="p-1.5 rounded-lg bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100/20 dark:border-indigo-900/10 text-[10px] space-y-1">
-                      <div className="flex items-center justify-between font-black text-indigo-600 dark:text-indigo-400">
+                    <div className="p-1.5 rounded-lg bg-primary-soft/50 border border-primary-border/40 text-[10px] space-y-1">
+                      <div className="flex items-center justify-between font-black text-primary">
                         <span className="flex items-center gap-1 font-bold">
                           <BookOpen className="w-3 h-3 shrink-0" />
                           <span>{_t('مدرسة', 'School', 'Schule')}</span>
@@ -1195,7 +1193,7 @@ export const ScheduleView: React.FC = () => {
                         <span className="text-[9px] font-mono shrink-0">{presence.arrivalTime}-{presence.departureTime}</span>
                       </div>
                       {activePeriodsCount > 0 && (
-                        <div className="text-[9px] text-slate-500 dark:text-slate-400 font-bold">
+                        <div className="text-[9px] text-text-muted font-bold">
                           🏫 {activePeriodsCount} {_t('حصص', 'periods', 'Stunden')}
                         </div>
                       )}
@@ -1205,7 +1203,7 @@ export const ScheduleView: React.FC = () => {
 
                 <div className="space-y-1.5 min-h-[90px]">
                   {day.lessons.length === 0 ? (
-                    <p className="text-[10px] text-text-muted/70 dark:text-slate-500 text-center py-4 font-semibold">
+                    <p className="text-[10px] text-text-muted text-center py-4 font-semibold">
                       {t('schedule_no_lessons')}
                     </p>
                   ) : (
@@ -1217,16 +1215,16 @@ export const ScheduleView: React.FC = () => {
                           onClick={() => openLessonControl(l)}
                           className={`p-1.5 rounded-lg border text-xs cursor-pointer transition-all hover:scale-[1.02] ${
                             conflict
-                              ? 'bg-amber-500/10 border-amber-500/50 text-amber-950 dark:text-amber-200 ring-1 ring-amber-400/30'
+                              ? 'bg-primary-soft border-primary-border/60 text-primary'
                               : l.type === 'online'
-                              ? 'bg-primary-soft border-primary-border text-primary-hover dark:bg-primary-soft/50 dark:border-primary-border dark:text-primary/70'
-                              : 'bg-primary-soft border-primary-border text-primary dark:bg-primary-soft dark:border-primary-border dark:text-primary'
+                              ? 'bg-primary-soft border-primary-border text-primary'
+                              : 'bg-primary-soft border-primary-border text-primary'
                           }`}
                         >
                           <div className="flex items-center justify-between font-mono font-bold text-[10px]">
                             <span>{l.time}</span>
                             {conflict ? (
-                              <span className="inline-flex items-center gap-0.5 text-amber-700 dark:text-amber-300 text-[9px] font-black uppercase">
+                              <span className="inline-flex items-center gap-0.5 text-primary text-[9px] font-black uppercase">
                                 <AlertTriangle className="w-2.5 h-2.5" />
                                 <span>{t('schedule_conflict')}</span>
                               </span>
@@ -1246,7 +1244,7 @@ export const ScheduleView: React.FC = () => {
                     setSelectedDate(day.dateStr);
                     setIsAddLessonModalOpen(true);
                   }}
-                  className="w-full text-[10px] font-bold text-slate-500 hover:text-primary dark:hover:text-primary bg-surface-hover/60 hover:bg-primary-soft p-1.5 rounded-xl border border-dashed border-surface-border dark:border-surface-border-soft transition-all cursor-pointer text-center"
+                  className="w-full text-[10px] font-bold text-text-muted hover:text-primary bg-surface-hover hover:bg-primary-soft p-1.5 rounded-xl border border-dashed border-surface-border transition-all cursor-pointer text-center"
                 >
                   + {t('add')}
                 </button>
@@ -1258,8 +1256,8 @@ export const ScheduleView: React.FC = () => {
 
       {/* 3. MONTH VIEW */}
       {calendarView === 'month' && (
-        <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs space-y-2">
-          <div className="grid grid-cols-7 gap-1 text-center text-xs font-black text-text-muted/70 uppercase tracking-wider border-b border-slate-100 dark:border-surface-border pb-2">
+        <div className="bg-surface border border-surface-border rounded-lg p-2.5 sm:p-3 shadow-2xs space-y-2">
+          <div className="grid grid-cols-7 gap-1 text-center text-xs font-black text-text-muted/70 uppercase tracking-wider border-b border-surface-border pb-2">
             <span>Mon</span>
             <span>Tue</span>
             <span>Wed</span>
@@ -1272,7 +1270,7 @@ export const ScheduleView: React.FC = () => {
           <div className="grid grid-cols-7 gap-1.5">
             {monthData.gridDays.map((cell, index) => {
               if (!cell) {
-                return <div key={`empty_${index}`} className="min-h-[64px] bg-background/40 dark:bg-surface/40 rounded-xl" />;
+                return <div key={`empty_${index}`} className="min-h-[64px] bg-surface-hover/30 rounded-xl" />;
               }
 
               const isSelected = cell.dateStr === selectedDate;
@@ -1286,22 +1284,22 @@ export const ScheduleView: React.FC = () => {
                   }}
                   className={`min-h-[64px] p-1.5 rounded-xl border transition-all cursor-pointer active:scale-95 active:bg-surface-hover flex flex-col justify-between ${
                     cell.hasConflict
-                      ? 'border-amber-500/50 bg-amber-500/5 dark:bg-amber-500/10'
+                      ? 'border-primary/50 bg-primary-soft/40'
                       : cell.isToday
-                      ? 'bg-primary-soft dark:bg-primary-soft/40 border-primary font-bold'
+                      ? 'bg-primary-soft border-primary font-bold'
                       : isSelected
-                      ? 'bg-primary-soft dark:bg-primary-soft border-primary-border'
-                      : 'bg-background/50 dark:bg-slate-800/40 border-surface-border/60 dark:border-surface-border hover:border-primary'
+                      ? 'bg-primary-soft border-primary-border'
+                      : 'bg-surface border-surface-border hover:border-primary'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className={`text-xs font-mono font-bold ${cell.isToday ? 'text-primary dark:text-primary font-black' : 'text-slate-800 dark:text-slate-200'}`}>
+                    <span className={`text-xs font-mono font-bold ${cell.isToday ? 'text-primary font-black' : 'text-text-main'}`}>
                       {cell.dayNumber}
                     </span>
 
                     {cell.lessons.length > 0 && (
                       <span className={`text-[9px] font-black px-1.5 py-0.2 rounded-full flex items-center gap-0.5 ${
-                        cell.hasConflict ? 'bg-amber-600 text-white animate-pulse' : 'bg-primary text-white'
+                        cell.hasConflict ? 'bg-primary text-white animate-pulse' : 'bg-primary text-white'
                       }`}>
                         {cell.hasConflict && <AlertTriangle className="w-2.5 h-2.5" />}
                         <span>{cell.lessons.length}</span>
@@ -1313,9 +1311,7 @@ export const ScheduleView: React.FC = () => {
                     {cell.lessons.slice(0, 3).map((l) => (
                       <span
                         key={l.id}
-                        className={`w-2 h-2 rounded-full ${
-                          hasConflict(l.id) ? 'bg-amber-500' : l.type === 'online' ? 'bg-primary' : 'bg-primary'
-                        }`}
+                        className="w-2 h-2 rounded-full bg-primary"
                         title={`${l.time} - ${l.title}`}
                       />
                     ))}
@@ -1332,10 +1328,10 @@ export const ScheduleView: React.FC = () => {
 
       {/* RESCHEDULE MODAL */}
       {rescheduleLesson && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0">
           <div className="bg-surface border border-surface-border rounded-t-[28px] sm:rounded-xl pb-safe-bottom sm:pb-0 mb-0 p-5 max-w-sm w-full shadow-2xl space-y-4 font-sans">
-        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-surface-border pb-3">
+        <div className="w-12 h-1.5 bg-surface-border rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+            <div className="flex items-center justify-between border-b border-surface-border pb-3">
               <h3 className="text-sm font-black text-text-main flex items-center gap-2">
                 <ArrowLeftRight className="w-4 h-4 text-primary" />
                 <span>{t('schedule_reschedule')}</span>
@@ -1350,7 +1346,7 @@ export const ScheduleView: React.FC = () => {
 
             <div className="bg-surface-hover/60 p-3 rounded-lg border border-surface-border/80 dark:border-surface-border-soft/80 space-y-1">
               <span className="text-[10px] font-bold text-text-muted/70 uppercase">{rescheduleLesson.title}</span>
-              <p className="text-[11px] text-slate-500">{rescheduleLesson.date} • {rescheduleLesson.time}</p>
+              <p className="text-[11px] text-text-muted">{rescheduleLesson.date} • {rescheduleLesson.time}</p>
             </div>
 
             {rescheduleSuccess && (
@@ -1406,14 +1402,14 @@ export const ScheduleView: React.FC = () => {
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setRescheduleLesson(null)}
-                className="px-3.5 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-surface-hover rounded-xl cursor-pointer"
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main hover:bg-surface-hover rounded-xl cursor-pointer"
               >
                 {t('cancel')}
               </button>
               <button
                 onClick={handleSaveReschedule}
                 disabled={checkTimeConflict(newDate, newTime, rescheduleLesson?.id)}
-                className={`px-4 py-2 text-xs font-bold text-white rounded-xl transition-all shadow-xs ${checkTimeConflict(newDate, newTime, rescheduleLesson?.id) ? 'bg-slate-400 cursor-not-allowed' : 'bg-primary hover:bg-primary-hover cursor-pointer'}`}
+                className={`px-4 py-2 text-xs font-bold rounded-xl transition-all shadow-xs ${checkTimeConflict(newDate, newTime, rescheduleLesson?.id) ? 'bg-surface-border text-text-muted cursor-not-allowed' : 'bg-primary hover:bg-primary-hover text-white cursor-pointer active:scale-95'}`}
               >
                 {t('save')}
               </button>

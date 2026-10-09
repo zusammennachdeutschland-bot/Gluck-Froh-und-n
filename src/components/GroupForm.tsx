@@ -3,12 +3,14 @@ import { Group, GradeLevel, LessonType, PaymentCycle } from '../types';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { useApp } from '../context/AppContext';
 import { Video, MapPin, DollarSign, Calendar, Sparkles } from 'lucide-react';
+import { isGroupPerLesson } from '../utils/lessonUtils';
 
 export interface GroupFormData {
   name: string;
   grade: GradeLevel;
   type: LessonType;
   paymentCycle: PaymentCycle;
+  paymentModel?: 'per_session' | 'package';
   monthlyPackagePrice: number;
   pricePerSession: number;
   sessionCount: number;
@@ -40,12 +42,15 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
   const [name, setName] = useState(initialData?.name || '');
   const [grade, setGrade] = useState<GradeLevel>(initialData?.grade || 'Grade 9');
   const [type, setType] = useState<LessonType>(initialData?.type || 'online');
-  const [paymentCycle, setPaymentCycle] = useState<PaymentCycle>(initialData?.paymentCycle || 'monthly');
+  const isInitialPerLesson = isGroupPerLesson(initialData);
+  const [paymentCycle, setPaymentCycle] = useState<PaymentCycle>(isInitialPerLesson ? 'per_lesson' : (initialData?.paymentCycle || 'monthly'));
   const [monthlyPackagePrice, setMonthlyPackagePrice] = useState(initialData?.monthlyPackagePrice || 1200);
-  const [pricePerSession, setPricePerSession] = useState(initialData?.pricePerSession || (initialData?.monthlyPackagePrice ? Math.round(initialData.monthlyPackagePrice / (initialData.sessionCount || 8)) : 150));
-  const initialSessionCount = (initialData?.sessionCount && initialData.sessionCount > 1) 
-    ? initialData.sessionCount 
-    : (initialData?.paymentCycle === 'monthly' ? 4 : (initialData?.sessionCount || 4));
+  const [pricePerSession, setPricePerSession] = useState(initialData?.pricePerSession || (initialData?.monthlyPackagePrice ? Math.round(initialData.monthlyPackagePrice / (initialData.sessionCount || 4)) : 150));
+  const initialSessionCount = isInitialPerLesson
+    ? 1
+    : ((initialData?.sessionCount && initialData.sessionCount > 1) 
+        ? initialData.sessionCount 
+        : 4);
   const [sessionCount, setSessionCount] = useState<number>(initialSessionCount);
   const [startingSessionNumber, setStartingSessionNumber] = useState(initialData?.startingSessionNumber || 1);
   const { financeAccounts } = useApp();
@@ -94,6 +99,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
       grade,
       type,
       paymentCycle: isPerLesson ? 'per_lesson' : 'monthly',
+      paymentModel: isPerLesson ? 'per_session' : 'package',
       monthlyPackagePrice: isPerLesson ? Number(pricePerSession) : Number(monthlyPackagePrice),
       pricePerSession: Number(pricePerSession),
       sessionCount: effectiveSessionCount,
@@ -191,7 +197,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
       {/* Payment Model Selector */}
       <div className="space-y-1">
         <label className="text-xs font-bold text-text-main">
-          Abrechnungsmodell (Payment Option) *
+          {_t('نظام المحاسبة والدفع *', 'Payment Option *', 'Abrechnungsmodell *')}
         </label>
         <div className="grid grid-cols-2 gap-2 text-xs">
           <button
@@ -207,7 +213,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
             }`}
           >
             <Calendar className="w-4 h-4" />
-            <span>Monatspaket (Monthly)</span>
+            <span>{_t('باقة دورية (شهري)', 'Monthly Package', 'Monatspaket (Monthly)')}</span>
           </button>
           <button
             type="button"
@@ -222,7 +228,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
             }`}
           >
             <DollarSign className="w-4 h-4" />
-            <span>Pro Sitzung (Per Session)</span>
+            <span>{_t('محاسبة بالحصة', 'Per Session', 'Pro Sitzung (Per Session)')}</span>
           </button>
         </div>
       </div>
@@ -433,7 +439,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-surface-border dark:border-surface-border-soft">
+      <div className="pt-2 border-t border-surface-border dark:border-surface-border-soft">
         <div className="space-y-1">
           <label className="text-xs font-bold text-text-main">
             WhatsApp Group Link (Optional)
@@ -445,20 +451,6 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
             placeholder="https://chat.whatsapp.com/..."
             className="w-full px-3 py-2 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-mono"
           />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-bold text-text-main">
-            Group Color
-          </label>
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-              className="w-8 h-8 rounded cursor-pointer border-0 p-0"
-            />
-            <span className="text-xs font-mono">{color}</span>
-          </div>
         </div>
       </div>
 

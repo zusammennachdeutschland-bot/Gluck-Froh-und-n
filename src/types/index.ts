@@ -542,6 +542,58 @@ export interface StageFollowUpRecord {
   };
 }
 
+export type VisitPlannerStatus = 'completed' | 'planned' | 'rescheduled' | 'cancelled' | 'unscheduled';
+
+export interface PlannedVisitRecord extends SyncableRecord {
+  id: string;
+  term: string;
+  teacherId: string;
+  teacherName: string;
+  gradeClass: string;
+  grade?: string;
+  sectionClass?: string;
+  date: string; // YYYY-MM-DD
+  dayKey: string; // "0" to "6"
+  weekdayNameAr?: string;
+  weekdayNameEn?: string;
+  periodNumber: number;
+  startTime?: string;
+  endTime?: string;
+  status: VisitPlannerStatus;
+  isManualOverride?: boolean;
+  actualVisitRecordId?: string;
+  rescheduledFromDate?: string;
+  rescheduledFromPeriod?: number;
+  notes?: string;
+  conflictReason?: string;
+  subjectName?: string;
+}
+
+export interface TermVisitRequirement {
+  id: string;
+  teacherId: string;
+  teacherName: string;
+  gradeClass: string;
+  requiredVisitsCount: number;
+  completedVisitsCount: number;
+  plannedVisitsCount: number;
+  isSatisfied: boolean;
+  availableSlotCount: number;
+  conflictReason?: string;
+}
+
+export interface TermVisitPlannerSettings {
+  term: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  workingDays: string[]; // ["0", "1", "2", "3", "4"]
+  visitsPerTeacherPerClass: number; // Default 1
+  hodTeacherId?: string;
+  plannedVisits?: PlannedVisitRecord[];
+  requirements?: TermVisitRequirement[];
+  lastGeneratedAt?: string;
+}
+
 export interface SchoolSettings {
   presence: Record<string, SchoolDayPresence>; // "0" to "6"
   periodSettings: SchoolPeriodSettings;
@@ -566,6 +618,7 @@ export interface SchoolSettings {
   actionPlans?: StudentActionPlan[];
   staffAttendanceRecords?: StaffAttendanceRecord[];
   customTimedSessions?: CustomTimedSession[];
+  termVisitPlannerSettings?: TermVisitPlannerSettings;
 }
 
 export interface WeeklyPlanLog {

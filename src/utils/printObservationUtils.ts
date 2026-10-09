@@ -5,7 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { sanitizeModernCssColors } from './certificateExportUtils';
-import { getReportSchoolLogoHtml } from './alsunLogoData';
+import { getReportSchoolLogoHtml, getEffectiveSchoolName, getReportSchoolNameHtml } from './alsunLogoData';
 
 export function getVisitsForStageReport(
   record: StageFollowUpRecord,
@@ -51,7 +51,7 @@ export function generateStageFollowUpFirstPageContentHtml(
     '<div style="flex: 1; background-color: #fc0;"></div>' +
   '</div>';
 
-  const schoolName = settings.schoolName || '';
+  const schoolNameHtml = getReportSchoolNameHtml(settings, { isRtl, tag: 'h1', fontSize: '14pt' });
   const departmentName = settings.departmentName || '';
   const academicYear = settings.academicYear || '';
   const term = settings.currentTerm || '';
@@ -89,7 +89,7 @@ export function generateStageFollowUpFirstPageContentHtml(
       '<div class="header">' +
         '<div class="header-logo">' + logoHtml + '</div>' +
         '<div class="header-text">' +
-          '<h1>' + schoolName + '</h1>' +
+          schoolNameHtml +
           '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
         '</div>' +
         '<div>' + flagHtml + '</div>' +
@@ -756,7 +756,7 @@ export function generateObservationReportContentHtml(
     '<div style="flex: 1; background-color: #fc0;"></div>' +
   '</div>';
   
-  const schoolName = settings.schoolName || '';
+  const schoolNameHtml = getReportSchoolNameHtml(settings, { isRtl, tag: 'h1', fontSize: '14pt' });
   const departmentName = settings.departmentName || '';
   const academicYear = settings.academicYear || '';
   const term = settings.currentTerm || '';
@@ -823,7 +823,7 @@ export function generateObservationReportContentHtml(
     '<div class="header">' +
       '<div class="header-logo">' + logoHtml + '</div>' +
       '<div class="header-text">' +
-        '<h1>' + schoolName + '</h1>' +
+        schoolNameHtml +
         '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
       '</div>' +
       '<div>' + flagHtml + '</div>' +
@@ -1430,7 +1430,7 @@ export function generateActionPlansReportHtml(
     filteredPlans = plans.filter(p => p.status === 'RESOLVED');
   }
 
-  const schoolName = settings.schoolName || '';
+  const schoolNameHtml = getReportSchoolNameHtml(settings, { isRtl, tag: 'div', fontSize: '14pt' });
   const departmentName = settings.departmentName || '';
   const currentTerm = settings.currentTerm || '';
   const rawHodName = settings.hodName || '';
@@ -1509,7 +1509,7 @@ export function generateActionPlansReportHtml(
         '<div class="brand-section">' +
           logoHtml +
           '<div>' +
-            '<div class="school-name">' + schoolName + '</div>' +
+            schoolNameHtml +
             '<div class="dept-name">' + departmentName + '</div>' +
           '</div>' +
         '</div>' +

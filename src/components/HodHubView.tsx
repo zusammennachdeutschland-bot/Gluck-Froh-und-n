@@ -31,6 +31,7 @@ import { StageCommunicationView } from './StageCommunicationView';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { TeacherAttendanceModal } from './TeacherAttendanceModal';
 import { DetailedStaffAttendanceModal } from './DetailedStaffAttendanceModal';
+import { TermVisitPlannerView } from './TermVisitPlannerView';
 import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
 import { normalizeClassCode, generateUnifiedScheduleImportPrompt } from '../utils/classNormalizer';
 
@@ -64,7 +65,7 @@ export const HodHubView: React.FC = () => {
   } = useApp();
   const schoolSettings = profile?.schoolSettings || {} as any;
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'timetables' | 'stage_managers' | 'plans' | 'action_plans' | 'staff' | 'students' | 'complaints'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'timetables' | 'stage_managers' | 'plans' | 'term_visit_planner' | 'action_plans' | 'staff' | 'students' | 'complaints'>('overview');
   const [isFabOpen, setIsFabOpen] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
@@ -2351,9 +2352,10 @@ export const HodHubView: React.FC = () => {
             { id: 'staff', icon: Users, title: _t('المعلمين', 'Staff', 'Kollegium'), activeClass: 'bg-primary text-white' },
             { id: 'timetables', icon: Calendar, title: _t('الجداول', 'Timetables', 'Pläne'), activeClass: 'bg-primary text-white' },
             { id: 'plans', icon: CheckCircle2, title: _t('الخطة', 'Plans', 'Pläne'), activeClass: 'bg-primary text-white' },
+            { id: 'term_visit_planner', icon: ClipboardList, title: _t('مُخطط الزيارات', 'Visit Planner', 'Besuchsplaner'), activeClass: 'bg-primary text-white' },
             { id: 'students', icon: GraduationCap, title: _t('الطلاب', 'Students', 'Schüler'), activeClass: 'bg-primary text-white' },
-            { id: 'action_plans', icon: Target, title: _t('الدعم', 'Support', 'Förder'), activeClass: 'bg-emerald-600 text-white' },
-            { id: 'complaints', icon: AlertTriangle, title: _t('الشكاوى', 'Complaints', 'Beschwerden'), activeClass: 'bg-rose-600 text-white' }
+            { id: 'action_plans', icon: Target, title: _t('الدعم', 'Support', 'Förder'), activeClass: 'bg-primary text-white' },
+            { id: 'complaints', icon: AlertTriangle, title: _t('الشكاوى', 'Complaints', 'Beschwerden'), activeClass: 'bg-primary text-white' }
           ].map(tab => {
             const isActive = activeTab === tab.id;
             const Icon = tab.icon;
@@ -2383,7 +2385,7 @@ export const HodHubView: React.FC = () => {
       {activeTab === 'overview' && (
         <div className="space-y-2 animate-fade-in relative pb-20">
           {/* 1. Core KPIs & Quick Stats Bar */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div 
               onClick={() => setActiveTab('staff')}
               className="bg-surface border border-surface-border p-3 rounded-xl shadow-2xs flex flex-col items-center justify-center text-center cursor-pointer hover:border-primary transition-all"
@@ -2393,6 +2395,19 @@ export const HodHubView: React.FC = () => {
               </div>
               <span className="text-lg font-black text-text-main">{liveKpis?.visitsCount ?? visitRecords.length}</span>
               <span className="text-[10px] font-bold text-text-muted">{_t('الزيارات الصفية', 'Class Visits', 'Besuche')}</span>
+            </div>
+
+            <div 
+              onClick={() => setActiveTab('term_visit_planner')}
+              className="bg-surface border border-surface-border p-2 sm:p-2.5 rounded-xl shadow-2xs flex flex-col items-center justify-center text-center cursor-pointer hover:border-primary transition-all"
+            >
+              <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center mb-1">
+                <ClipboardList className="w-4 h-4" />
+              </div>
+              <span className="text-lg font-black text-text-main">
+                {schoolSettings.termVisitPlannerSettings?.plannedVisits?.length || 0}
+              </span>
+              <span className="text-[10px] font-bold text-text-muted">{_t('مُخطط الزيارات', 'Visit Planner', 'Besuchsplaner')}</span>
             </div>
 
             <div 
@@ -3452,7 +3467,7 @@ export const HodHubView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleOpenAddCustomSession()}
-                  className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer active:scale-95 shadow-xs"
+                  className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer active:scale-95 shadow-xs"
                 >
                   <Plus className="w-3 h-3" />
                   <span>{_t('إضافة حصة مخصصة', 'New Session', 'Neue Stunde')}</span>
@@ -3472,7 +3487,7 @@ export const HodHubView: React.FC = () => {
               if (filtered.length === 0) {
                 return (
                   <div className="py-6 text-center border border-dashed border-surface-border rounded-xl space-y-2">
-                    <Clock className="w-8 h-8 text-indigo-300 dark:text-indigo-700 mx-auto" />
+                    <Clock className="w-8 h-8 text-primary/40 mx-auto" />
                     <p className="text-[11px] font-bold text-text-main">
                       {_t('لا توجد حصص مخصصة مسجلة حالياً', 'No custom timed sessions added yet', 'Noch keine speziellen Stunden hinzugefügt')}
                     </p>
@@ -3482,7 +3497,7 @@ export const HodHubView: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleOpenAddCustomSession()}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white text-[11px] font-bold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>{_t('إضافة أول حصة مخصصة الآن', 'Add Custom Session Now', 'Jetzt Stunde hinzufügen')}</span>
@@ -4010,7 +4025,7 @@ export const HodHubView: React.FC = () => {
                       setObsInitialTeacherId(undefined);
                       setIsVisitModalOpen(true);
                     }}
-                    className="px-2 sm:px-2.5 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10.5px] sm:text-[11px] font-bold rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap"
+                    className="px-2 sm:px-2.5 py-1.5 sm:py-2 bg-primary hover:bg-primary-hover text-white text-[10.5px] sm:text-[11px] font-bold rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap"
                   >
                     <Plus className="w-3.5 h-3.5 shrink-0" />
                     <span className="truncate">{_t('إضافة زيارة', 'Add Visit', 'Besuch hinzufügen')}</span>
@@ -6713,6 +6728,11 @@ export const HodHubView: React.FC = () => {
         </div>
       )}
 
+      {/* TAB 4.5: TERM VISIT PLANNER */}
+      {activeTab === 'term_visit_planner' && (
+        <TermVisitPlannerView />
+      )}
+
       {/* TAB 5: GERMAN STUDENT ROSTER */}
       {activeTab === 'students' && (
         <HodStudentsView />
@@ -7467,7 +7487,7 @@ export const HodHubView: React.FC = () => {
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5 active:scale-95"
+                    className="px-4 py-1.5 bg-primary hover:bg-primary-hover text-white text-[11px] font-bold rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5 active:scale-95"
                   >
                     <Check className="w-4 h-4" />
                     <span>{_t('حفظ الحصة', 'Save Session', 'Speichern')}</span>

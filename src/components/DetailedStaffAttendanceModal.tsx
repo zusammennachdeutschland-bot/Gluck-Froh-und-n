@@ -179,7 +179,7 @@ export const DetailedStaffAttendanceModal: React.FC<DetailedStaffAttendanceModal
             </button>
             <button
               onClick={handleShareWhatsApp}
-              className="p-1.5 sm:p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 border border-emerald-500/20 rounded-lg sm:rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+              className="p-1.5 sm:p-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg sm:rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer"
               title={_t('مشاركة عبر واتساب', 'Share WhatsApp', 'WhatsApp')}
             >
               <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />

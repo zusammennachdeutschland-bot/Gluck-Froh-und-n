@@ -4,7 +4,7 @@ import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { getReportSchoolLogoHtml } from './alsunLogoData';
+import { getReportSchoolLogoHtml, getEffectiveSchoolName } from './alsunLogoData';
 
 export interface WeeklyPlanGradeItem {
   gradeName: string;
@@ -211,7 +211,7 @@ export function generateSingleWeeklyPlanHtml(
   const stageDe = getGermanGradeBandLabel(plan.gradeBand);
   const stageAr = getArabicGradeBandLabel(plan.gradeBand);
   const appreciation = getWeeklySecretaryAppreciationText(weekNum, secName);
-  const schoolName = settings.schoolName || '';
+  const schoolName = getEffectiveSchoolName(settings, true);
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 48 });
 
   return `<!DOCTYPE html>
@@ -473,7 +473,7 @@ export function generateSingleWeeklyPlanHtml(
         </div>
         <div class="header-title">
           <h1>📌 Wochenplan - Deutschabteilung</h1>
-          <p>${schoolName} | ${stageDe} - ${stageAr}</p>
+          <p><span style="font-family: 'Cairo', 'Tajawal', sans-serif !important; direction: rtl; unicode-bidi: isolate; display: inline-block;">${schoolName}</span> | ${stageDe} - ${stageAr}</p>
         </div>
       </div>
       <div style="text-align: right;">
@@ -582,7 +582,7 @@ export function generateAllWeeklyPlansCombinedTableHtml(
   weekNum: number
 ): string {
   const hodName = cleanHodName(settings.hodName, 'Fachleiter');
-  const schoolName = settings.schoolName || '';
+  const schoolName = getEffectiveSchoolName(settings, true);
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 44 });
 
   // Order stage bands logically: 1-3, 4-6, 7-9, 10-12
@@ -810,7 +810,7 @@ export function generateAllWeeklyPlansCombinedTableHtml(
         </div>
         <div class="header-title">
           <h1>📌 Gesamter Wochenplan - Deutschabteilung (Alle Klassen 1–12)</h1>
-          <p>${schoolName} | Schuljahr: ${settings.academicYear || '2025/2026'}</p>
+          <p><span style="font-family: 'Cairo', 'Tajawal', sans-serif !important; direction: rtl; unicode-bidi: isolate; display: inline-block;">${schoolName}</span> | Schuljahr: ${settings.academicYear || '2025/2026'}</p>
         </div>
       </div>
       <div style="text-align: right;">
@@ -1023,7 +1023,7 @@ export async function downloadSingleWeeklyPlanPdf(
     const stageDe = getGermanGradeBandLabel(plan.gradeBand);
     const stageAr = getArabicGradeBandLabel(plan.gradeBand);
     const appreciation = getWeeklySecretaryAppreciationText(weekNum, secName);
-    const schoolName = settings.schoolName || '';
+    const schoolName = getEffectiveSchoolName(settings, true);
     const logoHtml = getReportSchoolLogoHtml(settings, { height: 48 });
 
     const container = document.createElement('div');
@@ -1049,7 +1049,7 @@ export async function downloadSingleWeeklyPlanPdf(
           </div>
           <div>
             <h1 style="margin: 0; font-size: 16pt; color: #0369a1; font-weight: 800; letter-spacing: -0.5px;">📌 Wochenplan - Deutschabteilung</h1>
-            <p style="margin: 2px 0 0; font-size: 10pt; color: #475569; font-weight: 600;">${schoolName} | ${stageDe} - ${stageAr}</p>
+            <p style="margin: 2px 0 0; font-size: 10pt; color: #475569; font-weight: 600;"><span style="font-family: 'Cairo', 'Tajawal', sans-serif !important; direction: rtl; unicode-bidi: isolate; display: inline-block;">${schoolName}</span> | ${stageDe} - ${stageAr}</p>
           </div>
         </div>
         <div style="text-align: right;">
@@ -1197,7 +1197,7 @@ export async function downloadAllWeeklyPlansCombinedPdf(
 ): Promise<{ success: boolean; filename?: string; error?: string }> {
   try {
     const hodName = cleanHodName(settings.hodName, 'Fachleiter');
-    const schoolName = settings.schoolName || '';
+    const schoolName = getEffectiveSchoolName(settings, true);
     const logoHtml = getReportSchoolLogoHtml(settings, { height: 44 });
 
     const sortedPlans = [...plans].sort((a, b) => {
@@ -1234,7 +1234,7 @@ export async function downloadAllWeeklyPlansCombinedPdf(
           </div>
           <div>
             <h1 style="margin: 0; font-size: 14pt; color: #0369a1; font-weight: 800; letter-spacing: -0.3px;">📌 Gesamter Wochenplan - Deutschabteilung (Alle Klassen 1–12)</h1>
-            <p style="margin: 1px 0 0; font-size: 9pt; color: #475569; font-weight: 600;">${schoolName} | Schuljahr: ${settings.academicYear || '2025/2026'}</p>
+            <p style="margin: 1px 0 0; font-size: 9pt; color: #475569; font-weight: 600;"><span style="font-family: 'Cairo', 'Tajawal', sans-serif !important; direction: rtl; unicode-bidi: isolate; display: inline-block;">${schoolName}</span> | Schuljahr: ${settings.academicYear || '2025/2026'}</p>
           </div>
         </div>
         <div style="text-align: right;">

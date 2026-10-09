@@ -450,7 +450,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
           {/* Header Row: Title & Action Buttons */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-500/20">
+              <div className="w-9 h-9 rounded-xl bg-primary-soft text-primary flex items-center justify-center shrink-0 border border-primary-border">
                 <Target className="w-5 h-5" />
               </div>
               <div>
@@ -469,7 +469,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
 
               <button
                 onClick={handleOpenCreateModal}
-                className="px-2 sm:px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] sm:text-[11px] font-black transition-all flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap"
+                className="px-2 sm:px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-[10px] sm:text-[11px] font-black transition-all flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap"
               >
                 <Plus className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{_t('خطة جديدة', 'New Plan', 'Neuer Plan')}</span>
@@ -486,7 +486,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                 className="px-1.5 sm:px-2 py-1.5 bg-surface hover:bg-surface-hover text-text-main rounded-xl text-[10px] sm:text-[11px] font-bold border border-surface-border transition-all flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
                 title={_t('طباعة فورية A4', 'Print A4', 'Drucken A4')}
               >
-                <Printer className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <Printer className="w-3.5 h-3.5 text-text-muted shrink-0" />
                 <span className="truncate">{_t('طباعة A4', 'Print A4', 'Drucken A4')}</span>
               </button>
 
@@ -506,7 +506,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                 className="px-1.5 sm:px-2 py-1.5 bg-surface hover:bg-surface-hover text-text-main rounded-xl text-[10px] sm:text-[11px] font-bold border border-surface-border transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap"
                 title={_t('تنزيل ملف PDF', 'Download PDF', 'PDF herunterladen')}
               >
-                <Download className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <Download className="w-3.5 h-3.5 text-text-muted shrink-0" />
                 <span className="truncate">{isDownloadingPdf ? '...' : 'PDF'}</span>
               </button>
 
@@ -515,7 +515,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                 className="px-1.5 sm:px-2 py-1.5 bg-surface hover:bg-surface-hover text-text-main rounded-xl text-[10px] sm:text-[11px] font-bold border border-surface-border transition-all flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
                 title={_t('تخصيص ومعاينة التقرير', 'Preview Report', 'Vorschau')}
               >
-                <FileText className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <FileText className="w-3.5 h-3.5 text-text-muted shrink-0" />
                 <span className="truncate">{_t('المعاينة', 'Preview', 'Vorschau')}</span>
               </button>
             </div>
@@ -523,24 +523,24 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
 
           {/* Quick Stats Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-surface-border">
-            <div className="p-2 bg-surface-hover rounded-xl border border-surface-border flex items-center justify-between">
+            <div className="p-2.5 bg-surface-hover/70 rounded-xl border border-surface-border flex items-center justify-between">
               <span className="text-[10px] font-bold text-text-muted">{_t('إجمالي الخطط', 'Total Plans', 'Gesamt')}</span>
               <span className="text-xs font-black text-text-main">{totalPlansCount}</span>
             </div>
 
-            <div className="p-2 bg-amber-500/10 rounded-xl border border-amber-500/20 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300">{_t('🟡 قيد المتابعة', 'Active', 'Aktiv')}</span>
-              <span className="text-xs font-black text-amber-700 dark:text-amber-300">{activePlansCount}</span>
+            <div className="p-2.5 bg-surface-hover/70 rounded-xl border border-surface-border flex items-center justify-between">
+              <span className="text-[10px] font-bold text-text-muted">{_t('قيد المتابعة', 'Active', 'Aktiv')}</span>
+              <span className="text-xs font-black text-text-main">{activePlansCount}</span>
             </div>
 
-            <div className="p-2 bg-emerald-500/10 rounded-xl border border-emerald-500/20 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300">{_t('🟢 تم التمكن والإغلاق', 'Resolved', 'Abgeschlossen')}</span>
-              <span className="text-xs font-black text-emerald-700 dark:text-emerald-300">{resolvedPlansCount}</span>
+            <div className="p-2.5 bg-surface-hover/70 rounded-xl border border-surface-border flex items-center justify-between">
+              <span className="text-[10px] font-bold text-text-muted">{_t('تم التمكن والإغلاق', 'Resolved', 'Abgeschlossen')}</span>
+              <span className="text-xs font-black text-text-main">{resolvedPlansCount}</span>
             </div>
 
-            <div className="p-2 bg-primary/10 rounded-xl border border-primary/20 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-primary">{_t('👨‍🏫 المعلمون المسؤولون', 'Teachers', 'Lehrer')}</span>
-              <span className="text-xs font-black text-primary">{activeTeachersCount}</span>
+            <div className="p-2.5 bg-surface-hover/70 rounded-xl border border-surface-border flex items-center justify-between">
+              <span className="text-[10px] font-bold text-text-muted">{_t('المعلمون المسؤولون', 'Teachers', 'Lehrer')}</span>
+              <span className="text-xs font-black text-text-main">{activeTeachersCount}</span>
             </div>
           </div>
         </div>
@@ -557,7 +557,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder={_t('بحث باسم الطالب، الفصل، أو المعلم أو مجال الضعف...', 'Search student, class, teacher or weakness...', 'Suchen...')}
-              className="w-full pr-8 pl-2.5 py-1.5 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="w-full pr-8 pl-2.5 py-1.5 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
             />
           </div>
 
@@ -565,7 +565,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
           {(embeddedStudentId || embeddedTeacherId) && (
             <button
               onClick={handleOpenCreateModal}
-              className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 shrink-0 cursor-pointer hover:bg-emerald-700 transition-all"
+              className="px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 shrink-0 cursor-pointer transition-all"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>{_t('إضافة خطة دعم', 'Add Support Plan', 'Förderplan hinzufügen')}</span>
@@ -588,18 +588,18 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
             <button
               onClick={() => setStatusFilter('ACTIVE')}
               className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                statusFilter === 'ACTIVE' ? 'bg-amber-500 text-white shadow-2xs' : 'text-text-muted hover:text-text-main'
+                statusFilter === 'ACTIVE' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-text-main'
               }`}
             >
-              🟡 {_t('متابعة', 'Active', 'Aktiv')} ({activePlansCount})
+              {_t('متابعة', 'Active', 'Aktiv')} ({activePlansCount})
             </button>
             <button
               onClick={() => setStatusFilter('RESOLVED')}
               className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                statusFilter === 'RESOLVED' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-text-muted hover:text-text-main'
+                statusFilter === 'RESOLVED' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-text-main'
               }`}
             >
-              🟢 {_t('مكتمل', 'Done', 'Erledigt')} ({resolvedPlansCount})
+              {_t('مكتمل', 'Done', 'Erledigt')} ({resolvedPlansCount})
             </button>
           </div>
 
@@ -607,7 +607,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
           <select
             value={classFilter}
             onChange={e => setClassFilter(e.target.value)}
-            className="px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10px] font-bold text-text-main focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+            className="px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10px] font-bold text-text-main focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
           >
             <option value="ALL">{_t('جميع الفصول', 'All Classes', 'Alle Klassen')} ({availableClasses.length})</option>
             {availableClasses.map(c => (
@@ -619,7 +619,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
           <select
             value={teacherFilter}
             onChange={e => setTeacherFilter(e.target.value)}
-            className="px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10px] font-bold text-text-main focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+            className="px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10px] font-bold text-text-main focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
           >
             <option value="ALL">{_t('جميع المعلمين', 'All Teachers', 'Alle Lehrer')}</option>
             {teachersList.map((t: any) => (
@@ -643,7 +643,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
           <h3 className="text-[11px] font-black text-text-main">{_t('لا توجد خطط دعم أكاديمي مطابقة', 'No matching support plans', 'Keine Förderpläne gefunden')}</h3>
           <button
             onClick={handleOpenCreateModal}
-            className="px-2.5 py-1 bg-emerald-600 text-white rounded-xl text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-2xs hover:bg-emerald-700 transition-all"
+            className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-xl text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-2xs transition-all"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>{_t('إنشاء خطة دعم الآن', 'Create Support Plan Now', 'Jetzt Förderplan erstellen')}</span>
@@ -769,7 +769,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
 
                   <button
                     onClick={() => handleOpenLogModal(plan)}
-                    className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black shadow-2xs flex items-center gap-1 cursor-pointer transition-all shrink-0"
+                    className="px-2 py-0.5 bg-primary hover:bg-primary-hover text-white rounded-lg text-[10px] font-black shadow-2xs flex items-center gap-1 cursor-pointer transition-all shrink-0"
                     title={_t('تسجيل متابعة الأسبوع الحالي', 'Log Week Progress', 'Wöchentlichen Fortschritt erfassen')}
                   >
                     <Plus className="w-3 h-3 stroke-[3]" />
@@ -960,7 +960,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                   <label className="text-[11px] font-bold text-text-main flex items-center gap-1.5">
                     <span>{_t('خطوات خطة الدعم العلاجية (اختيار متعدد):', 'Action Steps (Multiple Selection):', 'Fördermaßnahmen:')}</span>
                   </label>
-                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 rounded-full text-[10px] font-black">
+                  <span className="text-[10px] font-black text-text-muted">
                     {selectedActionSteps.length + (customActionStep.trim() ? 1 : 0)} محدد
                   </span>
                 </div>
@@ -1026,7 +1026,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-emerald-600 text-white rounded-xl text-[11px] font-bold shadow-2xs hover:bg-emerald-700 transition-all cursor-pointer"
+                  className="px-4 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
                 >
                   {editingPlan ? _t('حفظ التعديلات', 'Save Changes', 'Speichern') : _t('إنشاء الخطة الآن', 'Create Plan Now', 'Plan erstellen')}
                 </button>
@@ -1232,10 +1232,10 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                       setIsDownloadingPdf(false);
                     }}
                     disabled={isDownloadingPdf}
-                    className="px-2.5 py-1.5 bg-emerald-700 text-white rounded-xl text-[11px] font-bold flex items-center gap-1.5 cursor-pointer hover:bg-emerald-800 transition-all shadow-xs disabled:opacity-50"
+                    className="px-2.5 py-1.5 bg-primary text-white rounded-xl text-[11px] font-bold flex items-center gap-1.5 cursor-pointer hover:bg-primary-hover transition-all shadow-xs disabled:opacity-50"
                     title="تنزيل ملف PDF مباشر على جهازك"
                   >
-                    <Download className="w-3.5 h-3.5 text-emerald-300" />
+                    <Download className="w-3.5 h-3.5" />
                     <span>{isDownloadingPdf ? 'جاري تجهيز PDF...' : 'تحميل PDF'}</span>
                   </button>
 
@@ -1247,7 +1247,7 @@ export const ActionPlansView: React.FC<ActionPlansViewProps> = ({
                       isRtl: true,
                       lang: 'ar'
                     })}
-                    className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-xl text-[11px] font-bold flex items-center gap-1.5 cursor-pointer hover:bg-emerald-700 transition-all shadow-xs"
+                    className="px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
                     title="فتح نافذة طباعة A4 ناصعة بدون خلفيات"
                   >
                     <Printer className="w-3.5 h-3.5" />

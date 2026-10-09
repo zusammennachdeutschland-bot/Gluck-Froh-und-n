@@ -537,10 +537,10 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
                           onMarkVisitsDownloaded([visit.id], true);
                         }
                       }}
-                      className="h-7 px-2 text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 dark:text-indigo-300 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 dark:border-indigo-800 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                      className="h-7 px-2 text-[10px] font-bold text-primary bg-primary-soft hover:bg-primary-soft/80 border border-primary-border rounded-lg transition-all flex items-center gap-1 cursor-pointer"
                       title={_t('طباعة هذا التقرير فقط', 'Print This Only', 'Nur diesen drucken')}
                     >
-                      <Printer className="w-3 h-3" />
+                      <Printer className="w-3 h-3 text-primary" />
                       <span className="hidden sm:inline">{_t('طباعة', 'Print', 'Drucken')}</span>
                     </button>
                   </div>
@@ -584,13 +584,13 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
             <button
               onClick={handlePrintCombined}
               disabled={selectedVisitsList.length === 0 || isPrinting || isExportingPdf}
-              className="h-9 px-3 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 dark:text-indigo-300 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/70 dark:border-indigo-800 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50 disabled:pointer-events-none shrink-0"
+              className="h-9 px-3 text-xs font-bold text-primary bg-primary-soft hover:bg-primary-soft/80 border border-primary-border rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50 disabled:pointer-events-none shrink-0"
               title={_t('طباعة التقارير المحددة', 'Print Selected', 'Drucken')}
             >
               {isPrinting ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <Printer className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <Printer className="w-3.5 h-3.5 text-primary" />
               )}
               <span>{_t(`طباعة (${selectedVisitsList.length})`, `Print (${selectedVisitsList.length})`, `Drucken (${selectedVisitsList.length})`)}</span>
             </button>

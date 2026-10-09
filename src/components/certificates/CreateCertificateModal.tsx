@@ -797,8 +797,8 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                     onClick={() => setTemplateTab('ai_custom')}
                     className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
                       templateTab === 'ai_custom'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'text-indigo-600 dark:text-indigo-400 hover:text-indigo-700'
+                        ? 'bg-primary text-white shadow-xs'
+                        : 'text-primary hover:text-primary-hover'
                     }`}
                   >
                     <Sparkles className="w-3 h-3 text-amber-400" />
@@ -832,9 +832,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                 <div className="space-y-2.5">
                   {savedAIBackgrounds.length === 0 ? (
                     <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-surface-border dark:border-slate-700 text-center space-y-2">
-                      <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
-                        <Sparkles className="w-4 h-4" />
-                      </div>
+                      <Sparkles className="w-8 h-8 text-primary/40 mx-auto" />
                       <p className="text-xs text-text-muted">
                         {_t('لا توجد خلفيات AI محفوظة في مكتبتك حالياً.', 'No saved AI backgrounds in your library yet.', 'Noch keine KI-Hintergründe gespeichert.')}
                       </p>
@@ -863,7 +861,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                             }}
                             className={`p-2 rounded-2xl border text-start transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between group ${
                               isSelected
-                                ? 'border-indigo-600 ring-2 ring-indigo-500/20 bg-indigo-500/5 shadow-xs'
+                                ? 'border-primary ring-2 ring-primary/20 bg-primary/5 shadow-xs'
                                 : 'bg-surface dark:bg-slate-900 border-surface-border dark:border-slate-800 hover:border-slate-300'
                             }`}
                           >
@@ -874,8 +872,8 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                                 className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-200"
                               />
                               {isSelected && (
-                                <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
-                                  <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-md">
+                                <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                                  <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center shadow-md">
                                     <Check className="w-3.5 h-3.5" />
                                   </div>
                                 </div>
@@ -900,7 +898,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
                       <button
                         type="button"
                         onClick={onOpenAIDesigner}
-                        className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                        className="text-[11px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
                         <span>{_t('+ تصميم أو استيراد خلفية AI جديدة', '+ Design or Import New AI Background', '+ Neuer KI-Hintergrund')}</span>

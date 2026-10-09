@@ -364,7 +364,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
                     }}
                     className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
                       parentContactType === 'username'
-                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        ? 'bg-primary text-white shadow-2xs'
                         : 'text-text-muted hover:text-text-main'
                     }`}
                   >
@@ -377,7 +377,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
               <div className="relative">
                 <div className="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none text-text-muted">
                   {parentContactType === 'username' ? (
-                    <AtSign className="w-3.5 h-3.5 text-emerald-600" />
+                    <AtSign className="w-3.5 h-3.5 text-primary" />
                   ) : (
                     <Phone className="w-3.5 h-3.5 text-primary" />
                   )}
@@ -425,7 +425,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
                     }}
                     className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
                       studentContactType === 'username'
-                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        ? 'bg-primary text-white shadow-2xs'
                         : 'text-text-muted hover:text-text-main'
                     }`}
                   >

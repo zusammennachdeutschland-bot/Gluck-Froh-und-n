@@ -95,14 +95,14 @@ export const BottomNav: React.FC = () => {
                     <IconComponent
                       className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-150 ${
                         isActive
-                          ? 'text-primary dark:text-primary'
-                          : 'text-slate-700/80 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                          ? 'text-primary'
+                          : 'text-text-muted hover:text-text-main'
                       }`}
                     />
                     
                     {/* Expandable Label */}
                     <span
-                      className={`text-[10px] sm:text-xs font-black tracking-tight text-primary dark:text-primary whitespace-nowrap overflow-hidden transition-all duration-150 ease-out pr-0.5 ${
+                      className={`text-[10px] sm:text-xs font-black tracking-tight text-primary whitespace-nowrap overflow-hidden transition-all duration-150 ease-out pr-0.5 ${
                         isActive ? 'max-w-[120px] opacity-100' : 'max-w-0 opacity-0'
                       }`}
                     >
@@ -148,23 +148,23 @@ export const BottomNav: React.FC = () => {
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95, y: 8 }}
                     transition={{ duration: 0.12, ease: 'easeOut' }}
-                    className="absolute bottom-16 left-1/2 -translate-x-1/2 w-64 bg-surface dark:bg-slate-900 border border-surface-border/80 dark:border-slate-800 rounded-[22px] shadow-[0_10px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] p-1.5 space-y-1 z-50 pointer-events-auto origin-bottom"
+                    className="absolute bottom-16 left-1/2 -translate-x-1/2 w-64 bg-surface border border-surface-border rounded-[22px] shadow-[0_10px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] p-1.5 space-y-1 z-50 pointer-events-auto origin-bottom"
                   >
                     <button
                       onClick={() => {
                         setIsAddQuickLessonModalOpen(true);
                         setShowQuickMenu(false);
                       }}
-                      className="w-full text-start flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer group"
+                      className="w-full text-start flex items-center gap-3 p-2.5 rounded-xl hover:bg-surface-hover transition-colors cursor-pointer group"
                     >
-                      <div className="w-8 h-8 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                      <div className="w-8 h-8 rounded-lg bg-primary-soft flex items-center justify-center shrink-0">
                         <Zap className="w-4.5 h-4.5 text-primary" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <span className="block text-xs font-black text-slate-900 dark:text-slate-100">
+                        <span className="block text-xs font-black text-text-main">
                           {t('quick_lesson_modal_title') || 'Schnell-Eintrag'}
                         </span>
-                        <span className="block text-[10px] text-text-muted dark:text-slate-400 font-medium truncate">
+                        <span className="block text-[10px] text-text-muted font-medium truncate">
                           {_t('جدولة حصة بسرعة', 'Quickly schedule a lesson', 'Schnell eine Lektion planen')}
                         </span>
                       </div>
@@ -175,16 +175,16 @@ export const BottomNav: React.FC = () => {
                         setIsStartLessonNowModalOpen(true);
                         setShowQuickMenu(false);
                       }}
-                      className="w-full text-start flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer group"
+                      className="w-full text-start flex items-center gap-3 p-2.5 rounded-xl hover:bg-surface-hover transition-colors cursor-pointer group"
                     >
-                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center shrink-0">
-                        <Play className="w-4.5 h-4.5 text-emerald-600 dark:text-emerald-400 fill-emerald-500/30" />
+                      <div className="w-8 h-8 rounded-lg bg-primary-soft flex items-center justify-center shrink-0">
+                        <Play className="w-4.5 h-4.5 text-primary fill-primary/30" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <span className="block text-xs font-black text-slate-900 dark:text-slate-100">
+                        <span className="block text-xs font-black text-text-main">
                           {t('sofort_title') || _t('بدء حصة الآن', 'Start Lesson Now', 'Lektion jetzt starten')}
                         </span>
-                        <span className="block text-[10px] text-text-muted dark:text-slate-400 font-medium truncate">
+                        <span className="block text-[10px] text-text-muted font-medium truncate">
                           {_t('تشغيل مؤقت فوري للحصة', 'Start an instant lesson timer', 'Sofort eine Live-Stoppuhr starten')}
                         </span>
                       </div>
@@ -220,19 +220,19 @@ export const BottomNav: React.FC = () => {
                       <IconComponent
                         className={`w-4.5 h-4.5 sm:w-5 sm:h-5 transition-colors duration-150 ${
                           isActive
-                            ? 'text-primary dark:text-primary'
-                            : 'text-slate-700/80 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                            ? 'text-primary'
+                            : 'text-text-muted hover:text-text-main'
                         }`}
                       />
                       {(tab as any).badge && (
-                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold px-1 min-w-[14px] h-[14px] rounded-full flex items-center justify-center shadow-sm">
+                        <span className="absolute -top-1 -right-1 bg-primary text-white text-[8px] font-bold px-1 min-w-[14px] h-[14px] rounded-full flex items-center justify-center shadow-xs">
                           {(tab as any).badge}
                         </span>
                       )}
                     </div>
                     
                     <span
-                      className={`text-[10px] sm:text-xs font-black tracking-tight text-primary dark:text-primary whitespace-nowrap overflow-hidden transition-all duration-150 ease-out pr-0.5 ${
+                      className={`text-[10px] sm:text-xs font-black tracking-tight text-primary whitespace-nowrap overflow-hidden transition-all duration-150 ease-out pr-0.5 ${
                         isActive ? 'max-w-[120px] opacity-100' : 'max-w-0 opacity-0'
                       }`}
                     >

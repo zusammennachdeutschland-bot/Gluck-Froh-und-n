@@ -1,5 +1,5 @@
 import { Complaint, SchoolSettings, VisitRecord } from '../types';
-import { getReportSchoolLogoHtml } from './alsunLogoData';
+import { getReportSchoolLogoHtml, getReportSchoolNameHtml } from './alsunLogoData';
 import { generateObservationReportContentHtml } from './printObservationUtils';
 
 export interface StageManagerReportData {
@@ -32,7 +32,7 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
   } = data;
 
   const visitsToRender = (includeVisits && visits && visits.length > 0) ? visits : [];
-  const schoolName = settings?.schoolName || '';
+  const schoolNameHtml = getReportSchoolNameHtml(settings, { isRtl: true, tag: 'div', fontSize: '13pt' });
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 50 });
 
   const teacherToStudentCount = complaints.filter(c => c.direction === 'TEACHER_TO_STUDENT').length;
@@ -495,7 +495,7 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
               ${logoHtml}
             </div>
             <div class="header-title-box">
-              <div style="font-size: 13pt; font-weight: 900; color: #0f172a; margin-bottom: 2px;">${schoolName}</div>
+              ${schoolNameHtml}
               <div class="dept-badge">🇩🇪 قسم اللغة الألمانية (Deutschabteilung)</div>
               <div class="main-title">${titleText}</div>
               <div class="sub-meta">المرحلة: ${stageName} | مدير المرحلة: <strong>..................................</strong></div>

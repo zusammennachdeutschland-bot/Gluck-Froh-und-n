@@ -1002,8 +1002,8 @@ export const StageCommunicationView: React.FC = () => {
                           <span className="font-bold text-[11px] text-text-main">
                             متابعة {rec.periodType === 'weekly' ? 'أسبوعية' : rec.periodType === 'monthly' ? 'شهرية' : 'فصلية'} - الأسبوع {rec.weekNumber || 1}
                           </span>
-                          <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 text-[10px] font-extrabold rounded-md">
-                            مُعتمد ومُرسل
+                          <span className="text-[10px] font-black text-text-muted flex items-center gap-1">
+                            • مُعتمد ومُرسل
                           </span>
                         </div>
                         <p className="text-[11px] text-text-muted">
@@ -1015,24 +1015,24 @@ export const StageCommunicationView: React.FC = () => {
                         <button
                           onClick={() => handleDownloadPdf(rec)}
                           disabled={activeLoadingAction?.id === rec.id}
-                          className="h-8 px-3 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 text-[11px] font-bold rounded-lg transition-all border border-sky-200 dark:border-sky-800 flex items-center gap-1"
+                          className="h-8 px-3 bg-surface hover:bg-surface-hover text-text-main hover:text-primary text-[11px] font-bold rounded-lg transition-all border border-surface-border hover:border-primary/40 flex items-center gap-1 cursor-pointer shadow-2xs"
                         >
-                          <Download className="w-3.5 h-3.5" />
+                          <Download className="w-3.5 h-3.5 text-primary" />
                           <span>PDF</span>
                         </button>
                         <button
                           onClick={() => handleShareWhatsApp(rec)}
                           disabled={activeLoadingAction?.id === rec.id}
-                          className="h-8 px-3 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 text-[11px] font-bold rounded-lg transition-all border border-emerald-200 dark:border-emerald-800 flex items-center gap-1"
+                          className="h-8 px-3 bg-surface hover:bg-surface-hover text-text-main hover:text-primary text-[11px] font-bold rounded-lg transition-all border border-surface-border hover:border-primary/40 flex items-center gap-1 cursor-pointer shadow-2xs"
                         >
-                          <MessageCircle className="w-3.5 h-3.5" />
+                          <MessageCircle className="w-3.5 h-3.5 text-primary" />
                           <span>واتساب</span>
                         </button>
                         <button
                           onClick={() => handlePrintReport(rec)}
-                          className="h-8 px-3 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 text-[11px] font-bold rounded-lg transition-all border border-indigo-200 dark:border-indigo-800 flex items-center gap-1"
+                          className="h-8 px-3 bg-surface hover:bg-surface-hover text-text-main hover:text-primary text-[11px] font-bold rounded-lg transition-all border border-surface-border hover:border-primary/40 flex items-center gap-1 cursor-pointer shadow-2xs"
                         >
-                          <Printer className="w-3.5 h-3.5" />
+                          <Printer className="w-3.5 h-3.5 text-primary" />
                           <span>طباعة</span>
                         </button>
                       </div>

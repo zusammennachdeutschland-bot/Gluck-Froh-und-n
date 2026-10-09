@@ -220,7 +220,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
             }}
             className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'library'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-primary text-white shadow-xs'
                 : 'text-text-muted hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
@@ -232,7 +232,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
             onClick={() => setActiveTab('generator')}
             className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'generator'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-primary text-white shadow-xs'
                 : 'text-text-muted hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
@@ -244,7 +244,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
             onClick={() => setActiveTab('import')}
             className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'import'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-primary text-white shadow-xs'
                 : 'text-text-muted hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
@@ -279,7 +279,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                           key={lang}
                           onClick={() => setPreviewSampleLang(lang)}
                           className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                            previewSampleLang === lang ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                            previewSampleLang === lang ? 'bg-primary text-white' : 'text-slate-400 hover:text-white'
                           }`}
                         >
                           {lang === 'ar' ? 'العربية' : lang === 'de' ? 'Deutsch' : 'English'}
@@ -361,9 +361,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                 </div>
               ) : savedBackgrounds.length === 0 ? (
                 <div className="p-8 sm:p-12 text-center bg-slate-50 dark:bg-slate-800/40 rounded-3xl border border-dashed border-surface-border dark:border-slate-800 space-y-3">
-                  <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
-                    <ImageIcon className="w-7 h-7" />
-                  </div>
+                  <ImageIcon className="w-10 h-10 text-primary/40 mx-auto" />
                   <h4 className="text-sm font-black text-text-main">
                     {_t('لم تقم باستيراد أي خلفيات بعد', 'No AI backgrounds imported yet', 'Noch keine Hintergründe importiert')}
                   </h4>
@@ -539,7 +537,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                         onClick={() => setSelectedStyle(styleKey)}
                         className={`p-3 rounded-2xl border text-start transition-all cursor-pointer relative flex flex-col justify-between ${
                           isSelected
-                            ? 'bg-indigo-500/10 border-indigo-600 ring-2 ring-indigo-500/20 shadow-xs'
+                            ? 'bg-primary/10 border-primary ring-2 ring-primary/20 shadow-xs'
                             : 'bg-surface dark:bg-slate-900 border-surface-border dark:border-slate-800 hover:border-slate-300'
                         }`}
                       >
@@ -549,7 +547,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                               className="w-4 h-4 rounded-full border border-white/20 shadow-xs shrink-0" 
                               style={{ background: preset.previewBg }}
                             />
-                            {isSelected && <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />}
+                            {isSelected && <CheckCircle2 className="w-4 h-4 text-primary" />}
                           </div>
                           <span className="block font-black text-xs text-text-main">
                             {preset.name[language] || preset.name.de}
@@ -623,7 +621,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                     className={`px-3 py-1 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
                       isCopied
                         ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
+                        : 'bg-primary hover:bg-primary-hover text-white shadow-xs'
                     }`}
                   >
                     {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
@@ -674,7 +672,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                 className={`p-6 sm:p-8 text-center rounded-3xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center justify-center gap-2.5 ${
                   validationResult?.isValid
                     ? 'bg-emerald-500/5 border-emerald-500/40 hover:bg-emerald-500/10'
-                    : 'bg-slate-50 dark:bg-slate-800/40 border-surface-border dark:border-slate-700 hover:border-indigo-500/60 hover:bg-indigo-500/5'
+                    : 'bg-slate-50 dark:bg-slate-800/40 border-surface-border dark:border-slate-700 hover:border-primary/60 hover:bg-primary-soft/30'
                 }`}
               >
                 <input
@@ -691,7 +689,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
                   validationResult?.isValid
                     ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                    : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+                    : 'bg-primary-soft text-primary'
                 }`}>
                   {validationResult?.isValid ? <CheckCircle2 className="w-6 h-6" /> : <Upload className="w-6 h-6" />}
                 </div>
@@ -775,7 +773,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                                 onClick={() => setTextColorMode(mode.id as any)}
                                 className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer text-center ${
                                   textColorMode === mode.id
-                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                    ? 'bg-primary text-white border-primary shadow-xs'
                                     : 'bg-surface dark:bg-slate-800 border-surface-border dark:border-slate-700 text-text-muted'
                                 }`}
                               >
@@ -790,7 +788,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                       <div className="pt-3 border-t border-surface-border dark:border-slate-800 space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-black text-text-main flex items-center gap-1.5">
-                            <Eye className="w-4 h-4 text-indigo-500" />
+                            <Eye className="w-4 h-4 text-primary" />
                             {_t('معاينة تفاعلية فورية لنصوص الشهادة على الخلفية', 'Live Interactive Certificate Preview on Background', 'Live-Vorschau mit Daten')}
                           </span>
 
@@ -801,7 +799,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
                                 type="button"
                                 onClick={() => setPreviewSampleLang(lang)}
                                 className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
-                                  previewSampleLang === lang ? 'bg-indigo-600 text-white' : 'text-text-muted hover:text-text-main'
+                                  previewSampleLang === lang ? 'bg-primary text-white' : 'text-text-muted hover:text-text-main'
                                 }`}
                               >
                                 {lang === 'ar' ? 'العربية' : lang === 'de' ? 'Deutsch' : 'English'}

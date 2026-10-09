@@ -459,6 +459,26 @@ export const HodStudentsView: React.FC = () => {
     return { totalGerman, boysCount, girlsCount, busRidersCount, classesCount };
   }, [students, uniqueClasses]);
 
+  const classStudentCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of students) {
+      const c = (s.gradeClass || '').toUpperCase();
+      map.set(c, (map.get(c) || 0) + 1);
+    }
+    return map;
+  }, [students]);
+
+  const gradeStudentCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of students) {
+      const raw = (s.gradeClass || '').trim();
+      const match = raw.match(/^(\d+|[A-Za-z]+)/);
+      const gradeStr = match ? match[1].toUpperCase() : raw.toUpperCase();
+      map.set(gradeStr, (map.get(gradeStr) || 0) + 1);
+    }
+    return map;
+  }, [students]);
+
   // Open Add Modal
   const handleOpenAdd = () => {
     setEditingStudent(null);
@@ -816,7 +836,7 @@ export const HodStudentsView: React.FC = () => {
               <h2 className="text-sm sm:text-base font-black text-text-main">
                 {_t('قوائم وسجلات طلاب اللغة الألمانية', 'German Students Roster', 'Schülerverzeichnis')}
               </h2>
-              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-md text-[10px] font-extrabold border border-emerald-500/20">
+              <span className="px-2 py-0.5 bg-primary-soft text-primary rounded-md text-[10px] font-extrabold border border-primary-border">
                 🇩🇪 Deutsch
               </span>
             </div>
@@ -840,16 +860,16 @@ export const HodStudentsView: React.FC = () => {
                 setPasteError(null);
                 setPasteSuccessCount(null);
               }}
-              className="px-2 sm:px-3 py-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main border border-surface-border rounded-xl text-[10.5px] sm:text-xs font-bold shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+              className="px-2 sm:px-3 py-1.5 bg-surface-hover hover:bg-surface-border text-text-main border border-surface-border rounded-xl text-[10.5px] sm:text-xs font-bold shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
             >
-              <Code2 className="w-3.5 h-3.5 text-primary shrink-0" />
+              <Code2 className="w-3.5 h-3.5 text-text-muted shrink-0" />
               <span className="truncate">{_t('استيراد البيانات', 'Prompt & Import', 'Prompt & Datenimport')}</span>
             </button>
 
             {/* Delete / Clear Options Button (Utility Action) */}
             <button
               onClick={() => setIsBulkDeleteModalOpen(true)}
-              className="px-2 sm:px-3 py-1.5 bg-surface-hover hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-surface-border hover:border-rose-500/30 rounded-xl text-[10.5px] sm:text-xs font-bold shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+              className="px-2 sm:px-3 py-1.5 bg-surface-hover hover:bg-surface-border text-text-muted hover:text-text-main border border-surface-border rounded-xl text-[10.5px] sm:text-xs font-bold shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
               title={_t('خيارات الحذف والتصفية حسب الفصل/الصف', 'Delete options by class/grade', 'Löschoptionen nach Klasse/Stufe')}
             >
               <Trash2 className="w-3.5 h-3.5 shrink-0" />
@@ -860,8 +880,8 @@ export const HodStudentsView: React.FC = () => {
 
         {/* Quick Counters Bar */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 border-t border-surface-border">
-          <div className="bg-surface-hover/80 border border-surface-border p-2 rounded-xl flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-[11px] shrink-0">
+          <div className="bg-surface-hover/70 border border-surface-border p-2 rounded-xl flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-surface text-text-main border border-surface-border flex items-center justify-center font-bold text-[11px] shrink-0">
               📊
             </div>
             <div>
@@ -870,43 +890,43 @@ export const HodStudentsView: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-surface-hover/80 border border-surface-border p-2 rounded-xl flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-600 flex items-center justify-center font-bold text-[11px] shrink-0">
+          <div className="bg-surface-hover/70 border border-surface-border p-2 rounded-xl flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-surface text-text-main border border-surface-border flex items-center justify-center font-bold text-[11px] shrink-0">
               👦
             </div>
             <div>
               <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{_t('بنين', 'Boys', 'Jungen')}</div>
-              <div className="text-[11px] font-black text-blue-600">{stats.boysCount}</div>
+              <div className="text-[11px] font-black text-text-main">{stats.boysCount}</div>
             </div>
           </div>
 
-          <div className="bg-surface-hover/80 border border-surface-border p-2 rounded-xl flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-pink-500/10 text-pink-600 flex items-center justify-center font-bold text-[11px] shrink-0">
+          <div className="bg-surface-hover/70 border border-surface-border p-2 rounded-xl flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-surface text-text-main border border-surface-border flex items-center justify-center font-bold text-[11px] shrink-0">
               👧
             </div>
             <div>
               <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{_t('بنات', 'Girls', 'Mädchen')}</div>
-              <div className="text-[11px] font-black text-pink-600">{stats.girlsCount}</div>
+              <div className="text-[11px] font-black text-text-main">{stats.girlsCount}</div>
             </div>
           </div>
 
-          <div className="bg-surface-hover/80 border border-surface-border p-2 rounded-xl flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold text-[11px] shrink-0">
+          <div className="bg-surface-hover/70 border border-surface-border p-2 rounded-xl flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-surface text-text-main border border-surface-border flex items-center justify-center font-bold text-[11px] shrink-0">
               🚌
             </div>
             <div>
               <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{_t('ركاب الباص', 'Bus Riders', 'Busnutzer')}</div>
-              <div className="text-[11px] font-black text-amber-600">{stats.busRidersCount}</div>
+              <div className="text-[11px] font-black text-text-main">{stats.busRidersCount}</div>
             </div>
           </div>
 
-          <div className="bg-surface-hover/80 border border-surface-border p-2 rounded-xl flex items-center gap-2 col-span-2 sm:col-span-1">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold text-[11px] shrink-0">
+          <div className="bg-surface-hover/70 border border-surface-border p-2 rounded-xl flex items-center gap-2 col-span-2 sm:col-span-1">
+            <div className="w-7 h-7 rounded-lg bg-surface text-text-main border border-surface-border flex items-center justify-center font-bold text-[11px] shrink-0">
               🏫
             </div>
             <div>
               <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{_t('عدد الفصول', 'Classes', 'Klassen')}</div>
-              <div className="text-[11px] font-black text-emerald-600">{stats.classesCount}</div>
+              <div className="text-[11px] font-black text-text-main">{stats.classesCount}</div>
             </div>
           </div>
         </div>
@@ -914,9 +934,9 @@ export const HodStudentsView: React.FC = () => {
 
       {/* FLOATING ACTION TOOLBAR WHEN CHECKBOXES ARE SELECTED */}
       {selectedStudentIds.length > 0 && (
-        <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-2.5 px-4 flex items-center justify-between gap-1.5 shadow-md animate-fade-in">
-          <div className="flex items-center gap-2 text-[11px] font-black text-rose-700 dark:text-rose-300">
-            <CheckSquare className="w-4 h-4 text-rose-600" />
+        <div className="bg-primary-soft border border-primary-border rounded-xl p-2.5 px-4 flex items-center justify-between gap-1.5 shadow-md animate-fade-in text-primary">
+          <div className="flex items-center gap-2 text-[11px] font-black">
+            <CheckSquare className="w-4 h-4 text-primary" />
             <span>
               {_t(`تم تحديد (${selectedStudentIds.length}) طالب من القائمة`, `Selected (${selectedStudentIds.length}) students`, `${selectedStudentIds.length} Schüler ausgewählt`)}
             </span>
@@ -936,7 +956,7 @@ export const HodStudentsView: React.FC = () => {
                 setTargetBulkMoveClass(uniqueClasses[0] || '10A');
                 setIsBulkMoveModalOpen(true);
               }}
-              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              className="px-3 py-1 bg-primary hover:bg-primary-hover text-white rounded-lg text-[11px] font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
             >
               <ArrowRightLeft className="w-3.5 h-3.5" />
               <span>{_t(`نقل المحددين (${selectedStudentIds.length}) لفصل آخر`, `Move Selected (${selectedStudentIds.length}) to Class`, `Ausgewählte (${selectedStudentIds.length}) verschieben`)}</span>
@@ -1144,7 +1164,7 @@ export const HodStudentsView: React.FC = () => {
                       {selectedClass}
                     </span>
                     <span className="text-text-muted text-[11px]">
-                      ({students.filter(s => s.gradeClass.toUpperCase() === selectedClass.toUpperCase()).length} {_t('طلاب مسجلين', 'students registered', 'Schüler')})
+                      ({classStudentCountMap.get(selectedClass.toUpperCase()) || 0} {_t('طلاب مسجلين', 'students registered', 'Schüler')})
                     </span>
                   </div>
 
@@ -1157,7 +1177,7 @@ export const HodStudentsView: React.FC = () => {
                         setIsCustomWholeClassMove(false);
                         setClassToMoveFrom(selectedClass);
                       }}
-                      className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer text-[11px]"
+                      className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-lg font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer text-[11px]"
                       title={_t('نقل جميع طلاب هذا الفصل بالكامل إلى فصل آخر', 'Move all students in this class to another', 'Alle Schüler dieser Klasse verschieben')}
                     >
                       <ArrowRightLeft className="w-3.5 h-3.5" />
@@ -1211,7 +1231,7 @@ export const HodStudentsView: React.FC = () => {
             <button
               onClick={handleCopyFullRosterText}
               disabled={!isAnyFilterActive || filteredStudents.length === 0}
-              className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-text-main rounded-lg text-[11px] font-bold border border-surface-border flex items-center gap-1 transition-all cursor-pointer"
+              className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border disabled:opacity-40 disabled:cursor-not-allowed text-text-main rounded-lg text-[11px] font-bold border border-surface-border flex items-center gap-1 transition-all cursor-pointer"
               title={_t('نسخ القائمة ثنائية اللغة للواتساب', 'Copy for WhatsApp', 'Für WhatsApp kopieren')}
             >
               <Copy className="w-3 h-3 text-emerald-600" />
@@ -1221,7 +1241,7 @@ export const HodStudentsView: React.FC = () => {
             <button
               onClick={handleExportCsv}
               disabled={!isAnyFilterActive || filteredStudents.length === 0}
-              className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-text-main rounded-lg text-[11px] font-bold border border-surface-border flex items-center gap-1 transition-all cursor-pointer"
+              className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border disabled:opacity-40 disabled:cursor-not-allowed text-text-main rounded-lg text-[11px] font-bold border border-surface-border flex items-center gap-1 transition-all cursor-pointer"
               title={_t('تصدير CSV ثنائي اللغة', 'Export CSV', 'CSV exportieren')}
             >
               <FileSpreadsheet className="w-3 h-3 text-blue-600" />
@@ -1260,7 +1280,7 @@ export const HodStudentsView: React.FC = () => {
               </button>
               <button
                 onClick={() => setIsPromptModalOpen(true)}
-                className="px-3 py-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main border border-surface-border text-[11px] font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                className="px-3 py-1.5 bg-surface-hover hover:bg-surface-border text-text-main border border-surface-border text-[11px] font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
               >
                 <Code2 className="w-3.5 h-3.5" />
                 <span>{_t('استيراد بالـ AI Prompt', 'Import via AI Prompt', 'Per KI importieren')}</span>
@@ -1319,7 +1339,7 @@ export const HodStudentsView: React.FC = () => {
                           key={`quick-class-${c}`}
                           type="button"
                           onClick={() => applyGradeClassFilter(c)}
-                          className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 border border-surface-border rounded-lg text-[11px] font-bold text-text-main transition-all cursor-pointer shadow-2xs active:scale-95"
+                          className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border border border-surface-border rounded-lg text-[11px] font-bold text-text-main transition-all cursor-pointer shadow-2xs active:scale-95"
                         >
                           🏫 {c}
                         </button>
@@ -1365,7 +1385,7 @@ export const HodStudentsView: React.FC = () => {
                       setCustomBulkMoveClass('');
                       setIsBulkMoveModalOpen(true);
                     }}
-                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                    className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
                   >
                     <ArrowRightLeft className="w-3.5 h-3.5" />
                     <span>{_t('نقل المحددين إلى فصل آخر', 'Move to Class', 'In Klasse verschieben')}</span>
@@ -1373,7 +1393,7 @@ export const HodStudentsView: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleDeleteSelectedStudents}
-                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                    className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>{_t('حذف المحددين', 'Delete Selected', 'Ausgewählte löschen')}</span>
@@ -1599,7 +1619,7 @@ export const HodStudentsView: React.FC = () => {
                         <div className="flex items-center justify-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={() => handleCopyStudentRow(s)}
-                            className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 text-text-muted hover:text-text-main rounded transition-all cursor-pointer"
+                            className="p-1 hover:bg-surface-border text-text-muted hover:text-text-main rounded transition-all cursor-pointer"
                             title={_t('نسخ الصف', 'Copy row', 'Zeile kopieren')}
                           >
                             <Copy className="w-3.5 h-3.5" />
@@ -1704,7 +1724,7 @@ export const HodStudentsView: React.FC = () => {
                   >
                     {uniqueClasses.length === 0 && <option value="">{_t('لا توجد فصول', 'No classes', 'Keine Klassen')}</option>}
                     {uniqueClasses.map(c => {
-                      const count = students.filter(s => s.gradeClass.toUpperCase() === c.toUpperCase()).length;
+                      const count = classStudentCountMap.get(c.toUpperCase()) || 0;
                       return (
                         <option key={c} value={c}>
                           🏫 الفصل: {c} ({count} طالب)
@@ -1715,7 +1735,7 @@ export const HodStudentsView: React.FC = () => {
                   <button
                     onClick={() => handleDeleteByClass(targetDeleteClass)}
                     disabled={!targetDeleteClass || uniqueClasses.length === 0}
-                    className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-[11px] font-bold transition-all cursor-pointer shrink-0"
+                    className="px-2 py-1 bg-surface-hover hover:bg-surface-border text-text-muted hover:text-text-main border border-surface-border disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-[11px] font-bold transition-all cursor-pointer shrink-0"
                   >
                     {_t(`حذف فصل (${targetDeleteClass || '-'})`, `Delete Class`, `Klasse löschen`)}
                   </button>
@@ -1725,7 +1745,7 @@ export const HodStudentsView: React.FC = () => {
               {/* Option 3: Delete By Grade Level (e.g., Grade 5) */}
               <div className="pt-3 space-y-2">
                 <label className="text-[11px] font-bold text-text-main flex items-center gap-1.5">
-                  <Layers className="w-4 h-4 text-amber-600" />
+                  <Layers className="w-4 h-4 text-primary" />
                   <span>{_t('3. حذف طلاب صف دراسي كامل (Grade):', '3. Delete by Grade Level:', '3. Nach Stufe löschen:')}</span>
                 </label>
                 <div className="flex items-center gap-2">
@@ -1736,11 +1756,7 @@ export const HodStudentsView: React.FC = () => {
                   >
                     {uniqueGrades.length === 0 && <option value="">{_t('لا توجد صفوف', 'No grades', 'Keine Stufen')}</option>}
                     {uniqueGrades.map(g => {
-                      const count = students.filter(s => {
-                        const match = s.gradeClass.trim().match(/^(\d+|[A-Za-z]+)/);
-                        const gradeStr = match ? match[1].toUpperCase() : s.gradeClass.trim().toUpperCase();
-                        return gradeStr === g.toUpperCase();
-                      }).length;
+                      const count = gradeStudentCountMap.get(g.toUpperCase()) || 0;
                       return (
                         <option key={g} value={g}>
                           📚 الصف الدراسـي: {g} ({count} طالب)
@@ -1751,7 +1767,7 @@ export const HodStudentsView: React.FC = () => {
                   <button
                     onClick={() => handleDeleteByGrade(targetDeleteGrade)}
                     disabled={!targetDeleteGrade || uniqueGrades.length === 0}
-                    className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-[11px] font-bold transition-all cursor-pointer shrink-0"
+                    className="px-2 py-1 bg-surface-hover hover:bg-surface-border text-text-muted hover:text-text-main border border-surface-border disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-[11px] font-bold transition-all cursor-pointer shrink-0"
                   >
                     {_t(`حذف الصف (${targetDeleteGrade || '-'})`, `Delete Grade`, `Stufe löschen`)}
                   </button>
@@ -1772,7 +1788,7 @@ export const HodStudentsView: React.FC = () => {
                   </div>
                   <button
                     onClick={handleDeleteFilteredStudents}
-                    className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    className="w-full py-2 bg-primary hover:bg-primary-hover text-white text-[11px] font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>{_t(`حذف نتائج البحث (${filteredStudents.length} طالب)`, `Delete Search Results (${filteredStudents.length})`, `Suchergebnisse löschen (${filteredStudents.length})`)}</span>
@@ -1843,13 +1859,13 @@ export const HodStudentsView: React.FC = () => {
             <div className="flex items-center justify-end gap-2 pt-1">
               <button
                 onClick={() => setStudentToDelete(null)}
-                className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
+                className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
               >
                 {_t('إلغاء', 'Cancel', 'Abbrechen')}
               </button>
               <button
                 onClick={() => handleDeleteStudentDirect(studentToDelete.id)}
-                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-[11px] font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-xl text-[11px] font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>{_t('نعم، حذف الطالب', 'Yes, Delete', 'Ja, löschen')}</span>
@@ -2041,7 +2057,7 @@ export const HodStudentsView: React.FC = () => {
                   href="https://chatgpt.com/"
                   target="_blank"
                   rel="noreferrer"
-                  className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border inline-flex items-center gap-1 transition-all"
+                  className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border inline-flex items-center gap-1 transition-all"
                 >
                   <span>ChatGPT</span>
                   <ExternalLink className="w-3 h-3 text-emerald-500" />
@@ -2050,7 +2066,7 @@ export const HodStudentsView: React.FC = () => {
                   href="https://gemini.google.com/"
                   target="_blank"
                   rel="noreferrer"
-                  className="px-2.5 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border inline-flex items-center gap-1 transition-all"
+                  className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border inline-flex items-center gap-1 transition-all"
                 >
                   <span>Google Gemini</span>
                   <ExternalLink className="w-3 h-3 text-blue-500" />
@@ -2096,7 +2112,7 @@ export const HodStudentsView: React.FC = () => {
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
                   onClick={() => setIsPromptModalOpen(false)}
-                  className="px-2.5 py-1.5 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
+                  className="px-2.5 py-1.5 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
                 >
                   {_t('إغلاق', 'Close', 'Schließen')}
                 </button>
@@ -2255,7 +2271,7 @@ export const HodStudentsView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsAddEditModalOpen(false)}
-                  className="px-2 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
+                  className="px-2 py-1 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
                 >
                   {_t('إلغاء', 'Cancel', 'Abbrechen')}
                 </button>
@@ -2502,7 +2518,7 @@ export const HodStudentsView: React.FC = () => {
                   }
                 }}
                 disabled={isCustomMoveClass && !customMoveClass.trim()}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+                className="px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
               >
                 <ArrowRightLeft className="w-4 h-4" />
                 <span>{_t('تأكيد النقل', 'Confirm Move', 'Verschieben bestätigen')}</span>
@@ -2518,9 +2534,7 @@ export const HodStudentsView: React.FC = () => {
           <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-surface-border">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20">
-                  <ArrowRightLeft className="w-5 h-5" />
-                </div>
+                <ArrowRightLeft className="w-6 h-6 text-primary shrink-0" />
                 <div>
                   <h3 className="text-sm font-black text-text-main">
                     {_t('نقل الطلاب المحددين جماعياً إلى فصل جديد', 'Bulk Move Selected Students', 'Ausgewählte Schüler in Klasse verschieben')}
@@ -2609,7 +2623,7 @@ export const HodStudentsView: React.FC = () => {
                   }
                 }}
                 disabled={isCustomBulkMoveClass && !customBulkMoveClass.trim()}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+                className="px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
               >
                 <ArrowRightLeft className="w-4 h-4" />
                 <span>{_t(`نقل (${selectedStudentIds.length}) طالب إلى (${isCustomBulkMoveClass ? (customBulkMoveClass || '...') : targetBulkMoveClass})`, `Move (${selectedStudentIds.length}) students`, `(${selectedStudentIds.length}) Schüler verschieben`)}</span>
@@ -2625,9 +2639,7 @@ export const HodStudentsView: React.FC = () => {
           <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-surface-border">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20">
-                  <ArrowRightLeft className="w-5 h-5" />
-                </div>
+                <ArrowRightLeft className="w-6 h-6 text-primary shrink-0" />
                 <div>
                   <h3 className="text-sm font-black text-text-main">
                     {_t(`نقل جميع طلاب فصل (${classToMoveFrom}) إلى فصل آخر`, `Move All Students in Class (${classToMoveFrom})`, `Alle Schüler aus (${classToMoveFrom}) verschieben`)}
@@ -2649,7 +2661,7 @@ export const HodStudentsView: React.FC = () => {
             <div className="space-y-3">
               <div className="text-[11px] text-text-muted bg-surface-hover/50 p-2.5 rounded-lg border border-surface-border-soft flex items-center justify-between">
                 <span className="font-bold">{_t('الفصل المصدر (الحالي):', 'Source Class:', 'Ausgangsklasse:')}</span>
-                <span className="text-blue-600 dark:text-blue-400 font-black bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
+                <span className="text-primary font-black">
                   {classToMoveFrom}
                 </span>
               </div>
@@ -2709,7 +2721,7 @@ export const HodStudentsView: React.FC = () => {
                   }
                 }}
                 disabled={isCustomWholeClassMove && !customWholeClassMove.trim()}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+                className="px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
               >
                 <ArrowRightLeft className="w-4 h-4" />
                 <span>{_t(`نقل طلاب الفصل بالكامل إلى (${isCustomWholeClassMove ? (customWholeClassMove || '...') : targetWholeClassMove})`, `Move Class to (${isCustomWholeClassMove ? customWholeClassMove : targetWholeClassMove})`, `Klasse verschieben`)}</span>

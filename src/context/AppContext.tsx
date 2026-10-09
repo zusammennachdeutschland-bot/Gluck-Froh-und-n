@@ -20,7 +20,7 @@ import { storage } from '../services/storageService';
 import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
-import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber } from '../utils/lessonUtils';
+import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, isGroupPerLesson } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import LiveTimer from '../services/liveTimerPlugin';
@@ -221,7 +221,7 @@ interface AppContextType {
     bundleSize?: number,
     customBundlePrice?: number
   ) => void;
-  updateLessonPaymentStatus: (lessonId: string, status: PaymentStatus, customAmountPaid?: number, accountId?: string) => void;
+  updateLessonPaymentStatus: (lessonId: string, status: PaymentStatus, customAmountPaid?: number, accountId?: string, targetStudentId?: string) => void;
 
   // Notifications
   notifications: NotificationItem[];
@@ -841,15 +841,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     let groupChanges = false;
     const healedGroups = groups.map(g => {
-      // If group is set to per_lesson / per_session, strictly preserve per_lesson and normalize sessionCount = 1
-      if (g.paymentCycle === 'per_lesson' || g.paymentModel === 'per_session') {
-        if (g.sessionCount !== 1 || g.paymentCycle !== 'per_lesson' || g.paymentModel !== 'per_session') {
+      // If group is set to per_lesson / per_session or identified as per-lesson, strictly preserve per_lesson and normalize sessionCount = 1
+      if (isGroupPerLesson(g)) {
+        if (g.sessionCount !== 1 || g.paymentCycle !== 'per_lesson' || g.paymentModel !== 'per_session' || g.startingSessionNumber !== 1) {
           groupChanges = true;
           return wrapMutation({
             ...g,
             paymentCycle: 'per_lesson',
             paymentModel: 'per_session',
-            sessionCount: 1
+            sessionCount: 1,
+            startingSessionNumber: 1
           } as Group);
         }
         return g;
@@ -867,10 +868,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       let lessonChanges = false;
       const updated = allLessons.map(l => {
         if (!l.groupId || l.deleted) return l;
-        const grp = healedGroups.find(g => g.id === l.groupId);
+        const grp = healedGroups.find(g => g.id === l.groupId || (g.name && l.groupId && g.name.trim().toLowerCase() === l.groupId.trim().toLowerCase()));
         if (!grp) return l;
 
-        const isCycleGroup = Boolean((grp.sessionCount && grp.sessionCount > 1) || (grp.paymentCycle === 'monthly' && grp.paymentModel !== 'per_session'));
+        const isPerLessonGrp = isGroupPerLesson(grp);
+        if (isPerLessonGrp) {
+          if (l.totalSessionsInPackage !== 1 || l.sessionNumber !== 1) {
+            lessonChanges = true;
+            return {
+              ...l,
+              totalSessionsInPackage: 1,
+              sessionNumber: 1,
+              isQuickLesson: false
+            };
+          }
+          return l;
+        }
+
+        const isCycleGroup = !isPerLessonGrp && Boolean((grp.sessionCount && grp.sessionCount > 1) || (grp.paymentCycle === 'monthly' && grp.paymentModel !== 'per_session'));
         if (isCycleGroup) {
           const targetSessionCount = grp.sessionCount || 4;
           if (l.totalSessionsInPackage !== targetSessionCount || l.isQuickLesson) {
@@ -887,13 +902,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
       // Recalculate sequential session numbers for all affected cycle groups (only if missing or invalid)
       healedGroups.forEach(grp => {
+        if (isGroupPerLesson(grp)) return;
         const isCycleGroup = Boolean((grp.sessionCount && grp.sessionCount > 1) || (grp.paymentCycle === 'monthly' && grp.paymentModel !== 'per_session'));
         if (!isCycleGroup) return;
 
         const targetCount = grp.sessionCount || 4;
         const startSeq = Math.min(targetCount, Math.max(1, grp.startingSessionNumber || 1));
         const nonCancelled = updated
-          .filter(l => l.groupId === grp.id && !l.deleted && l.status !== 'cancelled')
+          .filter(l => (l.groupId === grp.id || (grp.name && l.groupId && grp.name.trim().toLowerCase() === l.groupId.trim().toLowerCase())) && !l.deleted && l.status !== 'cancelled')
           .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
 
         nonCancelled.forEach((l, idx) => {
@@ -1025,7 +1041,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return updated;
   }, [students]);
 
-  // One-time startup reconciliation: ensure paid payment records and paid lessons are bidirectionally synchronized
+  // One-time startup reconciliation: ensure paid payment records and paid lessons are bidirectionally synchronized per student
   useEffect(() => {
     const allPayments = (fullPaymentsRef.current && fullPaymentsRef.current.length > 0)
       ? fullPaymentsRef.current
@@ -1035,80 +1051,100 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       ? fullLessonsRef.current
       : lessons;
       
-    const paidLessonIds = new Set<string>();
-    const paidLessonDateSignatures = new Set<string>();
+    // Index paid lessons and dates strictly per student to avoid cross-student interference in group lessons
+    const paidLessonIdsByStudent = new Map<string, Set<string>>();
+    const paidDateSignaturesByStudent = new Map<string, Set<string>>();
 
     allPayments.forEach(p => {
       if (!p.deleted && (p.status === 'paid' || p.status === 'exempted' || p.paymentType === 'exemption')) {
-        if (p.lessonId) paidLessonIds.add(p.lessonId);
+        const stId = p.studentId;
+        if (!stId) return;
+
+        if (!paidLessonIdsByStudent.has(stId)) paidLessonIdsByStudent.set(stId, new Set<string>());
+        const stIds = paidLessonIdsByStudent.get(stId)!;
+        if (p.lessonId) stIds.add(p.lessonId);
         if (p.lessonIds && Array.isArray(p.lessonIds)) {
           p.lessonIds.forEach(id => {
-            if (!id.startsWith('virtual_')) paidLessonIds.add(id);
+            if (!id.startsWith('virtual_')) stIds.add(id);
           });
         }
+
+        if (!paidDateSignaturesByStudent.has(stId)) paidDateSignaturesByStudent.set(stId, new Set<string>());
+        const stDates = paidDateSignaturesByStudent.get(stId)!;
         if (p.lessonDates && Array.isArray(p.lessonDates)) {
           p.lessonDates.forEach(dStr => {
             if (!dStr || typeof dStr !== 'string') return;
             const match = dStr.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
             if (match) {
               const dIso = normalizeDateToISO(match[1]);
-              if (p.studentId) paidLessonDateSignatures.add(`${p.studentId}_${dIso}`);
-              if (p.groupId) paidLessonDateSignatures.add(`${p.groupId}_${dIso}`);
+              stDates.add(`${stId}_${dIso}`);
             }
           });
         }
       }
     });
 
-    // Also collect paid status from all lessons directly
+    // Also collect paid status from all lessons directly per student
     allCurrentLessons.forEach(l => {
       if (!l.deleted) {
-        const isPaid = l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid';
-        if (isPaid) {
-          paidLessonIds.add(l.id);
-          if (l.studentId && l.date) paidLessonDateSignatures.add(`${l.studentId}_${l.date}`);
-          if (l.groupId && l.date) paidLessonDateSignatures.add(`${l.groupId}_${l.date}`);
+        if (l.studentId && (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid')) {
+          if (!paidLessonIdsByStudent.has(l.studentId)) paidLessonIdsByStudent.set(l.studentId, new Set<string>());
+          paidLessonIdsByStudent.get(l.studentId)!.add(l.id);
+          if (l.date) {
+            if (!paidDateSignaturesByStudent.has(l.studentId)) paidDateSignaturesByStudent.set(l.studentId, new Set<string>());
+            paidDateSignaturesByStudent.get(l.studentId)!.add(`${l.studentId}_${l.date}`);
+          }
         }
         if (l.studentPayments && typeof l.studentPayments === 'object') {
           Object.entries(l.studentPayments).forEach(([stId, sp]: [string, any]) => {
             if (sp?.paymentStatus === 'paid' || sp?.status === 'paid') {
-              paidLessonIds.add(l.id);
-              if (l.date) paidLessonDateSignatures.add(`${stId}_${l.date}`);
+              if (!paidLessonIdsByStudent.has(stId)) paidLessonIdsByStudent.set(stId, new Set<string>());
+              paidLessonIdsByStudent.get(stId)!.add(l.id);
+              if (l.date) {
+                if (!paidDateSignaturesByStudent.has(stId)) paidDateSignaturesByStudent.set(stId, new Set<string>());
+                paidDateSignaturesByStudent.get(stId)!.add(`${stId}_${l.date}`);
+              }
             }
           });
         }
         if (l.report?.studentPayments && typeof l.report.studentPayments === 'object') {
           Object.entries(l.report.studentPayments).forEach(([stId, sp]: [string, any]) => {
             if (sp?.paymentStatus === 'paid' || sp?.status === 'paid') {
-              paidLessonIds.add(l.id);
-              if (l.date) paidLessonDateSignatures.add(`${stId}_${l.date}`);
+              if (!paidLessonIdsByStudent.has(stId)) paidLessonIdsByStudent.set(stId, new Set<string>());
+              paidLessonIdsByStudent.get(stId)!.add(l.id);
+              if (l.date) {
+                if (!paidDateSignaturesByStudent.has(stId)) paidDateSignaturesByStudent.set(stId, new Set<string>());
+                paidDateSignaturesByStudent.get(stId)!.add(`${stId}_${l.date}`);
+              }
             }
           });
         }
       }
     });
 
-    if (paidLessonIds.size > 0 || paidLessonDateSignatures.size > 0) {
+    if (paidLessonIdsByStudent.size > 0 || paidDateSignaturesByStudent.size > 0) {
       updateFullLessonsStorage(allLessons => {
         let changed = false;
         const updated = allLessons.map(l => {
           if (l.deleted) return l;
-          const isDatePaid = (l.studentId && paidLessonDateSignatures.has(`${l.studentId}_${l.date}`)) ||
-                             (l.groupId && paidLessonDateSignatures.has(`${l.groupId}_${l.date}`));
-          const isPaidInRecs = paidLessonIds.has(l.id) || isDatePaid;
-
-          if (isPaidInRecs && l.paymentStatus !== 'paid') {
-            changed = true;
-            return wrapMutation({
-              ...l,
-              paymentStatus: 'paid' as const,
-              amountPaid: l.amountPaid || l.amountDue || 200,
-              report: l.report ? {
-                ...l.report,
-                paymentStatus: 'paid',
-                amountPaid: l.report.amountPaid || l.amountPaid || l.amountDue || 200
-              } : undefined
-            } as Lesson);
+          
+          if (l.studentId) {
+            const stPaidIds = paidLessonIdsByStudent.get(l.studentId);
+            const stPaidDates = paidDateSignaturesByStudent.get(l.studentId);
+            const isPaid = (stPaidIds && stPaidIds.has(l.id)) || (stPaidDates && stPaidDates.has(`${l.studentId}_${l.date}`));
+            if (isPaid && l.paymentStatus !== 'paid') {
+              changed = true;
+              return wrapMutation({
+                ...l,
+                paymentStatus: 'paid' as const,
+                amountPaid: l.amountPaid || l.amountDue || 200,
+                report: l.report ? {
+                  ...l.report,
+                  paymentStatus: 'paid',
+                  amountPaid: l.report.amountPaid || l.amountPaid || l.amountDue || 200
+                } : undefined
+              } as Lesson);
+            }
           }
           return l;
         });
@@ -1116,25 +1152,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
     }
 
-    // Settle any lingering pending payment records whose lessons or dates are already paid
+    // Settle any lingering pending payment records whose lessons or dates are already paid FOR THAT SPECIFIC STUDENT
     updateFullPaymentsStorage(allP => {
       let paymentsChanged = false;
       const updatedP = allP.map(p => {
         if (!p.deleted && (p.status === 'pending' || p.status === 'not_yet' || p.status === 'unpaid')) {
+          const stId = p.studentId;
+          const stPaidLessonIds = stId ? paidLessonIdsByStudent.get(stId) : undefined;
+          const stPaidDateSignatures = stId ? paidDateSignaturesByStudent.get(stId) : undefined;
+
           const realIds = (p.lessonIds || []).filter(id => !id.startsWith('virtual_'));
-          const hasCoveredPaidIds = realIds.length > 0 && realIds.every(id => paidLessonIds.has(id));
+          const hasCoveredPaidIds = Boolean(
+            stPaidLessonIds && 
+            stPaidLessonIds instanceof Set &&
+            realIds.length > 0 && 
+            realIds.every(id => Boolean(stPaidLessonIds?.has(id)))
+          );
 
           let hasCoveredPaidDates = false;
-          if (Array.isArray(p.lessonDates) && p.lessonDates.length > 0) {
+          if (stPaidDateSignatures && stPaidDateSignatures instanceof Set && Array.isArray(p.lessonDates) && p.lessonDates.length > 0) {
             const pDates: string[] = [];
             p.lessonDates.forEach(dStr => {
               const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
               if (match) pDates.push(normalizeDateToISO(match[1]));
             });
-            if (pDates.length > 0 && pDates.every(dIso => 
-              (p.studentId && paidLessonDateSignatures.has(`${p.studentId}_${dIso}`)) ||
-              (p.groupId && paidLessonDateSignatures.has(`${p.groupId}_${dIso}`))
-            )) {
+            if (pDates.length > 0 && pDates.every(dIso => Boolean(stPaidDateSignatures?.has(`${stId}_${dIso}`)))) {
               hasCoveredPaidDates = true;
             }
           }
@@ -1525,11 +1567,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!isInitializedRef.current) return;
 
     groups.filter(g => !g.deleted).forEach(grp => {
-      const isPerLesson = Boolean(
-        grp.paymentCycle === 'per_lesson' ||
-        grp.paymentModel === 'per_session' ||
-        (grp.sessionCount !== undefined && grp.sessionCount <= 1)
-      );
+      const isPerLesson = isGroupPerLesson(grp);
       const targetSessionCount = isPerLesson ? 1 : Math.max(2, grp.sessionCount || 4);
       const targetPrice = isPerLesson
         ? (grp.pricePerSession || grp.monthlyPackagePrice || 0)
@@ -1542,14 +1580,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       // Check students in this group
       const mismatchedStudents = students.filter(s => 
         !s.deleted && 
-        s.groupId === grp.id && 
+        (s.groupId === grp.id || (grp.name && s.groupId && grp.name.trim().toLowerCase() === s.groupId.trim().toLowerCase())) && 
         (s.paymentPlan !== targetPaymentPlan || s.bundleSize !== targetSessionCount)
       );
 
       if (mismatchedStudents.length > 0) {
         setStudents(prev => {
           const next = prev.map(s => {
-            if (s.groupId !== grp.id || s.deleted) return s;
+            const matchesGrp = s.groupId === grp.id || (grp.name && s.groupId && grp.name.trim().toLowerCase() === s.groupId.trim().toLowerCase());
+            if (!matchesGrp || s.deleted) return s;
             return wrapMutation({
               ...s,
               paymentPlan: targetPaymentPlan,
@@ -1567,18 +1606,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const mismatchedPayments = payments.filter(p =>
         !p.deleted &&
         (p.status === 'pending' || p.status === 'not_yet') &&
-        (p.groupId === grp.id || students.some(st => st.groupId === grp.id && st.id === p.studentId)) &&
-        (p.bundleSize !== targetSessionCount || (p.lessonDates && p.lessonDates.some(d => d.includes('Session 1/1') && targetSessionCount > 1)))
+        (p.groupId === grp.id || students.some(st => (st.groupId === grp.id || (grp.name && st.groupId && grp.name.trim().toLowerCase() === st.groupId.trim().toLowerCase())) && st.id === p.studentId)) &&
+        (p.bundleSize !== targetSessionCount || (isPerLesson && p.lessonDates && p.lessonDates.some(d => !d.includes('Session 1/1'))))
       );
 
       if (mismatchedPayments.length > 0) {
         setPayments(prev => {
           const next = prev.map(p => {
             if (p.deleted || (p.status !== 'pending' && p.status !== 'not_yet')) return p;
-            const matches = p.groupId === grp.id || students.some(st => st.groupId === grp.id && st.id === p.studentId);
+            const matches = p.groupId === grp.id || students.some(st => (st.groupId === grp.id || (grp.name && st.groupId && grp.name.trim().toLowerCase() === st.groupId.trim().toLowerCase())) && st.id === p.studentId);
             if (!matches) return p;
 
             const updatedDates = (p.lessonDates || []).map(d => {
+              if (targetSessionCount === 1) {
+                return d.replace(/Session (\d+)\/(\d+)/g, 'Session 1/1');
+              }
               return d.replace(/Session (\d+)\/(\d+)/g, `Session $1/${targetSessionCount}`);
             });
 
@@ -1594,7 +1636,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
       }
     });
-  }, [groups]);
+  }, [groups, students.length]);
 
   // System Notification Settings & Scheduled Notifications Engine
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() => {
@@ -2149,14 +2191,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const existsInNew = newAutoLessons.some(l => l.groupId === group.id && l.date === dateStr && l.time === sessionTime);
 
           if (!existsInLessons && !existsInNew) {
-            const isPerLesson = Boolean(
-              group.paymentCycle === 'per_lesson' ||
-              group.paymentModel === 'per_session' ||
-              (group.sessionCount !== undefined && group.sessionCount <= 1)
-            );
+            const isPerLesson = isGroupPerLesson(group);
             const perSessionPrice = isPerLesson && group.pricePerSession
               ? group.pricePerSession
-              : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 8));
+              : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 4));
 
             newAutoLessons.push(wrapMutation({
               id: `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`,
@@ -2168,8 +2206,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               durationMinutes: group.lessonDurationMinutes || 60,
               type: group.type,
               grade: group.grade,
-              sessionNumber: (((group.startingSessionNumber || 1) - 1 + lessons.filter(l => l.groupId === group.id && !l.deleted).length + newAutoLessons.length) % (group.sessionCount || 4)) + 1,
-              totalSessionsInPackage: group.sessionCount || 4,
+              sessionNumber: isPerLesson ? 1 : ((((group.startingSessionNumber || 1) - 1 + lessons.filter(l => l.groupId === group.id && !l.deleted).length + newAutoLessons.length) % (group.sessionCount || 4)) + 1),
+              totalSessionsInPackage: isPerLesson ? 1 : (group.sessionCount || 4),
               status: 'scheduled',
               paymentStatus: 'pending',
               amountDue: perSessionPrice,
@@ -2495,21 +2533,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const existingGroup = groups.find(g => g.id === id);
     if (!existingGroup) return;
 
-    let isPerLesson = false;
-    if (updates.paymentCycle === 'per_lesson' || updates.paymentModel === 'per_session') {
-      isPerLesson = true;
-    } else if (updates.paymentCycle === 'monthly' || updates.paymentModel === 'package') {
-      isPerLesson = false;
-    } else if (existingGroup.paymentCycle === 'per_lesson' || existingGroup.paymentModel === 'per_session') {
-      // Existing group is per-lesson, preserve it unless explicitly changed
-      isPerLesson = true;
-    } else if (updates.sessionCount !== undefined && updates.sessionCount > 1) {
-      isPerLesson = false;
-    } else if (existingGroup.sessionCount !== undefined && existingGroup.sessionCount > 1) {
-      isPerLesson = false;
-    } else {
-      isPerLesson = false;
-    }
+    const isExplicitlyPerLesson = updates.paymentCycle === 'per_lesson' || updates.paymentModel === 'per_session' || (updates.sessionCount !== undefined && updates.sessionCount <= 1);
+    const isExplicitlyPackage = updates.paymentCycle === 'monthly' || updates.paymentModel === 'package' || (updates.sessionCount !== undefined && updates.sessionCount > 1);
+    const isPerLesson = isExplicitlyPerLesson || (!isExplicitlyPackage && isGroupPerLesson(existingGroup));
 
     const mergedSessionCount = isPerLesson ? 1 : Math.max(2, updates.sessionCount ?? existingGroup.sessionCount ?? 4);
     const mergedStartingNumber = isPerLesson ? 1 : Math.max(1, updates.startingSessionNumber ?? existingGroup.startingSessionNumber ?? 1);
@@ -2688,6 +2714,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             } as Lesson);
           }
         });
+      } else {
+        // For per-lesson groups: strictly enforce totalSessionsInPackage = 1 and sessionNumber = 1
+        updatedLessons.forEach((l, idx) => {
+          if (l.groupId === id && !l.deleted && (l.totalSessionsInPackage !== 1 || l.sessionNumber !== 1)) {
+            updatedLessons[idx] = wrapMutation({
+              ...updatedLessons[idx],
+              totalSessionsInPackage: 1,
+              sessionNumber: 1
+            } as Lesson);
+          }
+        });
       }
 
       return updatedLessons;
@@ -2748,6 +2785,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             updated[idx] = {
               ...updated[idx],
               totalSessionsInPackage: mergedSessionCount
+            };
+          }
+        });
+      } else {
+        // For per-lesson groups: strictly enforce totalSessionsInPackage = 1 and sessionNumber = 1 in storage too
+        updated.forEach((l, idx) => {
+          if (l.groupId === id && !l.deleted && (l.totalSessionsInPackage !== 1 || l.sessionNumber !== 1)) {
+            updated[idx] = {
+              ...updated[idx],
+              sessionNumber: 1,
+              totalSessionsInPackage: 1
             };
           }
         });
@@ -2894,8 +2942,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Student operations (Note: Pricing is automatically inherited from assigned group!)
   const addStudent = (studentData: Omit<Student, 'id' | 'documents' | 'joinedDate'>): Student => {
+    const assignedGroup = studentData.groupId 
+      ? (groups.find(g => g.id === studentData.groupId || (g.name && g.name.trim().toLowerCase() === studentData.groupId!.trim().toLowerCase())))
+      : undefined;
+    const isGrpPerLesson = assignedGroup ? isGroupPerLesson(assignedGroup) : false;
+    const paymentPlan = isGrpPerLesson 
+      ? 'per_lesson' 
+      : (studentData.paymentPlan || (assignedGroup?.sessionCount === 8 ? '8_lessons' : assignedGroup?.sessionCount === 12 ? '12_lessons' : (assignedGroup?.sessionCount === 4 ? '4_lessons' : undefined)));
+    const bundleSize = isGrpPerLesson ? 1 : (studentData.bundleSize || assignedGroup?.sessionCount);
+    const pricePerLesson = studentData.pricePerLesson || (assignedGroup ? (isGrpPerLesson ? (assignedGroup.pricePerSession || assignedGroup.monthlyPackagePrice) : Math.round((assignedGroup.monthlyPackagePrice || 1200) / (assignedGroup.sessionCount || 4))) : undefined);
+    const monthlyFee = studentData.monthlyFee || assignedGroup?.monthlyPackagePrice;
+
     const newStudent: Student = wrapMutation({
       ...studentData,
+      paymentPlan,
+      bundleSize,
+      pricePerLesson,
+      monthlyFee,
       id: `s_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       documents: [],
       joinedDate: formatLocalDate()
@@ -3630,10 +3693,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Lesson operations with session calculation
   const addLesson = (lessonData: Omit<Lesson, 'id' | 'sessionNumber' | 'totalSessionsInPackage'> & { id?: string }, repeatWeeks: number = 1): Lesson[] => {
-    const targetGroup = groups.find(g => g.id === lessonData.groupId && !g.deleted);
+    const targetGroup = groups.find(g => (g.id === lessonData.groupId || (g.name && lessonData.groupId && g.name.trim().toLowerCase() === lessonData.groupId.trim().toLowerCase())) && !g.deleted);
     const activeLessons = lessons.filter(l => !l.deleted && l.status !== 'cancelled');
     const groupLessons = activeLessons.filter(l => l.groupId === lessonData.groupId);
-    const totalSessions = targetGroup?.sessionCount || 4;
+    const isPerLesson = isGroupPerLesson(targetGroup);
+    const totalSessions = isPerLesson ? 1 : (targetGroup?.sessionCount || 4);
 
     const createdLessons: Lesson[] = [];
     const baseDate = new Date(lessonData.date);
@@ -3652,10 +3716,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
       const existingMatch = activeLessons.find(l => areDuplicateLessons(l, candidate, students));
       if (!existingMatch) {
-        const baseSessionNum = (lessonData as any).sessionNumber && (lessonData as any).sessionNumber >= 1
+        const baseSessionNum = isPerLesson ? 1 : ((lessonData as any).sessionNumber && (lessonData as any).sessionNumber >= 1
           ? (lessonData as any).sessionNumber
-          : (targetGroup ? getGroupCycleInfo(targetGroup, activeLessons).currentSessionNumber : (((groupLessons.length + createdLessons.length) % totalSessions) + 1));
-        const currentSessionNum = ((baseSessionNum - 1 + week) % totalSessions) + 1;
+          : (targetGroup ? getGroupCycleInfo(targetGroup, activeLessons).currentSessionNumber : (((groupLessons.length + createdLessons.length) % totalSessions) + 1)));
+        const currentSessionNum = isPerLesson ? 1 : (((baseSessionNum - 1 + week) % totalSessions) + 1);
 
         createdLessons.push(wrapMutation({
           ...lessonData,
@@ -3821,11 +3885,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const targetLesson = (fullLessonsRef.current || []).find(l => l.id === lessonId) || lessons.find(l => l.id === lessonId);
     if (!targetLesson) return;
 
-    const finalSessionNumber = sessionNumber !== undefined && sessionNumber > 0
-      ? sessionNumber
-      : (targetLesson.sessionNumber || 1);
-    const targetGroup = groups.find(g => g.id === targetLesson.groupId);
-    const updatedTotalSessions = targetGroup?.sessionCount || packageCount || targetLesson.totalSessionsInPackage || 4;
+    const targetGroup = groups.find(g => g.id === targetLesson.groupId || (g.name && targetLesson.groupId && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()));
+    const isPerLesson = targetGroup ? isGroupPerLesson(targetGroup) : (targetLesson.totalSessionsInPackage === 1);
+    const finalSessionNumber = isPerLesson
+      ? 1
+      : (sessionNumber !== undefined && sessionNumber > 0
+          ? sessionNumber
+          : (targetLesson.sessionNumber || 1));
+    const updatedTotalSessions = isPerLesson ? 1 : (targetGroup?.sessionCount || packageCount || targetLesson.totalSessionsInPackage || 4);
     const finalAmountPaid = report.amountPaid ?? targetLesson.amountPaid;
     const finalAmountDue = targetLesson.amountDue || 200;
     const today = formatLocalDate();
@@ -4166,7 +4233,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
       if (isGroupMember || isIndividual) {
         const stPayChoice = report.studentPayments?.[s.id];
-        const newStatus = stPayChoice?.status || report.paymentStatus || s.paymentStatus || 'pending';
+        // If it's a group member, only set paid if this student specifically has paid in stPayChoice
+        const newStatus = isGroupMember
+          ? (stPayChoice?.status || 'pending')
+          : (stPayChoice?.status || report.paymentStatus || s.paymentStatus || 'pending');
         return wrapMutation({
           ...s,
           paymentStatus: newStatus
@@ -4373,14 +4443,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         );
 
         if (!exists) {
-          const isPerLesson = Boolean(
-            targetGroup.paymentCycle === 'per_lesson' ||
-            targetGroup.paymentModel === 'per_session' ||
-            (targetGroup.sessionCount !== undefined && targetGroup.sessionCount <= 1)
-          );
+          const isPerLesson = isGroupPerLesson(targetGroup);
           const perSessionPrice = isPerLesson && targetGroup.pricePerSession
             ? targetGroup.pricePerSession
-            : Math.round((targetGroup.monthlyPackagePrice || 1200) / (targetGroup.sessionCount || 8));
+            : Math.round((targetGroup.monthlyPackagePrice || 1200) / (targetGroup.sessionCount || 4));
 
           const dummyLesson = { id: 'dummy', date: dateStr, time: sessionTime, durationMinutes: targetGroup.lessonDurationMinutes || 60 };
           
@@ -4401,8 +4467,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               durationMinutes: targetGroup.lessonDurationMinutes || 60,
               type: targetGroup.type,
               grade: targetGroup.grade,
-              sessionNumber: (((targetGroup.startingSessionNumber || 1) - 1 + activeLessons.filter(l => l.groupId === groupId).length + newLessons.length) % (targetGroup.sessionCount || 4)) + 1,
-              totalSessionsInPackage: targetGroup.sessionCount || 4,
+              sessionNumber: isPerLesson ? 1 : ((((targetGroup.startingSessionNumber || 1) - 1 + activeLessons.filter(l => l.groupId === groupId).length + newLessons.length) % (targetGroup.sessionCount || 4)) + 1),
+              totalSessionsInPackage: isPerLesson ? 1 : (targetGroup.sessionCount || 4),
               status: 'scheduled',
               paymentStatus: 'pending',
               amountDue: perSessionPrice,
@@ -4623,15 +4689,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             amountDue: perLessonFee
           }
         };
+
+        const isGroupLesson = Boolean(l.groupId);
+        let allGroupStudentsPaid = false;
+        if (isGroupLesson) {
+          const groupSts = students.filter(s => s.groupId === l.groupId && !s.deleted && s.status !== 'archived');
+          allGroupStudentsPaid = groupSts.length > 0 && groupSts.every(gst => {
+            const sp = updatedStudentPayments[gst.id];
+            return sp?.paymentStatus === 'paid' || (sp as any)?.status === 'paid';
+          });
+        }
+
+        const overallStatus = isGroupLesson
+          ? (allGroupStudentsPaid ? 'paid' : 'partial')
+          : 'paid';
+
+        const totalPaidOnLesson = Object.values(updatedStudentPayments).reduce(
+          (sum: number, sp: any) => sum + (sp?.amountPaid || sp?.amount || 0), 0
+        );
+
         return wrapMutation({
           ...l,
-          paymentStatus: 'paid',
-          amountPaid: perLessonFee,
+          paymentStatus: overallStatus,
+          amountPaid: totalPaidOnLesson,
           studentPayments: updatedStudentPayments,
           report: l.report ? {
             ...l.report,
-            paymentStatus: 'paid',
-            amountPaid: perLessonFee,
+            paymentStatus: overallStatus,
+            amountPaid: totalPaidOnLesson,
             studentPayments: updatedStudentPayments
           } : undefined
         } as Lesson);
@@ -4985,7 +5070,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     confetti({ particleCount: 50, spread: 40 });
   };
 
-  const updateLessonPaymentStatus = (lessonId: string, status: PaymentStatus, customAmountPaid?: number, accountId?: string) => {
+  const updateLessonPaymentStatus = (lessonId: string, status: PaymentStatus, customAmountPaid?: number, accountId?: string, targetStudentId?: string) => {
     const targetLesson = (fullLessonsRef.current || []).find(l => l.id === lessonId) || lessons.find(l => l.id === lessonId);
     if (!targetLesson) return;
 
@@ -4997,33 +5082,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const today = formatLocalDate();
     const targetAccountId = accountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
 
+    const effectiveStudentId = targetStudentId || targetLesson.studentId;
+
     // Update lesson status, studentPayments, and report
     const lessonUpdater = (allLessons: Lesson[]) => allLessons.map(l => {
       if (l.id === lessonId) {
         const currentStudentPayments = l.studentPayments || {};
-        const updatedStudentPayments = targetLesson.studentId ? {
+        const updatedStudentPayments = effectiveStudentId ? {
           ...currentStudentPayments,
-          [targetLesson.studentId]: {
-            studentId: targetLesson.studentId,
-            studentName: targetLesson.studentName || 'Schüler',
+          [effectiveStudentId]: {
+            studentId: effectiveStudentId,
+            studentName: students.find(s => s.id === effectiveStudentId)?.name || targetLesson.studentName || 'Schüler',
             paymentStatus: status,
             amountPaid: finalPaid,
             amountDue: due
           }
         } : currentStudentPayments;
 
+        const isGroupLesson = Boolean(l.groupId);
+        let allGroupStudentsPaid = false;
+        if (isGroupLesson) {
+          const groupSts = students.filter(s => s.groupId === l.groupId && !s.deleted && s.status !== 'archived');
+          allGroupStudentsPaid = groupSts.length > 0 && groupSts.every(gst => {
+            const sp = updatedStudentPayments[gst.id];
+            return sp?.paymentStatus === 'paid' || (sp as any)?.status === 'paid';
+          });
+        }
+
+        const overallStatus = isGroupLesson
+          ? (allGroupStudentsPaid ? status : (status === 'paid' ? 'partial' : (l.paymentStatus || 'pending')))
+          : status;
+
+        const totalPaidOnLesson = Object.keys(updatedStudentPayments).length > 0
+          ? Object.values(updatedStudentPayments).reduce((sum: number, sp: any) => sum + (sp?.amountPaid || sp?.amount || 0), 0)
+          : finalPaid;
+
         return wrapMutation({
           ...l,
-          paymentStatus: status,
-          amountPaid: finalPaid,
+          paymentStatus: overallStatus,
+          amountPaid: totalPaidOnLesson,
           studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : l.studentPayments,
           report: l.report ? {
             ...l.report,
-            paymentStatus: status,
-            amountPaid: finalPaid,
-            studentPayments: targetLesson.studentId ? {
+            paymentStatus: overallStatus,
+            amountPaid: totalPaidOnLesson,
+            studentPayments: effectiveStudentId ? {
               ...(l.report.studentPayments || {}),
-              [targetLesson.studentId]: {
+              [effectiveStudentId]: {
                 status,
                 amount: finalPaid
               }
@@ -5037,22 +5142,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     updateFullLessonsStorage(lessonUpdater);
     autoSyncEngine.notifyMutation('lessons', lessonId);
 
-    // Update student payment status for individual student or all students in group
-    if (targetLesson.studentId) {
-      setStudents(prev => prev.map(s => s.id === targetLesson.studentId ? wrapMutation({ ...s, paymentStatus: status } as Student) : s));
-      autoSyncEngine.notifyMutation('students', targetLesson.studentId);
-    } else if (targetLesson.groupId) {
-      setStudents(prev => prev.map(s => s.groupId === targetLesson.groupId ? wrapMutation({ ...s, paymentStatus: status } as Student) : s));
-      autoSyncEngine.notifyMutation('students', targetLesson.groupId);
+    // Update student payment status for individual student
+    if (effectiveStudentId) {
+      setStudents(prev => prev.map(s => s.id === effectiveStudentId ? wrapMutation({ ...s, paymentStatus: status } as Student) : s));
+      autoSyncEngine.notifyMutation('students', effectiveStudentId);
     }
 
-    // Sync corresponding payment records in payments list (settle all matching)
+    // Sync corresponding payment records in payments list (settle strictly matching student)
     let paymentRecordId = '';
     const paymentUpdater = (prevPayments: PaymentRecord[]) => {
       let matchedAny = false;
       const updated = prevPayments.map(p => {
+        // Strictly match student if effectiveStudentId is present
+        if (effectiveStudentId && p.studentId && p.studentId !== effectiveStudentId) {
+          return p;
+        }
         const matchesId = p.lessonId === lessonId || (p.lessonIds && p.lessonIds.includes(lessonId));
-        const matchesDate = targetLesson.studentId && p.studentId === targetLesson.studentId &&
+        const matchesDate = effectiveStudentId && p.studentId === effectiveStudentId &&
           (p.lessonDates && p.lessonDates.some(d => d.includes(targetLesson.date)));
         if (matchesId || matchesDate) {
           matchedAny = true;

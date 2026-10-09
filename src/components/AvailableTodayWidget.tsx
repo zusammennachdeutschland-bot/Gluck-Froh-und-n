@@ -42,7 +42,7 @@ export const AvailableTodayWidget: React.FC = () => {
   return (
     <div 
       onClick={() => setActiveTab('freeTime')}
-      className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
+      className="bg-surface border border-surface-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all cursor-pointer hover:bg-surface-hover"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
@@ -64,14 +64,14 @@ export const AvailableTodayWidget: React.FC = () => {
           <span className="text-xs sm:text-sm font-black text-primary font-mono">{totalHours}</span>
         </div>
         
-        <div className="flex flex-col gap-0.5 border-l border-surface-border pl-2">
+        <div className="flex flex-col gap-0.5 border-inline-start border-surface-border ps-2">
           <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider">{t('auto_slots')}</span>
           <span className="text-xs sm:text-sm font-black text-primary font-mono">{slotsCount}</span>
         </div>
 
-        <div className="flex flex-col gap-0.5 border-l border-surface-border pl-2">
+        <div className="flex flex-col gap-0.5 border-inline-start border-surface-border ps-2">
           <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider">{t('auto_next_slot')}</span>
-          <span className="text-[11px] sm:text-xs font-black text-slate-700 dark:text-slate-300 font-mono">
+          <span className="text-[11px] sm:text-xs font-black text-text-main font-mono">
             {nextSlot ? `${nextSlot.start}` : t('auto_none')}
           </span>
         </div>

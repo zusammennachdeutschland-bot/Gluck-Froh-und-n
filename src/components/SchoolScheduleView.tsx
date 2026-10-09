@@ -1037,7 +1037,7 @@ export const SchoolScheduleView: React.FC = () => {
                 setNoteFormPeriod(liveCurrentSession.periodNumber || 1);
                 setIsSchoolNotesModalOpen(true);
               }}
-              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10.5px] font-black shadow-2xs cursor-pointer flex items-center gap-1"
+              className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-lg text-[10.5px] font-black shadow-2xs cursor-pointer flex items-center gap-1"
             >
               <FileText className="w-3 h-3" />
               <span>{_t('تسجيل ملاحظة', 'Log Note', 'Notiz')}</span>
@@ -1483,7 +1483,7 @@ export const SchoolScheduleView: React.FC = () => {
                         <div className="flex items-start justify-between gap-1.5 sm:gap-2">
                           <div className="flex gap-1.5 sm:gap-2 text-start">
                             {isCustom ? (
-                              <span className="w-5 sm:w-6 h-5 sm:h-6 rounded-md bg-indigo-600 text-white flex items-center justify-center text-[11px] font-black shrink-0 shadow-2xs">
+                              <span className="w-5 sm:w-6 h-5 sm:h-6 rounded-md bg-primary text-white flex items-center justify-center text-[11px] font-black shrink-0 shadow-2xs">
                                 <Clock className="w-3 h-3" />
                               </span>
                             ) : (
@@ -1844,7 +1844,7 @@ export const SchoolScheduleView: React.FC = () => {
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+                    className="px-5 py-2 text-xs font-black bg-primary hover:bg-primary-hover text-white rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1.5"
                   >
                     <CheckCircle2 className="w-4 h-4" />
                     <span>{_t('حفظ الحصة', 'Save Session', 'Speichern')}</span>
@@ -2067,7 +2067,7 @@ export const SchoolScheduleView: React.FC = () => {
                             {_t('ملخص البيانات التي ستُضاف إلى جدولك:', 'Summary of data to be added to your schedule:', 'Zusammenfassung der hinzuzufügenden Daten:')}
                           </span>
                         </div>
-                        <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/25">
+                        <span className="text-[10px] font-black text-text-muted flex items-center gap-1">
                           ✓ {_t('جاهز للحفظ', 'Ready to save', 'Bereit zum Speichern')}
                         </span>
                       </div>
@@ -2123,15 +2123,15 @@ export const SchoolScheduleView: React.FC = () => {
 
                       {/* Unique Normalized Classes Pills */}
                       {uniqueClasses.length > 0 && (
-                        <div className="p-2.5 bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 rounded-xl space-y-1.5">
-                          <div className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
-                            <Tag className="w-3 h-3 text-indigo-600" />
+                        <div className="p-2.5 bg-primary-soft/30 border border-primary-border/40 rounded-xl space-y-1.5">
+                          <div className="text-[10px] font-bold text-primary flex items-center gap-1.5">
+                            <Tag className="w-3 h-3 text-primary" />
                             <span>{_t('الفصول المستهدفة الموحدة (مطابقة لكشوف وفلاتر الطلاب):', 'Standardized classes to be added (matching student lists):', 'Extrahierte Klassen:')}</span>
                           </div>
-                          <div className="flex flex-wrap gap-1">
+                          <div className="flex flex-wrap items-center gap-2">
                             {uniqueClasses.map(c => (
-                              <span key={c} className="px-2 py-0.5 bg-indigo-600 text-white rounded-md text-[10px] font-mono font-bold shadow-2xs">
-                                {c}
+                              <span key={c} className="text-[11px] font-mono font-bold text-primary">
+                                #{c}
                               </span>
                             ))}
                           </div>
@@ -2722,7 +2722,7 @@ export const SchoolScheduleView: React.FC = () => {
               <div className="flex justify-end">
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs"
+                  className="px-4 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs"
                 >
                   {_t('حفظ الملاحظة', 'Save Note', 'Notiz speichern')}
                 </button>

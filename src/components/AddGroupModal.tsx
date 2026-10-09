@@ -234,7 +234,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
                         }}
                         className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
                           studentContactType === 'username'
-                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            ? 'bg-primary text-white shadow-2xs'
                             : 'text-text-muted hover:text-text-main'
                         }`}
                       >

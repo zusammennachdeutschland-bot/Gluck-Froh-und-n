@@ -897,7 +897,7 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
                       </div>
                       <button 
                         onClick={() => setSelectedGroup(g)}
-                        className="px-3 py-1 bg-emerald-600 text-white rounded-md font-bold hover:bg-emerald-700 transition-colors cursor-pointer"
+                        className="px-3 py-1 bg-primary text-white rounded-md font-bold hover:bg-primary-hover transition-colors cursor-pointer"
                       >
                         {_t('إصلاح', 'Fix Now')}
                       </button>

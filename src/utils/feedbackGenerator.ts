@@ -4,25 +4,36 @@ import { StudentSessionPerformance } from '../types';
 // EGYPTIAN ARABIC OPENERS & CLOSERS
 // ==========================================
 
-export const arabicOpenersMale = [
-  'مساء الخير يا فندم، حابب أطمن حضرتك على أداء البطل في حصة النهارده: ',
-  'تحياتي لحضرتك، تقرير سريع عن مستوى الشاطر في سيشن النهارده: ',
-  'أهلاً بحضرتك، حبيت أشاركك ملخص أداء البطل في الألماني النهارده: ',
-  'مساء الفل يا فندم، بخصوص حصة النهارده ومستوى البطل: ',
-  'تحياتي لحضرتك، ما شاء الله على أداء الشاطر في درس النهارده: ',
-  'مساء الخير لحضرتك، ملخص سريع ومهم عن سيشن الألماني النهارده: ',
-  'أهلاً بحضرتك يا فندم، حابب أنقل لحضرتك تقييم البطل في حصة النهارده: '
-];
+export const getArabicOpenersMale = (isMorning: boolean = new Date().getHours() < 12) => {
+  const greeting = isMorning ? 'صباح الخير' : 'مساء الخير';
+  const greetingFolky = isMorning ? 'صباح الفل' : 'مساء الفل';
+  return [
+    `${greeting} يا فندم، حابب أطمن حضرتك على أداء البطل في حصة النهارده: `,
+    'تحياتي لحضرتك، تقرير سريع عن مستوى الشاطر في سيشن النهارده: ',
+    'أهلاً بحضرتك، حبيت أشاركك ملخص أداء البطل في الألماني النهارده: ',
+    `${greetingFolky} يا فندم، بخصوص حصة النهارده ومستوى البطل: `,
+    'تحياتي لحضرتك، ما شاء الله على أداء الشاطر في درس النهارده: ',
+    `${greeting} لحضرتك، ملخص سريع ومهم عن سيشن الألماني النهارده: `,
+    'أهلاً بحضرتك يا فندم، حابب أنقل لحضرتك تقييم البطل في حصة النهارده: '
+  ];
+};
 
-export const arabicOpenersFemale = [
-  'مساء الخير يا فندم، حابب أطمن حضرتك على أداء البطلة في حصة النهارده: ',
-  'تحياتي لحضرتك، تقرير سريع عن مستوى الشاطرة في سيشن النهارده: ',
-  'أهلاً بحضرتك، حبيت أشاركك ملخص أداء البطلة في الألماني النهارده: ',
-  'مساء الفل يا فندم، بخصوص حصة النهارده ومستوى الشاطرة: ',
-  'تحياتي لحضرتك، ما شاء الله على أداء البطلة في درس النهارده: ',
-  'مساء الخير لحضرتك، ملخص سريع ومهم عن سيشن الألماني النهارده: ',
-  'أهلاً بحضرتك يا فندم، حابب أنقل لحضرتك تقييم البطلة في حصة النهارده: '
-];
+export const getArabicOpenersFemale = (isMorning: boolean = new Date().getHours() < 12) => {
+  const greeting = isMorning ? 'صباح الخير' : 'مساء الخير';
+  const greetingFolky = isMorning ? 'صباح الفل' : 'مساء الفل';
+  return [
+    `${greeting} يا فندم، حابب أطمن حضرتك على أداء البطلة في حصة النهارده: `,
+    'تحياتي لحضرتك، تقرير سريع عن مستوى الشاطرة في سيشن النهارده: ',
+    'أهلاً بحضرتك، حبيت أشاركك ملخص أداء البطلة في الألماني النهارده: ',
+    `${greetingFolky} يا فندم، بخصوص حصة النهارده ومستوى الشاطرة: `,
+    'تحياتي لحضرتك، ما شاء الله على أداء البطلة في درس النهارده: ',
+    `${greeting} لحضرتك، ملخص سريع ومهم عن سيشن الألماني النهارده: `,
+    'أهلاً بحضرتك يا فندم، حابب أنقل لحضرتك تقييم البطلة في حصة النهارده: '
+  ];
+};
+
+export const arabicOpenersMale = getArabicOpenersMale();
+export const arabicOpenersFemale = getArabicOpenersFemale();
 
 export const arabicClosersMale = {
   excellent: [
@@ -842,6 +853,7 @@ export const generateFeedback = (
     progs = englishProgress;
   } else {
     // Authentic Egyptian Arabic: choose gender-specific dictionary
+    const isMorning = new Date().getHours() < 12;
     if (gender === 'female') {
       bases = arabicBaseFemale;
       parts = arabicParticipationFemale;
@@ -851,7 +863,7 @@ export const generateFeedback = (
       writes = arabicWritingFemale;
       focus = arabicFocusFemale;
       progs = arabicProgressFemale;
-      openers = arabicOpenersFemale;
+      openers = getArabicOpenersFemale(isMorning);
       closers = arabicClosersFemale;
     } else {
       bases = arabicBaseMale;
@@ -862,7 +874,7 @@ export const generateFeedback = (
       writes = arabicWritingMale;
       focus = arabicFocusMale;
       progs = arabicProgressMale;
-      openers = arabicOpenersMale;
+      openers = getArabicOpenersMale(isMorning);
       closers = arabicClosersMale;
     }
   }

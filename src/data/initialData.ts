@@ -111,8 +111,8 @@ export const INITIAL_TEACHER_PROFILE: TeacherProfile = {
   enableLessonAlerts: true,
   enableBrowserPush: false,
   schoolSettings: {
-    schoolName: '',
-    departmentName: '',
+    schoolName: 'مدرسة الألسن للغات',
+    departmentName: 'قسم اللغة الألمانية',
     academicYear: '2025 / 2026',
     currentTerm: 'الفصل الدراسي الأول',
     hodName: '',

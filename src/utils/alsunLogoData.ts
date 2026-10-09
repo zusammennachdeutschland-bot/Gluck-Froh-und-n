@@ -50,6 +50,33 @@ export function getEffectiveSchoolLogo(settings?: SchoolSettings): string {
 }
 
 /**
+ * Returns the effective localized school name, falling back to 'مدرسة الألسن للغات' if empty or unset.
+ */
+export function getEffectiveSchoolName(settings?: SchoolSettings, isRtl: boolean = true): string {
+  if (settings?.schoolName && settings.schoolName.trim().length > 0) {
+    return settings.schoolName.trim();
+  }
+  return isRtl ? 'مدرسة الألسن للغات' : 'Al Alsun Language School';
+}
+
+/**
+ * Generates properly styled HTML for displaying the school name in PDF reports
+ */
+export function getReportSchoolNameHtml(
+  settings?: SchoolSettings,
+  options: { isRtl?: boolean; fontSize?: string; color?: string; extraStyles?: string; tag?: string } = {}
+): string {
+  const isRtl = options.isRtl !== false;
+  const name = getEffectiveSchoolName(settings, isRtl);
+  const fontSize = options.fontSize || '14pt';
+  const color = options.color || '#0f172a';
+  const extraStyles = options.extraStyles || '';
+  const tag = options.tag || 'div';
+
+  return `<${tag} style="font-size: ${fontSize}; font-weight: 900; color: ${color}; margin: 0 0 2px 0; font-family: 'Cairo', 'Tajawal', 'Segoe UI', Tahoma, sans-serif !important; direction: ${isRtl ? 'rtl' : 'ltr'}; text-align: inherit; letter-spacing: 0px !important; line-height: 1.4 !important; word-break: keep-all !important; overflow-wrap: break-word !important; unicode-bidi: isolate; padding-top: 2px; ${extraStyles}">${name}</${tag}>`;
+}
+
+/**
  * Generates an optimized HTML img tag for the school logo
  */
 export function getReportSchoolLogoHtml(

@@ -1,5 +1,5 @@
 import { Student, Group, Lesson, PaymentRecord } from '../types';
-import { areDuplicateLessons } from './lessonUtils';
+import { areDuplicateLessons, isGroupPerLesson } from './lessonUtils';
 import { resolveStudentWhatsAppContact } from './phoneUtils';
 import { normalizeDateToISO } from './timeUtils';
 
@@ -162,15 +162,6 @@ export const calculateDuePaymentCycles = (
             studentPaidLessons.set(stId, new Set<string>());
           }
           ids.forEach(id => studentPaidLessons.get(stId)!.add(id));
-        } else if (p.groupId) {
-          // If payment was recorded for a group without specific studentId, link to all group students
-          const groupSts = activeStudents.filter(s => s.groupId === p.groupId);
-          groupSts.forEach(s => {
-            if (!studentPaidLessons.has(s.id)) {
-              studentPaidLessons.set(s.id, new Set<string>());
-            }
-            ids.forEach(id => studentPaidLessons.get(s.id)!.add(id));
-          });
         }
       }
     }
@@ -178,18 +169,12 @@ export const calculateDuePaymentCycles = (
 
   // Also collect all lessons that are directly marked as paid or studentPayments paid
   activeLessons.forEach(l => {
-    if (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') {
-      if (l.studentId) {
-        if (!studentPaidLessons.has(l.studentId)) studentPaidLessons.set(l.studentId, new Set<string>());
-        studentPaidLessons.get(l.studentId)!.add(l.id);
-      } else if (l.groupId) {
-        const groupSts = activeStudents.filter(s => s.groupId === l.groupId);
-        groupSts.forEach(s => {
-          if (!studentPaidLessons.has(s.id)) studentPaidLessons.set(s.id, new Set<string>());
-          studentPaidLessons.get(s.id)!.add(l.id);
-        });
-      }
+    // 1-on-1 private lesson with explicit studentId (strictly when NOT a group lesson)
+    if (!l.groupId && (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') && l.studentId) {
+      if (!studentPaidLessons.has(l.studentId)) studentPaidLessons.set(l.studentId, new Set<string>());
+      studentPaidLessons.get(l.studentId)!.add(l.id);
     }
+    // Individual student payments on the lesson
     if (l.studentPayments && typeof l.studentPayments === 'object') {
       Object.entries(l.studentPayments).forEach(([stId, sp]: [string, any]) => {
         if (sp?.paymentStatus === 'paid' || sp?.status === 'paid') {
@@ -198,6 +183,7 @@ export const calculateDuePaymentCycles = (
         }
       });
     }
+    // Individual student payments in the lesson report
     if (l.report?.studentPayments && typeof l.report.studentPayments === 'object') {
       Object.entries(l.report.studentPayments).forEach(([stId, sp]: [string, any]) => {
         if (sp?.paymentStatus === 'paid' || sp?.status === 'paid') {
@@ -209,7 +195,8 @@ export const calculateDuePaymentCycles = (
   });
 
   activeStudents.forEach(st => {
-    const grp = activeGroups.find(g => g.id === st.groupId);
+    const grp = activeGroups.find(g => g.id === st.groupId || (st.groupId && g.name && g.name.trim().toLowerCase() === st.groupId.trim().toLowerCase()) || (g.name && st.groupId && st.groupId.trim().toLowerCase().includes(g.name.trim().toLowerCase())))
+      || groups.find(g => g.id === st.groupId || (st.groupId && g.name && g.name.trim().toLowerCase() === st.groupId.trim().toLowerCase()));
     const { cycleLength, amountDue } = getStudentCyclePricing(st, grp);
     const paidIds = studentPaidLessons.get(st.id) || new Set<string>();
 
@@ -224,19 +211,21 @@ export const calculateDuePaymentCycles = (
       const att = l.report?.studentAttendance?.[st.id] || l.report?.attendanceStatus || 'present';
       if (att === 'absent') return false;
 
-      // Check if lesson is marked as paid in payment records
+      // Check if lesson is marked as paid in payment records for this student
       if (paidIds.has(l.id)) return false;
 
-      // Check if student is explicitly marked as paid in lesson object or lesson report
+      // Check if this student is explicitly marked as paid in lesson object or lesson report
       const stPaymentObj = l.studentPayments?.[st.id];
       const repPaymentObj = l.report?.studentPayments?.[st.id] as any;
       const isStudentPaidInLesson = (stPaymentObj?.paymentStatus === 'paid' || (stPaymentObj as any)?.status === 'paid') || 
                                     (repPaymentObj?.paymentStatus === 'paid' || repPaymentObj?.status === 'paid');
-      const isIndividualLessonPaid = (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') &&
-                                     (l.studentId ? l.studentId === st.id : true);
+      
+      // If it is a 1-on-1 private lesson specifically for this student (not a group lesson)
+      const isPrivateLessonForStudent = !l.groupId && Boolean(l.studentId && l.studentId === st.id);
+      const isPrivateLessonPaid = isPrivateLessonForStudent && (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid');
 
-      // If directly marked paid (per-lesson, in report, or on lesson itself), exclude immediately!
-      if (isStudentPaidInLesson || isIndividualLessonPaid || l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') {
+      // If directly marked paid for this student, exclude immediately!
+      if (isStudentPaidInLesson || isPrivateLessonPaid) {
         return false;
       }
 
@@ -476,13 +465,17 @@ export const calculateDuePaymentCycles = (
       }
 
       const st = students.find(s => s.id === p.studentId);
-      const grp = groups.find(g => g.id === (p.groupId || st?.groupId));
+      const grp = groups.find(g => g.id === (p.groupId || st?.groupId) || (g.name && p.groupId && g.name.trim().toLowerCase() === p.groupId.trim().toLowerCase()) || (p.groupName && g.name && g.name.trim().toLowerCase() === p.groupName.trim().toLowerCase()));
+      const isGrpPerLesson = grp ? isGroupPerLesson(grp) : false;
       const pricing = st ? getStudentCyclePricing(st, grp) : null;
-      const effectiveCycleLength = pricing ? pricing.cycleLength : (p.bundleSize || 1);
-      const effectiveAmountDue = pricing ? pricing.amountDue : (p.amountDue || 0);
+      const effectiveCycleLength = isGrpPerLesson ? 1 : (pricing ? pricing.cycleLength : (p.bundleSize || 1));
+      const effectiveAmountDue = pricing ? pricing.amountDue : (isGrpPerLesson && grp?.pricePerSession ? grp.pricePerSession : (p.amountDue || 0));
 
       // Sanitize lessonDates in unpaid payment record so any stale (Session 1/1) matches the actual effectiveCycleLength
       const sanitizedLessonDates = (p.lessonDates || []).map(d => {
+        if (effectiveCycleLength === 1) {
+          return d.replace(/Session (\d+)\/(\d+)/g, 'Session 1/1');
+        }
         return d.replace(/Session (\d+)\/(\d+)/g, `Session $1/${effectiveCycleLength}`);
       });
 
@@ -547,6 +540,9 @@ export const getStudentCyclePricing = (
 ): CyclePricingResult => {
   // 1. Group settings take precedence whenever a student belongs to a group
   // UNLESS the student has an explicit custom bundle override with a custom price
+  const isGroupPerLessonFlag = group ? isGroupPerLesson(group) : false;
+  const isStudentExplicitPerLesson = student.paymentPlan === 'per_lesson' || student.bundleSize === 1;
+
   if (group) {
     const hasExplicitStudentCustomOverride = 
       student.paymentPlan === 'custom_bundle' &&
@@ -555,21 +551,15 @@ export const getStudentCyclePricing = (
       student.customBundlePrice > 0;
 
     if (hasExplicitStudentCustomOverride) {
-      const cycleLength = student.bundleSize || group.sessionCount || 8;
+      const cycleLength = student.bundleSize || group.sessionCount || 4;
       const amountDue = student.customBundlePrice!;
       const pricePerSession = Math.round(amountDue / (cycleLength || 1));
       return { cycleLength, amountDue, pricePerSession, isCustomOverride: true };
     }
 
-    const isPerLesson = Boolean(
-      group.paymentCycle === 'per_lesson' ||
-      group.paymentModel === 'per_session' ||
-      (group.sessionCount !== undefined && group.sessionCount <= 1)
-    );
-
-    if (isPerLesson) {
+    if (isGroupPerLessonFlag || isStudentExplicitPerLesson) {
       const cycleLength = 1;
-      const pricePerSession = group.pricePerSession || (group.monthlyPackagePrice && group.sessionCount ? Math.round(group.monthlyPackagePrice / group.sessionCount) : (student.pricePerLesson || 300));
+      const pricePerSession = group.pricePerSession || (group.monthlyPackagePrice && group.sessionCount && group.sessionCount > 1 ? Math.round(group.monthlyPackagePrice / group.sessionCount) : (group.monthlyPackagePrice || student.pricePerLesson || 300));
       const amountDue = pricePerSession;
       return { cycleLength, amountDue, pricePerSession, isCustomOverride: false };
     } else {
@@ -581,7 +571,13 @@ export const getStudentCyclePricing = (
   }
 
   // 2. Individual student without group assignment
-  if (student.paymentPlan === 'per_lesson') {
+  if (
+    student.paymentPlan === 'per_lesson' || 
+    student.bundleSize === 1 ||
+    (student.groupId && (student.groupId.includes('بالحصة') || student.groupId.toLowerCase().includes('per_lesson'))) ||
+    (student.name && (student.name.includes('بالحصة') || student.name.toLowerCase().includes('per_lesson'))) ||
+    (student.notes && (student.notes.includes('بالحصة') || student.notes.toLowerCase().includes('per_lesson')))
+  ) {
     const cycleLength = 1;
     const pricePerSession = student.pricePerLesson || 300;
     const amountDue = pricePerSession;
@@ -592,19 +588,19 @@ export const getStudentCyclePricing = (
                                   (student.customBundlePrice !== undefined && student.customBundlePrice !== null && student.customBundlePrice > 0);
 
   if (hasExplicitCustomBundle) {
-    const cycleLength = student.bundleSize || 8;
+    const cycleLength = student.bundleSize || 4;
     const amountDue = student.customBundlePrice || (student.pricePerLesson ? student.pricePerLesson * cycleLength : 2400);
     const pricePerSession = Math.round(amountDue / (cycleLength || 1));
     return { cycleLength, amountDue, pricePerSession, isCustomOverride: true };
   }
 
   // Individual student fallback
-  const plan = student.paymentPlan || '8_lessons';
+  const plan = student.paymentPlan || (student.bundleSize === 8 ? '8_lessons' : student.bundleSize === 12 ? '12_lessons' : '4_lessons');
   const isPerLesson = (plan as string) === 'per_lesson';
   const cycleLength = isPerLesson ? 1 : (student.bundleSize || (
     plan === '4_lessons' ? 4 : 
     plan === '8_lessons' ? 8 : 
-    plan === '12_lessons' ? 12 : 8
+    plan === '12_lessons' ? 12 : 4
   ));
   const pricePerSession = student.pricePerLesson || 300;
   const amountDue = isPerLesson ? pricePerSession : (

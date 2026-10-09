@@ -622,7 +622,7 @@ export const CertificateCenter: React.FC = () => {
                         </button>
                         <button
                           onClick={() => shareCertificate(cert, cert.title, cert.recipientName || cert.studentName, 'png')}
-                          className="p-1.5 bg-indigo-500/10 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg transition-colors cursor-pointer"
+                          className="p-1.5 bg-primary/10 text-primary hover:bg-primary hover:text-white rounded-lg transition-colors cursor-pointer"
                           title={_t('مشاركة', 'Share', 'Teilen')}
                         >
                           <Send className="w-3.5 h-3.5" />

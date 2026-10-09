@@ -67,7 +67,7 @@ export const WeeklyOverviewWidget: React.FC = () => {
     <div className="bg-surface border border-surface-border rounded-xl p-2.5 sm:p-3 shadow-2xs space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5 min-w-0">
-          <div className="p-1 rounded-md bg-primary-soft text-primary">
+          <div className="p-1 rounded-md bg-primary-soft text-primary border border-primary-border">
             <CalendarDays className="w-3.5 h-3.5" />
           </div>
           <div>
@@ -81,7 +81,7 @@ export const WeeklyOverviewWidget: React.FC = () => {
         </div>
 
         {targetGoal > 0 && (
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-hover border border-surface-border text-[10px] font-bold text-text-muted">
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-soft border border-primary-border text-[10px] font-bold text-primary">
             <Target className="w-3 h-3 text-primary" />
             <span>{goalPercent}%</span>
           </div>
@@ -89,9 +89,9 @@ export const WeeklyOverviewWidget: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-3 gap-1.5 text-center">
-        <div className="p-1.5 rounded-lg bg-surface-hover border border-surface-border/60">
-          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
-            <CheckCircle2 className="w-3 h-3" />
+        <div className="p-1.5 rounded-lg bg-surface-hover border border-surface-border">
+          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-primary">
+            <CheckCircle2 className="w-3 h-3 text-primary" />
             <span>{t('status_completed')}</span>
           </div>
           <span className="text-sm font-black text-text-main mt-0.5 block">
@@ -99,9 +99,9 @@ export const WeeklyOverviewWidget: React.FC = () => {
           </span>
         </div>
 
-        <div className="p-1.5 rounded-lg bg-surface-hover border border-surface-border/60">
-          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-rose-600 dark:text-rose-400">
-            <XCircle className="w-3 h-3" />
+        <div className="p-1.5 rounded-lg bg-surface-hover border border-surface-border">
+          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-text-muted">
+            <XCircle className="w-3 h-3 text-text-muted" />
             <span>{t('status_cancelled')}</span>
           </div>
           <span className="text-sm font-black text-text-main mt-0.5 block">
@@ -109,9 +109,9 @@ export const WeeklyOverviewWidget: React.FC = () => {
           </span>
         </div>
 
-        <div className="p-1.5 rounded-lg bg-surface-hover border border-surface-border/60">
-          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400">
-            <Clock className="w-3 h-3" />
+        <div className="p-1.5 rounded-lg bg-surface-hover border border-surface-border">
+          <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-text-muted">
+            <Clock className="w-3 h-3 text-primary" />
             <span>{t('stat_remaining')}</span>
           </div>
           <span className="text-sm font-black text-text-main mt-0.5 block">
@@ -121,13 +121,13 @@ export const WeeklyOverviewWidget: React.FC = () => {
       </div>
 
       {/* Financial Summary */}
-      <div className="pt-1.5 border-t border-surface-border/60 flex items-center justify-between text-xs">
+      <div className="pt-1.5 border-t border-surface-border flex items-center justify-between text-xs">
         <div className="flex items-center gap-1.5 text-text-muted font-bold text-[11px]">
           <Wallet className="w-3.5 h-3.5 text-primary" />
           <span>{_t('المحصل / المتوقع:', 'Collected / Expected:', 'Eingenommen / Erwartet:')}</span>
         </div>
         <div className="flex items-center gap-1 font-mono font-black text-xs">
-          <span className="text-emerald-600 dark:text-emerald-400">{stats.revenue}</span>
+          <span className="text-primary">{stats.revenue}</span>
           <span className="text-text-muted/60">/</span>
           <span className="text-text-main">{stats.totalExpected}</span>
           <span className="text-[10px] font-sans text-text-muted">{profile.currency || 'EGP'}</span>

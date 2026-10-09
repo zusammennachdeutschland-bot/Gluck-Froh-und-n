@@ -1,4 +1,4 @@
-import { isPendingStatus } from "../utils/lessonUtils";
+import { isPendingStatus, isGroupPerLesson } from "../utils/lessonUtils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
@@ -432,7 +432,9 @@ export const TodaysProgressTimeline: React.FC = () => {
           {/* Lessons List (Material 3 Compact Agenda Cards) */}
           <div className="space-y-1">
             {processedLessons.map(({ lesson, state }) => {
-              const targetGroup = lesson.groupId ? groups.find(g => g.id === lesson.groupId) : null;
+              const targetGroup = lesson.groupId 
+                ? (groups.find(g => g.id === lesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === lesson.groupId!.trim().toLowerCase()))
+                : (lesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === lesson.groupName!.trim().toLowerCase()) : null);
               const groupStudents = targetGroup && students ? students.filter(s => s.groupId === targetGroup.id) : [];
               const isCompletedState = lesson.status === 'completed';
               const isCancelledState = lesson.status === 'cancelled';
@@ -543,7 +545,7 @@ export const TodaysProgressTimeline: React.FC = () => {
 
                       {/* Quiet Status / Session Count in Title Row (Preserves single-line metadata) */}
                       <div className="flex items-center gap-1 shrink-0">
-                        {lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 && (
+                        {lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 && !isGroupPerLesson(targetGroup) && (
                           <span className="text-[9.5px] sm:text-[10px] font-mono font-bold text-primary bg-primary/10 dark:bg-primary/20 px-1.5 py-0.2 rounded shrink-0">
                             {_t('حصة', 'Session', 'Std.')} {lesson.sessionNumber}/{lesson.totalSessionsInPackage}
                           </span>

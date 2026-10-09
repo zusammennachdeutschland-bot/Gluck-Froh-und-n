@@ -178,13 +178,13 @@ export const SmartDailySummaryWidget: React.FC = () => {
             {t('smart_summary_title')}
           </h3>
         </div>
-        <span className="text-[9px] font-extrabold bg-primary-50 dark:bg-primary-950/60 text-primary-700 dark:text-primary-300 px-2 py-0.2 rounded-full border border-primary-border dark:border-primary-800/80">
+        <span className="text-[9px] font-extrabold bg-primary-soft text-primary px-2 py-0.5 rounded-full border border-primary-border">
           {t('smart_summary_badge')}
         </span>
       </div>
 
       {/* Narrative Card */}
-      <div className="relative z-10 bg-primary-soft/40 dark:bg-background/70 border border-primary-border rounded-lg p-1.5 sm:p-2 mb-1.5 transition-all">
+      <div className="relative z-10 bg-surface-hover border border-surface-border rounded-lg p-1.5 sm:p-2 mb-1.5 transition-all">
         <p className="text-xs leading-relaxed text-text-main font-medium">
           {summary.text}
         </p>
@@ -193,8 +193,8 @@ export const SmartDailySummaryWidget: React.FC = () => {
       {/* Metrics Row */}
       <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
         {/* Lessons count */}
-        <div className="flex items-center gap-1.5 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
-          <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+        <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+          <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0">
             <BookOpen className="w-3 h-3" />
           </div>
           <div className="min-w-0">
@@ -208,8 +208,8 @@ export const SmartDailySummaryWidget: React.FC = () => {
         </div>
 
         {/* Students count */}
-        <div className="flex items-center gap-1.5 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
-          <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+        <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+          <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0">
             <Users className="w-3 h-3" />
           </div>
           <div className="min-w-0">
@@ -223,46 +223,46 @@ export const SmartDailySummaryWidget: React.FC = () => {
         </div>
 
         {/* Expected Income */}
-        <div className="flex items-center gap-1.5 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
-          <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+        <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+          <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0">
             <Wallet className="w-3 h-3" />
           </div>
           <div className="min-w-0">
             <p className="text-[9px] text-text-muted font-bold truncate">
               {t('daily_stats_revenue_today')}
             </p>
-            <p className="text-xs font-extrabold text-primary dark:text-primary font-mono">
+            <p className="text-xs font-extrabold text-primary font-mono">
               {summary.collectedToday.toLocaleString()} <span className="text-[9px]">{summary.currency}</span>
             </p>
           </div>
         </div>
 
         {/* First Lesson / Overdue Alert */}
-        <div className="flex items-center gap-1.5 bg-background dark:bg-background/60 border border-surface-border/80 dark:border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+        <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
           {summary.firstLessonTime ? (
             <>
-              <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+              <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0">
                 <Clock className="w-3 h-3" />
               </div>
               <div className="min-w-0">
                 <p className="text-[9px] text-text-muted font-bold truncate">
                   {t('smart_summary_first_lesson')}
                 </p>
-                <p className="text-xs font-extrabold text-slate-800 dark:text-slate-200 font-mono truncate">
+                <p className="text-xs font-extrabold text-text-main font-mono truncate">
                   {summary.firstLessonTime}
                 </p>
               </div>
             </>
           ) : (
             <>
-              <div className="p-1 rounded-md bg-primary-soft dark:bg-primary-soft text-primary dark:text-primary shrink-0">
+              <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0">
                 <AlertCircle className="w-3 h-3" />
               </div>
               <div className="min-w-0">
                 <p className="text-[9px] text-text-muted font-bold truncate">
                   {t('smart_summary_overdue_students')}
                 </p>
-                <p className="text-xs font-extrabold text-primary dark:text-primary font-mono">
+                <p className="text-xs font-extrabold text-primary font-mono">
                   {summary.lateStudentsCount}
                 </p>
               </div>

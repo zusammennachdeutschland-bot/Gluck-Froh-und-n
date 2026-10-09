@@ -250,20 +250,16 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
             <span className="text-[10px] sm:text-xs font-black tracking-wider text-text-muted uppercase shrink-0">
               {_t('بطاقة الطالب الذكية', 'STUDENT CARD', 'SCHÜLER SMART CARD')}
             </span>
-            <span className="text-[9.5px] font-black text-primary bg-primary-soft border border-primary-border/60 px-2 py-0.5 rounded-full shrink-0">
+            <span className="text-[10px] font-black text-primary shrink-0">
               {student.grade}
             </span>
-            <span className={`text-[9.5px] font-black px-2 py-0.5 rounded-full border shrink-0 ${
-              (student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female'
-                ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900'
-                : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900'
-            }`}>
+            <span className="text-text-muted/40">•</span>
+            <span className="text-[10px] font-bold text-text-muted shrink-0">
               {(student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female' ? '👧 طالبة' : '👦 طالب'}
             </span>
-            <span className={`text-[9.5px] font-black px-2 py-0.5 rounded-full border shrink-0 ${
-              student.status === 'active'
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900'
-                : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+            <span className="text-text-muted/40">•</span>
+            <span className={`text-[10px] font-bold shrink-0 ${
+              student.status === 'active' ? 'text-primary' : 'text-text-muted'
             }`}>
               {student.status === 'active' ? _t('نشط ✓', 'Active ✓', 'Aktiv ✓') : _t('مؤرشف ⚪', 'Archived ⚪', 'Archiviert ⚪')}
             </span>
@@ -363,7 +359,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   rel="noreferrer"
                   className={`font-black text-[11px] sm:text-xs py-2 sm:py-2.5 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 min-w-0 ${
                     resolvedWhatsApp.hasContact
-                      ? 'bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white cursor-pointer shadow-xs'
+                      ? 'bg-primary hover:bg-primary-hover active:scale-[0.98] text-white cursor-pointer shadow-xs'
                       : 'bg-surface-hover text-text-muted cursor-not-allowed pointer-events-none'
                   }`}
                 >
@@ -422,7 +418,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
             {/* PAKETZYKLUS */}
             <div className="p-2 sm:p-3 bg-surface border border-surface-border rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-2xs">
-              <div className="flex items-center gap-1 text-indigo-500">
+              <div className="flex items-center gap-1 text-primary">
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-wider text-text-muted">{_t('الدورة', 'CYCLE', 'PAKETZYKLUS')}</span>
               </div>
@@ -435,12 +431,12 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
           <div className="flex w-full items-center justify-start sm:justify-center gap-1 bg-surface p-1 rounded-xl border border-surface-border shadow-2xs overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden">
             {[
               { id: 'overview' as const, title: _t('الرئيسية', 'Overview', 'Übersicht'), icon: Info, count: undefined, activeClass: 'bg-primary text-white' },
-              { id: 'attendance' as const, title: _t('الحضور', 'Attendance', 'Anwesenheit'), icon: Calendar, count: presentCount + lateCount + absentCount, activeClass: 'bg-emerald-600 text-white' },
-              { id: 'scores' as const, title: _t('الدرجات', 'Grades & HW', 'Noten'), icon: GraduationCap, count: undefined, activeClass: 'bg-indigo-600 text-white' },
-              { id: 'payments' as const, title: _t('المالية', 'Payments', 'Zahlungen'), icon: DollarSign, count: undefined, activeClass: 'bg-amber-600 text-white' },
-              { id: 'files' as const, title: _t('الملفات', 'Files', 'Dateien'), icon: FileText, count: (student.documents || []).length, activeClass: 'bg-blue-600 text-white' },
-              { id: 'certificates' as const, title: _t('الشهادات', 'Certificates', 'Zertifikate'), icon: Award, count: studentCertificates.length, activeClass: 'bg-yellow-600 text-white' },
-              { id: 'recordings' as const, title: _t('التسجيلات', 'Recordings', 'Aufnahmen'), icon: Video, count: studentRecordings.length, activeClass: 'bg-purple-600 text-white' },
+              { id: 'attendance' as const, title: _t('الحضور', 'Attendance', 'Anwesenheit'), icon: Calendar, count: presentCount + lateCount + absentCount, activeClass: 'bg-primary text-white' },
+              { id: 'scores' as const, title: _t('الدرجات', 'Grades & HW', 'Noten'), icon: GraduationCap, count: undefined, activeClass: 'bg-primary text-white' },
+              { id: 'payments' as const, title: _t('المالية', 'Payments', 'Zahlungen'), icon: DollarSign, count: undefined, activeClass: 'bg-primary text-white' },
+              { id: 'files' as const, title: _t('الملفات', 'Files', 'Dateien'), icon: FileText, count: (student.documents || []).length, activeClass: 'bg-primary text-white' },
+              { id: 'certificates' as const, title: _t('الشهادات', 'Certificates', 'Zertifikate'), icon: Award, count: studentCertificates.length, activeClass: 'bg-primary text-white' },
+              { id: 'recordings' as const, title: _t('التسجيلات', 'Recordings', 'Aufnahmen'), icon: Video, count: studentRecordings.length, activeClass: 'bg-primary text-white' },
             ].map(tab => {
               const isActive = activeTab === tab.id;
               const Icon = tab.icon;
@@ -567,12 +563,10 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   {studentRecordings.length > 0 && (
                     <div 
                       onClick={() => setActiveTab('recordings')}
-                      className="p-3 bg-purple-500/10 hover:bg-purple-500/15 border border-purple-500/20 rounded-2xl flex items-center justify-between cursor-pointer transition-all"
+                      className="p-3 bg-primary-soft hover:bg-primary-soft/80 border border-primary-border rounded-2xl flex items-center justify-between cursor-pointer transition-all"
                     >
                       <div className="flex items-center gap-2.5">
-                        <div className="p-2 bg-purple-600 text-white rounded-xl shadow-2xs">
-                          <Video className="w-4 h-4" />
-                        </div>
+                        <Video className="w-5 h-5 text-primary shrink-0" />
                         <div>
                           <p className="text-xs font-black text-text-main">
                             {_t(`تسجيلات الحصص المتاحة (${studentRecordings.length})`, `Available Session Recordings (${studentRecordings.length})`, `Verfügbare Aufnahmen (${studentRecordings.length})`)}
@@ -582,7 +576,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                           </p>
                         </div>
                       </div>
-                      <span className="text-xs font-black text-purple-600 dark:text-purple-400">
+                      <span className="text-xs font-black text-primary">
                         {_t('عرض التسجيلات ←', 'View →', 'Anzeigen →')}
                       </span>
                     </div>
@@ -597,7 +591,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                 </div>
 
                 {/* Security Bottom Notice matching mockup */}
-                <div className="p-3 bg-blue-50/40 dark:bg-blue-950/10 border border-blue-100/50 dark:border-blue-950/30 rounded-2xl flex items-center justify-between text-xs text-primary font-bold">
+                <div className="p-3 bg-primary-soft/40 border border-primary-border/40 rounded-2xl flex items-center justify-between text-xs text-primary font-bold">
                   <div className="flex items-center gap-2">
                     <Shield className="w-4.5 h-4.5 text-primary" />
                     <span>Alle Daten werden sicher gespeichert und regelmäßig gesichert.</span>
@@ -961,11 +955,9 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
             {activeTab === 'recordings' && (
               <div className="space-y-4">
                 {/* Header with Grain Quick Access */}
-                <div className="flex items-center justify-between p-3.5 bg-gradient-to-r from-purple-500/10 via-violet-500/10 to-primary/10 border border-purple-200 dark:border-purple-900/40 rounded-2xl">
+                <div className="flex items-center justify-between p-3.5 bg-primary-soft/40 border border-primary-border/40 rounded-2xl">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="p-2 bg-purple-600 text-white rounded-xl shadow-2xs shrink-0">
-                      <Video className="w-4 h-4" />
-                    </div>
+                    <Video className="w-5 h-5 text-primary shrink-0" />
                     <div className="min-w-0">
                       <h4 className="font-black text-xs text-text-main truncate">
                         {_t('تسجيلات حصص الطالب', 'Student Lesson Recordings', 'Schüler-Aufnahmen')}
@@ -980,7 +972,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                     href="https://grain.com/app/meetings"
                     target="_blank"
                     rel="noreferrer"
-                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+                    className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-black text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                     <span>Open Grain</span>
@@ -1105,7 +1097,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                             <button
                               type="button"
                               onClick={() => handleShareStudentRecWhatsApp(lesson)}
-                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ml-auto"
+                              className="px-3 py-1 bg-primary hover:bg-primary-hover text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ml-auto"
                               title={_t('إرسال التسجيل عبر واتساب', 'Send via WhatsApp', 'Per WhatsApp senden')}
                             >
                               <Send className="w-3.5 h-3.5" />
@@ -1177,7 +1169,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                       onClick={() => setEditGender('male')}
                       className={`py-2 px-3 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                         editGender === 'male'
-                          ? 'bg-blue-600 text-white border-blue-500 shadow-xs'
+                          ? 'bg-primary text-white border-primary shadow-xs'
                           : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
                       }`}
                     >
@@ -1287,7 +1279,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                           }}
                           className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
                             editParentContactType === 'username'
-                              ? 'bg-emerald-600 text-white shadow-2xs'
+                              ? 'bg-primary text-white shadow-2xs'
                               : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
                           }`}
                         >
@@ -1299,7 +1291,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                     <div className="relative">
                       <div className="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none text-slate-400">
                         {editParentContactType === 'username' ? (
-                          <AtSign className="w-3.5 h-3.5 text-emerald-600" />
+                          <AtSign className="w-3.5 h-3.5 text-primary" />
                         ) : (
                           <Phone className="w-3.5 h-3.5 text-primary" />
                         )}
@@ -1354,7 +1346,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                           }}
                           className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all cursor-pointer ${
                             editStudentContactType === 'username'
-                              ? 'bg-emerald-600 text-white shadow-2xs'
+                              ? 'bg-primary text-white shadow-2xs'
                               : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
                           }`}
                         >
@@ -1366,7 +1358,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                     <div className="relative">
                       <div className="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none text-slate-400">
                         {editStudentContactType === 'username' ? (
-                          <AtSign className="w-3.5 h-3.5 text-emerald-600" />
+                          <AtSign className="w-3.5 h-3.5 text-primary" />
                         ) : (
                           <Phone className="w-3.5 h-3.5 text-primary" />
                         )}

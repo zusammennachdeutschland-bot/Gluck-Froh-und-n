@@ -90,7 +90,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
   const [isRollingBack, setIsRollingBack] = useState<boolean>(false);
 
   // Auto Backups State
-  const [autoDaily, setAutoDaily] = useState<boolean>(() => localStorage.getItem('dl_auto_backup_daily') === 'true');
+  const [autoDaily, setAutoDaily] = useState<boolean>(() => localStorage.getItem('dl_auto_backup_daily') !== 'false');
   const [autoWeekly, setAutoWeekly] = useState<boolean>(() => localStorage.getItem('dl_auto_backup_weekly') !== 'false');
   const [autoMonthly, setAutoMonthly] = useState<boolean>(() => localStorage.getItem('dl_auto_backup_monthly') === 'true');
   const [retentionCount, setRetentionCount] = useState<number>(() => Number(localStorage.getItem('dl_backup_retention')) || 10);

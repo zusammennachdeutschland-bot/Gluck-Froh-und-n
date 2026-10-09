@@ -48,6 +48,7 @@ import { LoadingScreen } from './components/LoadingScreen';
 import { LessonAlarmModal } from './components/LessonAlarmModal';
 
 import { useLessonReminders } from './hooks/useLessonReminders';
+import { useAutomatedDailyBackup } from './hooks/useAutomatedDailyBackup';
 import { 
   setupNotificationActionListener, 
   initNotificationChannels, 
@@ -60,6 +61,7 @@ import { Toast } from '@capacitor/toast';
 
 function MainApp() {
   useLessonReminders();
+  useAutomatedDailyBackup();
   useDesktopShortcuts();
 
   const { 
@@ -567,6 +569,9 @@ function MainApp() {
             {activeTab === 'certificates' && <CertificateCenter />}
             {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
             {activeTab === 'hod' && <HodHubView />}
+
+            {/* Generous Clearance Spacer for Floating BottomNav */}
+            <div className="h-16 sm:h-20 w-full pointer-events-none shrink-0" aria-hidden="true" />
           </div>
         </PullToRefresh>
 

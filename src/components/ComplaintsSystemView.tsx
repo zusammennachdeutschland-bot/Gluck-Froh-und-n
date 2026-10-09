@@ -630,7 +630,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
 
               <button
                 onClick={() => setIsDispatchReportModalOpen(true)}
-                className="px-2 sm:px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10.5px] sm:text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+                className="px-2 sm:px-2.5 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-[10.5px] sm:text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
               >
                 <Printer className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{_t('تقرير مدير المرحلة', 'Stage Manager Report', 'Stufenleiter-Bericht')}</span>
@@ -1188,7 +1188,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
                   <label className="text-[11px] font-bold text-text-main flex items-center gap-1.5">
                     <span>{_t('الإجراءات والحلول المتخذة (يمكن اختيار أكثر من إجراء/حل):', 'Actions & Solutions Taken (Select multiple):', 'Maßnahmen & Lösungen (Mehrfachauswahl):')}</span>
                   </label>
-                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 rounded-full text-[10px] font-black">
+                  <span className="text-[10px] font-black text-text-muted">
                     {selectedActions.length + (formCustomAction.trim() ? 1 : 0)} {_t('محدد', 'selected', 'ausgewählt')}
                   </span>
                 </div>
@@ -1409,7 +1409,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
                           ? _t('إلغاء تحديد الكل', 'Deselect All', 'Alle abwählen')
                           : _t('تحديد الكل', 'Select All', 'Alle auswählen')}
                       </button>
-                      <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] font-bold text-text-muted">
                         {selectedVisitIdsForReport.length} / {availableVisitsForReport.length}
                       </span>
                     </div>
@@ -1515,7 +1515,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
 
                 <button
                   onClick={handleConfirmAndDispatchReport}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-extrabold shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  className="px-5 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-[11px] font-extrabold shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95"
                 >
                   <Printer className="w-4 h-4" />
                   <span>{_t('تأكيد وإصدار التقرير (A4)', 'Confirm & Dispatch (A4)', 'Bestätigen & Drucken')}</span>

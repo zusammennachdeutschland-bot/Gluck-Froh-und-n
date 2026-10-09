@@ -9,7 +9,7 @@ import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString }
 import { getStudentCode } from '../utils/studentCodeUtils';
 import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import { 
-  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen, Globe
+  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen, Globe, Sun, Moon
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { GroupProfileModal } from './GroupProfileModal';
@@ -259,6 +259,9 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const [isManualEdited, setIsManualEdited] = useState<boolean>(false);
   const [reportStyle, setReportStyle] = useState<'egyptian' | 'standard' | 'concise'>('egyptian');
   const [styleSeed, setStyleSeed] = useState<number>(0);
+  const [greetingPeriod, setGreetingPeriod] = useState<'morning' | 'evening'>(() => {
+    return new Date().getHours() < 12 ? 'morning' : 'evening';
+  });
   const [recordingLink, setRecordingLink] = useState<string>(
     lesson.report?.recordingLink || lesson.recordingLink || ''
   );
@@ -452,6 +455,8 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
     const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
 
+    const isMorning = greetingPeriod === 'morning';
+
     if (reportLanguage === 'en') {
       const groupTitle = associatedGroup?.name || lesson.title || 'German Group';
       const absentsOrLates = groupStudents.filter(st => {
@@ -459,7 +464,8 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
         return stAtt !== 'present';
       });
 
-      let text = `Hello / Greetings 👋\n📊 Group Session Report: *${groupTitle}* 🇩🇪\n`;
+      const enGreeting = isMorning ? 'Good morning / Greetings 👋' : 'Hello / Greetings 👋';
+      let text = `${enGreeting}\n📊 Group Session Report: *${groupTitle}* 🇩🇪\n`;
       if (lesson.date) text += `📅 Date: ${lesson.date}\n`;
       if (lesson.time) text += `⏰ Time: ${lesson.time}\n`;
       if (hasCycle) text += `🔢 Session: Session ${currentSessionNumber} of ${totalCycleSessions}\n`;
@@ -483,7 +489,8 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
         return stAtt !== 'present';
       });
 
-      let text = `Guten Tag! Herzliche Grüße 👋\n📊 Gruppenbericht: *${groupTitle}* 🇩🇪\n`;
+      const deGreeting = isMorning ? 'Guten Morgen! Herzliche Grüße 👋' : 'Guten Tag! Herzliche Grüße 👋';
+      let text = `${deGreeting}\n📊 Gruppenbericht: *${groupTitle}* 🇩🇪\n`;
       if (lesson.date) text += `📅 Datum: ${lesson.date}\n`;
       if (lesson.time) text += `⏰ Uhrzeit: ${lesson.time}\n`;
       if (hasCycle) text += `🔢 Unterrichtsstunde: Sitzung ${currentSessionNumber} von ${totalCycleSessions}\n`;
@@ -501,9 +508,15 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     }
 
     if (reportStyle === 'egyptian') {
-      const egyptianGreetings = [
+      const egyptianGreetings = isMorning ? [
+        'صباح الخير يا فندم / أهلاً بحضرتك 👋',
+        'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+        'صباح الفل لحضراتكم 👋',
+        'أهلاً بحضرتك يا فندم 👋'
+      ] : [
         'مساء الخير يا فندم / أهلاً بحضرتك 👋',
         'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+        'مساء الفل لحضراتكم 👋',
         'أهلاً بحضرتك يا فندم 👋'
       ];
       const selectedGreeting = egyptianGreetings[styleSeed % egyptianGreetings.length];
@@ -543,7 +556,8 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
         return stAtt !== 'present';
       });
 
-      let text = `⚡ تقرير سريع - ${associatedGroup?.name || lesson.title || 'حصة ألماني'} 🇩🇪
+      const conciseGreeting = isMorning ? '🌅 صباح الخير 👋' : '🌇 مساء الخير 👋';
+      let text = `${conciseGreeting}\n⚡ تقرير سريع - ${associatedGroup?.name || lesson.title || 'حصة ألماني'} 🇩🇪
 ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
 📌 ما تم شرحه: ${taughtToday}
@@ -564,7 +578,7 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
     // Standard Arabic
     const headerParts = [
-      `السلام عليكم ورحمة الله وبركاته 👋`,
+      isMorning ? 'صباح الخير، السلام عليكم ورحمة الله وبركاته يا فندم 👋' : 'مساء الخير، السلام عليكم ورحمة الله وبركاته يا فندم 👋',
       `📊 تقرير الحصة لمجموعة: ${associatedGroup?.name || lesson.title || 'مجموعة اللغة الألمانية'}`,
       dayDateLine,
       timeLine,
@@ -722,11 +736,13 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
       : (lesson.report?.studentExamGrade?.[lesson.studentId || ''] ?? lesson.report?.studentExamGrade?.['single']);
     const hasExam = !isAbsent && examGrade !== undefined && examGrade !== null && examGrade !== -1;
 
+    const isMorning = greetingPeriod === 'morning';
+
     // ENGLISH REPORT FORMULA
     if (reportLanguage === 'en') {
       const attendanceStr = isAbsent ? '❌ Absent' : isLate ? '⚠️ Late' : '✅ Present';
       const hwStr = isAbsent ? 'Absent' : homeworkOption === 'تم الحل بالكامل 👍' ? 'Completed fully 👍' : homeworkOption === 'لم يتم الحل 👎' ? 'Not completed 👎' : 'None assigned';
-      const greeting = `Hello / Greetings 👋`;
+      const greeting = isMorning ? `Good morning / Greetings 👋` : `Hello / Greetings 👋`;
       const datePart = lesson.date ? `📅 Date: ${lesson.date}` : '';
       const timePart = lesson.time ? `⏰ Time: ${lesson.time}` : '';
       const cyclePart = hasCycle ? `🔢 Session: Session ${currentSessionNumber} of ${totalCycleSessions}` : '';
@@ -753,7 +769,7 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
     if (reportLanguage === 'de') {
       const attendanceStr = isAbsent ? '❌ Abwesend' : isLate ? '⚠️ Verspätet' : '✅ Anwesend';
       const hwStr = isAbsent ? 'Abwesend' : homeworkOption === 'تم الحل بالكامل 👍' ? 'Vollständig erledigt 👍' : homeworkOption === 'لم يتم الحل 👎' ? 'Nicht erledigt 👎' : 'Keine Hausaufgabe';
-      const greeting = `Guten Tag! Herzliche Grüße 👋`;
+      const greeting = isMorning ? `Guten Morgen! Herzliche Grüße 👋` : `Guten Tag! Herzliche Grüße 👋`;
       const datePart = lesson.date ? `📅 Datum: ${lesson.date}` : '';
       const timePart = lesson.time ? `⏰ Uhrzeit: ${lesson.time}` : '';
       const cyclePart = hasCycle ? `🔢 Unterrichtsstunde: Sitzung ${currentSessionNumber} von ${totalCycleSessions}` : '';
@@ -778,10 +794,18 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
 
     // EGYPTIAN DIALECT FORMULA (صيغة مصرية راقية ومحبوبة لأولياء الأمور)
     if (reportStyle === 'egyptian') {
-      const egyptianGreetings = [
+      const egyptianGreetings = isMorning ? [
+        'صباح الخير يا فندم 👋',
+        'أهلاً بحضرتك يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+        'صباح الفل يا فندم 👋',
+        'تحياتي لحضرتك يا فندم 👋',
+        `أهلاً بولي أمر ${studentRoleLabel} العزيز${isFemale ? 'ة' : ''} 👋`
+      ] : [
         'مساء الخير يا فندم 👋',
         'أهلاً بحضرتك يا فندم 👋',
         'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+        'مساء الفل يا فندم 👋',
         'تحياتي لحضرتك يا فندم 👋',
         `أهلاً بولي أمر ${studentRoleLabel} العزيز${isFemale ? 'ة' : ''} 👋`
       ];
@@ -858,9 +882,11 @@ ${selectedOutro}`;
 
     // CONCISE FORMULA (صيغة كبسولة سريعة ومختصرة)
     if (reportStyle === 'concise') {
+      const conciseGreeting = isMorning ? '🌅 صباح الخير 👋' : '🌇 مساء الخير 👋';
       // If student was absent: remove the evaluation block with homework, quiz, dictation
       if (isAbsent) {
-        const generated = `⚡ كبسولة تقرير حصة الألماني:
+        const generated = `${conciseGreeting}
+⚡ كبسولة تقرير حصة الألماني:
 👤 ${studentRoleLabel}: *${studentDisplayName}* ${activeStudentCode ? `(كود: ${activeStudentCode})` : ''}
 ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
@@ -900,7 +926,8 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
       const evalSection = evalLines.length > 0 ? `\n\n📊 التقييم:\n${evalLines.join('\n')}` : '';
 
-      const generated = `🇩🇪 كبسولة تقرير حصة الألماني:
+      const generated = `${conciseGreeting}
+🇩🇪 كبسولة تقرير حصة الألماني:
 👤 ${studentRoleLabel}: *${studentDisplayName}* ${activeStudentCode ? `(كود: ${activeStudentCode})` : ''}
 ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
@@ -914,8 +941,11 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
     }
 
     // STANDARD ARABIC FORMULA (الصيغة الفصحى المنظمة)
+    const standardGreeting = isMorning 
+      ? 'صباح الخير، السلام عليكم ورحمة الله وبركاته يا فندم 👋' 
+      : 'مساء الخير، السلام عليكم ورحمة الله وبركاته يا فندم 👋';
     const headerParts = [
-      `السلام عليكم ورحمة الله وبركاته 👋`,
+      standardGreeting,
       `📊 تقرير متابعة الحصة:`,
       `👤 ${studentRoleLabel}: ${studentDisplayName}`,
       codeLine,
@@ -987,6 +1017,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
     recordingLink2,
     reportStyle,
     styleSeed,
+    greetingPeriod,
     profile.displayName,
     profile.displayNameAr,
     profile.nameAr,
@@ -1001,12 +1032,13 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleWhatsAppSend = async () => {
+  const handleWhatsAppSend = async (target?: 'parent' | 'group') => {
     persistRecordings(undefined, undefined, finalGeneratedText);
 
-    if (activeTab === 'bulk') {
+    if (target === 'group' || (activeTab === 'bulk' && target !== 'parent')) {
+      const groupText = activeTab === 'bulk' ? finalGeneratedText : getBulkReportText();
       try {
-        await navigator.clipboard.writeText(finalGeneratedText);
+        await navigator.clipboard.writeText(groupText);
         setCopied(true);
         setTimeout(() => setCopied(false), 2500);
       } catch (err) {
@@ -1014,10 +1046,14 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
       }
 
       if (groupWhatsAppLink) {
-        window.open(groupWhatsAppLink, '_blank');
+        let link = groupWhatsAppLink.trim();
+        if (!link.startsWith('http://') && !link.startsWith('https://')) {
+          link = `https://${link}`;
+        }
+        window.open(link, '_blank');
       } else {
         // Even if no group link registered: copy text and open WhatsApp so user can pick chat
-        const url = buildWhatsAppUrl('', finalGeneratedText);
+        const url = buildWhatsAppUrl('', groupText);
         window.open(url, '_blank');
       }
       try {
@@ -1026,8 +1062,18 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
       return;
     }
 
+    // Send to student's parent
+    try {
+      await navigator.clipboard.writeText(finalGeneratedText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+
     const fallbackUrl = buildWhatsAppUrl(parentPhone, finalGeneratedText);
     window.open(fallbackUrl, '_blank');
+    try {
+      confetti({ particleCount: 40, spread: 60, origin: { y: 0.8 } });
+    } catch (e) {}
   };
 
   const handlePrint = () => {
@@ -1325,7 +1371,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                     {_t('كود الطالب (المنصة)', 'Student Code (Portal)', 'Schüler-Code')}
                   </span>
                   <div className="flex items-center gap-1.5 pt-0.5">
-                    <span className="font-mono font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 px-2 py-0.5 rounded-lg text-xs">
+                    <span className="font-mono font-black text-primary text-xs">
                       {getStudentCode(activeStudent)}
                     </span>
                     <button
@@ -1336,7 +1382,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                         setCopiedCodeInModal(true);
                         setTimeout(() => setCopiedCodeInModal(false), 2000);
                       }}
-                      className="p-1 hover:bg-primary-soft rounded-md transition-colors cursor-pointer text-indigo-600 dark:text-indigo-400"
+                      className="p-1 hover:bg-primary-soft rounded-md transition-colors cursor-pointer text-primary"
                       title={_t('نسخ كود الطالب', 'Copy student code', 'Code kopieren')}
                     >
                       {copiedCodeInModal ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
@@ -1354,8 +1400,8 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                 <div className="font-extrabold text-text-main text-xs sm:text-[13px] truncate" dir="ltr">
                   {resolvedContact.hasContact ? (
                     resolvedContact.isUsername ? (
-                      <span className="inline-flex items-center gap-0.5 font-mono font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 text-xs">
-                        <AtSign className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span className="inline-flex items-center gap-1 font-mono font-black text-primary text-xs">
+                        <AtSign className="w-3.5 h-3.5 text-primary shrink-0" />
                         {cleanWhatsAppUsername(resolvedContact.contact)}
                       </span>
                     ) : (
@@ -1368,7 +1414,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
               </div>
             </div>
           ) : (
-            <div className="p-2.5 sm:p-3 bg-emerald-50/50 dark:bg-emerald-950/10 border border-emerald-100 dark:border-emerald-900/40 rounded-xl space-y-1 text-xs">
+            <div className="p-2.5 sm:p-3 bg-primary-soft/40 border border-primary-border/40 rounded-xl space-y-1 text-xs">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-text-muted font-bold block mb-0.5">{t('auto_group')}</span>
@@ -1379,28 +1425,28 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                         e.stopPropagation();
                         setShowGroupProfile(true);
                       }}
-                      className="font-black text-emerald-700 dark:text-emerald-400 text-xs sm:text-sm hover:underline inline-flex items-center gap-1.5 cursor-pointer text-start"
+                      className="font-black text-primary text-xs sm:text-sm hover:underline inline-flex items-center gap-1.5 cursor-pointer text-start"
                       title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
                     >
                       <span>{associatedGroup.name}</span>
                       <Users className="w-3.5 h-3.5 opacity-80" />
-                      <span className="text-[9px] bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.2 rounded font-bold">
+                      <span className="text-[9px] bg-primary/15 text-primary px-1.5 py-0.2 rounded font-bold">
                         {_t('فتح القائمة', 'Open List', 'Öffnen')}
                       </span>
                     </button>
                   ) : (
-                    <span className="font-black text-emerald-700 dark:text-emerald-400 text-xs sm:text-sm">
+                    <span className="font-black text-primary text-xs sm:text-sm">
                       {associatedGroup?.name || t('auto_german_group')}
                     </span>
                   )}
                 </div>
                 {groupWhatsAppLink ? (
-                  <span className="bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 px-2 py-1 rounded-md text-[10px] font-black flex items-center gap-1">
+                  <span className="bg-primary/15 text-primary px-2 py-1 rounded-md text-[10px] font-black flex items-center gap-1">
                     <Link2 className="w-3 h-3" />
                     <span>{t('auto_whatsapp_group_connected')}</span>
                   </span>
                 ) : (
-                  <span className="bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 px-2 py-1 rounded-md text-[10px] font-black">
+                  <span className="bg-primary/10 text-primary px-2 py-1 rounded-md text-[10px] font-black">
                     {_t('سيتم نسخ التقرير وفتح واتساب لاختيار الشات', 'Text copied & WhatsApp opens to pick chat', 'Text kopiert & WhatsApp öffnet')}
                   </span>
                 )}
@@ -1418,8 +1464,8 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                 </span>
               </div>
               {detectedPreviousHomework && (
-                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200/60 dark:border-emerald-800/40 flex items-center gap-1">
-                  <Check className="w-3 h-3" />
+                <span className="text-[10.5px] font-bold text-primary flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" />
                   <span>{_t('تم جلبه تلقائياً من الحصة السابقة', 'Loaded from previous lesson', 'Aus vorheriger Stunde geladen')}</span>
                 </span>
               )}
@@ -1467,10 +1513,10 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                 href="https://grain.com/app/meetings"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:hover:bg-purple-900/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 transition-all shadow-2xs active:scale-95 cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black bg-primary-soft hover:bg-primary-soft/80 text-primary border border-primary-border transition-all shadow-2xs active:scale-95 cursor-pointer"
                 title="Open Grain Meetings"
               >
-                <ExternalLink className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                <ExternalLink className="w-3 h-3 text-primary" />
                 <span>Open Grain</span>
               </a>
             </div>
@@ -1481,8 +1527,8 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                 <div className="flex items-center gap-1.5">
                   <span>{_t('التسجيل الأول (الجزء 1)', 'Recording 1 (Part 1)', 'Aufnahme 1 (Teil 1)')}</span>
                   {autoSavedNotice && (
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-1 animate-scale-up font-bold">
-                      <Check className="w-2.5 h-2.5 text-emerald-500" />
+                    <span className="text-[10px] text-primary flex items-center gap-1 animate-scale-up font-bold">
+                      <Check className="w-3 h-3 text-primary" />
                       <span>{_t('تم الحفظ في القوائم تلقائياً ✓', 'Saved to lists ✓', 'Gespeichert ✓')}</span>
                     </span>
                   )}
@@ -1613,9 +1659,9 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                       setReportStyle('egyptian');
                       setIsManualEdited(false);
                     }}
-                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${
                       reportStyle === 'egyptian'
-                        ? 'bg-amber-500 text-white shadow-2xs'
+                        ? 'bg-primary text-white shadow-2xs'
                         : 'text-text-muted hover:text-text-main'
                     }`}
                   >
@@ -1627,7 +1673,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                       setReportStyle('standard');
                       setIsManualEdited(false);
                     }}
-                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${
                       reportStyle === 'standard'
                         ? 'bg-primary text-white shadow-2xs'
                         : 'text-text-muted hover:text-text-main'
@@ -1641,15 +1687,41 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                       setReportStyle('concise');
                       setIsManualEdited(false);
                     }}
-                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${
                       reportStyle === 'concise'
-                        ? 'bg-indigo-600 text-white shadow-2xs'
+                        ? 'bg-primary text-white shadow-2xs'
                         : 'text-text-muted hover:text-text-main'
                     }`}
                   >
                     ⚡ مختصر
                   </button>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGreetingPeriod(prev => prev === 'morning' ? 'evening' : 'morning');
+                    setIsManualEdited(false);
+                  }}
+                  className={`px-2 py-1 border rounded-lg text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                    greetingPeriod === 'morning'
+                      ? 'bg-primary-soft text-primary border-primary/30 hover:bg-primary/20'
+                      : 'bg-primary-soft text-primary border-primary/30 hover:bg-primary/20'
+                  }`}
+                  title={_t('التبديل بين تحية الصباح (صباح الخير) والمساء (مساء الخير)', 'Toggle Morning/Evening greeting', 'Morgen-/Abendgruß umschalten')}
+                >
+                  {greetingPeriod === 'morning' ? (
+                    <>
+                      <Sun className="w-3 h-3 text-amber-500 shrink-0" />
+                      <span>{_t('صباح الخير', 'Morning', 'Morgen')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Moon className="w-3 h-3 text-primary shrink-0" />
+                      <span>{_t('مساء الخير', 'Evening', 'Abend')}</span>
+                    </>
+                  )}
+                </button>
 
                 <button
                   type="button"
@@ -1692,30 +1764,55 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
 
         {/* Footer Actions - Guaranteed visible and accessible */}
         <div className="p-2.5 sm:p-3 bg-surface border-t border-surface-border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0 pb-[max(12px,env(safe-area-inset-bottom,12px))] shadow-lg z-10">
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            {activeTab === 'bulk' ? (
-              <button
-                id="send-whatsapp-group-btn"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleWhatsAppSend();
-                }}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
-              >
-                <Send className="w-4 h-4 shrink-0" />
-                <span className="truncate">
-                  {groupWhatsAppLink
-                    ? t('auto_send_to_whatsapp_group')
-                    : _t('إرسال عبر واتساب (اختر الشات)', 'Send via WhatsApp', 'Über WhatsApp senden')}
-                </span>
-              </button>
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 flex-1 min-w-0">
+            {isGroupLesson ? (
+              <>
+                {/* Send to Group */}
+                <button
+                  id="send-whatsapp-group-btn"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleWhatsAppSend('group');
+                  }}
+                  className="flex-1 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
+                  title={_t('إرسال تقرير الحصة لجروب الواتساب', 'Send report to WhatsApp Group', 'Bericht an WhatsApp-Gruppe senden')}
+                >
+                  <Users className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
+                    {groupWhatsAppLink
+                      ? t('auto_send_to_whatsapp_group')
+                      : _t('إرسال لواتساب الجروب', 'Send to WhatsApp Group', 'An WhatsApp-Gruppe senden')}
+                  </span>
+                </button>
+
+                {/* Send to Parent */}
+                <button
+                  id="send-whatsapp-parent-btn"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleWhatsAppSend('parent');
+                  }}
+                  className="flex-1 bg-primary-soft hover:bg-primary/20 text-primary border border-primary/30 active:scale-95 font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[42px]"
+                  title={_t(`إرسال تقرير لولي أمر (${activeStudent?.name || 'الطالب'})`, `Send to parent (${activeStudent?.name || 'Student'})`, `An Eltern senden`)}
+                >
+                  <Send className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
+                    {_t(
+                      `إرسال لولي الأمر (${activeStudent?.name || 'الطالب'})`,
+                      `Send to Parent (${activeStudent?.name || 'Student'})`,
+                      `An Eltern senden`
+                    )}
+                  </span>
+                </button>
+              </>
             ) : (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleWhatsAppSend();
+                  handleWhatsAppSend('parent');
                 }}
                 className="flex-1 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
               >
@@ -1732,7 +1829,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                 e.stopPropagation();
                 handlePrint();
               }}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 font-bold text-xs py-2.5 sm:py-3 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[42px] shrink-0"
+              className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 sm:py-3 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[42px] shrink-0"
               title={t('auto_print')}
             >
               <Printer className="w-4 h-4" />
@@ -1745,7 +1842,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
               <a
                 href={`tel:${resolvedContact.contact}`}
                 onClick={(e) => e.stopPropagation()}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 font-bold text-xs py-2.5 sm:py-3 px-3 sm:px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[42px]"
+                className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 sm:py-3 px-3 sm:px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[42px]"
                 title={t('auto_phone_call')}
               >
                 <Phone className="w-4 h-4 text-primary" />
@@ -1764,9 +1861,9 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                   onClose();
                 }
               }}
-              className="flex-1 sm:flex-initial bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-4 sm:px-6 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md shadow-red-600/20 min-h-[42px]"
+              className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 sm:py-3 px-4 sm:px-5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-surface-border min-h-[42px]"
             >
-              <Home className="w-4 h-4 shrink-0" />
+              <Home className="w-4 h-4 shrink-0 text-text-muted" />
               <span className="truncate">{t('auto_go_to_homescreen')}</span>
             </button>
           </div>

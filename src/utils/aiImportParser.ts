@@ -578,31 +578,41 @@ function parseIndividualGroupBlock(
   const rawPaymentAmount = groupKv['payment_amount'] || groupKv['amount'] || groupKv['package_price'] || groupKv['price'] || '';
   const rawLessonPrice = groupKv['lesson_price'] || groupKv['price_per_lesson'] || groupKv['price_per_session'] || groupKv['session_price'] || '';
 
-  const validPaymentTypes = [
-    'per_lesson', 'per_session', 
-    'every_4_lessons', '4_lessons', 
-    'every_8_lessons', '8_lessons', 
-    'every_12_lessons', '12_lessons', 
-    'monthly', 'package'
-  ];
-  let mappedPaymentCycle: PaymentCycle = '4_lessons';
+  const cleanType = rawPaymentType.trim().toLowerCase();
+  let mappedPaymentCycle: PaymentCycle | null = null;
+
+  if (
+    cleanType === 'per_lesson' || cleanType === 'per_session' ||
+    cleanType.includes('بالحصة') || cleanType.includes('لكل حصة') || cleanType.includes('حصة بحصة') ||
+    cleanType === 'حصة' || cleanType === 'درس' || cleanType.includes('جلسة')
+  ) {
+    mappedPaymentCycle = 'per_lesson';
+  } else if (
+    cleanType === 'every_4_lessons' || cleanType === '4_lessons' ||
+    cleanType.includes('4') || cleanType.includes('٤')
+  ) {
+    mappedPaymentCycle = '4_lessons';
+  } else if (
+    cleanType === 'every_8_lessons' || cleanType === '8_lessons' ||
+    cleanType.includes('8') || cleanType.includes('٨')
+  ) {
+    mappedPaymentCycle = '8_lessons';
+  } else if (
+    cleanType === 'every_12_lessons' || cleanType === '12_lessons' ||
+    cleanType.includes('12') || cleanType.includes('١٢')
+  ) {
+    mappedPaymentCycle = '12_lessons';
+  } else if (
+    cleanType === 'monthly' || cleanType === 'package' ||
+    cleanType.includes('شهر') || cleanType.includes('باقة')
+  ) {
+    mappedPaymentCycle = 'monthly';
+  }
 
   if (!rawPaymentType.trim()) {
     errors.push(`${gTag}حقل نظام الدفع "payment_type" مطلوب في المجموعة.`);
-  } else if (!validPaymentTypes.includes(rawPaymentType)) {
+  } else if (!mappedPaymentCycle) {
     errors.push(`${gTag}نظام الدفع "${rawPaymentType}" غير صالح.`);
-  } else {
-    if (rawPaymentType === 'per_lesson' || rawPaymentType === 'per_session') {
-      mappedPaymentCycle = 'per_lesson';
-    } else if (rawPaymentType === 'every_4_lessons' || rawPaymentType === '4_lessons') {
-      mappedPaymentCycle = '4_lessons';
-    } else if (rawPaymentType === 'every_8_lessons' || rawPaymentType === '8_lessons') {
-      mappedPaymentCycle = '8_lessons';
-    } else if (rawPaymentType === 'every_12_lessons' || rawPaymentType === '12_lessons') {
-      mappedPaymentCycle = '12_lessons';
-    } else {
-      mappedPaymentCycle = 'monthly';
-    }
   }
 
   let finalPaymentAmount = 0;
