@@ -6,7 +6,7 @@ import {
   HardDrive, Download, Upload, Trash2, AlertTriangle, MessageSquare, ChevronRight,
   ArrowLeft, ArrowRight, Calendar, ShieldAlert, ShieldCheck, Info, Copy, Save, Phone, ExternalLink,
   BookOpen, FileText, Bell, CheckSquare, XCircle, Award, Sparkles, Star, Plus, Pencil, RotateCcw, Heart,
-  Target, Zap, Smartphone, Lock, Shield, Share2, Layers, CheckCircle
+  Target, Zap, Smartphone, Lock, Shield, Share2, Layers, CheckCircle, Palette
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
@@ -15,6 +15,8 @@ import { DataHealthCenterModal } from './DataHealthCenterModal';
 import { SchoolSettingsSection } from './SchoolSettingsSection';
 import { TeacherProfileSection } from './TeacherProfileSection';
 import { getEffectiveSchoolEndForDay, formatTime } from '../utils/timeUtils';
+import { COLOR_FAMILIES, getContrastTextColor } from '../utils/colorUtils';
+import { CustomColorPickerModal } from './CustomColorPickerModal';
 
 type SettingsCategory = 
   | 'language'
@@ -39,7 +41,7 @@ const DEFAULT_PARENT_TEMPLATES: Record<string, string> = {
 
 export const SettingsView: React.FC = () => {
   const { 
-    profile, updateProfile, theme, toggleTheme, language, setLanguage, t, _t,
+    profile, updateProfile, theme, setTheme, toggleTheme, language, setLanguage, t, _t,
     exportBackupFile, importBackupFile, clearAllData,
     inspirationSettings, inspirationMessages, updateInspirationSettings,
     addInspirationMessage, updateInspirationMessage, deleteInspirationMessage,
@@ -54,6 +56,8 @@ export const SettingsView: React.FC = () => {
   // Live Theme Accent Preview Interactive Demo States
   const [previewSwitchOn, setPreviewSwitchOn] = useState(true);
   const [previewFeedbackText, setPreviewFeedbackText] = useState<string | null>(null);
+  const [isColorPickerModalOpen, setIsColorPickerModalOpen] = useState(false);
+  const [activeFamilyTab, setActiveFamilyTab] = useState<string>('all');
 
   // Inspiration Messages UI States
   const [isManagingMessages, setIsManagingMessages] = useState(false);
@@ -454,7 +458,7 @@ export const SettingsView: React.FC = () => {
                   Globe
                 )}
                 {/* Interface Language Card */}
-          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 shadow-2xs space-y-2.5">
+          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3 shadow-2xs space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
                 <Globe className="w-3.5 h-3.5 text-primary" />
@@ -462,11 +466,7 @@ export const SettingsView: React.FC = () => {
               </h3>
             </div>
 
-            <p className="text-[11px] text-text-muted">
-              {t('settings_lang_desc')}
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+            <div className="grid grid-cols-3 gap-1.5 text-xs">
               {languagesList.map((langItem) => {
                 const isSelected = language === langItem.id;
                 return (
@@ -479,26 +479,18 @@ export const SettingsView: React.FC = () => {
                         confetti({ particleCount: 30, spread: 40 });
                       }
                     }}
-                    className={`p-2.5 rounded-lg font-bold flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                    className={`py-2 px-1 rounded-lg font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border text-center ${
                       isSelected
                         ? 'bg-primary text-white border-primary-border shadow-2xs'
                         : 'bg-surface-hover text-text-main border-surface-border dark:border-surface-border-soft hover:bg-slate-100 dark:hover:bg-slate-700'
                     }`}
                   >
-                    <span className="text-sm">{langItem.flag}</span>
-                    <span>{langItem.label}</span>
-                    {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
+                    <span className="text-xs sm:text-sm">{langItem.flag}</span>
+                    <span className="text-[11px] sm:text-xs truncate">{langItem.label}</span>
+                    {isSelected && <Check className="w-3 h-3 text-white shrink-0 hidden sm:inline" />}
                   </button>
                 );
               })}
-            </div>
-
-            {/* Language Note Banner */}
-            <div className="p-2.5 bg-primary-soft dark:bg-primary-soft border border-primary-border dark:border-primary-border rounded-lg flex items-start gap-2 text-primary dark:text-primary text-[11px]">
-              <MessageSquare className="w-3.5 h-3.5 text-primary dark:text-primary shrink-0 mt-0.5" />
-              <span>
-                {t('auto_note_the_selected_language_ap')}
-              </span>
             </div>
           </div>
 
@@ -506,102 +498,179 @@ export const SettingsView: React.FC = () => {
           <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 shadow-2xs space-y-2.5">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                {theme === 'dark' ? <Moon className="w-3.5 h-3.5 text-primary" /> : <Sun className="w-3.5 h-3.5 text-primary" />}
+                {theme === 'amoled' ? (
+                  <Zap className="w-3.5 h-3.5 text-primary animate-pulse" />
+                ) : theme === 'dark' ? (
+                  <Moon className="w-3.5 h-3.5 text-primary" />
+                ) : (
+                  <Sun className="w-3.5 h-3.5 text-primary" />
+                )}
                 <span>{t('settings_theme')}</span>
               </h3>
+              <span className="text-[10px] text-text-muted font-mono font-semibold">
+                {theme === 'amoled' ? '100% OLED Black' : theme === 'dark' ? 'Midnight Slate' : theme === 'tinted' ? _t('أورا ملونة ✨', 'Tinted Aura ✨', 'Farbig Weich ✨') : 'Clean Light'}
+              </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs">
               <button
                 type="button"
-                onClick={() => theme !== 'light' && toggleTheme()}
-                className={`p-2.5 rounded-lg font-bold flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                onClick={() => setTheme('light')}
+                className={`p-2 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
                   theme === 'light'
-                    ? 'bg-primary text-white border-primary-border shadow-2xs'
-                    : 'bg-surface-hover text-text-main border-surface-border dark:border-surface-border-soft hover:bg-slate-100 dark:hover:bg-slate-700'
+                    ? 'bg-primary text-white border-primary shadow-xs ring-2 ring-primary/30'
+                    : 'bg-surface-hover text-text-main border-surface-border hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
-                <Sun className="w-4 h-4" />
-                <span>{t('settings_theme_light')}</span>
+                <Sun className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-[11px] sm:text-xs truncate">{t('settings_theme_light')}</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => theme !== 'dark' && toggleTheme()}
-                className={`p-2.5 rounded-lg font-bold flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                onClick={() => setTheme('dark')}
+                className={`p-2 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
                   theme === 'dark'
-                    ? 'bg-primary text-white border-primary-border shadow-2xs'
-                    : 'bg-surface-hover text-text-main border-surface-border dark:border-surface-border-soft hover:bg-slate-100 dark:hover:bg-slate-700'
+                    ? 'bg-primary text-white border-primary shadow-xs ring-2 ring-primary/30'
+                    : 'bg-surface-hover text-text-main border-surface-border hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
-                <Moon className="w-4 h-4" />
-                <span>{t('settings_theme_dark')}</span>
+                <Moon className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-[11px] sm:text-xs truncate">{t('settings_theme_dark')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTheme('amoled')}
+                className={`p-2 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer border relative overflow-hidden ${
+                  theme === 'amoled'
+                    ? 'bg-black text-white border-primary ring-2 ring-primary shadow-lg shadow-primary/20'
+                    : 'bg-surface-hover text-text-main border-surface-border hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span className="text-[11px] sm:text-xs truncate">{t('settings_theme_amoled')}</span>
+                <span className="absolute end-1 top-1 w-1.5 h-1.5 rounded-full bg-primary" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTheme('tinted')}
+                className={`p-2 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer border relative overflow-hidden ${
+                  theme === 'tinted'
+                    ? 'bg-primary text-white border-primary ring-2 ring-primary/30 shadow-md'
+                    : 'bg-surface-hover text-text-main border-surface-border hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Palette className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span className="text-[11px] sm:text-xs truncate">{_t('فاتح ملوّن ✨', 'Tinted Light ✨', 'Farbig Hell ✨')}</span>
               </button>
             </div>
           </div>
 
           {/* Accent Color Section */}
-          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 shadow-2xs space-y-2.5">
-            <div className="flex items-center justify-between">
+          <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 sm:p-4 shadow-2xs space-y-2.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-primary" />
                 <span>
                   {t('auto_accent_color')}
                 </span>
               </h3>
+
+              {/* Professional Color Picker Trigger Button 🎨 */}
+              <button
+                type="button"
+                onClick={() => setIsColorPickerModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-xl text-xs font-bold shadow-2xs transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              >
+                <Palette className="w-3.5 h-3.5" />
+                <span>{_t('منتقي الألوان 🎨', 'Custom Color Picker 🎨', 'Farbauswahl 🎨')}</span>
+              </button>
             </div>
 
-            <p className="text-[11px] text-text-muted">
-              {t('auto_select_your_preferred_accent_c')}
-            </p>
-
-            <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 pt-1 pb-1">
-              {[
-                { id: 'blue' as const, hex: '#3b82f6', color: 'blue' },
-                { id: 'darkblue' as const, hex: '#1e40af', color: 'darkblue' },
-                { id: 'indigo' as const, hex: '#6366f1', color: 'indigo' },
-                { id: 'violet' as const, hex: '#8b5cf6', color: 'violet' },
-                { id: 'purple' as const, hex: '#a855f7', color: 'purple' },
-                { id: 'fuchsia' as const, hex: '#d946ef', color: 'fuchsia' },
-                { id: 'rose' as const, hex: '#f43f5e', color: 'rose' },
-                { id: 'red' as const, hex: '#ef4444', color: 'red' },
-                { id: 'orange' as const, hex: '#f97316', color: 'orange' },
-                { id: 'amber' as const, hex: '#f59e0b', color: 'amber' },
-                { id: 'green' as const, hex: '#22c55e', color: 'green' },
-                { id: 'emerald' as const, hex: '#10b981', color: 'emerald' },
-                { id: 'lime' as const, hex: '#84cc16', color: 'lime' },
-                { id: 'pink' as const, hex: '#ec4899', color: 'pink' },
-                { id: 'teal' as const, hex: '#14b8a6', color: 'teal' },
-                { id: 'cyan' as const, hex: '#06b6d4', color: 'cyan' },
-                { id: 'slate' as const, hex: '#64748b', color: 'slate' },
-              ].map((item) => {
-                const isSelected = accentColor === item.id;
+            {/* Color Family Filter Tabs - Icon-Only without text (No side-scrolling) */}
+            <div className="flex flex-wrap items-center gap-1.5 py-0.5">
+              <button
+                type="button"
+                onClick={() => setActiveFamilyTab('all')}
+                title={_t('جميع العائلات 🎨', 'All Families', 'Alle Familien')}
+                className={`w-8 h-8 rounded-lg text-sm font-bold flex items-center justify-center transition-all cursor-pointer ${
+                  activeFamilyTab === 'all'
+                    ? 'bg-primary text-white shadow-2xs scale-105 ring-2 ring-primary/30'
+                    : 'bg-surface-hover text-text-muted hover:text-text-main border border-surface-border'
+                }`}
+              >
+                🎨
+              </button>
+              {COLOR_FAMILIES.map(fam => {
+                const famName = language === 'ar' ? fam.nameAr : (language === 'de' ? fam.nameDe : fam.nameEn);
+                const isActive = activeFamilyTab === fam.id;
                 return (
                   <button
-                    key={item.id}
+                    key={fam.id}
                     type="button"
-                    onClick={() => {
-                      if (accentColor !== item.id) {
-                        setAccentColor(item.id);
-                        confetti({ particleCount: 30, spread: 40 });
-                      }
-                    }}
-                    className="flex flex-col items-center gap-1 focus:outline-none group cursor-pointer"
-                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                    onClick={() => setActiveFamilyTab(fam.id)}
+                    title={famName}
+                    className={`w-8 h-8 rounded-lg text-sm font-semibold flex items-center justify-center transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-primary/20 text-primary border border-primary/40 shadow-2xs scale-105 ring-2 ring-primary/30 font-bold'
+                        : 'bg-surface-hover text-text-muted hover:text-text-main border border-surface-border hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
                   >
-                    <div 
-                      className={`w-8 h-8 rounded-full flex items-center justify-center shadow-md relative transition-all duration-200 transform group-hover:scale-110 active:scale-95 ${
-                        isSelected 
-                          ? 'ring-2 ring-offset-2 ring-offset-surface scale-105' 
-                          : 'opacity-80 hover:opacity-100 border border-white/20'
-                      }`}
-                      style={{ backgroundColor: item.hex, ...(isSelected ? { "--tw-ring-color": item.hex } : {}) } as React.CSSProperties}
-                    >
-                      {isSelected && (
-                        <Check className="w-4 h-4 text-white stroke-[3.5px] drop-shadow-2xs animate-scale-up" />
-                      )}
-                    </div>
+                    <span>{fam.icon}</span>
                   </button>
+                );
+              })}
+            </div>
+
+            {/* Huge Color Palette Grid */}
+            <div className="space-y-3 pt-1">
+              {COLOR_FAMILIES.filter(fam => activeFamilyTab === 'all' || activeFamilyTab === fam.id).map(fam => {
+                const famName = language === 'ar' ? fam.nameAr : (language === 'de' ? fam.nameDe : fam.nameEn);
+                return (
+                  <div key={fam.id} className="space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-text-muted uppercase tracking-wider">
+                      <span>{fam.icon}</span>
+                      <span>{famName}</span>
+                    </div>
+                    <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+                      {fam.shades.map(shade => {
+                        const targetValue = shade.presetKey || shade.hex;
+                        const isSelected = accentColor === targetValue || accentColor === shade.hex || accentColor === `hex-${shade.hex.replace('#','')}`;
+                        return (
+                          <button
+                            key={shade.hex}
+                            type="button"
+                            onClick={() => {
+                              if (!isSelected) {
+                                setAccentColor(targetValue as any);
+                                confetti({ particleCount: 30, spread: 40 });
+                              }
+                            }}
+                            className="flex flex-col items-center gap-1 focus:outline-none group cursor-pointer"
+                            title={`${shade.name} (${shade.hex})`}
+                          >
+                            <div 
+                              className={`w-9 h-9 rounded-full flex items-center justify-center shadow-md relative transition-all duration-200 transform group-hover:scale-110 active:scale-95 ${
+                                isSelected 
+                                  ? 'ring-2 ring-offset-2 ring-offset-surface scale-105' 
+                                  : 'opacity-85 hover:opacity-100 border border-white/20'
+                              }`}
+                              style={{ backgroundColor: shade.hex, ...(isSelected ? { "--tw-ring-color": shade.hex } : {}) } as React.CSSProperties}
+                            >
+                              {isSelected && (
+                                <Check className={`w-4 h-4 stroke-[3.5px] drop-shadow animate-scale-up ${getContrastTextColor(shade.hex) === '#000000' ? 'text-slate-950' : 'text-white'}`} />
+                              )}
+                            </div>
+                            <span className="text-[9.5px] text-text-muted truncate w-full text-center font-medium group-hover:text-text-main">
+                              {shade.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -1570,6 +1639,16 @@ export const SettingsView: React.FC = () => {
       {showDataHealthCenterModal && (
         <DataHealthCenterModal onClose={() => setShowDataHealthCenterModal(false)} />
       )}
+
+      {/* ==========================================
+          PROFESSIONAL 2D CUSTOM COLOR PICKER MODAL
+      ========================================== */}
+      <CustomColorPickerModal
+        isOpen={isColorPickerModalOpen}
+        onClose={() => setIsColorPickerModalOpen(false)}
+        currentAccent={accentColor}
+        onSelectAccent={(col) => setAccentColor(col as any)}
+      />
     </div>
   );
 };

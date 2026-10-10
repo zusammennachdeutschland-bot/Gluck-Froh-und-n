@@ -230,6 +230,82 @@
   border-color: #1a1e26 !important;
 }
 
+/* ============================================================
+   AMOLED SUPER OLED TRUE PITCH BLACK MODE OVERRIDES (#000000)
+   ============================================================ */
+.amoled,
+.dark.amoled,
+[data-amoled="true"] {
+  --background: #000000 !important;
+  --surface: #000000 !important;
+  --surface-hover: #080a0f !important;
+  --surface-border: #1c2230 !important;
+  --surface-border-soft: #12151f !important;
+  --text-main: #ffffff !important;
+  --text-muted: #94a3b8 !important;
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+.amoled body,
+.amoled #root,
+.amoled main,
+.amoled header,
+.amoled footer,
+.amoled aside,
+.amoled nav,
+.amoled modal,
+.amoled .bg-background,
+.amoled .bg-surface,
+.amoled .bg-slate-950,
+.amoled .bg-slate-900,
+.amoled .bg-slate-850,
+.amoled .bg-slate-900\/90,
+.amoled .bg-slate-900\/95,
+.amoled .dark\:bg-slate-950,
+.amoled .dark\:bg-slate-900,
+.amoled .dark\:bg-slate-850,
+.amoled .dark\:bg-slate-900\/90,
+.amoled .dark\:bg-slate-900\/95 {
+  background-color: #000000 !important;
+}
+
+.amoled input,
+.amoled textarea,
+.amoled select {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border-color: #1c2230 !important;
+}
+
+.amoled .bg-surface-hover,
+.amoled .hover\:bg-surface-hover:hover,
+.amoled .dark\:bg-slate-800\/50,
+.amoled .dark\:bg-slate-800\/80,
+.amoled .hover\:bg-slate-800:hover {
+  background-color: #090c12 !important;
+}
+
+.amoled .border-surface-border,
+.amoled .border-surface-border-soft,
+.amoled .dark\:border-surface-border,
+.amoled .dark\:border-surface-border-soft,
+.amoled .dark\:border-slate-800,
+.amoled .dark\:border-slate-700 {
+  border-color: #1c2230 !important;
+}
+
+.amoled .bg-black\/60,
+.amoled .bg-black\/70,
+.amoled .bg-slate-900\/80,
+.amoled .bg-slate-950\/90 {
+  background-color: rgba(0, 0, 0, 0.92) !important;
+}
+
+.amoled .bg-primary {
+  box-shadow: 0 0 16px -2px var(--primary-glow, rgba(59, 130, 246, 0.45));
+}
+
 
 
 /* Design Token System v2 */
@@ -285,6 +361,9 @@
   --color-primary-soft: var(--primary-soft);
   --color-primary-border: var(--primary-border);
   --color-primary-glow: var(--primary-glow);
+  --color-primary-fg: var(--primary-fg);
+  --color-primary-foreground: var(--primary-fg);
+  --color-primary-text: var(--primary-text);
   --color-surface: var(--surface);
   --color-surface-hover: var(--surface-hover);
   --color-surface-border: var(--surface-border);
@@ -292,6 +371,86 @@
   --color-background: var(--background);
   --color-text-main: var(--text-main);
   --color-text-muted: var(--text-muted);
+}
+
+/* Ensure contrasting text color for buttons/badges using bg-primary */
+.bg-primary {
+  background-color: var(--primary) !important;
+  color: var(--primary-fg, #ffffff) !important;
+}
+
+.bg-primary .text-white,
+.bg-primary .text-slate-100,
+.bg-primary .text-slate-200,
+.bg-primary .text-slate-300,
+.bg-primary .text-slate-50,
+.bg-primary .text-black,
+.bg-primary .text-slate-900,
+.bg-primary > svg,
+.bg-primary > span,
+.bg-primary > p {
+  color: var(--primary-fg, #ffffff) !important;
+}
+
+.text-primary {
+  color: var(--primary-text, var(--primary)) !important;
+}
+
+:root {
+  --primary-fg: #ffffff;
+  --primary-text: var(--primary);
+}
+
+:root.accent-white {
+  --primary: #0f172a;
+  --primary-fg: #ffffff;
+  --primary-hover: #1e293b;
+  --primary-soft: rgba(15, 23, 42, 0.1);
+  --primary-border: rgba(15, 23, 42, 0.2);
+  --primary-glow: #0f172a;
+  --primary-text: #0f172a;
+}
+.dark.accent-white, .dark.dark.accent-white {
+  --primary: #ffffff;
+  --primary-fg: #000000;
+  --primary-hover: #f1f5f9;
+  --primary-soft: rgba(255, 255, 255, 0.18);
+  --primary-border: rgba(255, 255, 255, 0.35);
+  --primary-glow: #ffffff;
+  --primary-text: #ffffff;
+}
+
+:root.accent-black {
+  --primary: #000000;
+  --primary-fg: #ffffff;
+  --primary-hover: #18181b;
+  --primary-soft: rgba(0, 0, 0, 0.12);
+  --primary-border: rgba(0, 0, 0, 0.25);
+  --primary-glow: #000000;
+  --primary-text: #000000;
+}
+.dark.accent-black, .dark.dark.accent-black {
+  --primary: #ffffff;
+  --primary-fg: #000000;
+  --primary-hover: #f1f5f9;
+  --primary-soft: rgba(255, 255, 255, 0.18);
+  --primary-border: rgba(255, 255, 255, 0.35);
+  --primary-glow: #ffffff;
+  --primary-text: #ffffff;
+}
+
+/* 4th Theme Mode: Tinted Aura Light (Dynamic soft accent background + subtle dots pattern) */
+.tinted body {
+  background-color: var(--background) !important;
+  background-image: radial-gradient(color-mix(in srgb, var(--primary) 18%, transparent) 1.2px, transparent 1.2px) !important;
+  background-size: 18px 18px !important;
+}
+
+.tinted header,
+.tinted nav {
+  background-color: color-mix(in srgb, var(--primary) 6%, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--primary) 20%, #e2e8f0) !important;
+  backdrop-filter: blur(12px) !important;
 }
 
 :root, :root.accent-blue {

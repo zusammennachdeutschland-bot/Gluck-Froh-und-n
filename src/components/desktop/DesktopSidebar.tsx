@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
   History, Award, Clock, Plus, Zap, UserPlus, Layers,
-  Search, Moon, Sun, BookOpen
+  Search, Moon, Sun, BookOpen, Sparkles
 } from 'lucide-react';
 import { AvatarImage } from '../AvatarImage';
 import { DEFAULT_OFFLINE_AVATAR } from '../../data/avatarPresets';
@@ -345,9 +345,17 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
             <button
               onClick={toggleTheme}
               className="p-2 rounded-xl hover:bg-surface-hover text-text-muted hover:text-text-main transition-colors cursor-pointer"
-              title={theme === 'dark' ? 'Hellmodus' : 'Dunkelmodus'}
+              title={theme === 'amoled' ? 'AMOLED Mode (0% OLED Power)' : theme === 'dark' ? 'Dark Mode' : theme === 'tinted' ? 'Soft Tint & Pattern' : 'Light Mode'}
             >
-              {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-700" />}
+              {theme === 'amoled' ? (
+                <Zap className="w-4 h-4 text-primary animate-pulse" />
+              ) : theme === 'dark' ? (
+                <Moon className="w-4 h-4 text-primary" />
+              ) : theme === 'tinted' ? (
+                <Sparkles className="w-4 h-4 text-primary" />
+              ) : (
+                <Sun className="w-4 h-4 text-amber-500" />
+              )}
             </button>
           </div>
         </div>

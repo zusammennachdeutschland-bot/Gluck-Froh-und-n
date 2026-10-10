@@ -60,6 +60,7 @@ export type TranslationKey =
   | 'settings_theme'
   | 'settings_theme_light'
   | 'settings_theme_dark'
+  | 'settings_theme_amoled'
   | 'settings_profile'
   | 'settings_name'
   | 'settings_email'
@@ -931,6 +932,7 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     settings_theme: 'المظهر',
     settings_theme_light: 'الوضع الفاتح',
     settings_theme_dark: 'الوضع الداكن',
+    settings_theme_amoled: 'أسود أموليد (AMOLED)',
     settings_profile: 'بيانات المعلم',
     settings_name: 'اسم المعلم',
     settings_email: 'البريد الإلكتروني',
@@ -1800,6 +1802,7 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     settings_theme: 'Appearance',
     settings_theme_light: 'Light mode',
     settings_theme_dark: 'Dark mode',
+    settings_theme_amoled: 'AMOLED Pure Black',
     settings_profile: 'Teacher Profile',
     settings_name: 'Teacher name',
     settings_email: 'Email',
@@ -2669,6 +2672,7 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     settings_theme: 'Erscheinungsbild',
     settings_theme_light: 'Heller Modus',
     settings_theme_dark: 'Dunkler Modus',
+    settings_theme_amoled: 'AMOLED Reines Schwarz',
     settings_profile: 'Lehrerprofil',
     settings_name: 'Lehrername',
     settings_email: 'E-Mail',

@@ -230,7 +230,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
           <div className="pt-2.5 border-t border-surface-border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
             <div className="flex items-center justify-between sm:justify-start gap-3">
               <span className="font-bold text-text-main">
-                {_t('وضع المنبه المستمر (Alarm)', 'Continuous Alarm', 'Dauerhafter Wecker')}
+                {_t('إشعارات تذكير الحصص على الجهاز', 'Device Lesson Reminder Notifications', 'Geräte-Lektionsbenachrichtigungen')}
               </span>
               <button
                 type="button"
@@ -416,26 +416,6 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
                 <Check className="w-3.5 h-3.5 text-primary" />
                 {_t('الإشعارات مفعلة', 'Push Granted', 'Aktiviert')}
               </span>
-            )}
-
-            {overlayGranted ? (
-              <span className="text-text-muted font-bold text-[11px] flex items-center gap-1">
-                <Check className="w-3.5 h-3.5 text-primary" />
-                {_t('العوم فوق التطبيقات مفعّل', 'Overlay Granted', 'Über Apps aktiv')}
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={async () => {
-                  await openOverlayPermissionSettings();
-                  setTimeout(checkPermissions, 1500);
-                }}
-                className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white font-bold text-[11px] cursor-pointer flex items-center gap-1 transition-colors shadow-2xs"
-                title={_t('فتح إعدادات الهاتف لمنح إذن الظهور فوق التطبيقات الأخرى', 'Open phone settings to grant overlay permission', 'Overlay-Berechtigung erteilen')}
-              >
-                <Layers className="w-3 h-3" />
-                <span>{_t('إذن العوم فوق التطبيقات', 'Grant Overlay Permission', 'Über anderen Apps')}</span>
-              </button>
             )}
 
             <button

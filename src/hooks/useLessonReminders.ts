@@ -38,18 +38,8 @@ export const useLessonReminders = () => {
           for (const upcoming of upcomingLessons) {
             const notifKey = `rem_upcoming_${upcoming.id}_${todayStr}`;
             const isNotified = sessionStorage.getItem(notifKey);
-            const snoozedUntil = snoozedLessonAlarmMap[upcoming.id];
-            const isSnoozedActive = snoozedUntil && Date.now() < snoozedUntil;
 
-            // Trigger Alarm if enabled and not currently snoozed
-            if (!isSnoozedActive && !activeAlarmLesson && notificationSettings.alarmModeEnabled !== false) {
-              if (lastTriggeredLessonIdRef.current !== upcoming.id || !isNotified) {
-                lastTriggeredLessonIdRef.current = upcoming.id;
-                triggerLessonAlarm(upcoming);
-              }
-            }
-
-            // Send system/browser notification to pop up outside the app (Heads-up / Lockscreen)
+            // Send system/browser notification to pop up on device (Heads-up / Lockscreen / System Shade)
             if (!isNotified) {
               let perm = await getNotificationPermission();
               if (perm !== 'granted' && perm !== 'denied') {
@@ -64,7 +54,7 @@ export const useLessonReminders = () => {
                   ? `⏰ Nächste Lektion in Kürze: ${displayName}`
                   : `⏰ Upcoming Lesson Reminder: ${displayName}`;
                 const body = language === 'ar'
-                  ? `تبدأ الساعة ${upcoming.time} (${upcoming.type === 'online' ? 'أونلاين' : 'حضوري'}). المنبه جاهز!`
+                  ? `تبدأ الساعة ${upcoming.time} (${upcoming.type === 'online' ? 'أونلاين' : 'حضوري'}).`
                   : language === 'de'
                   ? `Startet um ${upcoming.time} Uhr (${upcoming.type === 'online' ? 'Online' : 'Präsenz'}).`
                   : `Starts at ${upcoming.time} (${upcoming.type === 'online' ? 'Online' : 'Offline/In-person'}).`;

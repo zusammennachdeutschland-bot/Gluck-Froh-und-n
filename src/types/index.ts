@@ -254,7 +254,7 @@ export interface DevicePresenceState {
 
 export type AppLanguage = 'ar' | 'en' | 'de';
 
-export type AccentColor = 'blue' | 'green' | 'purple' | 'orange' | 'red' | 'teal' | 'indigo' | 'rose' | 'amber' | 'emerald' | 'fuchsia' | 'cyan' | 'violet' | 'slate' | 'pink' | 'lime' | 'darkblue';
+export type AccentColor = 'blue' | 'green' | 'purple' | 'orange' | 'red' | 'teal' | 'indigo' | 'rose' | 'amber' | 'emerald' | 'fuchsia' | 'cyan' | 'violet' | 'slate' | 'pink' | 'lime' | 'darkblue' | 'white' | (string & {});
 
 export type PaymentStatus = 'paid' | 'pending' | 'partial' | 'exempted';
 
@@ -984,7 +984,7 @@ export interface BackupData {
   inspirationMessages?: InspirationMessage[];
   syncQueue: any[];
   todos?: TodoItem[];
-  theme?: 'light' | 'dark';
+  theme?: 'light' | 'dark' | 'amoled' | 'tinted';
   accentColor?: AccentColor;
   hodStudents?: HodGermanStudent[];
   hodComplaints?: Complaint[];

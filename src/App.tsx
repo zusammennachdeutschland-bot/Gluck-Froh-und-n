@@ -45,7 +45,6 @@ import { BackupModal } from './components/BackupModal';
 import { FloatingNetworkMonitor } from './components/FloatingNetworkMonitor';
 import { AddFinanceTransactionModal } from './components/finance/modals/AddFinanceTransactionModal';
 import { LoadingScreen } from './components/LoadingScreen';
-import { LessonAlarmModal } from './components/LessonAlarmModal';
 
 import { useLessonReminders } from './hooks/useLessonReminders';
 import { useAutomatedDailyBackup } from './hooks/useAutomatedDailyBackup';
@@ -367,8 +366,8 @@ function MainApp() {
 
   // Synchronize System Status Bar (Capacitor Android & Web Meta) with app theme
   useEffect(() => {
-    const isDark = theme === 'dark';
-    const bgColor = isDark ? '#020617' : '#FFFFFF';
+    const isDark = theme === 'dark' || theme === 'amoled';
+    const bgColor = isDark ? '#000000' : '#FFFFFF';
     // Capacitor Style.Light = Dark text/icons for light backgrounds
     // Capacitor Style.Dark  = Light text/icons for dark backgrounds
     const targetStyle = isDark ? Style.Dark : Style.Light;
@@ -635,17 +634,6 @@ function MainApp() {
         <AddFinanceTransactionModal
           type={quickTransactionType}
           onClose={() => setQuickTransactionType(null)}
-        />
-      )}
-      {activeAlarmLesson && (
-        <LessonAlarmModal
-          lesson={activeAlarmLesson}
-          onDismiss={dismissLessonAlarm}
-          onSnooze={snoozeLessonAlarm}
-          onStartNow={(lesson) => {
-            dismissLessonAlarm();
-            openLessonControl(lesson);
-          }}
         />
       )}
     </div>

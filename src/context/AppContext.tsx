@@ -1,4 +1,5 @@
 import { DEFAULT_FINANCE_CATEGORIES } from "../data/defaultFinanceCategories";
+import { applyAccentToDocument } from '../utils/colorUtils';
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   TeacherProfile, Group, Student, Lesson, PaymentRecord, NotificationItem, 
@@ -68,7 +69,8 @@ interface AppContextType {
   toggleTodo: (id: string) => void;
   deleteTodo: (id: string) => void;
   // Navigation & Theme & Language & Accent
-  theme: 'light' | 'dark';
+  theme: 'light' | 'dark' | 'amoled' | 'tinted';
+  setTheme: (t: 'light' | 'dark' | 'amoled' | 'tinted') => void;
   toggleTheme: () => void;
   language: AppLanguage;
   setLanguage: (lang: AppLanguage) => void;
@@ -228,6 +230,7 @@ interface AppContextType {
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   clearAllNotifications: () => void;
+  triggerToast: (msg: string) => void;
 
   // Notification Settings & System Scheduling Engine
   notificationSettings: NotificationSettings;
@@ -415,10 +418,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
 
   // Persistence state
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+  const [theme, setThemeState] = useState<'light' | 'dark' | 'amoled' | 'tinted'>(() => {
     const saved = initialData['dl_theme'];
-    return saved !== null && saved !== undefined ? saved : 'light';
+    return (saved === 'dark' || saved === 'amoled' || saved === 'light' || saved === 'tinted') ? saved : 'light';
   });
+
+  const setTheme = (t: 'light' | 'dark' | 'amoled' | 'tinted') => {
+    setThemeState(t);
+    storage.setItem('dl_theme', t);
+  };
+
+  const toggleTheme = () => {
+    setThemeState(prev => {
+      const next = prev === 'light' ? 'dark' : (prev === 'dark' ? 'amoled' : (prev === 'amoled' ? 'tinted' : 'light'));
+      storage.setItem('dl_theme', next);
+      return next;
+    });
+  };
 
   const [accentColor, setAccentColorState] = useState<AccentColor>(() => {
     const saved = initialData['dl_accent_color'];
@@ -431,11 +447,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   useEffect(() => {
-    const classes = ['accent-blue', 'accent-green', 'accent-purple', 'accent-orange', 'accent-red', 'accent-teal', 'accent-indigo', 'accent-rose', 'accent-amber', 'accent-emerald', 'accent-fuchsia', 'accent-cyan', 'accent-violet', 'accent-slate', 'accent-pink', 'accent-lime', 'accent-darkblue'];
-    classes.forEach(c => document.documentElement.classList.remove(c));
-    document.documentElement.classList.add(`accent-${accentColor}`);
-    
-  }, [accentColor]);
+    applyAccentToDocument(accentColor);
+  }, [accentColor, theme]);
 
   const [todos, setTodos] = useState<TodoItem[]>(() => {
     const saved = initialData['dl_quick_todos'];
@@ -1638,6 +1651,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     });
   }, [groups, students.length]);
 
+  // Global Toast System
+  const [globalToastMsg, setGlobalToastMsg] = useState<string | null>(null);
+
+  const triggerToast = useCallback((msg: string) => {
+    if (!msg) return;
+    setGlobalToastMsg(msg);
+    setTimeout(() => {
+      setGlobalToastMsg(prev => (prev === msg ? null : prev));
+    }, 3200);
+  }, []);
+
   // System Notification Settings & Scheduled Notifications Engine
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() => {
     const saved = initialData['dl_notification_settings'];
@@ -1684,15 +1708,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const [activeAlarmLesson, setActiveAlarmLesson] = useState<Lesson | null>(null);
   const [snoozedLessonAlarmMap, setSnoozedLessonAlarmMap] = useState<Record<string, number>>({});
 
-  const triggerLessonAlarm = useCallback((lesson: Lesson) => {
-    setActiveAlarmLesson(lesson);
-    if (notificationSettings.alarmModeEnabled !== false) {
-      alarmAudioService.startAlarm(
-        notificationSettings.alarmTone || 'digital',
-        notificationSettings.alarmDurationSeconds || 60
-      );
-    }
-  }, [notificationSettings.alarmModeEnabled, notificationSettings.alarmTone, notificationSettings.alarmDurationSeconds]);
+  const triggerLessonAlarm = useCallback((_lesson: Lesson) => {
+    // In-app modal alarm disabled per user request; reminders are delivered via device notifications only
+  }, []);
 
   const dismissLessonAlarm = useCallback(() => {
     alarmAudioService.stopAlarm();
@@ -1804,17 +1822,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Apply theme to DOM immediately on mount and whenever theme changes
   useEffect(() => {
-    const isDark = theme === 'dark';
-    const bgColor = isDark ? '#020617' : '#FFFFFF';
+    const isDark = theme === 'dark' || theme === 'amoled';
+    const isAmoled = theme === 'amoled';
+    const isTinted = theme === 'tinted';
+    const bgColor = isDark ? '#000000' : '#FFFFFF';
+
     if (isDark) {
       document.documentElement.classList.add('dark');
       document.documentElement.setAttribute('data-theme', 'dark');
       document.documentElement.style.colorScheme = 'dark';
     } else {
       document.documentElement.classList.remove('dark');
-      document.documentElement.setAttribute('data-theme', 'light');
+      document.documentElement.setAttribute('data-theme', isTinted ? 'tinted' : 'light');
       document.documentElement.style.colorScheme = 'light';
     }
+
+    if (isAmoled) {
+      document.documentElement.classList.add('amoled');
+      document.documentElement.setAttribute('data-amoled', 'true');
+    } else {
+      document.documentElement.classList.remove('amoled');
+      document.documentElement.removeAttribute('data-amoled');
+    }
+
+    if (isTinted) {
+      document.documentElement.classList.add('tinted');
+      document.documentElement.setAttribute('data-tinted', 'true');
+    } else {
+      document.documentElement.classList.remove('tinted');
+      document.documentElement.removeAttribute('data-tinted');
+    }
+
+    // Re-apply accent variables immediately after dark/amoled class updates
+    applyAccentToDocument(accentColor);
 
     try {
       const metas = document.querySelectorAll('meta[name="theme-color"]');
@@ -2229,10 +2269,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
     }
   }, [groups]);
-
-  const toggleTheme = () => {
-    setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
-  };
 
   const updateProfile = (updates: Partial<TeacherProfile>) => {
     setProfile(prev => {
@@ -6345,6 +6381,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         toggleTodo,
         deleteTodo,
         theme,
+        setTheme,
         toggleTheme,
         language,
         setLanguage,
@@ -6429,6 +6466,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         markNotificationRead,
         markAllNotificationsRead,
         clearAllNotifications,
+        triggerToast,
         notificationSettings,
         updateNotificationSettings,
         pendingScheduledNotifications,
@@ -6572,6 +6610,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }}
     >
       {children}
+      {globalToastMsg && (
+        <div className="fixed bottom-16 sm:bottom-6 left-1/2 -translate-x-1/2 z-[9999] bg-slate-900/95 dark:bg-slate-100/95 text-white dark:text-slate-900 text-xs font-bold px-4 py-2.5 rounded-full shadow-2xl border border-slate-700 dark:border-slate-300 flex items-center gap-2 animate-scale-up backdrop-blur-md max-w-[90vw] text-center">
+          <span className="w-2 h-2 rounded-full bg-primary shrink-0 animate-ping" />
+          <span>{globalToastMsg}</span>
+        </div>
+      )}
     </AppContext.Provider>
   );
 };

@@ -107,7 +107,20 @@ export function generateTermVisitPlan(
   // Preserve arrays and records if directly on schoolSettingsRaw
   const teachers = schoolSettingsRaw?.teachers || schoolSettings.teachers || [];
   const teacherSchedules = schoolSettingsRaw?.teacherSchedules || schoolSettings.teacherSchedules || {};
-  const historicalVisits = schoolSettingsRaw?.visitRecords || schoolSettings.visitRecords || [];
+  
+  // Combine all sources of visit records (visitRecords, hodVisits) to ensure zero data loss
+  const rawVisits = [
+    ...(schoolSettingsRaw?.visitRecords || schoolSettings.visitRecords || []),
+    ...((schoolSettingsRaw as any)?.hodVisits || (schoolSettings as any)?.hodVisits || [])
+  ];
+  const visitMap = new Map<string, any>();
+  rawVisits.forEach(v => {
+    if (v && typeof v === 'object') {
+      const key = v.id || `${v.teacherId || v.teacherName}_${v.className || v.gradeClass}_${v.visitedDate || v.date || v.visitedAt}`;
+      visitMap.set(key, v);
+    }
+  });
+  const historicalVisits = Array.from(visitMap.values());
   const customTimedSessions = schoolSettingsRaw?.customTimedSessions || schoolSettings.customTimedSessions || [];
 
   // 1. Resolve Term & Dates
@@ -166,23 +179,51 @@ export function generateTermVisitPlan(
 
   // 3. Reconcile Historical Visit Records (Source of Truth)
   const termVisits = historicalVisits.filter(v => {
-    if (!v.visitedDate) return false;
+    if (!v) return false;
+
     // Exclude cancelled visits
     const statusLower = ((v as any).status || '').toString().toLowerCase();
     if (statusLower.includes('cancel') || statusLower.includes('ملغ')) return false;
 
-    const matchesTermName = v.term && v.term.trim().toLowerCase() === term.trim().toLowerCase();
-    const withinTermDates = v.visitedDate >= startDate && v.visitedDate <= endDate;
+    const vDate = v.visitedDate || v.date || v.visitedAt || (v as any).createdAt;
 
-    if (matchesTermName && withinTermDates) return true;
-    if (withinTermDates) return true;
-    return false;
+    // Term name check (flexible)
+    const vTermClean = (v.term || '').toString().trim().toLowerCase();
+    const currentTermClean = (term || '').toString().trim().toLowerCase();
+    const matchesTermName = !v.term || 
+                            vTermClean === currentTermClean || 
+                            vTermClean.includes('term') || 
+                            vTermClean.includes('الفصل') || 
+                            currentTermClean.includes('term');
+
+    // Date range check
+    let withinTermDates = true;
+    if (vDate) {
+      const dateStr = String(vDate).split('T')[0];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        withinTermDates = dateStr >= startDate && dateStr <= endDate;
+      }
+    }
+
+    return matchesTermName || withinTermDates;
   });
 
   // Mark completed requirements
   termVisits.forEach(v => {
+    const vClass = v.className || v.gradeClass || v.class;
+    const vTeacherId = v.teacherId;
+    const vTeacherName = (v.teacherName || '').toString().trim().toLowerCase();
+
     requirementsMap.forEach(req => {
-      if (req.teacherId === v.teacherId && isMatchingClass(req.gradeClass, v.className)) {
+      const reqTeacherName = (req.teacherName || '').toString().trim().toLowerCase();
+      const teacherMatches = (vTeacherId && req.teacherId === vTeacherId) || 
+                             (vTeacherName && reqTeacherName && (
+                               vTeacherName === reqTeacherName || 
+                               vTeacherName.includes(reqTeacherName) || 
+                               reqTeacherName.includes(vTeacherName)
+                             ));
+
+      if (teacherMatches && isMatchingClass(req.gradeClass, vClass)) {
         req.completedVisitsCount += 1;
         if (req.completedVisitsCount >= req.requiredVisitsCount) {
           req.isSatisfied = true;

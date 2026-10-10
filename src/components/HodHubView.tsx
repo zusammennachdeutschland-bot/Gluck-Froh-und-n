@@ -55,6 +55,8 @@ export const HodHubView: React.FC = () => {
     updateSchoolNote, 
     deleteSchoolNote, 
     hodStudents, 
+    hodVisits,
+    setHodVisits,
     language, 
     _t, 
     t, 
@@ -132,9 +134,16 @@ export const HodHubView: React.FC = () => {
         storage.getItem<any[]>('hod_visit_records')
       ]);
 
+      // Merge all visit sources for true total count
+      const allVisitMap = new Map<string, any>();
+      (storedVisits || []).forEach((v: any) => v?.id && allVisitMap.set(v.id, v));
+      (schoolSettings.visitRecords || []).forEach((v: any) => v?.id && allVisitMap.set(v.id, v));
+      (hodVisits || []).forEach((v: any) => v?.id && allVisitMap.set(v.id, v));
+      (visitRecords || []).forEach((v: any) => v?.id && allVisitMap.set(v.id, v));
+
       // Calculate true KPIs
       const kpiData = {
-        visitsCount: storedVisits ? storedVisits.length : visitRecords.length,
+        visitsCount: allVisitMap.size,
         activePlansCount: storedPlans ? storedPlans.length : activePlans.length,
         pendingComplaintsCount: storedComplaints ? storedComplaints.filter(c => c.status !== 'resolved').length : parentComplaints.filter(c => c.status !== 'resolved').length
       };
@@ -1323,7 +1332,25 @@ export const HodHubView: React.FC = () => {
   };
 
   // State for Visits & Booklet Observations
-  const [visitRecords, setVisitRecords] = useState<any[]>(schoolSettings.visitRecords || []);
+  const initialMergedVisits = useMemo(() => {
+    const map = new Map<string, any>();
+    (schoolSettings.visitRecords || []).forEach((v: any) => v?.id && map.set(v.id, v));
+    (hodVisits || []).forEach((v: any) => v?.id && map.set(v.id, v));
+    return Array.from(map.values());
+  }, [schoolSettings.visitRecords, hodVisits]);
+
+  const [visitRecords, setVisitRecords] = useState<any[]>(initialMergedVisits);
+
+  useEffect(() => {
+    if (initialMergedVisits.length > 0) {
+      setVisitRecords(prev => {
+        const map = new Map<string, any>();
+        prev.forEach((v: any) => v?.id && map.set(v.id, v));
+        initialMergedVisits.forEach((v: any) => v?.id && map.set(v.id, v));
+        return Array.from(map.values());
+      });
+    }
+  }, [initialMergedVisits]);
   const [bookletObservations, setBookletObservations] = useState<any[]>(schoolSettings.bookletObservations || []);
   const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
   const [obsInitialTeacherId, setObsInitialTeacherId] = useState<string | undefined>(undefined);
@@ -1999,6 +2026,9 @@ export const HodHubView: React.FC = () => {
       ...updates
     };
     updateProfile({ schoolSettings: updatedSettings });
+    if (updates.visitRecords && setHodVisits) {
+      setHodVisits(updates.visitRecords);
+    }
   };
 
   // Handlers for Visits
@@ -4123,8 +4153,15 @@ export const HodHubView: React.FC = () => {
                           
                           {/* Visit Coverage Progress Bar */}
                           {!teacher.isHod && teacher.workload.assignedClasses.length > 0 && (() => {
-                            const teacherVisits = visitRecords.filter(v => v.teacherId === teacher.id && v.term === (schoolSettings.currentTerm || 'Term 1'));
-                            const uniqueClassesVisited = new Set(teacherVisits.map(v => v.className).filter(c => c && c !== 'Manual Entry')).size;
+                            const teacherVisits = visitRecords.filter(v => {
+                              const tMatch = (v.teacherId && v.teacherId === teacher.id) || 
+                                             (v.teacherName && teacher.name && v.teacherName.trim().toLowerCase() === teacher.name.trim().toLowerCase());
+                              const termClean = (v.term || '').toString().toLowerCase();
+                              const currTermClean = (schoolSettings.currentTerm || 'Term 1').toString().toLowerCase();
+                              const termMatch = !v.term || termClean === currTermClean || termClean.includes('term') || termClean.includes('الفصل');
+                              return tMatch && termMatch;
+                            });
+                            const uniqueClassesVisited = new Set(teacherVisits.map(v => v.className || v.gradeClass).filter(c => c && c !== 'Manual Entry')).size;
                             const totalAssignedClasses = teacher.workload.assignedClasses.length;
                             const progress = Math.min((uniqueClassesVisited / totalAssignedClasses) * 100, 100);
                             return (
