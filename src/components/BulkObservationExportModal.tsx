@@ -15,13 +15,15 @@ import {
   FileText,
   CheckCircle2,
   Clock,
-  RotateCcw
+  RotateCcw,
+  Save
 } from 'lucide-react';
 import { VisitRecord, SchoolSettings, Teacher } from '../types';
 import {
   downloadCombinedObservationReportsPdf,
   printCombinedObservationReports,
-  printObservationReport
+  printObservationReport,
+  saveCombinedReportsToPhoneStorage
 } from '../utils/printObservationUtils';
 import { useApp } from '../context/AppContext';
 
@@ -63,8 +65,37 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedVisitIds, setSelectedVisitIds] = useState<Set<string>>(new Set());
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isSavingPhone, setIsSavingPhone] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ current: number; total: number } | null>(null);
   const [isPrinting, setIsPrinting] = useState(false);
+
+  const handleSaveCombinedToPhoneStorage = async () => {
+    if (selectedVisitsList.length === 0 || isSavingPhone || isExportingPdf) return;
+
+    try {
+      setIsSavingPhone(true);
+      setExportProgress({ current: 1, total: selectedVisitsList.length });
+
+      await saveCombinedReportsToPhoneStorage(
+        selectedVisitsList,
+        schoolSettings,
+        isRtl,
+        effectiveReportLang,
+        (current, total) => {
+          setExportProgress({ current, total });
+        }
+      );
+
+      if (onMarkVisitsDownloaded) {
+        onMarkVisitsDownloaded(selectedVisitsList.map(v => v.id), true);
+      }
+    } catch (err) {
+      console.error('Failed to save combined reports to phone storage:', err);
+    } finally {
+      setIsSavingPhone(false);
+      setExportProgress(null);
+    }
+  };
 
   // Available terms from visits or settings
   const termsList = useMemo(() => {
@@ -577,6 +608,20 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
               className="h-9 px-3 text-xs font-bold text-text-muted hover:text-text-main bg-surface hover:bg-surface-hover border border-surface-border rounded-xl transition-all cursor-pointer shrink-0"
             >
               {_t('إغلاق', 'Close', 'Schließen')}
+            </button>
+
+            <button
+              onClick={handleSaveCombinedToPhoneStorage}
+              disabled={selectedVisitsList.length === 0 || isSavingPhone || isExportingPdf || isPrinting}
+              className="h-9 px-3 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 dark:text-amber-300 dark:bg-amber-950/60 dark:hover:bg-amber-900 border border-amber-300/80 dark:border-amber-800 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50 disabled:pointer-events-none shrink-0"
+              title={_t('حفظ التقرير المجمّع في مساحة الهاتف', 'Save combined report to phone storage', 'Auf Telefon speichern')}
+            >
+              {isSavingPhone ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700 dark:text-amber-400" />
+              ) : (
+                <Save className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+              )}
+              <span>{_t(`حفظ بالهاتف (${selectedVisitsList.length}) 📱`, `Save to Phone (${selectedVisitsList.length}) 📱`, `Auf Telefon (${selectedVisitsList.length}) 📱`)}</span>
             </button>
 
             <button

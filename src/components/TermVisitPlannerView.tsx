@@ -3,13 +3,13 @@ import { useApp } from '../context/AppContext';
 import { 
   Calendar, Clock, CheckCircle2, AlertTriangle, RefreshCw, Printer, Download,
   Filter, Users, User, BookOpen, Layers, Check, X, ShieldAlert, Sparkles,
-  ChevronRight, ArrowRight, Eye, Edit3, Plus, ArrowLeftRight, FileText, ChevronDown, ChevronUp
+  ChevronRight, ArrowRight, Eye, Edit3, Plus, ArrowLeftRight, FileText, ChevronDown, ChevronUp, Save
 } from 'lucide-react';
 import { 
   generateTermVisitPlan, getDefaultTermDates, GenerationResult 
 } from '../services/termVisitPlannerService';
 import { 
-  downloadTermVisitPlanPdf, printTermVisitPlanReport 
+  downloadTermVisitPlanPdf, printTermVisitPlanReport, saveTermVisitPlanToPhoneStorage 
 } from '../utils/termVisitPrintUtils';
 import { PlannedVisitRecord, VisitPlannerStatus, TermVisitRequirement } from '../types';
 
@@ -88,14 +88,25 @@ export const TermVisitPlannerView: React.FC = () => {
     }
   };
 
-  // Handle PDF Export
+  // Handle PDF Export (Visits and their Plan)
   const handleExportPdf = async () => {
-    triggerToast(_t('جاري إنشاء تقرير خطة الزيارات PDF...', 'Generating Principal PDF Report...', 'PDF-Bericht wird erstellt...'));
+    triggerToast(_t('جاري إنشاء وتحميل تقرير الزيارات وخطتها PDF...', 'Generating Visits & Plan PDF Report...', 'PDF-Bericht wird erstellt...'));
     const res = await downloadTermVisitPlanPdf(planResult, schoolSettings, isRtl, language);
     if (res.success) {
-      triggerToast(_t('تم تحميل تقرير الخطة بنجاح 📄', 'PDF Report downloaded successfully 📄', 'PDF heruntergeladen 📄'));
+      triggerToast(_t('تم تحميل تقرير الزيارات وخطتها بنجاح 📄', 'Visits & Plan report downloaded successfully 📄', 'PDF heruntergeladen 📄'));
     } else {
-      triggerToast(_t('تعذر تحميل التقرير', 'Failed to generate PDF', 'PDF-Generierung fehlgeschlagen'));
+      triggerToast(_t('تعذر تحميل التقرير، يرجى تجربة زر حفظ بالهاتف أو الطباعة', 'Failed to generate PDF, try Save to Phone or Print', 'PDF-Generierung fehlgeschlagen'));
+    }
+  };
+
+  // Handle Save to Phone Storage
+  const handleSaveToPhone = async () => {
+    triggerToast(_t('جاري حفظ تقرير الزيارات والخطة بمساحة الهاتف...', 'Saving report to phone storage...', 'Wird im Telefonspeicher gesichert...'));
+    const res = await saveTermVisitPlanToPhoneStorage(planResult, schoolSettings, isRtl, language);
+    if (res.success) {
+      triggerToast(_t('تم حفظ تقرير الزيارات والخطة بنجاح في مساحة الهاتف 📱', 'Visit plan report saved to phone storage successfully 📱', 'Erfolgreich auf Telefon gespeichert 📱'));
+    } else {
+      triggerToast(_t('تعذر حفظ التقرير في مساحة الهاتف', 'Failed to save report to phone storage', 'Fehler beim Speichern'));
     }
   };
 
@@ -194,40 +205,37 @@ export const TermVisitPlannerView: React.FC = () => {
         </div>
       )}
 
-      {/* Top Header & Export Controls */}
-      <div className="p-3.5 bg-surface border border-surface-border rounded-2xl shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-primary/10 text-primary rounded-xl shrink-0">
-            <Calendar className="w-5 h-5" />
+      {/* Top Header & Export Controls - Ultra-Compact & Shifting Everything Upwards */}
+      <div className="p-2 sm:p-2.5 bg-surface border border-surface-border rounded-xl shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 bg-primary/10 text-primary rounded-lg shrink-0">
+            <Calendar className="w-4 h-4" />
           </div>
-          <div>
-            <h2 className="text-sm font-black text-text-main flex items-center gap-1.5">
-              <span>{_t('مُخطط الزيارات الصفية للفصل الدراسي', 'Term Visit Planner', 'Semester-Besuchsplaner')}</span>
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-xs sm:text-sm font-black text-text-main flex items-center gap-1.5">
+              <span>{_t('مُخطط الزيارات الصفية وخطة الفصل', 'Classroom Visits & Term Plan', 'Besuchsplaner')}</span>
               <span className="px-2 py-0.5 rounded-full bg-primary/15 text-primary text-[10px] font-black">
                 {selectedTerm}
               </span>
             </h2>
-            <p className="text-[11px] text-text-muted font-medium">
-              {_t('تخطيط وحساب الزيارات الصفية تلقائياً بناءً على جدول المعلمين وإمكانية رئيس القسم', 'Automated term visit scheduling based on teacher & HOD timetables', 'Automatische Unterrichtsbesuchsplanung')}
-            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <button
             type="button"
             onClick={() => setShowConfigDrawer(!showConfigDrawer)}
-            className="px-3 py-1.5 rounded-xl bg-surface-hover hover:bg-surface-border border border-surface-border text-text-main font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="px-2.5 py-1 rounded-lg bg-surface-hover hover:bg-surface-border border border-surface-border text-text-main font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
           >
             <Clock className="w-3.5 h-3.5 text-primary" />
-            <span>{_t('إعدادات الخطة', 'Plan Config', 'Konfiguration')}</span>
-            {showConfigDrawer ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            <span>{_t('إعدادات الخطة', 'Plan Config', 'Konfig')}</span>
+            {showConfigDrawer ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           </button>
 
           <button
             type="button"
             onClick={() => setShowRegenConfirm(true)}
-            className="px-3 py-1.5 rounded-xl bg-surface-hover hover:bg-surface-border border border-surface-border text-text-main font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="px-2.5 py-1 rounded-lg bg-surface-hover hover:bg-surface-border border border-surface-border text-text-main font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-primary ${isGenerating ? 'animate-spin' : ''}`} />
             <span>{_t('إعادة الحساب', 'Recalculate', 'Neu berechnen')}</span>
@@ -236,7 +244,8 @@ export const TermVisitPlannerView: React.FC = () => {
           <button
             type="button"
             onClick={handlePrint}
-            className="px-3 py-1.5 rounded-xl bg-surface-hover hover:bg-surface-border border border-surface-border text-text-main font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="px-2.5 py-1 rounded-lg bg-surface-hover hover:bg-surface-border border border-surface-border text-text-main font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
+            title={_t('طباعة فورية للتقرير', 'Direct Print', 'Drucken')}
           >
             <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
             <span>{_t('طباعة', 'Print', 'Drucken')}</span>
@@ -244,11 +253,22 @@ export const TermVisitPlannerView: React.FC = () => {
 
           <button
             type="button"
+            onClick={handleSaveToPhone}
+            className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-extrabold flex items-center gap-1 cursor-pointer shadow-xs transition-all active:scale-95 text-xs"
+            title={_t('حفظ التقرير مباشرة في مساحة تخزين الهاتف والملفات', 'Save report directly to phone storage and files', 'Auf Telefonspeicher sichern')}
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>{_t('حفظ بالهاتف 📱', 'Save to Phone 📱', 'Auf Telefon 📱')}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleExportPdf}
-            className="px-3 py-1.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-black flex items-center gap-1.5 cursor-pointer shadow-xs transition-all active:scale-95"
+            className="px-3 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white font-black flex items-center gap-1.5 cursor-pointer shadow-xs transition-all active:scale-95 text-xs"
+            title={_t('تحميل ملف PDF المعتمد للزيارات وخطتها', 'Download approved PDF report for visits and their plan', 'PDF herunterladen')}
           >
             <Download className="w-3.5 h-3.5" />
-            <span>{_t('تقرير المدير (PDF)', 'Principal PDF Report', 'Direktor-PDF')}</span>
+            <span>{_t('تحميل الزيارات وخطتها (PDF)', 'Download Visits & Plan (PDF)', 'Besuche & Plan (PDF)')}</span>
           </button>
         </div>
       </div>
@@ -335,41 +355,41 @@ export const TermVisitPlannerView: React.FC = () => {
         </div>
       )}
 
-      {/* KPI Stats Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        <div className="p-3 bg-surface border border-surface-border rounded-2xl shadow-2xs flex flex-col items-center justify-center text-center">
-          <span className="text-xs font-bold text-text-muted">{_t('إجمالي المطلوبة', 'Total Required', 'Gesamt erfordert')}</span>
-          <span className="text-xl font-black text-text-main mt-0.5">{planResult.summary.totalRequirements}</span>
+      {/* KPI Stats Bar - Ultra-Compact Strip */}
+      <div className="grid grid-cols-5 gap-1.5 p-1.5 bg-surface border border-surface-border rounded-xl text-center text-xs">
+        <div className="p-1 bg-surface-hover rounded-lg">
+          <span className="text-[10px] font-bold text-text-muted block leading-tight">{_t('المطلوبة', 'Required', 'Erfordert')}</span>
+          <span className="text-xs sm:text-sm font-black text-text-main">{planResult.summary.totalRequirements}</span>
         </div>
 
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl shadow-2xs flex flex-col items-center justify-center text-center">
-          <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">{_t('منفذة (مكتملة)', 'Completed Visits', 'Abgeschlossen')}</span>
-          <span className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">{planResult.summary.completedCount}</span>
+        <div className="p-1 bg-emerald-500/10 rounded-lg">
+          <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 block leading-tight">{_t('المنفذة', 'Completed', 'Erledigt')}</span>
+          <span className="text-xs sm:text-sm font-black text-emerald-600 dark:text-emerald-400">{planResult.summary.completedCount}</span>
         </div>
 
-        <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl shadow-2xs flex flex-col items-center justify-center text-center">
-          <span className="text-xs font-bold text-blue-700 dark:text-blue-400">{_t('مجدولة مقدماً', 'Planned Visits', 'Geplant')}</span>
-          <span className="text-xl font-black text-blue-600 dark:text-blue-400 mt-0.5">{planResult.summary.plannedCount}</span>
+        <div className="p-1 bg-blue-500/10 rounded-lg">
+          <span className="text-[10px] font-bold text-blue-700 dark:text-blue-400 block leading-tight">{_t('المجدولة', 'Planned', 'Geplant')}</span>
+          <span className="text-xs sm:text-sm font-black text-blue-600 dark:text-blue-400">{planResult.summary.plannedCount}</span>
         </div>
 
-        <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-2xl shadow-2xs flex flex-col items-center justify-center text-center">
-          <span className="text-xs font-bold text-rose-700 dark:text-rose-400">{_t('غير مجدولة (تعارض)', 'Unscheduled', 'Ungeplant')}</span>
-          <span className="text-xl font-black text-rose-600 dark:text-rose-400 mt-0.5">{planResult.summary.unscheduledCount}</span>
+        <div className="p-1 bg-rose-500/10 rounded-lg">
+          <span className="text-[10px] font-bold text-rose-700 dark:text-rose-400 block leading-tight">{_t('غير مجدولة', 'Unscheduled', 'Ungeplant')}</span>
+          <span className="text-xs sm:text-sm font-black text-rose-600 dark:text-rose-400">{planResult.summary.unscheduledCount}</span>
         </div>
 
-        <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl shadow-2xs flex flex-col items-center justify-center text-center col-span-2 sm:col-span-1">
-          <span className="text-xs font-bold text-amber-700 dark:text-amber-400">{_t('نسبة التغطية المكتملة', 'Verified Coverage', 'Abdeckung')}</span>
-          <span className="text-xl font-black text-amber-600 dark:text-amber-400 mt-0.5">{planResult.summary.coveragePercentage}%</span>
+        <div className="p-1 bg-amber-500/10 rounded-lg">
+          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 block leading-tight">{_t('التغطية', 'Coverage', 'Abdeckung')}</span>
+          <span className="text-xs sm:text-sm font-black text-amber-600 dark:text-amber-400">{planResult.summary.coveragePercentage}%</span>
         </div>
       </div>
 
-      {/* Filter & View Switcher Toolbar */}
-      <div className="p-2.5 bg-surface border border-surface-border rounded-2xl shadow-2xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2">
+      {/* Filter & View Switcher Toolbar - Ultra-Compact */}
+      <div className="p-1.5 sm:p-2 bg-surface border border-surface-border rounded-xl shadow-2xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-1.5">
         {/* View Modes */}
-        <div className="flex items-center gap-1 bg-surface-hover p-1 rounded-xl border border-surface-border shrink-0">
+        <div className="flex items-center gap-1 bg-surface-hover p-0.5 rounded-lg border border-surface-border shrink-0">
           {[
             { id: 'schedule', label: _t('الجدول الزمني', 'Schedule', 'Zeitplan') },
-            { id: 'weekly', label: _t('أسسبوعي', 'Weekly', 'Wöchentlich') },
+            { id: 'weekly', label: _t('أسبوعي', 'Weekly', 'Wöchentlich') },
             { id: 'teachers', label: _t('حسب المعلم', 'By Teacher', 'Nach Lehrer') },
             { id: 'requirements', label: _t('المتطلبات', 'Requirements', 'Anforderungen') },
           ].map(m => (
@@ -377,7 +397,7 @@ export const TermVisitPlannerView: React.FC = () => {
               key={m.id}
               type="button"
               onClick={() => setActiveViewMode(m.id as any)}
-              className={`px-2.5 py-1 rounded-lg font-bold text-xs cursor-pointer transition-all ${
+              className={`px-2 py-0.5 rounded-md font-bold text-[11px] sm:text-xs cursor-pointer transition-all ${
                 activeViewMode === m.id
                   ? 'bg-primary text-white shadow-2xs'
                   : 'text-text-muted hover:text-text-main'
@@ -389,19 +409,25 @@ export const TermVisitPlannerView: React.FC = () => {
         </div>
 
         {/* Search & Dropdown Filters */}
-        <div className="flex items-center gap-2 flex-wrap flex-1 justify-end">
+        <div className="flex items-center gap-1.5 flex-wrap flex-1 justify-end">
+          {planResult.conflicts.length > 0 && (
+            <span className="px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-700 dark:text-rose-400 font-extrabold text-[10px] shrink-0" title={planResult.conflicts.map(c => `${c.teacherName}: ${c.reason}`).join(' | ')}>
+              ⚠️ {planResult.conflicts.length} {_t('تعارض', 'conflicts', 'Konflikte')}
+            </span>
+          )}
+
           <input
             type="text"
-            placeholder={_t('بحث باسم المعلم أو الفصل...', 'Search teacher or class...', 'Suchen...')}
+            placeholder={_t('بحث بالمعلم أو الفصل...', 'Search...', 'Suchen...')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="px-2.5 py-1 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-main w-full sm:w-48"
+            className="px-2 py-1 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold text-text-main w-full sm:w-40"
           />
 
           <select
             value={selectedTeacherFilter}
             onChange={(e) => setSelectedTeacherFilter(e.target.value)}
-            className="px-2.5 py-1 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-main cursor-pointer"
+            className="px-2 py-1 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold text-text-main cursor-pointer"
           >
             <option value="all">{_t('جميع المعلمين', 'All Teachers', 'Alle Lehrer')}</option>
             {teachersList.map(t => (
@@ -412,7 +438,7 @@ export const TermVisitPlannerView: React.FC = () => {
           <select
             value={selectedStatusFilter}
             onChange={(e) => setSelectedStatusFilter(e.target.value)}
-            className="px-2.5 py-1 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-main cursor-pointer"
+            className="px-2 py-1 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold text-text-main cursor-pointer"
           >
             <option value="all">{_t('جميع الحالات', 'All Statuses', 'Alle Status')}</option>
             <option value="completed">{_t('مكتملة', 'Completed', 'Abgeschlossen')}</option>
@@ -423,7 +449,7 @@ export const TermVisitPlannerView: React.FC = () => {
           <select
             value={selectedClassFilter}
             onChange={(e) => setSelectedClassFilter(e.target.value)}
-            className="px-2.5 py-1 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-main cursor-pointer"
+            className="px-2 py-1 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold text-text-main cursor-pointer"
           >
             <option value="all">{_t('جميع الفصول', 'All Classes', 'Alle Klassen')}</option>
             {uniqueClasses.map(c => (
@@ -432,28 +458,6 @@ export const TermVisitPlannerView: React.FC = () => {
           </select>
         </div>
       </div>
-
-      {/* Conflicts Banner Notice */}
-      {planResult.conflicts.length > 0 && (
-        <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-start gap-2 text-rose-700 dark:text-rose-400">
-          <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <p className="font-extrabold text-xs">
-              {_t(`تنبيه تعارضات: يوجد (${planResult.conflicts.length}) متطلبات زيارة يتعذر جدولتها تلقائياً بسبب عدم تقاطع فترات التفرغ`, `Conflict Notice: (${planResult.conflicts.length}) visit requirements could not be auto-scheduled due to timetable conflicts`, 'Konflikte beim Erstellen')}
-            </p>
-            <div className="text-[11px] font-medium opacity-90">
-              {planResult.conflicts.slice(0, 3).map((c, i) => (
-                <div key={i}>• {c.teacherName} ({c.className}): {c.reason}</div>
-              ))}
-              {planResult.conflicts.length > 3 && (
-                <div className="font-bold border-t border-rose-500/20 pt-1 mt-1">
-                  {_t(`+ ${planResult.conflicts.length - 3} تعارضات إضافية مذكورة بالتقرير التفصيلي`, `+ ${planResult.conflicts.length - 3} more conflicts listed in full report`, '')}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* VIEW 1: FULL CHRONOLOGICAL SCHEDULE */}
       {activeViewMode === 'schedule' && (

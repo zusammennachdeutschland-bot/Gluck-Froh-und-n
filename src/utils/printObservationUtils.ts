@@ -462,8 +462,12 @@ export function prepareClonedDocForHtml2Canvas(clonedDoc: Document) {
         if (s.parentNode) s.parentNode.removeChild(s);
       } else if (s.tagName === 'STYLE') {
         const txt = s.textContent || '';
-        if (txt.includes('oklch') || txt.includes('color-mix') || txt.includes('light-dark') || txt.includes('@import')) {
+        const isReportStyle = txt.includes('.report-page') || txt.includes('.stage-first-page') || txt.includes('.certificate-root') || txt.includes('.action-plan-report');
+        if (isReportStyle) {
           s.textContent = sanitizeModernCssColors(txt);
+        } else {
+          // Remove parent Tailwind v4 / Vite stylesheets that crash html2canvas parser
+          if (s.parentNode) s.parentNode.removeChild(s);
         }
       }
     });
@@ -474,8 +478,12 @@ export function prepareClonedDocForHtml2Canvas(clonedDoc: Document) {
   try {
     const styles = clonedDoc.querySelectorAll('style');
     styles.forEach(s => {
-      if (s.textContent) {
-        s.textContent = sanitizeModernCssColors(s.textContent);
+      const txt = s.textContent || '';
+      const isReportStyle = txt.includes('.report-page') || txt.includes('.stage-first-page') || txt.includes('.certificate-root') || txt.includes('.action-plan-report');
+      if (isReportStyle) {
+        s.textContent = sanitizeModernCssColors(txt);
+      } else {
+        if (s.parentNode) s.parentNode.removeChild(s);
       }
     });
   } catch (e) {
@@ -1661,6 +1669,167 @@ export async function downloadActionPlansPdf(
     if (document.body.contains(container)) {
       document.body.removeChild(container);
     }
+  }
+}
+
+export function saveReportAsOfflineHtml(htmlContent: string, fileName: string) {
+  const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = fileName.endsWith('.html') ? fileName : `${fileName}.html`;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => {
+    if (document.body.contains(link)) document.body.removeChild(link);
+    URL.revokeObjectURL(blobUrl);
+  }, 4000);
+}
+
+export async function saveReportToPhoneStorage(
+  visit: VisitRecord,
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string
+): Promise<{ success: boolean; filename: string; method: 'pdf' | 'share' | 'html'; error?: string }> {
+  const safeTeacherName = (visit.teacherName || 'Teacher').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+  const safeClassName = (visit.className || 'Class').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+  const dateStr = visit.visitedDate || new Date().toISOString().split('T')[0];
+  const pdfFileName = `تقرير_زيارة_${safeTeacherName}_${safeClassName}_${dateStr}.pdf`;
+  const htmlFileName = `تقرير_زيارة_${safeTeacherName}_${safeClassName}_${dateStr}.html`;
+
+  try {
+    const pdf = await generateObservationReportPdfInstance(visit, settings, isRtl, lang);
+    const blob = pdf.output('blob');
+
+    if (Capacitor.isNativePlatform()) {
+      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      const savedFile = await Filesystem.writeFile({
+        path: pdfFileName,
+        data: pdfBase64,
+        directory: Directory.Cache
+      });
+      await Share.share({
+        title: `تقرير زيارة - ${visit.teacherName}`,
+        url: savedFile.uri
+      });
+      return { success: true, filename: pdfFileName, method: 'pdf' };
+    }
+
+    const pdfFile = new File([blob], pdfFileName, { type: 'application/pdf' });
+    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+      try {
+        await navigator.share({
+          files: [pdfFile],
+          title: `تقرير زيارة صفية - ${visit.teacherName}`,
+          text: `تقرير زيارة صفية للمعلم: ${visit.teacherName}`
+        });
+        return { success: true, filename: pdfFileName, method: 'share' };
+      } catch (shareErr: any) {
+        if (shareErr?.name === 'AbortError') {
+          return { success: true, filename: pdfFileName, method: 'share' };
+        }
+      }
+    }
+
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = pdfFileName;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+
+    setTimeout(() => {
+      if (document.body.contains(link)) document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    }, 4000);
+
+    return { success: true, filename: pdfFileName, method: 'pdf' };
+  } catch (pdfErr) {
+    console.warn('PDF generation encountered issue, saving offline HTML report as fallback:', pdfErr);
+  }
+
+  try {
+    const htmlContent = generateObservationReportHtml(visit, settings, isRtl, lang, false);
+    saveReportAsOfflineHtml(htmlContent, htmlFileName);
+    return { success: true, filename: htmlFileName, method: 'html' };
+  } catch (htmlErr: any) {
+    return { success: false, filename: '', method: 'html', error: htmlErr?.message || 'Save failed' };
+  }
+}
+
+export async function saveCombinedReportsToPhoneStorage(
+  visits: VisitRecord[],
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<{ success: boolean; filename: string; method: 'pdf' | 'share' | 'html'; error?: string }> {
+  if (!visits || visits.length === 0) {
+    return { success: false, filename: '', method: 'pdf', error: 'No visits selected' };
+  }
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const pdfFileName = `تقارير_زيارات_مجمعة_${visits.length}_${dateStr}.pdf`;
+  const htmlFileName = `تقارير_زيارات_مجمعة_${visits.length}_${dateStr}.html`;
+
+  try {
+    const pdf = await generateCombinedObservationReportsPdfInstance(visits, settings, isRtl, lang, onProgress);
+    const blob = pdf.output('blob');
+
+    if (Capacitor.isNativePlatform()) {
+      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      const savedFile = await Filesystem.writeFile({
+        path: pdfFileName,
+        data: pdfBase64,
+        directory: Directory.Cache
+      });
+      await Share.share({
+        title: `تقارير زيارات صفية مجمعة (${visits.length})`,
+        url: savedFile.uri
+      });
+      return { success: true, filename: pdfFileName, method: 'pdf' };
+    }
+
+    const pdfFile = new File([blob], pdfFileName, { type: 'application/pdf' });
+    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+      try {
+        await navigator.share({
+          files: [pdfFile],
+          title: `تقارير زيارات صفية مجمعة (${visits.length})`
+        });
+        return { success: true, filename: pdfFileName, method: 'share' };
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return { success: true, filename: pdfFileName, method: 'share' };
+      }
+    }
+
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = pdfFileName;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+
+    setTimeout(() => {
+      if (document.body.contains(link)) document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    }, 4000);
+
+    return { success: true, filename: pdfFileName, method: 'pdf' };
+  } catch (pdfErr) {
+    console.warn('Combined PDF export error, saving offline HTML fallback package:', pdfErr);
+  }
+
+  try {
+    const combinedHtml = generateCombinedObservationReportsHtml(visits, settings, isRtl, lang, false);
+    saveReportAsOfflineHtml(combinedHtml, htmlFileName);
+    return { success: true, filename: htmlFileName, method: 'html' };
+  } catch (htmlErr: any) {
+    return { success: false, filename: '', method: 'html', error: htmlErr?.message || 'Save failed' };
   }
 }
 

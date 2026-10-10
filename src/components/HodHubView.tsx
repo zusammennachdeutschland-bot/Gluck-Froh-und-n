@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Users, Calendar, BookOpen, FileText, CheckCircle2, AlertTriangle, Clock, Plus, Trash2, Edit3, Send, Sparkles, Printer, Check, X, Shield, FileCheck, Layers, ChevronRight, RefreshCw, RotateCcw, Upload, Phone, MessageCircle, Copy, MapPin, Eye, Target, ClipboardList, Award, BarChart3, Download, Loader2, GraduationCap, Tag, CheckSquare, Square, Pin, Search, MessageSquare, AlertCircle, Bookmark, Coffee } from 'lucide-react';
+import { Users, Calendar, BookOpen, FileText, CheckCircle2, AlertTriangle, Clock, Plus, Trash2, Edit3, Send, Sparkles, Printer, Check, X, Shield, FileCheck, Layers, ChevronRight, RefreshCw, RotateCcw, Upload, Phone, MessageCircle, Copy, MapPin, Eye, Target, ClipboardList, Award, BarChart3, Download, Loader2, GraduationCap, Tag, CheckSquare, Square, Pin, Search, MessageSquare, AlertCircle, Bookmark, Coffee, Save } from 'lucide-react';
 import { calculatePeriodsTimings, parseTimeToMinutes, getCustomSessionsForPeriod, getUnmatchedCustomSessions, getMergedDayScheduleItems } from '../utils/schoolUtils';
 import { 
   printObservationReport, 
@@ -10,7 +10,9 @@ import {
   shareStageFollowUpViaWhatsApp,
   printStageFollowUpReport,
   downloadCombinedObservationReportsPdf,
-  printCombinedObservationReports
+  printCombinedObservationReports,
+  saveReportToPhoneStorage,
+  saveCombinedReportsToPhoneStorage
 } from '../utils/printObservationUtils';
 import {
   downloadSingleWeeklyPlanPdf,
@@ -70,25 +72,56 @@ export const HodHubView: React.FC = () => {
   const [isFabOpen, setIsFabOpen] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
-  const [activeLoadingAction, setActiveLoadingAction] = useState<{ id: string; type: 'download' | 'share' } | null>(null);
+  const [activeLoadingAction, setActiveLoadingAction] = useState<{ id: string; type: 'download' | 'share' | 'save' } | null>(null);
   const [downloadingPlanId, setDownloadingPlanId] = useState<string | null>(null);
   const [isDownloadingAllPlans, setIsDownloadingAllPlans] = useState(false);
 
   const handleDownloadPdf = async (v: any) => {
     if (!v || activeLoadingAction) return;
     setActiveLoadingAction({ id: v.id, type: 'download' });
-    triggerToast(_t('جاري إنشاء وتحميل تقرير الزيارة PDF 📄...', 'Generating and downloading visit report PDF 📄...', 'Bericht wird als PDF generiert 📄...'));
+    triggerToast(_t('جاري إنشاء وتحميل تقرير الزيارة 📄...', 'Generating visit report 📄...', 'Bericht wird generiert 📄...'));
     try {
       const res = await downloadObservationReportPdf(v, schoolSettings, (language === 'ar'), language);
       if (res?.success) {
         handleMarkVisitsDownloaded([v.id], true);
         triggerToast(_t(`تم تجهيز وتحميل تقرير الزيارة (${res.filename}) بنجاح 📥`, `Visit report downloaded successfully 📥`, `Bericht heruntergeladen 📥`));
-      } else {
-        triggerToast(_t('تعذر تحميل التقرير، يرجى المحاولة مجدداً', 'Download failed, please try again', 'Fehler beim Download'));
+        return;
       }
     } catch (err) {
-      console.error('Download PDF error:', err);
-      triggerToast(_t('حدث خطأ أثناء تحميل التقرير', 'Error downloading report', 'Fehler beim Download'));
+      console.warn('Direct PDF download encountered issue, attempting phone storage save fallback:', err);
+    }
+
+    // Automatic fallback to Phone Storage Save if direct download fails
+    try {
+      const saveRes = await saveReportToPhoneStorage(v, schoolSettings, (language === 'ar'), language);
+      if (saveRes?.success) {
+        handleMarkVisitsDownloaded([v.id], true);
+        triggerToast(_t(`تم حفظ التقرير بنجاح في مساحة الهاتف (${saveRes.filename}) 💾`, `Saved to phone storage 💾`, `Auf dem Telefon gespeichert 💾`));
+      } else {
+        triggerToast(_t('تعذر تحميل التقرير، يرجى الاستعانة بقم "طباعة"', 'Download failed, please try Print option', 'Fehler beim Download'));
+      }
+    } catch (saveErr) {
+      triggerToast(_t('تعذر تحميل التقرير، يرجى المحاولة مجدداً', 'Download failed, please try again', 'Fehler beim Download'));
+    } finally {
+      setActiveLoadingAction(null);
+    }
+  };
+
+  const handleSaveToPhoneStorage = async (v: any) => {
+    if (!v || activeLoadingAction) return;
+    setActiveLoadingAction({ id: v.id, type: 'save' });
+    triggerToast(_t('جاري حفظ التقرير في مساحة الهاتف 📱...', 'Saving report to phone storage 📱...', 'Bericht wird auf dem Telefon gespeichert 📱...'));
+    try {
+      const res = await saveReportToPhoneStorage(v, schoolSettings, (language === 'ar'), language);
+      if (res?.success) {
+        handleMarkVisitsDownloaded([v.id], true);
+        triggerToast(_t(`تم حفظ التقرير بنجاح في مساحة الهاتف (${res.filename}) 💾`, `Report saved to phone storage 💾`, `Auf dem Telefon gespeichert 💾`));
+      } else {
+        triggerToast(_t('تعذر حفظ التقرير، يرجى المحاولة مجدداً', 'Save failed, please try again', 'Fehler beim Speichern'));
+      }
+    } catch (err) {
+      console.error('Save to phone error:', err);
+      triggerToast(_t('حدث خطأ أثناء حفظ التقرير في مساحة الهاتف', 'Error saving report to phone', 'Fehler beim Speichern'));
     } finally {
       setActiveLoadingAction(null);
     }
@@ -4837,6 +4870,23 @@ export const HodHubView: React.FC = () => {
                                   </span>
                                 </button>
                                 <button
+                                  onClick={() => handleSaveToPhoneStorage(v)}
+                                  disabled={!!activeLoadingAction}
+                                  className="h-7 sm:h-8 px-2 sm:px-2.5 text-[10px] sm:text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 dark:text-amber-300 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:border-amber-800 rounded-lg transition-all duration-150 active:scale-95 flex items-center justify-center gap-1 cursor-pointer shadow-2xs disabled:opacity-60 disabled:pointer-events-none"
+                                  title={_t('حفظ في مساحة تخزين الهاتف', 'Save to Phone Storage', 'Auf Telefon speichern')}
+                                >
+                                  {activeLoadingAction?.id === v.id && activeLoadingAction?.type === 'save' ? (
+                                    <Loader2 className="w-3 h-3 animate-spin text-amber-600 dark:text-amber-400" />
+                                  ) : (
+                                    <Save className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                  )}
+                                  <span>
+                                    {activeLoadingAction?.id === v.id && activeLoadingAction?.type === 'save'
+                                      ? _t('جاري...', 'Saving...', 'Wird gespeichert...')
+                                      : _t('حفظ بالهاتف', 'Save to Phone', 'Speichern')}
+                                  </span>
+                                </button>
+                                <button
                                   onClick={() => handleDownloadPdf(v)}
                                   disabled={!!activeLoadingAction}
                                   className="h-7 sm:h-8 px-2 sm:px-2.5 text-[10px] sm:text-[11px] font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200/80 dark:text-sky-300 dark:bg-sky-950/40 dark:hover:bg-sky-900/60 dark:border-sky-800 rounded-lg transition-all duration-150 active:scale-95 flex items-center justify-center gap-1 cursor-pointer shadow-2xs disabled:opacity-60 disabled:pointer-events-none"
@@ -6466,6 +6516,23 @@ export const HodHubView: React.FC = () => {
                     {activeLoadingAction?.id === previewVisitRecord.id && activeLoadingAction?.type === 'share'
                       ? _t('جاري المشاركة...', 'Sharing...', 'Wird geteilt...')
                       : _t('مشاركة عبر واتساب', 'Share via WhatsApp', 'Über WhatsApp teilen')}
+                  </span>
+                </button>
+                <button
+                  onClick={() => handleSaveToPhoneStorage(previewVisitRecord)}
+                  disabled={!!activeLoadingAction}
+                  className="h-9 px-3.5 text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 dark:text-amber-300 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:border-amber-800 rounded-xl transition-all duration-150 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60 disabled:pointer-events-none"
+                  title={_t('حفظ التقرير مباشرة في مساحة تخزين الهاتف', 'Save directly to phone storage', 'Auf dem Telefon speichern')}
+                >
+                  {activeLoadingAction?.id === previewVisitRecord.id && activeLoadingAction?.type === 'save' ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-600 dark:text-amber-400" />
+                  ) : (
+                    <Save className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  )}
+                  <span>
+                    {activeLoadingAction?.id === previewVisitRecord.id && activeLoadingAction?.type === 'save'
+                      ? _t('جاري الحفظ...', 'Saving to phone...', 'Wird gespeichert...')
+                      : _t('حفظ في مساحة الهاتف 📱', 'Save to Phone 📱', 'Auf Telefon speichern 📱')}
                   </span>
                 </button>
                 <button
