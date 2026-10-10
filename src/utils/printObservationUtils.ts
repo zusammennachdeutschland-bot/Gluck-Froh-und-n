@@ -450,6 +450,86 @@ export function generateStageFollowUpReportHtml(
     '</html>';
 }
 
+export function prepareClonedDocForHtml2Canvas(clonedDoc: Document) {
+  try {
+    const headElements = clonedDoc.head.querySelectorAll('style, link[rel="stylesheet"]');
+    headElements.forEach(s => {
+      if (s.tagName === 'LINK') {
+        const href = (s as HTMLLinkElement).href || '';
+        if (href.includes('fonts.googleapis.com') || href.includes('fonts.gstatic.com')) {
+          return;
+        }
+        if (s.parentNode) s.parentNode.removeChild(s);
+      } else if (s.tagName === 'STYLE') {
+        const txt = s.textContent || '';
+        if (txt.includes('oklch') || txt.includes('color-mix') || txt.includes('light-dark') || txt.includes('@import')) {
+          s.textContent = sanitizeModernCssColors(txt);
+        }
+      }
+    });
+  } catch (e) {
+    console.warn('prepareClonedDoc error:', e);
+  }
+
+  try {
+    const styles = clonedDoc.querySelectorAll('style');
+    styles.forEach(s => {
+      if (s.textContent) {
+        s.textContent = sanitizeModernCssColors(s.textContent);
+      }
+    });
+  } catch (e) {
+    console.warn('sanitize styles error:', e);
+  }
+}
+
+export async function renderContainerToCanvas(
+  container: HTMLElement,
+  options?: { width?: number; height?: number }
+): Promise<HTMLCanvasElement> {
+  const width = options?.width || 794;
+  const height = options?.height || 1123;
+
+  try {
+    return await html2canvas(container, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      imageTimeout: 8000,
+      logging: false,
+      backgroundColor: '#ffffff',
+      width,
+      height,
+      windowWidth: width,
+      windowHeight: height,
+      onclone: (clonedDoc) => {
+        prepareClonedDocForHtml2Canvas(clonedDoc);
+      }
+    });
+  } catch (firstErr) {
+    console.warn('Primary html2canvas render failed, retrying with isolated document head:', firstErr);
+    return await html2canvas(container, {
+      scale: 1.5,
+      useCORS: true,
+      allowTaint: true,
+      imageTimeout: 10000,
+      logging: false,
+      backgroundColor: '#ffffff',
+      width,
+      height,
+      windowWidth: width,
+      windowHeight: height,
+      onclone: (clonedDoc) => {
+        const nodes = clonedDoc.head.querySelectorAll('style, link[rel="stylesheet"]');
+        nodes.forEach(n => {
+          if (n.tagName === 'LINK' && (n as HTMLLinkElement).href?.includes('fonts.')) return;
+          if (n.parentNode) n.parentNode.removeChild(n);
+        });
+      }
+    });
+  }
+}
+
 export async function generateStageFollowUpPdfInstance(
   record: StageFollowUpRecord,
   settings: SchoolSettings,
@@ -493,26 +573,7 @@ export async function generateStageFollowUpPdfInstance(
 
     container.innerHTML = `${styleTag1}<div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent1}</div>`;
 
-    const canvas1 = await html2canvas(container, {
-      scale: 2,
-      useCORS: true,
-      allowTaint: true,
-      imageTimeout: 5000,
-      logging: false,
-      backgroundColor: '#ffffff',
-      width: 794,
-      height: 1123,
-      windowWidth: 794,
-      windowHeight: 1123,
-      onclone: (clonedDoc) => {
-        const styles = clonedDoc.querySelectorAll('style');
-        styles.forEach(s => {
-          if (s.textContent) {
-            s.textContent = sanitizeModernCssColors(s.textContent);
-          }
-        });
-      }
-    });
+    const canvas1 = await renderContainerToCanvas(container, { width: 794, height: 1123 });
 
     const imgData1 = canvas1.toDataURL('image/jpeg', 0.95);
     const imgWidth1 = pdfWidth;
@@ -548,26 +609,7 @@ export async function generateStageFollowUpPdfInstance(
 
       container.innerHTML = `${styleTagV}<div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContentV}</div>`;
 
-      const canvasV = await html2canvas(container, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        imageTimeout: 5000,
-        logging: false,
-        backgroundColor: '#ffffff',
-        width: 794,
-        height: 1123,
-        windowWidth: 794,
-        windowHeight: 1123,
-        onclone: (clonedDoc) => {
-          const styles = clonedDoc.querySelectorAll('style');
-          styles.forEach(s => {
-            if (s.textContent) {
-              s.textContent = sanitizeModernCssColors(s.textContent);
-            }
-          });
-        }
-      });
+      const canvasV = await renderContainerToCanvas(container, { width: 794, height: 1123 });
 
       const imgDataV = canvasV.toDataURL('image/jpeg', 0.95);
       const imgWidthV = pdfWidth;
@@ -1064,26 +1106,7 @@ export async function generateCombinedObservationReportsPdfInstance(
 
       container.innerHTML = `${styleTag}<div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent}</div>`;
 
-      const canvas = await html2canvas(container, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        imageTimeout: 5000,
-        logging: false,
-        backgroundColor: '#ffffff',
-        width: 794,
-        height: 1123,
-        windowWidth: 794,
-        windowHeight: 1123,
-        onclone: (clonedDoc) => {
-          const styles = clonedDoc.querySelectorAll('style');
-          styles.forEach(s => {
-            if (s.textContent) {
-              s.textContent = sanitizeModernCssColors(s.textContent);
-            }
-          });
-        }
-      });
+      const canvas = await renderContainerToCanvas(container, { width: 794, height: 1123 });
 
       const imgData = canvas.toDataURL('image/jpeg', 0.95);
       const imgWidth = pdfWidth;
@@ -1230,26 +1253,7 @@ export async function generateObservationReportPdfInstance(
   document.body.appendChild(container);
 
   try {
-    const canvas = await html2canvas(container, {
-      scale: 2,
-      useCORS: true,
-      allowTaint: true,
-      imageTimeout: 5000,
-      logging: false,
-      backgroundColor: '#ffffff',
-      width: 794,
-      height: 1123,
-      windowWidth: 794,
-      windowHeight: 1123,
-      onclone: (clonedDoc) => {
-        const styles = clonedDoc.querySelectorAll('style');
-        styles.forEach(s => {
-          if (s.textContent) {
-            s.textContent = sanitizeModernCssColors(s.textContent);
-          }
-        });
-      }
-    });
+    const canvas = await renderContainerToCanvas(container, { width: 794, height: 1123 });
 
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
     const pdf = new jsPDF({
@@ -1625,22 +1629,7 @@ export async function downloadActionPlansPdf(
   document.body.appendChild(container);
 
   try {
-    const canvas = await html2canvas(container, {
-      scale: 2,
-      useCORS: true,
-      allowTaint: true,
-      imageTimeout: 5000,
-      logging: false,
-      backgroundColor: '#ffffff',
-      onclone: (clonedDoc) => {
-        const styles = clonedDoc.querySelectorAll('style');
-        styles.forEach(s => {
-          if (s.textContent) {
-            s.textContent = sanitizeModernCssColors(s.textContent);
-          }
-        });
-      }
-    });
+    const canvas = await renderContainerToCanvas(container, { width: 794, height: Math.max(1123, container.scrollHeight || 1123) });
 
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
     const pdf = new jsPDF('p', 'mm', 'a4');

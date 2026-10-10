@@ -16,7 +16,7 @@ import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
 import { formatLocalDate } from '../utils/timeUtils';
 
 export const StageCommunicationView: React.FC = () => {
-  const { profile, updateProfile, language, _t, reportLanguage } = useApp();
+  const { profile, updateProfile, language, _t, reportLanguage, hodVisits } = useApp();
   const effectiveReportLang = reportLanguage || language || 'ar';
   const schoolSettings = useMemo(() => profile?.schoolSettings || {} as any, [profile?.schoolSettings]);
 
@@ -27,7 +27,13 @@ export const StageCommunicationView: React.FC = () => {
   const complaints: Complaint[] = useMemo(() => schoolSettings.complaints || [], [schoolSettings.complaints]);
   const actionPlans: StudentActionPlan[] = useMemo(() => schoolSettings.actionPlans || [], [schoolSettings.actionPlans]);
   const stageFollowUps: StageFollowUpRecord[] = useMemo(() => schoolSettings.stageFollowUps || [], [schoolSettings.stageFollowUps]);
-  const visitRecords: VisitRecord[] = useMemo(() => schoolSettings.visitRecords || [], [schoolSettings.visitRecords]);
+  const visitRecords: VisitRecord[] = useMemo(() => {
+    const raw = schoolSettings.visitRecords || [];
+    const map = new Map<string, VisitRecord>();
+    raw.forEach(v => v?.id && map.set(v.id, v));
+    (hodVisits || []).forEach(v => v?.id && map.set(v.id, v));
+    return Array.from(map.values());
+  }, [schoolSettings.visitRecords, hodVisits]);
 
   // Selected Stage Manager & Report Form State
   const [selectedManager, setSelectedManager] = useState<StageManager | null>(stageManagers[0] || null);

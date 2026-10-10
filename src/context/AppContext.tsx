@@ -1357,6 +1357,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     if (!isInitializedRef.current) return;
     storage.setItem('hod_visit_records', hodVisits);
+
+    // Keep profile.schoolSettings.visitRecords synchronized with hodVisits
+    setProfile(prev => {
+      const existingSettings = prev?.schoolSettings || {};
+      const existingVisits = existingSettings.visitRecords || [];
+      const map = new Map<string, VisitRecord>();
+      existingVisits.forEach(v => v?.id && map.set(v.id, v));
+      (hodVisits || []).forEach(v => v?.id && map.set(v.id, v));
+      const merged = Array.from(map.values());
+
+      if (existingVisits.length === merged.length && merged.every((v, i) => v.id === existingVisits[i]?.id)) {
+        return prev;
+      }
+
+      const updated = {
+        ...prev,
+        schoolSettings: {
+          ...existingSettings,
+          visitRecords: merged
+        }
+      };
+      storage.setItem('dl_profile', updated);
+      return updated;
+    });
   }, [hodVisits]);
 
   // School & Lesson Notes State with SyncableRecord schema
@@ -2271,6 +2295,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   }, [groups]);
 
   const updateProfile = (updates: Partial<TeacherProfile>) => {
+    if (updates.schoolSettings?.visitRecords && Array.isArray(updates.schoolSettings.visitRecords)) {
+      setHodVisits(updates.schoolSettings.visitRecords);
+    }
     setProfile(prev => {
       const updated = { ...prev, ...updates };
       storage.setItem('dl_profile', updated);
