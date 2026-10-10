@@ -18,7 +18,7 @@ import {
 import { App as CapacitorApp } from '@capacitor/app';
 import { storage } from '../services/storageService';
 import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates } from '../utils/paymentUtils';
-import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
+import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
 import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, isGroupPerLesson } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
@@ -4428,6 +4428,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const matchingSlot = slots.find(s => getDayNumber(s.day) === dayNum);
 
       if (matchingSlot) {
+        // Alternating week check (Week A vs Week B)
+        if (!isDateMatchingGroupRecurrence(targetGroup.scheduleRecurrence, d)) {
+          continue;
+        }
+
         const dateStr = formatLocalDate(d);
         const sessionTime = matchingSlot.time || defaultTime || '17:00';
 
@@ -4474,7 +4479,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               amountDue: perSessionPrice,
               amountPaid: 0,
               meetingLink: targetGroup.type === 'online' ? (targetGroup.zoomLink || profile.defaultZoomLink) : undefined,
-              locationAddress: targetGroup.type === 'offline' ? (targetGroup.address || 'Cairo Center') : undefined
+              locationAddress: targetGroup.type === 'offline' ? (targetGroup.address || 'Cairo Center') : undefined,
+              scheduleRecurrence: targetGroup.scheduleRecurrence || 'weekly',
+              biweeklyWeek: getAlternatingWeek(d)
             } as Lesson));
           }
         }

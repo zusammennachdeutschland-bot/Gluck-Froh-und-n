@@ -9,6 +9,7 @@ import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString }
 import { getStudentCode } from '../utils/studentCodeUtils';
 import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import { getTimeBasedGreeting, getCairoHour } from '../utils/greetingUtils';
+import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { 
   X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen, Globe, Sun, Moon
 } from 'lucide-react';
@@ -117,9 +118,20 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     : (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 ? lesson.totalSessionsInPackage : 4);
 
   // Find students associated with this lesson or group
-  const groupStudents = lesson.groupId 
-    ? students.filter(s => s.groupId === lesson.groupId) 
-    : [];
+  const allGroupStudents = useMemo(() => {
+    return lesson.groupId ? students.filter(s => s.groupId === lesson.groupId) : [];
+  }, [lesson.groupId, students]);
+
+  // Scheduled students for this lesson based on alternating week schedule (or students who have explicit recorded attendance)
+  const groupStudents = useMemo(() => {
+    if (!lesson.groupId) return [];
+    return allGroupStudents.filter(s => {
+      // If student has explicit attendance record in this lesson, keep them!
+      if (lesson.report?.studentAttendance?.[s.id] !== undefined) return true;
+      if (!lesson.date) return true;
+      return isStudentMatchingLessonWeek(s.scheduleRecurrence, lesson.date);
+    });
+  }, [allGroupStudents, lesson.groupId, lesson.date, lesson.report?.studentAttendance]);
 
   const isGroupLesson = (Boolean(lesson.groupId) || groupStudents.length > 0) && groupStudents.length > 1;
 
@@ -1267,6 +1279,8 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                     >
                       <User className="w-3.5 h-3.5" />
                       <span>{st.name}</span>
+                      {st.scheduleRecurrence === 'biweekly_a' && <span className="text-[9px] font-bold">🅰️</span>}
+                      {st.scheduleRecurrence === 'biweekly_b' && <span className="text-[9px] font-bold">🅱️</span>}
                       <span className={`text-[9px] px-1 rounded font-bold ${
                         isSelected 
                           ? 'bg-white/20 text-white' 

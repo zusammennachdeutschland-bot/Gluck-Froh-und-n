@@ -7,6 +7,7 @@ import { getStudentRoleLabel, isLikelyFemaleStudent } from '../utils/genderUtils
 import confetti from 'canvas-confetti';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
+import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 
 interface HomeworkFollowUpModalProps {
   pendingFollowUps: PendingFollowUp[];
@@ -159,7 +160,8 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
 
     const teacherSign = profile.displayNameAr || (profile.displayName ? `أ/ ${profile.displayName}` : '');
 
-    const groupStudents = students.filter(s => s.groupId === selectedGroup.groupId);
+    const lessonDate = selectedGroup.latestCompletedLesson?.date;
+    const groupStudents = students.filter(s => s.groupId === selectedGroup.groupId && (!lessonDate || isStudentMatchingLessonWeek(s.scheduleRecurrence, lessonDate)));
     const allStudentNames = groupStudents.map(s => {
       if (currentMsgLang === 'de' || currentMsgLang === 'en') {
         return s.certificateName || s.displayNameEn || s.nameEn || s.name;

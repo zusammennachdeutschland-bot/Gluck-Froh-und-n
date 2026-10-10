@@ -701,6 +701,8 @@ export type WeeklyWorkingHours = {
 
 export type PaymentCycle = 'per_lesson' | '4_lessons' | '8_lessons' | '12_lessons' | 'monthly';
 
+export type ScheduleRecurrence = 'weekly' | 'biweekly_a' | 'biweekly_b';
+
 export interface GroupScheduleSlot {
   day: string;
   time: string;
@@ -717,6 +719,8 @@ export interface Group extends SyncableRecord {
   defaultFinanceAccountId?: string; // Replaced paymentMethod
   paymentCycle?: PaymentCycle;
   paymentModel?: 'per_session' | 'package';
+  scheduleRecurrence?: ScheduleRecurrence; // 'weekly' (default), 'biweekly_a' (Week A / starts this week), 'biweekly_b' (Week B / starts next week)
+  biweeklyAnchorDate?: string;
   scheduleDays?: string[]; // e.g. ['Sunday', 'Wednesday']
   scheduleTime?: string; // e.g. "17:00"
   scheduleDayTimes?: Record<string, string>; // e.g. { "Sunday": "15:00", "Wednesday": "19:00" }
@@ -768,6 +772,7 @@ export interface Student extends SyncableRecord {
   packageProgress?: number;
   totalLessonsCount?: number;
   paymentPlan?: PaymentPlanType;
+  scheduleRecurrence?: ScheduleRecurrence; // 'weekly' (default), 'biweekly_a' (Week A / أسبوع أ), 'biweekly_b' (Week B / أسبوع ب)
   pricePerLesson?: number;
   bundleSize?: number;
   customBundlePrice?: number;
@@ -902,6 +907,8 @@ export interface Lesson extends SyncableRecord {
   offlinePaymentAction?: 'paid_now' | 'will_pay_next' | 'partially_paid' | 'not_paid';
   notes?: string;
   duration?: number;
+  scheduleRecurrence?: ScheduleRecurrence;
+  biweeklyWeek?: 'A' | 'B';
   // Quick Lesson fields
   isQuickLesson?: boolean;
   quickStudentName?: string;

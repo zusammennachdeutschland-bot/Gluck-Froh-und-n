@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
-import { getUpcomingGroupSchedule } from '../utils/scheduleUtils';
+import { getUpcomingGroupSchedule, isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { getGroupCycleInfo, calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import { 
   X, Send, Copy, Check, MessageSquare, AlertTriangle, Clock, Link as LinkIcon, 
@@ -49,10 +49,13 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
 
   // Find associated group
   const targetGroup = group || (lesson?.groupId ? groups.find(g => g.id === lesson.groupId) : null);
-  const groupStudents = targetGroup ? students.filter(s => s.groupId === targetGroup.id) : [];
-
   // Find upcoming lesson if lesson is not directly passed
   const upcomingLesson = lesson || (targetGroup ? (lessons || []).find(l => l.groupId === targetGroup.id && !l.deleted && (l.status === 'scheduled' || l.status === 'in_progress')) : null);
+  
+  const lessonDate = lesson?.date || upcomingLesson?.date;
+  const groupStudents = targetGroup 
+    ? students.filter(s => s.groupId === targetGroup.id && (!lessonDate || isStudentMatchingLessonWeek(s.scheduleRecurrence, lessonDate)))
+    : [];
   
   // Multi-student group flag
   const isMultiStudentGroup = Boolean(targetGroup && groupStudents.length > 1);

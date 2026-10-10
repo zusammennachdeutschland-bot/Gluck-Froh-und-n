@@ -807,6 +807,18 @@ export const StudentsView: React.FC = () => {
                         <span className="text-[9.5px] font-bold text-primary bg-primary-soft border border-primary-border/50 px-1.5 py-0.2 rounded shrink-0">
                           {student.grade}
                         </span>
+
+                        {/* Student Alternating Week Badge */}
+                        {student.scheduleRecurrence === 'biweekly_a' && (
+                          <span className="text-[9px] font-bold text-sky-600 dark:text-sky-400 bg-sky-500/10 border border-sky-500/30 px-1.5 py-0.2 rounded shrink-0">
+                            🅰️ {_t('أسبوع أ', 'Week A', 'Woche A')}
+                          </span>
+                        )}
+                        {student.scheduleRecurrence === 'biweekly_b' && (
+                          <span className="text-[9px] font-bold text-purple-600 dark:text-purple-400 bg-purple-500/10 border border-purple-500/30 px-1.5 py-0.2 rounded shrink-0">
+                            🅱️ {_t('أسبوع ب', 'Week B', 'Woche B')}
+                          </span>
+                        )}
                       </div>
 
                       {/* LINE 2: Group + Contacts */}

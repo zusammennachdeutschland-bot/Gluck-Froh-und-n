@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
-import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
+import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { 
   CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check
 } from 'lucide-react';
@@ -436,6 +436,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                 ? (groups.find(g => g.id === lesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === lesson.groupId!.trim().toLowerCase()))
                 : (lesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === lesson.groupName!.trim().toLowerCase()) : null);
               const groupStudents = targetGroup && students ? students.filter(s => s.groupId === targetGroup.id) : [];
+              const scheduledStudents = groupStudents.filter(s => !lesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, lesson.date));
               const isCompletedState = lesson.status === 'completed';
               const isCancelledState = lesson.status === 'cancelled';
               const endTime = getLessonEndTime(lesson.time, lesson.durationMinutes || 60);
@@ -449,8 +450,9 @@ export const TodaysProgressTimeline: React.FC = () => {
               } else {
                 metaParts.push(lesson.location && lesson.location !== 'center' && lesson.location !== 'home' ? lesson.location : t('next_action_offline'));
               }
-              if (targetGroup && groupStudents.length > 0) {
-                metaParts.push(`${groupStudents.length} ${_t('طلاب', 'students', 'Schüler')}`);
+              if (targetGroup && (scheduledStudents.length > 0 || groupStudents.length > 0)) {
+                const countToShow = scheduledStudents.length > 0 ? scheduledStudents.length : groupStudents.length;
+                metaParts.push(`${countToShow} ${_t('طلاب', 'students', 'Schüler')}`);
               }
 
               return (

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Group, GradeLevel, LessonType, PaymentCycle } from '../types';
+import { Group, GradeLevel, LessonType, PaymentCycle, ScheduleRecurrence } from '../types';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { useApp } from '../context/AppContext';
-import { Video, MapPin, DollarSign, Calendar, Sparkles } from 'lucide-react';
+import { Video, MapPin, DollarSign, Calendar, Sparkles, Repeat, Check, Info } from 'lucide-react';
 import { isGroupPerLesson } from '../utils/lessonUtils';
+import { getCurrentAlternatingWeek } from '../utils/scheduleUtils';
 
 export interface GroupFormData {
   name: string;
@@ -16,6 +17,7 @@ export interface GroupFormData {
   sessionCount: number;
   startingSessionNumber: number;
   defaultFinanceAccountId?: string;
+  scheduleRecurrence: ScheduleRecurrence;
   scheduleDays: string[];
   scheduleTime: string;
   dayTimes: Record<string, string>;
@@ -55,6 +57,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
   const [startingSessionNumber, setStartingSessionNumber] = useState(initialData?.startingSessionNumber || 1);
   const { financeAccounts } = useApp();
   const [defaultFinanceAccountId, setDefaultFinanceAccountId] = useState(initialData?.defaultFinanceAccountId || (financeAccounts?.[0]?.id || ''));
+  const [scheduleRecurrence, setScheduleRecurrence] = useState<ScheduleRecurrence>(initialData?.scheduleRecurrence || 'weekly');
   const [scheduleDays, setScheduleDays] = useState<string[]>(initialData?.scheduleDays || []);
   const [scheduleTime, setScheduleTime] = useState(initialData?.scheduleTime || '17:00');
   const [dayTimes, setDayTimes] = useState<Record<string, string>>(initialData?.scheduleDayTimes || {});
@@ -100,6 +103,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
       sessionCount: effectiveSessionCount,
       startingSessionNumber: isPerLesson ? 1 : Math.max(1, Number(startingSessionNumber) || 1),
       defaultFinanceAccountId,
+      scheduleRecurrence,
       scheduleDays,
       scheduleTime,
       dayTimes,
@@ -362,6 +366,86 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
           </div>
         </div>
 
+        {/* Recurrence Mode: Weekly vs Bi-weekly (Alternating Weeks A / B) */}
+        <div className="space-y-2 relative z-10 pt-2 border-t border-primary-border/20">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-primary-hover dark:text-primary-hover flex items-center gap-1.5">
+              <Repeat className="w-3.5 h-3.5" />
+              <span>{_t('نظام التكرار والمواعيد', 'Recurrence Pattern', 'Wiederholungsrhythmus')}</span>
+            </label>
+            <span className="text-[10px] font-bold text-text-muted">
+              {_t('هذا الأسبوع:', 'This week:', 'Diese Woche:')} <span className="font-mono text-primary font-black">{_t('أسبوع', 'Week', 'Woche')} {getCurrentAlternatingWeek()}</span>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+            <button
+              type="button"
+              onClick={() => setScheduleRecurrence('weekly')}
+              className={`p-2 rounded-xl border text-start transition-all cursor-pointer ${
+                scheduleRecurrence === 'weekly'
+                  ? 'bg-primary text-white border-primary shadow-xs'
+                  : 'bg-surface border-surface-border hover:bg-surface-hover text-text-main'
+              }`}
+            >
+              <div className="text-xs font-black flex items-center justify-between">
+                <span>🔄 {_t('كل أسبوع', 'Every Week', 'Jede Woche')}</span>
+                {scheduleRecurrence === 'weekly' && <Check className="w-3.5 h-3.5" />}
+              </div>
+              <div className={`text-[10px] mt-0.5 ${scheduleRecurrence === 'weekly' ? 'text-white/80' : 'text-text-muted'}`}>
+                {_t('حصة أسبوعية منتظمة', 'Regular weekly', 'Regelmäßig')}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setScheduleRecurrence('biweekly_a')}
+              className={`p-2 rounded-xl border text-start transition-all cursor-pointer ${
+                scheduleRecurrence === 'biweekly_a'
+                  ? 'bg-primary text-white border-primary shadow-xs'
+                  : 'bg-surface border-surface-border hover:bg-surface-hover text-text-main'
+              }`}
+            >
+              <div className="text-xs font-black flex items-center justify-between">
+                <span>🅰️ {_t('أسبوع وآسبوع (أ)', 'Bi-weekly (A)', 'Alle 2 Wochen (A)')}</span>
+                {scheduleRecurrence === 'biweekly_a' && <Check className="w-3.5 h-3.5" />}
+              </div>
+              <div className={`text-[10px] mt-0.5 ${scheduleRecurrence === 'biweekly_a' ? 'text-white/80' : 'text-text-muted'}`}>
+                {_t('هذا الأسبوع وكل أسبوعين', 'This week & every 2w', 'Diese Woche & alle 2W')}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setScheduleRecurrence('biweekly_b')}
+              className={`p-2 rounded-xl border text-start transition-all cursor-pointer ${
+                scheduleRecurrence === 'biweekly_b'
+                  ? 'bg-primary text-white border-primary shadow-xs'
+                  : 'bg-surface border-surface-border hover:bg-surface-hover text-text-main'
+              }`}
+            >
+              <div className="text-xs font-black flex items-center justify-between">
+                <span>🅱️ {_t('أسبوع وآسبوع (ب)', 'Bi-weekly (B)', 'Alle 2 Wochen (B)')}</span>
+                {scheduleRecurrence === 'biweekly_b' && <Check className="w-3.5 h-3.5" />}
+              </div>
+              <div className={`text-[10px] mt-0.5 ${scheduleRecurrence === 'biweekly_b' ? 'text-white/80' : 'text-text-muted'}`}>
+                {_t('الأسبوع القادم وكل أسبوعين', 'Next week & every 2w', 'Nächste Woche & alle 2W')}
+              </div>
+            </button>
+          </div>
+
+          {scheduleRecurrence !== 'weekly' && (
+            <div className="p-2 rounded-lg bg-primary/10 border border-primary/20 text-[11px] font-semibold text-primary flex items-start gap-1.5">
+              <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-primary" />
+              <span>
+                {scheduleRecurrence === 'biweekly_a'
+                  ? _t('الحصص ستُجدول في أسبوع (أ) فقط (يبدأ هذا الأسبوع). يمكنك إضافة طالب أو مجموعة أخرى في أسبوع (ب) لنفس اليوم والساعة دون أي تعارض!', 'Lessons will occur on Week A only (starts this week). You can add another student or group on Week B for the same time slot without conflict!', 'Unterricht findet nur in Woche A statt (beginnt diese Woche). Sie können eine andere Gruppe für Woche B zur selben Zeit anlegen!')
+                  : _t('الحصص ستُجدول في أسبوع (ب) فقط (يبدأ الأسبوع القادم). يتيح لك مشاركة نفس الوقت بالتناوب مع طالب أسبوع (أ)!', 'Lessons will occur on Week B only (starts next week). Allows sharing the exact same time slot alternately with Week A!', 'Unterricht findet nur in Woche B statt (beginnt nächste Woche). Erlaubt das Teilen des Termins mit Woche A!')}
+              </span>
+            </div>
+          )}
+        </div>
+
         {scheduleDays.length > 0 && (
           <div className="space-y-2 relative z-10 pt-2 border-t border-primary-border/20">
             <label className="text-xs font-bold text-primary-hover dark:text-primary-hover">Uhrzeit pro Tag (Time per Day)</label>
@@ -407,8 +491,8 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
         <div className="space-y-3">
           <div className="space-y-1">
             <label className="text-xs font-bold text-text-main flex items-center justify-between">
-              <span>Permanent Zoom Link *</span>
-              <span className="text-[10px] text-text-muted font-normal">Required</span>
+              <span>{_t('رابط زووم الدائم (اختياري)', 'Permanent Zoom Link (Optional)', 'Permanenter Zoom-Link (Optional)')}</span>
+              <span className="text-[10px] text-text-muted font-normal">{_t('اختياري', 'Optional', 'Optional')}</span>
             </label>
             <input
               type="url"

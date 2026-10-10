@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Student, GradeLevel, CertificateRecord } from '../types';
+import { Student, GradeLevel, CertificateRecord, ScheduleRecurrence } from '../types';
 import { COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
 import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
@@ -10,7 +10,7 @@ import {
   X, Phone, Send, FileText, Upload, Trash2, Calendar, Award, DollarSign, 
   BookOpen, CheckCircle2, AlertCircle, Download, FileCheck, User, Edit3, Save, Check, Sparkles,
   RefreshCw, Shield, Lock, MoreHorizontal, MessageSquare, Info, Star, GraduationCap, Users, Plus, Eye, Share2,
-  AtSign, Video, ExternalLink, Copy, Play
+  AtSign, Video, ExternalLink, Copy, Play, Repeat
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
@@ -72,6 +72,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   const [editStudentContactType, setEditStudentContactType] = useState<'phone' | 'username'>(isInitialStudentUser ? 'username' : 'phone');
   const [editStudentPhone, setEditStudentPhone] = useState(student.studentPhone);
   const [editNotes, setEditNotes] = useState(student.notes || '');
+  const [editScheduleRecurrence, setEditScheduleRecurrence] = useState<ScheduleRecurrence>(student.scheduleRecurrence || 'weekly');
   const [editStatus, setEditStatus] = useState<'active' | 'archived'>(student.status || 'active');
   const [saveSuccessToast, setSaveSuccessToast] = useState(false);
 
@@ -194,6 +195,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
       certificateName: editCertificateName,
       gender: editGender,
       groupId: editGroupId,
+      scheduleRecurrence: editScheduleRecurrence,
       grade: editGrade,
       parentName: editParentName,
       parentPhone: finalParentPhone,
@@ -311,6 +313,17 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   ) : (
                     <span className="font-medium bg-surface-hover px-2 py-0.5 rounded-md">
                       {_t('بدون مجموعة', 'No Group', 'Keine Gruppe')}
+                    </span>
+                  )}
+
+                  {student.scheduleRecurrence === 'biweekly_a' && (
+                    <span className="font-bold text-[10px] px-2 py-0.5 rounded-md bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
+                      🅰️ {_t('أسبوع وأسبوع (أ)', 'Bi-weekly (A)', 'Alle 2 Wochen (A)')}
+                    </span>
+                  )}
+                  {student.scheduleRecurrence === 'biweekly_b' && (
+                    <span className="font-bold text-[10px] px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                      🅱️ {_t('أسبوع وأسبوع (ب)', 'Bi-weekly (B)', 'Alle 2 Wochen (B)')}
                     </span>
                   )}
 
@@ -1233,6 +1246,67 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                       </optgroup>
                     </select>
                   </div>
+                </div>
+
+                {/* Alternating Week Attendance Selector */}
+                <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                  <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Repeat className="w-3.5 h-3.5 text-primary" />
+                      {_t('نظام حضور الطالب (أسبوعي / أسبوع وآسبوع)', 'Attendance Recurrence (Weekly / Bi-weekly)', 'Teilnahme-Rhythmus')}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-normal">
+                      {_t('أسبوع آه وأسبوع لأ', 'Alternating weeks', 'Alle 2 Wochen')}
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setEditScheduleRecurrence('weekly')}
+                      className={`py-2 px-1.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                        editScheduleRecurrence === 'weekly'
+                          ? 'bg-primary text-white border-primary shadow-xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <div>{_t('كل أسبوع', 'Every Week', 'Jede Woche')}</div>
+                      <div className="text-[9px] opacity-80 font-normal">{_t('حضور أسبوعي', 'Weekly', 'Wöchentlich')}</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditScheduleRecurrence('biweekly_a')}
+                      className={`py-2 px-1.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                        editScheduleRecurrence === 'biweekly_a'
+                          ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <div>🅰️ {_t('أسبوع (أ)', 'Week A', 'Woche A')}</div>
+                      <div className="text-[9px] opacity-80 font-normal">{_t('هذا الأسبوع', 'This week', 'Diese Woche')}</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditScheduleRecurrence('biweekly_b')}
+                      className={`py-2 px-1.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                        editScheduleRecurrence === 'biweekly_b'
+                          ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <div>🅱️ {_t('أسبوع (ب)', 'Week B', 'Woche B')}</div>
+                      <div className="text-[9px] opacity-80 font-normal">{_t('الأسبوع القادم', 'Next week', 'Nächste Woche')}</div>
+                    </button>
+                  </div>
+                  {editScheduleRecurrence === 'biweekly_a' && (
+                    <p className="text-[10px] text-primary font-medium mt-1">
+                      {_t('يحضر هذا الطالب في أسبوع (أ) فقط بالتناوب. متوافق مع جدول الحصص والمالية.', 'Attends on Week A only. Synced with schedule & finance.', 'Nimmt nur an Woche A teil.')}
+                    </p>
+                  )}
+                  {editScheduleRecurrence === 'biweekly_b' && (
+                    <p className="text-[10px] text-primary font-medium mt-1">
+                      {_t('يحضر هذا الطالب في أسبوع (ب) فقط بالتناوب. متوافق مع جدول الحصص والمالية.', 'Attends on Week B only. Synced with schedule & finance.', 'Nimmt nur an Woche B teil.')}
+                    </p>
+                  )}
                 </div>
 
                 {/* Parent Name & Phone */}

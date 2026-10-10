@@ -62,6 +62,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       sessionCount: effectiveSessionCount,
       startingSessionNumber: isPerLesson ? 1 : Math.max(1, Number(data.startingSessionNumber) || 1),
       defaultFinanceAccountId: data.defaultFinanceAccountId,
+      scheduleRecurrence: data.scheduleRecurrence || 'weekly',
       scheduleDays: data.scheduleDays,
       scheduleTime: data.scheduleTime,
       scheduleDayTimes: data.dayTimes,

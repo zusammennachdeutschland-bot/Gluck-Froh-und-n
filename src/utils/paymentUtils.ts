@@ -1,7 +1,8 @@
-import { Student, Group, Lesson, PaymentRecord } from '../types';
+import { Student, Group, Lesson, PaymentRecord, ScheduleRecurrence } from '../types';
 import { areDuplicateLessons, isGroupPerLesson } from './lessonUtils';
 import { resolveStudentWhatsAppContact } from './phoneUtils';
 import { normalizeDateToISO } from './timeUtils';
+import { isDateMatchingGroupRecurrence } from './scheduleUtils';
 
 export interface CyclePricingResult {
   cycleLength: number;
@@ -42,7 +43,8 @@ export const calculateEstimatedPastDate = (
   baseDateStr: string,
   targetSessionNum: number,
   currentSessionNum: number,
-  scheduleDays?: string[]
+  scheduleDays?: string[],
+  scheduleRecurrence?: ScheduleRecurrence
 ): string => {
   if (targetSessionNum === currentSessionNum) {
     return baseDateStr;
@@ -62,10 +64,13 @@ export const calculateEstimatedPastDate = (
   if (validScheduleDays.length > 0) {
     let foundCount = 0;
     const cursor = new Date(baseDate.getTime());
-    for (let dayOffset = 1; dayOffset <= 120; dayOffset++) {
+    for (let dayOffset = 1; dayOffset <= 240; dayOffset++) {
       cursor.setDate(cursor.getDate() - 1);
       const dayName = dayNames[cursor.getDay()].toLowerCase();
       if (validScheduleDays.includes(dayName)) {
+        if (scheduleRecurrence && scheduleRecurrence !== 'weekly' && !isDateMatchingGroupRecurrence(scheduleRecurrence, cursor)) {
+          continue;
+        }
         foundCount++;
         if (foundCount === sessionsDiff) {
           const y = cursor.getFullYear();
@@ -77,8 +82,9 @@ export const calculateEstimatedPastDate = (
     }
   }
 
-  // Fallback: step backwards by ~3.5 days (average 2 sessions per week)
-  const daysToSubtract = Math.max(1, Math.round(sessionsDiff * 3.5));
+  // Fallback: step backwards by ~3.5 days (or 7 days if biweekly)
+  const isBiweekly = scheduleRecurrence && scheduleRecurrence !== 'weekly';
+  const daysToSubtract = Math.max(1, Math.round(sessionsDiff * (isBiweekly ? 7 : 3.5)));
   const targetDate = new Date(baseDate.getTime() - daysToSubtract * 24 * 60 * 60 * 1000);
   const y = targetDate.getFullYear();
   const m = String(targetDate.getMonth() + 1).padStart(2, '0');
@@ -94,7 +100,8 @@ export const sanitizePaymentLessonDates = (
   lessonDates: string[] | undefined,
   baseDateStr: string,
   bundleSize: number,
-  scheduleDays?: string[]
+  scheduleDays?: string[],
+  scheduleRecurrence?: ScheduleRecurrence
 ): string[] => {
   if (!lessonDates || lessonDates.length === 0) return [];
   return lessonDates.map(item => {
@@ -105,7 +112,7 @@ export const sanitizePaymentLessonDates = (
     if (match) {
       const sessNum = parseInt(match[1], 10);
       const totalSess = bundleSize || parseInt(match[2], 10) || 1;
-      const pastDate = calculateEstimatedPastDate(baseDateStr, sessNum, totalSess, scheduleDays);
+      const pastDate = calculateEstimatedPastDate(baseDateStr, sessNum, totalSess, scheduleDays, scheduleRecurrence);
       return `${formatDateDisplay(pastDate)} (Session ${sessNum}/${totalSess})`;
     }
     return item;
@@ -283,7 +290,7 @@ export const calculateDuePaymentCycles = (
         ((st.groupId && l.groupId === st.groupId) || (l.studentId && l.studentId === st.id)) && 
         l.sessionNumber === i
       );
-      const pastDate = matched?.date || calculateEstimatedPastDate(latestLessonDate, i, anchorSessionNum, grp?.scheduleDays);
+      const pastDate = matched?.date || calculateEstimatedPastDate(latestLessonDate, i, anchorSessionNum, grp?.scheduleDays, st.scheduleRecurrence || grp?.scheduleRecurrence);
       const dLabel = `${formatDateDisplay(pastDate)} (Session ${i}/${cycleLength})`;
       processedLessons.push({
         id: matched ? matched.id : `virtual_${st.id}_sess_${i}`,
@@ -319,7 +326,7 @@ export const calculateDuePaymentCycles = (
             ((st.groupId && l.groupId === st.groupId) || (l.studentId && l.studentId === st.id)) && 
             l.sessionNumber === s
           );
-          const pastDate = matched?.date || calculateEstimatedPastDate(latestLessonDate, s, anchorSessionNum, grp?.scheduleDays);
+          const pastDate = matched?.date || calculateEstimatedPastDate(latestLessonDate, s, anchorSessionNum, grp?.scheduleDays, st.scheduleRecurrence || grp?.scheduleRecurrence);
           const dLabel = `${formatDateDisplay(pastDate)} (Session ${s}/${cycleLength})`;
           processedLessons.push({
             id: matched ? matched.id : `virtual_${st.id}_sess_${s}`,

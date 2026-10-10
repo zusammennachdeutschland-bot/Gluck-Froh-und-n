@@ -94,6 +94,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
         name: group.name,
         grade: group.grade,
         type: group.type,
+        scheduleRecurrence: group.recurrence || 'weekly',
         scheduleDays: group.days,
         scheduleTime: group.time,
         schedules: group.schedules,
@@ -130,6 +131,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
           parentContactType: isParentUser ? 'username' : 'phone',
           parentName: '',
           groupId: newGroup.id,
+          scheduleRecurrence: st.scheduleRecurrence || group.recurrence || 'weekly',
           grade: group.grade
         });
         totalStudentsAdded++;

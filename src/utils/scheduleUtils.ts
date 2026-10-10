@@ -1,4 +1,4 @@
-import { Group, GroupScheduleSlot, Lesson } from '../types';
+import { Group, GroupScheduleSlot, Lesson, ScheduleRecurrence } from '../types';
 import { parseLocalDate, formatLocalDate } from './timeUtils';
 
 export const DAY_NAME_TO_NUM: Record<string, number> = {
@@ -22,6 +22,85 @@ export const NUM_TO_ENGLISH_DAY: Record<number, string> = {
 export const NUM_TO_ARABIC_DAY: Record<number, string> = {
   0: 'الأحد', 1: 'الإثنين', 2: 'الثلاثاء', 3: 'الأربعاء', 4: 'الخميس', 5: 'الجمعة', 6: 'السبت'
 };
+
+/**
+ * Reference anchor Monday: 2026-01-05 (Week 1 of 2026)
+ * Calculates which alternating week cycle a date falls into ('A' or 'B').
+ */
+export function getAlternatingWeek(dateInput: Date | string): 'A' | 'B' {
+  const d = typeof dateInput === 'string' ? parseLocalDate(dateInput) : new Date(dateInput);
+  const day = d.getDay();
+  // Monday of this week
+  const diffToMonday = (day === 0 ? -6 : 1 - day);
+  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diffToMonday);
+  monday.setHours(0, 0, 0, 0);
+
+  // Fixed reference Monday: 2026-01-05
+  const refMonday = new Date(2026, 0, 5, 0, 0, 0, 0);
+  const diffMs = monday.getTime() - refMonday.getTime();
+  const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+  
+  // Even weeks -> 'A', odd weeks -> 'B'
+  const isEven = Math.abs(diffWeeks) % 2 === 0;
+  return isEven ? 'A' : 'B';
+}
+
+/**
+ * Returns whether a date matches the group's schedule recurrence
+ */
+export function isDateMatchingGroupRecurrence(
+  recurrence: ScheduleRecurrence | undefined,
+  dateInput: Date | string
+): boolean {
+  if (!recurrence || recurrence === 'weekly') return true;
+  const currentWeek = getAlternatingWeek(dateInput);
+  if (recurrence === 'biweekly_a') return currentWeek === 'A';
+  if (recurrence === 'biweekly_b') return currentWeek === 'B';
+  return true;
+}
+
+/**
+ * Determines whether a student is scheduled to attend on a given lesson date based on alternating week schedule.
+ * - 'weekly' (or undefined): attends every scheduled week
+ * - 'biweekly_a': attends only on Week A (أسبوع أ)
+ * - 'biweekly_b': attends only on Week B (أسبوع ب)
+ */
+export function isStudentMatchingLessonWeek(
+  studentRecurrence: ScheduleRecurrence | undefined,
+  dateInput: Date | string
+): boolean {
+  if (!studentRecurrence || studentRecurrence === 'weekly') return true;
+  const currentWeek = getAlternatingWeek(dateInput);
+  if (studentRecurrence === 'biweekly_a') return currentWeek === 'A';
+  if (studentRecurrence === 'biweekly_b') return currentWeek === 'B';
+  return true;
+}
+
+/**
+ * Returns human-readable recurrence label
+ */
+export function getRecurrenceLabel(
+  recurrence: ScheduleRecurrence | undefined,
+  lang: 'ar' | 'en' | 'de' = 'ar'
+): string {
+  if (!recurrence || recurrence === 'weekly') {
+    return lang === 'ar' ? 'أسبوعي' : lang === 'de' ? 'Wöchentlich' : 'Weekly';
+  }
+  if (recurrence === 'biweekly_a') {
+    return lang === 'ar' ? 'أسبوع وأسبوع (أ)' : lang === 'de' ? 'Alle 2 Wochen (A)' : 'Bi-weekly (A)';
+  }
+  if (recurrence === 'biweekly_b') {
+    return lang === 'ar' ? 'أسبوع وأسبوع (ب)' : lang === 'de' ? 'Alle 2 Wochen (B)' : 'Bi-weekly (B)';
+  }
+  return '';
+}
+
+/**
+ * Returns current week alternating cycle ('A' or 'B') for today
+ */
+export function getCurrentAlternatingWeek(): 'A' | 'B' {
+  return getAlternatingWeek(new Date());
+}
 
 export function getDayNumber(dayName: string): number {
   if (!dayName) return -1;
@@ -96,15 +175,19 @@ export function formatGroupScheduleDisplay(group: Partial<Group>, lang: 'ar' | '
     return lang === 'ar' ? 'بدون مواعيد محددة' : 'No schedule set';
   }
 
+  const recBadge = group.scheduleRecurrence && group.scheduleRecurrence !== 'weekly'
+    ? ` [${getRecurrenceLabel(group.scheduleRecurrence, lang)}]`
+    : '';
+
   const firstTime = slots[0].time;
   const allSameTime = slots.every(s => s.time === firstTime);
 
   if (allSameTime) {
     const daysStr = slots.map(s => normalizeDayToDisplay(s.day, lang)).join(', ');
-    return `${daysStr} @ ${firstTime}`;
+    return `${daysStr} @ ${firstTime}${recBadge}`;
   }
 
-  return slots.map(s => `${normalizeDayToDisplay(s.day, lang)} @ ${s.time}`).join(' | ');
+  return `${slots.map(s => `${normalizeDayToDisplay(s.day, lang)} @ ${s.time}`).join(' | ')}${recBadge}`;
 }
 
 /**
@@ -205,6 +288,12 @@ export function getProjectedLessonsForRange(
       const dayNum = cursor.getDay();
       const dateStr = formatLocalDate(cursor);
 
+      // Check alternating week recurrence (Week A vs Week B)
+      if (!isDateMatchingGroupRecurrence(group.scheduleRecurrence, cursor)) {
+        cursor.setDate(cursor.getDate() + 1);
+        continue;
+      }
+
       const matchingSlots = slots.filter(s => getDayNumber(s.day) === dayNum);
       for (const slot of matchingSlots) {
         const sessionTime = slot.time || group.scheduleTime || '17:00';
@@ -233,7 +322,9 @@ export function getProjectedLessonsForRange(
             amountDue: perSessionPrice,
             amountPaid: 0,
             meetingLink: group.type === 'online' ? (group.zoomLink || defaultZoomLink) : undefined,
-            locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined
+            locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
+            scheduleRecurrence: group.scheduleRecurrence || 'weekly',
+            biweeklyWeek: getAlternatingWeek(cursor)
           } as Lesson);
         }
       }

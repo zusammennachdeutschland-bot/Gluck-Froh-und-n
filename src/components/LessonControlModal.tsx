@@ -19,6 +19,7 @@ import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact } 
 import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUtils';
 import { calculateSequentialSessionNumber, isGroupPerLesson } from '../utils/lessonUtils';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
+import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import confetti from 'canvas-confetti';
 
 export const LessonControlModal: React.FC = () => {
@@ -231,7 +232,7 @@ export const LessonControlModal: React.FC = () => {
         setStudentAttendance(selectedLesson.report.studentAttendance);
       } else if (selectedLesson.groupId) {
         const initialAtt: Record<string, AttendanceStatus> = {};
-        const groupSts = students.filter(s => s.groupId === selectedLesson.groupId);
+        const groupSts = students.filter(s => s.groupId === selectedLesson.groupId && (!selectedLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, selectedLesson.date)));
         groupSts.forEach(st => {
           initialAtt[st.id] = selectedLesson.report?.attendanceStatus || 'present';
         });
@@ -310,7 +311,7 @@ export const LessonControlModal: React.FC = () => {
         setStudentExamGrade({});
       } else if (selectedLesson.groupId) {
         const initialAtt: Record<string, AttendanceStatus> = {};
-        const groupSts = students.filter(s => s.groupId === selectedLesson.groupId);
+        const groupSts = students.filter(s => s.groupId === selectedLesson.groupId && (!selectedLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, selectedLesson.date)));
         groupSts.forEach(st => {
           initialAtt[st.id] = 'present';
         });
@@ -473,7 +474,7 @@ export const LessonControlModal: React.FC = () => {
   const activeLessonStudents = isQuick
     ? [targetStudent || quickStudentSynthetic]
     : (selectedLesson.groupId 
-        ? students.filter(s => s.groupId === selectedLesson.groupId)
+        ? students.filter(s => s.groupId === selectedLesson.groupId && (!selectedLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, selectedLesson.date) || selectedLesson.report?.studentAttendance?.[s.id] !== undefined))
         : (targetStudent ? [targetStudent] : []));
   
   const targetGroup = groups.find(g => g.id === selectedLesson.groupId)

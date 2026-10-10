@@ -1,4 +1,4 @@
-import { GradeLevel, LessonType, PaymentCycle } from '../types';
+import { GradeLevel, LessonType, PaymentCycle, ScheduleRecurrence } from '../types';
 import { normalizeDayToShortKey } from './scheduleUtils';
 
 export interface ParsedScheduleSlot {
@@ -10,6 +10,7 @@ export interface ParsedGroupData {
   name: string;
   grade: GradeLevel;
   type: LessonType;
+  recurrence?: ScheduleRecurrence;
   days: string[];
   time: string; // Default or first schedule time
   schedules: ParsedScheduleSlot[];
@@ -31,6 +32,7 @@ export interface ParsedStudentData {
   studentPhone?: string;
   studentUsername?: string;
   studentContactType?: 'phone' | 'username';
+  scheduleRecurrence?: ScheduleRecurrence;
 }
 
 export interface ParsedGroupWithStudents {
@@ -458,6 +460,14 @@ function parseIndividualGroupBlock(
   const rawZoomLink = groupKv['zoom_link'] || groupKv['zoomlink'] || groupKv['zoom_meeting_link'] || groupKv['zoom'] || groupKv['meeting_link'] || '';
   const rawAddress = groupKv['address'] || groupKv['location'] || groupKv['place'] || groupKv['center'] || '';
   const rawWhatsappLink = groupKv['whatsapp_link'] || groupKv['whatsapplink'] || groupKv['whatsapp'] || groupKv['whatsapp_group_link'] || groupKv['whatsapp_group'] || groupKv['chat_link'] || '';
+  const rawRecurrence = (groupKv['recurrence'] || groupKv['frequency'] || groupKv['repeat'] || groupKv['التكرار'] || '').toLowerCase();
+
+  let parsedRecurrence: ScheduleRecurrence = 'weekly';
+  if (rawRecurrence.includes('biweekly_b') || rawRecurrence.includes('week_b') || rawRecurrence.includes('(b)') || rawRecurrence.includes('ب') || rawRecurrence.includes('ثاني') || rawRecurrence.includes('قادم')) {
+    parsedRecurrence = 'biweekly_b';
+  } else if (rawRecurrence.includes('biweekly') || rawRecurrence.includes('week_a') || rawRecurrence.includes('(a)') || rawRecurrence.includes('أ') || rawRecurrence.includes('أول') || rawRecurrence.includes('اول') || rawRecurrence.includes('اسبوع_واسبوع') || rawRecurrence.includes('أسبوع_وأسبوع')) {
+    parsedRecurrence = 'biweekly_a';
+  }
 
   const displayGroupName = name.trim() ? `"${name.trim()}"` : `المجموعة ${groupIndex + 1}`;
   const gTag = totalGroups > 1 ? `[${displayGroupName}] ` : '';
@@ -674,6 +684,7 @@ function parseIndividualGroupBlock(
     let certificateName = '';
     let parentPhone = '';
     let studentPhone = '';
+    let studentRecurrence: ScheduleRecurrence | undefined = undefined;
 
     if (trimmedLine.includes('|')) {
       const parts = trimmedLine.split('|');
@@ -682,6 +693,16 @@ function parseIndividualGroupBlock(
         certificateName = parts[1] ? parts[1].trim() : '';
         parentPhone = parts[2] ? parts[2].trim() : '';
         studentPhone = parts[3] ? parts[3].trim() : '';
+        if (parts.length >= 5) {
+          const rawR = parts[4].toLowerCase().trim();
+          if (rawR.includes('b') || rawR.includes('ب') || rawR.includes('ثاني') || rawR.includes('قادم')) {
+            studentRecurrence = 'biweekly_b';
+          } else if (rawR.includes('a') || rawR.includes('أ') || rawR.includes('اول') || rawR.includes('أول')) {
+            studentRecurrence = 'biweekly_a';
+          } else if (rawR.includes('week') || rawR.includes('أسبوع')) {
+            studentRecurrence = 'weekly';
+          }
+        }
       } else {
         const isLatin = !/[\u0600-\u06FF]/.test(studentName);
         certificateName = isLatin ? studentName : '';
@@ -791,6 +812,17 @@ function parseIndividualGroupBlock(
       }
     }
 
+    if (!studentRecurrence) {
+      if (/(أسبوع أ|week a|week_a|\(أ\)|🅰️)/i.test(trimmedLine)) {
+        studentRecurrence = 'biweekly_a';
+      } else if (/(أسبوع ب|week b|week_b|\(ب\)|🅱️)/i.test(trimmedLine)) {
+        studentRecurrence = 'biweekly_b';
+      }
+    }
+    if (studentName) {
+      studentName = studentName.replace(/\s*[\(\[]?(أسبوع أ|أسبوع ب|week a|week b|أسبوع_أ|أسبوع_ب|\(أ\)|\(ب\)|🅰️|🅱️)[\)\]]?\s*/gi, '').trim();
+    }
+
     if (studentName) {
       const lowerName = studentName.toLowerCase();
 
@@ -818,6 +850,7 @@ function parseIndividualGroupBlock(
         studentPhone: studentPhone || undefined,
         studentUsername: isStudentUser && studentPhone ? studentPhone.replace(/^@/, '') : undefined,
         studentContactType: isStudentUser ? 'username' : (studentPhone ? 'phone' : undefined),
+        scheduleRecurrence: studentRecurrence || parsedRecurrence || 'weekly',
       });
     }
   }
@@ -839,6 +872,7 @@ function parseIndividualGroupBlock(
           name: name.trim(),
           grade: normalizeGrade(rawGrade),
           type: (rawType === 'online' ? 'online' : 'offline') as LessonType,
+          recurrence: parsedRecurrence,
           days: parsedDays,
           time: primaryTime,
           schedules: parsedSchedules,

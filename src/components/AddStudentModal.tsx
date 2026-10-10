@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
-import { GradeLevel } from '../types';
-import { X, UserPlus, Info, Phone, AtSign, Sparkles } from 'lucide-react';
+import { GradeLevel, ScheduleRecurrence } from '../types';
+import { X, UserPlus, Info, Phone, AtSign, Sparkles, Repeat } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
@@ -37,6 +37,13 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
   const [studentContactType, setStudentContactType] = useState<'phone' | 'username'>('phone');
   const [studentPhone, setStudentPhone] = useState('');
   const [notes, setNotes] = useState('');
+  const [scheduleRecurrence, setScheduleRecurrence] = useState<ScheduleRecurrence>(() => {
+    if (initialGroupId) {
+      const g = groups.find(x => x.id === initialGroupId);
+      if (g?.scheduleRecurrence && g.scheduleRecurrence !== 'weekly') return g.scheduleRecurrence;
+    }
+    return 'weekly';
+  });
 
   const selectedGroup = groups.find(g => g.id === groupId);
 
@@ -48,6 +55,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
         if (draft.name) setName(draft.name);
         if (draft.certificateName) setCertificateName(draft.certificateName);
         if (draft.groupId) setGroupId(draft.groupId);
+        if (draft.scheduleRecurrence) setScheduleRecurrence(draft.scheduleRecurrence);
         if (draft.grade) setGrade(draft.grade);
         if (draft.parentName) setParentName(draft.parentName);
         if (draft.parentContactType) setParentContactType(draft.parentContactType);
@@ -74,10 +82,10 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
   useEffect(() => {
     if (name || certificateName || parentName || parentPhone || studentPhone || notes) {
       storage.setItem('dl_draft_add_student', {
-        name, certificateName, groupId, grade, parentName, parentContactType, parentPhone, studentContactType, studentPhone, notes
+        name, certificateName, groupId, scheduleRecurrence, grade, parentName, parentContactType, parentPhone, studentContactType, studentPhone, notes
       });
     }
-  }, [name, certificateName, groupId, grade, parentName, parentContactType, parentPhone, studentContactType, studentPhone, notes]);
+  }, [name, certificateName, groupId, scheduleRecurrence, grade, parentName, parentContactType, parentPhone, studentContactType, studentPhone, notes]);
 
   const handleParentPhoneChange = (val: string) => {
     setParentPhone(val);
@@ -127,6 +135,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
       certificateName: certificateName.trim(),
       gender,
       groupId,
+      scheduleRecurrence,
       grade: grade || selectedGroup?.grade || 'Grade 7',
       parentName,
       parentPhone: finalParentPhone,
@@ -264,31 +273,115 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
             <select
               value={groupId}
               onChange={(e) => {
-                setGroupId(e.target.value);
-                const g = groups.find(item => item.id === e.target.value);
-                if (g) setGrade(g.grade);
+                const newGId = e.target.value;
+                setGroupId(newGId);
+                const g = groups.find(item => item.id === newGId);
+                if (g) {
+                  setGrade(g.grade);
+                  if (g.scheduleRecurrence && g.scheduleRecurrence !== 'weekly') {
+                    setScheduleRecurrence(g.scheduleRecurrence);
+                  }
+                }
               }}
               className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
             >
-              {groups.map(g => (
-                <option key={g.id} value={g.id}>
-                  {g.name} ({g.grade} • {(g.type || '').toUpperCase()})
-                </option>
-              ))}
+              {groups.map(g => {
+                const recBadge = g.scheduleRecurrence === 'biweekly_a'
+                  ? ' • 🅰️ أسبوع وآسبوع (أ)'
+                  : g.scheduleRecurrence === 'biweekly_b'
+                    ? ' • 🅱️ أسبوع وآسبوع (ب)'
+                    : '';
+                return (
+                  <option key={g.id} value={g.id}>
+                    {g.name} ({g.grade} • {(g.type || '').toUpperCase()}{recBadge})
+                  </option>
+                );
+              })}
             </select>
+          </div>
+
+          {/* Alternating Week Attendance (أسبوع وآسبوع / أسبوع آه وأسبوع لأ) */}
+          <div className="space-y-1.5 p-3 rounded-xl bg-surface-hover/80 border border-surface-border">
+            <label className="text-xs font-bold text-text-main flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Repeat className="w-3.5 h-3.5 text-primary" />
+                {_t('نظام حضور الطالب (أسبوعي / أسبوع وآسبوع)', 'Attendance Recurrence', 'Teilnahme-Rhythmus')}
+              </span>
+              <span className="text-[10px] text-text-muted font-normal">
+                {_t('أسبوع آه وأسبوع لأ', 'Alternating weeks', 'Alle 2 Wochen')}
+              </span>
+            </label>
+            <div className="grid grid-cols-3 gap-1.5">
+              <button
+                type="button"
+                onClick={() => setScheduleRecurrence('weekly')}
+                className={`py-2 px-1.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                  scheduleRecurrence === 'weekly'
+                    ? 'bg-primary text-white border-primary shadow-xs'
+                    : 'bg-surface text-text-muted hover:text-text-main border-surface-border'
+                }`}
+              >
+                <div>{_t('كل أسبوع', 'Every Week', 'Jede Woche')}</div>
+                <div className="text-[9px] opacity-80 font-normal">{_t('حضور أسبوعي', 'Weekly', 'Wöchentlich')}</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setScheduleRecurrence('biweekly_a')}
+                className={`py-2 px-1.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                  scheduleRecurrence === 'biweekly_a'
+                    ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                    : 'bg-surface text-text-muted hover:text-text-main border-surface-border'
+                }`}
+              >
+                <div>🅰️ {_t('أسبوع (أ)', 'Week A', 'Woche A')}</div>
+                <div className="text-[9px] opacity-80 font-normal">{_t('هذا الأسبوع', 'This week', 'Diese Woche')}</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setScheduleRecurrence('biweekly_b')}
+                className={`py-2 px-1.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                  scheduleRecurrence === 'biweekly_b'
+                    ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                    : 'bg-surface text-text-muted hover:text-text-main border-surface-border'
+                }`}
+              >
+                <div>🅱️ {_t('أسبوع (ب)', 'Week B', 'Woche B')}</div>
+                <div className="text-[9px] opacity-80 font-normal">{_t('الأسبوع القادم', 'Next week', 'Nächste Woche')}</div>
+              </button>
+            </div>
+            {scheduleRecurrence === 'biweekly_a' && (
+              <p className="text-[10px] text-primary font-medium mt-1">
+                {_t('يحضر هذا الطالب في أسبوع (أ) فقط بالتناوب. متوافق مع جدول الحصص والمالية.', 'Attends on Week A only. Synced with schedule & finance.', 'Nimmt nur an Woche A teil.')}
+              </p>
+            )}
+            {scheduleRecurrence === 'biweekly_b' && (
+              <p className="text-[10px] text-primary font-medium mt-1">
+                {_t('يحضر هذا الطالب في أسبوع (ب) فقط بالتناوب. متوافق مع جدول الحصص والمالية.', 'Attends on Week B only. Synced with schedule & finance.', 'Nimmt nur an Woche B teil.')}
+              </p>
+            )}
           </div>
 
           {/* Pricing Info Inherited Notice */}
           {selectedGroup && (
             <div className="bg-primary-soft dark:bg-primary-soft/40 border border-primary-border/80 dark:border-primary-border/60 rounded-xl p-3 flex items-start gap-2 text-xs text-primary-hover dark:text-primary/70 transition-all">
               <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-              <div>
+              <div className="space-y-1">
                 <p className="font-bold">{t('auto_inherited_pricing')}</p>
                 <p className="text-[11px] text-primary dark:text-primary mt-0.5">
                   {t('auto_package')}
                   <span className="font-mono font-bold">{selectedGroup.monthlyPackagePrice} EGP</span> / {selectedGroup.sessionCount} {t('auto_sessions')}.
                   {_t(` يتم التوريث تلقائياً من ${selectedGroup.name}.`, ` Inherited automatically from ${selectedGroup.name}.`, ` Preis wird automatisch von ${selectedGroup.name} übernommen.`)}
                 </p>
+                {selectedGroup.scheduleRecurrence && selectedGroup.scheduleRecurrence !== 'weekly' && (
+                  <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-[10px] font-black text-primary">
+                    <span>{selectedGroup.scheduleRecurrence === 'biweekly_a' ? '🅰️' : '🅱️'}</span>
+                    <span>
+                      {selectedGroup.scheduleRecurrence === 'biweekly_a'
+                        ? _t('نظام أسبوع وآسبوع (أ): الحصص تُحسب وتُجدول في أسبوع (أ) فقط بالتناوب.', 'Bi-weekly (A): Lessons scheduled on Week A only.', 'Alle 2 Wochen (A): Unterricht in Woche A.')
+                        : _t('نظام أسبوع وآسبوع (ب): الحصص تُحسب وتُجدول في أسبوع (ب) فقط بالتناوب.', 'Bi-weekly (B): Lessons scheduled on Week B only.', 'Alle 2 Wochen (B): Unterricht in Woche B.')}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}

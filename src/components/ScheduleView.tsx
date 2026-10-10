@@ -3,11 +3,11 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
 import { parseLocalDate, formatLocalDate } from '../utils/timeUtils';
-import { getProjectedLessonsForRange } from '../utils/scheduleUtils';
+import { getProjectedLessonsForRange, getCurrentAlternatingWeek, getAlternatingWeek } from '../utils/scheduleUtils';
 import { 
   Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, ChevronDown,
   Video, MapPin, CheckCircle2, AlertTriangle, Trash2, ArrowLeftRight, 
-  Download, X, Check, Zap, RefreshCw, Play, Send, BookOpen, Plus
+  Download, X, Check, Zap, RefreshCw, Play, Send, BookOpen, Plus, Repeat
 } from 'lucide-react';
 import { StartLessonNowModal } from './StartLessonNowModal';
 import { LessonReminderModal } from './LessonReminderModal';
@@ -679,8 +679,17 @@ export const ScheduleView: React.FC = () => {
           )}
         </div>
 
-        {/* View Switcher Tabs (Day / Week / Month) */}
-        <div className="flex items-center bg-surface-hover p-0.5 rounded-lg text-xs font-bold gap-0.5 border border-surface-border/60">
+        {/* Current Alternating Week Indicator & View Switcher Tabs (Day / Week / Month) */}
+        <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-soft text-primary border border-primary-border/60 text-[10.5px] font-black shrink-0 shadow-2xs">
+            <Repeat className="w-3 h-3 shrink-0 text-primary" />
+            <span>{_t('هذا الأسبوع:', 'This week:', 'Diese Woche:')}</span>
+            <span className="font-mono bg-primary text-white px-1.5 py-0.2 rounded text-[9.5px]">
+              {_t('أسبوع', 'Week', 'Woche')} {getCurrentAlternatingWeek()}
+            </span>
+          </div>
+
+          <div className="flex items-center bg-surface-hover p-0.5 rounded-lg text-xs font-bold gap-0.5 border border-surface-border/60">
           <button
             onClick={() => setCalendarView('day')}
             className={`px-2.5 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs font-extrabold ${
@@ -706,6 +715,7 @@ export const ScheduleView: React.FC = () => {
             {t('schedule_month_view')}
           </button>
         </div>
+      </div>
       </div>
 
       {/* 1. DAY VIEW */}

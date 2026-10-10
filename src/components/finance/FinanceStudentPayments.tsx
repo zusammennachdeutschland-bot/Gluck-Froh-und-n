@@ -681,6 +681,12 @@ export const FinanceStudentPayments: React.FC = () => {
 
     const isSingle = item.cycleLength <= 1;
     const stObj = students.find(s => s.id === item.studentId || (s.name && item.studentName && s.name.trim().toLowerCase() === item.studentName.trim().toLowerCase()));
+    const targetGrp = groups.find(g => g.id === item.groupId);
+    const effRecurrence = stObj?.scheduleRecurrence || targetGrp?.scheduleRecurrence;
+    const recTagEn = effRecurrence === 'biweekly_a' ? ' (Bi-weekly A)' : effRecurrence === 'biweekly_b' ? ' (Bi-weekly B)' : '';
+    const recTagDe = effRecurrence === 'biweekly_a' ? ' (Alle 2 Wochen A)' : effRecurrence === 'biweekly_b' ? ' (Alle 2 Wochen B)' : '';
+    const recTagAr = effRecurrence === 'biweekly_a' ? ' (أسبوع أ)' : effRecurrence === 'biweekly_b' ? ' (أسبوع ب)' : '';
+
     const englishStudentName = stObj?.certificateName || stObj?.displayNameEn || stObj?.nameEn;
     const studentDisplayName = (lang === 'en' || lang === 'de')
       ? (englishStudentName || item.studentName)
@@ -688,16 +694,16 @@ export const FinanceStudentPayments: React.FC = () => {
 
     if (lang === 'en') {
       const enG = getTimeBasedGreeting('en', { recipientName: 'Dear Parent' });
-      return `${enG}\n\nNotice of ${isSingle ? 'Lesson Payment Due' : 'Course Cycle Completion & Payment Due'} 📚\n\nStudent: ${studentDisplayName}\n${item.groupName ? `Group: ${item.groupName}\n` : ''}Amount Due: ${item.amountDue} ${currency} (${item.cycleLength} lesson${item.cycleLength > 1 ? 's' : ''})\n\nCompleted Lesson Dates:\n${datesFormatted}\n\nThank you for your cooperation!`;
+      return `${enG}\n\nNotice of ${isSingle ? 'Lesson Payment Due' : 'Course Cycle Completion & Payment Due'} 📚\n\nStudent: ${studentDisplayName}\n${item.groupName ? `Group: ${item.groupName}${recTagEn}\n` : ''}Amount Due: ${item.amountDue} ${currency} (${item.cycleLength} lesson${item.cycleLength > 1 ? 's' : ''})\n\nCompleted Lesson Dates:\n${datesFormatted}\n\nThank you for your cooperation!`;
     }
 
     if (lang === 'de') {
       const deG = getTimeBasedGreeting('de', { recipientName: 'Sehr geehrte Eltern' });
-      return `${deG}\n\nBenachrichtigung über ${isSingle ? 'Lektionsfälligkeit' : 'Kurssitzungsabschluss & Fälligkeit'} 📚\n\nSchüler/in: ${studentDisplayName}\n${item.groupName ? `Gruppe: ${item.groupName}\n` : ''}Fälliger Betrag: ${item.amountDue} ${currency} (${item.cycleLength} Lektion${item.cycleLength > 1 ? 'en' : ''})\n\nAbgeschlossene Termine:\n${datesFormatted}\n\nVielen Dank für Ihre Zusammenarbeit!`;
+      return `${deG}\n\nBenachrichtigung über ${isSingle ? 'Lektionsfälligkeit' : 'Kurssitzungsabschluss & Fälligkeit'} 📚\n\nSchüler/in: ${studentDisplayName}\n${item.groupName ? `Gruppe: ${item.groupName}${recTagDe}\n` : ''}Fälliger Betrag: ${item.amountDue} ${currency} (${item.cycleLength} Lektion${item.cycleLength > 1 ? 'en' : ''})\n\nAbgeschlossene Termine:\n${datesFormatted}\n\nVielen Dank für Ihre Zusammenarbeit!`;
     }
 
     const arG = getTimeBasedGreeting('ar', { style: 'egyptian' });
-    return `${arG}\n\nإشعار ${isSingle ? 'استحقاق سداد الحصة الدراسية' : 'اكتمال الدورة الدراسية واستحقاق السداد'} 📚\n\nالطالب/ة: ${studentDisplayName}\n${item.groupName ? `المجموعة: ${item.groupName}\n` : ''}المبلغ المستحق: ${item.amountDue} ${currency} (${item.cycleLength > 1 ? `عدد ${item.cycleLength} حصص` : 'حصة واحدة'})\n\nتاريخ الحصص المكتملة:\n${datesFormatted}\n\nشاكرين ومقدرين حسن تعاونكم معنا للتسديد.`;
+    return `${arG}\n\nإشعار ${isSingle ? 'استحقاق سداد الحصة الدراسية' : 'اكتمال الدورة الدراسية واستحقاق السداد'} 📚\n\nالطالب/ة: ${studentDisplayName}\n${item.groupName ? `المجموعة: ${item.groupName}${recTagAr}\n` : ''}المبلغ المستحق: ${item.amountDue} ${currency} (${item.cycleLength > 1 ? `عدد ${item.cycleLength} حصص` : 'حصة واحدة'})\n\nتاريخ الحصص المكتملة:\n${datesFormatted}\n\nشاكرين ومقدرين حسن تعاونكم معنا للتسديد.`;
   };
 
   const handleCopyMessage = (msg: string) => {
@@ -910,9 +916,17 @@ export const FinanceStudentPayments: React.FC = () => {
                         <h3 className="text-sm font-black text-text-main truncate">
                           {item.studentName}
                         </h3>
-                        <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[120px] border border-surface-border/40">
-                          {item.groupName}
-                        </span>
+                        {(() => {
+                          const itemSt = students.find(s => s.id === item.studentId || (s.name && item.studentName && s.name.trim().toLowerCase() === item.studentName.trim().toLowerCase()));
+                          const itemRec = itemSt?.scheduleRecurrence || groups.find(g => g.id === item.groupId)?.scheduleRecurrence;
+                          return (
+                            <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[140px] border border-surface-border/40">
+                              {item.groupName}
+                              {itemRec === 'biweekly_a' && ' 🅰️'}
+                              {itemRec === 'biweekly_b' && ' 🅱️'}
+                            </span>
+                          );
+                        })()}
                       </div>
                       <div className="text-right shrink-0">
                         <span className="text-base sm:text-lg font-black text-primary font-mono leading-none">
@@ -1247,9 +1261,17 @@ export const FinanceStudentPayments: React.FC = () => {
                     <div className="flex items-baseline justify-between gap-2">
                       <div className="flex items-center gap-1.5 min-w-0 flex-1">
                         <h4 className="text-sm font-black text-text-main truncate">{item.studentName}</h4>
-                        <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[120px] border border-surface-border/40">
-                          {item.groupName}
-                        </span>
+                        {(() => {
+                          const itemSt = students.find(s => s.id === item.studentId || (s.name && item.studentName && s.name.trim().toLowerCase() === item.studentName.trim().toLowerCase()));
+                          const itemRec = itemSt?.scheduleRecurrence || groups.find(g => g.id === item.groupId)?.scheduleRecurrence;
+                          return (
+                            <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[140px] border border-surface-border/40">
+                              {item.groupName}
+                              {itemRec === 'biweekly_a' && ' 🅰️'}
+                              {itemRec === 'biweekly_b' && ' 🅱️'}
+                            </span>
+                          );
+                        })()}
                       </div>
                       <div className="text-right shrink-0">
                         <span className="text-base sm:text-lg font-black text-primary font-mono leading-none">

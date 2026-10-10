@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Group, Lesson, Student } from '../types';
+import { Group, Lesson, Student, ScheduleRecurrence } from '../types';
 import { 
   X, Users, Trash2, Send, Save, Video, ExternalLink, Copy, Check, 
   Sparkles, Calendar, Plus, Edit2, Play, FileText, UserPlus, UserMinus, Search, UserCheck, User,
@@ -46,6 +46,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
   const [newStudentPhone, setNewStudentPhone] = useState('');
   const [newStudentCertName, setNewStudentCertName] = useState('');
   const [newStudentGender, setNewStudentGender] = useState<'male' | 'female'>('male');
+  const [newStudentRecurrence, setNewStudentRecurrence] = useState<ScheduleRecurrence>(group.scheduleRecurrence || 'weekly');
   const [hasManualGender, setHasManualGender] = useState(false);
   const [showFullAddStudentModal, setShowFullAddStudentModal] = useState(false);
   const [existingStudentSearch, setExistingStudentSearch] = useState('');
@@ -220,6 +221,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
         gender: detectedGender,
         groupId: group.id,
         grade: group.grade || 'Grade 9',
+        scheduleRecurrence: newStudentRecurrence,
         notes: '',
         status: 'active'
       });
@@ -292,6 +294,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       sessionCount: effectiveSessionCount,
       startingSessionNumber: isPerLesson ? 1 : Math.max(1, Number(data.startingSessionNumber) || 1),
       defaultFinanceAccountId: data.defaultFinanceAccountId,
+      scheduleRecurrence: data.scheduleRecurrence || 'weekly',
       scheduleDays: data.scheduleDays,
       scheduleTime: data.scheduleTime,
       scheduleDayTimes: data.dayTimes,
@@ -305,6 +308,9 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
     };
 
     updateGroup(group.id, updatedGroupData);
+    if (data.scheduleDays && data.scheduleDays.length > 0) {
+      generateGroupScheduleLessons(group.id, data.scheduleDays, data.scheduleTime, 4, data.dayTimes, updatedGroupData);
+    }
 
     confetti({ particleCount: 50, spread: 40 });
     onClose();
@@ -709,6 +715,52 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                           />
                         </div>
 
+                        {/* Student Recurrence Selection: Weekly vs Week A vs Week B */}
+                        <div className="space-y-1.5 p-2.5 rounded-xl bg-surface-hover/70 border border-surface-border">
+                          <label className="text-[11px] font-bold text-text-main flex items-center justify-between">
+                            <span>{_t('نظام حضور الطالب بالتناوب (أسبوع آه وأسبوع لأ)', 'Attendance Recurrence', 'Teilnahme-Rhythmus')}</span>
+                            <span className="text-[10px] text-text-muted font-normal">{_t('حضور دوري', 'Schedule cycle', 'Rhythmus')}</span>
+                          </label>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setNewStudentRecurrence('weekly')}
+                              className={`py-1.5 px-1 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                                newStudentRecurrence === 'weekly'
+                                  ? 'bg-primary text-white border-primary shadow-xs'
+                                  : 'bg-surface text-text-muted hover:text-text-main border-surface-border'
+                              }`}
+                            >
+                              <div>{_t('كل أسبوع', 'Every Week', 'Jede Woche')}</div>
+                              <div className="text-[9px] opacity-80 font-normal">{_t('أسبوعي', 'Weekly', 'Wöchentlich')}</div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setNewStudentRecurrence('biweekly_a')}
+                              className={`py-1.5 px-1 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                                newStudentRecurrence === 'biweekly_a'
+                                  ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                                  : 'bg-surface text-text-muted hover:text-text-main border-surface-border'
+                              }`}
+                            >
+                              <div>🅰️ {_t('أسبوع (أ)', 'Week A', 'Woche A')}</div>
+                              <div className="text-[9px] opacity-80 font-normal">{_t('الأسبوع الحالي', 'This week', 'Diese Woche')}</div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setNewStudentRecurrence('biweekly_b')}
+                              className={`py-1.5 px-1 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                                newStudentRecurrence === 'biweekly_b'
+                                  ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                                  : 'bg-surface text-text-muted hover:text-text-main border-surface-border'
+                              }`}
+                            >
+                              <div>🅱️ {_t('أسبوع (ب)', 'Week B', 'Woche B')}</div>
+                              <div className="text-[9px] opacity-80 font-normal">{_t('الأسبوع القادم', 'Next week', 'Nächste Woche')}</div>
+                            </button>
+                          </div>
+                        </div>
+
                         <div className="flex items-center gap-2 pt-1">
                           <button
                             type="button"
@@ -824,6 +876,16 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                           <div className="min-w-0">
                             <span className="text-text-main font-bold block truncate group-hover/item:text-primary transition-colors flex items-center gap-1.5">
                               <span>{s.name}</span>
+                              {s.scheduleRecurrence === 'biweekly_a' && (
+                                <span className="text-[9px] font-bold text-sky-600 dark:text-sky-400 bg-sky-500/10 border border-sky-500/30 px-1 py-0.2 rounded shrink-0">
+                                  🅰️ {_t('أسبوع أ', 'Week A', 'Woche A')}
+                                </span>
+                              )}
+                              {s.scheduleRecurrence === 'biweekly_b' && (
+                                <span className="text-[9px] font-bold text-purple-600 dark:text-purple-400 bg-purple-500/10 border border-purple-500/30 px-1 py-0.2 rounded shrink-0">
+                                  🅱️ {_t('أسبوع ب', 'Week B', 'Woche B')}
+                                </span>
+                              )}
                               <span className="text-[10px] text-primary opacity-0 group-hover/item:opacity-100 transition-opacity">↗</span>
                             </span>
                             <span className="text-text-muted/80 text-[10px] font-mono block truncate">
