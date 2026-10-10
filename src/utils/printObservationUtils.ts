@@ -1708,31 +1708,16 @@ export async function saveReportToPhoneStorage(
       const savedFile = await Filesystem.writeFile({
         path: pdfFileName,
         data: pdfBase64,
-        directory: Directory.Cache
+        directory: Directory.Documents
       });
       await Share.share({
-        title: `تقرير زيارة - ${visit.teacherName}`,
+        title: pdfFileName,
         url: savedFile.uri
       });
       return { success: true, filename: pdfFileName, method: 'pdf' };
     }
 
-    const pdfFile = new File([blob], pdfFileName, { type: 'application/pdf' });
-    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-      try {
-        await navigator.share({
-          files: [pdfFile],
-          title: `تقرير زيارة صفية - ${visit.teacherName}`,
-          text: `تقرير زيارة صفية للمعلم: ${visit.teacherName}`
-        });
-        return { success: true, filename: pdfFileName, method: 'share' };
-      } catch (shareErr: any) {
-        if (shareErr?.name === 'AbortError') {
-          return { success: true, filename: pdfFileName, method: 'share' };
-        }
-      }
-    }
-
+    // Direct Anchor Download into Phone Internal Storage Downloads folder
     const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = blobUrl;
@@ -1784,28 +1769,16 @@ export async function saveCombinedReportsToPhoneStorage(
       const savedFile = await Filesystem.writeFile({
         path: pdfFileName,
         data: pdfBase64,
-        directory: Directory.Cache
+        directory: Directory.Documents
       });
       await Share.share({
-        title: `تقارير زيارات صفية مجمعة (${visits.length})`,
+        title: pdfFileName,
         url: savedFile.uri
       });
       return { success: true, filename: pdfFileName, method: 'pdf' };
     }
 
-    const pdfFile = new File([blob], pdfFileName, { type: 'application/pdf' });
-    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-      try {
-        await navigator.share({
-          files: [pdfFile],
-          title: `تقارير زيارات صفية مجمعة (${visits.length})`
-        });
-        return { success: true, filename: pdfFileName, method: 'share' };
-      } catch (e: any) {
-        if (e?.name === 'AbortError') return { success: true, filename: pdfFileName, method: 'share' };
-      }
-    }
-
+    // Direct Anchor Download into Phone Internal Storage Downloads folder
     const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = blobUrl;

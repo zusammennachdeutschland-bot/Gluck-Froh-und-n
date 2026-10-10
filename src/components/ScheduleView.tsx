@@ -388,12 +388,11 @@ export const ScheduleView: React.FC = () => {
         const savedFile = await Filesystem.writeFile({
           path: filename,
           data: icsContentStr,
-          directory: Directory.Cache,
+          directory: Directory.Documents,
           encoding: Encoding.UTF8
         });
         await Share.share({
-          title: 'Schedule Export',
-          text: `Glück Schedule Export - ${filename}`,
+          title: filename,
           url: savedFile.uri,
           dialogTitle: 'Save Schedule Calendar File'
         });

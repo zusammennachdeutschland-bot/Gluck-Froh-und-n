@@ -1042,48 +1042,18 @@ export async function shareCertificate(
         const savedFile = await Filesystem.writeFile({
           path: safeFilename,
           data: pdfBase64,
-          directory: Directory.Cache
+          directory: Directory.Documents
         });
 
         await Share.share({
-          title: `${title} - ${recipientName}`,
-          text: `🎓 شهادة تقدير للطالب: ${recipientName} (${title})`,
+          title: safeFilename,
           url: savedFile.uri,
           dialogTitle: 'مشاركة شهادة PDF'
         });
         return true;
       }
 
-      // Web fallback: Try Web Share API first
-      if (typeof navigator !== 'undefined' && navigator.share && typeof navigator.canShare === 'function') {
-        try {
-          const blob = pdf.output('blob');
-          const file = new File([blob], safeFilename, { type: 'application/pdf' });
-          if (navigator.canShare({ files: [file] })) {
-            await navigator.share({
-              title: `${title} - ${recipientName}`,
-              text: `🎓 شهادة تقدير للطالب: ${recipientName} (${title})`,
-              files: [file]
-            });
-            return true;
-          }
-        } catch (shareErr: any) {
-          // If user cancelled, treat as successful completion without error
-          if (
-            shareErr?.name === 'AbortError' ||
-            shareErr?.message?.includes('cancel') ||
-            shareErr?.message?.includes('canceled') ||
-            shareErr?.message?.includes('cancelled') ||
-            shareErr?.code === 20
-          ) {
-            return true;
-          }
-          // If browser revoked user gesture due to async rendering delay, fall through to download
-          console.warn('Web share gesture expired or unsupported, downloading file instead:', shareErr);
-        }
-      }
-
-      // Fallback: Download file directly
+      // Direct Web download to phone internal Downloads folder
       triggerWebDownload(pdf.output('blob'), safeFilename);
       return true;
     } else {
@@ -1096,46 +1066,18 @@ export async function shareCertificate(
         const savedFile = await Filesystem.writeFile({
           path: safeFilename,
           data: base64Data,
-          directory: Directory.Cache
+          directory: Directory.Documents
         });
 
         await Share.share({
-          title: `${title} - ${recipientName}`,
-          text: `🎓 شهادة تقدير للطالب: ${recipientName} (${title})`,
+          title: safeFilename,
           url: savedFile.uri,
           dialogTitle: 'مشاركة صورة الشهادة'
         });
         return true;
       }
 
-      // Web fallback: Try Web Share API first
-      if (typeof navigator !== 'undefined' && navigator.share && typeof navigator.canShare === 'function') {
-        try {
-          const blob = dataUrlToBlob(dataUrl);
-          const file = new File([blob], safeFilename, { type: 'image/png' });
-          if (navigator.canShare({ files: [file] })) {
-            await navigator.share({
-              title: `${title} - ${recipientName}`,
-              text: `🎓 شهادة تقدير للطالب: ${recipientName} (${title})`,
-              files: [file]
-            });
-            return true;
-          }
-        } catch (shareErr: any) {
-          if (
-            shareErr?.name === 'AbortError' ||
-            shareErr?.message?.includes('cancel') ||
-            shareErr?.message?.includes('canceled') ||
-            shareErr?.message?.includes('cancelled') ||
-            shareErr?.code === 20
-          ) {
-            return true;
-          }
-          console.warn('Web share gesture expired or unsupported, downloading file instead:', shareErr);
-        }
-      }
-
-      // Fallback: Download file directly
+      // Direct Web download to phone internal Downloads folder
       triggerWebDownload(dataUrlToBlob(dataUrl), safeFilename);
       return true;
     }

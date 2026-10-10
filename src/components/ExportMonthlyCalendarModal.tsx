@@ -245,12 +245,11 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
         const savedFile = await Filesystem.writeFile({
           path: exportStats.filename,
           data: exportStats.icsContent,
-          directory: Directory.Cache,
+          directory: Directory.Documents,
           encoding: Encoding.UTF8
         });
         await Share.share({
-          title: 'Calendar Export',
-          text: `Glück Calendar Export - ${exportStats.filename}`,
+          title: exportStats.filename,
           url: savedFile.uri,
           dialogTitle: 'Save Calendar File'
         });

@@ -62,9 +62,9 @@ export async function exportMasterSchedule(
         const savedFile = await Filesystem.writeFile({
           path: filename,
           data: pdfBase64,
-          directory: Directory.Cache
+          directory: Directory.Documents
         });
-        await Share.share({ title, url: savedFile.uri });
+        await Share.share({ title: filename, url: savedFile.uri });
       } else {
         pdf.save(filename);
       }
@@ -80,9 +80,9 @@ export async function exportMasterSchedule(
         const savedFile = await Filesystem.writeFile({
           path: filename,
           data: base64Data,
-          directory: Directory.Cache
+          directory: Directory.Documents
         });
-        await Share.share({ title, url: savedFile.uri });
+        await Share.share({ title: filename, url: savedFile.uri });
       } else {
         const blob = dataUrlToBlob(dataUrl);
         const objectUrl = URL.createObjectURL(blob);

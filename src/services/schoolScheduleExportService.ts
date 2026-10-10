@@ -802,46 +802,33 @@ export async function shareSchoolSchedule(
       const savedFile = await Filesystem.writeFile({
         path: filename,
         data: base64Data,
-        directory: Directory.Cache
+        directory: Directory.Documents
       });
 
       await Share.share({
-        title: model.title,
-        text: `📖 ${model.title} (${model.stats.summaryLine})`,
+        title: filename,
         url: savedFile.uri,
         dialogTitle: model.language === 'ar' ? 'مشاركة جدول المدرسة' : 'Share School Schedule'
       });
       return { success: true };
     }
 
-    // 2. Web Share API with File
-    if (typeof navigator !== 'undefined' && navigator.share && typeof navigator.canShare === 'function') {
-      try {
-        const blob = dataUrlToBlob(dataUrl);
-        const file = new File([blob], filename, { type: mimeType });
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            title: model.title,
-            text: `📖 ${model.title} (${model.stats.summaryLine})`,
-            files: [file]
-          });
-          return { success: true };
-        }
-      } catch (shareErr: any) {
-        if (
-          shareErr?.name === 'AbortError' ||
-          shareErr?.message?.includes('cancel') ||
-          shareErr?.message?.includes('canceled') ||
-          shareErr?.message?.includes('cancelled')
-        ) {
-          return { success: true };
-        }
-        console.warn('Web share gesture timed out or unsupported, falling back to download:', shareErr);
-      }
-    }
+    // 2. Direct Web Anchor Download to Phone Internal Storage / Downloads
+    const blob = dataUrlToBlob(dataUrl);
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
 
-    // 3. Fallback: Download file
-    return exportSchoolScheduleAsImage(settings, profile, { ...options, format });
+    setTimeout(() => {
+      if (document.body.contains(link)) document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    }, 4000);
+
+    return { success: true };
   } catch (error: any) {
     console.error('Error sharing school schedule:', error);
     return { 

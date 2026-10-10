@@ -310,8 +310,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             try {
               await Promise.race([
                 Share.share({
-                  title: 'Glueck Backup',
-                  text: 'Backup Export Data (Glueck)',
+                  title: fileName,
                   url: savedFile.uri,
                   dialogTitle: 'Export Backup JSON'
                 }),
@@ -462,8 +461,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             try {
               await Promise.race([
                 Share.share({
-                  title: 'Glueck Simple Backup',
-                  text: 'Quick Backup Data (Glueck)',
+                  title: fileName,
                   url: savedFile.uri,
                   dialogTitle: 'Save Backup File'
                 }),
