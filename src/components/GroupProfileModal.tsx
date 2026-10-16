@@ -6,7 +6,6 @@ import {
   Sparkles, Calendar, Plus, Edit2, Play, FileText, UserPlus, UserMinus, Search, UserCheck, User,
   GraduationCap, Clock, MapPin, CreditCard, MessageCircle
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { CascadeDeleteGroupModal } from './CascadeDeleteGroupModal';
 import { LessonReminderModal } from './LessonReminderModal';
@@ -72,7 +71,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
     };
   }, [onClose]);
 
-  const groupStudents = students.filter(s => s.groupId === group.id);
+  const groupStudents = students.filter(s => s.groupId === group.id && !s.deleted && s.status !== 'archived');
   const cycleInfo = getGroupCycleInfo(group, lessons, language);
 
   const groupLessons = lessons
@@ -145,7 +144,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
     });
 
     setEditingLessonRecordingId(null);
-    confetti({ particleCount: 30, spread: 30 });
+    /* confetti removed */
   };
 
   const isPerLessonGroup = isGroupPerLesson(group);
@@ -231,7 +230,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       setNewStudentCertName('');
       setShowAddStudentSection(false);
       setStudentActionSuccess(_t(`تمت إضافة الطالب ${trimmedName} بنجاح إلى المجموعة وبيانات البرنامج!`, `Student ${trimmedName} added successfully!`, `Schüler ${trimmedName} erfolgreich hinzugefügt!`));
-      confetti({ particleCount: 40, spread: 50 });
+      /* confetti removed */
       setTimeout(() => setStudentActionSuccess(null), 3500);
     } catch (err) {
       console.error(err);
@@ -246,7 +245,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
 
     updateStudent(studentId, { groupId: group.id });
     setStudentActionSuccess(_t(`تم ضم الطالب ${student.name} إلى المجموعة!`, `Student ${student.name} assigned to group!`, `Schüler ${student.name} zugewiesen!`));
-    confetti({ particleCount: 30, spread: 45 });
+    /* confetti removed */
     setTimeout(() => setStudentActionSuccess(null), 3000);
   };
 
@@ -262,7 +261,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
     }
   };
 
-  const availableExistingStudents = students.filter(s => s.groupId !== group.id);
+  const availableExistingStudents = students.filter(s => s.groupId !== group.id && !s.deleted && s.status !== 'archived');
   const filteredExistingStudents = availableExistingStudents.filter(s => {
     if (!existingStudentSearch.trim()) return true;
     const query = existingStudentSearch.toLowerCase().trim();
@@ -312,7 +311,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       generateGroupScheduleLessons(group.id, data.scheduleDays, data.scheduleTime, 4, data.dayTimes, updatedGroupData);
     }
 
-    confetti({ particleCount: 50, spread: 40 });
+    /* confetti removed */
     onClose();
   };
 

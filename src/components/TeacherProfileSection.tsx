@@ -4,7 +4,6 @@ import {
   User, Mail, DollarSign, Calendar, Clock, Target, 
   Save, CheckCircle2, ArrowLeft, ArrowRight, UserCheck, ShieldCheck
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface Props {
   onBack?: () => void;
@@ -79,7 +78,7 @@ export const TeacherProfileSection: React.FC<Props> = ({ onBack }) => {
     });
 
     setIsSaved(true);
-    confetti({ particleCount: 35, spread: 40 });
+    /* confetti removed */
     setTimeout(() => setIsSaved(false), 3000);
   };
 

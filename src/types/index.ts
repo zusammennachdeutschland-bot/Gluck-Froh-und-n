@@ -753,6 +753,7 @@ export interface Student extends SyncableRecord {
   certificateName?: string; // Transliterated/custom name used on certificates (e.g. "Rital Tarek" for "ريتال طارق")
   gender?: 'male' | 'female';
   groupId: string;
+  archivedGroupId?: string;
   grade: GradeLevel;
   parentName: string;
   parentPhone: string;

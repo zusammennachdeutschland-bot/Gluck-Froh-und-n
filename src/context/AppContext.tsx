@@ -1,6 +1,8 @@
 import { DEFAULT_FINANCE_CATEGORIES } from "../data/defaultFinanceCategories";
+import { DEFAULT_LERNSTUDIO_SETS } from "../data/defaultLernstudioSets";
 import { applyAccentToDocument } from '../utils/colorUtils';
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { LernstudioSet } from '../types/lernstudio';
 import { 
   TeacherProfile, Group, Student, Lesson, PaymentRecord, NotificationItem, 
   LessonReport, StudentDocument, PaymentStatus, LessonStatus, AttendanceStatus, HomeworkStatus, SyncStatus, BackupData, BackupIntegrityReport, StudentPaymentDetail, AppLanguage, AccentColor, RecentlyDeletedData, ActiveLessonSession,
@@ -54,7 +56,6 @@ import {
 import { goldPriceService } from '../services/goldPrice/goldPriceService';
 
 import { alarmAudioService } from '../services/alarmAudioService';
-import confetti from 'canvas-confetti';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -81,8 +82,13 @@ interface AppContextType {
   setAccentColor: (color: AccentColor) => void;
   t: (key: TranslationKey) => string;
   _t: (ar: string, en: string, de?: string) => string;
-  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod';
-  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod') => void;
+  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio';
+  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio') => void;
+
+  // Lernstudio Sets
+  lernstudioSets: LernstudioSet[];
+  saveLernstudioSet: (set: LernstudioSet) => void;
+  deleteLernstudioSet: (setId: string) => void;
 
   // Certificates
   certificates: CertificateRecord[];
@@ -127,6 +133,7 @@ interface AppContextType {
   addStudent: (student: Omit<Student, 'id' | 'documents' | 'joinedDate'>) => Student;
   updateStudent: (id: string, updates: Partial<Student>) => void;
   deleteStudent: (id: string) => void;
+  deleteStudentsBulk: (ids: string[]) => void;
   deleteStudentsByGroup: (groupId: string) => void;
   moveStudent: (studentId: string, newGroupId: string) => void;
   moveStudentsBulk: (studentIds: string[], newGroupId: string) => void;
@@ -839,6 +846,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
 
   const fullPaymentsRef = useRef<PaymentRecord[]>(initialPaymentDeduplication.deduplicated);
+
+  // Lernstudio Sets State & Persistence
+  const [lernstudioSets, setLernstudioSets] = useState<LernstudioSet[]>(() => {
+    const saved = initialData['dl_lernstudio_sets'];
+    if (Array.isArray(saved) && saved.length > 0) {
+      const existingIds = new Set(saved.map((s: any) => s.id));
+      const missingDefaults = DEFAULT_LERNSTUDIO_SETS.filter((ds) => !existingIds.has(ds.id));
+      return [...saved, ...missingDefaults];
+    }
+    return DEFAULT_LERNSTUDIO_SETS;
+  });
+
+  const saveLernstudioSet = (newSet: LernstudioSet) => {
+    setLernstudioSets(prev => {
+      const exists = prev.some(s => s.id === newSet.id);
+      let updated: LernstudioSet[];
+      if (exists) {
+        updated = prev.map(s => s.id === newSet.id ? wrapMutation(newSet) : s);
+      } else {
+        updated = [wrapMutation(newSet), ...prev];
+      }
+      storage.setItem('dl_lernstudio_sets', updated);
+      return updated;
+    });
+  };
+
+  const deleteLernstudioSet = (setId: string) => {
+    setLernstudioSets(prev => {
+      const updated = prev.filter(s => s.id !== setId);
+      storage.setItem('dl_lernstudio_sets', updated);
+      return updated;
+    });
+  };
 
   // Persist cleaned deduplicated records on startup if duplicates were found
   useEffect(() => {
@@ -2069,7 +2109,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       displayMethod: prev.displayMethod || 'both',
       source: prev.source || 'all'
     }));
-    confetti({ particleCount: 50, spread: 60 });
+    /* confetti removed */
   };
 
   const dismissInspirationCard = useCallback(() => {
@@ -2588,7 +2628,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     } as Group);
     setGroups(prev => [...prev, duplicatedGroup]);
     autoSyncEngine.notifyMutation('groups', duplicatedGroup.id);
-    confetti({ particleCount: 50, spread: 40 });
+    /* confetti removed */
     return duplicatedGroup;
   };
 
@@ -3035,7 +3075,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const existingStudent = students.find(s => s.id === id);
     const oldName = existingStudent?.name;
 
-    setStudents(prev => prev.map(s => (s.id === id ? wrapMutation({ ...s, ...updates } as Student) : s)));
+    setStudents(prev => {
+      const next = prev.map(s => {
+        if (s.id === id) {
+          const nextUpdates = { ...updates };
+          if (nextUpdates.status === 'archived') {
+            if (!nextUpdates.archivedGroupId && (s.groupId || (s as any).archivedGroupId)) {
+              nextUpdates.archivedGroupId = s.groupId || (s as any).archivedGroupId;
+            }
+            nextUpdates.groupId = '';
+          }
+          return wrapMutation({ ...s, ...nextUpdates } as Student);
+        }
+        return s;
+      });
+      storage.setItem('dl_students', next);
+      return next;
+    });
     autoSyncEngine.notifyMutation('students', id);
 
     // Propagate student name changes to other synced database collections (lessons and payments)
@@ -3096,8 +3152,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         students: [{ item: targetStudent, deletedAt: new Date().toISOString() }, ...prev.students]
       }));
     }
-    setStudents(prev => prev.map(s => s.id === id ? wrapDeletion(s) : s));
+    setStudents(prev => {
+      const next = prev.map(s => {
+        if (s.id === id) {
+          return wrapDeletion({
+            ...s,
+            status: 'archived',
+            archivedGroupId: s.groupId || (s as any).archivedGroupId || '',
+            groupId: '',
+            updatedAt: Date.now()
+          });
+        }
+        return s;
+      });
+      storage.setItem('dl_students', next);
+      return next;
+    });
     autoSyncEngine.notifyMutation('students', id);
+  };
+
+  const deleteStudentsBulk = (ids: string[]) => {
+    const idSet = new Set(ids);
+    const studentsToDelete = students.filter(s => idSet.has(s.id) && !s.deleted);
+    if (studentsToDelete.length > 0) {
+      setRecentlyDeleted(prev => ({
+        ...prev,
+        students: [
+          ...studentsToDelete.map(item => ({ item, deletedAt: new Date().toISOString() })),
+          ...prev.students
+        ]
+      }));
+      setStudents(prev => {
+        const next = prev.map(s => {
+          if (idSet.has(s.id)) {
+            return wrapDeletion({
+              ...s,
+              status: 'archived',
+              archivedGroupId: s.groupId || (s as any).archivedGroupId || '',
+              groupId: '',
+              updatedAt: Date.now()
+            });
+          }
+          return s;
+        });
+        storage.setItem('dl_students', next);
+        return next;
+      });
+      ids.forEach(id => {
+        autoSyncEngine.notifyMutation('students', id);
+      });
+    }
   };
 
   const deleteStudentsByGroup = (groupId: string) => {
@@ -3110,7 +3214,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           ...prev.students
         ]
       }));
-      setStudents(prev => prev.map(s => s.groupId === groupId ? wrapDeletion(s) : s));
+      setStudents(prev => {
+        const next = prev.map(s => {
+          if (s.groupId === groupId) {
+            return wrapDeletion({
+              ...s,
+              status: 'archived',
+              archivedGroupId: groupId,
+              groupId: '',
+              updatedAt: Date.now()
+            });
+          }
+          return s;
+        });
+        storage.setItem('dl_students', next);
+        return next;
+      });
       studentsToDelete.forEach(s => {
         autoSyncEngine.notifyMutation('students', s.id);
       });
@@ -3120,17 +3239,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const moveStudent = (studentId: string, newGroupId: string) => {
     const targetGroup = groups.find(g => g.id === newGroupId);
     const newGrade = targetGroup?.grade;
-    setStudents(prev => prev.map(s => {
-      if (s.id === studentId) {
-        return wrapMutation({
-          ...s,
-          groupId: newGroupId,
-          grade: newGrade || s.grade,
-          updatedAt: Date.now()
-        } as Student);
-      }
-      return s;
-    }));
+    setStudents(prev => {
+      const next = prev.map(s => {
+        if (s.id === studentId) {
+          return wrapMutation({
+            ...s,
+            groupId: newGroupId,
+            grade: newGrade || s.grade,
+            updatedAt: Date.now()
+          } as Student);
+        }
+        return s;
+      });
+      storage.setItem('dl_students', next);
+      return next;
+    });
     autoSyncEngine.notifyMutation('students', studentId);
   };
 
@@ -3138,24 +3261,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const targetGroup = groups.find(g => g.id === newGroupId);
     const newGrade = targetGroup?.grade;
     const idSet = new Set(studentIds);
-    setStudents(prev => prev.map(s => {
-      if (idSet.has(s.id)) {
-        return wrapMutation({
-          ...s,
-          groupId: newGroupId,
-          grade: newGrade || s.grade,
-          updatedAt: Date.now()
-        } as Student);
-      }
-      return s;
-    }));
+    setStudents(prev => {
+      const next = prev.map(s => {
+        if (idSet.has(s.id)) {
+          return wrapMutation({
+            ...s,
+            groupId: newGroupId,
+            grade: newGrade || s.grade,
+            updatedAt: Date.now()
+          } as Student);
+        }
+        return s;
+      });
+      storage.setItem('dl_students', next);
+      return next;
+    });
     studentIds.forEach(id => {
       autoSyncEngine.notifyMutation('students', id);
     });
   };
 
   const archiveStudent = (id: string) => {
-    setStudents(prev => prev.map(s => s.id === id ? wrapMutation({ ...s, status: 'archived' } as Student) : s));
+    setStudents(prev => {
+      const next = prev.map(s => {
+        if (s.id === id) {
+          return wrapMutation({
+            ...s,
+            status: 'archived',
+            archivedGroupId: s.groupId || (s as any).archivedGroupId || '',
+            groupId: '',
+            updatedAt: Date.now()
+          } as Student);
+        }
+        return s;
+      });
+      storage.setItem('dl_students', next);
+      return next;
+    });
+    autoSyncEngine.notifyMutation('students', id);
   };
 
   const uploadStudentDocument = (studentId: string, file: File, category: 'homework' | 'exam' | 'doc') => {
@@ -3735,7 +3878,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         autoSyncEngine.notifyMutation('lessons', id);
       }
     }
-    confetti({ particleCount: 50, spread: 40 });
+    /* confetti removed */
   };
 
   const permanentlyDeleteItem = (type: 'student' | 'group' | 'lesson', id: string) => {
@@ -3961,7 +4104,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const today = formatLocalDate();
 
     const groupSts = targetLesson.groupId 
-      ? students.filter(s => s.groupId === targetLesson.groupId)
+      ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetLesson.groupId)
       : [];
 
     const reportUpdater = (allLessons: Lesson[]) => {
@@ -4291,6 +4434,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     // Update students payment status in state
     setStudents(prev => prev.map(s => {
+      if (s.deleted || s.status === 'archived') return s;
       const isGroupMember = targetLesson.groupId && s.groupId === targetLesson.groupId;
       const isIndividual = targetLesson.studentId ? s.id === targetLesson.studentId : (!!targetLesson.studentName && s.name === targetLesson.studentName);
 
@@ -4338,7 +4482,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       storage.removeItem('dl_active_lesson_session');
     }
 
-    confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+    /* confetti removed */
   };
 
   const cancelLesson = (lessonId: string, notes?: string) => {
@@ -4643,7 +4787,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }));
     }
 
-    confetti({ particleCount: 60, spread: 50 });
+    /* confetti removed */
   };
 
   const addPaymentRecord = (record: Omit<PaymentRecord, 'id'>) => {
@@ -4810,7 +4954,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setStudents(prev => prev.map(s => s.id === data.studentId ? wrapMutation({ ...s, paymentStatus: 'paid' } as Student) : s));
     autoSyncEngine.notifyMutation('payments', finalPaymentId);
     autoSyncEngine.notifyMutation('lessons', data.studentId);
-    confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+    /* confetti removed */
   };
 
   const markCyclePaymentNotYet = (data: {
@@ -4913,7 +5057,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     setStudents(prev => prev.map(s => s.id === data.studentId ? wrapMutation({ ...s, paymentStatus: 'paid' } as Student) : s));
     autoSyncEngine.notifyMutation('payments', finalPaymentId);
-    confetti({ particleCount: 60, spread: 55, origin: { y: 0.6 } });
+    /* confetti removed */
   };
 
   const exemptCyclePayment = (data: {
@@ -5137,7 +5281,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       return s;
     }));
-    confetti({ particleCount: 50, spread: 40 });
+    /* confetti removed */
   };
 
   const updateLessonPaymentStatus = (lessonId: string, status: PaymentStatus, customAmountPaid?: number, accountId?: string, targetStudentId?: string) => {
@@ -5294,7 +5438,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         relatedStudentId: targetLesson.studentId,
         relatedPaymentId: paymentRecordId || `pay_l_${lessonId}`
       });
-      confetti({ particleCount: 70, spread: 60 });
+      /* confetti removed */
     }
   };
 
@@ -5400,7 +5544,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setLanguageState(INITIAL_TEACHER_PROFILE.language || 'de');
 
     // Fire celebration confetti
-    confetti({ particleCount: 100, spread: 80 });
+    /* confetti removed */
 
     // Reload the window to reinitialize all context states with default values
     setTimeout(() => {
@@ -5481,7 +5625,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
     }
 
-    confetti({ particleCount: 60, spread: 60 });
+    /* confetti removed */
     return newLesson;
   };
 
@@ -5544,7 +5688,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return p;
     }));
 
-    confetti({ particleCount: 100, spread: 80 });
+    /* confetti removed */
     return newStudent;
   };
 
@@ -5759,7 +5903,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         console.error('Failed to rebuild notification schedules after restore:', err);
       }
 
-      confetti({ particleCount: 80, spread: 70 });
+      /* confetti removed */
       return true;
     } catch (e) {
       console.error('Failed to restore backup', e);
@@ -5814,8 +5958,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
         await Share.share({
           title: 'Glück Backup',
-          text: 'Backup Export Data (Glück)',
-          url: savedFile.uri,
+          files: [savedFile.uri],
           dialogTitle: 'Export Backup JSON'
         });
         return;
@@ -6448,6 +6591,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         addStudent,
         updateStudent,
         deleteStudent,
+        deleteStudentsBulk,
         deleteStudentsByGroup,
         moveStudent,
         moveStudentsBulk,
@@ -6531,6 +6675,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         restoreDefaultInspirationMessages,
         dismissInspirationCard,
         checkAndTriggerInspirationReminder,
+        lernstudioSets,
+        saveLernstudioSet,
+        deleteLernstudioSet,
         isAddLessonModalOpen,
         setIsAddLessonModalOpen,
         isAddQuickLessonModalOpen,

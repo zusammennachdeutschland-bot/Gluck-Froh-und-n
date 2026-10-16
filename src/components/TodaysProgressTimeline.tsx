@@ -435,7 +435,7 @@ export const TodaysProgressTimeline: React.FC = () => {
               const targetGroup = lesson.groupId 
                 ? (groups.find(g => g.id === lesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === lesson.groupId!.trim().toLowerCase()))
                 : (lesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === lesson.groupName!.trim().toLowerCase()) : null);
-              const groupStudents = targetGroup && students ? students.filter(s => s.groupId === targetGroup.id) : [];
+              const groupStudents = targetGroup && students ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id) : [];
               const scheduledStudents = groupStudents.filter(s => !lesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, lesson.date));
               const isCompletedState = lesson.status === 'completed';
               const isCancelledState = lesson.status === 'cancelled';

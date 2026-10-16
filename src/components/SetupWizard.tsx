@@ -10,7 +10,6 @@ import {
 import { AppLanguage, AccentColor, NotificationSound, SchoolSettings, SchoolPeriodSettings, SchoolDayPresence } from '../types';
 import { AvatarImage } from './AvatarImage';
 import { motion, AnimatePresence } from 'motion/react';
-import confetti from 'canvas-confetti';
 import { getSchoolSettings, DEFAULT_SCHOOL_SETTINGS } from '../utils/schoolUtils';
 
 const PRESET_AVATARS = [
@@ -188,7 +187,7 @@ export const SetupWizard: React.FC = () => {
       if (success) {
         localStorage.setItem('dl_setup_completed', 'true');
         setIsOpen(false);
-        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        /* confetti removed */
       }
     } catch (err) {
       console.error('Failed to restore backup during setup:', err);
@@ -324,11 +323,7 @@ export const SetupWizard: React.FC = () => {
     localStorage.setItem('dl_setup_completed', 'true');
     
     // Celebration
-    confetti({
-      particleCount: 120,
-      spread: 80,
-      origin: { y: 0.6 }
-    });
+    /* confetti removed */
 
     setTimeout(() => {
       setIsOpen(false);

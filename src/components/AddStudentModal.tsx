@@ -4,7 +4,6 @@ import { storage } from '../services/storageService';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { GradeLevel, ScheduleRecurrence } from '../types';
 import { X, UserPlus, Info, Phone, AtSign, Sparkles, Repeat } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
 import { transliterateArabicNameToEnglish } from '../utils/nameUtils';
@@ -149,7 +148,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
     });
 
     storage.removeItem('dl_draft_add_student');
-    confetti({ particleCount: 60, spread: 50 });
+    /* confetti removed */
     onClose();
   };
 

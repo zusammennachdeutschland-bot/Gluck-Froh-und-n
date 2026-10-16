@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
   History, Award, Clock, Plus, Zap, UserPlus, Layers,
-  Search, Moon, Sun, BookOpen, Sparkles
+  Search, Moon, Sun, BookOpen, Sparkles, Gamepad2
 } from 'lucide-react';
 import { AvatarImage } from '../AvatarImage';
 import { DEFAULT_OFFLINE_AVATAR } from '../../data/avatarPresets';
@@ -191,6 +191,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
     { id: 'freeTime', label: t('nav_free_time') || 'Freie Termine', icon: Clock, badge: null },
     { id: 'schoolSchedule', label: _t('جدول المدرسة', 'School Schedule', 'Stundenplan'), icon: BookOpen, badge: null },
     { id: 'hod', label: _t('إدارة القسم (HOD Hub)', 'HOD Hub', 'Fachleiter Hub'), icon: Layers, badge: null },
+    { id: 'lernstudio', label: 'Glück Lernstudio 🇩🇪', icon: Gamepad2, badge: 'NEU' },
     { id: 'settings', label: t('nav_settings') || 'Einstellungen', icon: Settings, badge: null },
   ];
 

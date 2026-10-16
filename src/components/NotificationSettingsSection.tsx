@@ -11,7 +11,6 @@ import {
   UserCheck, RefreshCw, Trash2, ArrowLeft, ArrowRight,
   Play, Square, Smartphone, Layers, Check, ExternalLink, ChevronDown, ChevronUp
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { alarmAudioService, AlarmTone } from '../services/alarmAudioService';
 
 interface Props {
@@ -83,7 +82,7 @@ export const NotificationSettingsSection: React.FC<Props> = ({ onBack }) => {
     setIsRebuilding(true);
     try {
       await rebuildNotificationSchedules();
-      confetti({ particleCount: 30, spread: 35 });
+      /* confetti removed */
     } finally {
       setIsRebuilding(false);
     }

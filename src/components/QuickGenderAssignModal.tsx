@@ -6,7 +6,6 @@ import {
   X, Check, Users, Sparkles, UserCheck, ArrowRight, ArrowLeft, 
   RotateCcw, Filter, CheckCircle2, ChevronDown, ChevronUp
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface QuickGenderAssignModalProps {
   isOpen: boolean;
@@ -65,7 +64,7 @@ export const QuickGenderAssignModal: React.FC<QuickGenderAssignModalProps> = ({
     // If all pending will be 1 (this was the last), fire confetti
     if (pendingStudents.length <= 1) {
       try {
-        confetti({ particleCount: 70, spread: 70, origin: { y: 0.6 } });
+        /* confetti removed */
       } catch (e) {}
     }
 

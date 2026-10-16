@@ -1169,14 +1169,33 @@ export async function downloadSingleWeeklyPlanPdf(
     const filename = `Wochenplan_Woche_${weekNum}_${safeStage}.pdf`;
 
     if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: filename,
-        data: pdfBase64,
-        directory: Directory.Cache
-      });
-      await Share.share({ title: `Wochenplan Woche ${weekNum}`, url: savedFile.uri });
-    } else {
+      try {
+        const pdfBase64 = pdf.output('datauristring').split(',')[1];
+        await Filesystem.writeFile({
+          path: filename,
+          data: pdfBase64,
+          directory: Directory.Documents
+        });
+      } catch (nativeErr) {
+        console.warn('Native Filesystem save warning:', nativeErr);
+      }
+    }
+
+    try {
+      const blob = pdf.output('blob');
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      link.target = '_self';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (document.body.contains(link)) document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
+      }, 4000);
+    } catch (_) {
       pdf.save(filename);
     }
 
@@ -1355,14 +1374,33 @@ export async function downloadAllWeeklyPlansCombinedPdf(
     const filename = `Gesamter_Wochenplan_Woche_${weekNum}.pdf`;
 
     if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: filename,
-        data: pdfBase64,
-        directory: Directory.Cache
-      });
-      await Share.share({ title: `Gesamter Wochenplan Woche ${weekNum}`, url: savedFile.uri });
-    } else {
+      try {
+        const pdfBase64 = pdf.output('datauristring').split(',')[1];
+        await Filesystem.writeFile({
+          path: filename,
+          data: pdfBase64,
+          directory: Directory.Documents
+        });
+      } catch (nativeErr) {
+        console.warn('Native Filesystem save warning:', nativeErr);
+      }
+    }
+
+    try {
+      const blob = pdf.output('blob');
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      link.target = '_self';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (document.body.contains(link)) document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
+      }, 4000);
+    } catch (_) {
       pdf.save(filename);
     }
 

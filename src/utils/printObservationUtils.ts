@@ -664,20 +664,7 @@ export async function downloadStageFollowUpPdf(
     const safeManagerName = (record.stageManagerName || 'Manager').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
     const fileName = `متابعة_مرحلة_${safeManagerName}_${record.date || Date.now()}.pdf`;
 
-    if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: fileName,
-        data: pdfBase64,
-        directory: Directory.Cache
-      });
-      await Share.share({
-        title: `تقرير متابعة - ${record.stageManagerName}`,
-        url: savedFile.uri
-      });
-    } else {
-      pdf.save(fileName);
-    }
+    await savePdfFileCrossPlatform(pdf, fileName, `تقرير متابعة - ${record.stageManagerName}`);
     return { success: true, filename: fileName };
   } catch (error: any) {
     console.error('Error downloading Stage Follow-up PDF:', error);
@@ -694,18 +681,6 @@ export async function shareStageFollowUpViaWhatsApp(
   const safeManagerName = (record.stageManagerName || 'Manager').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
   const weekNumStr = record.weekNumber ? `_W${record.weekNumber}` : '';
   const fileName = `متابعة_مرحلة_${safeManagerName}${weekNumStr}_${record.date || Date.now()}.pdf`;
-  const periodLabel = record.periodType === 'weekly' ? 'أسبوعية' : record.periodType === 'monthly' ? 'شهرية' : 'فصلية';
-  const weekTitleStr = record.weekNumber ? ` - الأسبوع ${record.weekNumber}` : '';
-
-  const textSummary =
-    `📋 *تقرير متابعة وتقييم مدير المرحلة (${periodLabel}${weekTitleStr})*\n\n` +
-    `👤 *مدير المرحلة:* ${record.stageManagerName}\n` +
-    `🏫 *المرحلة / الصفوف:* ${record.gradeBand}\n` +
-    `🗓️ *رقم الأسبوع:* الأسبوع ${record.weekNumber || 1}\n` +
-    `📅 *تاريخ المتابعة:* ${record.date}\n` +
-    `👥 *عدد المعلمين التابعين:* ${record.teachersData.length} معلم\n\n` +
-    `✍️ *ملاحظات التقييم العامة:*\n${record.overallStageNotes || 'تم إنجاز التقييم بنجاح.'}\n\n` +
-    `👨‍🏫 *رئيس القسم:* ${settings.hodName || ''}`;
 
   try {
     const pdf = await generateStageFollowUpPdfInstance(record, settings, isRtl, lang);
@@ -718,8 +693,7 @@ export async function shareStageFollowUpViaWhatsApp(
         directory: Directory.Cache
       });
       await Share.share({
-        title: `تقرير متابعة - ${record.stageManagerName}`,
-        text: textSummary,
+        title: fileName,
         url: savedFile.uri
       });
       return;
@@ -735,17 +709,26 @@ export async function shareStageFollowUpViaWhatsApp(
       navigator.canShare({ files: [pdfFile] })
     ) {
       await navigator.share({
-        files: [pdfFile],
-        title: `تقرير متابعة - ${record.stageManagerName}`,
-        text: textSummary,
+        files: [pdfFile]
       });
       return;
     }
-  } catch (err) {
-    console.warn('Web Share failed, fallback to WhatsApp link:', err);
-  }
 
-  window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(textSummary)}`, '_blank');
+    // Direct download fallback so the actual PDF is available in Internal Storage / Downloads
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = fileName;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      if (document.body.contains(link)) document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    }, 4000);
+  } catch (err) {
+    console.warn('Web Share failed, fallback to file download:', err);
+  }
 }
 
 export function printStageFollowUpReport(
@@ -1141,23 +1124,23 @@ export async function generateCombinedObservationReportsPdfInstance(
 }
 
 async function savePdfFileCrossPlatform(pdf: jsPDF, fileName: string, shareTitle?: string): Promise<void> {
+  const blob = pdf.output('blob');
+
   if (Capacitor.isNativePlatform()) {
-    const pdfBase64 = pdf.output('datauristring').split(',')[1];
-    const savedFile = await Filesystem.writeFile({
-      path: fileName,
-      data: pdfBase64,
-      directory: Directory.Cache
-    });
-    await Share.share({
-      title: shareTitle || fileName,
-      url: savedFile.uri
-    });
-    return;
+    try {
+      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      await Filesystem.writeFile({
+        path: fileName,
+        data: pdfBase64,
+        directory: Directory.Documents
+      });
+    } catch (nativeErr) {
+      console.warn('Native Filesystem save to Documents error:', nativeErr);
+    }
   }
 
   // Web & Mobile Browser (Android Chrome, iOS Safari, etc.)
   try {
-    const blob = pdf.output('blob');
     const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = blobUrl;
@@ -1175,7 +1158,9 @@ async function savePdfFileCrossPlatform(pdf: jsPDF, fileName: string, shareTitle
     }, 4000);
   } catch (err) {
     // Fallback to jsPDF standard save
-    pdf.save(fileName);
+    try {
+      pdf.save(fileName);
+    } catch (_) {}
   }
 }
 
@@ -1366,8 +1351,7 @@ export async function shareObservationReportViaWhatsApp(
         directory: Directory.Cache
       });
       await Share.share({
-        title: `تقرير زيارة صفية - ${visit.teacherName}`,
-        text: textSummary,
+        title: fileName,
         url: savedFile.uri
       });
       return;
@@ -1384,18 +1368,26 @@ export async function shareObservationReportViaWhatsApp(
       navigator.canShare({ files: [pdfFile] })
     ) {
       await navigator.share({
-        files: [pdfFile],
-        title: `تقرير زيارة صفية - ${visit.teacherName}`,
-        text: textSummary,
+        files: [pdfFile]
       });
       return;
     }
-  } catch (err) {
-    console.warn('Web Share failed or dismissed, fallback to WhatsApp text:', err);
-  }
 
-  // Fallback to WhatsApp URL
-  window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(textSummary)}`, '_blank');
+    // Direct download fallback so the actual PDF is available in Internal Storage / Downloads
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = fileName;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      if (document.body.contains(link)) document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    }, 4000);
+  } catch (err) {
+    console.warn('Web Share failed or dismissed, fallback to file download:', err);
+  }
 }
 
 export interface ActionPlansPrintOptions {
@@ -1647,20 +1639,7 @@ export async function downloadActionPlansPdf(
     pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
     const fileName = `خطط_علاجية_${new Date().toISOString().split('T')[0]}.pdf`;
 
-    if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: fileName,
-        data: pdfBase64,
-        directory: Directory.Cache
-      });
-      await Share.share({
-        title: `خطط علاجية للطلاب`,
-        url: savedFile.uri
-      });
-    } else {
-      pdf.save(fileName);
-    }
+    await savePdfFileCrossPlatform(pdf, fileName, 'خطط علاجية للطلاب');
     return { success: true, filename: fileName };
   } catch (error: any) {
     console.error('Error generating Action Plans PDF:', error);
@@ -1701,36 +1680,7 @@ export async function saveReportToPhoneStorage(
 
   try {
     const pdf = await generateObservationReportPdfInstance(visit, settings, isRtl, lang);
-    const blob = pdf.output('blob');
-
-    if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: pdfFileName,
-        data: pdfBase64,
-        directory: Directory.Documents
-      });
-      await Share.share({
-        title: pdfFileName,
-        url: savedFile.uri
-      });
-      return { success: true, filename: pdfFileName, method: 'pdf' };
-    }
-
-    // Direct Anchor Download into Phone Internal Storage Downloads folder
-    const blobUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = pdfFileName;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-
-    setTimeout(() => {
-      if (document.body.contains(link)) document.body.removeChild(link);
-      URL.revokeObjectURL(blobUrl);
-    }, 4000);
-
+    await savePdfFileCrossPlatform(pdf, pdfFileName, `تقرير زيارة صفية - ${visit.teacherName}`);
     return { success: true, filename: pdfFileName, method: 'pdf' };
   } catch (pdfErr) {
     console.warn('PDF generation encountered issue, saving offline HTML report as fallback:', pdfErr);
@@ -1762,36 +1712,7 @@ export async function saveCombinedReportsToPhoneStorage(
 
   try {
     const pdf = await generateCombinedObservationReportsPdfInstance(visits, settings, isRtl, lang, onProgress);
-    const blob = pdf.output('blob');
-
-    if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: pdfFileName,
-        data: pdfBase64,
-        directory: Directory.Documents
-      });
-      await Share.share({
-        title: pdfFileName,
-        url: savedFile.uri
-      });
-      return { success: true, filename: pdfFileName, method: 'pdf' };
-    }
-
-    // Direct Anchor Download into Phone Internal Storage Downloads folder
-    const blobUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = pdfFileName;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-
-    setTimeout(() => {
-      if (document.body.contains(link)) document.body.removeChild(link);
-      URL.revokeObjectURL(blobUrl);
-    }, 4000);
-
+    await savePdfFileCrossPlatform(pdf, pdfFileName, `تقارير زيارات صفية مجمعة (${visits.length})`);
     return { success: true, filename: pdfFileName, method: 'pdf' };
   } catch (pdfErr) {
     console.warn('Combined PDF export error, saving offline HTML fallback package:', pdfErr);

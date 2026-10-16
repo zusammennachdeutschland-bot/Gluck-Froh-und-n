@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Home, Calendar, Users, MoreHorizontal, Wallet, BarChart2, Settings, Zap, History, Play, Clock, Award, BookOpen, Layers } from 'lucide-react';
+import { Home, Calendar, Users, MoreHorizontal, Wallet, BarChart2, Settings, Zap, History, Play, Clock, Award, BookOpen, Layers, Gamepad2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
 
@@ -52,7 +52,7 @@ export const BottomNav: React.FC = () => {
 
   const rightTabs = [
     { id: 'payments', label: t('nav_payments') || 'Zahlungen', icon: Wallet, badge: unreadDueCount > 0 ? unreadDueCount : null },
-    { id: 'schoolSchedule', label: _t('المدرسة', 'School', 'Schule'), icon: BookOpen },
+    { id: 'lernstudio', label: 'Lernstudio', icon: Gamepad2 },
     { id: 'hod', label: _t('القسم', 'HOD', 'Fachleiter'), icon: Layers },
   ];
 

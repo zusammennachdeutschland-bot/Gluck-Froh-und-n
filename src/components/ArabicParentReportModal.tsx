@@ -13,7 +13,6 @@ import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { 
   X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen, Globe, Sun, Moon
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { GroupProfileModal } from './GroupProfileModal';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 
@@ -119,7 +118,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
   // Find students associated with this lesson or group
   const allGroupStudents = useMemo(() => {
-    return lesson.groupId ? students.filter(s => s.groupId === lesson.groupId) : [];
+    return lesson.groupId ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === lesson.groupId) : [];
   }, [lesson.groupId, students]);
 
   // Scheduled students for this lesson based on alternating week schedule (or students who have explicit recorded attendance)
@@ -1044,7 +1043,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
     persistRecordings(undefined, undefined, finalGeneratedText);
     navigator.clipboard.writeText(finalGeneratedText);
     setCopied(true);
-    confetti({ particleCount: 40, spread: 60, origin: { y: 0.8 } });
+    /* confetti removed */
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -1073,7 +1072,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
         window.open(url, '_blank');
       }
       try {
-        confetti({ particleCount: 40, spread: 60, origin: { y: 0.8 } });
+        /* confetti removed */
       } catch (e) {}
       return;
     }
@@ -1088,7 +1087,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
     const fallbackUrl = buildWhatsAppUrl(parentPhone, finalGeneratedText);
     window.open(fallbackUrl, '_blank');
     try {
-      confetti({ particleCount: 40, spread: 60, origin: { y: 0.8 } });
+      /* confetti removed */
     } catch (e) {}
   };
 

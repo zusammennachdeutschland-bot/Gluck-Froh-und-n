@@ -24,6 +24,7 @@ import { FreeTimeSlotsView } from './components/FreeTimeSlotsView';
 import { CertificateCenter } from './components/certificates/CertificateCenter';
 import { SchoolScheduleView } from './components/SchoolScheduleView';
 import { HodHubView } from './components/HodHubView';
+import { LernstudioView } from './components/lernstudio/LernstudioView';
 
 import { DesktopSidebar } from './components/desktop/DesktopSidebar';
 import { DesktopTopBar } from './components/desktop/DesktopTopBar';
@@ -83,7 +84,12 @@ function MainApp() {
     dismissLessonAlarm,
     snoozeLessonAlarm,
     notificationSettings,
-    theme
+    theme,
+    lernstudioSets,
+    saveLernstudioSet,
+    deleteLernstudioSet,
+    groups,
+    profile
   } = useApp();
 
   // Ensure notification channels and system permissions are properly configured for outside-the-app alerts
@@ -569,6 +575,17 @@ function MainApp() {
             {activeTab === 'certificates' && <CertificateCenter />}
             {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
             {activeTab === 'hod' && <HodHubView />}
+            {activeTab === 'lernstudio' && (
+              <LernstudioView
+                sets={lernstudioSets || []}
+                groups={groups || []}
+                schoolName={profile?.displayNameAr || profile?.displayName || 'Glück'}
+                teacherName={profile?.displayName}
+                onSaveSet={saveLernstudioSet}
+                onDeleteSet={deleteLernstudioSet}
+                language={language}
+              />
+            )}
 
             {/* Generous Clearance Spacer for Floating BottomNav */}
             <div className="h-16 sm:h-20 w-full pointer-events-none shrink-0" aria-hidden="true" />
@@ -611,6 +628,17 @@ function MainApp() {
                   {activeTab === 'certificates' && <CertificateCenter />}
                   {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
                   {activeTab === 'hod' && <HodHubView />}
+                  {activeTab === 'lernstudio' && (
+                    <LernstudioView
+                      sets={lernstudioSets || []}
+                      groups={groups || []}
+                      schoolName={profile?.displayNameAr || profile?.displayName || 'Glück'}
+                      teacherName={profile?.displayName}
+                      onSaveSet={saveLernstudioSet}
+                      onDeleteSet={deleteLernstudioSet}
+                      language={language}
+                    />
+                  )}
                 </motion.div>
               </AnimatePresence>
             </div>
@@ -667,7 +695,7 @@ export default function App() {
         'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records',
         'dl_school_notes', 'dl_finance_accounts', 'dl_finance_categories', 'dl_finance_transactions',
         'dl_finance_recurring', 'dl_finance_installments', 'dl_finance_notifications',
-        'gluck_gold_holdings', 'gluck_gold_settings',
+        'gluck_gold_holdings', 'gluck_gold_settings', 'dl_lernstudio_sets',
         'dl_settings', 'dl_sync_state'
       ];
       

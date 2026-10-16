@@ -8,7 +8,6 @@ import {
   X, Send, Copy, Check, MessageSquare, AlertTriangle, Clock, Link as LinkIcon, 
   MapPin, Video, Sparkles, Phone, Users, CheckCircle2, AtSign, Plus, Hash, BookOpen 
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
 
@@ -54,7 +53,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   
   const lessonDate = lesson?.date || upcomingLesson?.date;
   const groupStudents = targetGroup 
-    ? students.filter(s => s.groupId === targetGroup.id && (!lessonDate || isStudentMatchingLessonWeek(s.scheduleRecurrence, lessonDate)))
+    ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id && (!lessonDate || isStudentMatchingLessonWeek(s.scheduleRecurrence, lessonDate)))
     : [];
   
   // Multi-student group flag
@@ -396,7 +395,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     navigator.clipboard.writeText(activeMessage);
     setCopied(true);
     try {
-      confetti({ particleCount: 35, spread: 50 });
+      /* confetti removed */
     } catch (e) {
       // ignore
     }
@@ -427,7 +426,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
         window.open(url, '_blank');
       }
       try {
-        confetti({ particleCount: 60, spread: 60 });
+        /* confetti removed */
       } catch (e) {
         // ignore
       }
@@ -437,7 +436,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     const url = buildWhatsAppUrl(phone, activeMessage);
     window.open(url, '_blank');
     try {
-      confetti({ particleCount: 60, spread: 60 });
+      /* confetti removed */
     } catch (e) {
       // ignore
     }
@@ -462,7 +461,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     const url = buildWhatsAppUrl(resolved.contact, finalMsg);
     window.open(url, '_blank');
     try {
-      confetti({ particleCount: 60, spread: 60 });
+      /* confetti removed */
     } catch (e) {
       // ignore
     }

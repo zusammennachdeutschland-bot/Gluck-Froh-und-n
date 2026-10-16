@@ -936,22 +936,17 @@ export async function downloadTermVisitPlanPdf(
     const pdf = await generateTermVisitPlanPdfInstance(result, settings, isRtl, lang, options);
     const blob = pdf.output('blob');
 
-    // 1. Native Capacitor platform support
+    // 1. Native Capacitor platform support (Save directly to Documents folder)
     if (Capacitor.isNativePlatform()) {
       try {
         const pdfBase64 = pdf.output('datauristring').split(',')[1];
-        const savedFile = await Filesystem.writeFile({
+        await Filesystem.writeFile({
           path: fileName,
           data: pdfBase64,
           directory: Directory.Documents
         });
-        await Share.share({
-          title: fileName,
-          url: savedFile.uri
-        });
-        return { success: true, filename: fileName, method: 'native' };
       } catch (nativeErr) {
-        console.warn('Native Capacitor share failed, falling back to browser download:', nativeErr);
+        console.warn('Native Capacitor save to Documents warning:', nativeErr);
       }
     }
 
@@ -1011,27 +1006,19 @@ export async function saveTermVisitPlanToPhoneStorage(
     // 1. Capacitor Native Storage
     if (Capacitor.isNativePlatform()) {
       try {
-        const savedFile = await Filesystem.writeFile({
+        await Filesystem.writeFile({
           path: fileName,
           data: pdfBase64,
           directory: Directory.Documents
         });
-        await Share.share({
-          title: fileName,
-          url: savedFile.uri
-        });
-        return { success: true, filename: fileName, method: 'native-documents' };
       } catch {
-        const cachedFile = await Filesystem.writeFile({
-          path: fileName,
-          data: pdfBase64,
-          directory: Directory.Cache
-        });
-        await Share.share({
-          title: fileName,
-          url: cachedFile.uri
-        });
-        return { success: true, filename: fileName, method: 'native-cache' };
+        try {
+          await Filesystem.writeFile({
+            path: fileName,
+            data: pdfBase64,
+            directory: Directory.Cache
+          });
+        } catch (_) {}
       }
     }
 

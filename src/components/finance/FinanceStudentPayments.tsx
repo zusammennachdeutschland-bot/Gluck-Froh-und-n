@@ -11,8 +11,8 @@ import {
   Landmark, Wallet, CreditCard, Layers, BookOpen, ChevronDown, Coins, ShieldX, ShieldCheck, Minus, Plus,
   Users, Filter, AtSign, Globe
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { Pagination } from '../common/Pagination';
+import { GroupProfileModal } from '../GroupProfileModal';
 
 export const FinanceStudentPayments: React.FC = () => {
   const { 
@@ -21,6 +21,18 @@ export const FinanceStudentPayments: React.FC = () => {
     recordAdvancePayment, exemptCyclePayment, exemptSingleLesson,
     t, _t, financeAccounts, reportLanguage, setReportLanguage
   } = useApp();
+
+  const [selectedGroupForProfile, setSelectedGroupForProfile] = useState<Group | null>(null);
+  const openStudentGroup = (studentId?: string, groupId?: string, groupName?: string) => {
+    const foundGrp = groups.find(g => 
+      (groupId && g.id === groupId) || 
+      (studentId && g.students?.includes(studentId)) ||
+      (groupName && g.name === groupName)
+    );
+    if (foundGrp) {
+      setSelectedGroupForProfile(foundGrp);
+    }
+  };
 
   const [activeTab, setActiveTab] = useState<'cycles' | 'single_lessons' | 'in_progress' | 'history'>('cycles');
   const [searchTerm, setSearchTerm] = useState('');
@@ -559,14 +571,14 @@ export const FinanceStudentPayments: React.FC = () => {
       notes: `سداد اشتراك (${item.cycleLength}/${item.cycleLength} حصص)`,
       accountId: targetAccountId
     });
-    confetti({ particleCount: 50, spread: 60 });
+    /* confetti removed */
   };
 
   const handleMarkSingleLessonPaid = (lesson: Lesson) => {
     const targetAccId = getCardAccountId(`lesson_${lesson.id}`, lesson.groupId);
     const due = lesson.amountDue || 200;
     updateLessonPaymentStatus(lesson.id, 'paid', due, targetAccId);
-    confetti({ particleCount: 50, spread: 60 });
+    /* confetti removed */
   };
 
   const handleMarkNotYet = (item: DuePaymentCycle) => {
@@ -913,14 +925,23 @@ export const FinanceStudentPayments: React.FC = () => {
                     {/* 1. CARD HEADER */}
                     <div className="flex items-baseline justify-between gap-2">
                       <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <h3 className="text-sm font-black text-text-main truncate">
+                        <button
+                          type="button"
+                          onClick={() => openStudentGroup(item.studentId, item.groupId, item.groupName)}
+                          className="text-sm font-black text-text-main truncate hover:text-primary hover:underline text-right cursor-pointer bg-transparent border-0 p-0"
+                          title="عرض مجموعة الطالب"
+                        >
                           {item.studentName}
-                        </h3>
+                        </button>
                         {(() => {
                           const itemSt = students.find(s => s.id === item.studentId || (s.name && item.studentName && s.name.trim().toLowerCase() === item.studentName.trim().toLowerCase()));
                           const itemRec = itemSt?.scheduleRecurrence || groups.find(g => g.id === item.groupId)?.scheduleRecurrence;
                           return (
-                            <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[140px] border border-surface-border/40">
+                            <span 
+                              onClick={() => openStudentGroup(item.studentId, item.groupId, item.groupName)}
+                              className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[140px] border border-surface-border/40 cursor-pointer hover:bg-primary-soft hover:text-primary transition-colors"
+                              title="عرض تفاصيل المجموعة"
+                            >
                               {item.groupName}
                               {itemRec === 'biweekly_a' && ' 🅰️'}
                               {itemRec === 'biweekly_b' && ' 🅱️'}
@@ -1102,10 +1123,19 @@ export const FinanceStudentPayments: React.FC = () => {
                     {/* 1. CARD HEADER */}
                     <div className="flex items-baseline justify-between gap-2">
                       <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <h4 className="text-sm font-black text-text-main truncate">
+                        <button
+                          type="button"
+                          onClick={() => openStudentGroup(lesson.studentId, lesson.groupId, lesson.groupName)}
+                          className="text-sm font-black text-text-main truncate hover:text-primary hover:underline text-right cursor-pointer bg-transparent border-0 p-0"
+                          title="عرض مجموعة الطالب"
+                        >
                           {displayName}
-                        </h4>
-                        <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[120px] border border-surface-border/40">
+                        </button>
+                        <span 
+                          onClick={() => openStudentGroup(lesson.studentId, lesson.groupId, lesson.groupName)}
+                          className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[120px] border border-surface-border/40 cursor-pointer hover:bg-primary-soft hover:text-primary transition-colors"
+                          title="عرض تفاصيل المجموعة"
+                        >
                           {groupLabel}
                         </span>
                       </div>
@@ -1260,12 +1290,23 @@ export const FinanceStudentPayments: React.FC = () => {
                   <div key={`${item.id}_${idx}`} className="bg-surface border border-surface-border hover:border-primary/40 transition-all p-3 rounded-[16px] space-y-2 shadow-2xs flex flex-col justify-between">
                     <div className="flex items-baseline justify-between gap-2">
                       <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <h4 className="text-sm font-black text-text-main truncate">{item.studentName}</h4>
+                        <button
+                          type="button"
+                          onClick={() => openStudentGroup(item.studentId, item.groupId, item.groupName)}
+                          className="text-sm font-black text-text-main truncate hover:text-primary hover:underline text-right cursor-pointer bg-transparent border-0 p-0"
+                          title="عرض مجموعة الطالب"
+                        >
+                          {item.studentName}
+                        </button>
                         {(() => {
                           const itemSt = students.find(s => s.id === item.studentId || (s.name && item.studentName && s.name.trim().toLowerCase() === item.studentName.trim().toLowerCase()));
                           const itemRec = itemSt?.scheduleRecurrence || groups.find(g => g.id === item.groupId)?.scheduleRecurrence;
                           return (
-                            <span className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[140px] border border-surface-border/40">
+                            <span 
+                              onClick={() => openStudentGroup(item.studentId, item.groupId, item.groupName)}
+                              className="px-1.5 py-0.5 rounded-full bg-surface-hover text-text-muted text-[10px] font-bold shrink-0 truncate max-w-[140px] border border-surface-border/40 cursor-pointer hover:bg-primary-soft hover:text-primary transition-colors"
+                              title="عرض تفاصيل المجموعة"
+                            >
                               {item.groupName}
                               {itemRec === 'biweekly_a' && ' 🅰️'}
                               {itemRec === 'biweekly_b' && ' 🅱️'}
@@ -1355,7 +1396,14 @@ export const FinanceStudentPayments: React.FC = () => {
                     >
                       <div className="space-y-2">
                         <div className="flex items-center justify-between gap-2">
-                          <h4 className="text-sm font-black text-text-main truncate">{p.studentName}</h4>
+                          <button
+                            type="button"
+                            onClick={() => openStudentGroup(p.studentId, p.groupId, p.groupName)}
+                            className="text-sm font-black text-text-main truncate hover:text-primary hover:underline text-right cursor-pointer bg-transparent border-0 p-0"
+                            title="عرض مجموعة الطالب"
+                          >
+                            {p.studentName}
+                          </button>
                           <div className="flex items-center gap-1 shrink-0">
                             {p.paymentType === 'advance_payment' && (
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-primary-soft text-primary border border-primary-border flex items-center gap-1">
@@ -1363,7 +1411,11 @@ export const FinanceStudentPayments: React.FC = () => {
                                 <span>{_t('سداد مقدم', 'Advance', 'Voraus')} ({p.bundleSize || 1} {_t('حصص', 'lessons', 'Lekt.')})</span>
                               </span>
                             )}
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-surface-hover text-text-muted">
+                            <span 
+                              onClick={() => openStudentGroup(p.studentId, p.groupId, p.groupName)}
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-surface-hover text-text-muted cursor-pointer hover:bg-primary-soft hover:text-primary transition-colors"
+                              title="عرض تفاصيل المجموعة"
+                            >
                               {p.groupName}
                             </span>
                           </div>
@@ -1859,7 +1911,7 @@ export const FinanceStudentPayments: React.FC = () => {
                     lessonIds: prorateModalItem.lessonIds
                   });
                   setProrateModalItem(null);
-                  confetti({ particleCount: 30, spread: 40 });
+                  /* confetti removed */
                 }}
                 className="w-full py-2.5 bg-primary-soft hover:bg-primary/20 text-primary border border-primary-border rounded-xl font-bold text-xs cursor-pointer shadow-xs flex items-center justify-center gap-1.5 transition-all active:scale-95"
               >
@@ -1883,7 +1935,7 @@ export const FinanceStudentPayments: React.FC = () => {
                     accountId: targetAcc
                   });
                   setProrateModalItem(null);
-                  confetti({ particleCount: 50, spread: 50 });
+                  /* confetti removed */
                 }}
                 className="w-full py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl font-bold text-xs cursor-pointer shadow-xs flex items-center justify-center gap-1.5 transition-all active:scale-95"
               >
@@ -2224,6 +2276,13 @@ export const FinanceStudentPayments: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {selectedGroupForProfile && (
+        <GroupProfileModal
+          group={selectedGroupForProfile}
+          onClose={() => setSelectedGroupForProfile(null)}
+        />
       )}
     </div>
   );

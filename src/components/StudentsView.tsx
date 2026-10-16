@@ -29,7 +29,7 @@ export const StudentsView: React.FC = () => {
   const { 
     students, groups, profile, lessons, payments, language,
     setIsAddStudentModalOpen, setIsAddGroupModalOpen,
-    deleteStudent, deleteStudentsByGroup, moveStudent, moveStudentsBulk,
+    deleteStudent, deleteStudentsBulk, deleteStudentsByGroup, moveStudent, moveStudentsBulk,
     archiveStudent, deleteGroup, archiveGroup,
     updateStudent, updateGroup, t, _t
   } = useApp();
@@ -91,11 +91,11 @@ export const StudentsView: React.FC = () => {
     return group.scheduleDays.some(d => getDayNumber(d) === targetDayNum);
   };
 
-  const activeStudents = useMemo(() => students.filter(s => s.status !== 'archived'), [students]);
-  const archivedStudents = useMemo(() => students.filter(s => s.status === 'archived'), [students]);
+  const activeStudents = useMemo(() => students.filter(s => !s.deleted && s.status !== 'archived'), [students]);
+  const archivedStudents = useMemo(() => students.filter(s => !s.deleted && s.status === 'archived'), [students]);
 
-  const activeGroups = useMemo(() => groups.filter(g => g.status !== 'archived'), [groups]);
-  const archivedGroups = useMemo(() => groups.filter(g => g.status === 'archived'), [groups]);
+  const activeGroups = useMemo(() => groups.filter(g => !g.deleted && g.status !== 'archived'), [groups]);
+  const archivedGroups = useMemo(() => groups.filter(g => !g.deleted && g.status === 'archived'), [groups]);
 
   const groupMap = useMemo(() => {
     const map = new Map<string, Group>();
@@ -670,7 +670,7 @@ export const StudentsView: React.FC = () => {
               type="button"
               onClick={() => {
                 if (window.confirm(_t(`هل أنت متأكد من حذف ${selectedStudentIds.length} طالب؟`, `Delete ${selectedStudentIds.length} selected students?`, `${selectedStudentIds.length} Schüler löschen?`))) {
-                  selectedStudentIds.forEach(id => deleteStudent(id));
+                  deleteStudentsBulk(selectedStudentIds);
                   setSelectedStudentIds([]);
                 }
               }}
@@ -763,7 +763,19 @@ export const StudentsView: React.FC = () => {
                     <div className="min-w-0 space-y-1 flex-1">
                       {/* LINE 1: Name + Gender + Grade in ONE clean row */}
                       <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                        <h3 className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors tracking-tight truncate max-w-[150px] sm:max-w-[220px]">
+                        <h3
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (studentGroup) {
+                              setSelectedGroup(studentGroup);
+                            } else {
+                              setSelectedStudent(student);
+                              setSelectedStudentTab('overview');
+                            }
+                          }}
+                          className="text-xs sm:text-sm font-black text-text-main group-hover:text-primary transition-colors tracking-tight truncate max-w-[150px] sm:max-w-[220px] cursor-pointer hover:underline"
+                          title={studentGroup ? _t('انقر لفتح مجموعة الطالب', 'Click to open student group', 'Klicken zum Öffnen der Gruppe') : _t('عرض ملف الطالب', 'View student profile', 'Schülerprofil anzeigen')}
+                        >
                           {student.name}
                         </h3>
 

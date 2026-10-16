@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { GradeLevel, LessonType, PaymentCycle } from '../types';
 import { Users, Bot, Sparkles, Phone, AtSign, X } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { AiImportModal } from './AiImportModal';
 import { GroupForm, GroupFormData } from './GroupForm';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
@@ -98,7 +97,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       generateGroupScheduleLessons(createdGroup.id, data.scheduleDays, data.scheduleTime, 4, data.dayTimes, createdGroup);
     }
 
-    confetti({ particleCount: 60, spread: 50 });
+    /* confetti removed */
     onClose();
   };
 

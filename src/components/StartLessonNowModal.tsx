@@ -8,7 +8,6 @@ import {
   X, Play, Users, User, Clock, Calendar as CalendarIcon, Video, MapPin, 
   CheckCircle2, Sparkles, BookOpen, Award, FileText, Zap, ChevronRight, ArrowLeft
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface StartLessonNowModalProps {
   onClose: () => void;
@@ -145,7 +144,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
 
     if (existingLesson) {
       if (mode === 'start_live') {
-        confetti({ particleCount: 60, spread: 50 });
+        /* confetti removed */
         updateLesson(existingLesson.id, { status: 'in_progress' });
         startActiveLessonTimer(existingLesson);
         openLessonControl(existingLesson);
@@ -168,7 +167,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
           savedAt: new Date().toISOString()
         });
         updateLesson(existingLesson.id, { status: 'completed' });
-        confetti({ particleCount: 80, spread: 60 });
+        /* confetti removed */
         onClose();
         return;
       }
@@ -207,7 +206,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
 
     if (mode === 'start_live') {
       // Launch live timer & control modal immediately
-      confetti({ particleCount: 70, spread: 60 });
+      /* confetti removed */
       startActiveLessonTimer(addedLesson);
       openLessonControl(addedLesson);
       onClose();
@@ -228,7 +227,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
         savedAt: new Date().toISOString()
       });
 
-      confetti({ particleCount: 90, spread: 70 });
+      /* confetti removed */
       onClose();
     }
   };

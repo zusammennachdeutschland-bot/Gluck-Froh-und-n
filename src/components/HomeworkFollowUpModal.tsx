@@ -4,7 +4,6 @@ import { PendingFollowUp } from '../utils/homeworkFollowUpUtils';
 import { X, Check, Send, BookOpen, User, Sparkles, AtSign, Phone, Copy, Users, CheckCircle2, Link as LinkIcon, ExternalLink, MessageSquare } from 'lucide-react';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getStudentRoleLabel, isLikelyFemaleStudent } from '../utils/genderUtils';
-import confetti from 'canvas-confetti';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
@@ -55,7 +54,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
     });
     
     try {
-      confetti({ particleCount: 30, spread: 50 });
+      /* confetti removed */
     } catch (e) {}
   };
 
@@ -74,7 +73,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
     updateGroup(groupId, { whatsAppGroupLink: url });
     setIsEditingGroupLink(false);
     try {
-      confetti({ particleCount: 30, spread: 40 });
+      /* confetti removed */
     } catch (e) {}
   };
 
@@ -94,7 +93,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
     }
 
     try {
-      confetti({ particleCount: 50, spread: 70 });
+      /* confetti removed */
     } catch (e) {}
   };
 
@@ -161,7 +160,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
     const teacherSign = profile.displayNameAr || (profile.displayName ? `أ/ ${profile.displayName}` : '');
 
     const lessonDate = selectedGroup.latestCompletedLesson?.date;
-    const groupStudents = students.filter(s => s.groupId === selectedGroup.groupId && (!lessonDate || isStudentMatchingLessonWeek(s.scheduleRecurrence, lessonDate)));
+    const groupStudents = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === selectedGroup.groupId && (!lessonDate || isStudentMatchingLessonWeek(s.scheduleRecurrence, lessonDate)));
     const allStudentNames = groupStudents.map(s => {
       if (currentMsgLang === 'de' || currentMsgLang === 'en') {
         return s.certificateName || s.displayNameEn || s.nameEn || s.name;

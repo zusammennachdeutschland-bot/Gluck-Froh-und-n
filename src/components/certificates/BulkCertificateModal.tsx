@@ -13,7 +13,6 @@ import { resolveCertificateRecipientName } from '../../utils/certificateUtils';
 import { getSavedAIBackgrounds } from '../../utils/aiBackgroundUtils';
 import { CertificateTemplateThumbnail } from './CertificateTemplateThumbnail';
 import { X, Check, Sparkles, CheckCircle2, Layers, AlertTriangle, Image as ImageIcon } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface BulkCertificateModalProps {
   onClose: () => void;
@@ -192,7 +191,7 @@ export const BulkCertificateModal: React.FC<BulkCertificateModalProps> = ({
     });
 
     const created = addCertificatesBulk(payloadList);
-    confetti({ particleCount: 120, spread: 80 });
+    /* confetti removed */
     setIssuedCount(created.length);
     if (onBulkIssued) onBulkIssued(created);
   };

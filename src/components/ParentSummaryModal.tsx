@@ -8,7 +8,6 @@ import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cl
 import { getTeacherEnglishName, getTeacherArabicName } from '../utils/teacherUtils';
 import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
-import confetti from 'canvas-confetti';
 
 interface ParentSummaryModalProps {
   lesson: Lesson;
@@ -193,7 +192,7 @@ Glück fröhlich und froh 🇩🇪`;
   const handleWhatsAppSend = () => {
     const url = buildWhatsAppUrl(resolvedParentContact.contact, summaryText);
     window.open(url, '_blank');
-    confetti({ particleCount: 50, spread: 40 });
+    /* confetti removed */
   };
 
   return (

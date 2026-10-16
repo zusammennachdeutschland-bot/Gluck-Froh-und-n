@@ -12,7 +12,6 @@ import {
   RefreshCw, Shield, Lock, MoreHorizontal, MessageSquare, Info, Star, GraduationCap, Users, Plus, Eye, Share2,
   AtSign, Video, ExternalLink, Copy, Play, Repeat
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { CreateCertificateModal } from './certificates/CreateCertificateModal';
 import { CertificatePreviewModal } from './certificates/CertificatePreviewModal';
@@ -27,7 +26,7 @@ interface StudentProfileModalProps {
 }
 
 export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ student, onClose, initialTab = 'overview' }) => {
-  const { groups, lessons, payments, certificates, profile, uploadStudentDocument, deleteStudentDocument, updateStudent, updateStudentCertificateName, deleteStudent, t, _t } = useApp();
+  const { groups, lessons, payments, certificates, profile, uploadStudentDocument, deleteStudentDocument, updateStudent, updateStudentCertificateName, deleteStudent, archiveStudent, t, _t } = useApp();
 
   const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'recordings' | 'edit'>(initialTab);
   const [selectedCategory, setSelectedCategory] = useState<'homework' | 'exam' | 'doc'>('homework');
@@ -194,7 +193,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
       studentCode: editStudentCode.trim() || studentCode,
       certificateName: editCertificateName,
       gender: editGender,
-      groupId: editGroupId,
+      groupId: editStatus === 'archived' ? '' : editGroupId,
+      archivedGroupId: editStatus === 'archived' ? (editGroupId || student.groupId || student.archivedGroupId || '') : student.archivedGroupId,
       scheduleRecurrence: editScheduleRecurrence,
       grade: editGrade,
       parentName: editParentName,
@@ -209,7 +209,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
     });
 
     setSaveSuccessToast(true);
-    confetti({ particleCount: 50, spread: 40 });
+    /* confetti removed */
     setTimeout(() => {
       setSaveSuccessToast(false);
       setActiveTab('overview');
@@ -219,7 +219,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       uploadStudentDocument(student.id, e.target.files[0], selectedCategory);
-      confetti({ particleCount: 40, spread: 40 });
+      /* confetti removed */
     }
   };
 
@@ -1520,7 +1520,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
           onClose();
         }}
         onConfirmArchive={() => {
-          deleteStudent(student.id);
+          archiveStudent(student.id);
           setIsConfirmingDelete(false);
           onClose();
         }}

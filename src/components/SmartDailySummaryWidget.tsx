@@ -62,7 +62,7 @@ export const SmartDailySummaryWidget: React.FC = () => {
       if (l.studentId) {
         studentSet.add(l.studentId);
       } else if (l.groupId && l.groupId !== 'quick_group') {
-        const groupStudents = students.filter(s => s.groupId === l.groupId);
+        const groupStudents = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === l.groupId);
         if (groupStudents.length > 0) {
           groupStudents.forEach(s => studentSet.add(s.id));
         } else {

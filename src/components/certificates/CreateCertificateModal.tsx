@@ -41,7 +41,6 @@ import {
   Calendar
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import confetti from 'canvas-confetti';
 
 interface CreateCertificateModalProps {
   onClose: () => void;
@@ -330,7 +329,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
         teacherName: instructorName.trim(),
         centerOrSchoolName: centerOrSchoolName.trim() || undefined
       });
-      confetti({ particleCount: 60, spread: 50 });
+      /* confetti removed */
       if (onCertificateSaved) onCertificateSaved(currentCertificateData);
       onClose();
     } else {
@@ -360,7 +359,7 @@ export const CreateCertificateModal: React.FC<CreateCertificateModalProps> = ({
         centerOrSchoolName: centerOrSchoolName.trim() || undefined
       });
 
-      confetti({ particleCount: 100, spread: 70 });
+      /* confetti removed */
       setCreatedRecord(newRecord);
       if (onCertificateSaved) onCertificateSaved(newRecord);
     }

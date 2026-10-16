@@ -6,7 +6,6 @@ import { storage } from '../services/storageService';
 import { PREDEFINED_GRADES } from '../data/initialData';
 import { GradeLevel, LessonType } from '../types';
 import { X, Calendar, Clock, AlertTriangle, Sparkles, Check, Video, MapPin, Repeat, ExternalLink, Plus } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface AddLessonModalProps {
   onClose: () => void;
@@ -33,7 +32,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
   const [repeatWeeks, setRepeatWeeks] = useState(4);
 
   const selectedGroup = groups.find(g => g.id === groupId);
-  const groupStudents = students.filter(s => s.groupId === groupId);
+  const groupStudents = students.filter(s => s.groupId === groupId && !s.deleted && s.status !== 'archived');
 
   // CONFLICT DETECTION ALGORITHM:
   // Check if chosen date + time overlaps with any existing lesson
@@ -125,7 +124,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
     }, isWeeklyRecurring ? Number(repeatWeeks) : 1);
 
     storage.removeItem('dl_draft_add_lesson');
-    confetti({ particleCount: 70, spread: 50 });
+    /* confetti removed */
     onClose();
   };
 

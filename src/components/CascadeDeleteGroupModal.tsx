@@ -23,7 +23,7 @@ export const CascadeDeleteGroupModal: React.FC<CascadeDeleteGroupModalProps> = (
   if (!isOpen) return null;
 
   // Calculate stats dynamically based on current context arrays
-  const groupStudents = students.filter(s => s.groupId === groupId);
+  const groupStudents = students.filter(s => s.groupId === groupId && !s.deleted && s.status !== 'archived');
   const groupStudentIds = new Set(groupStudents.map(s => s.id));
   const groupLessons = lessons.filter(l => l.groupId === groupId);
   const groupPayments = payments.filter(p => p.groupId === groupId || groupStudentIds.has(p.studentId));

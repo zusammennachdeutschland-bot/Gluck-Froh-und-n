@@ -573,23 +573,15 @@ export async function exportSchoolScheduleAsImage(
     if (Capacitor.isNativePlatform()) {
       try {
         const base64Data = dataUrl.split(',')[1];
-        const savedFile = await Filesystem.writeFile({
+        await Filesystem.writeFile({
           path: filename,
           data: base64Data,
-          directory: Directory.Cache
-        });
-
-        // Open Share sheet / Save intent directly on mobile
-        await Share.share({
-          title: model.title,
-          text: `${model.title} - ${model.stats.summaryLine}`,
-          url: savedFile.uri,
-          dialogTitle: model.language === 'ar' ? 'حفظ / مشاركة جدول المدرسة' : 'Save / Share School Schedule'
+          directory: Directory.Documents
         });
 
         return { success: true, filename };
       } catch (nativeErr: any) {
-        console.warn('Capacitor native share warning:', nativeErr);
+        console.warn('Capacitor native save warning:', nativeErr);
       }
     }
 
@@ -664,22 +656,15 @@ export async function exportSchoolScheduleAsPdf(
     if (Capacitor.isNativePlatform()) {
       try {
         const pdfBase64 = pdf.output('datauristring').split(',')[1];
-        const savedFile = await Filesystem.writeFile({
+        await Filesystem.writeFile({
           path: filename,
           data: pdfBase64,
-          directory: Directory.Cache
-        });
-
-        await Share.share({
-          title: model.title,
-          text: `${model.title} - ${model.stats.summaryLine}`,
-          url: savedFile.uri,
-          dialogTitle: model.language === 'ar' ? 'حفظ / مشاركة ملف PDF' : 'Save / Share Schedule PDF'
+          directory: Directory.Documents
         });
 
         return { success: true, filename };
       } catch (nativeErr: any) {
-        console.warn('Capacitor native PDF share warning:', nativeErr);
+        console.warn('Capacitor native PDF save warning:', nativeErr);
       }
     }
 

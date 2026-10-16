@@ -20,7 +20,6 @@ import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUti
 import { calculateSequentialSessionNumber, isGroupPerLesson } from '../utils/lessonUtils';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
-import confetti from 'canvas-confetti';
 
 export const LessonControlModal: React.FC = () => {
   const { 
@@ -192,7 +191,7 @@ export const LessonControlModal: React.FC = () => {
 
   // Group students for bulk/individual attendance
   const groupStudents = selectedLesson?.groupId 
-    ? students.filter(s => s.groupId === selectedLesson.groupId)
+    ? students.filter(s => s.groupId === selectedLesson.groupId && !s.deleted && s.status !== 'archived')
     : [];
 
   const lastInitializedLessonIdRef = useRef<string | null>(null);
@@ -232,7 +231,7 @@ export const LessonControlModal: React.FC = () => {
         setStudentAttendance(selectedLesson.report.studentAttendance);
       } else if (selectedLesson.groupId) {
         const initialAtt: Record<string, AttendanceStatus> = {};
-        const groupSts = students.filter(s => s.groupId === selectedLesson.groupId && (!selectedLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, selectedLesson.date)));
+        const groupSts = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === selectedLesson.groupId && (!selectedLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, selectedLesson.date)));
         groupSts.forEach(st => {
           initialAtt[st.id] = selectedLesson.report?.attendanceStatus || 'present';
         });
@@ -311,7 +310,7 @@ export const LessonControlModal: React.FC = () => {
         setStudentExamGrade({});
       } else if (selectedLesson.groupId) {
         const initialAtt: Record<string, AttendanceStatus> = {};
-        const groupSts = students.filter(s => s.groupId === selectedLesson.groupId && (!selectedLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, selectedLesson.date)));
+        const groupSts = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === selectedLesson.groupId && (!selectedLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, selectedLesson.date)));
         groupSts.forEach(st => {
           initialAtt[st.id] = 'present';
         });
@@ -395,7 +394,7 @@ export const LessonControlModal: React.FC = () => {
     const text = `السلام عليكم ورحمة الله وبركاته.\nتم الانتهاء من عدد الحصص المتفق عليها. برجاء تحويل الرسوم المستحقة.\n\nبيانات التحويل:\n📱 رقم الهاتف: ${profile.phone || '01012345678'}\n💳 InstaPay: ${profile.instaPayId || 'abdulrahman@instapay'}\n\nمع الشكر والتقدير\n${teacherSig}`;
     navigator.clipboard.writeText(text);
     setReminderCopied(true);
-    confetti({ particleCount: 40, spread: 50 });
+    /* confetti removed */
     setTimeout(() => setReminderCopied(false), 3000);
   };
 
@@ -474,8 +473,8 @@ export const LessonControlModal: React.FC = () => {
   const activeLessonStudents = isQuick
     ? [targetStudent || quickStudentSynthetic]
     : (selectedLesson.groupId 
-        ? students.filter(s => s.groupId === selectedLesson.groupId && (!selectedLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, selectedLesson.date) || selectedLesson.report?.studentAttendance?.[s.id] !== undefined))
-        : (targetStudent ? [targetStudent] : []));
+        ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === selectedLesson.groupId && (!selectedLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, selectedLesson.date) || selectedLesson.report?.studentAttendance?.[s.id] !== undefined))
+        : (targetStudent && !targetStudent.deleted && targetStudent.status !== 'archived' ? [targetStudent] : []));
   
   const targetGroup = groups.find(g => g.id === selectedLesson.groupId)
     || (targetStudent?.groupId ? groups.find(g => g.id === targetStudent.groupId) : undefined)
@@ -637,7 +636,7 @@ export const LessonControlModal: React.FC = () => {
     setTimeout(() => setPaymentToastMessage(null), 3500);
     if (markPaid) {
       try {
-        confetti({ particleCount: 60, spread: 65, origin: { y: 0.6 } });
+        /* confetti removed */
       } catch {}
     }
   };
@@ -652,7 +651,7 @@ export const LessonControlModal: React.FC = () => {
   const isGroupLesson = Boolean(
     targetGroup && (
       (targetGroup.type && targetGroup.type === 'group') ||
-      students.filter(s => s.groupId === targetGroup.id).length > 1 ||
+      students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id).length > 1 ||
       activeLessonStudents.length > 1 ||
       !selectedLesson.studentId
     )
@@ -787,7 +786,7 @@ export const LessonControlModal: React.FC = () => {
     }
     setShowReportForm(true);
     try {
-      confetti({ particleCount: 50, spread: 60 });
+      /* confetti removed */
     } catch {}
   };
 
@@ -907,7 +906,7 @@ export const LessonControlModal: React.FC = () => {
     setIsEditingReport(false);
     setShowArabicParentReportModal(true); // Automatically open Arabic parent report to make sharing incredibly easy!
     try {
-      confetti({ particleCount: 50, spread: 60 });
+      /* confetti removed */
     } catch {}
   };
 

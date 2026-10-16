@@ -9,7 +9,6 @@ import { Lesson, PaymentRecord } from '../types';
 import { calculateOverallAttendance } from '../utils/lessonUtils';
 import { formatLocalDate } from '../utils/timeUtils';
 import { Pagination } from './common/Pagination';
-import confetti from 'canvas-confetti';
 
 export const ReportsView: React.FC = () => {
   const { lessons: activeLessons, payments: activePayments, getHistoricalLessons, getHistoricalPayments, updateLesson, updateLessonPaymentStatus, profile, openLessonControl, t, reportLanguage, reportT, groups, students } = useApp();
@@ -191,7 +190,7 @@ export const ReportsView: React.FC = () => {
       amountPaid: due
     });
     setLessons(prev => prev.map(l => l.id === lesson.id ? { ...l, paymentStatus: 'paid', amountPaid: due } : l));
-    confetti({ particleCount: 50, spread: 40 });
+    /* confetti removed */
   };
 
   // Revenue chart data: last 8 weeks only for visual clarity and speed

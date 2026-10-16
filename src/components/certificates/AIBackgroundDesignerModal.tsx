@@ -19,7 +19,6 @@ import {
   AlertTriangle, Image as ImageIcon, Plus, Info, RefreshCw, X, Award, 
   ExternalLink, Layers, CheckCircle2, ArrowRight
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface AIBackgroundDesignerModalProps {
   onClose: () => void;
@@ -122,7 +121,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
         promptUsed: generatedPrompt
       });
 
-      confetti({ particleCount: 60, spread: 50 });
+      /* confetti removed */
       await refreshLibrary();
 
       // Reset import state

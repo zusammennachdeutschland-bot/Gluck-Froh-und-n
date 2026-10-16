@@ -137,6 +137,18 @@ export function sanitizeInitialData(rawData: Record<string, any>): Record<string
     lessons: Array.isArray(rawRecentlyDeleted.lessons) ? rawRecentlyDeleted.lessons : []
   };
 
+  // 8b. Lernstudio Sets
+  const rawLernstudioSets = ensureArray<any>('dl_lernstudio_sets', []);
+  sanitized['dl_lernstudio_sets'] = rawLernstudioSets
+    .filter(s => s && typeof s === 'object')
+    .map((s, idx) => ({
+      ...s,
+      id: String(s.id || `set_${Date.now()}_${idx}`),
+      title: String(s.title || 'مجموعة بدون اسم'),
+      level: s.level || 'A1',
+      items: Array.isArray(s.items) ? s.items : []
+    }));
+
   // 9. Profile
   const rawProfile = ensureObject<TeacherProfile>('dl_profile', INITIAL_TEACHER_PROFILE);
   sanitized['dl_profile'] = {

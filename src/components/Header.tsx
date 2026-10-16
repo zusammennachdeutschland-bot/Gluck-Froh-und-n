@@ -4,7 +4,7 @@ import { Lesson } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
 import { isPendingStatus } from '../utils/lessonUtils';
 import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
-import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users } from 'lucide-react';
+import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2 } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { SyncHeaderButton } from './sync/SyncHeaderButton';
@@ -278,7 +278,7 @@ export const Header: React.FC = () => {
       if (l.studentId) {
         studentSet.add(l.studentId);
       } else if (l.groupId && l.groupId !== 'quick_group') {
-        const groupStudents = students.filter(s => s.groupId === l.groupId);
+        const groupStudents = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === l.groupId);
         if (groupStudents.length > 0) {
           groupStudents.forEach(s => studentSet.add(s.id));
         } else {
@@ -357,6 +357,7 @@ export const Header: React.FC = () => {
                      : activeTab === 'freeTime' ? (t('nav_free_time') || 'Free Time')
                      : activeTab === 'schoolSchedule' ? _t('المدرسة', 'School', 'Schule')
                      : activeTab === 'hod' ? _t('القسم', 'HOD', 'Fachleiter')
+                     : activeTab === 'lernstudio' ? 'Lernstudio 🇩🇪'
                      : activeTab}
                   </h1>
                 </>
@@ -495,6 +496,7 @@ export const Header: React.FC = () => {
                     { id: 'freeTime', label: t('nav_free_time') || 'Free Time', icon: Clock },
                     { id: 'schoolSchedule', label: _t('جدول المدرسة', 'School Schedule', 'Stundenplan'), icon: BookOpen },
                     { id: 'hod', label: _t('إدارة القسم (HOD)', 'HOD Hub', 'Fachleiter Hub'), icon: Layers },
+                    { id: 'lernstudio', label: 'Glück Lernstudio 🇩🇪', icon: Gamepad2 },
                     { id: 'settings', label: t('nav_settings') || 'Einstellungen', icon: Settings },
                   ].map(item => {
                     const Icon = item.icon;

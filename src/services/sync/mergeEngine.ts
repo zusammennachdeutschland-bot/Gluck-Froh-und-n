@@ -105,6 +105,11 @@ export function mergeEntities<T extends SyncableRecord>(
         }
       }
 
+      // Preserve local deletion and archival tombstones against older/drifted remote non-deleted items
+      if (localItem.deleted && !incomingItem.deleted && incomingTime <= localTime + 300000 && incomingVer <= localVer) {
+        shouldAcceptIncoming = false;
+      }
+
       if (shouldAcceptIncoming) {
         // If incoming item is not deleted, preserve non-empty local fields like certificateName (Latin name) if incoming is missing them
         let finalItem = incomingItem;
@@ -119,6 +124,13 @@ export function mergeEntities<T extends SyncableRecord>(
               ? (incomingItem as any).documents
               : ((localItem as any).documents || [])
           };
+          // Preserve local student status/group if locally archived or unassigned
+          if ((localItem as any).status === 'archived') {
+            (finalItem as any).status = 'archived';
+            (finalItem as any).groupId = '';
+          } else if ((localItem as any).groupId === '' && localTime >= incomingTime) {
+            (finalItem as any).groupId = '';
+          }
         }
 
         entityMap.set(incomingItem.id, finalItem);

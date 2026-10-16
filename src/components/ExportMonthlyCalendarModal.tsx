@@ -129,7 +129,7 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
     filteredLessons.forEach(l => {
       if (l.groupId) exportedGroupIds.add(l.groupId);
       if (l.studentId) includedStudentIds.add(l.studentId);
-      const groupStudents = students.filter(s => s.groupId === l.groupId);
+      const groupStudents = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === l.groupId);
       groupStudents.forEach(s => includedStudentIds.add(s.id));
 
       const targetGroup = groups.find(g => g.id === l.groupId);
@@ -242,20 +242,15 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
 
     if (Capacitor.isNativePlatform()) {
       try {
-        const savedFile = await Filesystem.writeFile({
+        await Filesystem.writeFile({
           path: exportStats.filename,
           data: exportStats.icsContent,
           directory: Directory.Documents,
           encoding: Encoding.UTF8
         });
-        await Share.share({
-          title: exportStats.filename,
-          url: savedFile.uri,
-          dialogTitle: 'Save Calendar File'
-        });
         return;
       } catch (err) {
-        console.warn('Capacitor save/share failed, fallback to web download:', err);
+        console.warn('Capacitor save failed, fallback to web download:', err);
       }
     }
 
@@ -282,8 +277,7 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
           encoding: Encoding.UTF8
         });
         await Share.share({
-          title: `Calendar Export - ${MONTH_NAMES_DISPLAY[selectedMonth]} ${selectedYear}`,
-          text: `Teacher Assistant calendar for ${MONTH_NAMES_DISPLAY[selectedMonth]} ${selectedYear}`,
+          title: exportStats.filename,
           url: savedFile.uri,
           dialogTitle: 'Share Calendar File'
         });
@@ -297,8 +291,7 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
         await navigator.share({
-          title: `Calendar Export - ${MONTH_NAMES_DISPLAY[selectedMonth]} ${selectedYear}`,
-          text: `Teacher Assistant calendar for ${MONTH_NAMES_DISPLAY[selectedMonth]} ${selectedYear}`,
+          title: exportStats.filename,
           files: [file]
         });
         return;

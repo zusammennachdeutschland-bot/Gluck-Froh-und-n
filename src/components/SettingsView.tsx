@@ -8,7 +8,6 @@ import {
   BookOpen, FileText, Bell, CheckSquare, XCircle, Award, Sparkles, Star, Plus, Pencil, RotateCcw, Heart,
   Target, Zap, Smartphone, Lock, Shield, Share2, Layers, CheckCircle, Palette
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
 import { SmartBackupCenter } from './SmartBackupCenter';
 import { DataHealthCenterModal } from './DataHealthCenterModal';
@@ -141,7 +140,7 @@ export const SettingsView: React.FC = () => {
     
     navigator.clipboard.writeText(text);
     setCopiedPaymentDetails(true);
-    confetti({ particleCount: 50, spread: 50 });
+    /* confetti removed */
     setTimeout(() => setCopiedPaymentDetails(false), 2500);
   };
 
@@ -155,7 +154,7 @@ export const SettingsView: React.FC = () => {
           const success = await importBackupFile(content);
           if (success) {
             setRestoreStatusMsg(t('dataRefreshed'));
-            confetti({ particleCount: 70, spread: 60 });
+            /* confetti removed */
             setTimeout(() => setRestoreStatusMsg(null), 4000);
           } else {
             alert('JSON File invalid');
@@ -168,7 +167,7 @@ export const SettingsView: React.FC = () => {
 
   const triggerSaveToast = () => {
     setSavedSuccessToast(true);
-    confetti({ particleCount: 50, spread: 40 });
+    /* confetti removed */
     setTimeout(() => setSavedSuccessToast(false), 3000);
   };
 
@@ -476,7 +475,7 @@ export const SettingsView: React.FC = () => {
                     onClick={() => {
                       if (language !== langItem.id) {
                         setLanguage(langItem.id);
-                        confetti({ particleCount: 30, spread: 40 });
+                        /* confetti removed */
                       }
                     }}
                     className={`py-2 px-1 rounded-lg font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border text-center ${
@@ -645,7 +644,7 @@ export const SettingsView: React.FC = () => {
                             onClick={() => {
                               if (!isSelected) {
                                 setAccentColor(targetValue as any);
-                                confetti({ particleCount: 30, spread: 40 });
+                                /* confetti removed */
                               }
                             }}
                             className="flex flex-col items-center gap-1 focus:outline-none group cursor-pointer"
@@ -1429,7 +1428,7 @@ export const SettingsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  confetti({ particleCount: 40, spread: 50 });
+                  /* confetti removed */
                   window.dispatchEvent(new CustomEvent('open-setup-wizard'));
                 }}
                 className="w-full py-2.5 px-3 bg-primary-soft hover:bg-primary/15 text-primary border border-primary-border rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"

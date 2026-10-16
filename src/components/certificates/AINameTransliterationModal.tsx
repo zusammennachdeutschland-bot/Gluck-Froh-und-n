@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Sparkles, Copy, Check, X, AlertCircle, FileSpreadsheet, CheckCircle2, Edit3, ArrowRight, Search } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface AINameTransliterationModalProps {
   onClose: () => void;
@@ -157,7 +156,7 @@ ${JSON.stringify(listToTransliterate, null, 2)}`;
 
     if (entriesToApply.length > 0) {
       updateStudentCertificateNamesBulk(entriesToApply);
-      confetti({ particleCount: 70, spread: 60 });
+      /* confetti removed */
       setSavedToast(true);
       setTimeout(() => {
         setSavedToast(false);
@@ -175,7 +174,7 @@ ${JSON.stringify(listToTransliterate, null, 2)}`;
         delete next[studentId];
         return next;
       });
-      confetti({ particleCount: 30, spread: 35 });
+      /* confetti removed */
     }
   };
 
