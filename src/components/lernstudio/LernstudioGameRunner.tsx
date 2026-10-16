@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioItem, LernstudioExerciseType, LernstudioTheme } from '../../types/lernstudio';
 import { CheckCircle2, XCircle, RotateCcw, ArrowRight, Award, Trophy, HelpCircle, Eye, RefreshCw, ThumbsUp } from 'lucide-react';
 import { playLernstudioSound } from '../../utils/lernstudioAudioUtils';
-import { getLernstudioTranslations } from '../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle } from '../../utils/lernstudioTranslations';
 
 interface Props {
   set: LernstudioSet;
@@ -266,7 +266,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   }
 
   return (
-    <div className={`p-4 sm:p-6 rounded-3xl space-y-5 transition-all ${activeTheme.bgGradient}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="p-4 sm:p-6 rounded-3xl space-y-5 transition-all bg-background text-text-main" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       {/* Header Bar */}
       <div className="flex items-center justify-between gap-3 flex-wrap bg-surface/80 backdrop-blur-md p-3 sm:p-4 rounded-2xl border border-surface-border shadow-xs">
         <div className="flex items-center gap-2">
@@ -282,7 +282,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
           <div>
             <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5">
               <span>{activeTheme.emoji}</span>
-              <span>{set.title}</span>
+              <span>{getLocalizedSetTitle(set, language)}</span>
             </h2>
             <p className="text-[10px] text-text-muted">
               {t.levelLabel} {set.level} • {items.length} {t.vocabularyCount}

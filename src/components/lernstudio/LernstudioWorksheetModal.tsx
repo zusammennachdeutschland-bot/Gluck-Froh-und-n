@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { LernstudioSet } from '../../types/lernstudio';
+import { getLernstudioTranslations, getLocalizedSetTitle } from '../../utils/lernstudioTranslations';
 import {
   downloadOrSaveLernstudioWorksheet,
   printLernstudioWorksheetDirectly,
   WorksheetOptions
 } from '../../utils/lernstudioPdfUtils';
-import { X, Printer, FileText, Download, Check, Sparkles, Loader2 } from 'lucide-react';
+import { X, Printer, FileText, Download, Check, Loader2 } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
   set: LernstudioSet;
   schoolName?: string;
   teacherName?: string;
+  language?: string;
   onClose: () => void;
 }
 
@@ -20,12 +22,17 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
   set,
   schoolName: initialSchool,
   teacherName: initialTeacher,
+  language = 'ar',
   onClose
 }) => {
-  const [schoolName, setSchoolName] = useState(initialSchool || 'مدرسة Glück - Lernstudio');
-  const [teacherName, setTeacherName] = useState(initialTeacher || 'الأستاذ المعلم');
-  const [gradeName, setGradeName] = useState(set.grade || 'الصف الأول');
-  const [subjectName, setSubjectName] = useState('اللغة الألمانية');
+  const t = getLernstudioTranslations(language);
+  const isRtl = language === 'ar';
+  const displaySetTitle = getLocalizedSetTitle(set, language);
+
+  const [schoolName, setSchoolName] = useState(initialSchool || (isRtl ? 'مدرسة Glück - Lernstudio' : 'Glück - Lernstudio School'));
+  const [teacherName, setTeacherName] = useState(initialTeacher || (isRtl ? 'الأستاذ المعلم' : 'Teacher'));
+  const [gradeName, setGradeName] = useState(set.grade || (isRtl ? 'الصف الأول' : 'Grade 1'));
+  const [subjectName, setSubjectName] = useState(isRtl ? 'اللغة الألمانية' : 'Deutsch');
 
   const [includeVocabularyTable, setIncludeVocabularyTable] = useState(true);
   const [includeMissingLetters, setIncludeMissingLetters] = useState(true);
@@ -52,7 +59,6 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
     try {
       const opts = getOptions(isTeacherKey);
       await downloadOrSaveLernstudioWorksheet(set, opts);
-      /* confetti removed */
     } catch (err) {
       console.error('Worksheet PDF Generation error:', err);
     } finally {
@@ -66,14 +72,14 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-hidden" dir="rtl">
+    <div className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
       <div className="bg-surface border border-surface-border rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
         {/* Header */}
         <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between bg-surface shrink-0">
           <div className="flex items-center gap-2">
             <Printer className="w-5 h-5 text-primary" />
             <h2 className="text-sm sm:text-base font-black text-text-main">
-              طباعة ورقة عمل A4 - ({set.title})
+              {t.worksheetModalTitle} - ({displaySetTitle})
             </h2>
           </div>
           <button
@@ -89,12 +95,12 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
         <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
           <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-xs text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-2">
             <Check className="w-4 h-4 shrink-0 text-emerald-500" />
-            <span>تم تحديث نظام خطوط الـ PDF بدعم شامل للغة العربية والخط الألمانية بدون حروف مكسورة!</span>
+            <span>PDF Generator with Arabic & German font support.</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-bold text-text-muted block mb-1">اسم المدرسة:</label>
+              <label className="text-xs font-bold text-text-muted block mb-1">School / School Name:</label>
               <input
                 type="text"
                 value={schoolName}
@@ -104,7 +110,7 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
             </div>
 
             <div>
-              <label className="text-xs font-bold text-text-muted block mb-1">اسم المعلم:</label>
+              <label className="text-xs font-bold text-text-muted block mb-1">Teacher / Teacher Name:</label>
               <input
                 type="text"
                 value={teacherName}
@@ -114,7 +120,7 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
             </div>
 
             <div>
-              <label className="text-xs font-bold text-text-muted block mb-1">الصف الدراسية:</label>
+              <label className="text-xs font-bold text-text-muted block mb-1">Grade / Level:</label>
               <input
                 type="text"
                 value={gradeName}
@@ -124,7 +130,7 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
             </div>
 
             <div>
-              <label className="text-xs font-bold text-text-muted block mb-1">المادة:</label>
+              <label className="text-xs font-bold text-text-muted block mb-1">Subject:</label>
               <input
                 type="text"
                 value={subjectName}
@@ -136,7 +142,7 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
 
           {/* Sections checkboxes */}
           <div className="space-y-2 pt-2 border-t border-surface-border">
-            <span className="text-xs font-black text-text-main block">الأقسام المطلوبة في ورقة العمل:</span>
+            <span className="text-xs font-black text-text-main block">Worksheet Sections:</span>
 
             <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-text-muted">
               <input
@@ -145,7 +151,7 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
                 onChange={(e) => setIncludeVocabularyTable(e.target.checked)}
                 className="rounded border-surface-border text-primary focus:ring-primary"
               />
-              <span>1. جدول المفردات والمعاني (Wortschatz)</span>
+              <span>1. Vocabulary Table (Wortschatz)</span>
             </label>
 
             <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-text-muted">
@@ -155,7 +161,7 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
                 onChange={(e) => setIncludeMissingLetters(e.target.checked)}
                 className="rounded border-surface-border text-primary focus:ring-primary"
               />
-              <span>2. تمارين الحرف الناقص (Missing Letters)</span>
+              <span>2. Missing Letters Practice</span>
             </label>
 
             <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-text-muted">
@@ -165,7 +171,7 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
                 onChange={(e) => setIncludeSentenceBuilder(e.target.checked)}
                 className="rounded border-surface-border text-primary focus:ring-primary"
               />
-              <span>3. تمارين ترتيب الجمل (Satzbau)</span>
+              <span>3. Sentence Builder (Satzbau)</span>
             </label>
           </div>
         </div>
@@ -182,12 +188,12 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
               {isGenerating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>جاري التجهيز...</span>
+                  <span>Processing...</span>
                 </>
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  <span>تحميل الطالب (PDF)</span>
+                  <span>{t.downloadPdf} (Student)</span>
                 </>
               )}
             </button>
@@ -201,12 +207,12 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
               {isGenerating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>جاري التجهيز...</span>
+                  <span>Processing...</span>
                 </>
               ) : (
                 <>
                   <FileText className="w-4 h-4" />
-                  <span>تحميل المدرس (PDF)</span>
+                  <span>{t.downloadPdf} (Teacher)</span>
                 </>
               )}
             </button>
@@ -218,7 +224,7 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
             className="w-full py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center justify-center gap-1.5"
           >
             <Printer className="w-4 h-4 text-primary" />
-            <span>طباعة طباعة مباشرة للفيزيكال للطالب 🖨️</span>
+            <span>{t.printBtn}</span>
           </button>
         </div>
       </div>

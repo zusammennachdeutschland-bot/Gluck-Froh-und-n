@@ -1,14 +1,21 @@
 import React, { useState, useMemo } from 'react';
-import { LernstudioSet, LernstudioThemeId, LernstudioLevel } from '../../types/lernstudio';
+import { LernstudioSet, LernstudioThemeId, LernstudioLevel, LernstudioGameMode } from '../../types/lernstudio';
 import { Group } from '../../types';
 import { LERNSTUDIO_THEMES } from './lernstudioThemes';
 import { LernstudioGameRunner } from './LernstudioGameRunner';
 import { LernstudioClassroomBoard } from './LernstudioClassroomBoard';
+import { LernstudioWheelGame } from './games/LernstudioWheelGame';
+import { LernstudioRaceGame } from './games/LernstudioRaceGame';
+import { LernstudioMemoryGame } from './games/LernstudioMemoryGame';
+import { LernstudioSortingGame } from './games/LernstudioSortingGame';
+import { LernstudioSentenceGame } from './games/LernstudioSentenceGame';
+import { LernstudioGamesPortalView } from './LernstudioGamesPortalView';
 import { LernstudioSetEditorModal } from './LernstudioSetEditorModal';
 import { LernstudioAiModal } from './LernstudioAiModal';
 import { LernstudioWorksheetModal } from './LernstudioWorksheetModal';
 import { LernstudioTeachModal } from './LernstudioTeachModal';
-import { getLernstudioTranslations } from '../../utils/lernstudioTranslations';
+import { LernstudioWordsModal } from './LernstudioWordsModal';
+import { getLernstudioTranslations, getLocalizedSetTitle, getLocalizedSetTopic, getLocalizedGrade, getLocalizedSetDescription, PROGRAM_GRADES, matchesGradeFilter } from '../../utils/lernstudioTranslations';
 import { CHILDREN_LEVEL_CATEGORIES } from '../../data/childrenTopicsPreset';
 
 import {
@@ -28,7 +35,9 @@ import {
   Layers,
   Award,
   ChevronRight,
-  BookOpen
+  BookOpen,
+  Eye,
+  Share2
 } from 'lucide-react';
 
 interface Props {
@@ -57,7 +66,7 @@ export const LernstudioView: React.FC<Props> = ({
   const activeTheme = LERNSTUDIO_THEMES[currentThemeId];
 
   // Mode View State
-  const [activeMode, setActiveMode] = useState<'hub' | 'game' | 'classroom'>('hub');
+  const [activeMode, setActiveMode] = useState<LernstudioGameMode>('hub');
   const [selectedSetForMode, setSelectedSetForMode] = useState<LernstudioSet | null>(null);
 
   // Modals
@@ -72,21 +81,32 @@ export const LernstudioView: React.FC<Props> = ({
   const [isTeachModalOpen, setIsTeachModalOpen] = useState(false);
   const [selectedSetForTeach, setSelectedSetForTeach] = useState<LernstudioSet | null>(null);
 
+  const [isWordsModalOpen, setIsWordsModalOpen] = useState(false);
+  const [selectedSetForWordsModal, setSelectedSetForWordsModal] = useState<LernstudioSet | null>(null);
+
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedLevel, setSelectedLevel] = useState<string>('all');
-  const [selectedChildrenCategory, setSelectedChildrenCategory] = useState<string>('all');
+  const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('all');
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>('all');
 
-  // Filtered Sets
+  // Filtered Sets (with Deduplication Protection)
   const filteredSets = useMemo(() => {
-    return sets.filter((set) => {
-      if (set.isArchived) return false;
+    const seenIds = new Set<string>();
+    const seenTitles = new Set<string>();
 
-      const matchLevel = selectedLevel === 'all' || set.level === selectedLevel;
-      const matchChildrenCategory =
-        selectedChildrenCategory === 'all' ||
-        (set.grade && set.grade.includes(selectedChildrenCategory));
+    return sets.filter((set) => {
+      if (!set || !set.id || set.isArchived) return false;
+
+      // Deduplicate by ID
+      if (seenIds.has(set.id)) return false;
+
+      // Deduplicate by Title (strip (Copy) / (نسخة) for clean matching)
+      const cleanTitleKey = (set.title || '').replace(/\((Copy|نسخة)\)/gi, '').trim().toLowerCase();
+      if (cleanTitleKey && seenTitles.has(cleanTitleKey)) {
+        return false;
+      }
+
+      const matchGrade = matchesGradeFilter(set, selectedGradeFilter);
       const matchGroup = selectedGroupFilter === 'all' || set.assignedGroupId === selectedGroupFilter;
 
       const q = searchTerm.trim().toLowerCase();
@@ -96,9 +116,14 @@ export const LernstudioView: React.FC<Props> = ({
         (set.topic && set.topic.toLowerCase().includes(q)) ||
         (set.grade && set.grade.toLowerCase().includes(q));
 
-      return matchLevel && matchChildrenCategory && matchGroup && matchQuery;
+      if (matchGrade && matchGroup && matchQuery) {
+        seenIds.add(set.id);
+        if (cleanTitleKey) seenTitles.add(cleanTitleKey);
+        return true;
+      }
+      return false;
     });
-  }, [sets, selectedLevel, selectedChildrenCategory, selectedGroupFilter, searchTerm]);
+  }, [sets, selectedGradeFilter, selectedGroupFilter, searchTerm]);
 
   // Handlers
   const handleDuplicateSet = (set: LernstudioSet) => {
@@ -113,20 +138,58 @@ export const LernstudioView: React.FC<Props> = ({
     /* confetti removed */
   };
 
-  const handleExportSetJson = (set: LernstudioSet) => {
-    const jsonStr = JSON.stringify(set, null, 2);
-    navigator.clipboard.writeText(jsonStr);
-    alert(language === 'ar' ? `تم نسخ بيانات المجموعة (${set.title}) بصيغة JSON إلى الحافظة!` : `Set (${set.title}) JSON copied to clipboard!`);
+  const handleShareWhatsApp = (set: LernstudioSet) => {
+    const displayTitle = getLocalizedSetTitle(set, language);
+    const displayTopic = getLocalizedSetTopic(set, language);
+    const items = set.items || [];
+
+    let text = `🇩🇪 *${displayTitle}*\n`;
+    text += `📌 ${displayTopic}\n`;
+    text += `📚 ${items.length} ${t.vocabularyCount}:\n\n`;
+
+    items.slice(0, 15).forEach((it, idx) => {
+      text += `${idx + 1}. ${it.german} ➡️ ${it.arabic}\n`;
+    });
+
+    if (items.length > 15) {
+      text += `... +${items.length - 15} ${t.vocabularyCount}\n`;
+    }
+
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
   };
 
-  // Render Sub-Views (Game, Classroom)
+  // Render Sub-Views (Full-Page Games Portal & Individual Games)
+  if (activeMode === 'games_portal' && selectedSetForMode) {
+    return (
+      <LernstudioGamesPortalView
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('hub')}
+        onSelectGame={(gMode) => setActiveMode(gMode)}
+      />
+    );
+  }
+
+  if (activeMode === 'sentence_builder' && selectedSetForMode) {
+    return (
+      <LernstudioSentenceGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
   if (activeMode === 'game' && selectedSetForMode) {
     return (
       <LernstudioGameRunner
         set={selectedSetForMode}
         activeTheme={activeTheme}
         language={language}
-        onBack={() => setActiveMode('hub')}
+        onBack={() => setActiveMode('games_portal')}
       />
     );
   }
@@ -136,13 +199,57 @@ export const LernstudioView: React.FC<Props> = ({
       <LernstudioClassroomBoard
         set={selectedSetForMode}
         activeTheme={activeTheme}
-        onBack={() => setActiveMode('hub')}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'wheel' && selectedSetForMode) {
+    return (
+      <LernstudioWheelGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'race' && selectedSetForMode) {
+    return (
+      <LernstudioRaceGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'memory' && selectedSetForMode) {
+    return (
+      <LernstudioMemoryGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'sorting' && selectedSetForMode) {
+    return (
+      <LernstudioSortingGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
       />
     );
   }
 
   return (
-    <div className={`p-4 sm:p-6 rounded-3xl space-y-6 transition-all min-h-[85vh] ${activeTheme.bgGradient}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className={`p-4 sm:p-6 pb-32 sm:pb-40 rounded-3xl space-y-6 transition-all min-h-[85vh] ${activeTheme.bgGradient}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
       {/* Top Banner & Title Bar */}
       <div className="flex items-center justify-between gap-3 flex-wrap bg-surface/90 backdrop-blur-md p-3.5 sm:p-5 rounded-3xl border border-surface-border shadow-md overflow-hidden">
         <div className="flex items-center gap-2 min-w-0">
@@ -214,41 +321,26 @@ export const LernstudioView: React.FC<Props> = ({
         </div>
 
         {/* Dropdowns row on mobile */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full sm:w-auto shrink-0 min-w-0">
-          {/* Children Level Category Filter */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full sm:w-auto shrink-0 min-w-0">
+          {/* Program Grade Filter (Grade 1 to Grade 12) */}
           <select
-            value={selectedChildrenCategory}
-            onChange={(e) => setSelectedChildrenCategory(e.target.value)}
-            className="w-full sm:w-auto px-2.5 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate"
+            value={selectedGradeFilter}
+            onChange={(e) => setSelectedGradeFilter(e.target.value)}
+            className="w-full sm:w-auto px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate cursor-pointer"
           >
-            <option value="all">-- {language === 'ar' ? 'جميع مستويات الأطفال (7 مستويات)' : 'All Children Levels'} --</option>
-            {CHILDREN_LEVEL_CATEGORIES.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat}
+            <option value="all">-- {t.allLevels} --</option>
+            {PROGRAM_GRADES.map((g) => (
+              <option key={g.id} value={g.id}>
+                {language === 'ar' ? g.labelAr : language === 'de' ? g.labelDe : g.labelEn}
               </option>
             ))}
-          </select>
-
-          {/* Level Filter */}
-          <select
-            value={selectedLevel}
-            onChange={(e) => setSelectedLevel(e.target.value)}
-            className="w-full sm:w-auto px-2.5 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate"
-          >
-            <option value="all">{t.allLevels}</option>
-            <option value="A1">A1</option>
-            <option value="A2">A2</option>
-            <option value="B1">B1</option>
-            <option value="B2">B2</option>
-            <option value="C1">C1</option>
-            <option value="C2">C2</option>
           </select>
 
           {/* Group Filter */}
           <select
             value={selectedGroupFilter}
             onChange={(e) => setSelectedGroupFilter(e.target.value)}
-            className="w-full sm:w-auto px-2.5 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate"
+            className="w-full sm:w-auto px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate cursor-pointer"
           >
             <option value="all">{t.allGroups}</option>
             {groups.map((g) => (
@@ -284,117 +376,107 @@ export const LernstudioView: React.FC<Props> = ({
             return (
               <div
                 key={set.id}
-                className={`p-5 rounded-3xl space-y-4 flex flex-col justify-between transition-all hover:scale-[1.01] ${activeTheme.cardBg}`}
+                className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-surface-border bg-surface shadow-2xs hover:shadow-md transition-all flex flex-col justify-between space-y-3.5 group max-w-full overflow-hidden"
               >
-                <div className="space-y-3">
-                  {/* Card Badges */}
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black ${activeTheme.accentBadge}`}>
-                      {set.level} • {set.topic} {set.grade ? `(${set.grade})` : ''}
-                    </span>
+                <div className="space-y-3 min-w-0 max-w-full">
+                  {/* Card Header: Vocabulary Count, Grade & Group */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap text-xs min-w-0 max-w-full overflow-hidden">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted min-w-0 max-w-full flex-wrap overflow-hidden">
+                      <span className="font-bold text-primary shrink-0">{itemCount} {t.vocabularyCount}</span>
+                      {set.grade && (
+                        <>
+                          <span aria-hidden="true" className="text-text-muted/40 shrink-0">·</span>
+                          <span className="truncate max-w-[140px] sm:max-w-none text-text-main font-semibold">{getLocalizedGrade(set.grade, language)}</span>
+                        </>
+                      )}
+                    </div>
 
                     {assignedGroup && (
-                      <span className="px-2 py-0.5 rounded-lg bg-surface-hover text-text-muted font-bold text-[10px]">
+                      <span className="px-2 py-0.5 rounded-md bg-surface-hover text-text-muted font-bold text-[10px] shrink-0 border border-surface-border/40 truncate max-w-[120px]">
                         👥 {assignedGroup.name}
                       </span>
                     )}
                   </div>
 
-                  {/* Card Title & Info */}
-                  <div>
-                    <h3 className="text-base font-black text-text-main line-clamp-1">{set.title}</h3>
+                  {/* Card Title & Description - Click opens vocabulary modal */}
+                  <div
+                    onClick={() => {
+                      setSelectedSetForWordsModal(set);
+                      setIsWordsModalOpen(true);
+                    }}
+                    className="space-y-1.5 cursor-pointer group/title p-1 -m-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0 max-w-full overflow-hidden"
+                  >
+                    <h3 className="text-base sm:text-lg font-bold text-text-main group-hover/title:text-primary transition-colors leading-snug flex items-start justify-between gap-2 min-w-0">
+                      <span className="line-clamp-2 break-words flex-1 min-w-0">{getLocalizedSetTitle(set, language)}</span>
+                      <Eye className="w-4 h-4 text-text-muted opacity-40 group-hover/title:opacity-100 group-hover/title:text-primary transition-all shrink-0 mt-1" />
+                    </h3>
                     {set.description && (
-                      <p className="text-xs text-text-muted line-clamp-2 mt-0.5">{set.description}</p>
-                    )}
-                  </div>
-
-                  {/* Vocabulary preview items pills */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {set.items.slice(0, 4).map((it, idx) => (
-                      <span
-                        key={idx}
-                        className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-surface-hover text-text-main border border-surface-border/40 font-mono"
-                        dir="ltr"
-                      >
-                        {it.emoji} {it.german}
-                      </span>
-                    ))}
-                    {itemCount > 4 && (
-                      <span className="text-[10px] font-bold text-text-muted">+ {itemCount - 4}</span>
+                      <p className="text-xs text-text-muted line-clamp-2 leading-relaxed break-words">
+                        {getLocalizedSetDescription(set, language)}
+                      </p>
                     )}
                   </div>
                 </div>
 
-                {/* Card Action Buttons */}
-                <div className="space-y-2 pt-3 border-t border-surface-border/50">
-                  {/* Primary Play, Teach & Classroom Buttons */}
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSetForMode(set);
-                        setActiveMode('game');
-                      }}
-                      className={`py-2 px-2 rounded-xl text-xs font-black shadow-xs cursor-pointer inline-flex items-center justify-center gap-1 ${activeTheme.primaryBg}`}
-                    >
-                      <Gamepad2 className="w-3.5 h-3.5" />
-                      <span>{t.playGame}</span>
-                    </button>
+                {/* Card Action Section */}
+                <div className="pt-3 border-t border-surface-border/60 space-y-2">
+                  {/* Primary Game Portal CTA Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSetForMode(set);
+                      setActiveMode('games_portal');
+                    }}
+                    className="w-full py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold shadow-2xs cursor-pointer inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-white transform active:scale-[0.98] transition-all"
+                  >
+                    <Gamepad2 className="w-4 h-4 shrink-0" />
+                    <span>{t.playGame}</span>
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSetForTeach(set);
-                        setIsTeachModalOpen(true);
-                      }}
-                      className="py-2 px-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer inline-flex items-center justify-center gap-1"
-                    >
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>مود الشرح</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSetForMode(set);
-                        setActiveMode('classroom');
-                      }}
-                      className="py-2 px-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer inline-flex items-center justify-center gap-1"
-                    >
-                      <Trophy className="w-3.5 h-3.5" />
-                      <span>{t.classroomBoard}</span>
-                    </button>
-                  </div>
-
-                  {/* Secondary Printable & Controls */}
-                  <div className="flex items-center justify-between gap-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSetForWorksheet(set);
-                        setIsWorksheetModalOpen(true);
-                      }}
-                      className="px-2.5 py-1.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-xl text-[11px] font-bold cursor-pointer inline-flex items-center gap-1"
-                    >
-                      <Printer className="w-3.5 h-3.5 text-primary" />
-                      <span>{t.printWorksheet}</span>
-                    </button>
-
-                    <div className="flex items-center gap-1">
+                  {/* Secondary Action Row: Teach Mode, Worksheet, and Quick Tools */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
                       <button
                         type="button"
-                        onClick={() => handleExportSetJson(set)}
-                        className="p-1.5 text-text-muted hover:text-text-main bg-surface-hover rounded-lg transition-colors cursor-pointer"
-                        title={t.copyJson}
+                        onClick={() => {
+                          setSelectedSetForTeach(set);
+                          setIsTeachModalOpen(true);
+                        }}
+                        className="flex-1 py-1.5 px-2.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
                       >
-                        <Copy className="w-3.5 h-3.5" />
+                        <BookOpen className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
+                        <span className="truncate">{t.teachMode}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSetForWorksheet(set);
+                          setIsWorksheetModalOpen(true);
+                        }}
+                        className="flex-1 py-1.5 px-2.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <span className="truncate">{t.printWorksheet}</span>
+                      </button>
+                    </div>
+
+                    {/* Quick Icon Controls */}
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleShareWhatsApp(set)}
+                        className="p-1.5 text-text-muted hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
+                        title={t.shareWhatsApp}
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleDuplicateSet(set)}
-                        className="p-1.5 text-text-muted hover:text-text-main bg-surface-hover rounded-lg transition-colors cursor-pointer"
-                        title={t.copyJson}
+                        className="p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                        title={t.duplicateSet}
                       >
                         <Layers className="w-3.5 h-3.5" />
                       </button>
@@ -405,7 +487,7 @@ export const LernstudioView: React.FC<Props> = ({
                           setSetToEdit(set);
                           setIsSetEditorOpen(true);
                         }}
-                        className="p-1.5 text-text-muted hover:text-primary bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                        className="p-1.5 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
                         title={t.editSet}
                       >
                         <Edit3 className="w-3.5 h-3.5" />
@@ -418,7 +500,7 @@ export const LernstudioView: React.FC<Props> = ({
                             onDeleteSet(set.id);
                           }
                         }}
-                        className="p-1.5 text-text-muted hover:text-red-500 bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                        className="p-1.5 text-text-muted hover:text-red-500 hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
                         title={t.deleteSet}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -458,6 +540,7 @@ export const LernstudioView: React.FC<Props> = ({
           set={selectedSetForWorksheet}
           schoolName={schoolName}
           teacherName={teacherName}
+          language={language}
           onClose={() => {
             setIsWorksheetModalOpen(false);
             setSelectedSetForWorksheet(null);
@@ -476,6 +559,34 @@ export const LernstudioView: React.FC<Props> = ({
           }}
         />
       )}
+
+      {isWordsModalOpen && selectedSetForWordsModal && (
+        <LernstudioWordsModal
+          isOpen={isWordsModalOpen}
+          set={selectedSetForWordsModal}
+          language={language}
+          onClose={() => {
+            setIsWordsModalOpen(false);
+            setSelectedSetForWordsModal(null);
+          }}
+          onStartGames={() => {
+            setSelectedSetForMode(selectedSetForWordsModal);
+            setActiveMode('games_portal');
+            setIsWordsModalOpen(false);
+          }}
+          onStartTeach={() => {
+            setSelectedSetForTeach(selectedSetForWordsModal);
+            setIsTeachModalOpen(true);
+            setIsWordsModalOpen(false);
+          }}
+          onStartWorksheet={() => {
+            setSelectedSetForWorksheet(selectedSetForWordsModal);
+            setIsWorksheetModalOpen(true);
+            setIsWordsModalOpen(false);
+          }}
+        />
+      )}
+
     </div>
   );
 };

@@ -1,3 +1,5 @@
+import { LernstudioSet } from '../types/lernstudio';
+
 export type AppLanguage = 'ar' | 'en' | 'de';
 
 export interface LernstudioTranslations {
@@ -19,11 +21,71 @@ export interface LernstudioTranslations {
   gradeLabel: string;
   levelLabel: string;
   playGame: string;
+  teachMode: string;
+  viewWords: string;
+  wordsModalTitle: string;
+  searchWordsPlaceholder: string;
   classroomBoard: string;
   printWorksheet: string;
   editSet: string;
+  shareWhatsApp: string;
+  duplicateSet: string;
   copyJson: string;
   deleteSet: string;
+
+  // Games Portal
+  gamesPortalTitle: string;
+  gamesPortalBack: string;
+  teamContestsSection: string;
+  soloPracticeSection: string;
+  teamLabel: string;
+  soloLabel: string;
+  startBtn: string;
+  unavailableBtn: string;
+  availableNouns: string;
+  noNounsMsg: string;
+  classroomQuizTitle: string;
+  classroomQuizCategory: string;
+  wheelGameTitle: string;
+  wheelGameCategory: string;
+  raceGameTitle: string;
+  raceGameCategory: string;
+  teamSentenceTitle: string;
+  teamSentenceCategory: string;
+  soloSentenceTitle: string;
+  soloSentenceCategory: string;
+  sortingGameTitle: string;
+  sortingGameCategory: string;
+  memoryGameTitle: string;
+  memoryGameCategory: string;
+  comprehensivePracticeTitle: string;
+  comprehensivePracticeCategory: string;
+
+  // Sentence Game
+  sentenceGameHeader: string;
+  targetTranslationLabel: string;
+  dragOrTapWords: string;
+  undoBtnLabel: string;
+  resetBtnLabel: string;
+  hintBtnLabel: string;
+  nextQuestionBtn: string;
+  sentenceVictoryTitle: string;
+
+  // Sorting Game
+  sortingGameHeader: string;
+  sortingSubTitle: string;
+  sortingEmptyWarning: string;
+
+  // Teach Mode & Worksheets
+  teachModeTitle: string;
+  prevSlide: string;
+  nextSlide: string;
+  showTranslation: string;
+  hideTranslation: string;
+  listenAudio: string;
+  worksheetModalTitle: string;
+  printBtn: string;
+  downloadPdf: string;
 
   // Classroom Board Setup
   boardTitle: string;
@@ -134,7 +196,7 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     library: 'المكتبة التعليمية 📚',
     themePicker: 'تغيير الثيم',
     searchPlaceholder: 'بحث باسم المجموعة، الكلمة، أو الصف...',
-    allLevels: 'جميع المستويات',
+    allLevels: 'جميع الصفوف (من 1 إلى 12)',
     allGroups: 'جميع المجموعات',
     noSetsFound: 'لا توجد مجموعات تعليمية تطابق البحث',
     noSetsDesc: 'يمكنك إنشاء مجموعة جديدة يدويًا أو توليدها عبر الذكاء الاصطناعي.',
@@ -142,12 +204,68 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     vocabularyCount: 'مفردات',
     gradeLabel: 'الصف:',
     levelLabel: 'المستوى:',
-    playGame: 'الألعاب والتدريبات 🎮',
+    playGame: 'الألعاب والمسابقات 🎮🏆',
+    teachMode: 'مود الشرح 📖',
+    viewWords: 'عرض المفردات 👁️',
+    wordsModalTitle: 'مفردات المجموعة',
+    searchWordsPlaceholder: 'بحث في الكلمات...',
     classroomBoard: 'لعبة السبورة 🏫',
     printWorksheet: 'ورقة عمل 📄',
     editSet: 'تعديل',
+    shareWhatsApp: 'مشاركة عبر واتساب',
+    duplicateSet: 'نسخ المجموعة',
     copyJson: 'نسخ JSON',
     deleteSet: 'حذف',
+
+    gamesPortalTitle: 'الألعاب والمسابقات',
+    gamesPortalBack: 'العودة',
+    teamContestsSection: 'مسابقات الفصل والفرق',
+    soloPracticeSection: 'الألعاب والتدريب الفردي',
+    teamLabel: 'جماعي',
+    soloLabel: 'فردي',
+    startBtn: 'تشغيل',
+    unavailableBtn: 'غير متاح',
+    availableNouns: 'متاح',
+    noNounsMsg: 'غير متاح (لا تحتوي على أسماء)',
+    classroomQuizTitle: 'مسابقة الفصل الذكية',
+    classroomQuizCategory: 'جماعي / الفصل',
+    wheelGameTitle: 'عجلة الحظ والتحديات',
+    wheelGameCategory: '2 - 4 فرق',
+    raceGameTitle: 'سباق السيارات والفرق',
+    raceGameCategory: '2 - 4 فرق',
+    teamSentenceTitle: 'تحدي ترتيب الجمل للفرق',
+    teamSentenceCategory: 'تنافس فرق',
+    soloSentenceTitle: 'ترتيب الجمل والنحو',
+    soloSentenceCategory: 'تدريب فردي',
+    sortingGameTitle: 'فرز أدوات التعريف (der / die / das)',
+    sortingGameCategory: 'قواعد وأدوات',
+    memoryGameTitle: 'بطاقات الذاكرة والمطابقة',
+    memoryGameCategory: 'فردي / ثنائي',
+    comprehensivePracticeTitle: 'التدريب الفردي الشامل',
+    comprehensivePracticeCategory: 'اختبار سريع',
+
+    sentenceGameHeader: 'تحدي ترتيب الجمل الألمانية 🧩',
+    targetTranslationLabel: 'الترتيب المطلوب:',
+    dragOrTapWords: 'اسحب الكلمات أو اضغط عليها لرص الجملة:',
+    undoBtnLabel: 'تراجع',
+    resetBtnLabel: 'إعادة',
+    hintBtnLabel: 'تلميح',
+    nextQuestionBtn: 'السؤال التالي',
+    sentenceVictoryTitle: 'أحسنت! أكملت تحدي الجمل بنجاح 🎉',
+
+    sortingGameHeader: 'لعبة فرز الأدوات (der / die / das) 📦',
+    sortingSubTitle: 'اسحب الكلمة أو اضغط على الصندوق المناسب:',
+    sortingEmptyWarning: 'عذراً، هذه المجموعة لا تحتوي على أسماء معرفة (der/die/das) تناسب لعبة الفرز.',
+
+    teachModeTitle: 'العرض التقديمي ومود الشرح 📖',
+    prevSlide: 'السابق',
+    nextSlide: 'التالي',
+    showTranslation: 'إظهار الترجمة',
+    hideTranslation: 'إخفاء الترجمة',
+    listenAudio: 'استمع للكلمة 🔊',
+    worksheetModalTitle: 'طباعة ورقة عمل تفاعلية 📄',
+    printBtn: 'طباعة 🖨️',
+    downloadPdf: 'تحميل PDF 📥',
 
     boardTitle: 'إعداد لعبة السبورة التنافسية (Baamboozle Style) 🎮',
     selectGameMode: '1. اختر نظام اللعبة:',
@@ -253,7 +371,7 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     library: 'Study Library 📚',
     themePicker: 'Themes',
     searchPlaceholder: 'Search set title, German word, or grade...',
-    allLevels: 'All Levels',
+    allLevels: 'All Grades (Grade 1 - 12)',
     allGroups: 'All Classes',
     noSetsFound: 'No learning sets match your search',
     noSetsDesc: 'Create a new set manually or generate one with AI.',
@@ -261,12 +379,68 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     vocabularyCount: 'words',
     gradeLabel: 'Grade:',
     levelLabel: 'Level:',
-    playGame: 'Practice & Games 🎮',
+    playGame: 'Games & Competitions 🎮🏆',
+    teachMode: 'Teach Mode 📖',
+    viewWords: 'View Words 👁️',
+    wordsModalTitle: 'Set Vocabulary',
+    searchWordsPlaceholder: 'Search words...',
     classroomBoard: 'Classroom Board 🏫',
     printWorksheet: 'Worksheet 📄',
     editSet: 'Edit',
+    shareWhatsApp: 'Share via WhatsApp',
+    duplicateSet: 'Duplicate Set',
     copyJson: 'Copy JSON',
     deleteSet: 'Delete',
+
+    gamesPortalTitle: 'Games & Competitions',
+    gamesPortalBack: 'Back',
+    teamContestsSection: 'Classroom & Team Contests',
+    soloPracticeSection: 'Solo Practice & Games',
+    teamLabel: 'Teams',
+    soloLabel: 'Solo',
+    startBtn: 'Start',
+    unavailableBtn: 'Unavailable',
+    availableNouns: 'Available',
+    noNounsMsg: 'Unavailable (No nouns)',
+    classroomQuizTitle: 'Smart Classroom Quiz',
+    classroomQuizCategory: 'Class / Group',
+    wheelGameTitle: 'Spin Wheel Challenge',
+    wheelGameCategory: '2-4 Teams',
+    raceGameTitle: 'Team Car Race',
+    raceGameCategory: '2-4 Teams',
+    teamSentenceTitle: 'Team Sentence Builder',
+    teamSentenceCategory: 'Team Contest',
+    soloSentenceTitle: 'Sentence Builder & Grammar',
+    soloSentenceCategory: 'Solo Practice',
+    sortingGameTitle: 'Article Sorting Bins (der/die/das)',
+    sortingGameCategory: 'Grammar & Articles',
+    memoryGameTitle: 'Memory Match Cards',
+    memoryGameCategory: 'Solo / Pair',
+    comprehensivePracticeTitle: 'Comprehensive Solo Practice',
+    comprehensivePracticeCategory: 'Quick Quiz',
+
+    sentenceGameHeader: 'German Sentence Builder Challenge 🧩',
+    targetTranslationLabel: 'Target Translation:',
+    dragOrTapWords: 'Tap or drag words to construct sentence:',
+    undoBtnLabel: 'Undo',
+    resetBtnLabel: 'Reset',
+    hintBtnLabel: 'Hint',
+    nextQuestionBtn: 'Next Question',
+    sentenceVictoryTitle: 'Great job! Completed Sentence Builder! 🎉',
+
+    sortingGameHeader: 'Article Sorting Bins (der / die / das) 📦',
+    sortingSubTitle: 'Drag word or tap matching bin:',
+    sortingEmptyWarning: 'Sorry, this set does not contain nouns with articles for the sorting game.',
+
+    teachModeTitle: 'Presentation & Teach Mode 📖',
+    prevSlide: 'Previous',
+    nextSlide: 'Next',
+    showTranslation: 'Show Translation',
+    hideTranslation: 'Hide Translation',
+    listenAudio: 'Listen 🔊',
+    worksheetModalTitle: 'Print Interactive Worksheet 📄',
+    printBtn: 'Print 🖨️',
+    downloadPdf: 'Download PDF 📥',
 
     boardTitle: 'Competitive Classroom Board Setup (Baamboozle Style) 🎮',
     selectGameMode: '1. Select Game Mode:',
@@ -372,7 +546,7 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     library: 'Lernbibliothek 📚',
     themePicker: 'Designs',
     searchPlaceholder: 'Suche nach Thema, deutschem Wort oder Klasse...',
-    allLevels: 'Alle Niveaus',
+    allLevels: 'Alle Klassen (Klasse 1 - 12)',
     allGroups: 'Alle Klassen',
     noSetsFound: 'Keine Lernsets entsprechen deiner Suche',
     noSetsDesc: 'Erstelle manuell ein neues Set oder generiere eines mit KI.',
@@ -380,12 +554,68 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     vocabularyCount: 'Wörter',
     gradeLabel: 'Klasse:',
     levelLabel: 'Niveau:',
-    playGame: 'Übungen & Spiele 🎮',
+    playGame: 'Spiele & Wettbewerbe 🎮🏆',
+    teachMode: 'Lehrmodus 📖',
+    viewWords: 'Wörter anzeigen 👁️',
+    wordsModalTitle: 'Vokabelliste des Sets',
+    searchWordsPlaceholder: 'Wörter suchen...',
     classroomBoard: 'Klassenzimmer-Spiel 🏫',
     printWorksheet: 'Arbeitsblatt 📄',
     editSet: 'Bearbeiten',
+    shareWhatsApp: 'Auf WhatsApp teilen',
+    duplicateSet: 'Set duplizieren',
     copyJson: 'JSON kopieren',
     deleteSet: 'Löschen',
+
+    gamesPortalTitle: 'Spiele & Wettbewerbe',
+    gamesPortalBack: 'Zurück',
+    teamContestsSection: 'Klassenzimmer- & Team-Wettbewerbe',
+    soloPracticeSection: 'Einzelübungen & Spiele',
+    teamLabel: 'Teams',
+    soloLabel: 'Einzel',
+    startBtn: 'Starten',
+    unavailableBtn: 'Inaktiv',
+    availableNouns: 'Verfügbar',
+    noNounsMsg: 'Nicht verfügbar (Keine Nomen)',
+    classroomQuizTitle: 'Smartes Klassenzimmer-Quiz',
+    classroomQuizCategory: 'Klasse / Gruppe',
+    wheelGameTitle: 'Glücksrad-Challenge',
+    wheelGameCategory: '2-4 Teams',
+    raceGameTitle: 'Team-Auto-Rennen',
+    raceGameCategory: '2-4 Teams',
+    teamSentenceTitle: 'Team-Satzbau-Challenge',
+    teamSentenceCategory: 'Teamwettbewerb',
+    soloSentenceTitle: 'Satzbau & Grammatik',
+    soloSentenceCategory: 'Einzelübung',
+    sortingGameTitle: 'Artikel Sortieren (der / die / das)',
+    sortingGameCategory: 'Grammatik & Artikel',
+    memoryGameTitle: 'Memory-Karten',
+    memoryGameCategory: 'Einzel / Paar',
+    comprehensivePracticeTitle: 'Umfassendes Einzel-Training',
+    comprehensivePracticeCategory: 'Schnell-Quiz',
+
+    sentenceGameHeader: 'Deutscher Satzbau-Challenge 🧩',
+    targetTranslationLabel: 'Zielübersetzung:',
+    dragOrTapWords: 'Wörter antippen oder ziehen, um Satz zu bauen:',
+    undoBtnLabel: 'Rückgängig',
+    resetBtnLabel: 'Zurücksetzen',
+    hintBtnLabel: 'Hinweis',
+    nextQuestionBtn: 'Nächste Frage',
+    sentenceVictoryTitle: 'Super! Satzbau-Challenge bestanden! 🎉',
+
+    sortingGameHeader: 'Artikel Sortierboxen (der / die / das) 📦',
+    sortingSubTitle: 'Ziehe das Wort oder tippe auf die richtige Box:',
+    sortingEmptyWarning: 'Entschuldigung, dieses Set enthält keine Nomen mit Artikeln für das Sortierspiel.',
+
+    teachModeTitle: 'Präsentations- & Lehrmodus 📖',
+    prevSlide: 'Zurück',
+    nextSlide: 'Weiter',
+    showTranslation: 'Übersetzung anzeigen',
+    hideTranslation: 'Übersetzung verbergen',
+    listenAudio: 'Anhören 🔊',
+    worksheetModalTitle: 'Interaktives Arbeitsblatt drucken 📄',
+    printBtn: 'Drucken 🖨️',
+    downloadPdf: 'PDF herunterladen 📥',
 
     boardTitle: 'Klassenzimmer-Tafelspiel Setup (Baamboozle Style) 🎮',
     selectGameMode: '1. Spielmodus wählen:',
@@ -487,4 +717,155 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
 export function getLernstudioTranslations(lang?: string): LernstudioTranslations {
   const safeLang = (lang || 'ar').toLowerCase() as AppLanguage;
   return translations[safeLang] || translations.ar;
+}
+
+export function getLocalizedGrade(grade?: string, lang?: string): string {
+  if (!grade) return '';
+  const safeLang = (lang || 'ar').toLowerCase() as AppLanguage;
+  if (safeLang === 'ar') return grade;
+
+  const categoryMap: Record<string, { en: string; de: string }> = {
+    'المستوى الأول: الكلمات الأساسية': { en: 'Level 1: Essential Words', de: 'Stufe 1: Grundwortschatz' },
+    'المستوى الثاني: الطفل والبيت': { en: 'Level 2: Child & Home', de: 'Stufe 2: Kind & Zuhause' },
+    'المستوى الثالث: الطعام والحيوانات': { en: 'Level 3: Food & Animals', de: 'Stufe 3: Essen & Tiere' },
+    'المستوى الرابع: الحياة اليومية': { en: 'Level 4: Daily Life', de: 'Stufe 4: Alltag' },
+    'المستوى الخامس: العالم من حولنا': { en: 'Level 5: The World Around Us', de: 'Stufe 5: Welt um uns herum' },
+    'المستوى السادس: الأفعال والصفات والمفاهيم': { en: 'Level 6: Verbs, Adjectives & Concepts', de: 'Stufe 6: Verben, Adjektive & Konzepte' },
+    'المستوى السابع: موضوعات إضافية للأنشطة': { en: 'Level 7: Activity Topics', de: 'Stufe 7: Weitere Themen & Aktivitäten' }
+  };
+
+  for (const [key, val] of Object.entries(categoryMap)) {
+    if (grade.includes(key)) {
+      return grade.replace(key, val[safeLang as 'en' | 'de'] || key);
+    }
+  }
+
+  return grade;
+}
+
+export function getLocalizedSetTitle(set?: Partial<LernstudioSet> | null, lang?: string): string {
+  if (!set) return '';
+  const safeLang = (lang || 'ar').toLowerCase() as AppLanguage;
+  if (set.titleTranslations && set.titleTranslations[safeLang]) {
+    return set.titleTranslations[safeLang]!;
+  }
+  let title = set.title || set.topic || '';
+  if (safeLang === 'en') {
+    title = title.replace(/\(نسخة\)/g, '(Copy)');
+  } else if (safeLang === 'ar') {
+    title = title.replace(/\(Copy\)/g, '(نسخة)');
+  }
+  return title;
+}
+
+export function getLocalizedSetTopic(set?: Partial<LernstudioSet> | null, lang?: string): string {
+  if (!set) return '';
+  const safeLang = (lang || 'ar').toLowerCase() as AppLanguage;
+  
+  if (set.topicTranslations && set.topicTranslations[safeLang]) {
+    return set.topicTranslations[safeLang]!;
+  }
+  
+  const rawTopic = set.topic || set.title || '';
+  if (safeLang === 'ar') return rawTopic;
+
+  const topicDictionary: Record<string, { en: string; de: string }> = {
+    'التحيات والوداع': { en: 'Greetings & Farewells', de: 'Begrüßungen & Verabschiedungen' },
+    'Begrüßungen und Verabschiedungen': { en: 'Greetings & Farewells', de: 'Begrüßungen und Verabschiedungen' },
+    'الألوان': { en: 'Colors', de: 'Farben' },
+    'Farben': { en: 'Colors', de: 'Farben' },
+    'الأرقام': { en: 'Numbers', de: 'Zahlen' },
+    'Zahlen': { en: 'Numbers', de: 'Zahlen' },
+    'العائلة': { en: 'Family', de: 'Familie' },
+    'Meine Familie': { en: 'My Family', de: 'Meine Familie' },
+    'الجسم': { en: 'Body', de: 'Körper' },
+    'Mein Körper': { en: 'My Body', de: 'Mein Körper' },
+    'الحيوانات': { en: 'Animals', de: 'Tiere' },
+    'Tiere': { en: 'Animals', de: 'Tiere' },
+    'الطعام': { en: 'Food', de: 'Essen' },
+    'Lebensmittel': { en: 'Food', de: 'Lebensmittel' },
+    'الملابس': { en: 'Clothing', de: 'Kleidung' },
+    'Kleidung': { en: 'Clothing', de: 'Kleidung' },
+    'البيت': { en: 'Home', de: 'Zuhause' },
+    'Mein Zuhause': { en: 'My Home', de: 'Mein Zuhause' },
+    'المدرسة': { en: 'School', de: 'Schule' },
+    'Schule': { en: 'School', de: 'Schule' },
+    'الوقت': { en: 'Time', de: 'Uhrzeit' },
+    'Die Uhrzeit': { en: 'Time', de: 'Die Uhrzeit' },
+    'الطقس': { en: 'Weather', de: 'Wetter' },
+    'Das Wetter': { en: 'Weather', de: 'Das Wetter' }
+  };
+
+  if (topicDictionary[rawTopic]) {
+    return topicDictionary[rawTopic][safeLang as 'en' | 'de'] || rawTopic;
+  }
+
+  return rawTopic;
+}
+
+export function getLocalizedSetDescription(set?: Partial<LernstudioSet> | null, lang?: string): string {
+  if (!set || !set.description) return '';
+  const safeLang = (lang || 'ar').toLowerCase() as AppLanguage;
+  
+  if (set.descriptionTranslations && set.descriptionTranslations[safeLang]) {
+    return set.descriptionTranslations[safeLang]!;
+  }
+  
+  const rawDesc = set.description;
+  if (safeLang === 'ar') return rawDesc;
+
+  const descMap: Record<string, { en: string; de: string }> = {
+    'تعلم أهم عبارات التحية والوداع باللغة الألمانية للأطفال.': {
+      en: 'Learn essential German greetings and farewells for kids.',
+      de: 'Lerne die wichtigsten deutschen Begrüßungs- und Verabschiedungsformeln für Kinder.'
+    }
+  };
+
+  if (descMap[rawDesc]) {
+    return descMap[rawDesc][safeLang as 'en' | 'de'] || rawDesc;
+  }
+
+  return rawDesc;
+}
+
+export interface ProgramGrade {
+  id: string;
+  num: number;
+  labelAr: string;
+  labelEn: string;
+  labelDe: string;
+  keywords: string[];
+}
+
+export const PROGRAM_GRADES: ProgramGrade[] = [
+  { id: 'grade_1', num: 1, labelAr: 'جريد 1 (الصف الأول)', labelEn: 'Grade 1', labelDe: 'Klasse 1', keywords: ['1', 'الأول', 'الاول', 'المستوى الأول'] },
+  { id: 'grade_2', num: 2, labelAr: 'جريد 2 (الصف الثاني)', labelEn: 'Grade 2', labelDe: 'Klasse 2', keywords: ['2', 'الثاني', 'المستوى الثاني'] },
+  { id: 'grade_3', num: 3, labelAr: 'جريد 3 (الصف الثالث)', labelEn: 'Grade 3', labelDe: 'Klasse 3', keywords: ['3', 'الثالث', 'المستوى الثالث'] },
+  { id: 'grade_4', num: 4, labelAr: 'جريد 4 (الصف الرابع)', labelEn: 'Grade 4', labelDe: 'Klasse 4', keywords: ['4', 'الرابع', 'المستوى الرابع'] },
+  { id: 'grade_5', num: 5, labelAr: 'جريد 5 (الصف الخامس)', labelEn: 'Grade 5', labelDe: 'Klasse 5', keywords: ['5', 'الخامس', 'المستوى الخامس'] },
+  { id: 'grade_6', num: 6, labelAr: 'جريد 6 (الصف السادس)', labelEn: 'Grade 6', labelDe: 'Klasse 6', keywords: ['6', 'السادس', 'المستوى السادس'] },
+  { id: 'grade_7', num: 7, labelAr: 'جريد 7 (الصف السابع)', labelEn: 'Grade 7', labelDe: 'Klasse 7', keywords: ['7', 'السابع', 'المستوى السابع'] },
+  { id: 'grade_8', num: 8, labelAr: 'جريد 8 (الصف الثامن)', labelEn: 'Grade 8', labelDe: 'Klasse 8', keywords: ['8', 'الثامن'] },
+  { id: 'grade_9', num: 9, labelAr: 'جريد 9 (الصف التاسع)', labelEn: 'Grade 9', labelDe: 'Klasse 9', keywords: ['9', 'التاسع'] },
+  { id: 'grade_10', num: 10, labelAr: 'جريد 10 (الصف العاشر)', labelEn: 'Grade 10', labelDe: 'Klasse 10', keywords: ['10', 'العاشر'] },
+  { id: 'grade_11', num: 11, labelAr: 'جريد 11 (الصف الحادي عشر)', labelEn: 'Grade 11', labelDe: 'Klasse 11', keywords: ['11', 'الحادي عشر'] },
+  { id: 'grade_12', num: 12, labelAr: 'جريد 12 (الصف الثاني عشر)', labelEn: 'Grade 12', labelDe: 'Klasse 12', keywords: ['12', 'الثاني عشر'] },
+];
+
+export function matchesGradeFilter(set: Partial<LernstudioSet>, gradeFilterId: string): boolean {
+  if (!gradeFilterId || gradeFilterId === 'all') return true;
+  const targetGrade = PROGRAM_GRADES.find((g) => g.id === gradeFilterId);
+  if (!targetGrade) return true;
+
+  const setGrade = (set.grade || '').toLowerCase();
+  const setTitle = (set.title || '').toLowerCase();
+  const setTopic = (set.topic || '').toLowerCase();
+  const fullText = `${setGrade} ${setTitle} ${setTopic}`;
+
+  return (
+    targetGrade.keywords.some((kw) => fullText.includes(kw.toLowerCase())) ||
+    fullText.includes(`grade ${targetGrade.num}`) ||
+    fullText.includes(`جريد ${targetGrade.num}`) ||
+    fullText.includes(`klasse ${targetGrade.num}`)
+  );
 }

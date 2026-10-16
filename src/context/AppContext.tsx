@@ -847,15 +847,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const fullPaymentsRef = useRef<PaymentRecord[]>(initialPaymentDeduplication.deduplicated);
 
-  // Lernstudio Sets State & Persistence
+  // Lernstudio Sets State & Persistence (Strictly Deduplicated)
   const [lernstudioSets, setLernstudioSets] = useState<LernstudioSet[]>(() => {
     const saved = initialData['dl_lernstudio_sets'];
+    let rawSets: LernstudioSet[] = [];
+
     if (Array.isArray(saved) && saved.length > 0) {
       const existingIds = new Set(saved.map((s: any) => s.id));
       const missingDefaults = DEFAULT_LERNSTUDIO_SETS.filter((ds) => !existingIds.has(ds.id));
-      return [...saved, ...missingDefaults];
+
+      const enrichedSaved = saved.map((s: LernstudioSet) => {
+        const defaultMatch = DEFAULT_LERNSTUDIO_SETS.find((ds) => ds.id === s.id);
+        if (defaultMatch) {
+          return {
+            ...defaultMatch,
+            ...s,
+            grade: s.grade && s.grade.startsWith('جريد') ? s.grade : defaultMatch.grade,
+            titleTranslations: s.titleTranslations || defaultMatch.titleTranslations,
+            topicTranslations: s.topicTranslations || defaultMatch.topicTranslations,
+            descriptionTranslations: s.descriptionTranslations || defaultMatch.descriptionTranslations
+          };
+        }
+        return s;
+      });
+
+      rawSets = [...enrichedSaved, ...missingDefaults];
+    } else {
+      rawSets = DEFAULT_LERNSTUDIO_SETS;
     }
-    return DEFAULT_LERNSTUDIO_SETS;
+
+    // Strict Deduplication by ID and Title
+    const seenIds = new Set<string>();
+    const seenTitles = new Set<string>();
+    const deduped: LernstudioSet[] = [];
+
+    for (const set of rawSets) {
+      if (!set || !set.id || seenIds.has(set.id)) continue;
+      const titleKey = (set.title || '').trim().toLowerCase();
+
+      // If duplicate title found (e.g. from previous duplicate exports), keep only the first/primary set
+      if (titleKey && seenTitles.has(titleKey)) {
+        continue;
+      }
+
+      seenIds.add(set.id);
+      if (titleKey) seenTitles.add(titleKey);
+      deduped.push(set);
+    }
+
+    storage.setItem('dl_lernstudio_sets', deduped);
+    return deduped;
   });
 
   const saveLernstudioSet = (newSet: LernstudioSet) => {

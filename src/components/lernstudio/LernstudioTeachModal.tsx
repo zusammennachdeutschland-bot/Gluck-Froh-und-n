@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { LernstudioSet, LernstudioItem } from '../../types/lernstudio';
-import { X, Volume2, ChevronRight, ChevronLeft, BookOpen, Sparkles, CheckCircle2 } from 'lucide-react';
+import { getLernstudioTranslations, getLocalizedSetTitle } from '../../utils/lernstudioTranslations';
+import { X, Volume2, ChevronRight, ChevronLeft, BookOpen } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -10,6 +11,10 @@ interface Props {
 }
 
 export const LernstudioTeachModal: React.FC<Props> = ({ isOpen, set, language = 'ar', onClose }) => {
+  const t = getLernstudioTranslations(language);
+  const isRtl = language === 'ar';
+  const displaySetTitle = getLocalizedSetTitle(set, language);
+
   const [currentIndex, setCurrentIndex] = useState(0);
 
   if (!isOpen || !set || !set.items || set.items.length === 0) return null;
@@ -44,7 +49,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({ isOpen, set, language = 
   };
 
   return (
-    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-hidden animate-fade-in" dir="rtl">
+    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-hidden animate-fade-in" dir={isRtl ? 'rtl' : 'ltr'}>
       <div className="bg-surface border border-surface-border rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-scale-up">
         {/* Header */}
         <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between bg-surface shrink-0">
@@ -52,10 +57,10 @@ export const LernstudioTeachModal: React.FC<Props> = ({ isOpen, set, language = 
             <BookOpen className="w-5 h-5 text-primary" />
             <div>
               <h2 className="text-sm sm:text-base font-black text-text-main">
-                مود الشرح التفاعلي 📖 - ({set.title})
+                {t.teachModeTitle} - ({displaySetTitle})
               </h2>
               <span className="text-[10px] font-bold text-text-muted">
-                {set.level} • {set.topic}
+                {set.topic}
               </span>
             </div>
           </div>
@@ -99,7 +104,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({ isOpen, set, language = 
                   type="button"
                   onClick={() => handleSpeakGerman(currentItem.german)}
                   className="p-2 bg-primary text-white rounded-xl shadow-md hover:bg-primary-hover transition-all cursor-pointer inline-flex items-center justify-center"
-                  title="استماع نطق ألماني صحيح"
+                  title={t.listenAudio}
                 >
                   <Volume2 className="w-5 h-5" />
                 </button>
@@ -112,7 +117,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({ isOpen, set, language = 
               )}
             </div>
 
-            {/* Arabic Translation */}
+            {/* Translation */}
             <div className="py-2 px-4 bg-surface rounded-2xl border border-surface-border inline-block shadow-2xs">
               <span className="text-base sm:text-lg font-black text-primary">
                 {currentItem.arabic}
@@ -122,7 +127,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({ isOpen, set, language = 
             {/* Example Sentence */}
             {(currentItem.exampleSentenceGerman || currentItem.exampleSentenceArabic) && (
               <div className="p-3.5 bg-surface/90 border border-surface-border rounded-2xl space-y-1 text-right">
-                <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block">مثال توضيحي (Beispielsatz):</span>
+                <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block">Beispielsatz:</span>
                 {currentItem.exampleSentenceGerman && (
                   <div className="text-xs font-bold text-text-main font-mono flex items-center justify-between gap-2" dir="ltr">
                     <span>{currentItem.exampleSentenceGerman}</span>
@@ -136,7 +141,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({ isOpen, set, language = 
                   </div>
                 )}
                 {currentItem.exampleSentenceArabic && (
-                  <div className="text-xs font-bold text-text-muted" dir="rtl">
+                  <div className="text-xs font-bold text-text-muted" dir={isRtl ? 'rtl' : 'ltr'}>
                     {currentItem.exampleSentenceArabic}
                   </div>
                 )}
@@ -152,12 +157,12 @@ export const LernstudioTeachModal: React.FC<Props> = ({ isOpen, set, language = 
             onClick={handlePrev}
             className="px-4 py-2.5 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
           >
-            <ChevronRight className="w-4 h-4" />
-            <span>السابق</span>
+            <ChevronRight className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+            <span>{t.prevSlide}</span>
           </button>
 
           <span className="text-xs font-black text-text-muted font-mono">
-            {currentIndex + 1} من {items.length}
+            {currentIndex + 1} / {items.length}
           </span>
 
           <button
@@ -165,8 +170,8 @@ export const LernstudioTeachModal: React.FC<Props> = ({ isOpen, set, language = 
             onClick={handleNext}
             className="px-5 py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer inline-flex items-center gap-1.5"
           >
-            <span>{currentIndex + 1 === items.length ? 'إعادة البداية 🔄' : 'التالي ➔'}</span>
-            {currentIndex + 1 < items.length && <ChevronLeft className="w-4 h-4" />}
+            <span>{t.nextSlide}</span>
+            {currentIndex + 1 < items.length && <ChevronLeft className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />}
           </button>
         </div>
       </div>

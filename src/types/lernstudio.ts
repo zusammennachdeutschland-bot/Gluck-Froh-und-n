@@ -8,6 +8,7 @@ export interface LernstudioItem {
   id: string;
   german: string;               // German word or term e.g. "die Katze"
   arabic: string;               // Arabic translation e.g. "القطة"
+  article?: 'der' | 'die' | 'das'; // Definite article for German nouns
   english?: string;              // English translation (optional)
   plural?: string;               // Plural form e.g. "die Katzen"
   exampleSentenceGerman?: string;// Example sentence in German
@@ -23,7 +24,20 @@ export type LernstudioExerciseType =
   | 'missing_letter' 
   | 'sentence_builder' 
   | 'emoji_vocab' 
-  | 'scrambled_letters';
+  | 'scrambled_letters'
+  | 'der_die_das'
+  | 'plural_match';
+
+export type LernstudioGameMode =
+  | 'hub'
+  | 'games_portal'
+  | 'game'
+  | 'classroom'
+  | 'wheel'
+  | 'race'
+  | 'memory'
+  | 'sorting'
+  | 'sentence_builder';
 
 export interface LernstudioExercise {
   id: string;
@@ -38,11 +52,16 @@ export interface LernstudioExercise {
 export interface LernstudioSet {
   id: string;
   title: string;
+  titleTranslations?: { ar?: string; de?: string; en?: string };
   description?: string;
+  descriptionTranslations?: { ar?: string; de?: string; en?: string };
   grade?: string;                // e.g. "الصف الأول", "Grade 1", etc.
   level: LernstudioLevel;
   topic: string;
+  topicTranslations?: { ar?: string; de?: string; en?: string };
   difficulty: LernstudioDifficulty;
+  hasArticles?: boolean;         // Whether this set contains German nouns with der/die/das articles
+  sentenceBuilderSupported?: boolean; // Whether set has sentence builder content
   items: LernstudioItem[];
   customExercises?: LernstudioExercise[];
   assignedGroupId?: string;

@@ -16,12 +16,83 @@ function getAudioContext(): AudioContext | null {
   return audioCtx;
 }
 
-export function playLernstudioSound(type: 'correct' | 'wrong' | 'powerup_gift' | 'powerup_steal' | 'powerup_boom' | 'powerup_swap' | 'powerup_star' | 'powerup_rocket' | 'powerup_skip') {
+export type LernstudioSoundType =
+  | 'correct'
+  | 'wrong'
+  | 'powerup_gift'
+  | 'powerup_steal'
+  | 'powerup_boom'
+  | 'powerup_swap'
+  | 'powerup_star'
+  | 'powerup_rocket'
+  | 'powerup_skip'
+  | 'wheel_spin'
+  | 'card_flip'
+  | 'card_match'
+  | 'race_vroom'
+  | 'combo_ding';
+
+export function playLernstudioSound(type: LernstudioSoundType) {
   try {
     const ctx = getAudioContext();
     if (!ctx) return;
 
     const now = ctx.currentTime;
+
+    if (type === 'wheel_spin') {
+      // Crisp mechanical tick
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(450, now);
+      osc.frequency.exponentialRampToValueAtTime(120, now + 0.04);
+      gain.gain.setValueAtTime(0.18, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.04);
+    } else if (type === 'card_flip') {
+      // Soft card whoosh
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(280, now);
+      osc.frequency.exponentialRampToValueAtTime(560, now + 0.07);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.07);
+    } else if (type === 'card_match' || type === 'combo_ding') {
+      // Sparkling double chime
+      [587.33, 880, 1174.66].forEach((f, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, now + i * 0.06);
+        gain.gain.setValueAtTime(0.2, now + i * 0.06);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.06 + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + i * 0.06);
+        osc.stop(now + i * 0.06 + 0.25);
+      });
+    } else if (type === 'race_vroom') {
+      // Motor rev sweep
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(110, now);
+      osc.frequency.exponentialRampToValueAtTime(440, now + 0.25);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else
 
     if (type === 'correct') {
       // High cheerful chime (E5 -> G#5 -> B5)

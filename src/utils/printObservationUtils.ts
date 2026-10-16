@@ -459,15 +459,10 @@ export function prepareClonedDocForHtml2Canvas(clonedDoc: Document) {
         if (href.includes('fonts.googleapis.com') || href.includes('fonts.gstatic.com')) {
           return;
         }
-        if (s.parentNode) s.parentNode.removeChild(s);
       } else if (s.tagName === 'STYLE') {
         const txt = s.textContent || '';
-        const isReportStyle = txt.includes('.report-page') || txt.includes('.stage-first-page') || txt.includes('.certificate-root') || txt.includes('.action-plan-report');
-        if (isReportStyle) {
+        if (txt.includes('oklch') || txt.includes('color-mix') || txt.includes('oklab')) {
           s.textContent = sanitizeModernCssColors(txt);
-        } else {
-          // Remove parent Tailwind v4 / Vite stylesheets that crash html2canvas parser
-          if (s.parentNode) s.parentNode.removeChild(s);
         }
       }
     });
@@ -479,11 +474,8 @@ export function prepareClonedDocForHtml2Canvas(clonedDoc: Document) {
     const styles = clonedDoc.querySelectorAll('style');
     styles.forEach(s => {
       const txt = s.textContent || '';
-      const isReportStyle = txt.includes('.report-page') || txt.includes('.stage-first-page') || txt.includes('.certificate-root') || txt.includes('.action-plan-report');
-      if (isReportStyle) {
+      if (txt.includes('oklch') || txt.includes('color-mix') || txt.includes('oklab')) {
         s.textContent = sanitizeModernCssColors(txt);
-      } else {
-        if (s.parentNode) s.parentNode.removeChild(s);
       }
     });
   } catch (e) {
@@ -1063,19 +1055,24 @@ export async function generateCombinedObservationReportsPdfInstance(
   const pdfHeight = pdf.internal.pageSize.getHeight(); // 297mm
 
   const container = document.createElement('div');
-  container.style.position = 'absolute';
+  container.style.position = 'fixed';
   container.style.left = '-9999px';
   container.style.top = '0';
-  container.style.width = '794px'; // standard A4 width at 96dpi
-  container.style.height = '1123px'; // standard A4 height at 96dpi
+  container.style.width = '794px';
   container.style.minHeight = '1123px';
-  container.style.maxHeight = '1123px';
   container.style.backgroundColor = '#ffffff';
   container.style.boxSizing = 'border-box';
-  container.style.padding = '16px 20px';
+  container.style.padding = '12px 18px';
   container.style.zIndex = '-9999';
-  container.style.overflow = 'hidden';
   document.body.appendChild(container);
+
+  if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+    try {
+      await document.fonts.ready;
+    } catch {
+      // continue
+    }
+  }
 
   try {
     for (let i = 0; i < visits.length; i++) {
@@ -1095,19 +1092,31 @@ export async function generateCombinedObservationReportsPdfInstance(
       const styleTag = styleMatch ? `<style>${styleMatch[1]}</style>` : '';
       const bodyContent = bodyMatch ? bodyMatch[1] : htmlStr;
 
-      container.innerHTML = `${styleTag}<div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent}</div>`;
+      container.innerHTML = `
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+        ${styleTag}
+        <div style="width: 100%; min-height: 1090px; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">
+          ${bodyContent}
+        </div>
+      `;
 
-      const canvas = await renderContainerToCanvas(container, { width: 794, height: 1123 });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const canvas = await renderContainerToCanvas(container, {
+        width: 794,
+        height: Math.max(1123, container.offsetHeight || 1123)
+      });
 
       const imgData = canvas.toDataURL('image/jpeg', 0.95);
-      const imgWidth = pdfWidth;
       const imgHeight = (canvas.height * pdfWidth) / canvas.width;
 
-      if (Math.abs(imgHeight - pdfHeight) <= 3) {
+      if (Math.abs(imgHeight - pdfHeight) <= 4) {
         pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
       } else if (imgHeight > pdfHeight) {
         const scale = pdfHeight / imgHeight;
-        const finalWidth = imgWidth * scale;
+        const finalWidth = pdfWidth * scale;
         const xMargin = (pdfWidth - finalWidth) / 2;
         pdf.addImage(imgData, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
       } else {
@@ -1139,28 +1148,28 @@ async function savePdfFileCrossPlatform(pdf: jsPDF, fileName: string, shareTitle
     }
   }
 
-  // Web & Mobile Browser (Android Chrome, iOS Safari, etc.)
+  // Cross-browser reliable download (jsPDF save + HTML anchor fallback)
   try {
-    const blobUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = fileName;
-    link.target = '_self';
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-
-    setTimeout(() => {
-      if (document.body.contains(link)) {
-        document.body.removeChild(link);
-      }
-      URL.revokeObjectURL(blobUrl);
-    }, 4000);
+    pdf.save(fileName);
   } catch (err) {
-    // Fallback to jsPDF standard save
     try {
-      pdf.save(fileName);
-    } catch (_) {}
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      link.target = '_self';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (document.body.contains(link)) {
+          document.body.removeChild(link);
+        }
+        URL.revokeObjectURL(blobUrl);
+      }, 4000);
+    } catch (fallbackErr) {
+      console.error('All download mechanisms failed:', fallbackErr);
+    }
   }
 }
 
@@ -1222,18 +1231,15 @@ export async function generateObservationReportPdfInstance(
   lang: string
 ): Promise<jsPDF> {
   const container = document.createElement('div');
-  container.style.position = 'absolute';
+  container.style.position = 'fixed';
   container.style.left = '-9999px';
   container.style.top = '0';
   container.style.width = '794px'; // standard A4 width at 96dpi
-  container.style.height = '1123px'; // exact standard A4 height at 96dpi
   container.style.minHeight = '1123px';
-  container.style.maxHeight = '1123px';
   container.style.backgroundColor = '#ffffff';
   container.style.boxSizing = 'border-box';
-  container.style.padding = '16px 20px';
+  container.style.padding = '12px 18px';
   container.style.zIndex = '-9999';
-  container.style.overflow = 'hidden';
 
   const htmlStr = generateObservationReportHtml(visit, settings, isRtl, lang, false);
   const bodyMatch = htmlStr.match(/<body[^>]*>([\s\S]*)<\/body>/i);
@@ -1242,11 +1248,31 @@ export async function generateObservationReportPdfInstance(
   const styleTag = styleMatch ? `<style>${styleMatch[1]}</style>` : '';
   const bodyContent = bodyMatch ? bodyMatch[1] : htmlStr;
 
-  container.innerHTML = `${styleTag}<div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">${bodyContent}</div>`;
+  container.innerHTML = `
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+    ${styleTag}
+    <div style="width: 100%; min-height: 1090px; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; color: #000000; box-sizing: border-box;" dir="${isRtl ? 'rtl' : 'ltr'}">
+      ${bodyContent}
+    </div>
+  `;
   document.body.appendChild(container);
 
+  if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+    try {
+      await document.fonts.ready;
+    } catch {
+      // continue
+    }
+  }
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
   try {
-    const canvas = await renderContainerToCanvas(container, { width: 794, height: 1123 });
+    const canvas = await renderContainerToCanvas(container, {
+      width: 794,
+      height: Math.max(1123, container.offsetHeight || 1123)
+    });
 
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
     const pdf = new jsPDF({
@@ -1258,15 +1284,13 @@ export async function generateObservationReportPdfInstance(
 
     const pdfWidth = pdf.internal.pageSize.getWidth(); // 210mm
     const pdfHeight = pdf.internal.pageSize.getHeight(); // 297mm
-
-    const imgWidth = pdfWidth;
     const imgHeight = (canvas.height * pdfWidth) / canvas.width;
 
-    if (Math.abs(imgHeight - pdfHeight) <= 3) {
+    if (Math.abs(imgHeight - pdfHeight) <= 4) {
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
     } else if (imgHeight > pdfHeight) {
       const scale = pdfHeight / imgHeight;
-      const finalWidth = imgWidth * scale;
+      const finalWidth = pdfWidth * scale;
       const xMargin = (pdfWidth - finalWidth) / 2;
       pdf.addImage(imgData, 'JPEG', xMargin, 0, finalWidth, pdfHeight, undefined, 'FAST');
     } else {
@@ -1352,6 +1376,7 @@ export async function shareObservationReportViaWhatsApp(
       });
       await Share.share({
         title: fileName,
+        text: textSummary,
         url: savedFile.uri
       });
       return;
@@ -1368,25 +1393,91 @@ export async function shareObservationReportViaWhatsApp(
       navigator.canShare({ files: [pdfFile] })
     ) {
       await navigator.share({
+        title: fileName,
+        text: textSummary,
         files: [pdfFile]
       });
       return;
     }
 
-    // Direct download fallback so the actual PDF is available in Internal Storage / Downloads
-    const blobUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = fileName;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    setTimeout(() => {
-      if (document.body.contains(link)) document.body.removeChild(link);
-      URL.revokeObjectURL(blobUrl);
-    }, 4000);
+    // Direct download and open WhatsApp fallback
+    await savePdfFileCrossPlatform(pdf, fileName);
+    const encodedText = encodeURIComponent(textSummary);
+    window.open(`https://api.whatsapp.com/send?text=${encodedText}`, '_blank');
   } catch (err) {
-    console.warn('Web Share failed or dismissed, fallback to file download:', err);
+    console.warn('Web Share failed or dismissed, fallback to direct download & WhatsApp:', err);
+    const encodedText = encodeURIComponent(textSummary);
+    window.open(`https://api.whatsapp.com/send?text=${encodedText}`, '_blank');
+  }
+}
+
+/**
+ * Shares multiple observation reports in a single merged PDF file via WhatsApp or Web Share.
+ */
+export async function shareCombinedObservationReportsViaWhatsApp(
+  visits: VisitRecord[],
+  settings: SchoolSettings,
+  isRtl: boolean,
+  lang: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<void> {
+  if (!visits || visits.length === 0) return;
+
+  if (visits.length === 1) {
+    return shareObservationReportViaWhatsApp(visits[0], settings, isRtl, lang);
+  }
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const fileName = `تقارير_زيارات_مجمعة_${visits.length}_${dateStr}.pdf`;
+  const textSummary =
+    `📋 *تقارير زيارات صفية مجمعة (${visits.length} تقرير)*\n` +
+    `🏫 ${getEffectiveSchoolName(settings) || 'قسم اللغة الألمانية'}\n` +
+    `📅 ${dateStr}\n` +
+    `المعلمين المشمولين: ${visits.map(v => v.teacherName).slice(0, 5).join('، ')}${visits.length > 5 ? ' وغيرهم...' : ''}`;
+
+  try {
+    const pdf = await generateCombinedObservationReportsPdfInstance(visits, settings, isRtl, lang, onProgress);
+
+    if (Capacitor.isNativePlatform()) {
+      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: pdfBase64,
+        directory: Directory.Cache
+      });
+      await Share.share({
+        title: fileName,
+        text: textSummary,
+        url: savedFile.uri
+      });
+      return;
+    }
+
+    const blob = pdf.output('blob');
+    const pdfFile = new File([blob], fileName, { type: 'application/pdf' });
+
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.share &&
+      navigator.canShare &&
+      navigator.canShare({ files: [pdfFile] })
+    ) {
+      await navigator.share({
+        title: fileName,
+        text: textSummary,
+        files: [pdfFile]
+      });
+      return;
+    }
+
+    // Direct download & WhatsApp fallback
+    await savePdfFileCrossPlatform(pdf, fileName);
+    const encodedText = encodeURIComponent(textSummary);
+    window.open(`https://api.whatsapp.com/send?text=${encodedText}`, '_blank');
+  } catch (err) {
+    console.warn('Share combined failed, fallback to save and WhatsApp:', err);
+    const encodedText = encodeURIComponent(textSummary);
+    window.open(`https://api.whatsapp.com/send?text=${encodedText}`, '_blank');
   }
 }
 

@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
   X,
-  Printer,
   Download,
   CheckSquare,
   Square,
@@ -16,14 +15,14 @@ import {
   CheckCircle2,
   Clock,
   RotateCcw,
-  Save
+  Share
 } from 'lucide-react';
 import { VisitRecord, SchoolSettings, Teacher } from '../types';
 import {
   downloadCombinedObservationReportsPdf,
-  printCombinedObservationReports,
-  printObservationReport,
-  saveCombinedReportsToPhoneStorage
+  downloadObservationReportPdf,
+  shareObservationReportViaWhatsApp,
+  shareCombinedObservationReportsViaWhatsApp
 } from '../utils/printObservationUtils';
 import { useApp } from '../context/AppContext';
 
@@ -65,37 +64,8 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedVisitIds, setSelectedVisitIds] = useState<Set<string>>(new Set());
   const [isExportingPdf, setIsExportingPdf] = useState(false);
-  const [isSavingPhone, setIsSavingPhone] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ current: number; total: number } | null>(null);
-  const [isPrinting, setIsPrinting] = useState(false);
-
-  const handleSaveCombinedToPhoneStorage = async () => {
-    if (selectedVisitsList.length === 0 || isSavingPhone || isExportingPdf) return;
-
-    try {
-      setIsSavingPhone(true);
-      setExportProgress({ current: 1, total: selectedVisitsList.length });
-
-      await saveCombinedReportsToPhoneStorage(
-        selectedVisitsList,
-        schoolSettings,
-        isRtl,
-        effectiveReportLang,
-        (current, total) => {
-          setExportProgress({ current, total });
-        }
-      );
-
-      if (onMarkVisitsDownloaded) {
-        onMarkVisitsDownloaded(selectedVisitsList.map(v => v.id), true);
-      }
-    } catch (err) {
-      console.error('Failed to save combined reports to phone storage:', err);
-    } finally {
-      setIsSavingPhone(false);
-      setExportProgress(null);
-    }
-  };
+  const [isSharingWhatsApp, setIsSharingWhatsApp] = useState(false);
 
   // Available terms from visits or settings
   const termsList = useMemo(() => {
@@ -210,27 +180,65 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
     }
   };
 
-  // Combined Print handler
-  const handlePrintCombined = async () => {
-    if (selectedVisitsList.length === 0 || isPrinting) return;
+  const [activeRowAction, setActiveRowAction] = useState<{ id: string; type: 'download' | 'share' } | null>(null);
+
+  // Single visit direct download handler
+  const handleDownloadSingleVisit = async (visit: VisitRecord) => {
+    if (activeRowAction || isExportingPdf || isSharingWhatsApp) return;
+    try {
+      setActiveRowAction({ id: visit.id, type: 'download' });
+      const res = await downloadObservationReportPdf(visit, schoolSettings, isRtl, effectiveReportLang);
+      if (res?.success && onMarkVisitsDownloaded) {
+        onMarkVisitsDownloaded([visit.id], true);
+      }
+    } catch (err) {
+      console.error('Download single visit error:', err);
+    } finally {
+      setActiveRowAction(null);
+    }
+  };
+
+  // Single visit WhatsApp share handler
+  const handleShareSingleVisit = async (visit: VisitRecord) => {
+    if (activeRowAction || isExportingPdf || isSharingWhatsApp) return;
+    try {
+      setActiveRowAction({ id: visit.id, type: 'share' });
+      await shareObservationReportViaWhatsApp(visit, schoolSettings, isRtl, effectiveReportLang);
+      if (onMarkVisitsDownloaded) {
+        onMarkVisitsDownloaded([visit.id], true);
+      }
+    } catch (err) {
+      console.error('Share single visit error:', err);
+    } finally {
+      setActiveRowAction(null);
+    }
+  };
+
+  // Combined WhatsApp Share handler
+  const handleShareSelectedWhatsApp = async () => {
+    if (selectedVisitsList.length === 0 || isSharingWhatsApp || isExportingPdf) return;
 
     try {
-      setIsPrinting(true);
-      await printCombinedObservationReports(
+      setIsSharingWhatsApp(true);
+      setExportProgress({ current: 1, total: selectedVisitsList.length });
+      await shareCombinedObservationReportsViaWhatsApp(
         selectedVisitsList,
         schoolSettings,
         isRtl,
-        effectiveReportLang
+        effectiveReportLang,
+        (current, total) => {
+          setExportProgress({ current, total });
+        }
       );
 
-      // Automatically mark selected visits as downloaded/printed
       if (onMarkVisitsDownloaded) {
         onMarkVisitsDownloaded(selectedVisitsList.map(v => v.id), true);
       }
     } catch (err) {
-      console.error('Failed to print combined reports:', err);
+      console.error('Failed to share via WhatsApp:', err);
     } finally {
-      setIsPrinting(false);
+      setIsSharingWhatsApp(false);
+      setExportProgress(null);
     }
   };
 
@@ -560,17 +568,31 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
                       </button>
                     )}
                     <button
-                      onClick={() => {
-                        printObservationReport(visit, schoolSettings, isRtl, language);
-                        if (onMarkVisitsDownloaded) {
-                          onMarkVisitsDownloaded([visit.id], true);
-                        }
-                      }}
-                      className="h-7 px-2 text-[10px] font-bold text-primary bg-primary-soft hover:bg-primary-soft/80 border border-primary-border rounded-lg transition-all flex items-center gap-1 cursor-pointer"
-                      title={_t('طباعة هذا التقرير فقط', 'Print This Only', 'Nur diesen drucken')}
+                      onClick={() => handleDownloadSingleVisit(visit)}
+                      disabled={!!activeRowAction || isExportingPdf || isSharingWhatsApp}
+                      className="h-7 px-2 text-[10px] font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 dark:text-sky-300 dark:bg-sky-950/60 dark:hover:bg-sky-900 rounded-lg transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      title={_t('تحميل PDF لهذا التقرير', 'Download PDF', 'PDF herunterladen')}
                     >
-                      <Printer className="w-3 h-3 text-primary" />
-                      <span className="hidden sm:inline">{_t('طباعة', 'Print', 'Drucken')}</span>
+                      {activeRowAction?.id === visit.id && activeRowAction.type === 'download' ? (
+                        <Loader2 className="w-3 h-3 animate-spin text-sky-600" />
+                      ) : (
+                        <Download className="w-3 h-3 text-sky-600" />
+                      )}
+                      <span className="hidden sm:inline">{_t('تحميل', 'Download', 'Laden')}</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleShareSingleVisit(visit)}
+                      disabled={!!activeRowAction || isExportingPdf || isSharingWhatsApp}
+                      className="h-7 px-2 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/60 dark:hover:bg-emerald-900 rounded-lg transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      title={_t('مشاركة عبر واتساب', 'Share via WhatsApp', 'Über WhatsApp teilen')}
+                    >
+                      {activeRowAction?.id === visit.id && activeRowAction.type === 'share' ? (
+                        <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />
+                      ) : (
+                        <Share className="w-3 h-3 text-emerald-600" />
+                      )}
+                      <span className="hidden sm:inline">{_t('واتساب', 'WhatsApp', 'WhatsApp')}</span>
                     </button>
                   </div>
                 </div>
@@ -579,78 +601,85 @@ export const BulkObservationExportModal: React.FC<BulkObservationExportModalProp
           )}
         </div>
 
-        {/* Progress notification during PDF generation */}
-        {isExportingPdf && exportProgress && (
-          <div className="p-2 bg-primary/10 border-t border-primary/20 flex items-center justify-between gap-2 text-xs text-primary font-bold shrink-0">
-            <div className="flex items-center gap-1.5 truncate">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary shrink-0" />
-              <span className="truncate">
-                {_t(
-                  `جاري إنشاء PDF... صفحة ${exportProgress.current} من ${exportProgress.total}`,
-                  `Generating PDF... Page ${exportProgress.current} of ${exportProgress.total}`,
-                  `PDF wird erstellt... Seite ${exportProgress.current} von ${exportProgress.total}`
-                )}
+        {/* Progress notification during PDF generation / Sharing */}
+        {(isExportingPdf || isSharingWhatsApp) && exportProgress && (
+          <div className="p-2.5 bg-primary/10 border-t border-primary/20 flex flex-col gap-1.5 text-xs text-primary font-bold shrink-0 animate-fade-in">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 truncate">
+                <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+                <span className="truncate">
+                  {isSharingWhatsApp
+                    ? _t(
+                        `جاري تجهيز المشاركة... تقرير ${exportProgress.current} من ${exportProgress.total}`,
+                        `Preparing share... Report ${exportProgress.current} of ${exportProgress.total}`,
+                        `Wird vorbereitet... Bericht ${exportProgress.current} von ${exportProgress.total}`
+                      )
+                    : _t(
+                        `جاري إنشاء وتحميل PDF... صفحة ${exportProgress.current} من ${exportProgress.total}`,
+                        `Generating PDF... Page ${exportProgress.current} of ${exportProgress.total}`,
+                        `PDF wird erstellt... Seite ${exportProgress.current} von ${exportProgress.total}`
+                      )}
+                </span>
+              </div>
+              <span className="font-mono text-xs shrink-0 bg-primary/20 px-2 py-0.5 rounded-full">
+                {Math.round((exportProgress.current / exportProgress.total) * 100)}%
               </span>
             </div>
-            <span className="font-mono text-xs shrink-0">{Math.round((exportProgress.current / exportProgress.total) * 100)}%</span>
+            <div className="w-full bg-primary/20 h-1.5 rounded-full overflow-hidden">
+              <div
+                className="bg-primary h-full transition-all duration-300 rounded-full"
+                style={{ width: `${Math.round((exportProgress.current / exportProgress.total) * 100)}%` }}
+              />
+            </div>
           </div>
         )}
 
-        {/* Footer Actions - Compact & Mobile-Friendly */}
+        {/* Footer Actions - Responsive & Clean */}
         <div className="p-2.5 sm:p-3 border-t border-surface-border bg-surface-hover/40 flex items-center justify-between gap-2 shrink-0">
-          <div className="text-[11px] text-text-muted hidden sm:block truncate">
+          <div className="text-[11px] text-text-muted hidden md:block truncate">
             {_t('كل تقرير في صفحة A4 منفصلة داخل نفس ملف الـ PDF', 'Each report on separate A4 page in the PDF', 'Jeder Bericht auf separater A4-Seite')}
           </div>
 
-          <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
+          <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap sm:flex-nowrap">
             <button
               onClick={onClose}
-              className="h-9 px-3 text-xs font-bold text-text-muted hover:text-text-main bg-surface hover:bg-surface-hover border border-surface-border rounded-xl transition-all cursor-pointer shrink-0"
+              disabled={isExportingPdf || isSharingWhatsApp || !!activeRowAction}
+              className="h-9 px-3.5 text-xs font-bold text-text-muted hover:text-text-main bg-surface hover:bg-surface-hover border border-surface-border rounded-xl transition-all cursor-pointer shrink-0 disabled:opacity-50"
             >
               {_t('إغلاق', 'Close', 'Schließen')}
             </button>
 
             <button
-              onClick={handleSaveCombinedToPhoneStorage}
-              disabled={selectedVisitsList.length === 0 || isSavingPhone || isExportingPdf || isPrinting}
-              className="h-9 px-3 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 dark:text-amber-300 dark:bg-amber-950/60 dark:hover:bg-amber-900 border border-amber-300/80 dark:border-amber-800 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50 disabled:pointer-events-none shrink-0"
-              title={_t('حفظ التقرير المجمّع في مساحة الهاتف', 'Save combined report to phone storage', 'Auf Telefon speichern')}
+              onClick={handleShareSelectedWhatsApp}
+              disabled={selectedVisitsList.length === 0 || isSharingWhatsApp || isExportingPdf || !!activeRowAction}
+              className="h-9 px-3.5 text-xs font-bold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/60 dark:hover:bg-emerald-900 border border-emerald-300/80 dark:border-emerald-800 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50 disabled:pointer-events-none flex-1 sm:flex-initial"
+              title={_t('مشاركة التقارير المحددة عبر واتساب', 'Share Selected via WhatsApp', 'Über WhatsApp teilen')}
             >
-              {isSavingPhone ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700 dark:text-amber-400" />
+              {isSharingWhatsApp ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700 dark:text-emerald-400 shrink-0" />
               ) : (
-                <Save className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+                <Share className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 shrink-0" />
               )}
-              <span>{_t(`حفظ بالهاتف (${selectedVisitsList.length}) 📱`, `Save to Phone (${selectedVisitsList.length}) 📱`, `Auf Telefon (${selectedVisitsList.length}) 📱`)}</span>
-            </button>
-
-            <button
-              onClick={handlePrintCombined}
-              disabled={selectedVisitsList.length === 0 || isPrinting || isExportingPdf}
-              className="h-9 px-3 text-xs font-bold text-primary bg-primary-soft hover:bg-primary-soft/80 border border-primary-border rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50 disabled:pointer-events-none shrink-0"
-              title={_t('طباعة التقارير المحددة', 'Print Selected', 'Drucken')}
-            >
-              {isPrinting ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Printer className="w-3.5 h-3.5 text-primary" />
-              )}
-              <span>{_t(`طباعة (${selectedVisitsList.length})`, `Print (${selectedVisitsList.length})`, `Drucken (${selectedVisitsList.length})`)}</span>
+              <span className="whitespace-nowrap font-bold">
+                {isSharingWhatsApp
+                  ? _t('جاري التجهيز...', 'Preparing...', 'Vorbereitung...')
+                  : _t(`واتساب (${selectedVisitsList.length})`, `WhatsApp (${selectedVisitsList.length})`, `WhatsApp (${selectedVisitsList.length})`)}
+              </span>
             </button>
 
             <button
               onClick={handleDownloadCombinedPdf}
-              disabled={selectedVisitsList.length === 0 || isExportingPdf || isPrinting}
-              className="h-9 px-3.5 text-xs font-bold text-white bg-primary hover:bg-primary-hover rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex-1 sm:flex-initial truncate"
+              disabled={selectedVisitsList.length === 0 || isExportingPdf || isSharingWhatsApp || !!activeRowAction}
+              className="h-9 px-4 text-xs font-bold text-white bg-primary hover:bg-primary-hover rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex-1 sm:flex-initial"
             >
               {isExportingPdf ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
               ) : (
                 <Download className="w-3.5 h-3.5 shrink-0" />
               )}
-              <span className="truncate">
+              <span className="whitespace-nowrap font-bold">
                 {isExportingPdf
-                  ? _t('جاري التوليد...', 'Generating...', 'Wird generiert...')
+                  ? _t('جاري التحميل...', 'Downloading...', 'Wird heruntergeladen...')
                   : _t(
                       `تحميل PDF (${selectedVisitsList.length})`,
                       `Download PDF (${selectedVisitsList.length})`,

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { LernstudioSet, LernstudioLevel, LernstudioDifficulty } from '../../types/lernstudio';
 import { generateLernstudioPrompt, validateAndParseLernstudioJson } from '../../utils/lernstudioAiUtils';
 import { CHILDREN_TOPICS_PRESETS, CHILDREN_LEVEL_CATEGORIES } from '../../data/childrenTopicsPreset';
+import { PROGRAM_GRADES } from '../../utils/lernstudioTranslations';
 import { X, Copy, Check, Sparkles, Download, AlertCircle, FileText, BookOpen } from 'lucide-react';
 
 interface Props {
@@ -76,8 +77,11 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
       grade: parsedPreview.grade || grade || undefined,
       level: parsedPreview.level || level,
       difficulty: parsedPreview.difficulty || difficulty,
+      hasArticles: parsedPreview.hasArticles,
+      sentenceBuilderSupported: parsedPreview.sentenceBuilderSupported,
       description: parsedPreview.description || `مجموعة ${parsedPreview.title}`,
       items: parsedPreview.items,
+      customExercises: parsedPreview.customExercises,
       createdAt: new Date().toISOString(),
       updatedAt: Date.now()
     };
@@ -177,13 +181,18 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
 
                 <div>
                   <label className="text-xs font-bold text-text-muted block mb-1">{language === 'ar' ? 'الصف / المرحلة (Grade):' : 'Grade / Category:'}</label>
-                  <input
-                    type="text"
+                  <select
                     value={grade}
                     onChange={(e) => setGrade(e.target.value)}
-                    placeholder="مثال: المستوى الأول, Grade 5..."
-                    className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
-                  />
+                    className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary cursor-pointer"
+                  >
+                    <option value="">{language === 'ar' ? '-- اسأل الذكاء الاصطناعي (دا جريد كام؟) --' : '-- Ask AI (Which Grade?) --'}</option>
+                    {PROGRAM_GRADES.map((g) => (
+                      <option key={g.id} value={g.labelAr}>
+                        {language === 'ar' ? g.labelAr : language === 'de' ? g.labelDe : g.labelEn}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

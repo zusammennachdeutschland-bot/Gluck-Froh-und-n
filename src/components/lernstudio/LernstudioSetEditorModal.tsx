@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { LernstudioSet, LernstudioItem, LernstudioLevel, LernstudioDifficulty } from '../../types/lernstudio';
 import { Group } from '../../types';
+import { PROGRAM_GRADES } from '../../utils/lernstudioTranslations';
 import { X, Plus, Trash2, Save, Sparkles } from 'lucide-react';
 
 interface Props {
@@ -157,13 +158,18 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
 
             <div>
               <label className="text-xs font-bold text-text-muted block mb-1">الصف / المنهج (Grade):</label>
-              <input
-                type="text"
+              <select
                 value={grade}
                 onChange={(e) => setGrade(e.target.value)}
-                placeholder="مثال: الصف الأول..."
-                className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
-              />
+                className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary cursor-pointer"
+              >
+                <option value="">-- اختر الصف (Grade 1 - 12) --</option>
+                {PROGRAM_GRADES.map((g) => (
+                  <option key={g.id} value={g.labelAr}>
+                    {g.labelAr}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
