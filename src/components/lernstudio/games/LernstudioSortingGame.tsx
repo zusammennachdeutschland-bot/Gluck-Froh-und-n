@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme } from '../../../types/lernstudio';
 import { extractSortingItems, SortingItem } from '../../../utils/lernstudioQuestionAdapter';
 import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
-import { getLernstudioTranslations, getLocalizedSetTitle } from '../../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   ArrowLeft,
   RotateCcw,
@@ -182,7 +182,7 @@ export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, langu
               <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
                 {currentItem.nounOnly}
               </h2>
-              <p className="text-base text-slate-400 font-bold">{currentItem.arabic}</p>
+              <p className="text-base text-slate-400 font-bold">{getItemTranslation(currentItem, language)}</p>
 
               {/* Instant feedback icon */}
               {feedback && (

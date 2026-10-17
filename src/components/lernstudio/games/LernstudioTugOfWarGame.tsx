@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
 import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
-import { getLernstudioTranslations, getLocalizedSetTitle } from '../../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   ArrowLeft,
   RotateCcw,
@@ -93,23 +93,32 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
         };
       }
 
-      // Normal translation: German to Arabic
-      const wrongArabic = otherItems
+      // Normal translation: German to Target Language
+      const wrongTrans = otherItems
         .sort(() => 0.5 - Math.random())
         .slice(0, 3)
-        .map((it) => it.arabic);
+        .map((it) => getItemTranslation(it, language));
       
-      const options = [item.arabic, ...wrongArabic].sort(() => 0.5 - Math.random());
+      const targetTrans = getItemTranslation(item, language);
+      const options = [targetTrans, ...wrongTrans].sort(() => 0.5 - Math.random());
+      const safeLang = (language || 'ar').toLowerCase();
+
+      const qPrompt =
+        safeLang === 'en'
+          ? `What is the meaning of "${item.german}"?`
+          : safeLang === 'de'
+          ? `Was bedeutet das Wort "${item.german}"?`
+          : `ما هو المعنى العربي لكلمة "${item.german}"؟`;
 
       return {
         item,
-        prompt: `ما هو المعنى العربي لكلمة "${item.german}"؟`,
+        prompt: qPrompt,
         options,
-        correctAnswer: item.arabic,
+        correctAnswer: targetTrans,
         type: 'meaning'
       };
     });
-  }, [items]);
+  }, [items, language]);
 
   const currentQ = questions[questionIndex % Math.max(1, questions.length)];
 

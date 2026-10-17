@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioItem, LernstudioExerciseType, LernstudioTheme } from '../../types/lernstudio';
 import { CheckCircle2, XCircle, RotateCcw, ArrowRight, Award, Trophy, HelpCircle, Eye, RefreshCw, ThumbsUp } from 'lucide-react';
 import { playLernstudioSound } from '../../utils/lernstudioAudioUtils';
-import { getLernstudioTranslations, getLocalizedSetTitle } from '../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../utils/lernstudioTranslations';
 
 interface Props {
   set: LernstudioSet;
@@ -408,7 +408,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
                 <div className="p-4 bg-primary-soft/50 border border-primary-border/40 rounded-2xl text-center space-y-1">
                   <span className="text-3xl block mb-1">{currentItem.emoji || '📚'}</span>
                   <h3 className="text-2xl sm:text-3xl font-black text-text-main">
-                    {currentItem.arabic}
+                    {getItemTranslation(currentItem, language)}
                   </h3>
                   <p className="text-xs font-bold text-primary mt-2">{t.mcPrompt}</p>
                 </div>
@@ -443,7 +443,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
                   <h3 className="text-2xl sm:text-3xl font-black text-primary tracking-widest font-mono" dir="ltr">
                     {currentItem.missingLetterWord || currentItem.german.replace(/[aeiou]/g, '_')}
                   </h3>
-                  <p className="text-xs text-text-muted font-bold">{currentItem.arabic}</p>
+                  <p className="text-xs text-text-muted font-bold">{getItemTranslation(currentItem, language)}</p>
                 </div>
 
                 <div className="space-y-3 max-w-md mx-auto">
@@ -474,7 +474,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
               <div className="space-y-5">
                 <div className="p-4 bg-primary-soft/50 border border-primary-border/40 rounded-2xl text-center space-y-1">
                   <span className="text-xs font-bold text-primary block">{t.sentenceBuilderPrompt}</span>
-                  <p className="text-xs text-text-muted font-bold">{currentItem.exampleSentenceArabic || currentItem.arabic}</p>
+                  <p className="text-xs text-text-muted font-bold">{currentItem.exampleSentenceArabic || getItemTranslation(currentItem, language)}</p>
                 </div>
 
                 {/* Built sentence drop target */}
@@ -586,7 +586,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
               <div className="space-y-5">
                 <div className="p-4 bg-primary-soft/50 border border-primary-border/40 rounded-2xl text-center space-y-1">
                   <span className="text-xs font-bold text-primary block">{t.scrambledPrompt}</span>
-                  <p className="text-xs text-text-muted font-bold">{currentItem.arabic}</p>
+                  <p className="text-xs text-text-muted font-bold">{getItemTranslation(currentItem, language)}</p>
                 </div>
 
                 {/* Built word target */}

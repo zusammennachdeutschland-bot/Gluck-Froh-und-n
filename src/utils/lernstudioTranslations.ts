@@ -1,4 +1,4 @@
-import { LernstudioSet } from '../types/lernstudio';
+import { LernstudioSet, LernstudioItem } from '../types/lernstudio';
 
 export type AppLanguage = 'ar' | 'en' | 'de';
 
@@ -895,6 +895,18 @@ export function getLocalizedSetTopic(set?: Partial<LernstudioSet> | null, lang?:
   }
 
   return rawTopic;
+}
+
+export function getItemTranslation(item?: Partial<LernstudioItem> | null, lang?: string): string {
+  if (!item) return '';
+  const safeLang = (lang || 'ar').toLowerCase() as AppLanguage;
+  if (safeLang === 'en') {
+    return item.english && item.english.trim() ? item.english.trim() : (item.arabic || item.german || '');
+  }
+  if (safeLang === 'de') {
+    return item.german || item.english || item.arabic || '';
+  }
+  return item.arabic || item.english || item.german || '';
 }
 
 export function getLocalizedSetDescription(set?: Partial<LernstudioSet> | null, lang?: string): string {

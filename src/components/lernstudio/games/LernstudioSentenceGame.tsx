@@ -16,7 +16,8 @@ import {
   Lightbulb,
   Flame,
   Users,
-  User
+  User,
+  Snail
 } from 'lucide-react';
 
 interface Props {
@@ -333,13 +334,22 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
             <h2 className="text-lg sm:text-xl font-black text-white" dir={isRtl ? 'rtl' : 'ltr'}>
               {currentQ.arabicFull}
             </h2>
-            <button
-              onClick={() => handleSpeak(currentQ.germanFull)}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer inline-flex items-center gap-1.5 text-xs font-bold mt-1"
-            >
-              <Volume2 className="w-4 h-4 text-sky-400" />
-              <span>{t.listenAudio}</span>
-            </button>
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <button
+                onClick={() => speakGermanText(currentQ.germanFull, 0.85)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer inline-flex items-center gap-1.5 text-xs font-bold"
+              >
+                <Volume2 className="w-4 h-4 text-sky-400" />
+                <span>{t.listenAudio} (1.0x)</span>
+              </button>
+              <button
+                onClick={() => speakGermanText(currentQ.germanFull, 0.6)}
+                className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-colors cursor-pointer inline-flex items-center gap-1.5 text-xs font-bold"
+              >
+                <Snail className="w-4 h-4 text-amber-400" />
+                <span>بطيء (0.6x)</span>
+              </button>
+            </div>
           </div>
 
           {/* Construction Target Area */}

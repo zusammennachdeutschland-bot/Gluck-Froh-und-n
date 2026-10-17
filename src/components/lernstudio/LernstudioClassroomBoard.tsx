@@ -2,13 +2,14 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../types/lernstudio';
 import { Group, Student } from '../../types';
 import { useApp } from '../../context/AppContext';
-import { getLernstudioTranslations, LernstudioTranslations } from '../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, LernstudioTranslations, getItemTranslation } from '../../utils/lernstudioTranslations';
 import {
   detectCurrentScheduledGroup,
   filterGroupsByDayAndTime,
   getStudentsForGroup
 } from '../../utils/groupScheduleUtils';
 import { playLernstudioSound } from '../../utils/lernstudioAudioUtils';
+import { speakGermanText } from '../../utils/audioSpeechUtils';
 import {
   Trophy,
   Plus,
@@ -31,12 +32,15 @@ import {
   Calendar,
   Filter,
   Check,
-  Search
+  Search,
+  Volume2,
+  Snail
 } from 'lucide-react';
 
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
+  language?: string;
   onBack: () => void;
 }
 
@@ -109,9 +113,11 @@ export function cleanTeamDisplayName(teamName: string): string {
   return teamName;
 }
 
-export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, onBack }) => {
-  const { groups = [], students = [], language = 'ar' } = useApp();
-  const t = getLernstudioTranslations(language);
+export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, language: propLanguage, onBack }) => {
+  const { groups = [], students = [], language: appLanguage = 'ar' } = useApp();
+  const activeLanguage = propLanguage || appLanguage;
+  const language = activeLanguage;
+  const t = getLernstudioTranslations(activeLanguage);
 
   // Game Setup State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -262,7 +268,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
         isPowerCard: isPower,
         powerType: isPower ? randomPower : undefined,
         item,
-        question: item.arabic || item.exampleSentenceArabic || item.emoji || 'What is the German word?',
+        question: getItemTranslation(item, activeLanguage) || item.exampleSentenceArabic || item.emoji || 'What is the German word?',
         answer: item.german + (item.plural ? ` (Plural: ${item.plural})` : '') + (item.exampleSentenceGerman ? ` • ${item.exampleSentenceGerman}` : ''),
         isAnswered: false
       };
@@ -994,16 +1000,40 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
 
                 {/* Show Answer Reveal Box */}
                 {showAnswer ? (
-                  <div className="p-5 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-2 animate-scale-up">
+                  <div className="p-5 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-3 animate-scale-up">
                     <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 block">{t.correctAnswerLabel}</span>
                     <h3 className="text-2xl sm:text-3xl font-black text-emerald-700 dark:text-emerald-300 font-mono" dir="ltr">
-                      {activeTile.answer}
+                      {activeTile.item?.german || activeTile.answer}
                     </h3>
+
+                    {/* Audio Controls (Normal + Slow Speech) */}
+                    <div className="flex items-center justify-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => speakGermanText(activeTile.item?.german || activeTile.answer, 0.85)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black inline-flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                      >
+                        <Volume2 className="w-4 h-4" />
+                        <span>نطق عادي (1.0x)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => speakGermanText(activeTile.item?.german || activeTile.answer, 0.6)}
+                        className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black inline-flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                      >
+                        <Snail className="w-4 h-4" />
+                        <span>نطق بطيء (0.6x)</span>
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setShowAnswer(true)}
+                    onClick={() => {
+                      setShowAnswer(true);
+                      speakGermanText(activeTile.item?.german || activeTile.answer, 0.85);
+                    }}
                     className="px-8 py-3.5 bg-primary text-white rounded-2xl font-black text-sm shadow-lg hover:bg-primary-hover transition-all cursor-pointer inline-flex items-center gap-2"
                   >
                     <Eye className="w-5 h-5" />

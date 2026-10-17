@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
 import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
-import { getLernstudioTranslations, getLocalizedSetTitle } from '../../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   ArrowLeft,
   RotateCcw,
@@ -294,7 +294,7 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
           <div className="flex items-center justify-center gap-3 pt-1">
             {targetItem.emoji && <span className="text-3xl select-none">{targetItem.emoji}</span>}
             <h2 className="text-2xl sm:text-3xl font-black text-cyan-300">
-              {targetItem.arabic}
+              {getItemTranslation(targetItem, language)}
             </h2>
             <button
               type="button"

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { LernstudioSet } from '../../types/lernstudio';
 import { getLernstudioTranslations, getLocalizedSetTitle, getLocalizedSetTopic } from '../../utils/lernstudioTranslations';
-import { speakGermanText } from '../../utils/audioSpeechUtils';
-import { X, Volume2, Search, Gamepad2, BookOpen, Printer } from 'lucide-react';
+import { speakGermanText, speakGermanTextSlow } from '../../utils/audioSpeechUtils';
+import { X, Volume2, Search, Gamepad2, BookOpen, Printer, Snail } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -33,8 +33,8 @@ export const LernstudioWordsModal: React.FC<Props> = ({
   const displayTopic = getLocalizedSetTopic(set, language);
   const items = set.items || [];
 
-  const handleSpeakGerman = (text: string) => {
-    speakGermanText(text);
+  const handleSpeakGerman = (text: string, rate: number = 0.85) => {
+    speakGermanText(text, rate);
   };
 
   const filteredItems = items.filter((it) => {
@@ -110,14 +110,25 @@ export const LernstudioWordsModal: React.FC<Props> = ({
                     <span className="text-sm sm:text-base font-black text-text-main tracking-wide" dir="ltr">
                       {item.german}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => handleSpeakGerman(item.german)}
-                      className="p-1 rounded-lg text-primary/80 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
-                      title={t.listenAudio}
-                    >
-                      <Volume2 className="w-4 h-4" />
-                    </button>
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleSpeakGerman(item.german, 0.85)}
+                        className="p-1 rounded-lg text-primary/80 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
+                        title={t.listenAudio}
+                      >
+                        <Volume2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSpeakGerman(item.german, 0.6)}
+                        className="px-1.5 py-0.5 rounded-lg text-amber-600 hover:bg-amber-500/10 transition-colors cursor-pointer shrink-0 text-[10px] font-black border border-amber-500/30 inline-flex items-center gap-0.5"
+                        title="نطق بطيء (0.6x)"
+                      >
+                        <Snail className="w-3 h-3" />
+                        <span>0.6x</span>
+                      </button>
+                    </div>
                   </div>
 
                   <p className="text-xs text-text-muted font-bold">

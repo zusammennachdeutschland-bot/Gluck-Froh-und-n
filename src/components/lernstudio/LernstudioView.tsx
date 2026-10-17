@@ -222,6 +222,7 @@ export const LernstudioView: React.FC<Props> = ({
       <LernstudioClassroomBoard
         set={selectedSetForMode}
         activeTheme={activeTheme}
+        language={language}
         onBack={() => setActiveMode('games_portal')}
       />
     );

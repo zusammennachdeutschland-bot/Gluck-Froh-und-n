@@ -37,10 +37,14 @@ export function cleanGermanNoun(german: string): string {
  * combining any custom exercises defined in the set with dynamically generated
  * questions covering all vocabulary items and question formats.
  */
-export function buildDynamicQuestionPool(set: LernstudioSet): GameQuestion[] {
+import { getItemTranslation } from './lernstudioTranslations';
+
+export function buildDynamicQuestionPool(set: LernstudioSet, language: string = 'ar'): GameQuestion[] {
   const pool: GameQuestion[] = [];
   const items = set.items || [];
   if (items.length === 0) return pool;
+
+  const safeLang = (language || 'ar').toLowerCase();
 
   // 1. Incorporate any custom exercises from set
   if (set.customExercises && set.customExercises.length > 0) {
@@ -60,8 +64,9 @@ export function buildDynamicQuestionPool(set: LernstudioSet): GameQuestion[] {
   items.forEach((item, index) => {
     const article = item.article || extractGermanArticle(item.german);
     const nounOnly = cleanGermanNoun(item.german);
+    const itemTrans = getItemTranslation(item, safeLang);
 
-    // Multiple Choice: Arabic to German
+    // Multiple Choice: Translation to German
     const otherGerman = items
       .filter((it) => it.id !== item.id)
       .map((it) => it.german)
@@ -69,54 +74,74 @@ export function buildDynamicQuestionPool(set: LernstudioSet): GameQuestion[] {
       .slice(0, 3);
     const mcOptions = [item.german, ...otherGerman].sort(() => 0.5 - Math.random());
 
+    const promptTransToDe =
+      safeLang === 'en'
+        ? `What is the German word for "${itemTrans}"?`
+        : safeLang === 'de'
+        ? `Was ist das deutsche Wort für "${itemTrans}"?`
+        : `ما الكلمة الألمانية لمعنى: "${itemTrans}"؟`;
+
     pool.push({
       id: `dyn_mc_ar_de_${item.id}_${index}`,
       type: 'multiple_choice',
-      prompt: `ما الكلمة الألمانية لمعنى: "${item.arabic}"؟`,
+      prompt: promptTransToDe,
       emoji: item.emoji,
       options: mcOptions,
       correctAnswer: item.german,
-      explanation: `${item.german} تعني ${item.arabic}`,
+      explanation: `${item.german} = ${itemTrans}`,
       itemRef: item
     });
 
-    // Multiple Choice: German to Arabic
-    const otherArabic = items
+    // Multiple Choice: German to Translation
+    const otherTrans = items
       .filter((it) => it.id !== item.id)
-      .map((it) => it.arabic)
+      .map((it) => getItemTranslation(it, safeLang))
       .sort(() => 0.5 - Math.random())
       .slice(0, 3);
-    const mcOptionsAr = [item.arabic, ...otherArabic].sort(() => 0.5 - Math.random());
+    const mcOptionsAr = [itemTrans, ...otherTrans].sort(() => 0.5 - Math.random());
+
+    const promptDeToTrans =
+      safeLang === 'en'
+        ? `What is the meaning of "${item.german}"?`
+        : safeLang === 'de'
+        ? `Was bedeutet das Wort "${item.german}"?`
+        : `ما معنى الكلمة الألمانية "${item.german}"؟`;
 
     pool.push({
       id: `dyn_mc_de_ar_${item.id}_${index}`,
       type: 'multiple_choice',
-      prompt: `ما معنى الكلمة الألمانية "${item.german}"؟`,
+      prompt: promptDeToTrans,
       emoji: item.emoji,
       options: mcOptionsAr,
-      correctAnswer: item.arabic,
-      explanation: `${item.german} = ${item.arabic}`,
+      correctAnswer: itemTrans,
+      explanation: `${item.german} = ${itemTrans}`,
       itemRef: item
     });
 
     // Article Question (der / die / das) if applicable
     if (article) {
+      const articlePrompt =
+        safeLang === 'en'
+          ? `What is the correct article for "${nounOnly}"?`
+          : safeLang === 'de'
+          ? `Welcher Artikel gehört zu "${nounOnly}"?`
+          : `ما أداة التعريف الصحيحة لكلمة: "${nounOnly}"؟`;
+
       pool.push({
         id: `dyn_art_${item.id}_${index}`,
         type: 'der_die_das',
-        prompt: `ما أداة التعريف الصحيحة لكلمة: "${nounOnly}"؟`,
-        subPrompt: item.arabic,
+        prompt: articlePrompt,
+        subPrompt: itemTrans,
         emoji: item.emoji,
         options: ['der', 'die', 'das'],
         correctAnswer: article,
-        explanation: `الصحيح هو: ${article} ${nounOnly}`,
+        explanation: `${article} ${nounOnly}`,
         itemRef: item
       });
     }
 
     // Missing Letter Question
     if (item.missingLetterWord && item.missingLetterWord.includes('_')) {
-      // Find missing letter
       const blankIndex = item.missingLetterWord.indexOf('_');
       const cleanTarget = cleanGermanNoun(item.german);
       const missingChar = cleanTarget[blankIndex] || 'e';
@@ -128,21 +153,28 @@ export function buildDynamicQuestionPool(set: LernstudioSet): GameQuestion[] {
         .slice(0, 3);
       const letterOptions = [missingChar.toLowerCase(), ...distractorLetters].sort(() => 0.5 - Math.random());
 
+      const missingPrompt =
+        safeLang === 'en'
+          ? `What is the missing letter in "${item.missingLetterWord}"?`
+          : safeLang === 'de'
+          ? `Welcher Buchstabe fehlt in "${item.missingLetterWord}"?`
+          : `ما هو الحرف الناقص في الكلمة: "${item.missingLetterWord}"؟`;
+
       pool.push({
         id: `dyn_miss_${item.id}_${index}`,
         type: 'missing_letter',
-        prompt: `ما هو الحرف الناقص في الكلمة: "${item.missingLetterWord}"؟`,
-        subPrompt: item.arabic,
+        prompt: missingPrompt,
+        subPrompt: itemTrans,
         emoji: item.emoji,
         missingLetterWord: item.missingLetterWord,
         options: letterOptions,
         correctAnswer: missingChar.toLowerCase(),
-        explanation: `الكلمة الكاملة هي: ${item.german}`,
+        explanation: `${item.german}`,
         itemRef: item
       });
     }
 
-    // Sentence Builder Question if sentence elements exist
+    // Sentence Builder Question
     let sentencePieces: string[] = [];
     if (item.sentence4Elements && item.sentence4Elements.length === 4) {
       sentencePieces = [...item.sentence4Elements];
@@ -154,11 +186,18 @@ export function buildDynamicQuestionPool(set: LernstudioSet): GameQuestion[] {
     }
 
     if (sentencePieces.length >= 3) {
+      const sentencePrompt =
+        safeLang === 'en'
+          ? `Arrange words to build a correct sentence:`
+          : safeLang === 'de'
+          ? `Ordne die Wörter zu einem richtigen Satz:`
+          : `رتّب الكلمات لتكوين جملة صحيحة:`;
+
       pool.push({
         id: `dyn_sent_${item.id}_${index}`,
         type: 'sentence_builder',
-        prompt: `رتّب الكلمات لتكوين جملة صحيحة:`,
-        subPrompt: item.exampleSentenceArabic || `حول "${item.arabic}"`,
+        prompt: sentencePrompt,
+        subPrompt: item.exampleSentenceArabic || itemTrans,
         emoji: item.emoji,
         sentencePieces: sentencePieces,
         correctAnswer: sentencePieces.join(' '),
@@ -167,7 +206,7 @@ export function buildDynamicQuestionPool(set: LernstudioSet): GameQuestion[] {
       });
     }
 
-    // Plural Form Question if plural is given
+    // Plural Form Question
     if (item.plural) {
       const otherPlurals = items
         .filter((it) => it.id !== item.id && it.plural)
@@ -176,28 +215,31 @@ export function buildDynamicQuestionPool(set: LernstudioSet): GameQuestion[] {
       const pluralOptions = [item.plural, ...otherPlurals].sort(() => 0.5 - Math.random());
 
       if (pluralOptions.length >= 2) {
+        const pluralPrompt =
+          safeLang === 'en'
+            ? `What is the plural form of "${item.german}"?`
+            : safeLang === 'de'
+            ? `Was ist die Pluralform von "${item.german}"?`
+            : `ما صيغة الجمع لكلمة: "${item.german}"؟`;
+
         pool.push({
           id: `dyn_plur_${item.id}_${index}`,
           type: 'plural_match',
-          prompt: `ما صيغة الجمع لكلمة: "${item.german}"؟`,
-          subPrompt: item.arabic,
+          prompt: pluralPrompt,
+          subPrompt: itemTrans,
           emoji: item.emoji,
           options: pluralOptions,
           correctAnswer: item.plural,
-          explanation: `جمع "${item.german}" هو: "${item.plural}"`,
+          explanation: `${item.german} ➡️ ${item.plural}`,
           itemRef: item
         });
       }
     }
   });
 
-  // Shuffle the pool for varied gameplay
   return pool.sort(() => 0.5 - Math.random());
 }
 
-/**
- * Generates cards for Memory Matching game
- */
 export interface MemoryCard {
   id: string;
   pairId: string;
@@ -210,13 +252,19 @@ export interface MemoryCard {
   isMatched: boolean;
 }
 
-export function generateMemoryCards(items: LernstudioItem[], pairsCount: number = 6): MemoryCard[] {
+export function generateMemoryCards(
+  items: LernstudioItem[],
+  pairsCount: number = 6,
+  language: string = 'ar'
+): MemoryCard[] {
+  const safeLang = (language || 'ar').toLowerCase();
   const selectedItems = [...items].sort(() => 0.5 - Math.random()).slice(0, Math.min(pairsCount, items.length));
   const cards: MemoryCard[] = [];
 
   selectedItems.forEach((item, index) => {
     const pairId = `pair_${item.id || index}`;
     const article = item.article || extractGermanArticle(item.german);
+    const trans = getItemTranslation(item, safeLang);
 
     // Card 1: German word + Emoji
     cards.push({
@@ -230,13 +278,13 @@ export function generateMemoryCards(items: LernstudioItem[], pairsCount: number 
       isMatched: false
     });
 
-    // Card 2: Arabic meaning + English (if available)
+    // Card 2: Translation
     cards.push({
-      id: `card_ar_${item.id}_${index}`,
+      id: `card_trans_${item.id}_${index}`,
       pairId,
       type: 'meaning',
-      content: item.arabic,
-      subContent: item.english,
+      content: trans,
+      subContent: safeLang !== 'ar' ? item.arabic : item.english,
       emoji: item.emoji,
       isFlipped: false,
       isMatched: false
@@ -310,7 +358,8 @@ export interface SentenceGameQuestion {
 /**
  * Builds sentence ordering questions from the set's items and custom exercises
  */
-export function buildSentenceGameQuestions(set: LernstudioSet): SentenceGameQuestion[] {
+export function buildSentenceGameQuestions(set: LernstudioSet, language: string = 'ar'): SentenceGameQuestion[] {
+  const safeLang = (language || 'ar').toLowerCase();
   const results: SentenceGameQuestion[] = [];
   const items = set.items || [];
 
@@ -319,18 +368,33 @@ export function buildSentenceGameQuestions(set: LernstudioSet): SentenceGameQues
     set.customExercises.forEach((ex, idx) => {
       if (ex.type === 'sentence_builder' && ex.correctAnswer) {
         const full = ex.correctAnswer.trim();
-        // Split sentence into words, preserving German syntax
         const words = full.split(/\s+/).filter(Boolean);
         if (words.length >= 3) {
           const shuffled = [...words].sort(() => 0.5 - Math.random());
+          const defaultArPrompt = 'رتب الكلمات الألمانية بالترتيب الصحيح';
+          const defaultEnPrompt = 'Arrange German words in correct order';
+          const defaultDePrompt = 'Ordne die deutschen Wörter richtig an';
+
           results.push({
             id: ex.id || `custom_sb_${idx}`,
             germanFull: full,
-            arabicFull: ex.question.replace(/^رتب الكلمات.*?:?\s*/i, '').trim() || 'رتب الكلمات الألمانية بالترتيب الصحيح',
+            arabicFull:
+              ex.question.replace(/^رتب الكلمات.*?:?\s*/i, '').trim() ||
+              (safeLang === 'en'
+                ? defaultEnPrompt
+                : safeLang === 'de'
+                ? defaultDePrompt
+                : defaultArPrompt),
             words,
             scrambledWords: shuffled,
             emoji: '📝',
-            grammarTip: ex.explanation || 'في الجملة الخبرية الألمانية، الفعل يأتي دائماً في المركز الثاني (Position 2).'
+            grammarTip:
+              ex.explanation ||
+              (safeLang === 'en'
+                ? 'In German main clauses, verb is in Position 2.'
+                : safeLang === 'de'
+                ? 'Im Hauptsatz steht das Verb an Position 2.'
+                : 'في الجملة الخبرية الألمانية، الفعل يأتي دائماً في المركز الثاني (Position 2).')
           });
         }
       }
@@ -340,18 +404,33 @@ export function buildSentenceGameQuestions(set: LernstudioSet): SentenceGameQues
   // 2. From items with sentence4Elements
   items.forEach((item, idx) => {
     if (item.sentence4Elements && item.sentence4Elements.length === 4) {
-      const words = item.sentence4Elements.map(w => w.trim()).filter(Boolean);
+      const words = item.sentence4Elements.map((w) => w.trim()).filter(Boolean);
       if (words.length >= 3) {
         const full = words.join(' ');
         const shuffled = [...words].sort(() => 0.5 - Math.random());
+        const trans = getItemTranslation(item, safeLang);
         results.push({
           id: `item_s4_${item.id}_${idx}`,
           germanFull: full,
-          arabicFull: item.exampleSentenceArabic || `جملة على مفردة: ${item.arabic}`,
+          arabicFull:
+            item.exampleSentenceArabic ||
+            `${
+              safeLang === 'en'
+                ? 'Sentence for:'
+                : safeLang === 'de'
+                ? 'Satz für:'
+                : 'جملة على مفردة:'
+            } ${trans}`,
           words,
           scrambledWords: shuffled,
           emoji: item.emoji || '✨',
-          grammarTip: `الجملة مرتبطة بمفردة (${item.german})`
+          grammarTip: `${
+            safeLang === 'en'
+              ? 'Sentence related to'
+              : safeLang === 'de'
+              ? 'Satz zu'
+              : 'الجملة مرتبطة بمفردة'
+          } (${item.german})`
         });
       }
     }
@@ -361,48 +440,81 @@ export function buildSentenceGameQuestions(set: LernstudioSet): SentenceGameQues
   items.forEach((item, idx) => {
     if (item.exampleSentenceGerman && item.exampleSentenceGerman.trim()) {
       const full = item.exampleSentenceGerman.trim();
-      // Avoid duplicates
-      if (results.some(r => r.germanFull.toLowerCase() === full.toLowerCase())) return;
+      if (results.some((r) => r.germanFull.toLowerCase() === full.toLowerCase())) return;
 
       const words = full.split(/\s+/).filter(Boolean);
       if (words.length >= 3 && words.length <= 12) {
         const shuffled = [...words].sort(() => 0.5 - Math.random());
-        // If shuffle ended up identical to original, re-shuffle
         if (shuffled.join(' ') === words.join(' ') && words.length > 1) {
           shuffled.reverse();
         }
+        const trans = getItemTranslation(item, safeLang);
         results.push({
           id: `item_ex_${item.id}_${idx}`,
           germanFull: full,
-          arabicFull: item.exampleSentenceArabic || `جملة توضيحية لـ ${item.arabic}`,
+          arabicFull:
+            item.exampleSentenceArabic ||
+            `${
+              safeLang === 'en'
+                ? 'Example for'
+                : safeLang === 'de'
+                ? 'Beispielsatz für'
+                : 'جملة توضيحية لـ'
+            } ${trans}`,
           words,
           scrambledWords: shuffled,
           emoji: item.emoji || '📖',
-          grammarTip: 'انتبه لموقع الفعل (الفعل في المركز الثاني في الجمل الرئيسية).'
+          grammarTip:
+            safeLang === 'en'
+              ? 'Pay attention to verb position (Position 2 in main clause).'
+              : safeLang === 'de'
+              ? 'Achte auf die Verbposition (Position 2 im Hauptsatz).'
+              : 'انتبه لموقع الفعل (الفعل في المركز الثاني في الجمل الرئيسية).'
         });
       }
     }
   });
 
-  // 4. Fallback: If no sentences existed, synthesize educational sentences for the vocabulary
+  // 4. Fallback: Synthesize sentences
   if (results.length === 0 && items.length > 0) {
     items.slice(0, 8).forEach((item, idx) => {
       const art = item.article || extractGermanArticle(item.german);
       let sentenceDe = '';
       let sentenceAr = '';
+      const trans = getItemTranslation(item, safeLang);
 
       if (art === 'der') {
         sentenceDe = `Der ${cleanGermanNoun(item.german)} ist sehr schön.`;
-        sentenceAr = `${item.arabic} جميل جداً.`;
+        sentenceAr =
+          safeLang === 'en'
+            ? `The ${trans} is very nice.`
+            : safeLang === 'de'
+            ? `Der ${cleanGermanNoun(item.german)} ist sehr schön.`
+            : `${trans} جميل جداً.`;
       } else if (art === 'die') {
         sentenceDe = `Die ${cleanGermanNoun(item.german)} ist sehr nützlich.`;
-        sentenceAr = `${item.arabic} مفيدة جداً.`;
+        sentenceAr =
+          safeLang === 'en'
+            ? `The ${trans} is very useful.`
+            : safeLang === 'de'
+            ? `Die ${cleanGermanNoun(item.german)} ist sehr nützlich.`
+            : `${trans} مفيدة جداً.`;
       } else if (art === 'das') {
         sentenceDe = `Das ${cleanGermanNoun(item.german)} gefällt mir gut.`;
-        sentenceAr = `${item.arabic} يعجبني كثيراً.`;
+        sentenceAr =
+          safeLang === 'en'
+            ? `I really like the ${trans}.`
+            : safeLang === 'de'
+            ? `Das ${cleanGermanNoun(item.german)} gefällt mir gut.`
+            : `${trans} يعجبني كثيراً.`;
       } else {
         sentenceDe = `Wir lernen heute ${item.german} zusammen.`;
-        sentenceAr = `نحن نتعلم ${item.arabic} اليوم معاً.`;
+        sentenceAr =
+          safeLang === 'en'
+            ? `We are learning ${trans} together today.`
+            : safeLang === 'de'
+            ? `Wir lernen heute ${item.german} zusammen.`
+            : `نحن نتعلم ${trans} اليوم معاً.`;
       }
 
       const words = sentenceDe.split(/\s+/).filter(Boolean);
@@ -414,7 +526,12 @@ export function buildSentenceGameQuestions(set: LernstudioSet): SentenceGameQues
         words,
         scrambledWords: shuffled,
         emoji: item.emoji || '⭐',
-        grammarTip: 'الفعل يأتي دائماً في المركز الثاني في الجملة الألمانية.'
+        grammarTip:
+          safeLang === 'en'
+            ? 'Verb is always in Position 2 in German sentences.'
+            : safeLang === 'de'
+            ? 'Das Verb steht immer an Position 2 im deutschen Satz.'
+            : 'الفعل يأتي دائماً في المركز الثاني في الجملة الألمانية.'
       });
     });
   }

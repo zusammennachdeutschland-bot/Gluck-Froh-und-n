@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
 import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
-import { getLernstudioTranslations, getLocalizedSetTitle } from '../../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   ArrowLeft,
   RotateCcw,
@@ -397,7 +397,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
                 <div className="text-5xl select-none">{activeQuestion.targetItem.emoji}</div>
               )}
               <h3 className="text-xl sm:text-2xl font-black text-text-main">
-                {activeQuestion.targetItem.arabic}
+                {getItemTranslation(activeQuestion.targetItem, language)}
               </h3>
               <p className="text-xs font-bold text-text-muted">اختر الكلمة الألمانية المطابقة:</p>
             </div>

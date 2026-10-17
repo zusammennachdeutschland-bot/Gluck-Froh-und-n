@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
 import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
-import { getLernstudioTranslations, getLocalizedSetTitle } from '../../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   ArrowLeft,
   RotateCcw,
@@ -262,7 +262,7 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
           <div className="flex items-center justify-center gap-2.5">
             {targetItem.emoji && <span className="text-2xl">{targetItem.emoji}</span>}
             <h2 className="text-xl sm:text-2xl font-black text-text-main">
-              {targetItem.arabic}
+              {getItemTranslation(targetItem, language)}
             </h2>
             <button
               type="button"

@@ -99,14 +99,14 @@ export const speakGermanText = (text: string, rate: number = 0.85) => {
 
   let speechStarted = false;
 
-  // Try Web Speech API first on all platforms (works offline if device has German voice)
+  // Enforce local Web Speech API de-DE first
   if ('speechSynthesis' in window) {
     try {
       window.speechSynthesis.resume();
 
       const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.lang = 'de-DE';
-      utterance.rate = rate;
+      utterance.rate = Math.min(Math.max(rate, 0.4), 1.5);
       utterance.volume = 1.0;
 
       if (cachedGermanVoice) {
@@ -153,6 +153,13 @@ export const speakGermanText = (text: string, rate: number = 0.85) => {
 };
 
 /**
+ * Helper function to speak German text at a slow, clear pace (0.6x)
+ */
+export const speakGermanTextSlow = (text: string) => {
+  speakGermanText(text, 0.6);
+};
+
+/**
  * Robust Multi-Source Fallback Audio TTS player
  */
 const playFallbackTts = (text: string, rate: number = 0.85) => {
@@ -164,7 +171,7 @@ const playFallbackTts = (text: string, rate: number = 0.85) => {
       window.location.protocol === 'file:' ||
       !window.location.host;
 
-    // Direct HTTPS endpoints first for APKs & standalone builds
+    // Direct HTTPS endpoints strictly requested with sl=de & tl=de
     const sources = [
       `https://translate.googleapis.com/translate_tts?client=gtx&sl=de&tl=de&dt=t&q=${encoded}`,
       `https://dict.youdao.com/dictvoice?audio=${encoded}&type=2`,
@@ -186,7 +193,7 @@ const playFallbackTts = (text: string, rate: number = 0.85) => {
       const url = sources[currentSourceIdx++];
       const audio = new Audio(url);
       currentAudioElement = audio;
-      audio.playbackRate = Math.min(Math.max(rate, 0.5), 2.0);
+      audio.playbackRate = Math.min(Math.max(rate, 0.5), 1.5);
 
       const playPromise = audio.play();
       if (playPromise !== undefined) {
@@ -207,4 +214,5 @@ const playFallbackTts = (text: string, rate: number = 0.85) => {
     console.warn('Fallback TTS audio generation failed:', e);
   }
 };
+
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
 import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
-import { getLernstudioTranslations, getLocalizedSetTitle } from '../../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   ArrowLeft,
   RotateCcw,
@@ -331,7 +331,7 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
               المطلوب تقطيعه بسيف النينجا 🗡️:
             </div>
             <div className="text-base sm:text-xl font-black text-text-main flex items-center gap-2">
-              <span>{targetItem?.arabic}</span>
+              <span>{getItemTranslation(targetItem, language)}</span>
               <span className="text-text-muted text-xs font-bold">
                 ({targetItem?.german})
               </span>

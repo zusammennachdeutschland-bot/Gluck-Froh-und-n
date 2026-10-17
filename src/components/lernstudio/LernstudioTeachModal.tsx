@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioItem, LernstudioGameMode } from '../../types/lernstudio';
-import { getLernstudioTranslations, getLocalizedSetTitle } from '../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../utils/lernstudioTranslations';
 import { speakGermanText } from '../../utils/audioSpeechUtils';
 import {
   X,
@@ -498,7 +498,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                 {/* Translation */}
                 <div className="py-2 px-5 bg-surface rounded-2xl border border-surface-border inline-block shadow-2xs">
                   <span className="text-lg sm:text-xl font-black text-primary">
-                    {items[stageQuestionIndex].arabic}
+                    {getItemTranslation(items[stageQuestionIndex], language)}
                   </span>
                 </div>
 
@@ -550,7 +550,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
 
                   <div className="space-y-1">
                     <p className="text-xs font-bold text-text-muted">
-                      المعنى بالعربية: ({stage2Questions[stageQuestionIndex].targetItem.arabic})
+                      ({getItemTranslation(stage2Questions[stageQuestionIndex].targetItem, language)})
                     </p>
                     <p className="text-sm font-bold text-text-main">
                       هل الكلمة الألمانية المطابقة هي:
@@ -629,7 +629,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                     {stage3Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
                   </div>
                   <h3 className="text-xl sm:text-2xl font-black text-text-main">
-                    {stage3Questions[stageQuestionIndex].targetItem.arabic}
+                    {getItemTranslation(stage3Questions[stageQuestionIndex].targetItem, language)}
                   </h3>
                   <p className="text-xs text-text-muted font-bold">اختر الكلمة الألمانية المناسبة:</p>
                 </div>
@@ -708,7 +708,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                     {stage4Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
                   </div>
                   <h3 className="text-lg sm:text-xl font-black text-text-main">
-                    {stage4Questions[stageQuestionIndex].targetItem.arabic}
+                    {getItemTranslation(stage4Questions[stageQuestionIndex].targetItem, language)}
                   </h3>
                   <p className="text-xs text-text-muted font-bold">ابحث عن الكلمة الصحيحة بين جميع الخيارات:</p>
                 </div>

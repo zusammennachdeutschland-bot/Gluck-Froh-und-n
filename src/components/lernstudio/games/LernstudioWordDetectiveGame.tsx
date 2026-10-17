@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
 import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
-import { getLernstudioTranslations, getLocalizedSetTitle } from '../../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   ArrowLeft,
   RotateCcw,
@@ -219,7 +219,7 @@ export const LernstudioWordDetectiveGame: React.FC<Props> = ({
           <div className="flex items-center justify-center gap-3 py-1">
             {currentItem.emoji && <span className="text-4xl select-none">{currentItem.emoji}</span>}
             <h2 className="text-2xl sm:text-3xl font-black text-text-main">
-              {currentItem.arabic}
+              {getItemTranslation(currentItem, language)}
             </h2>
           </div>
 
@@ -343,7 +343,7 @@ export const LernstudioWordDetectiveGame: React.FC<Props> = ({
             أغلقت الخزينة! الكلمة كانت:
           </h2>
           <div className="text-2xl font-black text-primary font-mono py-1">
-            {targetWord} ({currentItem?.arabic})
+            {targetWord} ({getItemTranslation(currentItem, language)})
           </div>
           <p className="text-xs sm:text-sm font-bold text-text-muted">
             لا تيأس يا بطل، تدرب على تهجئة الحروف الألمانية وجرب مرة ثانية.
