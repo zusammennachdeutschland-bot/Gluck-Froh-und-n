@@ -1,13 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { LernstudioLibraryArticle, LernstudioLevel } from '../../types/lernstudio';
 import { LERNSTUDIO_LIBRARY_ARTICLES } from '../../data/lernstudioLibraryData';
+import { getLernstudioTranslations } from '../../utils/lernstudioTranslations';
 import { BookOpen, Search, ArrowRight, Volume2, Bookmark, Sparkles, CheckCircle2 } from 'lucide-react';
 
 interface Props {
   onBack: () => void;
+  language?: string;
 }
 
-export const LernstudioLibraryView: React.FC<Props> = ({ onBack }) => {
+export const LernstudioLibraryView: React.FC<Props> = ({ onBack, language = 'ar' }) => {
+  const t = getLernstudioTranslations(language);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedLevel, setSelectedLevel] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -30,7 +33,7 @@ export const LernstudioLibraryView: React.FC<Props> = ({ onBack }) => {
   }, [selectedCategory, selectedLevel, searchTerm]);
 
   return (
-    <div className="p-4 sm:p-6 space-y-6" dir="rtl">
+    <div className="p-4 sm:p-6 space-y-6" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       {/* Top Bar */}
       <div className="flex items-center justify-between gap-3 flex-wrap bg-surface p-4 rounded-3xl border border-surface-border shadow-xs">
         <div className="flex items-center gap-2">
@@ -40,15 +43,17 @@ export const LernstudioLibraryView: React.FC<Props> = ({ onBack }) => {
             className="p-2 text-text-muted hover:text-text-main bg-surface-hover rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1"
           >
             <ArrowRight className="w-4 h-4" />
-            <span>الرجوع للرئيسية</span>
+            <span>{language === 'ar' ? 'الرجوع للرئيسية' : language === 'de' ? 'Zurück zur Übersicht' : 'Back to Dashboard'}</span>
           </button>
 
           <div>
             <h2 className="text-base sm:text-lg font-black text-text-main flex items-center gap-2">
               <BookOpen className="w-5 h-5 text-primary" />
-              <span>مكتبة تعليم اللغة الألمانية (Lernbibliothek) 🇩🇪</span>
+              <span>{language === 'ar' ? 'مكتبة تعليم اللغة الألمانية (Lernbibliothek) 🇩🇪' : language === 'de' ? 'Deutsche Lernbibliothek (Lernbibliothek) 🇩🇪' : 'German Study Library 🇩🇪'}</span>
             </h2>
-            <p className="text-xs text-text-muted">دروس شاطرة وشاملة للقواعد والمفردات والمحادثات من A1 إلى C2</p>
+            <p className="text-xs text-text-muted">
+              {language === 'ar' ? 'دروس شاطرة وشاملة للقواعد والمفردات والمحادثات من A1 إلى C2' : language === 'de' ? 'Umfassende Lektionen zu Grammatik, Wortschatz und Konversation von A1 bis C2' : 'Comprehensive lessons for grammar, vocabulary and conversation from A1 to C2'}
+            </p>
           </div>
         </div>
       </div>
@@ -58,13 +63,15 @@ export const LernstudioLibraryView: React.FC<Props> = ({ onBack }) => {
         <div className="flex items-center gap-3 flex-wrap">
           {/* Search Box */}
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-text-muted" />
+            <Search className={`w-4 h-4 absolute top-1/2 -translate-y-1/2 text-text-muted ${language === 'ar' ? 'right-3' : 'left-3'}`} />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="البحث في دروس المكتبة..."
-              className="w-full pr-9 pl-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary"
+              placeholder={language === 'ar' ? 'البحث في دروس المكتبة...' : language === 'de' ? 'Bibliothek durchsuchen...' : 'Search library lessons...'}
+              className={`w-full py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary ${
+                language === 'ar' ? 'pr-9 pl-3' : 'pl-9 pr-3'
+              }`}
             />
           </div>
 
@@ -72,27 +79,27 @@ export const LernstudioLibraryView: React.FC<Props> = ({ onBack }) => {
           <select
             value={selectedCategory}
             onChange={(e) => setSelectedCategory(e.target.value)}
-            className="px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary"
+            className="px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary cursor-pointer"
           >
-            <option value="all">جميع الأقسام</option>
-            <option value="alphabet">الأبجدية والنطق 🔤</option>
-            <option value="vocabulary">المفردات 📚</option>
-            <option value="grammar">القواعد ⏱️</option>
-            <option value="conversations">المحادثات 🗣️</option>
-            <option value="reading_writing">القراءة والكتابة ✍️</option>
+            <option value="all">{language === 'ar' ? 'جميع الأقسام' : language === 'de' ? 'Alle Kategorien' : 'All Categories'}</option>
+            <option value="alphabet">{language === 'ar' ? 'الأبجدية والنطق 🔤' : language === 'de' ? 'Alphabet & Aussprache 🔤' : 'Alphabet & Pronunciation 🔤'}</option>
+            <option value="vocabulary">{language === 'ar' ? 'المفردات 📚' : language === 'de' ? 'Wortschatz 📚' : 'Vocabulary 📚'}</option>
+            <option value="grammar">{language === 'ar' ? 'القواعد ⏱️' : language === 'de' ? 'Grammatik ⏱️' : 'Grammar ⏱️'}</option>
+            <option value="conversations">{language === 'ar' ? 'المحادثات 🗣️' : language === 'de' ? 'Konversation 🗣️' : 'Conversations 🗣️'}</option>
+            <option value="reading_writing">{language === 'ar' ? 'القراءة والكتابة ✍️' : language === 'de' ? 'Lesen & Schreiben ✍️' : 'Reading & Writing ✍️'}</option>
           </select>
 
           {/* Level Filter */}
           <select
             value={selectedLevel}
             onChange={(e) => setSelectedLevel(e.target.value)}
-            className="px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary"
+            className="px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary cursor-pointer"
           >
-            <option value="all">جميع المستويات (A1-C2)</option>
-            <option value="A1">A1 - مبتدئ</option>
-            <option value="A2">A2 - أساسي</option>
-            <option value="B1">B1 - متوسط</option>
-            <option value="B2">B2 - متوسط متقدم</option>
+            <option value="all">{language === 'ar' ? 'جميع المستويات (A1-C2)' : language === 'de' ? 'Alle Stufen (A1-C2)' : 'All Levels (A1-C2)'}</option>
+            <option value="A1">A1 - {language === 'ar' ? 'مبتدئ' : language === 'de' ? 'Anfänger' : 'Beginner'}</option>
+            <option value="A2">A2 - {language === 'ar' ? 'أساسي' : language === 'de' ? 'Grundstufe' : 'Elementary'}</option>
+            <option value="B1">B1 - {language === 'ar' ? 'متوسط' : language === 'de' ? 'Mittelstufe' : 'Intermediate'}</option>
+            <option value="B2">B2 - {language === 'ar' ? 'متوسط متقدم' : language === 'de' ? 'Fortgeschritten' : 'Upper Intermediate'}</option>
           </select>
         </div>
       </div>
@@ -111,21 +118,23 @@ export const LernstudioLibraryView: React.FC<Props> = ({ onBack }) => {
                   {art.level}
                 </span>
                 <span className="text-[10px] font-bold text-text-muted">
-                  {art.category === 'alphabet' ? 'الأبجدية والنطق' : art.category === 'grammar' ? 'القواعد' : 'المفردات'}
+                  {art.category === 'alphabet' ? (language === 'ar' ? 'الأبجدية والنطق' : 'Alphabet') : art.category === 'grammar' ? (language === 'ar' ? 'القواعد' : 'Grammatik') : (language === 'ar' ? 'المفردات' : 'Wortschatz')}
                 </span>
               </div>
 
               <h3 className="text-sm font-black text-text-main group-hover:text-primary transition-colors">
-                {art.titleArabic}
+                {language === 'ar' ? art.titleArabic : art.title}
               </h3>
               <p className="text-xs font-mono font-bold text-primary" dir="ltr">
                 {art.title}
               </p>
-              <p className="text-xs text-text-muted line-clamp-2">{art.summaryArabic}</p>
+              <p className="text-xs text-text-muted line-clamp-2">
+                {language === 'ar' ? art.summaryArabic : art.summary}
+              </p>
             </div>
 
             <div className="pt-2 border-t border-surface-border/40 flex items-center justify-between text-xs font-bold text-primary">
-              <span>قراءة الدرس الكامل ↗</span>
+              <span>{language === 'ar' ? 'قراءة الدرس الكامل ↗' : language === 'de' ? 'Lektion lesen ↗' : 'Read Lesson ↗'}</span>
               <BookOpen className="w-4 h-4" />
             </div>
           </div>
@@ -135,12 +144,12 @@ export const LernstudioLibraryView: React.FC<Props> = ({ onBack }) => {
       {/* ARTICLE READER MODAL */}
       {activeArticle && (
         <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-hidden">
-          <div className="bg-surface border border-surface-border rounded-3xl max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+          <div className="bg-surface border border-surface-border rounded-3xl max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up" dir={language === 'ar' ? 'rtl' : 'ltr'}>
             {/* Modal Header */}
             <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between bg-surface shrink-0">
               <div>
                 <span className="text-[10px] font-black text-primary uppercase">{activeArticle.level} • {activeArticle.category}</span>
-                <h2 className="text-base font-black text-text-main">{activeArticle.titleArabic}</h2>
+                <h2 className="text-base font-black text-text-main">{language === 'ar' ? activeArticle.titleArabic : activeArticle.title}</h2>
               </div>
               <button
                 type="button"
@@ -152,10 +161,10 @@ export const LernstudioLibraryView: React.FC<Props> = ({ onBack }) => {
             </div>
 
             {/* Modal Body */}
-            <div className="p-5 sm:p-7 overflow-y-auto space-y-5 flex-1 text-right">
+            <div className="p-5 sm:p-7 overflow-y-auto space-y-5 flex-1">
               <div className="p-4 bg-primary-soft/40 border border-primary-border/40 rounded-2xl">
                 <h3 className="text-lg font-black text-primary ltr font-mono" dir="ltr">{activeArticle.title}</h3>
-                <p className="text-xs font-medium text-text-muted mt-1">{activeArticle.summaryArabic}</p>
+                <p className="text-xs font-medium text-text-muted mt-1">{language === 'ar' ? activeArticle.summaryArabic : activeArticle.summary}</p>
               </div>
 
               {/* Rendered HTML content */}
@@ -169,13 +178,13 @@ export const LernstudioLibraryView: React.FC<Props> = ({ onBack }) => {
                 <div className="p-4 bg-surface-hover/60 border border-surface-border rounded-2xl space-y-2">
                   <h4 className="text-xs font-black text-text-main flex items-center gap-1">
                     <Sparkles className="w-4 h-4 text-primary" />
-                    <span>أمثلة تطبيقية (Beispiele):</span>
+                    <span>{language === 'ar' ? 'أمثلة تطبيقية (Beispiele):' : language === 'de' ? 'Beispiele:' : 'Examples:'}</span>
                   </h4>
                   <div className="space-y-1.5">
-                    {activeArticle.examples.map((ex, idx) => (
+                    {activeArticle.examples.link ? null : activeArticle.examples.map((ex, idx) => (
                       <div key={idx} className="p-2.5 bg-surface rounded-xl border border-surface-border/60 text-xs flex items-center justify-between gap-2">
                         <span className="font-bold text-primary font-mono ltr" dir="ltr">{ex.german}</span>
-                        <span className="text-text-muted font-medium">{ex.arabic}</span>
+                        <span className="text-text-muted font-medium">{language === 'ar' ? ex.arabic : ex.german}</span>
                       </div>
                     ))}
                   </div>
@@ -189,7 +198,7 @@ export const LernstudioLibraryView: React.FC<Props> = ({ onBack }) => {
                 onClick={() => setActiveArticle(null)}
                 className="px-5 py-2 bg-primary text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer"
               >
-                إغلاق الدرس
+                {language === 'ar' ? 'إغلاق الدرس' : language === 'de' ? 'Schließen' : 'Close'}
               </button>
             </div>
           </div>

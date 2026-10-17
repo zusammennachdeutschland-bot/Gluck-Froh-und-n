@@ -415,7 +415,7 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
           </div>
 
           {eventAlert && (
-            <div className="p-4 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-sm font-bold text-center animate-bounce">
+            <div className="p-4 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-sm font-bold text-center">
               {eventAlert}
             </div>
           )}

@@ -221,10 +221,12 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
                     }}
                     className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
                   >
-                    <option value="auto">{language === 'ar' ? 'تلقائي يحدده الذكاء الاصطناعي بناءً على الصورة والدرس (5 إلى 20 كلمة) 🤖' : 'Auto determined by AI based on image (5 to 20 words) 🤖'}</option>
+                    <option value="auto">{language === 'ar' ? 'تلقائي يحدده الذكاء الاصطناعي بناءً على الصورة والدرس (5 إلى 30 كلمة) 🤖' : 'Auto determined by AI based on image (5 to 30 words) 🤖'}</option>
                     <option value="5">5 {language === 'ar' ? 'كلمات (درس قصير)' : 'words (short)'}</option>
                     <option value="10">10 {language === 'ar' ? 'كلمات (درس معياري)' : 'words (standard)'}</option>
+                    <option value="15">15 {language === 'ar' ? 'كلمة (درس متوسط)' : 'words (medium)'}</option>
                     <option value="20">20 {language === 'ar' ? 'كلمة (درس كامل وشامل)' : 'words (comprehensive)'}</option>
+                    <option value="24">24 {language === 'ar' ? 'كلمة (درس 24 كلمة)' : 'words (24 words)'}</option>
                     <option value="26">26 {language === 'ar' ? 'كلمة (الأبجدية كاملة)' : 'words (full alphabet)'}</option>
                   </select>
                 </div>

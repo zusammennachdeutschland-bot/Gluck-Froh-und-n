@@ -62,6 +62,21 @@ import { Share } from '@capacitor/share';
 import { validateAndSanitizeBackupPayload } from '../utils/backupEngine';
 import { syncAllWidgetsToNative } from '../services/widgetService';
 
+export const DEFAULT_BOTTOM_NAV_ORDER = [
+  'home',
+  'schedule',
+  'students',
+  'payments',
+  'lernstudio',
+  'hod',
+  'history',
+  'reports',
+  'certificates',
+  'freeTime',
+  'schoolSchedule',
+  'settings'
+];
+
 interface AppContextType {
   todos: TodoItem[];
   setTodos: React.Dispatch<React.SetStateAction<TodoItem[]>>;
@@ -298,6 +313,11 @@ interface AppContextType {
   setIsAddGroupModalOpen: (open: boolean) => void;
   isBackupModalOpen: boolean;
   setIsBackupModalOpen: (open: boolean) => void;
+  isReorderBottomNavOpen: boolean;
+  setIsReorderBottomNavOpen: (open: boolean) => void;
+  bottomNavOrder: string[];
+  setBottomNavOrder: (order: string[]) => void;
+  resetBottomNavOrder: () => void;
   clearAllData: () => void;
 
   // Added setters for Backup & Restore Center
@@ -853,16 +873,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     let rawSets: LernstudioSet[] = [];
 
     if (Array.isArray(saved) && saved.length > 0) {
-      const existingIds = new Set(saved.map((s: any) => s.id));
+      // Filter out old legacy sets ('set_def_') in favor of new massive 300-set children curriculum
+      const nonLegacySaved = saved.filter((s: any) => s && s.id && !s.id.startsWith('set_def_'));
+      const existingIds = new Set(nonLegacySaved.map((s: any) => s.id));
       const missingDefaults = DEFAULT_LERNSTUDIO_SETS.filter((ds) => !existingIds.has(ds.id));
 
-      const enrichedSaved = saved.map((s: LernstudioSet) => {
+      const enrichedSaved = nonLegacySaved.map((s: LernstudioSet) => {
         const defaultMatch = DEFAULT_LERNSTUDIO_SETS.find((ds) => ds.id === s.id);
         if (defaultMatch) {
           return {
             ...defaultMatch,
             ...s,
-            grade: s.grade && s.grade.startsWith('جريد') ? s.grade : defaultMatch.grade,
+            grade: s.grade || defaultMatch.grade,
             titleTranslations: s.titleTranslations || defaultMatch.titleTranslations,
             topicTranslations: s.topicTranslations || defaultMatch.topicTranslations,
             descriptionTranslations: s.descriptionTranslations || defaultMatch.descriptionTranslations
@@ -1907,6 +1929,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const [isAddStudentModalOpen, setIsAddStudentModalOpen] = useState(false);
   const [isAddGroupModalOpen, setIsAddGroupModalOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [isReorderBottomNavOpen, setIsReorderBottomNavOpen] = useState(false);
+
+  const [bottomNavOrder, setBottomNavOrderState] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('dl_mobile_bottom_nav_order');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const missing = DEFAULT_BOTTOM_NAV_ORDER.filter(id => !parsed.includes(id));
+          return [...parsed.filter(id => DEFAULT_BOTTOM_NAV_ORDER.includes(id)), ...missing];
+        }
+      }
+    } catch {}
+    return DEFAULT_BOTTOM_NAV_ORDER;
+  });
+
+  const setBottomNavOrder = (newOrder: string[]) => {
+    setBottomNavOrderState(newOrder);
+    try {
+      localStorage.setItem('dl_mobile_bottom_nav_order', JSON.stringify(newOrder));
+    } catch {}
+  };
+
+  const resetBottomNavOrder = () => {
+    setBottomNavOrder(DEFAULT_BOTTOM_NAV_ORDER);
+  };
 
   // Network online/offline listener
   useEffect(() => {
@@ -3052,6 +3100,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const archiveGroup = (id: string) => {
     setGroups(prev => prev.map(g => g.id === id ? wrapMutation({ ...g, status: 'archived' } as Group) : g));
+    setStudents(prev => {
+      const next = prev.map(s => {
+        if (s.groupId === id) {
+          return wrapMutation({
+            ...s,
+            status: 'archived',
+            archivedGroupId: id,
+            groupId: '',
+            updatedAt: Date.now()
+          } as Student);
+        }
+        return s;
+      });
+      storage.setItem('dl_students', next);
+      return next;
+    });
+    setLessons(prev => prev.map(l => {
+      if (l.groupId === id && l.status === 'scheduled') {
+        return wrapDeletion(l);
+      }
+      return l;
+    }));
+    refreshCalendarAndDashboard();
   };
 
   const cascadeDeleteGroup = async (id: string) => {
@@ -6731,6 +6802,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setIsAddGroupModalOpen,
         isBackupModalOpen,
         setIsBackupModalOpen,
+        isReorderBottomNavOpen,
+        setIsReorderBottomNavOpen,
+        bottomNavOrder,
+        setBottomNavOrder,
+        resetBottomNavOrder,
         setStudents,
         setGroups,
         setLessons,

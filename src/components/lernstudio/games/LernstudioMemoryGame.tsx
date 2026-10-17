@@ -259,7 +259,7 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
                     key={star}
                     className={`w-7 h-7 ${
                       star <= starsEarned
-                        ? 'fill-amber-400 text-amber-400 animate-bounce'
+                        ? 'fill-amber-400 text-amber-400'
                         : 'text-slate-700'
                     }`}
                   />

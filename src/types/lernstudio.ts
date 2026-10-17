@@ -37,7 +37,15 @@ export type LernstudioGameMode =
   | 'race'
   | 'memory'
   | 'sorting'
-  | 'sentence_builder';
+  | 'sentence_builder'
+  | 'balloon_pop'
+  | 'tictactoe'
+  | 'basket_catch'
+  | 'space_defense'
+  | 'word_detective'
+  | 'whack_a_mole'
+  | 'tug_of_war'
+  | 'word_ninja';
 
 export interface LernstudioExercise {
   id: string;

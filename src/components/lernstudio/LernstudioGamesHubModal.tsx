@@ -114,7 +114,7 @@ export const LernstudioGamesHubModal: React.FC<Props> = ({
   if (!isOpen || !set) return null;
 
   return (
-    <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto" dir="rtl">
+    <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <div className="bg-slate-900 border-2 border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[92vh] animate-scale-up text-white">
         {/* Header */}
         <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 shrink-0">
@@ -124,13 +124,17 @@ export const LernstudioGamesHubModal: React.FC<Props> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
-                <span>مركز الألعاب التفاعلية (Games Hub)</span>
+                <span>{language === 'ar' ? 'مركز الألعاب التفاعلية (Games Hub)' : language === 'de' ? 'Interaktiver Spiele-Hub (Games Hub)' : 'Interactive Games Hub'}</span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-bold border border-slate-700">
                   {set.title}
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                اختر نوع اللعبة المناسب لحصتك أو لتدريب الطلاب من قائمة الألعاب الجماعية والفردية:
+                {language === 'ar'
+                  ? 'اختر نوع اللعبة المناسب لحصتك أو لتدريب الطلاب من قائمة الألعاب الجماعية والفردية:'
+                  : language === 'de'
+                  ? 'Wählen Sie ein Spiel für Ihren Unterricht oder das Einzeltraining aus:'
+                  : 'Choose a game mode for your class or individual practice:'}
               </p>
             </div>
           </div>
@@ -165,7 +169,7 @@ export const LernstudioGamesHubModal: React.FC<Props> = ({
 
                 {/* Title & Emoji */}
                 <div className="flex items-start gap-3 mt-1">
-                  <span className="text-3xl p-2.5 rounded-2xl bg-slate-900 border border-slate-700 shrink-0 group-hover:scale-110 transition-transform">
+                  <span className="text-3xl p-2.5 rounded-2xl bg-slate-900 border border-slate-700 shrink-0">
                     {g.iconEmoji}
                   </span>
                   <div>

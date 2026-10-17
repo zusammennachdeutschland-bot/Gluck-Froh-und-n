@@ -9,6 +9,14 @@ import { LernstudioRaceGame } from './games/LernstudioRaceGame';
 import { LernstudioMemoryGame } from './games/LernstudioMemoryGame';
 import { LernstudioSortingGame } from './games/LernstudioSortingGame';
 import { LernstudioSentenceGame } from './games/LernstudioSentenceGame';
+import { LernstudioBalloonPopGame } from './games/LernstudioBalloonPopGame';
+import { LernstudioTicTacToeGame } from './games/LernstudioTicTacToeGame';
+import { LernstudioBasketCatchGame } from './games/LernstudioBasketCatchGame';
+import { LernstudioSpaceDefenseGame } from './games/LernstudioSpaceDefenseGame';
+import { LernstudioWordDetectiveGame } from './games/LernstudioWordDetectiveGame';
+import { LernstudioWhackAMoleGame } from './games/LernstudioWhackAMoleGame';
+import { LernstudioTugOfWarGame } from './games/LernstudioTugOfWarGame';
+import { LernstudioWordNinjaGame } from './games/LernstudioWordNinjaGame';
 import { LernstudioGamesPortalView } from './LernstudioGamesPortalView';
 import { LernstudioSetEditorModal } from './LernstudioSetEditorModal';
 import { LernstudioAiModal } from './LernstudioAiModal';
@@ -87,7 +95,21 @@ export const LernstudioView: React.FC<Props> = ({
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('all');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>('all');
+
+  // Dynamic Categories from available sets
+  const availableCategories = useMemo(() => {
+    const map = new Map<string, number>();
+    sets.forEach((s) => {
+      if (!s || s.isArchived) return;
+      const cat = s.topic || 'عام';
+      map.set(cat, (map.get(cat) || 0) + 1);
+    });
+    return Array.from(map.entries())
+      .map(([cat, count]) => ({ cat, count }))
+      .sort((a, b) => a.cat.localeCompare(b.cat));
+  }, [sets]);
 
   // Filtered Sets (with Deduplication Protection)
   const filteredSets = useMemo(() => {
@@ -107,6 +129,7 @@ export const LernstudioView: React.FC<Props> = ({
       }
 
       const matchGrade = matchesGradeFilter(set, selectedGradeFilter);
+      const matchCategory = selectedCategoryFilter === 'all' || set.topic === selectedCategoryFilter;
       const matchGroup = selectedGroupFilter === 'all' || set.assignedGroupId === selectedGroupFilter;
 
       const q = searchTerm.trim().toLowerCase();
@@ -116,14 +139,14 @@ export const LernstudioView: React.FC<Props> = ({
         (set.topic && set.topic.toLowerCase().includes(q)) ||
         (set.grade && set.grade.toLowerCase().includes(q));
 
-      if (matchGrade && matchGroup && matchQuery) {
+      if (matchGrade && matchCategory && matchGroup && matchQuery) {
         seenIds.add(set.id);
         if (cleanTitleKey) seenTitles.add(cleanTitleKey);
         return true;
       }
       return false;
     });
-  }, [sets, selectedGradeFilter, selectedGroupFilter, searchTerm]);
+  }, [sets, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter, searchTerm]);
 
   // Handlers
   const handleDuplicateSet = (set: LernstudioSet) => {
@@ -248,6 +271,94 @@ export const LernstudioView: React.FC<Props> = ({
     );
   }
 
+  if (activeMode === 'balloon_pop' && selectedSetForMode) {
+    return (
+      <LernstudioBalloonPopGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'tictactoe' && selectedSetForMode) {
+    return (
+      <LernstudioTicTacToeGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'basket_catch' && selectedSetForMode) {
+    return (
+      <LernstudioBasketCatchGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'tug_of_war' && selectedSetForMode) {
+    return (
+      <LernstudioTugOfWarGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'word_ninja' && selectedSetForMode) {
+    return (
+      <LernstudioWordNinjaGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'space_defense' && selectedSetForMode) {
+    return (
+      <LernstudioSpaceDefenseGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'whack_a_mole' && selectedSetForMode) {
+    return (
+      <LernstudioWhackAMoleGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'word_detective' && selectedSetForMode) {
+    return (
+      <LernstudioWordDetectiveGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
   return (
     <div className={`p-4 sm:p-6 pb-32 sm:pb-40 rounded-3xl space-y-6 transition-all min-h-[85vh] ${activeTheme.bgGradient}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
       {/* Top Banner & Title Bar */}
@@ -320,18 +431,32 @@ export const LernstudioView: React.FC<Props> = ({
           />
         </div>
 
-        {/* Dropdowns row on mobile */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full sm:w-auto shrink-0 min-w-0">
-          {/* Program Grade Filter (Grade 1 to Grade 12) */}
+        {/* Dropdowns row on mobile & desktop */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full sm:w-auto shrink-0 min-w-0">
+          {/* Level 1: Program Grade Filter */}
           <select
             value={selectedGradeFilter}
             onChange={(e) => setSelectedGradeFilter(e.target.value)}
             className="w-full sm:w-auto px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate cursor-pointer"
           >
-            <option value="all">-- {t.allLevels} --</option>
+            <option value="all">🎓 {t.allEducationalLevels} ({sets.length})</option>
             {PROGRAM_GRADES.map((g) => (
               <option key={g.id} value={g.id}>
                 {language === 'ar' ? g.labelAr : language === 'de' ? g.labelDe : g.labelEn}
+              </option>
+            ))}
+          </select>
+
+          {/* Level 2: Thematic Category Filter */}
+          <select
+            value={selectedCategoryFilter}
+            onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+            className="w-full sm:w-auto px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate cursor-pointer"
+          >
+            <option value="all">📁 {t.allTopicsAndCategories} ({availableCategories.length})</option>
+            {availableCategories.map((item) => (
+              <option key={item.cat} value={item.cat}>
+                {getLocalizedSetTopic({ topic: item.cat }, language)} ({item.count})
               </option>
             ))}
           </select>
@@ -342,7 +467,7 @@ export const LernstudioView: React.FC<Props> = ({
             onChange={(e) => setSelectedGroupFilter(e.target.value)}
             className="w-full sm:w-auto px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate cursor-pointer"
           >
-            <option value="all">{t.allGroups}</option>
+            <option value="all">👥 {t.allGroups}</option>
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
@@ -350,6 +475,36 @@ export const LernstudioView: React.FC<Props> = ({
             ))}
           </select>
         </div>
+      </div>
+
+      {/* Curriculum Summary Badge / Counter */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+        <div className="flex items-center gap-2">
+          <span className="px-3 py-1 bg-primary/10 text-primary border border-primary/20 rounded-full font-bold">
+            📚 {sets.length} {t.germanSetsForKids} ({sets.reduce((acc, s) => acc + (s.items?.length || 0), 0)} {t.vocabularyCount})
+          </span>
+          <span className="text-text-muted hidden sm:inline">
+            ✨ {t.curriculumSubtitle}
+          </span>
+        </div>
+        {(selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
+          <div className="flex items-center gap-2">
+            <span className="text-text-muted font-medium">
+              {t.displayedResults} <strong className="text-text-main font-bold">{filteredSets.length}</strong> {t.setsUnit}
+            </span>
+            <button
+              onClick={() => {
+                setSelectedGradeFilter('all');
+                setSelectedCategoryFilter('all');
+                setSelectedGroupFilter('all');
+                setSearchTerm('');
+              }}
+              className="text-xs text-primary hover:underline font-bold cursor-pointer"
+            >
+              {t.resetFilters}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Sets Grid Cards */}
@@ -556,6 +711,11 @@ export const LernstudioView: React.FC<Props> = ({
           onClose={() => {
             setIsTeachModalOpen(false);
             setSelectedSetForTeach(null);
+          }}
+          onLaunchGame={(gMode) => {
+            setSelectedSetForMode(selectedSetForTeach);
+            setActiveMode(gMode);
+            setIsTeachModalOpen(false);
           }}
         />
       )}

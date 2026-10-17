@@ -417,7 +417,7 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={handleNext}
-                className="py-3 px-6 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-sm cursor-pointer shadow-lg inline-flex items-center gap-2 animate-bounce"
+                className="py-3 px-6 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-sm cursor-pointer shadow-lg inline-flex items-center gap-2"
               >
                 <span>{t.nextQuestionBtn}</span>
               </button>

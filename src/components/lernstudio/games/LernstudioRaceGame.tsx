@@ -273,7 +273,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
                 </h3>
               </div>
               {boostApplied && (
-                <div className="flex items-center gap-1 px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 text-xs font-black animate-bounce">
+                <div className="flex items-center gap-1 px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 text-xs font-black">
                   <Zap className="w-4 h-4 fill-amber-300" /> تقدم خطوتين!
                 </div>
               )}

@@ -49,6 +49,13 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
       categoryKey: 'classroomQuizCategory'
     },
     {
+      id: 'tug_of_war',
+      titleKey: 'tugOfWarTitle',
+      emoji: '🪢',
+      category: 'team',
+      categoryKey: 'tugOfWarCategory'
+    },
+    {
       id: 'wheel',
       titleKey: 'wheelGameTitle',
       emoji: '🎡',
@@ -63,6 +70,20 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
       categoryKey: 'raceGameCategory'
     },
     {
+      id: 'space_defense',
+      titleKey: 'spaceDefenseTitle',
+      emoji: '🚀',
+      category: 'team',
+      categoryKey: 'spaceDefenseCategory'
+    },
+    {
+      id: 'tictactoe',
+      titleKey: 'tictactoeTitle',
+      emoji: '❌⭕',
+      category: 'team',
+      categoryKey: 'tictactoeCategory'
+    },
+    {
       id: 'sentence_builder',
       titleKey: 'teamSentenceTitle',
       emoji: '✍️',
@@ -72,6 +93,55 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
   ];
 
   const soloGames: GameItemConfig[] = [
+    {
+      id: 'word_ninja',
+      titleKey: 'wordNinjaTitle',
+      emoji: '🥷',
+      category: 'solo',
+      categoryKey: 'wordNinjaCategory'
+    },
+    {
+      id: 'balloon_pop',
+      titleKey: 'balloonPopTitle',
+      emoji: '🎈',
+      category: 'solo',
+      categoryKey: 'balloonPopCategory'
+    },
+    {
+      id: 'whack_a_mole',
+      titleKey: 'whackAMoleTitle',
+      emoji: '🔨',
+      category: 'solo',
+      categoryKey: 'whackAMoleCategory'
+    },
+    {
+      id: 'basket_catch',
+      titleKey: 'basketCatchTitle',
+      emoji: '🧺',
+      category: 'solo',
+      categoryKey: 'basketCatchCategory'
+    },
+    {
+      id: 'word_detective',
+      titleKey: 'wordDetectiveTitle',
+      emoji: '🕵️‍♂️',
+      category: 'solo',
+      categoryKey: 'wordDetectiveCategory'
+    },
+    {
+      id: 'space_defense',
+      titleKey: 'spaceDefenseTitle',
+      emoji: '🚀',
+      category: 'solo',
+      categoryKey: 'spaceDefenseCategory'
+    },
+    {
+      id: 'tug_of_war',
+      titleKey: 'tugOfWarTitle',
+      emoji: '🪢',
+      category: 'solo',
+      categoryKey: 'tugOfWarCategory'
+    },
     {
       id: 'sentence_builder',
       titleKey: 'soloSentenceTitle',
@@ -159,7 +229,7 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                 className="p-2.5 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border/60 hover:border-primary/50 transition-all cursor-pointer flex items-center justify-between gap-3 group shadow-2xs hover:shadow-xs"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="text-2xl shrink-0 group-hover:scale-110 transition-transform">{game.emoji}</span>
+                  <span className="text-2xl shrink-0">{game.emoji}</span>
                   <div className="min-w-0">
                     <h3 className="text-xs sm:text-sm font-bold text-text-main group-hover:text-primary transition-colors truncate">
                       {t[game.titleKey]}
@@ -218,7 +288,7 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                   }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="text-2xl shrink-0 group-hover:scale-110 transition-transform">{game.emoji}</span>
+                    <span className="text-2xl shrink-0">{game.emoji}</span>
                     <div className="min-w-0">
                       <h3 className={`text-xs sm:text-sm font-bold truncate ${isDisabled ? 'text-text-muted' : 'text-text-main group-hover:text-primary transition-colors'}`}>
                         {t[game.titleKey]}

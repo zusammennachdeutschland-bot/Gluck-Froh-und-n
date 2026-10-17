@@ -185,6 +185,31 @@ export interface LernstudioTranslations {
   completedGameDesc: string;
   restartGameBtn: string;
   returnToSetsBtn: string;
+
+  // New Game Keys
+  balloonPopTitle: string;
+  balloonPopCategory: string;
+  tictactoeTitle: string;
+  tictactoeCategory: string;
+  basketCatchTitle: string;
+  basketCatchCategory: string;
+  spaceDefenseTitle: string;
+  spaceDefenseCategory: string;
+  wordDetectiveTitle: string;
+  wordDetectiveCategory: string;
+  whackAMoleTitle: string;
+  whackAMoleCategory: string;
+  tugOfWarTitle: string;
+  tugOfWarCategory: string;
+  wordNinjaTitle: string;
+  wordNinjaCategory: string;
+  allEducationalLevels: string;
+  allTopicsAndCategories: string;
+  germanSetsForKids: string;
+  curriculumSubtitle: string;
+  displayedResults: string;
+  setsUnit: string;
+  resetFilters: string;
 }
 
 const translations: Record<AppLanguage, LernstudioTranslations> = {
@@ -243,6 +268,29 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     memoryGameCategory: 'فردي / ثنائي',
     comprehensivePracticeTitle: 'التدريب الفردي الشامل',
     comprehensivePracticeCategory: 'اختبار سريع',
+    balloonPopTitle: 'فرقعة البالونات 🎈',
+    balloonPopCategory: 'تحدي السرعة الفردي',
+    tictactoeTitle: 'لعبة X-O الكلمات ❌⭕',
+    tictactoeCategory: 'مواجهة فرق أو ضد الحاسوب',
+    basketCatchTitle: 'التقاط المفردات بالسلة 🧺',
+    basketCatchCategory: 'التقاط المطر الصوتي الفردي',
+    spaceDefenseTitle: 'معركة الدفاع الفضائي 🚀',
+    spaceDefenseCategory: 'جماعي أو فردي / تصويب',
+    wordDetectiveTitle: 'المحقق وكلمة السر 🕵️‍♂️',
+    wordDetectiveCategory: 'تخمين الحروف والألغاز',
+    whackAMoleTitle: 'اضرب الخلد والمفردات 🔨',
+    whackAMoleCategory: 'تحدي السرعة الفردي',
+    tugOfWarTitle: 'تحدي شد الحبل 🪢',
+    tugOfWarCategory: 'تنافس فرق حماسي / أو ضد الآلي',
+    wordNinjaTitle: 'نينجا تقطيع المفردات 🥷',
+    wordNinjaCategory: 'تحدي السرعة والتركيز الفردي',
+    allEducationalLevels: 'كل المراحل التعليمية',
+    allTopicsAndCategories: 'كل الموضوعات والمجالات',
+    germanSetsForKids: 'مجموعة ألمانية للأطفال',
+    curriculumSubtitle: '10 مفردات منتقاة لكل مجموعة مع الترجمة والصوت والأمثلة',
+    displayedResults: 'النتائج المعروضة:',
+    setsUnit: 'مجموعة',
+    resetFilters: 'إعادة تعيين الفلاتر',
 
     sentenceGameHeader: 'تحدي ترتيب الجمل الألمانية 🧩',
     targetTranslationLabel: 'الترتيب المطلوب:',
@@ -418,6 +466,29 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     memoryGameCategory: 'Solo / Pair',
     comprehensivePracticeTitle: 'Comprehensive Solo Practice',
     comprehensivePracticeCategory: 'Quick Quiz',
+    balloonPopTitle: 'Balloon Pop 🎈',
+    balloonPopCategory: 'Solo Speed Challenge',
+    tictactoeTitle: 'Word Tic-Tac-Toe ❌⭕',
+    tictactoeCategory: 'Team Duel or vs AI',
+    basketCatchTitle: 'Vocab Basket Catch 🧺',
+    basketCatchCategory: 'Solo Falling Words',
+    spaceDefenseTitle: 'Space Defender 🚀',
+    spaceDefenseCategory: 'Team or Solo / Blaster',
+    wordDetectiveTitle: 'Word Detective 🕵️‍♂️',
+    wordDetectiveCategory: 'Letter Guessing & Mystery',
+    whackAMoleTitle: 'Whack-A-Word 🔨',
+    whackAMoleCategory: 'Solo Reflex Challenge',
+    tugOfWarTitle: 'Tug of War 🪢',
+    tugOfWarCategory: 'Thrilling Team Pull or vs CPU',
+    wordNinjaTitle: 'Word Ninja 🥷',
+    wordNinjaCategory: 'Slice & Dice Solo Challenge',
+    allEducationalLevels: 'All Educational Levels',
+    allTopicsAndCategories: 'All Topics & Categories',
+    germanSetsForKids: 'German Sets for Kids',
+    curriculumSubtitle: '10 curated vocabulary items per set with audio, translation & examples',
+    displayedResults: 'Displayed results:',
+    setsUnit: 'sets',
+    resetFilters: 'Reset Filters',
 
     sentenceGameHeader: 'German Sentence Builder Challenge 🧩',
     targetTranslationLabel: 'Target Translation:',
@@ -593,6 +664,29 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     memoryGameCategory: 'Einzel / Paar',
     comprehensivePracticeTitle: 'Umfassendes Einzel-Training',
     comprehensivePracticeCategory: 'Schnell-Quiz',
+    balloonPopTitle: 'Ballon-Platzer 🎈',
+    balloonPopCategory: 'Einzelschnelligkeit',
+    tictactoeTitle: 'Wort-Tic-Tac-Toe ❌⭕',
+    tictactoeCategory: 'Teamduell oder gegen KI',
+    basketCatchTitle: 'Wort-Korb Fangen 🧺',
+    basketCatchCategory: 'Einzel-Regen-Spiel',
+    spaceDefenseTitle: 'Weltraum-Verteidiger 🚀',
+    spaceDefenseCategory: 'Team oder Einzeln / Shooter',
+    wordDetectiveTitle: 'Wort-Detektiv 🕵️‍♂️',
+    wordDetectiveCategory: 'Buchstabenrätsel',
+    whackAMoleTitle: 'Hau-den-Maulwurf 🔨',
+    whackAMoleCategory: 'Reflex-Spiel',
+    tugOfWarTitle: 'Tauziehen-Duell 🪢',
+    tugOfWarCategory: 'Spannender Team-Wettkampf',
+    wordNinjaTitle: 'Wort-Ninja 🥷',
+    wordNinjaCategory: 'Schneide-Challenge',
+    allEducationalLevels: 'Alle Bildungsstufen',
+    allTopicsAndCategories: 'Alle Themen & Kategorien',
+    germanSetsForKids: 'Deutsche Lernsets für Kinder',
+    curriculumSubtitle: '10 ausgewählte Vokabeln pro Set mit Audio, Übersetzung & Beispielen',
+    displayedResults: 'Angezeigte Ergebnisse:',
+    setsUnit: 'Sets',
+    resetFilters: 'Filter zurücksetzen',
 
     sentenceGameHeader: 'Deutscher Satzbau-Challenge 🧩',
     targetTranslationLabel: 'Zielübersetzung:',
@@ -838,22 +932,31 @@ export interface ProgramGrade {
 }
 
 export const PROGRAM_GRADES: ProgramGrade[] = [
-  { id: 'grade_1', num: 1, labelAr: 'جريد 1 (الصف الأول)', labelEn: 'Grade 1', labelDe: 'Klasse 1', keywords: ['1', 'الأول', 'الاول', 'المستوى الأول'] },
-  { id: 'grade_2', num: 2, labelAr: 'جريد 2 (الصف الثاني)', labelEn: 'Grade 2', labelDe: 'Klasse 2', keywords: ['2', 'الثاني', 'المستوى الثاني'] },
-  { id: 'grade_3', num: 3, labelAr: 'جريد 3 (الصف الثالث)', labelEn: 'Grade 3', labelDe: 'Klasse 3', keywords: ['3', 'الثالث', 'المستوى الثالث'] },
-  { id: 'grade_4', num: 4, labelAr: 'جريد 4 (الصف الرابع)', labelEn: 'Grade 4', labelDe: 'Klasse 4', keywords: ['4', 'الرابع', 'المستوى الرابع'] },
-  { id: 'grade_5', num: 5, labelAr: 'جريد 5 (الصف الخامس)', labelEn: 'Grade 5', labelDe: 'Klasse 5', keywords: ['5', 'الخامس', 'المستوى الخامس'] },
-  { id: 'grade_6', num: 6, labelAr: 'جريد 6 (الصف السادس)', labelEn: 'Grade 6', labelDe: 'Klasse 6', keywords: ['6', 'السادس', 'المستوى السادس'] },
-  { id: 'grade_7', num: 7, labelAr: 'جريد 7 (الصف السابع)', labelEn: 'Grade 7', labelDe: 'Klasse 7', keywords: ['7', 'السابع', 'المستوى السابع'] },
-  { id: 'grade_8', num: 8, labelAr: 'جريد 8 (الصف الثامن)', labelEn: 'Grade 8', labelDe: 'Klasse 8', keywords: ['8', 'الثامن'] },
-  { id: 'grade_9', num: 9, labelAr: 'جريد 9 (الصف التاسع)', labelEn: 'Grade 9', labelDe: 'Klasse 9', keywords: ['9', 'التاسع'] },
-  { id: 'grade_10', num: 10, labelAr: 'جريد 10 (الصف العاشر)', labelEn: 'Grade 10', labelDe: 'Klasse 10', keywords: ['10', 'العاشر'] },
-  { id: 'grade_11', num: 11, labelAr: 'جريد 11 (الصف الحادي عشر)', labelEn: 'Grade 11', labelDe: 'Klasse 11', keywords: ['11', 'الحادي عشر'] },
-  { id: 'grade_12', num: 12, labelAr: 'جريد 12 (الصف الثاني عشر)', labelEn: 'Grade 12', labelDe: 'Klasse 12', keywords: ['12', 'الثاني عشر'] },
+  { id: 'preschool', num: 0, labelAr: 'روضة أطفال (Preschool / KG)', labelEn: 'Preschool / KG', labelDe: 'Vorschule / Kindergarten', keywords: ['روضة', 'تمهيدي', 'preschool', 'kg', 'vorschule'] },
+  { id: 'grade_1', num: 1, labelAr: 'جريد 1 (الصف الأول)', labelEn: 'Grade 1', labelDe: 'Klasse 1', keywords: ['1', 'الأول', 'الاول', 'المستوى الأول', 'grade 1'] },
+  { id: 'grade_2', num: 2, labelAr: 'جريد 2 (الصف الثاني)', labelEn: 'Grade 2', labelDe: 'Klasse 2', keywords: ['2', 'الثاني', 'المستوى الثاني', 'grade 2'] },
+  { id: 'grade_3', num: 3, labelAr: 'جريد 3 (الصف الثالث)', labelEn: 'Grade 3', labelDe: 'Klasse 3', keywords: ['3', 'الثالث', 'المستوى الثالث', 'grade 3'] },
+  { id: 'grade_4', num: 4, labelAr: 'جريد 4 (الصف الرابع)', labelEn: 'Grade 4', labelDe: 'Klasse 4', keywords: ['4', 'الرابع', 'المستوى الرابع', 'grade 4'] },
+  { id: 'grade_5', num: 5, labelAr: 'جريد 5 (الصف الخامس)', labelEn: 'Grade 5', labelDe: 'Klasse 5', keywords: ['5', 'الخامس', 'المستوى الخامس', 'grade 5'] },
+  { id: 'grade_6', num: 6, labelAr: 'جريد 6 (الصف السادس)', labelEn: 'Grade 6', labelDe: 'Klasse 6', keywords: ['6', 'السادس', 'المستوى السادس', 'grade 6'] },
+  { id: 'level_a1', num: 101, labelAr: 'مستوى مبتدئ (A1)', labelEn: 'Beginner A1', labelDe: 'Anfänger A1', keywords: ['a1', 'مبتدئ', 'beginner'] },
+  { id: 'level_a2', num: 102, labelAr: 'مستوى أساسي (A2)', labelEn: 'Elementary A2', labelDe: 'Grundstufe A2', keywords: ['a2', 'أساسي', 'elementary'] },
 ];
 
 export function matchesGradeFilter(set: Partial<LernstudioSet>, gradeFilterId: string): boolean {
   if (!gradeFilterId || gradeFilterId === 'all') return true;
+
+  if (gradeFilterId === 'preschool') {
+    const text = `${set.grade || ''} ${set.title || ''}`.toLowerCase();
+    return text.includes('روضة') || text.includes('preschool') || text.includes('vorschule');
+  }
+  if (gradeFilterId === 'level_a1') {
+    return set.level === 'A1' || (set.grade || '').toLowerCase().includes('a1');
+  }
+  if (gradeFilterId === 'level_a2') {
+    return set.level === 'A2' || (set.grade || '').toLowerCase().includes('a2');
+  }
+
   const targetGrade = PROGRAM_GRADES.find((g) => g.id === gradeFilterId);
   if (!targetGrade) return true;
 

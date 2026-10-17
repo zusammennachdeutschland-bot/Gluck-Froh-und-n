@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { LernstudioSet } from '../../types/lernstudio';
 import { getLernstudioTranslations, getLocalizedSetTitle, getLocalizedSetTopic } from '../../utils/lernstudioTranslations';
+import { speakGermanText } from '../../utils/audioSpeechUtils';
 import { X, Volume2, Search, Gamepad2, BookOpen, Printer } from 'lucide-react';
 
 interface Props {
@@ -33,13 +34,7 @@ export const LernstudioWordsModal: React.FC<Props> = ({
   const items = set.items || [];
 
   const handleSpeakGerman = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'de-DE';
-      utterance.rate = 0.9;
-      window.speechSynthesis.speak(utterance);
-    }
+    speakGermanText(text);
   };
 
   const filteredItems = items.filter((it) => {

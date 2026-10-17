@@ -259,7 +259,11 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
               >
                 <option value={4}>Alle 4 Lektionen (Every 4)</option>
                 <option value={8}>Alle 8 Lektionen (Every 8)</option>
+                <option value={10}>Alle 10 Lektionen (Every 10)</option>
                 <option value={12}>Alle 12 Lektionen (Every 12)</option>
+                <option value={16}>Alle 16 Lektionen (Every 16)</option>
+                <option value={20}>Alle 20 Lektionen (Every 20)</option>
+                <option value={24}>Alle 24 Lektionen (Every 24)</option>
               </select>
             </div>
           </div>

@@ -8,6 +8,7 @@ interface Props {
   isOpen: boolean;
   setToEdit?: LernstudioSet | null;
   groups: Group[];
+  language?: string;
   onClose: () => void;
   onSaveSet: (set: LernstudioSet) => void;
 }
@@ -16,6 +17,7 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
   isOpen,
   setToEdit,
   groups,
+  language = 'ar',
   onClose,
   onSaveSet
 }) => {
@@ -72,7 +74,13 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
 
     const validItems = items.filter((i) => i.german.trim() && i.arabic.trim());
     if (validItems.length === 0) {
-      alert('يرجى إضافة كلمة ألمانية وترجمة عربية واحدة على الأقل.');
+      alert(
+        language === 'ar'
+          ? 'يرجى إضافة كلمة ألمانية وترجمة عربية واحدة على الأقل.'
+          : language === 'de'
+          ? 'Bitte fügen Sie mindestens ein deutsches Wort mit arabischer Übersetzung hinzu.'
+          : 'Please add at least one German word with Arabic translation.'
+      );
       return;
     }
 
@@ -91,18 +99,29 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
     };
 
     onSaveSet(updatedSet);
-    /* confetti removed */
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-hidden" dir="rtl">
+    <div className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-hidden" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <div className="bg-surface border border-surface-border rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-scale-up">
         {/* Header */}
         <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between bg-surface shrink-0">
           <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-primary" />
-            <span>{setToEdit ? 'تعديل المجموعة التعليمية' : 'إنشاء مجموعة تعليمية جديدة (Set)'}</span>
+            <span>
+              {setToEdit
+                ? language === 'ar'
+                  ? 'تعديل المجموعة التعليمية'
+                  : language === 'de'
+                  ? 'Lernset bearbeiten'
+                  : 'Edit Learning Set'
+                : language === 'ar'
+                ? 'إنشاء مجموعة تعليمية جديدة (Set)'
+                : language === 'de'
+                ? 'Neues Lernset erstellen (Set)'
+                : 'Create New Learning Set (Set)'}
+            </span>
           </h2>
           <button
             type="button"
@@ -118,7 +137,9 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
           {/* Metadata Section */}
           <div className="p-4 bg-surface-hover/50 border border-surface-border rounded-2xl grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="sm:col-span-2">
-              <label className="text-xs font-bold text-text-muted block mb-1">عنوان المجموعة (Title): *</label>
+              <label className="text-xs font-bold text-text-muted block mb-1">
+                {language === 'ar' ? 'عنوان المجموعة (Title): *' : language === 'de' ? 'Titel des Sets: *' : 'Set Title: *'}
+              </label>
               <input
                 type="text"
                 required
@@ -130,56 +151,64 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
             </div>
 
             <div>
-              <label className="text-xs font-bold text-text-muted block mb-1">المستوى الأوروبي (CEFR):</label>
+              <label className="text-xs font-bold text-text-muted block mb-1">
+                {language === 'ar' ? 'المستوى الأوروبي (CEFR):' : language === 'de' ? 'CEFR-Niveau:' : 'CEFR Level:'}
+              </label>
               <select
                 value={level}
                 onChange={(e) => setLevel(e.target.value as LernstudioLevel)}
-                className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
+                className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary cursor-pointer"
               >
-                <option value="A1">A1 - مبتدئ</option>
-                <option value="A2">A2 - أساسي</option>
-                <option value="B1">B1 - متوسط</option>
-                <option value="B2">B2 - متوسط متقدم</option>
-                <option value="C1">C1 - متقدم</option>
-                <option value="C2">C2 - محترف</option>
+                <option value="A1">A1 - {language === 'ar' ? 'مبتدئ' : language === 'de' ? 'Anfänger' : 'Beginner'}</option>
+                <option value="A2">A2 - {language === 'ar' ? 'أساسي' : language === 'de' ? 'Grundstufe' : 'Elementary'}</option>
+                <option value="B1">B1 - {language === 'ar' ? 'متوسط' : language === 'de' ? 'Mittelstufe' : 'Intermediate'}</option>
+                <option value="B2">B2 - {language === 'ar' ? 'متوسط متقدم' : language === 'de' ? 'Fortgeschritten' : 'Upper Intermediate'}</option>
+                <option value="C1">C1 - {language === 'ar' ? 'متقدم' : language === 'de' ? 'Fortgeschritten C1' : 'Advanced C1'}</option>
+                <option value="C2">C2 - {language === 'ar' ? 'محترف' : language === 'de' ? 'Kompetent C2' : 'Proficient C2'}</option>
               </select>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-text-muted block mb-1">الموضوع (Topic):</label>
+              <label className="text-xs font-bold text-text-muted block mb-1">
+                {language === 'ar' ? 'الموضوع (Topic):' : language === 'de' ? 'Thema:' : 'Topic:'}
+              </label>
               <input
                 type="text"
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                placeholder="مثال: المفردات, القواعد, المدرسة..."
+                placeholder="مثال: المفردات, القواعد..."
                 className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
               />
             </div>
 
             <div>
-              <label className="text-xs font-bold text-text-muted block mb-1">الصف / المنهج (Grade):</label>
+              <label className="text-xs font-bold text-text-muted block mb-1">
+                {language === 'ar' ? 'الصف / المنهج (Grade):' : language === 'de' ? 'Klasse / Stufe:' : 'Grade / Stage:'}
+              </label>
               <select
                 value={grade}
                 onChange={(e) => setGrade(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary cursor-pointer"
               >
-                <option value="">-- اختر الصف (Grade 1 - 12) --</option>
+                <option value="">{language === 'ar' ? '-- اختر الصف --' : language === 'de' ? '-- Klasse wählen --' : '-- Select Grade --'}</option>
                 {PROGRAM_GRADES.map((g) => (
                   <option key={g.id} value={g.labelAr}>
-                    {g.labelAr}
+                    {language === 'ar' ? g.labelAr : language === 'de' ? g.labelDe : g.labelEn}
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-text-muted block mb-1">ربط بجروب معين (اختياري):</label>
+              <label className="text-xs font-bold text-text-muted block mb-1">
+                {language === 'ar' ? 'ربط بجروب معين (اختياري):' : language === 'de' ? 'Gruppe zuordnen (optional):' : 'Assign Group (optional):'}
+              </label>
               <select
                 value={assignedGroupId}
                 onChange={(e) => setAssignedGroupId(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
+                className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary cursor-pointer"
               >
-                <option value="">بدون ربط (مستقلة)</option>
+                <option value="">{language === 'ar' ? 'بدون ربط (مستقلة)' : language === 'de' ? 'Keine (Unabhängig)' : 'None (Independent)'}</option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name} ({g.grade})
@@ -193,7 +222,7 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-black text-text-main uppercase tracking-wider">
-                قائمة مفردات المجموعة ({items.length} مفردات)
+                {language === 'ar' ? `قائمة مفردات المجموعة (${items.length} مفردات)` : language === 'de' ? `Wortschatzliste (${items.length} Wörter)` : `Vocabulary List (${items.length} words)`}
               </h3>
               <button
                 type="button"
@@ -201,7 +230,7 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
                 className="px-3 py-1.5 bg-primary-soft hover:bg-primary-soft/80 text-primary rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>إضافة كلمة جديدة</span>
+                <span>{language === 'ar' ? 'إضافة كلمة جديدة' : language === 'de' ? 'Neues Wort hinzufügen' : 'Add New Word'}</span>
               </button>
             </div>
 
@@ -215,7 +244,7 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
                       onClick={() => handleRemoveItem(idx)}
                       disabled={items.length <= 1}
                       className="p-1 text-text-muted hover:text-red-500 disabled:opacity-30 cursor-pointer"
-                      title="حذف المفردة"
+                      title={language === 'ar' ? 'حذف المفردة' : language === 'de' ? 'Wort löschen' : 'Delete Word'}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -223,7 +252,9 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div>
-                      <label className="text-[10px] font-bold text-text-muted block">الكلمة بالألمانية (German): *</label>
+                      <label className="text-[10px] font-bold text-text-muted block">
+                        {language === 'ar' ? 'الكلمة بالألمانية (German): *' : language === 'de' ? 'Deutsches Wort: *' : 'German Word: *'}
+                      </label>
                       <input
                         type="text"
                         required
@@ -236,7 +267,9 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-bold text-text-muted block">الترجمة بالعربية (Arabic): *</label>
+                      <label className="text-[10px] font-bold text-text-muted block">
+                        {language === 'ar' ? 'الترجمة بالعربية (Arabic): *' : language === 'de' ? 'Arabische Übersetzung: *' : 'Arabic Translation: *'}
+                      </label>
                       <input
                         type="text"
                         required
@@ -248,7 +281,9 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-bold text-text-muted block">صيغة الجمع (Plural):</label>
+                      <label className="text-[10px] font-bold text-text-muted block">
+                        {language === 'ar' ? 'صيغة الجمع (Plural):' : language === 'de' ? 'Plural:' : 'Plural:'}
+                      </label>
                       <input
                         type="text"
                         value={item.plural || ''}
@@ -260,7 +295,9 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-bold text-text-muted block">جملة مثال بالألمانية:</label>
+                      <label className="text-[10px] font-bold text-text-muted block">
+                        {language === 'ar' ? 'جملة مثال بالألمانية:' : language === 'de' ? 'Beispielsatz:' : 'Example Sentence:'}
+                      </label>
                       <input
                         type="text"
                         value={item.exampleSentenceGerman || ''}
@@ -272,7 +309,9 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-bold text-text-muted block">ترجمة جملة المثال:</label>
+                      <label className="text-[10px] font-bold text-text-muted block">
+                        {language === 'ar' ? 'ترجمة جملة المثال:' : language === 'de' ? 'Beispielsatz Übersetzung:' : 'Example Translation:'}
+                      </label>
                       <input
                         type="text"
                         value={item.exampleSentenceArabic || ''}
@@ -283,7 +322,9 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-bold text-text-muted block">الإيموجي (Emoji):</label>
+                      <label className="text-[10px] font-bold text-text-muted block">
+                        {language === 'ar' ? 'الإيموجي (Emoji):' : language === 'de' ? 'Emoji:' : 'Emoji:'}
+                      </label>
                       <input
                         type="text"
                         value={item.emoji || ''}
@@ -305,14 +346,14 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
               onClick={onClose}
               className="px-4 py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-xl text-xs font-bold cursor-pointer"
             >
-              إلغاء
+              {language === 'ar' ? 'إلغاء' : language === 'de' ? 'Abbrechen' : 'Cancel'}
             </button>
             <button
               type="submit"
               className="px-6 py-2 bg-primary text-white rounded-xl text-xs font-black shadow-md cursor-pointer inline-flex items-center gap-1.5"
             >
               <Save className="w-4 h-4" />
-              <span>حفظ المجموعة</span>
+              <span>{language === 'ar' ? 'حفظ المجموعة' : language === 'de' ? 'Set speichern' : 'Save Set'}</span>
             </button>
           </div>
         </form>

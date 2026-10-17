@@ -3,10 +3,10 @@ import { useApp } from '../../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
   History, Award, Clock, Plus, Zap, UserPlus, Layers,
-  Search, Moon, Sun, BookOpen, Sparkles, Gamepad2
+  Search, Moon, Sun, BookOpen, Sparkles, Gamepad2,
+  PanelLeftClose, PanelLeftOpen, SlidersHorizontal, ArrowUp, ArrowDown, RotateCcw, X
 } from 'lucide-react';
 import { AvatarImage } from '../AvatarImage';
-import { DEFAULT_OFFLINE_AVATAR } from '../../data/avatarPresets';
 import { SyncHeaderButton } from '../sync/SyncHeaderButton';
 import { SyncCenterModal } from '../sync/SyncCenterModal';
 import { pairWithPeer } from '../../services/sync/syncClient';
@@ -16,6 +16,11 @@ import { formatLocalDate } from '../../utils/timeUtils';
 interface DesktopSidebarProps {
   onOpenSyncModal?: () => void;
 }
+
+const ALL_NAV_IDS = [
+  'home', 'schedule', 'students', 'payments', 'history', 
+  'reports', 'certificates', 'freeTime', 'schoolSchedule', 'hod', 'lernstudio', 'settings'
+];
 
 export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal }) => {
   const {
@@ -55,9 +60,62 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
   } = useApp();
 
   const [internalSyncOpen, setInternalSyncOpen] = useState(false);
+  const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
   const [activityLogs, setActivityLogs] = useState<{ id: string; message: string; time: string }[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [seenDueCount, setSeenDueCount] = useState(0);
+
+  const [isMinimized, setIsMinimized] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('dl_sidebar_minimized') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [navOrder, setNavOrder] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('dl_sidebar_nav_order');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          // Ensure all current IDs are present
+          const missing = ALL_NAV_IDS.filter(id => !parsed.includes(id));
+          return [...parsed.filter(id => ALL_NAV_IDS.includes(id)), ...missing];
+        }
+      }
+    } catch {}
+    return ALL_NAV_IDS;
+  });
+
+  const saveNavOrder = (newOrder: string[]) => {
+    setNavOrder(newOrder);
+    try {
+      localStorage.setItem('dl_sidebar_nav_order', JSON.stringify(newOrder));
+    } catch {}
+  };
+
+  const moveNavItem = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= navOrder.length) return;
+    const updated = [...navOrder];
+    const temp = updated[index];
+    updated[index] = updated[targetIndex];
+    updated[targetIndex] = temp;
+    saveNavOrder(updated);
+  };
+
+  const resetNavOrder = () => {
+    saveNavOrder(ALL_NAV_IDS);
+  };
+
+  const toggleMinimize = () => {
+    const next = !isMinimized;
+    setIsMinimized(next);
+    try {
+      localStorage.setItem('dl_sidebar_minimized', String(next));
+    } catch {}
+  };
 
   const unreadCount = notifications.filter(n => !n.read).length;
   const deletedCount = recentlyDeleted.students.length + recentlyDeleted.groups.length + recentlyDeleted.lessons.length;
@@ -180,90 +238,133 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
     addLog(`Renamed peer to ${newName}`);
   };
 
-  const navItems = [
-    { id: 'home', label: t('nav_home') || 'Startseite', icon: Home, badge: null },
-    { id: 'schedule', label: t('nav_schedule') || 'Termine & Unterricht', icon: Calendar, badge: lessons.filter(l => l.date === formatLocalDate() && l.status !== 'cancelled').length || null },
-    { id: 'students', label: t('nav_students') || 'Schüler & Gruppen', icon: Users, badge: `${activeStudentsCount}` },
-    { id: 'payments', label: t('nav_payments') || 'Zahlungen & Finanzen', icon: Wallet, badge: unreadDueCount > 0 ? `${unreadDueCount}` : null },
-    { id: 'history', label: t('nav_history') || 'Sitzungsverlauf', icon: History, badge: null },
-    { id: 'reports', label: t('nav_reports') || 'Berichte & Analysen', icon: BarChart2, badge: null },
-    { id: 'certificates', label: t('nav_certificates') || 'Zertifikate-Studio', icon: Award, badge: null },
-    { id: 'freeTime', label: t('nav_free_time') || 'Freie Termine', icon: Clock, badge: null },
-    { id: 'schoolSchedule', label: _t('جدول المدرسة', 'School Schedule', 'Stundenplan'), icon: BookOpen, badge: null },
-    { id: 'hod', label: _t('إدارة القسم (HOD Hub)', 'HOD Hub', 'Fachleiter Hub'), icon: Layers, badge: null },
-    { id: 'lernstudio', label: 'Glück Lernstudio 🇩🇪', icon: Gamepad2, badge: 'NEU' },
-    { id: 'settings', label: t('nav_settings') || 'Einstellungen', icon: Settings, badge: null },
-  ];
+  const navItemMap: Record<string, { label: string; icon: React.ElementType; badge: any }> = {
+    home: { label: t('nav_home') || 'Startseite', icon: Home, badge: null },
+    schedule: { label: t('nav_schedule') || 'Termine & Unterricht', icon: Calendar, badge: lessons.filter(l => l.date === formatLocalDate() && l.status !== 'cancelled').length || null },
+    students: { label: t('nav_students') || 'Schüler & Gruppen', icon: Users, badge: `${activeStudentsCount}` },
+    payments: { label: t('nav_payments') || 'Zahlungen & Finanzen', icon: Wallet, badge: unreadDueCount > 0 ? `${unreadDueCount}` : null },
+    history: { label: t('nav_history') || 'Sitzungsverlauf', icon: History, badge: null },
+    reports: { label: t('nav_reports') || 'Berichte & Analysen', icon: BarChart2, badge: null },
+    certificates: { label: t('nav_certificates') || 'Zertifikate-Studio', icon: Award, badge: null },
+    freeTime: { label: t('nav_free_time') || 'Freie Termine', icon: Clock, badge: null },
+    schoolSchedule: { label: _t('جدول المدرسة', 'School Schedule', 'Stundenplan'), icon: BookOpen, badge: null },
+    hod: { label: _t('إدارة القسم (HOD Hub)', 'HOD Hub', 'Fachleiter Hub'), icon: Layers, badge: null },
+    lernstudio: { label: 'Glück Lernstudio 🇩🇪', icon: Gamepad2, badge: 'NEU' },
+    settings: { label: t('nav_settings') || 'Einstellungen', icon: Settings, badge: null },
+  };
+
+  const sortedNavItems = navOrder.map(id => ({ id, ...(navItemMap[id] || navItemMap['home']) }));
 
   return (
     <>
-      <aside className="w-64 xl:w-72 h-full bg-surface dark:bg-background border-r border-surface-border/70 dark:border-surface-border flex flex-col justify-between select-none shrink-0 z-30 transition-all">
+      <aside className={`h-full bg-surface dark:bg-background border-r border-surface-border/70 dark:border-surface-border flex flex-col justify-between select-none shrink-0 z-30 transition-all duration-300 ease-in-out ${isMinimized ? 'w-20' : 'w-64 xl:w-72'}`}>
         {/* Brand Header */}
-        <div className="p-4 border-b border-surface-border/60">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary via-primary-hover to-primary text-white flex items-center justify-center font-black text-lg shadow-md shadow-primary/20 shrink-0">
-              G
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="font-black text-base tracking-tight text-text-main">Glück</span>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary dark:bg-primary-soft">
-                  OS
-                </span>
+        <div className={`p-4 border-b border-surface-border/60 ${isMinimized ? 'flex flex-col items-center gap-3' : ''}`}>
+          <div className={`flex items-center ${isMinimized ? 'flex-col gap-2 w-full justify-center' : 'justify-between gap-3'}`}>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary via-primary-hover to-primary text-white flex items-center justify-center font-black text-lg shadow-md shadow-primary/20 shrink-0">
+                G
               </div>
-              <p className="text-[11px] text-text-muted truncate font-medium">
-                Deutschlehrer Cockpit
-              </p>
+              {!isMinimized && (
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-black text-base tracking-tight text-text-main">Glück</span>
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary dark:bg-primary-soft">
+                      OS
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-text-muted truncate font-medium">
+                    Deutschlehrer Cockpit
+                  </p>
+                </div>
+              )}
             </div>
+
+            {/* Minimize Toggle Button */}
+            <button
+              onClick={toggleMinimize}
+              className="p-2 rounded-xl text-text-muted hover:text-text-main hover:bg-surface-hover/80 dark:hover:bg-surface-border/40 transition-all cursor-pointer shrink-0"
+              title={isMinimized ? _t('توسيع القائمة الجانبية', 'Expand Sidebar', 'Sidebar erweitern') : _t('تصغير القائمة الجانبية', 'Minimize Sidebar', 'Sidebar minimieren')}
+            >
+              {isMinimized ? <PanelLeftOpen className="w-4 h-4 text-primary" /> : <PanelLeftClose className="w-4 h-4 text-text-muted" />}
+            </button>
           </div>
 
           {/* Teacher Profile Card */}
-          <div className="mt-3 p-2.5 rounded-xl bg-surface-hover/60 dark:bg-surface-border/30 border border-surface-border/50 flex items-center gap-2.5">
-            <div className="relative shrink-0">
+          {!isMinimized && (
+            <div className="mt-3 p-2.5 rounded-xl bg-surface-hover/60 dark:bg-surface-border/30 border border-surface-border/50 flex items-center gap-2.5">
+              <div className="relative shrink-0">
+                <AvatarImage
+                  name={profile.displayName}
+                  avatarUrl={profile.avatarUrl || undefined}
+                  alt={profile.displayName}
+                  className="w-9 h-9 rounded-full object-cover ring-1 ring-surface-border"
+                />
+                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full ring-2 ring-surface" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-text-main truncate">
+                  {profile.displayName || 'Deutschlehrer'}
+                </p>
+                <p className="text-[10px] text-text-muted truncate">
+                  {profile.email || 'offline-betrieb'}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {isMinimized && (
+            <div className="mt-2 relative">
               <AvatarImage
                 name={profile.displayName}
                 avatarUrl={profile.avatarUrl || undefined}
                 alt={profile.displayName}
-                className="w-9 h-9 rounded-full object-cover ring-1 ring-surface-border"
+                className="w-10 h-10 rounded-full object-cover ring-2 ring-primary/40 mx-auto"
               />
-              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full ring-2 ring-surface" />
+              <span className="absolute bottom-0 right-3 w-2.5 h-2.5 bg-emerald-500 rounded-full ring-2 ring-surface" />
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-text-main truncate">
-                {profile.displayName || 'Deutschlehrer'}
-              </p>
-              <p className="text-[10px] text-text-muted truncate">
-                {profile.email || 'offline-betrieb'}
-              </p>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Navigation Menu */}
-        <div className="flex-1 px-3 py-3 overflow-y-auto space-y-1">
-          <div className="text-[10px] uppercase font-bold tracking-wider text-text-muted/70 px-3 py-1">
-            Hauptmenü
-          </div>
+        <div className={`flex-1 py-3 overflow-y-auto space-y-1 ${isMinimized ? 'px-2' : 'px-3'}`}>
+          {!isMinimized && (
+            <div className="flex items-center justify-between px-3 py-1 mb-1">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-text-muted/70">
+                Hauptmenü
+              </span>
+              <button
+                onClick={() => setIsCustomizeModalOpen(true)}
+                className="p-1 rounded-lg text-text-muted hover:text-primary hover:bg-surface-hover transition-all cursor-pointer"
+                title={_t('ترتيب الأيقونات والصفحات', 'Rearrange Pages & Icons', 'Seiten & Icons anordnen')}
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
-          {navItems.map(item => {
+          {sortedNavItems.map(item => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id as any)}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                title={isMinimized ? item.label : undefined}
+                className={`w-full flex items-center rounded-xl text-xs font-bold transition-all cursor-pointer relative group ${
+                  isMinimized ? 'justify-center p-3' : 'justify-between px-3 py-2.5'
+                } ${
                   isActive
                     ? 'bg-primary text-white shadow-xs shadow-primary/20'
                     : 'text-text-muted hover:text-text-main hover:bg-surface-hover/80 dark:hover:bg-surface-border/40'
                 }`}
               >
-                <div className="flex items-center gap-2.5 min-w-0 truncate">
+                <div className={`flex items-center min-w-0 ${isMinimized ? 'justify-center' : 'gap-2.5 truncate'}`}>
                   <Icon className={`w-4 h-4 shrink-0 transition-colors ${isActive ? 'text-white' : 'text-primary'}`} />
-                  <span className="truncate">{item.label}</span>
+                  {!isMinimized && <span className="truncate">{item.label}</span>}
                 </div>
 
-                {item.badge && (
+                {item.badge && !isMinimized && (
                   <span
                     className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
                       isActive
@@ -274,68 +375,81 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
                     {item.badge}
                   </span>
                 )}
+
+                {item.badge && isMinimized && (
+                  <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-surface" title={String(item.badge)} />
+                )}
               </button>
             );
           })}
 
-          <div className="pt-3 text-[10px] uppercase font-bold tracking-wider text-text-muted/70 px-3 py-1">
-            Schnellaktionen
-          </div>
+          {!isMinimized && (
+            <>
+              <div className="pt-3 text-[10px] uppercase font-bold tracking-wider text-text-muted/70 px-3 py-1">
+                Schnellaktionen
+              </div>
 
-          <div className="space-y-1">
-            <button
-              onClick={() => setIsStartLessonNowModalOpen(true)}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-primary-soft text-primary border border-primary-border/60 hover:bg-primary-soft/80 transition-all cursor-pointer"
-            >
-              <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span className="truncate">{t('start_lesson_now') || 'Blitz-Start'}</span>
-            </button>
+              <div className="space-y-1">
+                <button
+                  onClick={() => setIsStartLessonNowModalOpen(true)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-primary-soft text-primary border border-primary-border/60 hover:bg-primary-soft/80 transition-all cursor-pointer"
+                >
+                  <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="truncate">{t('start_lesson_now') || 'Blitz-Start'}</span>
+                </button>
 
-            <button
-              onClick={() => setIsAddQuickLessonModalOpen(true)}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-text-main hover:bg-surface-hover/80 dark:hover:bg-surface-border/40 transition-all cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span className="truncate">{t('add_quick_lesson') || 'Schnell-Lektion'}</span>
-            </button>
+                <button
+                  onClick={() => setIsAddQuickLessonModalOpen(true)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-text-main hover:bg-surface-hover/80 dark:hover:bg-surface-border/40 transition-all cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="truncate">{t('add_quick_lesson') || 'Schnell-Lektion'}</span>
+                </button>
 
-            <button
-              onClick={() => setIsAddStudentModalOpen(true)}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-text-main hover:bg-surface-hover/80 dark:hover:bg-surface-border/40 transition-all cursor-pointer"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span className="truncate">{t('students_add_student') || 'Schüler anlegen'}</span>
-            </button>
+                <button
+                  onClick={() => setIsAddStudentModalOpen(true)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-text-main hover:bg-surface-hover/80 dark:hover:bg-surface-border/40 transition-all cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="truncate">{t('students_add_student') || 'Schüler anlegen'}</span>
+                </button>
 
-            <button
-              onClick={() => setIsAddGroupModalOpen(true)}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-text-main hover:bg-surface-hover/80 dark:hover:bg-surface-border/40 transition-all cursor-pointer"
-            >
-              <Layers className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span className="truncate">{t('students_add_group') || 'Gruppe anlegen'}</span>
-            </button>
-          </div>
+                <button
+                  onClick={() => setIsAddGroupModalOpen(true)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-text-main hover:bg-surface-hover/80 dark:hover:bg-surface-border/40 transition-all cursor-pointer"
+                >
+                  <Layers className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="truncate">{t('students_add_group') || 'Gruppe anlegen'}</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Footer Controls */}
-        <div className="p-3 border-t border-surface-border/60 bg-surface-hover/30 space-y-2">
+        <div className={`p-3 border-t border-surface-border/60 bg-surface-hover/30 space-y-2 ${isMinimized ? 'flex flex-col items-center' : ''}`}>
           {/* Search button with Ctrl+K shortcut badge */}
           <button
             onClick={() => setIsGlobalSearchOpen(true)}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-text-muted bg-surface dark:bg-background border border-surface-border/80 hover:border-primary/40 transition-all cursor-pointer"
+            title={isMinimized ? (t('search') || 'Suchen...') : undefined}
+            className={`flex items-center rounded-xl text-xs font-medium text-text-muted bg-surface dark:bg-background border border-surface-border/80 hover:border-primary/40 transition-all cursor-pointer ${
+              isMinimized ? 'p-2.5 justify-center w-full' : 'w-full justify-between px-3 py-2'
+            }`}
           >
             <div className="flex items-center gap-2">
-              <Search className="w-3.5 h-3.5 text-text-muted" />
-              <span>{t('search') || 'Suchen...'}</span>
+              <Search className="w-3.5 h-3.5 text-text-muted shrink-0" />
+              {!isMinimized && <span>{t('search') || 'Suchen...'}</span>}
             </div>
-            <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-border/50 text-text-muted">
-              ⌘K
-            </kbd>
+            {!isMinimized && (
+              <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-border/50 text-text-muted">
+                ⌘K
+              </kbd>
+            )}
           </button>
 
           {/* Bottom utility row */}
-          <div className="flex items-center justify-between pt-1">
-            {isSyncReady && syncState && (
+          <div className={`flex items-center pt-1 ${isMinimized ? 'flex-col gap-2 w-full justify-center' : 'justify-between'}`}>
+            {isSyncReady && syncState && !isMinimized && (
               <SyncHeaderButton
                 status={onlineCount > 0 ? 'online' : 'offline'}
                 connectedCount={onlineCount}
@@ -361,6 +475,87 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
           </div>
         </div>
       </aside>
+
+      {/* Customize Navigation Order Modal */}
+      {isCustomizeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="w-full max-w-md bg-surface dark:bg-background border border-surface-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 border-b border-surface-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="w-5 h-5 text-primary" />
+                <h3 className="text-sm font-black text-text-main">
+                  {_t('ترتيب القائمة والصفحات', 'Rearrange Menu & Pages', 'Menü & Seiten anordnen')}
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsCustomizeModalOpen(false)}
+                className="p-1.5 rounded-lg text-text-muted hover:text-text-main hover:bg-surface-hover transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-2 flex-1">
+              <p className="text-xs text-text-muted mb-3">
+                {_t('استخدم أزرار السهم لنقل الصفحات لأعلى أو لأسفل حسب تفضيلك الشخصي.', 'Use the up and down arrows to rearrange pages according to your workflow.', 'Verwende die Pfeiltasten, um Seiten nach deinen Wünschen anzuordnen.')}
+              </p>
+
+              {navOrder.map((id, index) => {
+                const item = navItemMap[id];
+                if (!item) return null;
+                const Icon = item.icon;
+                return (
+                  <div
+                    key={id}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-surface-hover/50 border border-surface-border/60"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-5 text-[11px] font-mono text-text-muted text-center">{index + 1}</span>
+                      <Icon className="w-4 h-4 text-primary shrink-0" />
+                      <span className="text-xs font-bold text-text-main truncate">{item.label}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => moveNavItem(index, 'up')}
+                        disabled={index === 0}
+                        className="p-1.5 rounded-lg bg-surface border border-surface-border text-text-muted hover:text-text-main disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                        title="Nach oben"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => moveNavItem(index, 'down')}
+                        disabled={index === navOrder.length - 1}
+                        className="p-1.5 rounded-lg bg-surface border border-surface-border text-text-muted hover:text-text-main disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                        title="Nach unten"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="p-4 border-t border-surface-border flex items-center justify-between bg-surface-hover/30">
+              <button
+                onClick={resetNavOrder}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-text-muted hover:text-text-main hover:bg-surface-hover transition-all cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>{_t('إعادة ضبط الافتراضي', 'Reset Default', 'Standard zurücksetzen')}</span>
+              </button>
+              <button
+                onClick={() => setIsCustomizeModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white shadow-md shadow-primary/20 hover:bg-primary-hover transition-all cursor-pointer"
+              >
+                {_t('تم', 'Done', 'Fertig')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Internal Sync Center Modal if opened via sidebar */}
       {!onOpenSyncModal && internalSyncOpen && isSyncReady && syncState && (

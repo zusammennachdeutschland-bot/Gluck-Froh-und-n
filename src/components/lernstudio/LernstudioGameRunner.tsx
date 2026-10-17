@@ -252,7 +252,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   if (!currentItem && !isCompleted) {
     return (
       <div className="p-8 text-center bg-surface border border-surface-border rounded-2xl space-y-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-        <HelpCircle className="w-12 h-12 text-primary mx-auto opacity-60 animate-bounce" />
+        <HelpCircle className="w-12 h-12 text-primary mx-auto opacity-60" />
         <h3 className="text-lg font-black text-text-main">{t.noSetsFound}</h3>
         <p className="text-xs text-text-muted">{t.noSetsDesc}</p>
         <button
@@ -360,7 +360,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       {/* Game Area */}
       {isCompleted ? (
         <div className={`p-8 rounded-3xl text-center space-y-5 ${activeTheme.cardBg}`}>
-          <Trophy className="w-16 h-16 text-amber-500 mx-auto animate-bounce" />
+          <Trophy className="w-16 h-16 text-amber-500 mx-auto" />
           <h2 className="text-2xl font-black text-text-main">{t.completedGameTitle}</h2>
           <p className="text-sm text-text-muted">
             {t.completedGameDesc} (<strong className="text-primary font-black">{score} {t.pointsLabel}</strong>)
@@ -543,7 +543,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
             {selectedGameType === 'emoji_vocab' && (
               <div className="space-y-5">
                 <div className="p-6 bg-primary-soft/50 border border-primary-border/40 rounded-2xl text-center space-y-2">
-                  <span className="text-6xl sm:text-7xl block animate-bounce">{currentItem.emoji || '🐱'}</span>
+                  <span className="text-6xl sm:text-7xl block">{currentItem.emoji || '🐱'}</span>
                   <p className="text-xs font-bold text-primary">{t.emojiVocabPrompt}</p>
                 </div>
 

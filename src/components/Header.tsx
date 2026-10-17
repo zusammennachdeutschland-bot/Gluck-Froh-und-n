@@ -4,7 +4,7 @@ import { Lesson } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
 import { isPendingStatus } from '../utils/lessonUtils';
 import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
-import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2 } from 'lucide-react';
+import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2, SlidersHorizontal } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { SyncHeaderButton } from './sync/SyncHeaderButton';
@@ -41,7 +41,9 @@ export const Header: React.FC = () => {
     getSyncHistory,
     clearSyncHistory,
     updateSyncState,
-    startHosting
+    startHosting,
+    setIsReorderBottomNavOpen,
+    bottomNavOrder
   } = useApp();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showToast, setShowToast] = useState(false);
@@ -483,42 +485,88 @@ export const Header: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Navigation Items */}
-                <div className="space-y-1 overflow-y-auto max-h-[calc(100dvh-200px)]">
-                  {[
-                    { id: 'home', label: t('nav_home') || 'Startseite', icon: Sparkles },
-                    { id: 'schedule', label: t('nav_schedule') || 'Termine', icon: Clock },
-                    { id: 'students', label: t('nav_students') || 'Schüler', icon: Users },
-                    { id: 'payments', label: t('nav_payments') || 'Zahlungen', icon: BarChart2 },
-                    { id: 'history', label: t('nav_history') || 'Sitzungen', icon: History },
-                    { id: 'reports', label: t('nav_reports') || 'Berichte', icon: BarChart2 },
-                    { id: 'certificates', label: t('nav_certificates') || 'Zertifikate', icon: Award },
-                    { id: 'freeTime', label: t('nav_free_time') || 'Free Time', icon: Clock },
-                    { id: 'schoolSchedule', label: _t('جدول المدرسة', 'School Schedule', 'Stundenplan'), icon: BookOpen },
-                    { id: 'hod', label: _t('إدارة القسم (HOD)', 'HOD Hub', 'Fachleiter Hub'), icon: Layers },
-                    { id: 'lernstudio', label: 'Glück Lernstudio 🇩🇪', icon: Gamepad2 },
-                    { id: 'settings', label: t('nav_settings') || 'Einstellungen', icon: Settings },
-                  ].map(item => {
-                    const Icon = item.icon;
-                    const isActive = activeTab === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => {
-                          setActiveTab(item.id as any);
-                          setShowMainMenuDrawer(false);
-                        }}
-                        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-start ${
-                          isActive
-                            ? 'bg-primary text-white shadow-xs'
-                            : 'text-text-main hover:bg-surface-hover dark:hover:bg-slate-900'
-                        }`}
-                      >
-                        <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-primary'}`} />
-                        <span>{item.label}</span>
-                      </button>
-                    );
-                  })}
+                {/* Option to Rearrange Bottom Navigation Pages */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMainMenuDrawer(false);
+                    setIsReorderBottomNavOpen(true);
+                  }}
+                  className="w-full flex items-center justify-between p-2.5 rounded-2xl bg-primary/10 border border-primary/20 text-primary hover:bg-primary hover:text-white transition-all cursor-pointer group shadow-xs"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-primary/20 group-hover:bg-white/20 flex items-center justify-center shrink-0 transition-colors">
+                      <SlidersHorizontal className="w-4 h-4 text-primary group-hover:text-white" />
+                    </div>
+                    <div className="text-start min-w-0">
+                      <span className="block text-xs font-black truncate leading-tight">
+                        {_t('ترتيب صفحات الشريط السفلي', 'Reorder Bottom Bar', 'Untere Leiste anpassen')}
+                      </span>
+                      <span className="block text-[10px] text-text-muted group-hover:text-white/80 font-medium truncate">
+                        {_t('تخصيص أيقونات وترتيب القائمة السفلية', 'Customize bottom navigation icons', 'Symbole & Seiten anordnen')}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-primary/15 group-hover:bg-white/20 shrink-0">
+                    {_t('ترتيب', 'Sort', 'Ordnen')}
+                  </span>
+                </button>
+
+                {/* Navigation Items (Reflects bottomNavOrder) */}
+                <div className="space-y-1 overflow-y-auto max-h-[calc(100dvh-260px)]">
+                  {(() => {
+                    const drawerItemMap: Record<string, { label: string; icon: any }> = {
+                      home: { label: t('nav_home') || (language === 'ar' ? 'الرئيسية' : language === 'de' ? 'Startseite' : 'Home'), icon: Sparkles },
+                      schedule: { label: t('nav_schedule') || (language === 'ar' ? 'الجدول والمواعيد' : language === 'de' ? 'Termine' : 'Schedule'), icon: Clock },
+                      students: { label: t('nav_students') || (language === 'ar' ? 'الطلاب والمجموعات' : language === 'de' ? 'Schüler' : 'Students'), icon: Users },
+                      payments: { label: t('nav_payments') || (language === 'ar' ? 'المدفوعات والمالية' : language === 'de' ? 'Zahlungen' : 'Payments'), icon: BarChart2 },
+                      lernstudio: { label: 'Glück Lernstudio 🇩🇪', icon: Gamepad2 },
+                      hod: { label: _t('إدارة القسم (HOD)', 'HOD Hub', 'Fachleiter Hub'), icon: Layers },
+                      history: { label: t('nav_history') || (language === 'ar' ? 'سجل الحصص' : language === 'de' ? 'Sitzungen' : 'History'), icon: History },
+                      reports: { label: t('nav_reports') || (language === 'ar' ? 'التقارير' : language === 'de' ? 'Berichte' : 'Reports'), icon: BarChart2 },
+                      certificates: { label: t('nav_certificates') || (language === 'ar' ? 'الشهادات' : language === 'de' ? 'Zertifikate' : 'Certificates'), icon: Award },
+                      freeTime: { label: t('nav_free_time') || (language === 'ar' ? 'أوقات الفراغ' : language === 'de' ? 'Free Time' : 'Free Time'), icon: Clock },
+                      schoolSchedule: { label: _t('جدول المدرسة', 'School Schedule', 'Stundenplan'), icon: BookOpen },
+                      settings: { label: t('nav_settings') || (language === 'ar' ? 'الإعدادات' : language === 'de' ? 'Einstellungen' : 'Settings'), icon: Settings },
+                    };
+
+                    const order = bottomNavOrder || Object.keys(drawerItemMap);
+
+                    return order.map((id, index) => {
+                      const item = drawerItemMap[id];
+                      if (!item) return null;
+                      const Icon = item.icon;
+                      const isActive = activeTab === id;
+                      const isInBottomBar = index < 6;
+
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => {
+                            setActiveTab(id as any);
+                            setShowMainMenuDrawer(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer text-start ${
+                            isActive
+                              ? 'bg-primary text-white shadow-xs'
+                              : 'text-text-main hover:bg-surface-hover dark:hover:bg-slate-900'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-primary'}`} />
+                            <span className="truncate">{item.label}</span>
+                          </div>
+                          {isInBottomBar && (
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium shrink-0 ${
+                              isActive ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                            }`}>
+                              {_t('في الشريط', 'In Bar', 'In Leiste')}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
 

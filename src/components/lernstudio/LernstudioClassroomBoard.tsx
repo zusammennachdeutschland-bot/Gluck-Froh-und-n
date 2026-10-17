@@ -99,6 +99,16 @@ export function getPowerCardLocalized(type: PowerCardType, t: LernstudioTranslat
   return cardsMap[type];
 }
 
+export function cleanTeamDisplayName(teamName: string): string {
+  if (!teamName) return '';
+  // If format is "GroupName (Student Names)" or "GroupName (تيم Student Names)", extract student names only
+  const match = teamName.match(/^[^(]+\(([^)]+)\)$/);
+  if (match && match[1]) {
+    return match[1].replace(/^(تيم|Team)\s+/gi, '').trim();
+  }
+  return teamName;
+}
+
 export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, onBack }) => {
   const { groups = [], students = [], language = 'ar' } = useApp();
   const t = getLernstudioTranslations(language);
@@ -158,7 +168,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
         const color = COLOR_PALETTES[teamIdx % COLOR_PALETTES.length];
         return {
           id: `team_${teamIdx + 1}`,
-          name: assignedStudents.length > 0 ? `${selectedGroup?.name || 'Group'} (${names})` : `Team ${teamIdx + 1}`,
+          name: assignedStudents.length > 0 ? names : (language === 'ar' ? `الفريق ${teamIdx + 1}` : `Team ${teamIdx + 1}`),
           colorBg: color.bg,
           colorText: color.text,
           colorBorder: color.border,
@@ -228,15 +238,20 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
       return;
     }
 
-    const count = Math.min(items.length, selectedTileCount);
-    const selectedItems = items.sort(() => 0.5 - Math.random()).slice(0, count);
+    // Generate full selectedTileCount by drawing from set items (repeating if set has fewer items)
+    const pool: LernstudioItem[] = [];
+    while (pool.length < selectedTileCount) {
+      const shuffled = [...items].sort(() => 0.5 - Math.random());
+      pool.push(...shuffled);
+    }
+    const finalItems = pool.slice(0, selectedTileCount);
 
     const powerTypesList: PowerCardType[] = [
       'gift_25', 'steal_15', 'swap_scores', 'rocket_boost',
       'lose_15', 'reset_zero', 'double_score', 'give_15', 'skip_turn'
     ];
 
-    const generatedTiles: BaamboozleTile[] = selectedItems.map((item, idx) => {
+    const generatedTiles: BaamboozleTile[] = finalItems.map((item, idx) => {
       const isPower = gameMode === 'power_only' ? true : (gameMode === 'classic' ? Math.random() < 0.25 : false);
       const randomPower = powerTypesList[Math.floor(Math.random() * powerTypesList.length)];
       const points = (idx % 4 + 1) * 10 + 5;
@@ -711,11 +726,11 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
 
     return (
       <div className={`p-8 rounded-3xl text-center space-y-6 animate-scale-up ${activeTheme.cardBg}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
-        <Trophy className="w-20 h-20 text-amber-500 mx-auto animate-bounce" />
+        <Trophy className="w-20 h-20 text-amber-500 mx-auto" />
         <div className="space-y-1">
           <span className="text-xs font-black text-amber-500 uppercase tracking-widest block">{t.winnerTitle}</span>
           <h2 className="text-2xl sm:text-3xl font-black text-text-main">
-            {t.winnerFirstPlace} <span className="text-primary">{winner.name} 🎉</span>
+            {t.winnerFirstPlace} <span className="text-primary">{cleanTeamDisplayName(winner.name)} 🎉</span>
           </h2>
           <p className="text-sm font-bold text-text-muted">{t.winnerScore} {winner.score} {t.scorePts}</p>
         </div>
@@ -725,21 +740,21 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
           {sortedTeams[1] && (
             <div className="p-4 bg-slate-200 dark:bg-slate-800 rounded-t-2xl space-y-1">
               <span className="text-2xl block">🥈</span>
-              <span className="text-xs font-black block truncate">{sortedTeams[1].name}</span>
+              <span className="text-xs font-black block truncate">{cleanTeamDisplayName(sortedTeams[1].name)}</span>
               <span className="text-xs font-bold text-text-muted">{sortedTeams[1].score} pts</span>
             </div>
           )}
 
           <div className="p-5 bg-amber-500 text-slate-950 rounded-t-3xl space-y-1 shadow-xl transform scale-110">
             <span className="text-3xl block">🥇</span>
-            <span className="text-xs font-black block truncate">{winner.name}</span>
+            <span className="text-xs font-black block truncate">{cleanTeamDisplayName(winner.name)}</span>
             <span className="text-sm font-black">{winner.score} pts</span>
           </div>
 
           {sortedTeams[2] && (
             <div className="p-4 bg-amber-700/20 rounded-t-2xl space-y-1">
               <span className="text-2xl block">🥉</span>
-              <span className="text-xs font-black block truncate">{sortedTeams[2].name}</span>
+              <span className="text-xs font-black block truncate">{cleanTeamDisplayName(sortedTeams[2].name)}</span>
               <span className="text-xs font-bold text-text-muted">{sortedTeams[2].score} pts</span>
             </div>
           )}
@@ -827,7 +842,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
       <div className={`p-3.5 rounded-2xl border shadow-md flex items-center justify-between gap-3 ${currentActiveTeam.colorBg} text-white animate-pulse`}>
         <div className="flex items-center gap-2">
           <span className="text-xl">{currentActiveTeam.badgeEmoji}</span>
-          <span className="font-black text-sm sm:text-base">{t.currentTurn} {currentActiveTeam.name}</span>
+          <span className="font-black text-sm sm:text-base">{t.currentTurn} {cleanTeamDisplayName(currentActiveTeam.name)}</span>
         </div>
 
         <span className="text-xs font-black bg-black/20 px-3 py-1 rounded-xl">
@@ -847,7 +862,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
               } text-white ${isTurn ? 'ring-4 ring-amber-400 scale-[1.02] shadow-lg' : 'opacity-80'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-black text-xs truncate max-w-[100px]">{team.name}</span>
+                <span className="font-black text-xs truncate max-w-[100px]">{cleanTeamDisplayName(team.name)}</span>
                 <span className="text-base font-black">{team.score}</span>
               </div>
 
@@ -932,7 +947,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
             {/* Header info */}
             <div className="flex items-center justify-between border-b border-surface-border pb-3">
               <span className="text-xs font-black text-primary">
-                #{activeTile.id} • {t.currentTurn} ({currentActiveTeam.name})
+                #{activeTile.id} • {t.currentTurn} ({cleanTeamDisplayName(currentActiveTeam.name)})
               </span>
 
               {timerSeconds !== null && !activeTile.isPowerCard && (
@@ -945,7 +960,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
 
             {/* POWER CARD EVENT REVEAL */}
             {activeTile.isPowerCard && activeTile.powerType ? (
-              <div className={`p-6 sm:p-8 rounded-3xl bg-gradient-to-br shadow-2xl space-y-4 animate-bounce ${getPowerCardLocalized(activeTile.powerType, t).bg}`}>
+              <div className={`p-6 sm:p-8 rounded-3xl bg-gradient-to-br shadow-2xl space-y-4 ${getPowerCardLocalized(activeTile.powerType, t).bg}`}>
                 <span className="text-6xl sm:text-7xl block">{getPowerCardLocalized(activeTile.powerType, t).emoji}</span>
                 <h2 className="text-2xl sm:text-3xl font-black">
                   {getPowerCardLocalized(activeTile.powerType, t).title}
@@ -970,7 +985,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, on
               <div className="space-y-6">
                 <div className="p-6 bg-primary-soft/50 border border-primary-border/40 rounded-3xl space-y-2">
                   {activeTile.item?.emoji && (
-                    <span className="text-5xl block animate-bounce">{activeTile.item.emoji}</span>
+                    <span className="text-5xl block">{activeTile.item.emoji}</span>
                   )}
                   <h2 className="text-2xl sm:text-3xl font-black text-text-main" dir="auto">
                     {activeTile.question}

@@ -258,23 +258,17 @@ export function getProjectedLessonsForRange(
   explicitLessons: Lesson[],
   defaultZoomLink?: string
 ): Lesson[] {
-  const explicit = (explicitLessons || []).filter(l => !l.deleted);
+  const activeGroups = (groups || []).filter(g => !g.deleted && g.status !== 'archived');
+  const activeGroupIds = new Set(activeGroups.map(g => g.id));
+
+  const explicit = (explicitLessons || []).filter(l => {
+    if (l.deleted) return false;
+    if (l.groupId && l.groupId !== 'quick_group' && !activeGroupIds.has(l.groupId)) return false;
+    return true;
+  });
   const explicitKeys = new Set<string>();
   const deletedKeys = new Set<string>();
-
-  (explicitLessons || []).forEach(l => {
-    if (l.groupId && l.date && l.time) {
-      const key = `${l.groupId}_${l.date}_${l.time}`;
-      if (l.deleted) {
-        deletedKeys.add(key);
-      } else {
-        explicitKeys.add(key);
-      }
-    }
-  });
-
   const projected: Lesson[] = [];
-  const activeGroups = (groups || []).filter(g => !g.deleted && g.status !== 'archived');
 
   const startD = parseLocalDate(startDateStr);
   const endD = parseLocalDate(endDateStr);
