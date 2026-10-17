@@ -143,16 +143,6 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     speakGermanText(text);
   };
 
-  // Auto-speak word in Stage 1 whenever item changes
-  useEffect(() => {
-    if (currentStage === 1 && items[stageQuestionIndex]) {
-      const timer = setTimeout(() => {
-        handleSpeakGerman(items[stageQuestionIndex].german);
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [currentStage, stageQuestionIndex, items]);
-
   // Generate Questions for Stage 2 (True / False)
   const stage2Questions = useMemo<TrueFalseQuestion[]>(() => {
     return items.map((target, idx) => {
@@ -187,6 +177,29 @@ export const LernstudioTeachModal: React.FC<Props> = ({
       return { targetItem: target, choices };
     });
   }, [items]);
+
+  // Auto-speak word whenever item or question changes across teach stages
+  useEffect(() => {
+    if (!isOpen || !items || items.length === 0) return;
+
+    let textToSpeak = '';
+    if (currentStage === 1 && items[stageQuestionIndex]) {
+      textToSpeak = items[stageQuestionIndex].german;
+    } else if (currentStage === 2 && stage2Questions[stageQuestionIndex]) {
+      textToSpeak = stage2Questions[stageQuestionIndex].displayedItem.german;
+    } else if (currentStage === 3 && stage3Questions[stageQuestionIndex]) {
+      textToSpeak = stage3Questions[stageQuestionIndex].targetItem.german;
+    } else if (currentStage === 4 && stage4Questions[stageQuestionIndex]) {
+      textToSpeak = stage4Questions[stageQuestionIndex].targetItem.german;
+    }
+
+    if (textToSpeak) {
+      const timer = setTimeout(() => {
+        handleSpeakGerman(textToSpeak);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [currentStage, stageQuestionIndex, items, isOpen, stage2Questions, stage3Questions, stage4Questions]);
 
   // Reset answer state when question index or stage changes
   const resetAnswerState = () => {

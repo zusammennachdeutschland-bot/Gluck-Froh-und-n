@@ -92,6 +92,16 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
     setBalloons(initialBalloons);
   }, [targetIndex, isGameOver, isVictory, items]);
 
+  // Auto-pronounce German target word when new round starts
+  useEffect(() => {
+    if (targetItem?.german && !isGameOver && !isVictory) {
+      const timer = setTimeout(() => {
+        speakGermanText(targetItem.german);
+      }, 350);
+      return () => clearTimeout(timer);
+    }
+  }, [targetItem, isGameOver, isVictory]);
+
   // Floating Loop
   useEffect(() => {
     if (isGameOver || isVictory) return;

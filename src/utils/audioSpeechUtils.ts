@@ -1,13 +1,17 @@
+import { TextToSpeech } from '@capacitor-community/text-to-speech';
+import { Toast } from '@capacitor/toast';
+
 /**
  * Cross-Platform German Text-To-Speech Utility
- * Fully optimized for Android APK (Capacitor/WebView), Linux Desktop, Web & iOS Safari.
+ * Fully offline-capable for Android APK (Capacitor Native TTS),
+ * Web Speech API (window.speechSynthesis), and Linux/Desktop environments.
  */
 
-let currentAudioElement: HTMLAudioElement | null = null;
-let cachedGermanVoice: SpeechSynthesisVoice | null = null;
 let isAudioUnlocked = false;
+let isNativeTtsAvailable: boolean | null = null;
+let cachedGermanVoice: SpeechSynthesisVoice | null = null;
 
-// Audio unlocker for Android WebView / Mobile browsers restricted media autoplay
+// Audio unlocker for mobile WebViews restricted media autoplay
 if (typeof window !== 'undefined') {
   const unlockAudio = () => {
     if (isAudioUnlocked) return;
@@ -39,7 +43,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('pointerdown', unlockAudio, { passive: true });
 }
 
-// Preload German voice if Web Speech API is supported
+// Preload Web Speech API voices if available
 if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   const loadVoices = () => {
     try {
@@ -62,21 +66,19 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
 }
 
 /**
- * Stop any active speech or audio output
+ * Immediately stop any active speech to prevent voice overlap when moving to the next word
  */
-export const stopGermanSpeech = () => {
+export const stopGermanSpeech = async () => {
   if (typeof window === 'undefined') return;
 
-  if (currentAudioElement) {
-    try {
-      currentAudioElement.pause();
-      currentAudioElement.currentTime = 0;
-    } catch {
-      // ignore
-    }
-    currentAudioElement = null;
+  // Stop native Capacitor TTS if active
+  try {
+    await TextToSpeech.stop();
+  } catch {
+    // ignore if not native
   }
 
+  // Stop Web Speech API if active
   if ('speechSynthesis' in window) {
     try {
       window.speechSynthesis.cancel();
@@ -87,19 +89,46 @@ export const stopGermanSpeech = () => {
 };
 
 /**
- * Primary function to speak German text with multi-tier fallback for Android APK, Linux & Web
+ * Primary function to pronounce German text automatically and offline.
+ * Full support for German umlauts and special characters: ä, ö, ü, ß.
+ * Rate defaults to clear natural speed (0.85).
  */
-export const speakGermanText = (text: string, rate: number = 0.85) => {
+export const speakGermanText = async (text: string, rate: number = 0.85) => {
   if (!text || typeof window === 'undefined') return;
 
   const cleanText = text.trim();
   if (!cleanText) return;
 
-  stopGermanSpeech();
+  // Prevent overlapping speech
+  await stopGermanSpeech();
 
-  let speechStarted = false;
+  const isCapacitorNative =
+    (window as any).Capacitor?.isNativePlatform?.() ||
+    window.location.protocol === 'capacitor:' ||
+    window.location.protocol === 'file:';
 
-  // Enforce local Web Speech API de-DE first
+  // 1. Native Android/iOS Offline TTS via Capacitor TextToSpeech Plugin
+  if (isCapacitorNative || isNativeTtsAvailable !== false) {
+    try {
+      await TextToSpeech.speak({
+        text: cleanText,
+        lang: 'de-DE',
+        rate: Math.min(Math.max(rate, 0.4), 1.5),
+        pitch: 1.0,
+        volume: 1.0,
+        category: 'ambient',
+      });
+      isNativeTtsAvailable = true;
+      return;
+    } catch (err: any) {
+      console.warn('Native Capacitor TextToSpeech attempt failed, trying Web Speech API:', err);
+      if (isCapacitorNative) {
+        isNativeTtsAvailable = false;
+      }
+    }
+  }
+
+  // 2. Web Speech API Fallback (for Web browsers or desktop builds)
   if ('speechSynthesis' in window) {
     try {
       window.speechSynthesis.resume();
@@ -122,97 +151,37 @@ export const speakGermanText = (text: string, rate: number = 0.85) => {
         }
       }
 
-      utterance.onstart = () => {
-        speechStarted = true;
-      };
-
-      utterance.onerror = (e) => {
-        console.warn('SpeechSynthesis error, falling back to audio streaming:', e);
-        if (!speechStarted) {
-          playFallbackTts(cleanText, rate);
-        }
-      };
-
       window.speechSynthesis.speak(utterance);
-
-      // Verify if synthesis actually started speaking within 200ms
-      setTimeout(() => {
-        if (!speechStarted) {
-          playFallbackTts(cleanText, rate);
-        }
-      }, 200);
-
       return;
     } catch (err) {
-      console.warn('SpeechSynthesis invocation failed:', err);
+      console.warn('Web SpeechSynthesis invocation failed:', err);
     }
   }
 
-  // Fallback to HTML5 Audio TTS
-  playFallbackTts(cleanText, rate);
+  // 3. Graceful Device Requirement Toast Notice if TTS unavailable
+  showTtsMissingWarning();
 };
 
 /**
- * Helper function to speak German text at a slow, clear pace (0.6x)
+ * Helper function to pronounce German text at a slower speed (0.6x)
  */
 export const speakGermanTextSlow = (text: string) => {
   speakGermanText(text, 0.6);
 };
 
-/**
- * Robust Multi-Source Fallback Audio TTS player
- */
-const playFallbackTts = (text: string, rate: number = 0.85) => {
+let lastToastTime = 0;
+const showTtsMissingWarning = async () => {
+  const now = Date.now();
+  if (now - lastToastTime < 5000) return;
+  lastToastTime = now;
+
   try {
-    const encoded = encodeURIComponent(text);
-
-    const isStandaloneApk =
-      window.location.protocol === 'capacitor:' ||
-      window.location.protocol === 'file:' ||
-      !window.location.host;
-
-    // Direct HTTPS endpoints strictly requested with sl=de & tl=de
-    const sources = [
-      `https://translate.googleapis.com/translate_tts?client=gtx&sl=de&tl=de&dt=t&q=${encoded}`,
-      `https://dict.youdao.com/dictvoice?audio=${encoded}&type=2`,
-      `https://tts.quest/api/voice?text=${encoded}&language=de`
-    ];
-
-    if (!isStandaloneApk) {
-      sources.push(`/api/tts?text=${encoded}&lang=de`);
-    }
-
-    let currentSourceIdx = 0;
-
-    const tryNextSource = () => {
-      if (currentSourceIdx >= sources.length) {
-        console.warn('All TTS audio sources failed');
-        return;
-      }
-
-      const url = sources[currentSourceIdx++];
-      const audio = new Audio(url);
-      currentAudioElement = audio;
-      audio.playbackRate = Math.min(Math.max(rate, 0.5), 1.5);
-
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          console.warn(`Audio playback error from source (${url}):`, err);
-          tryNextSource();
-        });
-      }
-
-      audio.onerror = () => {
-        console.warn(`Audio load error from source (${url})`);
-        tryNextSource();
-      };
-    };
-
-    tryNextSource();
-  } catch (e) {
-    console.warn('Fallback TTS audio generation failed:', e);
+    await Toast.show({
+      text: 'مطلوب تفعيل حزمة الصوت الألماني في إعدادات Android (Text-to-Speech Settings)',
+      duration: 'long',
+      position: 'bottom',
+    });
+  } catch {
+    console.warn('German TTS voice pack not found on device.');
   }
 };
-
-
