@@ -1,12 +1,45 @@
 /**
  * Cross-Platform German Text-To-Speech Utility
- * Optimized for Android Mobile Browsers, WebViews, iOS Safari and Desktop.
+ * Fully optimized for Android APK (Capacitor/WebView), Linux Desktop, Web & iOS Safari.
  */
 
 let currentAudioElement: HTMLAudioElement | null = null;
 let cachedGermanVoice: SpeechSynthesisVoice | null = null;
+let isAudioUnlocked = false;
 
-// Initialize and preload German voice on browser
+// Audio unlocker for Android WebView / Mobile browsers restricted media autoplay
+if (typeof window !== 'undefined') {
+  const unlockAudio = () => {
+    if (isAudioUnlocked) return;
+    try {
+      const silentAudio = new Audio(
+        'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
+      );
+      silentAudio.volume = 0.01;
+      silentAudio
+        .play()
+        .then(() => {
+          isAudioUnlocked = true;
+          cleanupListeners();
+        })
+        .catch(() => {});
+    } catch {
+      // ignore
+    }
+  };
+
+  const cleanupListeners = () => {
+    window.removeEventListener('touchstart', unlockAudio);
+    window.removeEventListener('click', unlockAudio);
+    window.removeEventListener('pointerdown', unlockAudio);
+  };
+
+  window.addEventListener('touchstart', unlockAudio, { passive: true });
+  window.addEventListener('click', unlockAudio, { passive: true });
+  window.addEventListener('pointerdown', unlockAudio, { passive: true });
+}
+
+// Preload German voice if Web Speech API is supported
 if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   const loadVoices = () => {
     try {
@@ -17,7 +50,7 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
           voices.find((v) => v.lang.startsWith('de')) ||
           null;
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
   };
@@ -38,7 +71,7 @@ export const stopGermanSpeech = () => {
     try {
       currentAudioElement.pause();
       currentAudioElement.currentTime = 0;
-    } catch (e) {
+    } catch {
       // ignore
     }
     currentAudioElement = null;
@@ -47,14 +80,14 @@ export const stopGermanSpeech = () => {
   if ('speechSynthesis' in window) {
     try {
       window.speechSynthesis.cancel();
-    } catch (e) {
+    } catch {
       // ignore
     }
   }
 };
 
 /**
- * Primary function to speak German text with multi-level fallbacks for Android & Mobile Web
+ * Primary function to speak German text with multi-tier fallback for Android APK, Linux & Web
  */
 export const speakGermanText = (text: string, rate: number = 0.85) => {
   if (!text || typeof window === 'undefined') return;
@@ -64,12 +97,11 @@ export const speakGermanText = (text: string, rate: number = 0.85) => {
 
   stopGermanSpeech();
 
-  let speechAttempted = false;
+  let speechStarted = false;
 
-  // Try Web Speech API if supported
+  // Try Web Speech API first on all platforms (works offline if device has German voice)
   if ('speechSynthesis' in window) {
     try {
-      // Resume SpeechSynthesis engine (vital for Android Chrome)
       window.speechSynthesis.resume();
 
       const utterance = new SpeechSynthesisUtterance(cleanText);
@@ -77,7 +109,6 @@ export const speakGermanText = (text: string, rate: number = 0.85) => {
       utterance.rate = rate;
       utterance.volume = 1.0;
 
-      // Assign cached German voice if available
       if (cachedGermanVoice) {
         utterance.voice = cachedGermanVoice;
       } else {
@@ -92,22 +123,24 @@ export const speakGermanText = (text: string, rate: number = 0.85) => {
       }
 
       utterance.onstart = () => {
-        speechAttempted = true;
+        speechStarted = true;
       };
 
       utterance.onerror = (e) => {
-        console.warn('SpeechSynthesis error on Android, switching to audio fallback:', e);
-        playFallbackTts(cleanText);
+        console.warn('SpeechSynthesis error, falling back to audio streaming:', e);
+        if (!speechStarted) {
+          playFallbackTts(cleanText, rate);
+        }
       };
 
       window.speechSynthesis.speak(utterance);
 
-      // Android fallback check: if speech hasn't started in 350ms, play TTS audio fallback
+      // Verify if synthesis actually started speaking within 200ms
       setTimeout(() => {
-        if (!speechAttempted && window.speechSynthesis.speaking === false) {
-          playFallbackTts(cleanText);
+        if (!speechStarted) {
+          playFallbackTts(cleanText, rate);
         }
-      }, 350);
+      }, 200);
 
       return;
     } catch (err) {
@@ -116,24 +149,62 @@ export const speakGermanText = (text: string, rate: number = 0.85) => {
   }
 
   // Fallback to HTML5 Audio TTS
-  playFallbackTts(cleanText);
+  playFallbackTts(cleanText, rate);
 };
 
 /**
- * Fallback TTS player using Google Translate TTS endpoint
+ * Robust Multi-Source Fallback Audio TTS player
  */
-const playFallbackTts = (text: string) => {
+const playFallbackTts = (text: string, rate: number = 0.85) => {
   try {
     const encoded = encodeURIComponent(text);
-    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=de&client=tw-ob`;
 
-    const audio = new Audio(ttsUrl);
-    currentAudioElement = audio;
+    const isStandaloneApk =
+      window.location.protocol === 'capacitor:' ||
+      window.location.protocol === 'file:' ||
+      !window.location.host;
 
-    audio.play().catch((err) => {
-      console.warn('Fallback audio playback error on Android:', err);
-    });
+    // Direct HTTPS endpoints first for APKs & standalone builds
+    const sources = [
+      `https://translate.googleapis.com/translate_tts?client=gtx&sl=de&tl=de&dt=t&q=${encoded}`,
+      `https://dict.youdao.com/dictvoice?audio=${encoded}&type=2`,
+      `https://tts.quest/api/voice?text=${encoded}&language=de`
+    ];
+
+    if (!isStandaloneApk) {
+      sources.push(`/api/tts?text=${encoded}&lang=de`);
+    }
+
+    let currentSourceIdx = 0;
+
+    const tryNextSource = () => {
+      if (currentSourceIdx >= sources.length) {
+        console.warn('All TTS audio sources failed');
+        return;
+      }
+
+      const url = sources[currentSourceIdx++];
+      const audio = new Audio(url);
+      currentAudioElement = audio;
+      audio.playbackRate = Math.min(Math.max(rate, 0.5), 2.0);
+
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn(`Audio playback error from source (${url}):`, err);
+          tryNextSource();
+        });
+      }
+
+      audio.onerror = () => {
+        console.warn(`Audio load error from source (${url})`);
+        tryNextSource();
+      };
+    };
+
+    tryNextSource();
   } catch (e) {
     console.warn('Fallback TTS audio generation failed:', e);
   }
 };
+

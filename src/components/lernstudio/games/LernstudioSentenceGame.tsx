@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernstudio';
 import { buildSentenceGameQuestions, SentenceGameQuestion } from '../../../utils/lernstudioQuestionAdapter';
 import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations } from '../../../utils/lernstudioTranslations';
 import {
   ArrowLeft,
@@ -58,17 +59,7 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
   const currentQ: SentenceGameQuestion | undefined = questions[currentIndex];
 
   const handleSpeak = (text: string) => {
-    try {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'de-DE';
-        utterance.rate = 0.9;
-        window.speechSynthesis.speak(utterance);
-      }
-    } catch {
-      // Speech synthesis not available
-    }
+    speakGermanText(text, 0.9);
   };
 
   const handleSelectWord = (bankIndex: number) => {

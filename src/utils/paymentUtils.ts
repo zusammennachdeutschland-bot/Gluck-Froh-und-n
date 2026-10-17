@@ -423,20 +423,27 @@ export const calculateDuePaymentCycles = (
         return `${d} (Session ${idx + 1}/${unpaidRec.bundleSize || cycleLength})`;
       });
 
-      list.push({
-        id: unpaidRec.id,
-        studentId: st.id,
-        studentName: st.name,
-        groupId: st.groupId || grp?.id || '',
-        groupName: grp?.name || unpaidRec.groupName || 'Gruppe',
-        cycleLength: unpaidRec.bundleSize || cycleLength,
-        amountDue: unpaidRec.amountDue || amountDue,
-        lessonDates,
-        lessonIds: unpaidRec.lessonIds || [],
-        status: 'not_yet',
-        parentPhone: resolveStudentWhatsAppContact(st).contact || '',
-        existingPaymentRecordId: unpaidRec.id
-      });
+      const recStatusStr = String(unpaidRec.status || '');
+      const isExplicitlyDue = recStatusStr === 'due' || recStatusStr === 'overdue';
+      const isFullCycleCompleted = cycleLength === 1 || stCompletedLessons.length >= cycleLength || maxCompletedSessionNum >= cycleLength;
+
+      // Only push if the full cycle of lessons is completed OR explicitly marked as due!
+      if (isExplicitlyDue || isFullCycleCompleted) {
+        list.push({
+          id: unpaidRec.id,
+          studentId: st.id,
+          studentName: st.name,
+          groupId: st.groupId || grp?.id || '',
+          groupName: grp?.name || unpaidRec.groupName || 'Gruppe',
+          cycleLength: unpaidRec.bundleSize || cycleLength,
+          amountDue: unpaidRec.amountDue || amountDue,
+          lessonDates,
+          lessonIds: unpaidRec.lessonIds || [],
+          status: isExplicitlyDue ? 'due' : 'not_yet',
+          parentPhone: resolveStudentWhatsAppContact(st).contact || '',
+          existingPaymentRecordId: unpaidRec.id
+        });
+      }
     }
   });
 
@@ -477,6 +484,18 @@ export const calculateDuePaymentCycles = (
       const pricing = st ? getStudentCyclePricing(st, grp) : null;
       const effectiveCycleLength = isGrpPerLesson ? 1 : (pricing ? pricing.cycleLength : (p.bundleSize || 1));
       const effectiveAmountDue = pricing ? pricing.amountDue : (isGrpPerLesson && grp?.pricePerSession ? grp.pricePerSession : (p.amountDue || 0));
+
+      // Check if cycle is actually completed or explicitly marked as due before pushing to Due Cycles!
+      const lastDateStr = (p.lessonDates && p.lessonDates.length > 0) ? p.lessonDates[p.lessonDates.length - 1] : '';
+      const sessionMatch = lastDateStr ? lastDateStr.match(/Session (\d+)\//) : null;
+      const sessNum = sessionMatch ? parseInt(sessionMatch[1], 10) : (p.lessonDates?.length || 0);
+      const isFullCycleCompleted = effectiveCycleLength === 1 || sessNum >= effectiveCycleLength || (p.lessonDates?.length || 0) >= effectiveCycleLength;
+      const pStatusStr = String(p.status || '');
+      const isExplicitlyDue = pStatusStr === 'due' || pStatusStr === 'overdue';
+
+      if (!isFullCycleCompleted && !isExplicitlyDue) {
+        return; // In-progress cycles (e.g. Session 2/4) belong under In-Progress tab, not Due Cycles!
+      }
 
       // Sanitize lessonDates in unpaid payment record so any stale (Session 1/1) matches the actual effectiveCycleLength
       const sanitizedLessonDates = (p.lessonDates || []).map(d => {

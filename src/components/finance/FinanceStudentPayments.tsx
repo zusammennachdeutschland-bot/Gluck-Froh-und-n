@@ -337,8 +337,8 @@ export const FinanceStudentPayments: React.FC = () => {
       const reachedCycleBySessionNum = maxCompletedSessionNum > 0 && cycleLength > 1 && (maxCompletedSessionNum >= cycleLength || maxCompletedSessionNum % cycleLength === 0);
       const isCycleFinished = totalCompletedCount >= cycleLength || reachedCycleBySessionNum;
 
-      // If they have completed some lessons but cycle is NOT finished and they do NOT have an unpaid record already
-      if (totalCompletedCount > 0 && !isCycleFinished && !hasUnpaidRec) {
+      // If they have completed some lessons but cycle is NOT finished (e.g. Session 2/4)
+      if (totalCompletedCount > 0 && !isCycleFinished) {
         const lessonDates: string[] = [];
         for (let i = 1; i <= virtualOffset; i++) {
           const matched = lessons.find(l => 

@@ -150,6 +150,35 @@ async function startServer() {
     res.json({ success: true, actionType, id: Date.now().toString(), payload, timestamp: Date.now() });
   });
 
+  app.get("/api/tts", async (req, res) => {
+    try {
+      const text = ((req.query.text as string) || "").trim();
+      const lang = ((req.query.lang as string) || "de").trim();
+      if (!text) {
+        return res.status(400).json({ error: "Missing text parameter" });
+      }
+      const encoded = encodeURIComponent(text);
+      const ttsUrl = `https://translate.googleapis.com/translate_tts?client=gtx&sl=${lang}&tl=${lang}&dt=t&q=${encoded}`;
+      const response = await fetch(ttsUrl, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Referer: "https://translate.google.com/"
+        }
+      });
+      if (!response.ok) {
+        return res.status(response.status).send("TTS fetch failed");
+      }
+      const buffer = await response.arrayBuffer();
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.send(Buffer.from(buffer));
+    } catch (err: any) {
+      console.error("TTS endpoint error:", err);
+      res.status(500).json({ error: "TTS failed" });
+    }
+  });
+
   // Vite middleware for development or static serving for production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
