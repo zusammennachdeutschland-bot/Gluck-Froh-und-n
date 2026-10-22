@@ -80,6 +80,7 @@ public class ContactsManagerPlugin extends Plugin {
             // Map: contactId -> Contact Builder
             Map<String, JSObject> contactMap = new HashMap<>();
             Map<String, Set<String>> phoneSets = new HashMap<>();
+            Map<String, JSArray> phoneArrays = new HashMap<>();
 
             // 1. Query Phones joined with Contacts
             Uri phoneUri = Phone.CONTENT_URI;
@@ -117,11 +118,13 @@ public class ContactsManagerPlugin extends Plugin {
                             contactObj.put("id", contactId);
                             contactObj.put("rawContactId", rawId);
                             contactObj.put("displayName", name != null ? name : "");
-                            contactObj.put("phoneNumbers", new JSArray());
+                            JSArray phoneArr = new JSArray();
+                            contactObj.put("phoneNumbers", phoneArr);
                             contactObj.put("isGoogleAccount", false);
                             contactObj.put("isReadOnly", false);
                             contactMap.put(contactId, contactObj);
                             phoneSets.put(contactId, new HashSet<>());
+                            phoneArrays.put(contactId, phoneArr);
                         }
 
                         Set<String> set = phoneSets.get(contactId);
@@ -131,8 +134,10 @@ public class ContactsManagerPlugin extends Plugin {
                             phoneObj.put("number", number);
                             phoneObj.put("normalizedNumber", norm != null ? norm : "");
                             
-                            JSArray arr = contactObj.getJSONArray("phoneNumbers");
-                            arr.put(phoneObj);
+                            JSArray arr = phoneArrays.get(contactId);
+                            if (arr != null) {
+                                arr.put(phoneObj);
+                            }
                         }
                     }
                 }

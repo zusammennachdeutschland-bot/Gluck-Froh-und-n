@@ -99,7 +99,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
           validate-wrappers: false
 
       - name: Ensure Valid Gradle Wrapper
@@ -109,14 +109,14 @@ jobs:
           
           if command -v gradle >/dev/null 2>&1; then
             echo "Generating clean Gradle wrapper via system Gradle..."
-            gradle wrapper --gradle-version 8.9 --distribution-type bin
+            gradle wrapper --gradle-version 8.13 --distribution-type bin
           fi
 
           echo "Ensuring gradle-wrapper.properties..."
           cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-bin.zip
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-bin.zip
           networkTimeout=10000
           validateDistributionUrl=true
           zipStoreBase=GRADLE_USER_HOME

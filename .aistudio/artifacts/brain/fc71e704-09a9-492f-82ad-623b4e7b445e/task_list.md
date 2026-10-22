@@ -42,3 +42,11 @@
   - [x] Verified TypeScript types and build via `lint_applet` (0 errors).
   - [x] Verified full applet build via `compile_applet` (Build succeeded).
   - [x] Executed automated unit tests (`runContactsStandardizerTests`): 36 assertions passed.
+
+- [x] **Stage 6: Android CI/CD Build Compatibility (#74 & #75)**
+  - [x] Fixed `ContactsManagerPlugin.java` permission signature and JSON type conversions (`phoneArrays` type-safety).
+  - [x] Resolved Gradle 8.9 vs AGP 8.13.0 conflict introduced by `@capacitor-community/text-to-speech` 8.0.2.
+  - [x] Upgraded Gradle wrapper and CI runner configuration to Gradle 8.13 in `.github/workflows/build-apk.yml` and `gradle-wrapper.properties`.
+  - [x] Updated root `android/build.gradle` to unified AGP 8.13.0.
+  - [x] Added Java 21 `compileOptions` and updated ProGuard configuration to `proguard-android-optimize.txt` in `android/app/build.gradle`.
+  - [x] Re-synced Capacitor native assets via `npx cap sync android`.

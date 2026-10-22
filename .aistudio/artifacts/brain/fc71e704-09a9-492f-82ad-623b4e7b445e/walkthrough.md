@@ -87,3 +87,17 @@ A complete, non-destructive contact standardization and cleanup system built dir
   - Result: **36 / 36 Passed (100%)**.
 - **TypeScript & Linting**: `tsc --noEmit` passed with 0 errors.
 - **Production Build**: `compile_applet` succeeded with clean bundles.
+
+---
+
+## 4. GitHub Actions CI Build Fix (#74 & #75)
+- **Root Cause Analysis**:
+  1. In commit `#74`, `ContactsManagerPlugin.java` contained conflicting Capacitor base plugin method signatures and an incompatible JSON type conversion from `JSONArray` to `JSArray`.
+  2. In commit `#75`, `@capacitor-community/text-to-speech` version 8.0.2 introduced an explicit dependency requirement on Android Gradle Plugin (AGP) `8.13.0`. The CI workflow (`build-apk.yml`) and `gradle-wrapper.properties` were pinned to Gradle `8.9`, which is incompatible with AGP 8.13.0 (AGP 8.13 requires Gradle 8.13+).
+- **Fixes Applied**:
+  1. Updated Gradle version from `8.9` to `8.13` in `.github/workflows/build-apk.yml` and `android/gradle/wrapper/gradle-wrapper.properties`.
+  2. Updated root `android/build.gradle` classpath to AGP `8.13.0`.
+  3. Added `compileOptions` targeting `JavaVersion.VERSION_21` in `android/app/build.gradle`.
+  4. Switched ProGuard rules to `proguard-android-optimize.txt`.
+  5. Refactored `ContactsManagerPlugin.java` phone array mapping to use a type-safe `phoneArrays` map.
+  6. Re-synced native assets and plugins via `npx cap sync android`.
