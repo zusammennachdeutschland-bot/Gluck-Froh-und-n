@@ -66,6 +66,7 @@ export const DEFAULT_BOTTOM_NAV_ORDER = [
   'home',
   'schedule',
   'students',
+  'parentPortal',
   'payments',
   'lernstudio',
   'hod',
@@ -97,8 +98,8 @@ interface AppContextType {
   setAccentColor: (color: AccentColor) => void;
   t: (key: TranslationKey) => string;
   _t: (ar: string, en: string, de?: string) => string;
-  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio';
-  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio') => void;
+  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio' | 'parentPortal';
+  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio' | 'parentPortal') => void;
 
   // Lernstudio Sets
   lernstudioSets: LernstudioSet[];

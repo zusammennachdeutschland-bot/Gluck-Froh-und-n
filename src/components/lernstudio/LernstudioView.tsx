@@ -17,6 +17,24 @@ import { LernstudioWordDetectiveGame } from './games/LernstudioWordDetectiveGame
 import { LernstudioWhackAMoleGame } from './games/LernstudioWhackAMoleGame';
 import { LernstudioTugOfWarGame } from './games/LernstudioTugOfWarGame';
 import { LernstudioWordNinjaGame } from './games/LernstudioWordNinjaGame';
+import { LernstudioBridgeBuilderGame } from './games/LernstudioBridgeBuilderGame';
+import { LernstudioColorMasterGame } from './games/LernstudioColorMasterGame';
+import { LernstudioFactoryMachineGame } from './games/LernstudioFactoryMachineGame';
+import { LernstudioFollowCluesGame } from './games/LernstudioFollowCluesGame';
+import { LernstudioIslandCrossingGame } from './games/LernstudioIslandCrossingGame';
+import { LernstudioPitStopGame } from './games/LernstudioPitStopGame';
+import { LernstudioPuzzleMastersGame } from './games/LernstudioPuzzleMastersGame';
+import { LernstudioRobotRepairGame } from './games/LernstudioRobotRepairGame';
+import { LernstudioRocketCountdownGame } from './games/LernstudioRocketCountdownGame';
+import { LernstudioSpaceFleetGame } from './games/LernstudioSpaceFleetGame';
+import { LernstudioSubmarineGame } from './games/LernstudioSubmarineGame';
+import { LernstudioTargetAttackGame } from './games/LernstudioTargetAttackGame';
+import { LernstudioTeamAuctionGame } from './games/LernstudioTeamAuctionGame';
+import { LernstudioTowerArchitectsGame } from './games/LernstudioTowerArchitectsGame';
+import { LernstudioVendingMachineGame } from './games/LernstudioVendingMachineGame';
+import { LernstudioWhatsInTheBoxGame } from './games/LernstudioWhatsInTheBoxGame';
+import { LernstudioWordRhythmGame } from './games/LernstudioWordRhythmGame';
+import { LernstudioWordWashGame } from './games/LernstudioWordWashGame';
 import { LernstudioGamesPortalView } from './LernstudioGamesPortalView';
 import { LernstudioSetEditorModal } from './LernstudioSetEditorModal';
 import { LernstudioAiModal } from './LernstudioAiModal';
@@ -352,6 +370,204 @@ export const LernstudioView: React.FC<Props> = ({
   if (activeMode === 'word_detective' && selectedSetForMode) {
     return (
       <LernstudioWordDetectiveGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'bridge_builder' && selectedSetForMode) {
+    return (
+      <LernstudioBridgeBuilderGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'color_master' && selectedSetForMode) {
+    return (
+      <LernstudioColorMasterGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'factory_machine' && selectedSetForMode) {
+    return (
+      <LernstudioFactoryMachineGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'follow_clues' && selectedSetForMode) {
+    return (
+      <LernstudioFollowCluesGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'island_crossing' && selectedSetForMode) {
+    return (
+      <LernstudioIslandCrossingGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'pit_stop' && selectedSetForMode) {
+    return (
+      <LernstudioPitStopGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'puzzle_masters' && selectedSetForMode) {
+    return (
+      <LernstudioPuzzleMastersGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'robot_repair' && selectedSetForMode) {
+    return (
+      <LernstudioRobotRepairGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'rocket_countdown' && selectedSetForMode) {
+    return (
+      <LernstudioRocketCountdownGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'space_fleet' && selectedSetForMode) {
+    return (
+      <LernstudioSpaceFleetGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'submarine_explore' && selectedSetForMode) {
+    return (
+      <LernstudioSubmarineGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'target_attack' && selectedSetForMode) {
+    return (
+      <LernstudioTargetAttackGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'team_auction' && selectedSetForMode) {
+    return (
+      <LernstudioTeamAuctionGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'tower_architects' && selectedSetForMode) {
+    return (
+      <LernstudioTowerArchitectsGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'vending_machine' && selectedSetForMode) {
+    return (
+      <LernstudioVendingMachineGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'whats_in_box' && selectedSetForMode) {
+    return (
+      <LernstudioWhatsInTheBoxGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'word_rhythm' && selectedSetForMode) {
+    return (
+      <LernstudioWordRhythmGame
+        set={selectedSetForMode}
+        activeTheme={activeTheme}
+        language={language}
+        onBack={() => setActiveMode('games_portal')}
+      />
+    );
+  }
+
+  if (activeMode === 'word_wash' && selectedSetForMode) {
+    return (
+      <LernstudioWordWashGame
         set={selectedSetForMode}
         activeTheme={activeTheme}
         language={language}

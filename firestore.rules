@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default Deny All (Global Safety Net)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper: Validates that the client's auth session version strictly matches
+    // the server-authoritative account document state and is not locked for password change.
+    function isTokenVersionValidAndActive(uid, tokenClaims) {
+      let parentDoc = get(/databases/$(database)/documents/parent_accounts/$(uid));
+      return parentDoc != null 
+             && parentDoc.data.authVersion == tokenClaims.authVersion
+             && parentDoc.data.mustChangePassword != true
+             && parentDoc.data.isRevoked != true;
+    }
+
+    // Portal Students Collection
+    // Read: Only authenticated guardians whose UID is linked to the student record
+    // and whose session version is valid and not pending password change.
+    // Write: Strictly denied to client SDKs (Server Admin SDK only).
+    match /portal_students/{studentCode} {
+      allow read: if request.auth != null
+                  && isTokenVersionValidAndActive(request.auth.uid, request.auth.token)
+                  && (request.auth.uid in resource.data.linkedParentUids);
+      allow write: if false;
+    }
+
+    // Parent Accounts Collection
+    // Read: Only the authenticated parent owning this specific document.
+    // Write: Strictly denied to client SDKs (Server Admin SDK only).
+    match /parent_accounts/{parentUid} {
+      allow read: if request.auth != null && request.auth.uid == parentUid;
+      allow write: if false;
+    }
+
+    // Private Collections (System Only - Zero Client Access)
+    match /registration_sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /rate_limits/{limitId} {
+      allow read, write: if false;
+    }
+
+    match /pairing_codes/{codeId} {
+      allow read, write: if false;
+    }
+
+    match /verified_teacher_devices/{deviceId} {
+      allow read, write: if false;
+    }
+
+    match /processed_nonces/{nonceId} {
+      allow read, write: if false;
+    }
+
+    match /audit_logs/{logId} {
+      allow read, write: if false;
+    }
+  }
+}

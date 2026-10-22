@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
 import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
-import { speakGermanText } from '../../../utils/audioSpeechUtils';
+import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   ArrowLeft,
@@ -98,7 +98,10 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
       const timer = setTimeout(() => {
         speakGermanText(targetItem.german);
       }, 350);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        stopGermanSpeech();
+      };
     }
   }, [targetItem, isGameOver, isVictory]);
 

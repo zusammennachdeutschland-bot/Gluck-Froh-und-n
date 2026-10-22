@@ -40,6 +40,10 @@ public class MainActivity extends BridgeActivity {
             registerPlugin(LiveTimerPlugin.class);
         } catch (Throwable ignored) {}
 
+        try {
+            registerPlugin(ContactsManagerPlugin.class);
+        } catch (Throwable ignored) {}
+
         super.onCreate(savedInstanceState);
 
         // 2. Prevent premature or synthetic back presses during first 5 seconds of launch

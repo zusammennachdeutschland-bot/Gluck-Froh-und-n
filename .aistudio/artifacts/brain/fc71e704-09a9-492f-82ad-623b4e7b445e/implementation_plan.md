@@ -1,75 +1,81 @@
-# German Text-to-Speech (TTS) Optimization & Custom Controls Plan for Android APK & Linux
+# Glück — Smart Google Contacts Cleanup & Unification ("Kontakte vereinheitlichen" / "توحيد جهات الاتصال")
 
-Comprehensive strategy to solve German Text-To-Speech (TTS) issues in Android APK (Capacitor/WebView) and Linux desktop environments, ensuring German pronunciation enforcement, local engine priority, multi-tier online fallbacks, and customizable speed controls (re-play & slow mode).
-
-> [!IMPORTANT] User Confirmed Preferences
-> - **Speed Controls & Actions**: Add direct speed toggle controls (Normal 1.0x / Slow 0.65x) and replay buttons on all German learning boards and interactive games.
-> - **Engine Hierarchy**: Priority goes to the local device speech synthesis engine (`de-DE` locale), falling back seamlessly to direct HTTPS Google/Youdao audio streams when local speech is unavailable.
-> - **Language Enforcement**: All German vocabulary and sentence pronunciations are strictly forced to `de-DE` locale, ignoring any English/Arabic UI language choices.
+## Overview
+Implement a comprehensive, non-destructive contact standardization and cleanup system inside the Glück teacher application. The feature standardizes existing Android and Google-synchronized contacts using English student names, parent phone numbers, and class designations already stored in Glück.
 
 ---
 
-## 1. Overview & Core Concept
+## 1. Core Rules & Standards
 
-- **What It Does**: Resolves all audio mute/English accent bugs in Android APK builds and Linux packages. Provides native, crisp German voice audio across all classroom modules, games (basketball, sentence builder, word ninja, etc.), and vocabulary cards with instant audio unlockers and slow-playback mode (`0.65x`).
-- **Target Audience / Persona**: German learners operating the app on Android phones/tablets as an installed APK or desktop users on Linux.
-- **Key Value**: Guarantees offline/online speech reliability without regional audio failure or language misconfiguration.
+### Contact Naming Convention
+- **Format**: `"{Student English Name}'s Mom - Klasse {Class Number}"`
+  - Examples:
+    - `"Ahmed's Mom - Klasse 4"`
+    - `"Mariam's Mom - Klasse 2"`
+    - `"Youssef's Mom - Klasse 6"`
+    - `"Lukas' Mom - Klasse 5"`
+- **English Name Resolution**:
+  - Uses the student's actual English name in Glück (`certificateName` if present, or Latin `name`).
+  - If a student has only an Arabic name and no English name is stored, flags the record for manual review / missing English name.
+- **English Possessive Suffix Rule**:
+  - Names ending in regular letters: `Ahmed's Mom`, `Mariam's Mom`
+  - Names ending in `s`, `x`, `z`: use standard English possessive apostrophe without duplicate `s`:
+    - `Lukas' Mom - Klasse 5`
+    - `Max' Mom - Klasse 3`
+    - `Aziz' Mom - Klasse 1`
+    - `Anas' Mom - Klasse 4`
+- **Class/Grade Designation**:
+  - The German word `"Klasse"` is strictly used instead of `"Grade"`.
+  - Grade 4 -> `Klasse 4`, Grade 2 -> `Klasse 2`.
+
+### Sibling Consolidation (Shared Parent Number)
+- **Rule**: One parent phone number must never produce multiple duplicate contacts.
+- **Format**:
+  - 2 siblings: `"Ahmed & Mariam's Mom - Klasse 2 & 4"`
+  - 3 siblings: `"Ahmed, Mariam & Youssef's Mom - Klasse 2, 4 & 6"`
+- **Deduplication**:
+  - Avoid repeating identical classes (e.g., if both siblings are in Klasse 4 -> `"Ahmed & Mariam's Mom - Klasse 4"`).
+- **Long Names**:
+  - If consolidated display name exceeds 45 characters, provide a concise display name and store the complete sibling list in the contact's Note field.
+- **Ambiguity**:
+  - Flag shared numbers with unclear relationships for manual review before applying changes.
+
+### Phone Number Normalization
+- Local Egyptian normalization:
+  - Strips formatting, whitespace, parentheses, dashes.
+  - Normalizes `+20`, `0020`, `20`, and local `01x` prefixes to match contacts reliably regardless of how they were saved.
 
 ---
 
-## 2. User Experience & Visual Design
+## 2. Technical Architecture
 
-- **Audio Control Bar / Replay Buttons**:
-  - Integrated speaker icons (`Volume2`) with secondary slow-speech toggle button (`0.65x` / turtle icon) beside cards and sentence prompts.
-  - Interactive micro-feedback: Brief pulse animation when audio plays, preventing double-taps.
-- **Language & Speech Consistency**:
-  - Unconditional German speech playback (`de-DE`) across all UI language modes (Arabic, English, German).
-  - Explicit audio context unlocker on first user touch (`touchstart`, `pointerdown`) for mobile WebView autoplay permissions.
+### Android Native Bridge (`ContactsManagerPlugin.java`)
+- Native Capacitor plugin registered in `MainActivity.java`:
+  - `checkPermissions` & `requestPermissions`: requests `READ_CONTACTS` and `WRITE_CONTACTS`.
+  - `getContacts`: queries `ContactsContract` for contact ID, raw contact ID, display name, phone numbers, account type (`com.google` vs device), and notes.
+  - `updateContactName`: atomic `ContentProviderOperation` update targeting `StructuredName` and optional `Note`.
+  - `batchUpdateContacts`: safe batch execution with error isolation.
+- `AndroidManifest.xml` permissions:
+  - `android.permission.READ_CONTACTS`
+  - `android.permission.WRITE_CONTACTS`
+
+### Web & Desktop Simulation
+- Full browser fallback and simulation using actual Glück student data when not running on native Android, ensuring 100% interactive testing and UI verification in the dev environment.
+
+### User Interface (`ContactsUnificationModal.tsx`)
+- German title: `"Kontakte vereinheitlichen"`
+- Arabic subtitle: `"توحيد جهات الاتصال"`
+- Metric cards: Needing Update, Already Standardized, Duplicates, Missing in Phone, Needs Review.
+- Filter tabs & search bar.
+- Before/After name comparison cards with linked student badges and Google account indicators.
+- Batch selection controls (Select All / Deselect All).
+- Live execution progress bar and detailed completion report.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
-
-- **Decision 1: Local Device Speech Engine (`SpeechSynthesisUtterance`) First**:
-  - *Chosen Approach*: Query local voices for `de-DE` or `de_*`. If speech starts within `200ms`, use local native TTS (zero network latency, works offline).
-  - *Why*: User selected local engine priority for offline support and responsiveness.
-  - *Fallback*: If local engine fails or has no German voice, automatically fall back to multi-tier HTTPS audio streams (`Google Translate TTS`, `Youdao`, `TTS Quest`, server proxy).
-
-- **Decision 2: Dedicated Speed Rate Support (`rate: number = 0.85` or `0.65`)**:
-  - *Chosen Approach*: Pass configurable rate parameters into `speakGermanText(text, rate)`.
-  - *Why*: Allows slow playback for complex German compounds and sentence builders.
-
----
-
-## 4. Technical Architecture & Data Strategy
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        User Interaction (APK / Web)                     │
-│               [Tap German Word / Press Slow Speech Button]              │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                   Audio Speech Utility (speakGermanText)                │
-│                 Unconditional 'de-DE' Locale Enforcement                │
-└──────────────────┬──────────────────────────────────────┬───────────────┘
-                                     │
-                   ┌─────────────────┴─────────────────┐
-                   │                                   │
-                   ▼ (Local Device First)              ▼ (Fallback >200ms / Error)
-┌──────────────────────────────────────┐ ┌────────────────────────────────┐
-│   window.speechSynthesis (de-DE)    │ │      HTML5 Multi-Tier Audio     │
-│  - Native German Voice               │ │  1. Google HTTPS TTS           │
-│  - Custom Playback Rate (1.0x / 0.65)│ │  2. Youdao HTTPS Audio         │
-│  - Offline Native Output             │ │  3. TTS Quest Backup           │
-└──────────────────────────────────────┘ └────────────────────────────────┘
-```
-
-### Component & Utility Mapping
-- **`src/utils/audioSpeechUtils.ts`**:
-  - Enforce `de-DE` locale on all speech synthesis utterances.
-  - Enhance `playFallbackTts` to support variable `playbackRate` on `HTMLAudioElement`.
-  - Strengthen voice detection for Android WebViews (`com.google.android.tts`).
-- **Game Components & Classroom (`LernstudioClassroomBoard`, Game Modules)**:
-  - Connect audio control states (normal vs. slow rate) to `speakGermanText`.
+## 3. Execution Stages
+- **Stage 1**: Phone normalization & name standardization utilities (`contactsStandardizer.ts`).
+- **Stage 2**: Native Capacitor Android plugin (`ContactsManagerPlugin.java`) and `AndroidManifest.xml` permissions.
+- **Stage 3**: Contact sync service (`contactsSyncService.ts`) with audit categorization, duplicate detection, and web fallback.
+- **Stage 4**: Interactive UI modal (`ContactsUnificationModal.tsx`) and entry points in `StudentsView.tsx` and `SettingsView.tsx`.
+- **Stage 5**: Build verification with Vite compilation, TypeScript linting, and Android `./gradlew assembleDebug` check.

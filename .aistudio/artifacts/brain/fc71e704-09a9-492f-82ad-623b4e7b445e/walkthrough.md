@@ -1,0 +1,89 @@
+# Glück — Smart Google Contacts Cleanup & Unification ("Kontakte vereinheitlichen" / "توحيد جهات الاتصال")
+
+## Overview
+A complete, non-destructive contact standardization and cleanup system built directly into the Glück teacher application. It standardizes existing Android and Google-synchronized contacts using English student names, parent phone numbers, and class designations already stored in Glück.
+
+---
+
+## 1. Key Rules & Implementation Details
+
+### Standardized Naming Convention
+- **Format**: `"{Student English Name}'s Mom - Klasse {Class Number}"`
+  - Examples:
+    - `"Ahmed's Mom - Klasse 4"`
+    - `"Mariam's Mom - Klasse 2"`
+    - `"Youssef's Mom - Klasse 6"`
+    - `"Lukas' Mom - Klasse 5"`
+- **English Name Resolution**:
+  - Uses the student's actual English name in Glück (`certificateName` if present, or Latin `name`).
+  - If a student has only an Arabic name without an English name, the contact is flagged for manual review rather than inventing or translating names.
+- **English Possessives**:
+  - Regular names append `'s` (e.g., `Ahmed's Mom`).
+  - Names ending in `s`, `x`, `z` use the conventional apostrophe without extra `s` (e.g., `Lukas' Mom - Klasse 5`, `Max' Mom - Klasse 3`, `Aziz' Mom - Klasse 1`).
+- **Class/Grade Designation**:
+  - Strictly uses `"Klasse"`, never `"Grade"`.
+  - Grade 4 -> `Klasse 4`, Grade 2 -> `Klasse 2`.
+
+### Sibling Consolidation (Shared Parent Number)
+- **Rule**: Multiple students sharing the same mother's phone number are consolidated into a single contact.
+- **Format**:
+  - 2 siblings: `"Ahmed & Mariam's Mom - Klasse 2 & 4"`
+  - 3 siblings: `"Ahmed, Mariam & Youssef's Mom - Klasse 2, 4 & 6"`
+- **Deduplication**: Identical classes are not repeated (e.g., if both siblings are in Klasse 4 -> `"Ahmed & Mariam's Mom - Klasse 4"`).
+- **Long Names**: If the display name exceeds 45 characters, a concise display name is used, and the full sibling breakdown is preserved in the contact's Note field.
+
+### Egyptian Phone Normalization
+- Normalizes `+20`, `0020`, `20`, and local `01x` prefixes to match phone numbers accurately regardless of formatting, spacing, parentheses, or Eastern Arabic digits.
+
+---
+
+## 2. Architecture & Components
+
+1. **`src/utils/contactsStandardizer.ts`**:
+   - Canonical phone normalization (`normalizeEgyptianPhone`, `getPhoneMatchKey`).
+   - English possessive formatter (`formatPossessive`).
+   - Class extractor & formatter (`formatKlasseName`, `joinKlasseDesignations`).
+   - Proposal generator (`buildStandardizedContactProposal`).
+
+2. **`android/app/src/main/java/com/glueck/app/ContactsManagerPlugin.java`**:
+   - Native Capacitor plugin registered in `MainActivity.java`.
+   - Android Permissions: `READ_CONTACTS`, `WRITE_CONTACTS`.
+   - Reads contacts, phones, account types (`com.google` vs device), and notes.
+   - Executes atomic batch updates targeting `StructuredName` and `Note` via Android `ContentProviderOperation`.
+
+3. **`src/services/contactsSyncService.ts`**:
+   - Bridges UI with `ContactsManagerPlugin`.
+   - Provides web simulation fallback for instant browser testing with realistic sample data.
+   - Categorizes contacts into:
+     - **Needs Update** (`NEEDS_UPDATE`)
+     - **Already Standardized** (`ALREADY_STANDARDIZED`)
+     - **Duplicates on Phone** (`DUPLICATE_ON_PHONE`)
+     - **Review / Missing English Name** (`MISSING_ENGLISH_NAME`)
+     - **Not in Phone** (`NOT_IN_CONTACTS`)
+
+4. **`src/components/ContactsUnificationModal.tsx`**:
+   - Main feature dialog with German header & Arabic subtitle: `"Kontakte vereinheitlichen" / "توحيد جهات الاتصال"`.
+   - Real-time audit metrics cards.
+   - Filter tabs and live search bar.
+   - Comparison cards showing Current Name ➔ Standardized Name.
+   - Linked student badges, phone copying, and inline name adjustment.
+   - Batch selection with "Select All" / "Deselect All".
+   - Safe execution progress dialog and completion report.
+
+5. **Entry Points**:
+   - **Students View Toolbar** (`src/components/StudentsView.tsx`): quick-access button alongside Add Student / Add Group.
+   - **Settings View** (`src/components/SettingsView.tsx`): dedicated category card and configuration subpage.
+
+---
+
+## 3. Verification & Test Results
+- **Standardizer Unit Test Suite** (`src/tests/contactsStandardizer.test.ts`):
+  - 36 assertions executed covering:
+    - Single student naming (`Ahmed's Mom - Klasse 4`)
+    - S/X/Z possessives (`Lukas' Mom - Klasse 5`, `Max'`, `Aziz'`)
+    - 2 & 3 sibling consolidations (`Ahmed & Mariam's Mom - Klasse 2 & 4`)
+    - Same-class deduplication
+    - Egyptian phone format variations (`+20`, `0020`, `010...`, Eastern Arabic digits)
+  - Result: **36 / 36 Passed (100%)**.
+- **TypeScript & Linting**: `tsc --noEmit` passed with 0 errors.
+- **Production Build**: `compile_applet` succeeded with clean bundles.

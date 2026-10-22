@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
   Zap, History, Play, Clock, Award, BookOpen, Layers, 
-  Gamepad2, SlidersHorizontal 
+  Gamepad2, SlidersHorizontal, ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
@@ -54,6 +54,10 @@ export const BottomNav: React.FC = () => {
     students: { 
       label: t('nav_students') || (language === 'ar' ? 'الطلاب' : language === 'de' ? 'Schüler' : 'Students'), 
       icon: Users 
+    },
+    parentPortal: {
+      label: _t('بوابة الأبناء', 'Portal', 'Elternportal'),
+      icon: ShieldCheck
     },
     payments: { 
       label: t('nav_payments') || (language === 'ar' ? 'المالية' : language === 'de' ? 'Zahlungen' : 'Payments'), 

@@ -16,12 +16,14 @@ import { TeacherProfileSection } from './TeacherProfileSection';
 import { getEffectiveSchoolEndForDay, formatTime } from '../utils/timeUtils';
 import { COLOR_FAMILIES, getContrastTextColor } from '../utils/colorUtils';
 import { CustomColorPickerModal } from './CustomColorPickerModal';
+import { ContactsUnificationModal } from './ContactsUnificationModal';
 
 type SettingsCategory = 
   | 'language'
   | 'notifications'
   | 'profile'
   | 'school'
+  | 'contacts'
   | 'payment'
   | 'messages'
   | 'inspiration'
@@ -51,6 +53,7 @@ export const SettingsView: React.FC = () => {
 
   const [activeCategory, setActiveCategory] = useState<SettingsCategory | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isContactsModalOpen, setIsContactsModalOpen] = useState(false);
 
   // Live Theme Accent Preview Interactive Demo States
   const [previewSwitchOn, setPreviewSwitchOn] = useState(true);
@@ -259,6 +262,14 @@ export const SettingsView: React.FC = () => {
       badge: _t('المدرسة', 'School', 'Schule')
     },
     {
+      id: 'contacts' as SettingsCategory,
+      title: _t('توحيد جهات الاتصال', 'Contacts Unification', 'Kontakte vereinheitlichen'),
+      description: _t('توحيد وتنسيق أسماء أولياء الأمور عبر Google Contacts وأندرويد', 'Standardize parent contact names across Google Contacts & Android', 'Elternkontakte über Google Contacts & Android vereinheitlichen'),
+      icon: Smartphone,
+      color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 dark:border-emerald-500/30',
+      badge: 'Google & Android'
+    },
+    {
       id: 'payment' as SettingsCategory,
       title: t('auto_payments_finance'),
       description: t('auto_financial_information_transfe'),
@@ -446,6 +457,62 @@ export const SettingsView: React.FC = () => {
           </div>
         ) : (
           <div className="animate-fade-in bg-surface rounded-xl border border-surface-border shadow-2xs p-3.5 sm:p-4 min-h-[50vh]">
+            {/* ==========================================
+                SUBPAGE: CONTACTS UNIFICATION
+            ========================================== */}
+            {activeCategory === 'contacts' && (
+              <div className="space-y-3.5 animate-scale-up">
+                {renderSubPageHeader(
+                  _t('توحيد جهات الاتصال', 'Contacts Unification', 'Kontakte vereinheitlichen'),
+                  _t('توحيد وتنسيق أسماء أولياء الأمور عبر Google Contacts وأندرويد', 'Standardize parent contact names across Google Contacts & Android', 'Elternkontakte über Google Contacts & Android vereinheitlichen'),
+                  Smartphone
+                )}
+
+                <div className="bg-surface border border-surface-border rounded-xl p-4 shadow-2xs space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-text-main">
+                        {_t('أداة توحيد وتنسيق جهات الاتصال الذكية', 'Smart Contact Standardization Tool', 'Smartes Werkzeug zur Kontaktvereinheitlichung')}
+                      </h4>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        {_t(
+                          'تنسيق جهات اتصال الهواتف والحسابات المرتبطة بـ Google وفق الصيغة القياسية: {اسم الطالب الإنجليزي}\'s Mom - Klasse {رقم الصف}',
+                          'Format phone & Google Contacts using standard formula: {Student English Name}\'s Mom - Klasse {Class}',
+                          'Formatierung nach Standard: {Schülername}\'s Mom - Klasse {Stufe}'
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-surface-hover/50 border border-surface-border text-xs text-text-muted space-y-1.5">
+                    <div className="font-semibold text-text-main flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                      <span>{_t('الميزات والمعايير المدعومة:', 'Features & Supported Standards:', 'Unterstützte Funktionen:')}</span>
+                    </div>
+                    <ul className="list-disc list-inside space-y-1 ps-2">
+                      <li>{_t('دمج تلقائي للإخوة المشتركين بنفس رقم الهاتف: Ahmed & Mariam\'s Mom - Klasse 2 & 4', 'Consolidates siblings on same number: Ahmed & Mariam\'s Mom - Klasse 2 & 4', 'Geschwister-Zusammenfassung')}</li>
+                      <li>{_t('استخدام كلمة Klasse حصراً بدلاً من Grade مع مراعاة قواعد الملكية بالإنجليزية', 'Strictly uses Klasse instead of Grade, respecting English possessives', 'Klasse statt Grade')}</li>
+                      <li>{_t('كشف الأرقام المكررة والأسماء الموحدة مسبقاً وتوافق كامل مع Google Contacts', 'Detects duplicates, already standardized contacts, and Google accounts', 'Duplikaterkennung')}</li>
+                    </ul>
+                  </div>
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setIsContactsModalOpen(true)}
+                      className="px-4 py-2 bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{_t('فتح أداة توحيد جهات الاتصال', 'Open Contacts Unifier', 'Werkzeug jetzt öffnen')}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ==========================================
                 SUBPAGE: APPEARANCE & LANGUAGE
             ========================================== */}
@@ -1648,6 +1715,13 @@ export const SettingsView: React.FC = () => {
         currentAccent={accentColor}
         onSelectAccent={(col) => setAccentColor(col as any)}
       />
+
+      {/* ==========================================
+          SMART CONTACTS UNIFICATION MODAL
+      ========================================== */}
+      {isContactsModalOpen && (
+        <ContactsUnificationModal onClose={() => setIsContactsModalOpen(false)} />
+      )}
     </div>
   );
 };

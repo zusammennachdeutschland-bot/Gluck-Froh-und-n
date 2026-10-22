@@ -1,0 +1,212 @@
+{
+  "students": {
+    "1001": {
+      "studentCode": "1001",
+      "studentName": "يوسف أحمد عمر",
+      "grade": "Grade 10 (A2.2)",
+      "groupName": "مجموعة المتميزين الألمانية A2",
+      "parentPhones": [
+        "01000000000",
+        "01111111111"
+      ],
+      "linkedParentUids": [
+        "p_01f018bfe380777d"
+      ],
+      "attendanceRate": 94,
+      "totalLessons": 18,
+      "completedLessons": 17,
+      "streak": 5,
+      "nextLesson": {
+        "date": "2026-10-22",
+        "time": "17:00",
+        "title": "الدرس 18: حروف الجر مع الداتيف Wechselpräpositionen",
+        "meetingLink": "https://meet.google.com/abc-demo-ags"
+      },
+      "lessons": [
+        {
+          "id": "les-1",
+          "title": "الدرس 17: الماضي البسيط Präteritum",
+          "date": "2026-10-15",
+          "time": "17:00",
+          "durationMinutes": 90,
+          "status": "completed",
+          "paymentStatus": "paid",
+          "homeworkStatus": "completed",
+          "homeworkTitle": "حل تمارين كتاب التدريبات صفحة 45-47",
+          "attendanceStatus": "present",
+          "quizScore": 9,
+          "examScore": 95,
+          "publicNotes": "أداء ممتاز وتفاعل متميز أثناء تصريف الأفعال الشاذة."
+        },
+        {
+          "id": "les-2",
+          "title": "الدرس 16: أدوات الربط weil & dass",
+          "date": "2026-10-08",
+          "time": "17:00",
+          "durationMinutes": 90,
+          "status": "completed",
+          "paymentStatus": "paid",
+          "homeworkStatus": "completed",
+          "homeworkTitle": "كتابة 5 جمل باستخدام weil",
+          "attendanceStatus": "present",
+          "quizScore": 10,
+          "publicNotes": "استيعاب سريع لقواعد ترتيب الفعل في نهاية الجملة."
+        }
+      ],
+      "homework": [
+        {
+          "id": "hw-1",
+          "title": "حل تمارين الأفعال المنفصلة Trennbare Verben",
+          "assignedDate": "2026-10-15",
+          "dueDate": "2026-10-22",
+          "status": "completed",
+          "description": "كتاب التدريبات صفحة 48 تمرين 3 و 4"
+        },
+        {
+          "id": "hw-2",
+          "title": "حفظ الكلمات الجديدة للدرس 17",
+          "assignedDate": "2026-10-15",
+          "dueDate": "2026-10-22",
+          "status": "assigned",
+          "description": "قائمة الكلمات في Lernstudio الخاصة بموضوع السفر"
+        }
+      ],
+      "grades": [
+        {
+          "id": "grd-1",
+          "title": "اختبار دوري - الوحدة الرابعة",
+          "date": "2026-10-15",
+          "type": "exam",
+          "score": 95,
+          "maxScore": 100,
+          "percentage": 95,
+          "feedback": "ممتاز جداً - إتقان كامل لقواعد الإعراب والأزمنة."
+        },
+        {
+          "id": "grd-2",
+          "title": "تسميع كلمات الأسبوع الثالث",
+          "date": "2026-10-08",
+          "type": "dictation",
+          "score": 10,
+          "maxScore": 10,
+          "percentage": 100,
+          "feedback": "10/10 بدون أي خطأ إملائي."
+        }
+      ],
+      "finance": {
+        "totalDue": 1200,
+        "totalPaid": 1200,
+        "remainingBalance": 0,
+        "currency": "EGP",
+        "records": [
+          {
+            "id": "pay-1",
+            "date": "2026-10-01",
+            "amountDue": 1200,
+            "amountPaid": 1200,
+            "status": "paid",
+            "notes": "اشتراك شهر أكتوبر 2026 (4 حصص مكثفة)"
+          }
+        ]
+      },
+      "certificates": [
+        {
+          "id": "cert-1",
+          "title": "شهادة تميز في اللغة الألمانية - المستوى A2.1",
+          "recipientName": "Youssef Ahmed Omar",
+          "certificateType": "german_excellence",
+          "issueDate": "2026-09-30",
+          "score": "98%",
+          "teacherName": "Herr Omar Hassan"
+        }
+      ],
+      "lastSyncedAt": "2026-10-19T18:10:02.164Z"
+    },
+    "2002": {
+      "studentCode": "2002",
+      "studentName": "سارة أحمد عمر (الأخت)",
+      "grade": "Grade 7 (A1.1)",
+      "groupName": "مجموعة المبتدئين A1",
+      "parentPhones": [
+        "01000000000"
+      ],
+      "attendanceRate": 100,
+      "totalLessons": 8,
+      "completedLessons": 8,
+      "streak": 4,
+      "lessons": [],
+      "homework": [],
+      "grades": [],
+      "finance": {
+        "totalDue": 800,
+        "totalPaid": 800,
+        "remainingBalance": 0,
+        "currency": "EGP",
+        "records": []
+      },
+      "certificates": [],
+      "linkedParentUids": [
+        "p_01f018bfe380777d"
+      ],
+      "lastSyncedAt": "2026-10-19T18:10:04.394Z"
+    }
+  },
+  "accounts": {
+    "p_01f018bfe380777d": {
+      "parentUid": "p_01f018bfe380777d",
+      "parentPhone": "01000000000",
+      "studentCodes": [
+        "1001",
+        "2002"
+      ],
+      "passwordHash": "b050917f4486209a33a008c84e23fb4e800232e6e91680f249b74f55d20d79a54bec7925ed18491d85406e183e19bf29dbe4470b2b2980c9d42972abb01629ff",
+      "salt": "f2c1d77fee1ec07ed85748cf6b464921",
+      "authVersion": 3,
+      "mustChangePassword": false,
+      "createdAt": "2026-10-19T18:10:02.755Z",
+      "updatedAt": "2026-10-19T18:10:03.675Z"
+    }
+  },
+  "devices": {
+    "dev_test_audit_01": {
+      "deviceId": "dev_test_audit_01",
+      "deviceName": "Teacher MacBook Pro",
+      "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGLUCKTEST",
+      "enrolledAt": "2026-10-19T18:10:04.049Z",
+      "isRevoked": false
+    }
+  },
+  "pairingCodes": {
+    "1515-2057": {
+      "code": "1515-2057",
+      "expiresAt": 1792434003968,
+      "consumed": true,
+      "createdAt": "2026-10-19T18:10:03.968Z"
+    }
+  },
+  "linkRequests": {
+    "req_d9144e7b5c0d": {
+      "requestId": "req_d9144e7b5c0d",
+      "parentUid": "p_01f018bfe380777d",
+      "targetStudentCode": "2002",
+      "pairingPin": "220319",
+      "expiresAt": 1792434304429,
+      "status": "APPROVED",
+      "createdAt": "2026-10-19T18:10:04.429Z"
+    }
+  },
+  "nonces": {
+    "nonce_1792433404097_gaist33wbet": 1792433404098
+  },
+  "rateLimits": {
+    "127.0.0.1": {
+      "attempts": 5,
+      "resetAt": 1792434304807
+    },
+    "9999_lockout_test": {
+      "attempts": 5,
+      "resetAt": 1792434304807,
+      "lockedUntil": 1792434305231
+    }
+  }
+}

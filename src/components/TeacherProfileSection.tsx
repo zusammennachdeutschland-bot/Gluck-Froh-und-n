@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   User, Mail, DollarSign, Calendar, Clock, Target, 
-  Save, CheckCircle2, ArrowLeft, ArrowRight, UserCheck, ShieldCheck
+  Save, CheckCircle2, ArrowLeft, ArrowRight, UserCheck, ShieldCheck,
+  RefreshCw, Globe, Smartphone, Check, X, AlertCircle
 } from 'lucide-react';
+import { portalSyncService, PortalSyncStatus } from '../services/portalSyncService';
 
 interface Props {
   onBack?: () => void;
@@ -50,6 +52,48 @@ export const TeacherProfileSection: React.FC<Props> = ({ onBack }) => {
   });
 
   const [isSaved, setIsSaved] = useState(false);
+
+  // Portal Sync State
+  const [syncStatus, setSyncStatus] = useState<PortalSyncStatus | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [approvalPin, setApprovalPin] = useState('');
+
+  const loadSyncStatus = async () => {
+    try {
+      const status = await portalSyncService.getStatus();
+      setSyncStatus(status);
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    loadSyncStatus();
+  }, []);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    setSyncFeedback(null);
+    try {
+      const res = await portalSyncService.syncAllStudents();
+      setSyncFeedback(res.message);
+      await loadSyncStatus();
+    } catch (e: any) {
+      setSyncFeedback(e.message || 'فشلت المزامنة');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleApprovePin = async (pin: string, approve = true) => {
+    try {
+      await portalSyncService.approveSiblingLink(pin, approve);
+      setSyncFeedback(approve ? 'تم اعتماد ربط الطالب بنجاح' : 'تم رفض طلب الربط');
+      setApprovalPin('');
+      await loadSyncStatus();
+    } catch (e: any) {
+      setSyncFeedback(e.message || 'خطأ في اعتماد الطلب');
+    }
+  };
 
   const handleSaveAll = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -378,6 +422,107 @@ export const TeacherProfileSection: React.FC<Props> = ({ onBack }) => {
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* PARENT PORTAL SYNC MANAGEMENT */}
+      <div className="bg-surface-card p-5 rounded-2xl border border-surface-border shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center font-bold">
+              <Globe className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm text-text-main flex items-center gap-2">
+                {_t('بوابة متابعة ولي الأمر أونلاين', 'Online Parent Portal', 'Elternportal')}
+                <span className="px-2 py-0.5 text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold rounded-md">
+                  {_t('نشط', 'Active', 'Aktiv')}
+                </span>
+              </h3>
+              <p className="text-xs text-text-muted">
+                {_t(
+                  'مزامنة آمنة للدرجات، الحضور، الواجبات والشهادات لمتابعة أولياء الأمور دون مشاركة بياناتك الخاصة',
+                  'Securely sync grades, attendance, homework, and certificates for parents',
+                  'Sichere Synchronisation für Eltern'
+                )}
+              </p>
+            </div>
+          </div>
+
+          <a
+            href="/portal/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 rounded-xl bg-surface border border-surface-border text-xs font-bold text-blue-600 hover:bg-surface-hover flex items-center gap-1.5 transition-colors"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            {_t('فتح البوابة', 'Open Portal', 'Portal öffnen')}
+          </a>
+        </div>
+
+        {/* Sync Status Banner */}
+        <div className="p-3.5 rounded-xl bg-surface border border-surface-border flex items-center justify-between text-xs">
+          <div className="space-y-0.5">
+            <div className="font-bold text-text-main flex items-center gap-2">
+              <Smartphone className="w-4 h-4 text-text-muted" />
+              <span>{_t('معرف الجهاز المعتمد:', 'Authorized Device:', 'Geräte-ID:')} <code className="font-mono text-primary text-[11px]">{syncStatus?.deviceId || 'جهاز محلي'}</code></span>
+            </div>
+            <div className="text-text-muted text-[11px]">
+              {_t('آخر مزامنة ناجحة:', 'Last synced:', 'Zuletzt synchronisiert:')} {syncStatus?.lastSyncedAt ? new Date(syncStatus.lastSyncedAt).toLocaleString('ar-EG') : _t('لم تتم المزامنة بعد', 'Never synced', 'Noch nie')}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className="px-4 py-2 rounded-xl bg-primary text-white font-bold flex items-center gap-2 hover:bg-primary/90 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? _t('جارِ المزامنة...', 'Syncing...', 'Synchronisiere...') : _t('مزامنة الآن', 'Sync Now', 'Jetzt synchronisieren')}</span>
+          </button>
+        </div>
+
+        {syncFeedback && (
+          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{syncFeedback}</span>
+          </div>
+        )}
+
+        {/* SIBLING LINK APPROVAL */}
+        <div className="pt-2 border-t border-surface-border space-y-2.5">
+          <h4 className="text-xs font-bold text-text-main flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-blue-500" />
+            {_t('اعتماد ربط الأخوة (بدون رسائل OTP)', 'Approve Sibling Linking (Zero-OTP)', 'Geschwister-Verknüpfung')}
+          </h4>
+          <p className="text-[11px] text-text-muted">
+            {_t(
+              'أدخل رمز الـ PIN المكون من 6 أرقام الظاهر على شاشة ولي الأمر في البوابة لاعتماده فوراً:',
+              'Enter the 6-digit PIN displayed on the parent portal to link accounts:',
+              'Geben Sie die 6-stellige PIN des Elternteils ein:'
+            )}
+          </p>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              maxLength={6}
+              placeholder="مثال: 582910"
+              value={approvalPin}
+              onChange={e => setApprovalPin(e.target.value.replace(/\D/g, ''))}
+              className="px-3 py-2 rounded-xl bg-surface border border-surface-border text-xs font-mono font-bold tracking-widest text-center w-36"
+            />
+            <button
+              type="button"
+              disabled={approvalPin.length !== 6}
+              onClick={() => handleApprovePin(approvalPin, true)}
+              className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 hover:bg-emerald-700 transition-colors disabled:opacity-40"
+            >
+              <Check className="w-3.5 h-3.5" />
+              {_t('اعتماد الربط', 'Approve Link', 'Bestätigen')}
+            </button>
+          </div>
         </div>
       </div>
     </div>

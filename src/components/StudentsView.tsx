@@ -15,6 +15,7 @@ import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { AiImportModal } from './AiImportModal';
 import { CascadeDeleteGroupModal } from './CascadeDeleteGroupModal';
 import { QuickGenderAssignModal } from './QuickGenderAssignModal';
+import { ContactsUnificationModal } from './ContactsUnificationModal';
 import { formatGroupScheduleDisplay, getDayNumber } from '../utils/scheduleUtils';
 import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
@@ -51,6 +52,7 @@ export const StudentsView: React.FC = () => {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [isAiImportModalOpen, setIsAiImportModalOpen] = useState(false);
   const [isGenderAssignModalOpen, setIsGenderAssignModalOpen] = useState(false);
+  const [isContactsModalOpen, setIsContactsModalOpen] = useState(false);
 
   // Student transfer & group clear states
   const [studentToMove, setStudentToMove] = useState<Student | null>(null);
@@ -433,7 +435,7 @@ export const StudentsView: React.FC = () => {
           <span>{t('students_and_groups_title')}</span>
         </h2>
 
-        <div className="grid grid-cols-3 gap-1 sm:gap-1.5 w-full sm:w-auto sm:flex sm:items-center sm:gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:items-center gap-1 sm:gap-2 w-full sm:w-auto">
           <button
             onClick={() => setIsAddStudentModalOpen(true)}
             className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
@@ -458,6 +460,16 @@ export const StudentsView: React.FC = () => {
           >
             <Bot className="w-3.5 h-3.5 shrink-0" />
             <span className="truncate">{t('auto_import_group_students')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsContactsModalOpen(true)}
+            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            title={_t('توحيد جهات الاتصال', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}
+          >
+            <Sparkles className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <span className="truncate">{_t('توحيد جهات الاتصال', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}</span>
           </button>
         </div>
       </div>
@@ -1975,6 +1987,11 @@ export const StudentsView: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Smart Google Contacts Cleanup & Unification Modal */}
+      {isContactsModalOpen && (
+        <ContactsUnificationModal onClose={() => setIsContactsModalOpen(false)} />
       )}
     </div>
   );

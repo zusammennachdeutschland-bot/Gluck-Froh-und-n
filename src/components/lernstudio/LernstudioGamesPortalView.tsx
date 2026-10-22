@@ -70,9 +70,37 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
       categoryKey: 'raceGameCategory'
     },
     {
+      id: 'team_auction',
+      titleKey: 'teamAuctionTitle',
+      emoji: '🔨',
+      category: 'team',
+      categoryKey: 'teamAuctionCategory'
+    },
+    {
+      id: 'space_fleet',
+      titleKey: 'spaceFleetTitle',
+      emoji: '🌌',
+      category: 'team',
+      categoryKey: 'spaceFleetCategory'
+    },
+    {
+      id: 'rocket_countdown',
+      titleKey: 'rocketCountdownTitle',
+      emoji: '🚀',
+      category: 'team',
+      categoryKey: 'rocketCountdownCategory'
+    },
+    {
+      id: 'tower_architects',
+      titleKey: 'towerArchitectsTitle',
+      emoji: '🏰',
+      category: 'team',
+      categoryKey: 'towerArchitectsCategory'
+    },
+    {
       id: 'space_defense',
       titleKey: 'spaceDefenseTitle',
-      emoji: '🚀',
+      emoji: '🛸',
       category: 'team',
       categoryKey: 'spaceDefenseCategory'
     },
@@ -93,6 +121,104 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
   ];
 
   const soloGames: GameItemConfig[] = [
+    {
+      id: 'bridge_builder',
+      titleKey: 'bridgeBuilderTitle',
+      emoji: '🌉',
+      category: 'solo',
+      categoryKey: 'bridgeBuilderCategory'
+    },
+    {
+      id: 'island_crossing',
+      titleKey: 'islandCrossingTitle',
+      emoji: '🏝️',
+      category: 'solo',
+      categoryKey: 'islandCrossingCategory'
+    },
+    {
+      id: 'submarine_explore',
+      titleKey: 'submarineExploreTitle',
+      emoji: '🌊',
+      category: 'solo',
+      categoryKey: 'submarineExploreCategory'
+    },
+    {
+      id: 'robot_repair',
+      titleKey: 'robotRepairTitle',
+      emoji: '🤖',
+      category: 'solo',
+      categoryKey: 'robotRepairCategory'
+    },
+    {
+      id: 'color_master',
+      titleKey: 'colorMasterTitle',
+      emoji: '🎨',
+      category: 'solo',
+      categoryKey: 'colorMasterCategory'
+    },
+    {
+      id: 'factory_machine',
+      titleKey: 'factoryMachineTitle',
+      emoji: '🏭',
+      category: 'solo',
+      categoryKey: 'factoryMachineCategory'
+    },
+    {
+      id: 'puzzle_masters',
+      titleKey: 'puzzleMastersTitle',
+      emoji: '🧩',
+      category: 'solo',
+      categoryKey: 'puzzleMastersCategory'
+    },
+    {
+      id: 'target_attack',
+      titleKey: 'targetAttackTitle',
+      emoji: '🎯',
+      category: 'solo',
+      categoryKey: 'targetAttackCategory'
+    },
+    {
+      id: 'vending_machine',
+      titleKey: 'vendingMachineTitle',
+      emoji: '🥤',
+      category: 'solo',
+      categoryKey: 'vendingMachineCategory'
+    },
+    {
+      id: 'whats_in_box',
+      titleKey: 'whatsInBoxTitle',
+      emoji: '📦',
+      category: 'solo',
+      categoryKey: 'whatsInBoxCategory'
+    },
+    {
+      id: 'word_rhythm',
+      titleKey: 'wordRhythmTitle',
+      emoji: '🎵',
+      category: 'solo',
+      categoryKey: 'wordRhythmCategory'
+    },
+    {
+      id: 'word_wash',
+      titleKey: 'wordWashTitle',
+      emoji: '🧼',
+      category: 'solo',
+      categoryKey: 'wordWashCategory'
+    },
+    {
+      id: 'follow_clues',
+      titleKey: 'followCluesTitle',
+      emoji: '🔍',
+      category: 'solo',
+      categoryKey: 'followCluesCategory'
+    },
+    {
+      id: 'pit_stop',
+      titleKey: 'pitStopTitle',
+      emoji: '🏁',
+      category: 'solo',
+      categoryKey: 'pitStopCategory'
+    },
     {
       id: 'word_ninja',
       titleKey: 'wordNinjaTitle',
@@ -127,27 +253,6 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
       emoji: '🕵️‍♂️',
       category: 'solo',
       categoryKey: 'wordDetectiveCategory'
-    },
-    {
-      id: 'space_defense',
-      titleKey: 'spaceDefenseTitle',
-      emoji: '🚀',
-      category: 'solo',
-      categoryKey: 'spaceDefenseCategory'
-    },
-    {
-      id: 'tug_of_war',
-      titleKey: 'tugOfWarTitle',
-      emoji: '🪢',
-      category: 'solo',
-      categoryKey: 'tugOfWarCategory'
-    },
-    {
-      id: 'sentence_builder',
-      titleKey: 'soloSentenceTitle',
-      emoji: '🧩',
-      category: 'solo',
-      categoryKey: 'soloSentenceCategory'
     },
     {
       id: 'sorting',

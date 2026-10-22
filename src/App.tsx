@@ -25,6 +25,7 @@ import { CertificateCenter } from './components/certificates/CertificateCenter';
 import { SchoolScheduleView } from './components/SchoolScheduleView';
 import { HodHubView } from './components/HodHubView';
 import { LernstudioView } from './components/lernstudio/LernstudioView';
+import { PortalAdminDashboard } from './components/portal/PortalAdminDashboard';
 
 import { DesktopSidebar } from './components/desktop/DesktopSidebar';
 import { DesktopTopBar } from './components/desktop/DesktopTopBar';
@@ -574,6 +575,7 @@ function MainApp() {
             {activeTab === 'freeTime' && <FreeTimeSlotsView />}
             {activeTab === 'certificates' && <CertificateCenter />}
             {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
+            {activeTab === 'parentPortal' && <PortalAdminDashboard />}
             {activeTab === 'hod' && <HodHubView />}
             {activeTab === 'lernstudio' && (
               <LernstudioView
@@ -627,6 +629,7 @@ function MainApp() {
                   {activeTab === 'freeTime' && <FreeTimeSlotsView />}
                   {activeTab === 'certificates' && <CertificateCenter />}
                   {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
+                  {activeTab === 'parentPortal' && <PortalAdminDashboard />}
                   {activeTab === 'hod' && <HodHubView />}
                   {activeTab === 'lernstudio' && (
                     <LernstudioView

@@ -203,6 +203,42 @@ export interface LernstudioTranslations {
   tugOfWarCategory: string;
   wordNinjaTitle: string;
   wordNinjaCategory: string;
+  bridgeBuilderTitle: string;
+  bridgeBuilderCategory: string;
+  colorMasterTitle: string;
+  colorMasterCategory: string;
+  factoryMachineTitle: string;
+  factoryMachineCategory: string;
+  followCluesTitle: string;
+  followCluesCategory: string;
+  islandCrossingTitle: string;
+  islandCrossingCategory: string;
+  pitStopTitle: string;
+  pitStopCategory: string;
+  puzzleMastersTitle: string;
+  puzzleMastersCategory: string;
+  robotRepairTitle: string;
+  robotRepairCategory: string;
+  rocketCountdownTitle: string;
+  rocketCountdownCategory: string;
+  spaceFleetTitle: string;
+  spaceFleetCategory: string;
+  submarineExploreTitle: string;
+  submarineExploreCategory: string;
+  targetAttackTitle: string;
+  targetAttackCategory: string;
+  teamAuctionTitle: string;
+  teamAuctionCategory: string;
+  towerArchitectsTitle: string;
+  towerArchitectsCategory: string;
+  vendingMachineTitle: string;
+  vendingMachineCategory: string;
+  whatsInBoxTitle: string;
+  whatsInBoxCategory: string;
+  wordRhythmTitle: string;
+  wordRhythmCategory: string;
+  wordWashTitle: string;
+  wordWashCategory: string;
   allEducationalLevels: string;
   allTopicsAndCategories: string;
   germanSetsForKids: string;
@@ -284,6 +320,42 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     tugOfWarCategory: 'تنافس فرق حماسي / أو ضد الآلي',
     wordNinjaTitle: 'نينجا تقطيع المفردات 🥷',
     wordNinjaCategory: 'تحدي السرعة والتركيز الفردي',
+    bridgeBuilderTitle: 'بناء الجسر 🌉',
+    bridgeBuilderCategory: 'تحدي الفردي والفرق لتجميع الألواح',
+    colorMasterTitle: 'سيد الألوان 🎨',
+    colorMasterCategory: 'مطابقة المفردات بالألوان المضيئة',
+    factoryMachineTitle: 'آلة المصنع الذكية 🏭',
+    factoryMachineCategory: 'توجيه الكلمات للسيور الخمسة',
+    followCluesTitle: 'تتبع الأدلة 🔍',
+    followCluesCategory: 'استكشاف المفردات عبر التلميحات المتتابعة',
+    islandCrossingTitle: 'عبور الجزر 🏝️',
+    islandCrossingCategory: 'القفز عبر الجزر بالوصول للترجمة',
+    pitStopTitle: 'محطة الصيانة والسباق 🏁',
+    pitStopCategory: 'تبديل الإطارات بفك الشفرات المفرداتية',
+    puzzleMastersTitle: 'سادة الألغاز 🧩',
+    puzzleMastersCategory: 'تركيب قطع الصورة وربط الكلمة',
+    robotRepairTitle: 'صيانة الروبوتات 🤖',
+    robotRepairCategory: 'إصلاح الدوائر الكهربائية البرمجية',
+    rocketCountdownTitle: 'عد تنازلي للصاروخ 🚀',
+    rocketCountdownCategory: 'تجهيز المنصة قبل نفاد الوقت',
+    spaceFleetTitle: 'أسطول المجرة 🌌',
+    spaceFleetCategory: 'قيادة السفن وحماية المدار المفرداتي',
+    submarineExploreTitle: 'مستكشف الغواصة 🌊',
+    submarineExploreCategory: 'الغوص للأعماق واكتشاف الكنوز',
+    targetAttackTitle: 'هجوم الأهداف 🎯',
+    targetAttackCategory: 'تصويب ودقة إصابة الهدف المطلوب',
+    teamAuctionTitle: 'مزاد الفرق 🔨',
+    teamAuctionCategory: 'المزايدة والتنافس التكتيكي بين الفرق',
+    towerArchitectsTitle: 'مهندسو الأبراج 🏰',
+    towerArchitectsCategory: 'بناء الطوابق بصف الكلمات الصحيحة',
+    vendingMachineTitle: 'آلة المشروبات 🥤',
+    vendingMachineCategory: 'إدخال العملة البرمجية واختيار الكلمة',
+    whatsInBoxTitle: 'ماذا يوجد في الصندوق؟ 📦',
+    whatsInBoxCategory: 'تخمين المحتوى والتفاعل السريع',
+    wordRhythmTitle: 'إيقاع المفردات 🎵',
+    wordRhythmCategory: 'مطابقة الكلمات مع النغمات والإيقاع',
+    wordWashTitle: 'غسيل المفردات 🧼',
+    wordWashCategory: 'تنظيف وتلميع الكلمات الألمانية',
     allEducationalLevels: 'كل المراحل التعليمية',
     allTopicsAndCategories: 'كل الموضوعات والمجالات',
     germanSetsForKids: 'مجموعة ألمانية للأطفال',
@@ -482,6 +554,42 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     tugOfWarCategory: 'Thrilling Team Pull or vs CPU',
     wordNinjaTitle: 'Word Ninja 🥷',
     wordNinjaCategory: 'Slice & Dice Solo Challenge',
+    bridgeBuilderTitle: 'Bridge Builder 🌉',
+    bridgeBuilderCategory: 'Plank Collecting Solo/Team Challenge',
+    colorMasterTitle: 'Color Master 🎨',
+    colorMasterCategory: 'Neon Palette Word Matching',
+    factoryMachineTitle: 'Factory Machine 🏭',
+    factoryMachineCategory: 'Conveyor Belt Sorting & Routing',
+    followCluesTitle: 'Follow the Clues 🔍',
+    followCluesCategory: 'Sequential Clue & Discovery Game',
+    islandCrossingTitle: 'Island Crossing 🏝️',
+    islandCrossingCategory: 'Hop Islands via German Translations',
+    pitStopTitle: 'Race Pit Stop 🏁',
+    pitStopCategory: 'Tire Change & Decoding Challenge',
+    puzzleMastersTitle: 'Puzzle Masters 🧩',
+    puzzleMastersCategory: 'Assemble Image & Connect Words',
+    robotRepairTitle: 'Robot Repair 🤖',
+    robotRepairCategory: 'Fix Circuit Boards with Vocab',
+    rocketCountdownTitle: 'Rocket Launch 🚀',
+    rocketCountdownCategory: 'Platform Prep before Liftoff',
+    spaceFleetTitle: 'Galaxy Space Fleet 🌌',
+    spaceFleetCategory: 'Starship Fleet Orbit Defense',
+    submarineExploreTitle: 'Submarine Explorer 🌊',
+    submarineExploreCategory: 'Deep Sea Treasure Hunting',
+    targetAttackTitle: 'Target Attack 🎯',
+    targetAttackCategory: 'Precision Archery Target Hitting',
+    teamAuctionTitle: 'Team Auction 🔨',
+    teamAuctionCategory: 'Tactical Bidding & Vocabulary',
+    towerArchitectsTitle: 'Tower Architects 🏰',
+    towerArchitectsCategory: 'Stack Floors with Correct Words',
+    vendingMachineTitle: 'Vending Machine 🥤',
+    vendingMachineCategory: 'Insert Coin & Select Vocabulary',
+    whatsInBoxTitle: "What's in the Box? 📦",
+    whatsInBoxCategory: 'Mystery Box Guessing Game',
+    wordRhythmTitle: 'Word Rhythm 🎵',
+    wordRhythmCategory: 'Musical Rhythm & Word Matching',
+    wordWashTitle: 'Word Wash 🧼',
+    wordWashCategory: 'Scrub & Shine German Words',
     allEducationalLevels: 'All Educational Levels',
     allTopicsAndCategories: 'All Topics & Categories',
     germanSetsForKids: 'German Sets for Kids',
@@ -680,6 +788,42 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     tugOfWarCategory: 'Spannender Team-Wettkampf',
     wordNinjaTitle: 'Wort-Ninja 🥷',
     wordNinjaCategory: 'Schneide-Challenge',
+    bridgeBuilderTitle: 'Brückenbauer 🌉',
+    bridgeBuilderCategory: 'Planken-Sammeln Challenge',
+    colorMasterTitle: 'Farbmeister 🎨',
+    colorMasterCategory: 'Leuchtende Wort-Zuordnung',
+    factoryMachineTitle: 'Fabrikmaschine 🏭',
+    factoryMachineCategory: 'Fließband-Sortieraufgabe',
+    followCluesTitle: 'Spuren Folgen 🔍',
+    followCluesCategory: 'Entdeckungsreise mit Hinweisen',
+    islandCrossingTitle: 'Inselhüpfen 🏝️',
+    islandCrossingCategory: 'Von Insel zu Insel springen',
+    pitStopTitle: 'Renn-Boxenstopp 🏁',
+    pitStopCategory: 'Reifenwechsel & Rätsel',
+    puzzleMastersTitle: 'Puzzle-Meister 🧩',
+    puzzleMastersCategory: 'Bild zusammensetzen & Begriffe lernen',
+    robotRepairTitle: 'Roboter-Reparatur 🤖',
+    robotRepairCategory: 'Schaltkreise reparieren',
+    rocketCountdownTitle: 'Raketen-Countdown 🚀',
+    rocketCountdownCategory: 'Startrampe vorbereiten',
+    spaceFleetTitle: 'Galaxie-Flotte 🌌',
+    spaceFleetCategory: 'Raumschiff-Orbit-Verteidigung',
+    submarineExploreTitle: 'U-Boot Entdecker 🌊',
+    submarineExploreCategory: 'Tiefsee-Schatzsuche',
+    targetAttackTitle: 'Zielscheiben-Angriff 🎯',
+    targetAttackCategory: 'Präzisions-Bogenschießen',
+    teamAuctionTitle: 'Team-Auktion 🔨',
+    teamAuctionCategory: 'Taktisches Bieten & Vokabeln',
+    towerArchitectsTitle: 'Turm-Architekten 🏰',
+    towerArchitectsCategory: 'Stockwerke mit Wörtern bauen',
+    vendingMachineTitle: 'Getränkeautomat 🥤',
+    vendingMachineCategory: 'Münze einwerfen & Wort wählen',
+    whatsInBoxTitle: 'Was ist in der Box? 📦',
+    whatsInBoxCategory: 'Geheimnisvolles Box-Rätsel',
+    wordRhythmTitle: 'Wort-Rhythmus 🎵',
+    wordRhythmCategory: 'Musikalischer Rhythmus & Wörter',
+    wordWashTitle: 'Wort-Wäsche 🧼',
+    wordWashCategory: 'Deutsche Wörter sauber schrubben',
     allEducationalLevels: 'Alle Bildungsstufen',
     allTopicsAndCategories: 'Alle Themen & Kategorien',
     germanSetsForKids: 'Deutsche Lernsets für Kinder',
@@ -903,10 +1047,14 @@ export function getItemTranslation(item?: Partial<LernstudioItem> | null, lang?:
   if (safeLang === 'en') {
     return item.english && item.english.trim() ? item.english.trim() : (item.arabic || item.german || '');
   }
-  if (safeLang === 'de') {
-    return item.german || item.english || item.arabic || '';
+  // For German learning, return Arabic or English meaning so quiz questions do not display identical German prompt and choices
+  if (item.arabic && item.arabic.trim()) {
+    return item.arabic.trim();
   }
-  return item.arabic || item.english || item.german || '';
+  if (item.english && item.english.trim()) {
+    return item.english.trim();
+  }
+  return item.german || '';
 }
 
 export function getLocalizedSetDescription(set?: Partial<LernstudioSet> | null, lang?: string): string {

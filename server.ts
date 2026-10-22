@@ -1,12 +1,17 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
+import { setupPortalRoutes } from "./src/server/portalBackend";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Mount Parent Portal and Teacher Sync APIs
+  setupPortalRoutes(app);
 
   // API Routes
   app.all("/api/health", (req, res) => {
@@ -176,6 +181,31 @@ async function startServer() {
     } catch (err: any) {
       console.error("TTS endpoint error:", err);
       res.status(500).json({ error: "TTS failed" });
+    }
+  });
+
+  // Parent Portal Sub-App routing for both Dev and Production
+  app.use((req, res, next) => {
+    if (req.path === '/portal') {
+      return res.redirect(301, '/portal/');
+    }
+    next();
+  });
+  app.use('/portal', (req, res, next) => {
+    if (process.env.NODE_ENV === "production") {
+      const distPath = path.join(process.cwd(), 'dist');
+      const portalDist = path.join(distPath, 'parent-portal');
+      const staticHandler = express.static(portalDist);
+      staticHandler(req, res, () => {
+        res.sendFile(path.join(portalDist, 'index.html'));
+      });
+    } else {
+      const filePath = path.join(process.cwd(), 'parent-portal', req.path === '/' || !req.path ? 'index.html' : req.path);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        res.sendFile(filePath);
+      } else {
+        res.sendFile(path.join(process.cwd(), 'parent-portal/index.html'));
+      }
     }
   });
 

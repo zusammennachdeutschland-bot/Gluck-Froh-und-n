@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioItem, LernstudioGameMode } from '../../types/lernstudio';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../utils/lernstudioTranslations';
-import { speakGermanText } from '../../utils/audioSpeechUtils';
+import { speakGermanText, stopGermanSpeech } from '../../utils/audioSpeechUtils';
 import {
   X,
   Volume2,
@@ -197,7 +197,10 @@ export const LernstudioTeachModal: React.FC<Props> = ({
       const timer = setTimeout(() => {
         handleSpeakGerman(textToSpeak);
       }, 300);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        stopGermanSpeech();
+      };
     }
   }, [currentStage, stageQuestionIndex, items, isOpen, stage2Questions, stage3Questions, stage4Questions]);
 

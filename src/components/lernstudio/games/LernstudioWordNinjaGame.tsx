@@ -355,10 +355,6 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
       <div className="relative min-h-[460px] sm:min-h-[500px] bg-gradient-to-b from-stone-900 via-zinc-950 to-stone-900 rounded-3xl border border-surface-border shadow-inner overflow-hidden select-none cursor-crosshair">
         {/* Dojo Tatami / Bamboo Ambient Background */}
         <div className="absolute inset-0 opacity-15 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:24px_24px] pointer-events-none" />
-        <div className="absolute top-4 left-4 text-xs font-black text-stone-500 flex items-center gap-1.5 pointer-events-none">
-          <Swords className="w-4 h-4" />
-          <span>المس أو اضغط لتقطيع الكلمة الصحيحة</span>
-        </div>
 
         {/* Floating Slicable Fruits & Bombs */}
         {!isGameOver && !isVictory && (

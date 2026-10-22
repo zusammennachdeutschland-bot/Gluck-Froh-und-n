@@ -1,0 +1,71 @@
+{
+  "entities": {
+    "PortalStudent": {
+      "title": "PortalStudent",
+      "description": "Sanitized student performance, attendance, homework, and grades for parent viewing",
+      "type": "object",
+      "properties": {
+        "studentCode": { "type": "string", "maxLength": 32 },
+        "studentName": { "type": "string", "maxLength": 128 },
+        "grade": { "type": "string", "maxLength": 64 },
+        "groupName": { "type": "string", "maxLength": 128 },
+        "parentPhones": { "type": "array" },
+        "linkedParentUids": { "type": "array" },
+        "attendanceRate": { "type": "number" },
+        "totalLessons": { "type": "number" },
+        "completedLessons": { "type": "number" },
+        "streak": { "type": "number" },
+        "nextLesson": { "type": "object" },
+        "lessons": { "type": "array" },
+        "homework": { "type": "array" },
+        "grades": { "type": "array" },
+        "finance": { "type": "object" },
+        "certificates": { "type": "array" },
+        "lastSyncedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentCode", "studentName", "parentPhones", "linkedParentUids"]
+    },
+    "ParentAccount": {
+      "title": "ParentAccount",
+      "description": "Guardian account profile and authorized student codes mapping",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string", "maxLength": 128 },
+        "parentPhone": { "type": "string", "maxLength": 32 },
+        "studentCodes": { "type": "array" },
+        "authVersion": { "type": "number" },
+        "mustChangePassword": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "parentPhone", "studentCodes", "authVersion"]
+    },
+    "TeacherDevice": {
+      "title": "TeacherDevice",
+      "description": "Registered and authorized teacher sync device",
+      "type": "object",
+      "properties": {
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "deviceName": { "type": "string", "maxLength": 128 },
+        "publicKey": { "type": "string" },
+        "enrolledAt": { "type": "string", "format": "date-time" },
+        "isRevoked": { "type": "boolean" }
+      },
+      "required": ["deviceId", "publicKey", "isRevoked"]
+    }
+  },
+  "firestore": {
+    "/portal_students/{studentCode}": {
+      "schema": "PortalStudent",
+      "description": "Public sanitized student records accessible only by linked guardian accounts"
+    },
+    "/parent_accounts/{parentUid}": {
+      "schema": "ParentAccount",
+      "description": "Private guardian account documents accessible only by the account owner"
+    },
+    "/verified_teacher_devices/{deviceId}": {
+      "schema": "TeacherDevice",
+      "description": "Server-authorized teacher sync devices with public key verification"
+    }
+  }
+}

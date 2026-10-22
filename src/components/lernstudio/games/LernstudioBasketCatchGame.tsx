@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
 import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
-import { speakGermanText } from '../../../utils/audioSpeechUtils';
+import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   ArrowLeft,
@@ -85,7 +85,10 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
       const timer = setTimeout(() => {
         speakGermanText(targetItem.german);
       }, 350);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        stopGermanSpeech();
+      };
     }
   }, [targetItem, isGameOver, isVictory]);
 
@@ -338,9 +341,6 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
             <div className="w-24 sm:w-28 h-14 bg-gradient-to-r from-amber-600 via-amber-500 to-amber-700 border-4 border-amber-300 rounded-b-3xl shadow-xl flex items-center justify-center text-3xl">
               🧺
             </div>
-            <span className="text-[10px] font-black text-text-muted mt-1 bg-surface/80 px-2 py-0.5 rounded-full border border-surface-border">
-              اسحب للتحريك
-            </span>
           </div>
         )}
 

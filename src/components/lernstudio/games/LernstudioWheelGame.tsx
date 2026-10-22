@@ -409,9 +409,6 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
               <span className="w-3 h-3 rounded-full animate-ping" style={{ backgroundColor: activeTeam.color }} />
               <span>{activeTeam.name}</span>
             </div>
-            <p className="text-xs text-slate-400 mt-2">
-              اضغط على زر <strong className="text-white">تدوير العجلة</strong> في المنتصف لبدء التحدي!
-            </p>
           </div>
 
           {eventAlert && (

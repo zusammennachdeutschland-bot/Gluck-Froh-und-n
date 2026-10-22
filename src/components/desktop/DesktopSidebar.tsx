@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
   History, Award, Clock, Plus, Zap, UserPlus, Layers,
-  Search, Moon, Sun, BookOpen, Sparkles, Gamepad2,
+  Search, Moon, Sun, BookOpen, Sparkles, Gamepad2, ShieldCheck,
   PanelLeftClose, PanelLeftOpen, SlidersHorizontal, ArrowUp, ArrowDown, RotateCcw, X
 } from 'lucide-react';
 import { AvatarImage } from '../AvatarImage';
@@ -18,7 +18,7 @@ interface DesktopSidebarProps {
 }
 
 const ALL_NAV_IDS = [
-  'home', 'schedule', 'students', 'payments', 'history', 
+  'home', 'schedule', 'students', 'parentPortal', 'payments', 'history', 
   'reports', 'certificates', 'freeTime', 'schoolSchedule', 'hod', 'lernstudio', 'settings'
 ];
 
@@ -242,6 +242,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
     home: { label: t('nav_home') || 'Startseite', icon: Home, badge: null },
     schedule: { label: t('nav_schedule') || 'Termine & Unterricht', icon: Calendar, badge: lessons.filter(l => l.date === formatLocalDate() && l.status !== 'cancelled').length || null },
     students: { label: t('nav_students') || 'Schüler & Gruppen', icon: Users, badge: `${activeStudentsCount}` },
+    parentPortal: { label: _t('بوابة أولياء الأمور', 'Parent Portal', 'Elternportal'), icon: ShieldCheck, badge: 'PROD' },
     payments: { label: t('nav_payments') || 'Zahlungen & Finanzen', icon: Wallet, badge: unreadDueCount > 0 ? `${unreadDueCount}` : null },
     history: { label: t('nav_history') || 'Sitzungsverlauf', icon: History, badge: null },
     reports: { label: t('nav_reports') || 'Berichte & Analysen', icon: BarChart2, badge: null },

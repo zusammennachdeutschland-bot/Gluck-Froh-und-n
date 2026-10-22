@@ -45,7 +45,25 @@ export type LernstudioGameMode =
   | 'word_detective'
   | 'whack_a_mole'
   | 'tug_of_war'
-  | 'word_ninja';
+  | 'word_ninja'
+  | 'bridge_builder'
+  | 'color_master'
+  | 'factory_machine'
+  | 'follow_clues'
+  | 'island_crossing'
+  | 'pit_stop'
+  | 'puzzle_masters'
+  | 'robot_repair'
+  | 'rocket_countdown'
+  | 'space_fleet'
+  | 'submarine_explore'
+  | 'target_attack'
+  | 'team_auction'
+  | 'tower_architects'
+  | 'vending_machine'
+  | 'whats_in_box'
+  | 'word_rhythm'
+  | 'word_wash';
 
 export interface LernstudioExercise {
   id: string;

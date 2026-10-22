@@ -399,7 +399,6 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
               <h3 className="text-xl sm:text-2xl font-black text-text-main">
                 {getItemTranslation(activeQuestion.targetItem, language)}
               </h3>
-              <p className="text-xs font-bold text-text-muted">اختر الكلمة الألمانية المطابقة:</p>
             </div>
 
             {/* Choices */}
