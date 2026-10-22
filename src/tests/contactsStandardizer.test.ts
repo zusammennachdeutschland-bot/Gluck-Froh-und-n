@@ -124,3 +124,10 @@ export function runContactsStandardizerTests(): { passed: number; failed: number
 
   return { passed, failed, errors };
 }
+
+// Auto-run if executed directly
+const res = runContactsStandardizerTests();
+console.log(`Contacts Standardizer Test Suite: ${res.passed} passed, ${res.failed} failed.`);
+if (res.failed > 0) {
+  process.exit(1);
+}

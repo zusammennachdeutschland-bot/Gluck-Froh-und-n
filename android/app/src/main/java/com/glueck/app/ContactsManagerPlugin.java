@@ -3,28 +3,29 @@ package com.glueck.app;
 import android.Manifest;
 import android.content.ContentProviderOperation;
 import android.content.ContentResolver;
+import android.content.Intent;
 import android.content.OperationApplicationException;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.RemoteException;
+import android.provider.BaseColumns;
 import android.provider.ContactsContract;
 import android.provider.ContactsContract.CommonDataKinds.Note;
 import android.provider.ContactsContract.CommonDataKinds.Phone;
 import android.provider.ContactsContract.CommonDataKinds.StructuredName;
 import android.provider.ContactsContract.Data;
 import android.provider.ContactsContract.RawContacts;
+import android.provider.Settings;
 import android.util.Log;
-import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
-import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
-import com.getcapacitor.annotation.PermissionCallback;
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -48,57 +49,15 @@ import java.util.Set;
 public class ContactsManagerPlugin extends Plugin {
     private static final String TAG = "ContactsManagerPlugin";
 
-    @PluginMethod
-    public void checkPermissions(PluginCall call) {
-        JSObject ret = new JSObject();
-        boolean hasRead = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-        boolean hasWrite = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.WRITE_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-        boolean granted = hasRead && hasWrite;
-        
-        ret.put("granted", granted);
-        ret.put("read", hasRead);
-        ret.put("write", hasWrite);
-        ret.put("contacts", granted ? "granted" : "prompt");
-        call.resolve(ret);
-    }
-
-    @PluginMethod
-    public void requestPermissions(PluginCall call) {
-        boolean hasRead = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-        boolean hasWrite = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.WRITE_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-
-        if (hasRead && hasWrite) {
-            JSObject ret = new JSObject();
-            ret.put("granted", true);
-            ret.put("read", true);
-            ret.put("write", true);
-            ret.put("contacts", "granted");
-            call.resolve(ret);
-        } else {
-            requestPermissionForAlias("contacts", call, "contactsPermsCallback");
-        }
-    }
-
-    @PermissionCallback
-    private void contactsPermsCallback(PluginCall call) {
-        boolean hasRead = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-        boolean hasWrite = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.WRITE_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-        boolean granted = hasRead && hasWrite;
-
-        JSObject ret = new JSObject();
-        ret.put("granted", granted);
-        ret.put("read", hasRead);
-        ret.put("write", hasWrite);
-        ret.put("contacts", granted ? "granted" : "denied");
-        call.resolve(ret);
-    }
-
+    /**
+     * Opens system app settings for permission management.
+     */
     @PluginMethod
     public void openSettings(PluginCall call) {
         try {
-            android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            intent.setData(android.net.Uri.fromParts("package", getContext().getPackageName(), null));
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.fromParts("package", getContext().getPackageName(), null));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             getContext().startActivity(intent);
             JSObject ret = new JSObject();
             ret.put("opened", true);
@@ -184,7 +143,7 @@ public class ContactsManagerPlugin extends Plugin {
                 Uri rawUri = RawContacts.CONTENT_URI;
                 String[] rawProjection = new String[] {
                     RawContacts.CONTACT_ID,
-                    RawContacts._ID,
+                    BaseColumns._ID,
                     RawContacts.ACCOUNT_TYPE,
                     RawContacts.ACCOUNT_NAME
                 };
@@ -208,7 +167,6 @@ public class ContactsManagerPlugin extends Plugin {
                                         obj.put("isGoogleAccount", true);
                                     }
                                     if (accType.contains("whatsapp") || accType.contains("telegram")) {
-                                        // Read-only social sync account
                                         obj.put("isReadOnly", true);
                                     }
                                 }
@@ -331,7 +289,6 @@ public class ContactsManagerPlugin extends Plugin {
 
         ops.add(ContentProviderOperation.newUpdate(Data.CONTENT_URI)
             .withSelection(nameWhere, nameArgs)
-            .withValue(StructuredName.DISPLAY_NAME, newDisplayName)
             .withValue(StructuredName.GIVEN_NAME, newDisplayName)
             .withValue(StructuredName.FAMILY_NAME, "")
             .build());
@@ -346,7 +303,7 @@ public class ContactsManagerPlugin extends Plugin {
 
             // Check if note exists
             boolean noteExists = false;
-            try (Cursor c = resolver.query(Data.CONTENT_URI, new String[] { Data._ID }, noteWhere, noteArgs, null)) {
+            try (Cursor c = resolver.query(Data.CONTENT_URI, new String[] { BaseColumns._ID }, noteWhere, noteArgs, null)) {
                 if (c != null && c.moveToFirst()) {
                     noteExists = true;
                 }
@@ -361,11 +318,14 @@ public class ContactsManagerPlugin extends Plugin {
                 // Find a valid RAW_CONTACT_ID
                 String rawContactId = getRawContactIdForContact(contactId);
                 if (rawContactId != null) {
-                    ops.add(ContentProviderOperation.newInsert(Data.CONTENT_URI)
-                        .withValue(Data.RAW_CONTACT_ID, rawContactId)
-                        .withValue(Data.MIMETYPE, Note.CONTENT_ITEM_TYPE)
-                        .withValue(Note.NOTE, note.trim())
-                        .build());
+                    try {
+                        long rawIdLong = Long.parseLong(rawContactId);
+                        ops.add(ContentProviderOperation.newInsert(Data.CONTENT_URI)
+                            .withValue(Data.RAW_CONTACT_ID, rawIdLong)
+                            .withValue(Data.MIMETYPE, Note.CONTENT_ITEM_TYPE)
+                            .withValue(Note.NOTE, note.trim())
+                            .build());
+                    } catch (NumberFormatException ignored) {}
                 }
             }
         }
@@ -379,7 +339,7 @@ public class ContactsManagerPlugin extends Plugin {
         String selection = RawContacts.CONTACT_ID + " = ? AND " + RawContacts.DELETED + " = 0";
         String[] args = new String[] { contactId };
         
-        try (Cursor c = resolver.query(RawContacts.CONTENT_URI, new String[] { RawContacts._ID }, selection, args, null)) {
+        try (Cursor c = resolver.query(RawContacts.CONTENT_URI, new String[] { BaseColumns._ID }, selection, args, null)) {
             if (c != null && c.moveToFirst()) {
                 return c.getString(0);
             }
