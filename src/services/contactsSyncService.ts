@@ -312,12 +312,12 @@ export const contactsSyncService = {
           statusLabelDe = 'Bereits standardisiert';
           statusDescriptionAr = 'جهة الاتصال مطابقة تماماً للمعيار المطلوب.';
           selectedForUpdate = false;
-        } else if (isReadOnly) {
+        } else if (isReadOnly && !isGoogle) {
           status = 'NEEDS_UPDATE';
           statusLabelAr = 'حساب خارجي للقراءة فقط';
           statusLabelDe = 'Schreibgeschützt';
-          statusDescriptionAr = 'جهة الاتصال تتبع تطبيقاً للمزامنة للقراءة فقط.';
-          selectedForUpdate = false;
+          statusDescriptionAr = 'جهة الاتصال تتبع تطبيقاً للقراءة فقط، يمكن محاولة التحديث أو التعديل يدوياً.';
+          selectedForUpdate = true;
         }
 
         auditItems.push({

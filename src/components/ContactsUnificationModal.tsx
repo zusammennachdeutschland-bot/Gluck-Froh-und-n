@@ -118,7 +118,7 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
   const handleSelectAll = (filteredItems: ContactAuditItem[]) => {
     const next = new Set(selectedIds);
     filteredItems.forEach(item => {
-      if (item.status !== 'MISSING_ENGLISH_NAME' && !item.isReadOnly) {
+      if (item.status !== 'MISSING_ENGLISH_NAME') {
         next.add(item.id);
       }
     });
@@ -175,6 +175,15 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
         i.students.some(s => s.name.toLowerCase().includes(q) || (s.certificateName && s.certificateName.toLowerCase().includes(q)))
       );
     }
+
+    // Sort items: priority to unstandardized (NEEDS_UPDATE, DUPLICATE_ON_PHONE) first
+    const statusPriority = (status: string) => {
+      if (status === 'NEEDS_UPDATE' || status === 'DUPLICATE_ON_PHONE') return 1;
+      if (status === 'MISSING_ENGLISH_NAME' || status === 'AMBIGUOUS') return 2;
+      return 3; // ALREADY_STANDARDIZED last
+    };
+
+    items = [...items].sort((a, b) => statusPriority(a.status) - statusPriority(b.status));
 
     return items;
   }, [auditResult, activeTab, searchQuery]);
@@ -270,13 +279,6 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
                   </span>
                 )}
               </div>
-              <p className="text-[11px] sm:text-xs text-text-muted mt-0.5 leading-normal line-clamp-1">
-                {_t(
-                  'توحيد وتنسيق أسماء جهات اتصال أولياء الأمور بصيغة موحدة وسلسة عبر Google Contacts وأندرويد.',
-                  'Standardize and unify parent contact names across Google Contacts & Android using student English names.',
-                  'Elternkontakte mit Schülernamen und Klassenstufe über Google Contacts & Android vereinheitlichen.'
-                )}
-              </p>
             </div>
           </div>
 
@@ -320,18 +322,18 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
                 {!permissionGranted && (
                   <button
                     onClick={handleRequestPermissions}
-                    className="px-2.5 py-1 bg-primary text-white font-bold rounded-lg hover:bg-primary-hover active:scale-95 transition-all cursor-pointer shadow-2xs"
+                    className="px-2 py-0.5 bg-primary text-white text-[10px] font-bold rounded-md hover:bg-primary-hover active:scale-95 transition-all cursor-pointer shadow-2xs"
                   >
-                    {_t('طلب الإذن الآن', 'Request Permission', 'Berechtigung anfordern')}
+                    {_t('طلب الإذن', 'Request', 'Erlauben')}
                   </button>
                 )}
                 <button
                   onClick={handleOpenAppSettings}
-                  className="px-2 py-1 bg-surface-hover text-text-muted hover:text-text-main font-bold rounded-lg border border-surface-border transition-all cursor-pointer flex items-center gap-1"
+                  className="px-1.5 py-0.5 bg-surface-hover text-text-muted hover:text-text-main text-[10px] font-bold rounded-md border border-surface-border transition-all cursor-pointer flex items-center gap-1"
                   title={_t('إعدادات التطبيق بالنظام', 'App Settings', 'App-Einstellungen')}
                 >
-                  <Settings className="w-3.5 h-3.5" />
-                  <span>{_t('إعدادات الهاتف', 'Settings', 'Einstellungen')}</span>
+                  <Settings className="w-3 h-3" />
+                  <span>{_t('الإعدادات', 'Settings', 'Einstellungen')}</span>
                 </button>
               </div>
             </div>
@@ -643,7 +645,7 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
                       {/* Checkbox */}
                       <button
                         type="button"
-                        disabled={item.status === 'MISSING_ENGLISH_NAME' || item.isReadOnly}
+                        disabled={item.status === 'MISSING_ENGLISH_NAME'}
                         onClick={() => toggleSelect(item.id)}
                         className="mt-0.5 text-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                       >

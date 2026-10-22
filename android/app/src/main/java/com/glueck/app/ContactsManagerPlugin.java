@@ -171,9 +171,6 @@ public class ContactsManagerPlugin extends Plugin {
                                     if (accType.toLowerCase().contains("google")) {
                                         obj.put("isGoogleAccount", true);
                                     }
-                                    if (accType.contains("whatsapp") || accType.contains("telegram")) {
-                                        obj.put("isReadOnly", true);
-                                    }
                                 }
                                 if (accName != null) {
                                     obj.put("accountName", accName);

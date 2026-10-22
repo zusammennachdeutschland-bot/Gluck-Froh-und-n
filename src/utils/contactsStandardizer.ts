@@ -159,8 +159,8 @@ export function getStudentEnglishName(student: Student): string | null {
 }
 
 /**
- * Cleans and title-cases an English name (e.g. "ahmed ibrahim" -> "Ahmed").
- * For contacts, teachers typically use the student's first name, or first + last if short.
+ * Cleans and title-cases the student's full English name (e.g. "ahmed ibrahim" -> "Ahmed Ibrahim", "farida osama" -> "Farida Osama").
+ * Preserves the full name as requested for contact identification.
  */
 function cleanEnglishName(rawName: string): string {
   const parts = rawName
@@ -177,11 +177,8 @@ function cleanEnglishName(rawName: string): string {
     return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
   });
 
-  // If single word, return it
-  if (capitalized.length === 1) return capitalized[0];
-
-  // Return full capitalized name (e.g., "Ahmed Tarek" or "Ahmed")
-  return capitalized[0];
+  // Return full capitalized name (e.g. "Ahmed Ibrahim", "Farida Osama")
+  return capitalized.join(' ');
 }
 
 /**
@@ -368,8 +365,8 @@ export function buildStandardizedContactProposal(
   // Full Standardized Name
   const fullStandardizedName = `${namePhrase} - ${classPhrase}`;
 
-  // Check length (> 45 chars)
-  const isNameTooLong = fullStandardizedName.length > 45;
+  // Check length (> 80 chars for Android contacts display)
+  const isNameTooLong = fullStandardizedName.length > 80;
   let shortDisplayName: string | undefined = undefined;
   let suggestedNote: string | undefined = undefined;
 
