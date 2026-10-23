@@ -123,9 +123,8 @@ export const SetupWizard: React.FC = () => {
     const isCompleted = localStorage.getItem('dl_setup_completed') === 'true';
     if (!isCompleted || !profile.displayName || profile.displayName.trim() === '' || profile.displayName === 'Teacher' || profile.displayName === 'أ. أحمد محمود') {
       setIsOpen(true);
-      setCurrentStep(0);
     }
-  }, [profile.displayName]);
+  }, []);
 
   // Listen to manual open trigger from settings
   useEffect(() => {
@@ -637,6 +636,12 @@ export const SetupWizard: React.FC = () => {
                           type="text"
                           value={displayName}
                           onChange={(e) => setDisplayName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (displayName.trim()) handleNext();
+                            }
+                          }}
                           placeholder="مثال: أ. عمر حسن / Herr Omar"
                           className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-primary shadow-2xs"
                           autoFocus

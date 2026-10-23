@@ -166,6 +166,20 @@ export const LernstudioView: React.FC<Props> = ({
     });
   }, [sets, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter, searchTerm]);
 
+  // Pagination State & Logic
+  const ITEMS_PER_PAGE = 12;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter]);
+
+  const totalPages = Math.ceil(filteredSets.length / ITEMS_PER_PAGE) || 1;
+  const paginatedSets = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredSets.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredSets, currentPage]);
+
   // Handlers
   const handleDuplicateSet = (set: LernstudioSet) => {
     const duplicated: LernstudioSet = {
@@ -740,149 +754,184 @@ export const LernstudioView: React.FC<Props> = ({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredSets.map((set) => {
-            const itemCount = set.items?.length || 0;
-            const assignedGroup = groups.find((g) => g.id === set.assignedGroupId);
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {paginatedSets.map((set) => {
+              const itemCount = set.items?.length || 0;
+              const assignedGroup = groups.find((g) => g.id === set.assignedGroupId);
 
-            return (
-              <div
-                key={set.id}
-                className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-surface-border bg-surface shadow-2xs hover:shadow-md transition-all flex flex-col justify-between space-y-3.5 group max-w-full overflow-hidden"
-              >
-                <div className="space-y-3 min-w-0 max-w-full">
-                  {/* Card Header: Vocabulary Count, Grade & Group */}
-                  <div className="flex items-center justify-between gap-2 flex-wrap text-xs min-w-0 max-w-full overflow-hidden">
-                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted min-w-0 max-w-full flex-wrap overflow-hidden">
-                      <span className="font-bold text-primary shrink-0">{itemCount} {t.vocabularyCount}</span>
-                      {set.grade && (
-                        <>
-                          <span aria-hidden="true" className="text-text-muted/40 shrink-0">·</span>
-                          <span className="truncate max-w-[140px] sm:max-w-none text-text-main font-semibold">{getLocalizedGrade(set.grade, language)}</span>
-                        </>
+              return (
+                <div
+                  key={set.id}
+                  className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-surface-border bg-surface shadow-2xs hover:shadow-md transition-all flex flex-col justify-between space-y-3.5 group max-w-full overflow-hidden"
+                >
+                  <div className="space-y-3 min-w-0 max-w-full">
+                    {/* Card Header: Vocabulary Count, Grade & Group */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap text-xs min-w-0 max-w-full overflow-hidden">
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted min-w-0 max-w-full flex-wrap overflow-hidden">
+                        <span className="font-bold text-primary shrink-0">{itemCount} {t.vocabularyCount}</span>
+                        {set.grade && (
+                          <>
+                            <span aria-hidden="true" className="text-text-muted/40 shrink-0">·</span>
+                            <span className="truncate max-w-[140px] sm:max-w-none text-text-main font-semibold">{getLocalizedGrade(set.grade, language)}</span>
+                          </>
+                        )}
+                      </div>
+
+                      {assignedGroup && (
+                        <span className="px-2 py-0.5 rounded-md bg-surface-hover text-text-muted font-bold text-[10px] shrink-0 border border-surface-border/40 truncate max-w-[120px]">
+                          👥 {assignedGroup.name}
+                        </span>
                       )}
                     </div>
 
-                    {assignedGroup && (
-                      <span className="px-2 py-0.5 rounded-md bg-surface-hover text-text-muted font-bold text-[10px] shrink-0 border border-surface-border/40 truncate max-w-[120px]">
-                        👥 {assignedGroup.name}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Card Title & Description - Click opens vocabulary modal */}
-                  <div
-                    onClick={() => {
-                      setSelectedSetForWordsModal(set);
-                      setIsWordsModalOpen(true);
-                    }}
-                    className="space-y-1.5 cursor-pointer group/title p-1 -m-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0 max-w-full overflow-hidden"
-                  >
-                    <h3 className="text-base sm:text-lg font-bold text-text-main group-hover/title:text-primary transition-colors leading-snug flex items-start justify-between gap-2 min-w-0">
-                      <span className="line-clamp-2 break-words flex-1 min-w-0">{getLocalizedSetTitle(set, language)}</span>
-                      <Eye className="w-4 h-4 text-text-muted opacity-40 group-hover/title:opacity-100 group-hover/title:text-primary transition-all shrink-0 mt-1" />
-                    </h3>
-                    {set.description && (
-                      <p className="text-xs text-text-muted line-clamp-2 leading-relaxed break-words">
-                        {getLocalizedSetDescription(set, language)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Card Action Section */}
-                <div className="pt-3 border-t border-surface-border/60 space-y-2">
-                  {/* Primary Game Portal CTA Button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSetForMode(set);
-                      setActiveMode('games_portal');
-                    }}
-                    className="w-full py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold shadow-2xs cursor-pointer inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-white transform active:scale-[0.98] transition-all"
-                  >
-                    <Gamepad2 className="w-4 h-4 shrink-0" />
-                    <span>{t.playGame}</span>
-                  </button>
-
-                  {/* Secondary Action Row: Teach Mode, Worksheet, and Quick Tools */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedSetForTeach(set);
-                          setIsTeachModalOpen(true);
-                        }}
-                        className="flex-1 py-1.5 px-2.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
-                      >
-                        <BookOpen className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
-                        <span className="truncate">{t.teachMode}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedSetForWorksheet(set);
-                          setIsWorksheetModalOpen(true);
-                        }}
-                        className="flex-1 py-1.5 px-2.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
-                      >
-                        <Printer className="w-3.5 h-3.5 text-primary shrink-0" />
-                        <span className="truncate">{t.printWorksheet}</span>
-                      </button>
+                    {/* Card Title & Description - Click opens vocabulary modal */}
+                    <div
+                      onClick={() => {
+                        setSelectedSetForWordsModal(set);
+                        setIsWordsModalOpen(true);
+                      }}
+                      className="space-y-1.5 cursor-pointer group/title p-1 -m-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0 max-w-full overflow-hidden"
+                    >
+                      <h3 className="text-base sm:text-lg font-bold text-text-main group-hover/title:text-primary transition-colors leading-snug flex items-start justify-between gap-2 min-w-0">
+                        <span className="line-clamp-2 break-words flex-1 min-w-0">{getLocalizedSetTitle(set, language)}</span>
+                        <Eye className="w-4 h-4 text-text-muted opacity-40 group-hover/title:opacity-100 group-hover/title:text-primary transition-all shrink-0 mt-1" />
+                      </h3>
+                      {set.description && (
+                        <p className="text-xs text-text-muted line-clamp-2 leading-relaxed break-words">
+                          {getLocalizedSetDescription(set, language)}
+                        </p>
+                      )}
                     </div>
+                  </div>
 
-                    {/* Quick Icon Controls */}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleShareWhatsApp(set)}
-                        className="p-1.5 text-text-muted hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
-                        title={t.shareWhatsApp}
-                      >
-                        <Share2 className="w-3.5 h-3.5" />
-                      </button>
+                  {/* Card Action Section */}
+                  <div className="pt-3 border-t border-surface-border/60 space-y-2">
+                    {/* Primary Game Portal CTA Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSetForMode(set);
+                        setActiveMode('games_portal');
+                      }}
+                      className="w-full py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold shadow-2xs cursor-pointer inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-white transform active:scale-[0.98] transition-all"
+                    >
+                      <Gamepad2 className="w-4 h-4 shrink-0" />
+                      <span>{t.playGame}</span>
+                    </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDuplicateSet(set)}
-                        className="p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
-                        title={t.duplicateSet}
-                      >
-                        <Layers className="w-3.5 h-3.5" />
-                      </button>
+                    {/* Secondary Action Row: Teach Mode, Worksheet, and Quick Tools */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedSetForTeach(set);
+                            setIsTeachModalOpen(true);
+                          }}
+                          className="flex-1 py-1.5 px-2.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
+                        >
+                          <BookOpen className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
+                          <span className="truncate">{t.teachMode}</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSetToEdit(set);
-                          setIsSetEditorOpen(true);
-                        }}
-                        className="p-1.5 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
-                        title={t.editSet}
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedSetForWorksheet(set);
+                            setIsWorksheetModalOpen(true);
+                          }}
+                          className="flex-1 py-1.5 px-2.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-primary shrink-0" />
+                          <span className="truncate">{t.printWorksheet}</span>
+                        </button>
+                      </div>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (window.confirm(language === 'ar' ? `هل أنت متأكد من حذف مجموعة (${set.title})؟` : `Delete set (${set.title})?`)) {
-                            onDeleteSet(set.id);
-                          }
-                        }}
-                        className="p-1.5 text-text-muted hover:text-red-500 hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
-                        title={t.deleteSet}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {/* Quick Icon Controls */}
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleShareWhatsApp(set)}
+                          className="p-1.5 text-text-muted hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
+                          title={t.shareWhatsApp}
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDuplicateSet(set)}
+                          className="p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                          title={t.duplicateSet}
+                        >
+                          <Layers className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSetToEdit(set);
+                            setIsSetEditorOpen(true);
+                          }}
+                          className="p-1.5 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                          title={t.editSet}
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(language === 'ar' ? `هل أنت متأكد من حذف مجموعة (${set.title})؟` : `Delete set (${set.title})?`)) {
+                              onDeleteSet(set.id);
+                            }
+                          }}
+                          className="p-1.5 text-text-muted hover:text-red-500 hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                          title={t.deleteSet}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
+              );
+            })}
+          </div>
+
+          {/* Pagination Controls Bar */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between p-4 bg-surface rounded-2xl border border-surface-border shadow-2xs mt-4">
+              <span className="text-xs text-text-muted font-bold">
+                {language === 'ar' ? `الصفحة ${currentPage} من ${totalPages}` : language === 'de' ? `Seite ${currentPage} von ${totalPages}` : `Page ${currentPage} of ${totalPages}`}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentPage(p => Math.max(1, p - 1));
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  disabled={currentPage === 1}
+                  className="px-3.5 py-2 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-xs font-bold text-text-main disabled:opacity-40 cursor-pointer transition-all"
+                >
+                  {language === 'ar' ? 'السابق' : language === 'de' ? 'Zurück' : 'Previous'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentPage(p => Math.min(totalPages, p + 1));
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  disabled={currentPage === totalPages}
+                  className="px-3.5 py-2 rounded-xl bg-primary text-white hover:bg-primary-hover text-xs font-bold disabled:opacity-40 cursor-pointer transition-all shadow-xs"
+                >
+                  {language === 'ar' ? 'التالي' : language === 'de' ? 'Weiter' : 'Next'}
+                </button>
               </div>
-            );
-          })}
+            </div>
+          )}
         </div>
       )}
 

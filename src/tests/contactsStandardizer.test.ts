@@ -11,7 +11,8 @@ import {
   joinKlasseDesignations,
   buildStandardizedContactProposal,
   isContactAlreadyStandardized,
-  getStudentEnglishName
+  getStudentEnglishName,
+  cleanEnglishName
 } from '../utils/contactsStandardizer';
 import { Student } from '../types';
 
@@ -121,6 +122,12 @@ export function runContactsStandardizerTests(): { passed: number; failed: number
   assert(isContactAlreadyStandardized("Ahmed's Mom - Klasse 4", "Ahmed's Mom - Klasse 4") === true, 'Exact match');
   assert(isContactAlreadyStandardized("ahmed's mom - klasse 4", "Ahmed's Mom - Klasse 4") === true, 'Case-insensitive match');
   assert(isContactAlreadyStandardized("Mama Ahmed", "Ahmed's Mom - Klasse 4") === false, 'Different name detected');
+
+  // 9. Two-part English name formatting tests
+  assert(cleanEnglishName('ahmed ibrahim') === 'Ahmed Ibrahim', '2-part name title case');
+  assert(cleanEnglishName('farida osama mohamed ali') === 'Farida Osama', '4-part name truncated to 2-part');
+  assert(cleanEnglishName('abdel rahman mourad hamed') === 'Abdelrahman Mourad', 'Compound prefix handled');
+  assert(cleanEnglishName('Lukas') === 'Lukas', 'Single name preserved');
 
   return { passed, failed, errors };
 }

@@ -291,6 +291,7 @@ public class ContactsManagerPlugin extends Plugin {
 
         ops.add(ContentProviderOperation.newUpdate(Data.CONTENT_URI)
             .withSelection(nameWhere, nameArgs)
+            .withValue(StructuredName.DISPLAY_NAME, newDisplayName)
             .withValue(StructuredName.GIVEN_NAME, newDisplayName)
             .withValue(StructuredName.FAMILY_NAME, "")
             .build());

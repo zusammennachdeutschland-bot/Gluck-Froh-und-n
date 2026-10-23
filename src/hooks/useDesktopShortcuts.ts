@@ -21,91 +21,99 @@ export function useDesktopShortcuts() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input, textarea, or contentEditable
-      const target = e.target as HTMLElement;
-      const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      try {
+        if (!e || !e.key) return;
 
-      // Global Search: Ctrl+K / Cmd+K
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setIsGlobalSearchOpen(prev => !prev);
-        return;
-      }
+        // Don't trigger if user is typing in an input, textarea, or contentEditable
+        const target = e.target as HTMLElement;
+        const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
 
-      // Escape key to close modals
-      if (e.key === 'Escape') {
-        if (isGlobalSearchOpen) {
-          setIsGlobalSearchOpen(false);
-        } else if (isControlModalOpen) {
-          closeLessonControl();
-        } else if (isAddLessonModalOpen) {
-          setIsAddLessonModalOpen(false);
-        } else if (isAddQuickLessonModalOpen) {
-          setIsAddQuickLessonModalOpen(false);
-        } else if (isAddStudentModalOpen) {
-          setIsAddStudentModalOpen(false);
-        } else if (isAddGroupModalOpen) {
-          setIsAddGroupModalOpen(false);
+        const keyLower = typeof e.key === 'string' ? e.key.toLowerCase() : '';
+
+        // Global Search: Ctrl+K / Cmd+K
+        if ((e.ctrlKey || e.metaKey) && keyLower === 'k') {
+          e.preventDefault();
+          setIsGlobalSearchOpen(prev => !prev);
+          return;
         }
-        return;
-      }
 
-      // Alt Shortcuts (works even without typing focus)
-      if (e.altKey && !isInput) {
-        switch (e.key.toLowerCase()) {
-          case '1':
-            e.preventDefault();
-            setActiveTab('home');
-            break;
-          case '2':
-            e.preventDefault();
-            setActiveTab('schedule');
-            break;
-          case '3':
-            e.preventDefault();
-            setActiveTab('students');
-            break;
-          case '4':
-            e.preventDefault();
-            setActiveTab('payments');
-            break;
-          case '5':
-            e.preventDefault();
-            setActiveTab('history');
-            break;
-          case '6':
-            e.preventDefault();
-            setActiveTab('reports');
-            break;
-          case '7':
-            e.preventDefault();
-            setActiveTab('certificates');
-            break;
-          case '8':
-            e.preventDefault();
-            setActiveTab('settings');
-            break;
-          case 'l':
-            e.preventDefault();
-            setIsAddLessonModalOpen(true);
-            break;
-          case 's':
-            e.preventDefault();
-            setIsAddStudentModalOpen(true);
-            break;
-          case 'g':
-            e.preventDefault();
-            setIsAddGroupModalOpen(true);
-            break;
-          case 'q':
-            e.preventDefault();
-            setIsAddQuickLessonModalOpen(true);
-            break;
-          case 'z':
-            e.preventDefault();
-            setIsStartLessonNowModalOpen(true);
-            break;
+        // Escape key to close modals
+        if (e.key === 'Escape') {
+          if (isGlobalSearchOpen) {
+            setIsGlobalSearchOpen(false);
+          } else if (isControlModalOpen) {
+            closeLessonControl();
+          } else if (isAddLessonModalOpen) {
+            setIsAddLessonModalOpen(false);
+          } else if (isAddQuickLessonModalOpen) {
+            setIsAddQuickLessonModalOpen(false);
+          } else if (isAddStudentModalOpen) {
+            setIsAddStudentModalOpen(false);
+          } else if (isAddGroupModalOpen) {
+            setIsAddGroupModalOpen(false);
+          }
+          return;
         }
+
+        // Alt Shortcuts (works even without typing focus)
+        if (e.altKey && !isInput && keyLower) {
+          switch (keyLower) {
+            case '1':
+              e.preventDefault();
+              setActiveTab('home');
+              break;
+            case '2':
+              e.preventDefault();
+              setActiveTab('schedule');
+              break;
+            case '3':
+              e.preventDefault();
+              setActiveTab('students');
+              break;
+            case '4':
+              e.preventDefault();
+              setActiveTab('payments');
+              break;
+            case '5':
+              e.preventDefault();
+              setActiveTab('history');
+              break;
+            case '6':
+              e.preventDefault();
+              setActiveTab('reports');
+              break;
+            case '7':
+              e.preventDefault();
+              setActiveTab('certificates');
+              break;
+            case '8':
+              e.preventDefault();
+              setActiveTab('settings');
+              break;
+            case 'l':
+              e.preventDefault();
+              setIsAddLessonModalOpen(true);
+              break;
+            case 's':
+              e.preventDefault();
+              setIsAddStudentModalOpen(true);
+              break;
+            case 'g':
+              e.preventDefault();
+              setIsAddGroupModalOpen(true);
+              break;
+            case 'q':
+              e.preventDefault();
+              setIsAddQuickLessonModalOpen(true);
+              break;
+            case 'z':
+              e.preventDefault();
+              setIsStartLessonNowModalOpen(true);
+              break;
+          }
+        }
+      } catch (err) {
+        console.warn('Desktop shortcut error caught gracefully:', err);
       }
     };
 

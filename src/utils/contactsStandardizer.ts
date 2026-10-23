@@ -140,18 +140,22 @@ export function getPhoneMatchKey(phone?: string | null): string {
  * Returns null if no English name is stored (e.g. only Arabic name).
  */
 export function getStudentEnglishName(student: Student): string | null {
-  // Check certificateName first (explicitly used for English transliterations in Glück)
-  if (student.certificateName && /[a-zA-Z]/.test(student.certificateName.trim())) {
-    return cleanEnglishName(student.certificateName.trim());
+  // Check certificateName first (explicitly used for English/transliterated names in Glück)
+  if (student.certificateName && student.certificateName.trim().length > 0) {
+    const cert = student.certificateName.trim();
+    // If it has Latin letters, clean and return
+    if (/[a-zA-Z]/.test(cert)) {
+      return cleanEnglishName(cert);
+    }
   }
 
-  // Check student.name if written in Latin
-  if (student.name && /[a-zA-Z]/.test(student.name.trim())) {
-    // If name is pure Latin or primarily Latin
-    const arabicChars = (student.name.match(/[\u0600-\u06FF]/g) || []).length;
-    const latinChars = (student.name.match(/[a-zA-Z]/g) || []).length;
-    if (latinChars > arabicChars) {
-      return cleanEnglishName(student.name.trim());
+  // If student.name is purely Latin (no Arabic characters at all)
+  if (student.name && student.name.trim().length > 0) {
+    const raw = student.name.trim();
+    const hasArabic = /[\u0600-\u06FF]/.test(raw);
+    const hasLatin = /[a-zA-Z]/.test(raw);
+    if (hasLatin && !hasArabic) {
+      return cleanEnglishName(raw);
     }
   }
 
@@ -159,10 +163,16 @@ export function getStudentEnglishName(student: Student): string | null {
 }
 
 /**
- * Cleans and title-cases the student's full English name (e.g. "ahmed ibrahim" -> "Ahmed Ibrahim", "farida osama" -> "Farida Osama").
- * Preserves the full name as requested for contact identification.
+ * Cleans, title-cases, and formats the student's English name as a clean two-part name (الاسم الثنائي).
+ * Examples:
+ * - "ahmed ibrahim" -> "Ahmed Ibrahim"
+ * - "farida osama mohamed" -> "Farida Osama"
+ * - "abdel rahman mourad hamed" -> "Abdelrahman Mourad"
+ * - "lukas" -> "Lukas"
  */
-function cleanEnglishName(rawName: string): string {
+export function cleanEnglishName(rawName: string): string {
+  if (!rawName) return '';
+
   const parts = rawName
     .replace(/[^\w\s'-]/g, '')
     .trim()
@@ -177,8 +187,27 @@ function cleanEnglishName(rawName: string): string {
     return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
   });
 
-  // Return full capitalized name (e.g. "Ahmed Ibrahim", "Farida Osama")
-  return capitalized.join(' ');
+  if (capitalized.length === 1) {
+    return capitalized[0];
+  }
+
+  if (capitalized.length === 2) {
+    return `${capitalized[0]} ${capitalized[1]}`;
+  }
+
+  // If 3 or more parts, handle compound prefixes (Abdel, Abdul, Abd, El, Al)
+  const firstLower = capitalized[0].toLowerCase();
+  const compoundPrefixes = ['abdel', 'abdul', 'abd', 'el', 'al'];
+
+  if (compoundPrefixes.includes(firstLower) && capitalized.length >= 3) {
+    const compoundFirstName = `${capitalized[0]}${capitalized[1].toLowerCase()}`;
+    const formattedCompoundFirst = compoundFirstName.charAt(0).toUpperCase() + compoundFirstName.slice(1);
+    const secondName = capitalized[2];
+    return `${formattedCompoundFirst} ${secondName}`;
+  }
+
+  // Default for 3+ parts: take the first two parts (First Name + Second Name)
+  return `${capitalized[0]} ${capitalized[1]}`;
 }
 
 /**
@@ -370,6 +399,27 @@ export function buildStandardizedContactProposal(
   let shortDisplayName: string | undefined = undefined;
   let suggestedNote: string | undefined = undefined;
 
+  // Build detailed note including session day, time, and student info
+  const studentDetailsList = validStudentsWithEnglishNames.map(x => {
+    const st = x.student;
+    const parts = [x.englishName];
+    if (st.grade) parts.push(formatKlasseName(st.grade));
+    if (st.scheduleDays && st.scheduleDays.length > 0) {
+      parts.push(`أيام: ${st.scheduleDays.join(', ')}`);
+    } else if (st.scheduleRecurrence) {
+      parts.push(`ميعاد: ${st.scheduleRecurrence}`);
+    }
+    if (st.scheduleTime) {
+      parts.push(`الساعة: ${st.scheduleTime}`);
+    }
+    if (st.notes) {
+      parts.push(`ملاحظات: ${st.notes}`);
+    }
+    return parts.join(' - ');
+  });
+
+  suggestedNote = `Glück Teacher App:\n` + studentDetailsList.join('\n') + `\nالهاتف: ${formattedPhone}`;
+
   if (isNameTooLong && isSibling) {
     // Generate concise display name: e.g. "Ahmed, Mariam +1's Mom - Klasse 2, 4..."
     const firstTwo = englishNames.slice(0, 2).join(' & ');
@@ -377,12 +427,6 @@ export function buildStandardizedContactProposal(
     const shortNamePart = extraCount > 0 ? `${firstTwo} +${extraCount}'s Mom` : `${firstTwo}'s Mom`;
     const shortClassPart = joinKlasseDesignations(grades.slice(0, 2)) + (grades.length > 2 ? '...' : '');
     shortDisplayName = `${shortNamePart} - ${shortClassPart}`;
-
-    // Note contains full details
-    const siblingDetails = validStudentsWithEnglishNames
-      .map(x => `${x.englishName} (${formatKlasseName(x.student.grade)})`)
-      .join(', ');
-    suggestedNote = `Glück Kontakte: ${siblingDetails} | الهاتف: ${formattedPhone}`;
   }
 
   return {

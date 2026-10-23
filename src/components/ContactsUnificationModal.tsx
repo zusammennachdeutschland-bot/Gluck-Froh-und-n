@@ -369,86 +369,86 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
           )}
         </div>
 
-        {/* Metric Cards */}
+        {/* Metric Cards - Compact */}
         {auditResult && (
-          <div className="px-4 py-2.5 sm:px-6 grid grid-cols-2 sm:grid-cols-5 gap-2 border-b border-surface-border bg-surface-hover/10 shrink-0 text-center">
+          <div className="px-4 py-2 sm:px-6 grid grid-cols-5 gap-1.5 border-b border-surface-border bg-surface-hover/10 shrink-0 text-center">
             <div 
               onClick={() => setActiveTab('needs_update')}
-              className={`p-2 rounded-xl border transition-all cursor-pointer ${
+              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
                 activeTab === 'needs_update' 
-                  ? 'bg-primary-soft border-primary-border shadow-xs' 
+                  ? 'bg-primary-soft border-primary-border shadow-2xs' 
                   : 'bg-surface border-surface-border hover:bg-surface-hover'
               }`}
             >
-              <div className="text-base sm:text-lg font-black text-primary">
+              <div className="text-sm font-black text-primary">
                 {auditResult.needsUpdateCount}
               </div>
-              <div className="text-[10px] sm:text-[11px] font-bold text-text-muted truncate">
+              <div className="text-[9px] font-bold text-text-muted truncate">
                 {_t('يحتاج توحيد', 'Needs Update', 'Zu aktualisieren')}
               </div>
             </div>
 
             <div 
               onClick={() => setActiveTab('standardized')}
-              className={`p-2 rounded-xl border transition-all cursor-pointer ${
+              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
                 activeTab === 'standardized' 
-                  ? 'bg-emerald-500/15 border-emerald-500/30 shadow-xs' 
+                  ? 'bg-emerald-500/15 border-emerald-500/30 shadow-2xs' 
                   : 'bg-surface border-surface-border hover:bg-surface-hover'
               }`}
             >
-              <div className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400">
+              <div className="text-sm font-black text-emerald-600 dark:text-emerald-400">
                 {auditResult.alreadyStandardizedCount}
               </div>
-              <div className="text-[10px] sm:text-[11px] font-bold text-text-muted truncate">
-                {_t('موحد ومطابق', 'Standardized', 'Bereits korrekt')}
+              <div className="text-[9px] font-bold text-text-muted truncate">
+                {_t('موحد', 'Standardized', 'Korrekt')}
               </div>
             </div>
 
             <div 
               onClick={() => setActiveTab('duplicates')}
-              className={`p-2 rounded-xl border transition-all cursor-pointer ${
+              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
                 activeTab === 'duplicates' 
-                  ? 'bg-purple-500/15 border-purple-500/30 shadow-xs' 
+                  ? 'bg-purple-500/15 border-purple-500/30 shadow-2xs' 
                   : 'bg-surface border-surface-border hover:bg-surface-hover'
               }`}
             >
-              <div className="text-base sm:text-lg font-black text-purple-600 dark:text-purple-400">
+              <div className="text-sm font-black text-purple-600 dark:text-purple-400">
                 {auditResult.duplicatesCount}
               </div>
-              <div className="text-[10px] sm:text-[11px] font-bold text-text-muted truncate">
-                {_t('أرقام مكررة', 'Duplicates', 'Duplikate')}
+              <div className="text-[9px] font-bold text-text-muted truncate">
+                {_t('مكرر', 'Duplicates', 'Duplikate')}
               </div>
             </div>
 
             <div 
               onClick={() => setActiveTab('ambiguous')}
-              className={`p-2 rounded-xl border transition-all cursor-pointer ${
+              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
                 activeTab === 'ambiguous' 
-                  ? 'bg-amber-500/15 border-amber-500/30 shadow-xs' 
+                  ? 'bg-amber-500/15 border-amber-500/30 shadow-2xs' 
                   : 'bg-surface border-surface-border hover:bg-surface-hover'
               }`}
             >
-              <div className="text-base sm:text-lg font-black text-amber-600 dark:text-amber-400">
+              <div className="text-sm font-black text-amber-600 dark:text-amber-400">
                 {auditResult.ambiguousCount}
               </div>
-              <div className="text-[10px] sm:text-[11px] font-bold text-text-muted truncate">
-                {_t('ينقصه اسم إنجليزي', 'Missing En Name', 'Prüfung nötig')}
+              <div className="text-[9px] font-bold text-text-muted truncate">
+                {_t('مراجعة', 'Review', 'Prüfung')}
               </div>
             </div>
 
             <div 
               onClick={() => setActiveTab('missing_in_phone')}
-              className={`p-2 rounded-xl border transition-all cursor-pointer col-span-2 sm:col-span-1 ${
+              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
                 activeTab === 'missing_in_phone' 
-                  ? 'bg-slate-500/15 border-slate-500/30 shadow-xs' 
+                  ? 'bg-slate-500/15 border-slate-500/30 shadow-2xs' 
                   : 'bg-surface border-surface-border hover:bg-surface-hover'
               }`}
             >
-              <div className="text-base sm:text-lg font-black text-text-muted">
+              <div className="text-sm font-black text-text-muted">
                 {auditResult.missingInPhoneCount}
               </div>
-              <div className="text-[10px] sm:text-[11px] font-bold text-text-muted truncate">
-                {_t('غير مسجل بالهاتف', 'Not in Phone', 'Nicht im Telefon')}
+              <div className="text-[9px] font-bold text-text-muted truncate">
+                {_t('غير مسجل', 'Not in Phone', 'Nicht im Tel')}
               </div>
             </div>
           </div>

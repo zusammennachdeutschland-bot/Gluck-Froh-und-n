@@ -16,6 +16,7 @@ import { AiImportModal } from './AiImportModal';
 import { CascadeDeleteGroupModal } from './CascadeDeleteGroupModal';
 import { QuickGenderAssignModal } from './QuickGenderAssignModal';
 import { ContactsUnificationModal } from './ContactsUnificationModal';
+import { ExternalContactEditorModal } from './ExternalContactEditorModal';
 import { formatGroupScheduleDisplay, getDayNumber } from '../utils/scheduleUtils';
 import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
@@ -53,6 +54,7 @@ export const StudentsView: React.FC = () => {
   const [isAiImportModalOpen, setIsAiImportModalOpen] = useState(false);
   const [isGenderAssignModalOpen, setIsGenderAssignModalOpen] = useState(false);
   const [isContactsModalOpen, setIsContactsModalOpen] = useState(false);
+  const [isExternalEditorOpen, setIsExternalEditorOpen] = useState(false);
 
   // Student transfer & group clear states
   const [studentToMove, setStudentToMove] = useState<Student | null>(null);
@@ -470,6 +472,16 @@ export const StudentsView: React.FC = () => {
           >
             <Sparkles className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
             <span className="truncate">{_t('توحيد جهات الاتصال', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsExternalEditorOpen(true)}
+            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-95 text-indigo-700 dark:text-indigo-400 border border-indigo-500/30 font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            title={_t('محرر جهات الاتصال الخارجي للذكاء الاصطناعي', 'External AI Contact Editor', 'Externer KI-Editor')}
+          >
+            <Bot className="w-3.5 h-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+            <span className="truncate">{_t('محرر الذكاء الاصطناعي', 'AI Contact Editor', 'KI-Editor')}</span>
           </button>
         </div>
       </div>
@@ -1992,6 +2004,11 @@ export const StudentsView: React.FC = () => {
       {/* Smart Google Contacts Cleanup & Unification Modal */}
       {isContactsModalOpen && (
         <ContactsUnificationModal onClose={() => setIsContactsModalOpen(false)} />
+      )}
+
+      {/* External AI Contact Editor Modal */}
+      {isExternalEditorOpen && (
+        <ExternalContactEditorModal onClose={() => setIsExternalEditorOpen(false)} />
       )}
     </div>
   );

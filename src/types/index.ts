@@ -779,6 +779,8 @@ export interface Student extends SyncableRecord {
   customBundlePrice?: number;
   advanceBalance?: number;
   monthlyFee?: number;
+  scheduleDays?: string[];
+  scheduleTime?: string;
 }
 
 export interface StudentPaymentDetail {

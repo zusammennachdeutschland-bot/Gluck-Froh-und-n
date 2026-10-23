@@ -6,7 +6,8 @@ import { GradeLevel, ScheduleRecurrence } from '../types';
 import { X, UserPlus, Info, Phone, AtSign, Sparkles, Repeat } from 'lucide-react';
 import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
-import { transliterateArabicNameToEnglish } from '../utils/nameUtils';
+import { transliterateArabicNameToEnglish, ensureTwoPartName } from '../utils/nameUtils';
+import { normalizeEgyptianPhone } from '../utils/contactsStandardizer';
 
 interface AddStudentModalProps {
   onClose: () => void;
@@ -122,12 +123,14 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
 
     const isParentUser = parentContactType === 'username' || isWhatsAppUsername(parentPhone);
     const cleanParentUser = cleanWhatsAppUsername(parentPhone);
-    const finalParentPhone = isParentUser ? `@${cleanParentUser}` : parentPhone.trim();
+    const finalParentPhone = isParentUser ? `@${cleanParentUser}` : normalizeEgyptianPhone(parentPhone);
 
     const hasStudentVal = !!studentPhone.trim();
     const isStudentUser = hasStudentVal && (studentContactType === 'username' || isWhatsAppUsername(studentPhone));
     const cleanStudentUser = hasStudentVal ? cleanWhatsAppUsername(studentPhone) : '';
-    const finalStudentPhone = hasStudentVal ? (isStudentUser ? `@${cleanStudentUser}` : studentPhone.trim()) : '';
+    const finalStudentPhone = hasStudentVal ? (isStudentUser ? `@${cleanStudentUser}` : normalizeEgyptianPhone(studentPhone)) : '';
+
+    const finalParentName = parentName.trim() || `أم ${name.trim()}`;
 
     addStudent({
       name,
@@ -136,7 +139,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
       groupId,
       scheduleRecurrence,
       grade: grade || selectedGroup?.grade || 'Grade 7',
-      parentName,
+      parentName: finalParentName,
       parentPhone: finalParentPhone,
       parentUsername: isParentUser ? cleanParentUser : undefined,
       parentContactType: isParentUser ? 'username' : 'phone',
@@ -179,9 +182,28 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
         <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 space-y-3 sm:space-y-4 max-h-[78vh] overflow-y-auto">
           {/* Student Name */}
           <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main">
-              {t('auto_student_name')} <span className="text-rose-500">*</span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-text-main">
+                {t('auto_student_name')} <span className="text-rose-500">*</span>
+              </label>
+              {name.trim() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const formatted = ensureTwoPartName(name);
+                    setName(formatted);
+                    if (!certificateName.trim() || certificateName === transliterateArabicNameToEnglish(name)) {
+                      setCertificateName(transliterateArabicNameToEnglish(formatted));
+                    }
+                  }}
+                  className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                  title={_t('تحويل إلى اسم ثنائي نقي (الاسم + اسم الأب)', 'Format as 2-part name', 'Als 2-teiligen Namen formatieren')}
+                >
+                  <Sparkles className="w-3 h-3 text-primary" />
+                  <span>{_t('ضبط كاسم ثنائي', '2-Part Name', '2-Teiliger Name')}</span>
+                </button>
+              )}
+            </div>
             <input
               type="text"
               required
@@ -193,6 +215,11 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
                 if (!hasManualGender && val.trim()) {
                   const predicted = isLikelyFemaleStudent(val) ? 'female' : 'male';
                   setGender(predicted);
+                }
+                // Auto-suggest 2-part English name if certificateName is empty or matching previous auto-gen
+                if (val.trim()) {
+                  const autoEn = transliterateArabicNameToEnglish(val);
+                  setCertificateName(autoEn);
                 }
               }}
               className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
@@ -250,10 +277,22 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
 
           {/* English/Latin Name for Certificates */}
           <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main flex items-center justify-between">
-              <span>{_t('اسم الطالب بالإنجليزية للشهادات', 'Student English Name (for Certificates)', 'Englischer Name des Schülers')}</span>
-              <span className="text-rose-500 text-[10px] font-black font-mono">* REQUIRED</span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-text-main flex items-center gap-1">
+                <span>{_t('اسم الطالب بالإنجليزية للشهادات', 'Student English Name (for Certificates)', 'Englischer Name des Schülers')}</span>
+                <span className="text-rose-500 text-[10px] font-black font-mono">* REQUIRED</span>
+              </label>
+              {certificateName.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setCertificateName(ensureTwoPartName(certificateName))}
+                  className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3 text-primary" />
+                  <span>{_t('ضبط كاسم ثنائي', '2-Part Name', '2-Teiliger Name')}</span>
+                </button>
+              )}
+            </div>
             <input
               type="text"
               required

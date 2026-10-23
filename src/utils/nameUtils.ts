@@ -1,6 +1,6 @@
 /**
- * Utility functions for student Arabic-to-English name transliteration.
- * Useful for automated certificate name generation and English records.
+ * Utility functions for student Arabic-to-English name transliteration and Two-Part Name formatting.
+ * Useful for automated certificate name generation, internal student records, and English contacts.
  */
 
 const COMMON_ARABIC_NAME_MAP: Record<string, string> = {
@@ -89,6 +89,53 @@ const ARABIC_CHAR_MAP: Record<string, string> = {
   'ه': 'h', 'ة': 'a', 'و': 'w', 'ي': 'y', 'ى': 'a'
 };
 
+/**
+ * Formats any student name (Arabic or English) as a clean two-part name (الاسم الثنائي).
+ * Handles compound prefixes like "عبد الرحمن" or "Abdel Rahman".
+ */
+export function ensureTwoPartName(fullName: string): string {
+  if (!fullName || !fullName.trim()) return '';
+  const trimmed = fullName.trim();
+
+  // If the name is in Latin/English characters
+  if (/^[a-zA-Z\s'-]+$/.test(trimmed)) {
+    const parts = trimmed.split(/\s+/).filter(Boolean);
+    if (parts.length <= 2) {
+      return parts.map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+    }
+
+    const firstLower = parts[0].toLowerCase();
+    const compoundPrefixes = ['abdel', 'abdul', 'abd', 'el', 'al'];
+
+    if (compoundPrefixes.includes(firstLower) && parts.length >= 3) {
+      const compoundFirst = `${parts[0]}${parts[1].toLowerCase()}`;
+      const formattedFirst = compoundFirst.charAt(0).toUpperCase() + compoundFirst.slice(1);
+      const secondPart = parts[2].charAt(0).toUpperCase() + parts[2].slice(1).toLowerCase();
+      return `${formattedFirst} ${secondPart}`;
+    }
+
+    const p1 = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
+    const p2 = parts[1].charAt(0).toUpperCase() + parts[1].slice(1).toLowerCase();
+    return `${p1} ${p2}`;
+  }
+
+  // If the name is in Arabic characters
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length <= 2) {
+    return words.join(' ');
+  }
+
+  // Handle Arabic compound prefix "عبد" or "أبو" or "أم" or "آل"
+  const firstWord = words[0];
+  if ((firstWord === 'عبد' || firstWord === 'أبو' || firstWord === 'أم' || firstWord === 'آل') && words.length >= 3) {
+    const compoundFirstName = `${words[0]} ${words[1]}`;
+    const secondName = words[2];
+    return `${compoundFirstName} ${secondName}`;
+  }
+
+  return `${words[0]} ${words[1]}`;
+}
+
 export function transliterateArabicWord(word: string): string {
   const clean = word.trim();
   if (!clean) return '';
@@ -113,21 +160,20 @@ export function transliterateArabicWord(word: string): string {
 
 export function transliterateArabicNameToEnglish(fullName: string): string {
   if (!fullName || !fullName.trim()) return '';
-  const trimmed = fullName.trim();
-  
+  const twoPart = ensureTwoPartName(fullName.trim());
+
   // If already in English/Latin
-  if (/^[a-zA-Z\s.-]+$/.test(trimmed)) {
-    return trimmed
-      .split(/\s+/)
-      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-      .join(' ');
+  if (/^[a-zA-Z\s.-]+$/.test(twoPart)) {
+    return ensureTwoPartName(twoPart);
   }
 
-  const words = trimmed.split(/\s+/);
-  return words
+  const words = twoPart.split(/\s+/);
+  const englishTrans = words
     .map(w => transliterateArabicWord(w))
     .filter(Boolean)
     .join(' ');
+
+  return ensureTwoPartName(englishTrans);
 }
 
 /**
@@ -156,4 +202,3 @@ export function normalizeSearchText(text?: string | null): string {
     .replace(/[ى]/g, 'ي')
     .replace(/[\u064B-\u065F\u0670]/g, '');
 }
-

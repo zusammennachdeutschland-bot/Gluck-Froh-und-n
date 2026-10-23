@@ -1,5 +1,6 @@
 import { GradeLevel, LessonType, PaymentCycle, ScheduleRecurrence } from '../types';
 import { normalizeDayToShortKey } from './scheduleUtils';
+import { normalizeEgyptianPhone } from './contactsStandardizer';
 
 export interface ParsedScheduleSlot {
   day: string;
@@ -783,18 +784,14 @@ function parseIndividualGroupBlock(
     }
 
     if (!parentPhone) {
-      errors.push(`${gTag}راتف أو يوزر نيم ولي الأمر مطلوب للطالب "${studentName || `سطر ${studentLineCount}`}".`);
+      errors.push(`${gTag}رقم هاتف أو يوزر نيم ولي الأمر مطلوب للطالب "${studentName || `سطر ${studentLineCount}`}".`);
     } else {
       const isParentUser = parentPhone.startsWith('@') || /[a-zA-Z]/.test(parentPhone);
       if (isParentUser) {
         const clean = parentPhone.trim().replace(/^@/, '').replace(/[^a-zA-Z0-9._]/g, '');
         parentPhone = clean ? `@${clean}` : parentPhone.trim();
       } else {
-        if (parentPhone.startsWith('+')) {
-          parentPhone = parentPhone.replace(/[^\d]/g, '');
-        } else if (/^[\d\s-]{8,20}$/.test(parentPhone)) {
-          parentPhone = parentPhone.replace(/[\s-]/g, '');
-        }
+        parentPhone = normalizeEgyptianPhone(parentPhone);
       }
     }
 
@@ -804,11 +801,7 @@ function parseIndividualGroupBlock(
         const clean = studentPhone.trim().replace(/^@/, '').replace(/[^a-zA-Z0-9._]/g, '');
         studentPhone = clean ? `@${clean}` : studentPhone.trim();
       } else {
-        if (studentPhone.startsWith('+')) {
-          studentPhone = studentPhone.replace(/[^\d]/g, '');
-        } else if (/^[\d\s-]{8,20}$/.test(studentPhone)) {
-          studentPhone = studentPhone.replace(/[\s-]/g, '');
-        }
+        studentPhone = normalizeEgyptianPhone(studentPhone);
       }
     }
 

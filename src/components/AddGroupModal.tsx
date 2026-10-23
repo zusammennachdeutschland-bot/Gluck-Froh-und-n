@@ -6,6 +6,7 @@ import { AiImportModal } from './AiImportModal';
 import { GroupForm, GroupFormData } from './GroupForm';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
+import { normalizeEgyptianPhone } from '../utils/contactsStandardizer';
 
 interface AddGroupModalProps {
   onClose: () => void;
@@ -78,13 +79,14 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
     if (createStudentWithGroup && studentName.trim()) {
       const isUser = studentContactType === 'username' || isWhatsAppUsername(studentParentPhone);
       const cleanUser = cleanWhatsAppUsername(studentParentPhone);
-      const finalPhone = isUser ? `@${cleanUser}` : studentParentPhone.trim();
+      const finalPhone = isUser ? `@${cleanUser}` : normalizeEgyptianPhone(studentParentPhone);
+      const finalParentName = studentParentName.trim() || `أم ${studentName.trim()}`;
 
       addStudent({
         name: studentName.trim(),
         groupId: createdGroup.id,
         grade: studentGrade || data.grade,
-        parentName: studentParentName.trim(),
+        parentName: finalParentName,
         parentPhone: finalPhone,
         parentUsername: isUser ? cleanUser : undefined,
         parentContactType: isUser ? 'username' : 'phone',

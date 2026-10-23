@@ -19,6 +19,7 @@ import { downloadCertificatePDF, shareCertificateWhatsApp } from '../utils/certi
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
 import { getStudentCode } from '../utils/studentCodeUtils';
 import { portalSyncService } from '../services/portalSyncService';
+import { ensureTwoPartName, transliterateArabicNameToEnglish } from '../utils/nameUtils';
 
 interface StudentProfileModalProps {
   student: Student;
@@ -1251,9 +1252,27 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                      {_t('اسم الطالب (Student Name) *', 'Student Name *', 'Schüler Name *')}
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300">
+                        {_t('اسم الطالب (Student Name) *', 'Student Name *', 'Schüler Name *')}
+                      </label>
+                      {editName.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const formatted = ensureTwoPartName(editName);
+                            setEditName(formatted);
+                            if (!editCertificateName.trim() || editCertificateName === transliterateArabicNameToEnglish(editName)) {
+                              setEditCertificateName(transliterateArabicNameToEnglish(formatted));
+                            }
+                          }}
+                          className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-primary" />
+                          <span>{_t('ضبط كاسم ثنائي', '2-Part Name', '2-Teiliger Name')}</span>
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="text"
                       required
@@ -1264,9 +1283,21 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                      {_t('الاسم بالإنجليزية للشهادات (English Name)', 'English Name for Certificates', 'Englischer Name für Zertifikate')}
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300">
+                        {_t('الاسم بالإنجليزية للشهادات (English Name)', 'English Name for Certificates', 'Englischer Name für Zertifikate')}
+                      </label>
+                      {editCertificateName.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setEditCertificateName(ensureTwoPartName(editCertificateName))}
+                          className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-primary" />
+                          <span>{_t('ضبط كاسم ثنائي', '2-Part Name', '2-Teiliger Name')}</span>
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="text"
                       value={editCertificateName}
