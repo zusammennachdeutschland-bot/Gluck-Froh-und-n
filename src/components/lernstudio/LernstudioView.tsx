@@ -43,6 +43,8 @@ import { LernstudioTeachModal } from './LernstudioTeachModal';
 import { LernstudioWordsModal } from './LernstudioWordsModal';
 import { getLernstudioTranslations, getLocalizedSetTitle, getLocalizedSetTopic, getLocalizedGrade, getLocalizedSetDescription, PROGRAM_GRADES, matchesGradeFilter } from '../../utils/lernstudioTranslations';
 import { CHILDREN_LEVEL_CATEGORIES } from '../../data/childrenTopicsPreset';
+import { useApp } from '../../context/AppContext';
+import { RandomStudentPickerModal } from '../RandomStudentPickerModal';
 
 import {
   Sparkles,
@@ -63,7 +65,8 @@ import {
   ChevronRight,
   BookOpen,
   Eye,
-  Share2
+  Share2,
+  Dices
 } from 'lucide-react';
 
 interface Props {
@@ -85,6 +88,7 @@ export const LernstudioView: React.FC<Props> = ({
   onDeleteSet,
   language = 'ar'
 }) => {
+  const { students } = useApp();
   const t = getLernstudioTranslations(language);
 
   // Theme State
@@ -100,6 +104,7 @@ export const LernstudioView: React.FC<Props> = ({
   const [setToEdit, setSetToEdit] = useState<LernstudioSet | null>(null);
 
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [isRandomPickerOpen, setIsRandomPickerOpen] = useState(false);
 
   const [isWorksheetModalOpen, setIsWorksheetModalOpen] = useState(false);
   const [selectedSetForWorksheet, setSelectedSetForWorksheet] = useState<LernstudioSet | null>(null);
@@ -621,6 +626,17 @@ export const LernstudioView: React.FC<Props> = ({
             ))}
           </div>
 
+          {/* Random Student Picker Roulette Button */}
+          <button
+            type="button"
+            onClick={() => setIsRandomPickerOpen(true)}
+            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-md cursor-pointer inline-flex items-center gap-1.5 shrink-0 transform hover:scale-105 transition-all"
+            title="اختيار طالب عشوائي للحصة"
+          >
+            <Dices className="w-4 h-4" />
+            <span>عجلة اختيار الطالب 🎲</span>
+          </button>
+
           {/* AI Generator Button */}
           <button
             type="button"
@@ -1013,6 +1029,13 @@ export const LernstudioView: React.FC<Props> = ({
         />
       )}
 
+      {/* Random Student Picker Roulette Modal */}
+      <RandomStudentPickerModal
+        isOpen={isRandomPickerOpen}
+        onClose={() => setIsRandomPickerOpen(false)}
+        students={students}
+        groups={groups}
+      />
     </div>
   );
 };
