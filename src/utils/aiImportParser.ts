@@ -71,9 +71,10 @@ Thursday|20:00
 عمر فاروق|Omar Farouk|01098765432|01011112222`;
 
 const SAMPLE_MULTI_GROUP_TEMPLATE = `[GROUP]
-name=الصف الخامس - سنتر الأوائل
+name=الصف الخامس - الأحد (أسبوع أ)
 grade=Grade 5
 type=offline
+recurrence=biweekly_a
 lesson_price=100
 payment_type=every_4_lessons
 payment_amount=400
@@ -82,7 +83,6 @@ whatsapp_link=https://chat.whatsapp.com/ExampleGroup1
 
 [SCHEDULE]
 Sunday|17:00
-Wednesday|17:00
 
 [STUDENTS]
 عمر فاروق|Omar Farouk|01098765432|01011112222
@@ -90,9 +90,10 @@ Wednesday|17:00
 سيف الدين|Seif El Din|01234567890|
 
 [GROUP]
-name=الصف السادس - أونلاين بلس
+name=الصف السادس - الأحد التالي (أسبوع ب)
 grade=Grade 6
 type=online
+recurrence=biweekly_b
 lesson_price=120
 payment_type=every_4_lessons
 payment_amount=480
@@ -100,8 +101,7 @@ zoom_link=https://zoom.us/j/987654321
 whatsapp_link=https://chat.whatsapp.com/ExampleGroup2
 
 [SCHEDULE]
-Monday|19:30
-Thursday|19:30
+Sunday|17:00
 
 [STUDENTS]
 كندا أحمد|Kinda Ahmed|201200005170|@kinda_student
@@ -151,6 +151,11 @@ export const AI_PROMPT_TEMPLATE_AR = `أنت مساعد إدخال بيانات 
 - نظام الدفع (payment_type): اختر حصراً من (per_lesson, every_4_lessons, every_8_lessons, every_12_lessons, monthly) (مطلوب).
 - المبلغ الإجمالي (payment_amount): يتم حسابه تلقائياً بناءً على سعر الحصة ونظام الدفع.
 - رابط جروب الواتساب (whatsapp_link): **إجباري ومطلوب إذا كانت المجموعة تحتوي على أكثر من طالب واحد (> 1 طالب)**! (أما إذا كان طالباً واحداً فقط فهو اختياري).
+- تكرار وتناوب الحصص (recurrence): اختياري - اختر حصراً من:
+  * "weekly": أسبوعي (كل أسبوع).
+  * "biweekly_a": أسبوع وأسبوع (أسبوع أ - الأحد الأول).
+  * "biweekly_b": أسبوع وأسبوع (أسبوع ب - الأحد التالي/القادم).
+  * يتيح لك إنشاء مجموعتين تعملان في نفس اليوم (مثلاً يوم الأحد) بالتناوب بين الأسابيع بدون أي تعارض!
 
 شروط هامة ونوع الحضور:
 * إذا كان نوع المجموعة "online":

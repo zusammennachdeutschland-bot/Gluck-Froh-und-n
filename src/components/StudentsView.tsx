@@ -7,7 +7,7 @@ import {
   FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, 
   FileText, Award, DollarSign, Bot, ChevronDown, Filter, Sparkles, AtSign, 
   Mars, Venus, CircleHelp, Copy, Check, ArrowRightLeft, UserX, CheckSquare, Square, AlertTriangle,
-  BarChart3, GraduationCap
+  BarChart3, GraduationCap, Smartphone, UserCheck, Dices
 } from 'lucide-react';
 import { StudentProfileModal } from './StudentProfileModal';
 import { GroupProfileModal } from './GroupProfileModal';
@@ -15,7 +15,11 @@ import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { AiImportModal } from './AiImportModal';
 import { CascadeDeleteGroupModal } from './CascadeDeleteGroupModal';
 import { QuickGenderAssignModal } from './QuickGenderAssignModal';
+import { StudentPhoneSyncModal } from './StudentPhoneSyncModal';
 import { ContactsUnificationModal } from './ContactsUnificationModal';
+import { BulkCertificateModal } from './certificates/BulkCertificateModal';
+import { GroupAnalyticsModal } from './GroupAnalyticsModal';
+import { RandomStudentPickerModal } from './RandomStudentPickerModal';
 import { formatGroupScheduleDisplay, getDayNumber } from '../utils/scheduleUtils';
 import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
@@ -52,7 +56,11 @@ export const StudentsView: React.FC = () => {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [isAiImportModalOpen, setIsAiImportModalOpen] = useState(false);
   const [isGenderAssignModalOpen, setIsGenderAssignModalOpen] = useState(false);
+  const [isStudentPhoneSyncModalOpen, setIsStudentPhoneSyncModalOpen] = useState(false);
   const [isContactsModalOpen, setIsContactsModalOpen] = useState(false);
+  const [isBulkCertificatesModalOpen, setIsBulkCertificatesModalOpen] = useState(false);
+  const [isGroupAnalyticsModalOpen, setIsGroupAnalyticsModalOpen] = useState(false);
+  const [isRandomPickerModalOpen, setIsRandomPickerModalOpen] = useState(false);
 
   // Student transfer & group clear states
   const [studentToMove, setStudentToMove] = useState<Student | null>(null);
@@ -435,54 +443,110 @@ export const StudentsView: React.FC = () => {
           <span>{t('students_and_groups_title')}</span>
         </h2>
 
-        {/* 4 Action Buttons in ONE Single Row - Icon Only on Mobile */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* 1. Add Student */}
+        {/* Action Buttons in ONE Single Row - Icon-Only with Unified App Theme Color */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 max-w-full">
+          {/* 1. Add Student (Primary Theme) */}
           <button
             type="button"
             onClick={() => setIsAddStudentModalOpen(true)}
-            className="p-2.5 sm:px-3 sm:py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap"
-            title={t('students_add_student')}
-            aria-label={t('students_add_student')}
+            className="p-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-xs shrink-0"
+            title={_t('إضافة طالب جديد', 'Add New Student', 'Neuen Schüler hinzufügen')}
+            aria-label={_t('إضافة طالب جديد', 'Add New Student', 'Neuen Schüler hinzufügen')}
           >
-            <UserPlus className="w-4 h-4 shrink-0" />
-            <span className="hidden sm:inline">{t('students_add_student')}</span>
+            <UserPlus className="w-4 h-4 shrink-0 text-white" />
           </button>
 
-          {/* 2. Add Group */}
+          {/* 2. Add Group (Unified Theme) */}
           <button
             type="button"
             onClick={() => setIsAddGroupModalOpen(true)}
-            className="p-2.5 sm:px-3 sm:py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
-            title={t('students_add_group')}
-            aria-label={t('students_add_group')}
+            className="p-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+            title={_t('إضافة مجموعة جديدة', 'Add New Group', 'Neue Gruppe hinzufügen')}
+            aria-label={_t('إضافة مجموعة جديدة', 'Add New Group', 'Neue Gruppe hinzufügen')}
           >
             <Plus className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
-            <span className="hidden sm:inline">{t('students_add_group')}</span>
           </button>
 
-          {/* 3. AI Import */}
+          {/* 3. AI Import (Unified Theme) */}
           <button
             type="button"
             onClick={() => setIsAiImportModalOpen(true)}
-            className="p-2.5 sm:px-3 sm:py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
-            title={t('auto_import_group_students')}
-            aria-label={t('auto_import_group_students')}
+            className="p-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+            title={_t('استيراد طلاب المجموعة بالذكاء الاصطناعي', 'AI Group Import', 'KI-Gruppenimport')}
+            aria-label={_t('استيراد طلاب المجموعة بالذكاء الاصطناعي', 'AI Group Import', 'KI-Gruppenimport')}
           >
             <Bot className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
-            <span className="hidden sm:inline">{t('auto_import_group_students')}</span>
           </button>
 
-          {/* 4. Contacts Cleanup */}
+          {/* 4. Gender Assign (Unified Theme) */}
+          <button
+            type="button"
+            onClick={() => setIsGenderAssignModalOpen(true)}
+            className="p-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0 relative"
+            title={_t('تحديد جنس الطلاب (ولد / بنت)', 'Assign Student Gender', 'Geschlecht zuweisen')}
+            aria-label={_t('تحديد جنس الطلاب (ولد / بنت)', 'Assign Student Gender', 'Geschlecht zuweisen')}
+          >
+            <UserCheck className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+            {unassignedGenderCount > 0 && (
+              <span className="absolute -top-1 -right-1 px-1.5 py-0.2 bg-indigo-600 text-white text-[9px] font-black rounded-full leading-none shadow-xs">
+                {unassignedGenderCount}
+              </span>
+            )}
+          </button>
+
+          {/* 5. Student Phone Sync (Unified Theme) */}
+          <button
+            type="button"
+            onClick={() => setIsStudentPhoneSyncModalOpen(true)}
+            className="p-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+            title={_t('إضافة أو تعديل أرقام هواتف الطلاب والربط بجهات الاتصال', 'Student Phones & Contacts', 'Schüler-Telefon & Kontakte')}
+            aria-label={_t('إضافة أو تعديل أرقام هواتف الطلاب والربط بجهات الاتصال', 'Student Phones & Contacts', 'Schüler-Telefon & Kontakte')}
+          >
+            <Smartphone className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+          </button>
+
+          {/* 6. Contacts Cleanup (Unified Theme) */}
           <button
             type="button"
             onClick={() => setIsContactsModalOpen(true)}
-            className="p-2.5 sm:px-3 sm:py-2 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
-            title={_t('توحيد جهات الاتصال', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}
-            aria-label={_t('توحيد جهات الاتصال', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}
+            className="p-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+            title={_t('توحيد صيغ أسماء الاتصال بحافظة الهاتف', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}
+            aria-label={_t('توحيد صيغ أسماء الاتصال بحافظة الهاتف', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}
           >
-            <Sparkles className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <span className="hidden sm:inline">{_t('توحيد جهات الاتصال', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}</span>
+            <Sparkles className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+          </button>
+
+          {/* 7. Certificates (Unified Theme) */}
+          <button
+            type="button"
+            onClick={() => setIsBulkCertificatesModalOpen(true)}
+            className="p-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+            title={_t('إصدار شهادات التقدير والتفوق للطلاب', 'Issue Certificates', 'Zertifikate ausstellen')}
+            aria-label={_t('إصدار شهادات التقدير والتفوق للطلاب', 'Issue Certificates', 'Zertifikate ausstellen')}
+          >
+            <Award className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+          </button>
+
+          {/* 8. Group Analytics & Reports (Unified Theme) */}
+          <button
+            type="button"
+            onClick={() => setIsGroupAnalyticsModalOpen(true)}
+            className="p-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+            title={_t('إحصائيات وتقارير المجموعات', 'Group Analytics & Reports', 'Gruppenstatistiken')}
+            aria-label={_t('إحصائيات وتقارير المجموعات', 'Group Analytics & Reports', 'Gruppenstatistiken')}
+          >
+            <BarChart3 className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+          </button>
+
+          {/* 9. Random Student Picker Roulette (Unified Theme) */}
+          <button
+            type="button"
+            onClick={() => setIsRandomPickerModalOpen(true)}
+            className="p-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+            title={_t('عجلة اختيار طالب عشوائي للحصة', 'Random Student Picker', 'Zufällige Schülerauswahl')}
+            aria-label={_t('عجلة اختيار طالب عشوائي للحصة', 'Random Student Picker', 'Zufällige Schülerauswahl')}
+          >
+            <Dices className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
           </button>
         </div>
       </div>
@@ -1991,10 +2055,40 @@ export const StudentsView: React.FC = () => {
         </div>
       )}
 
+      {/* Quick Gender Assign Modal */}
+      <QuickGenderAssignModal
+        isOpen={isGenderAssignModalOpen}
+        onClose={() => setIsGenderAssignModalOpen(false)}
+      />
+
+      {/* Student Phone & Contacts Sync Modal */}
+      <StudentPhoneSyncModal
+        isOpen={isStudentPhoneSyncModalOpen}
+        onClose={() => setIsStudentPhoneSyncModalOpen(false)}
+      />
+
       {/* Smart Google Contacts Cleanup & Unification Modal */}
       {isContactsModalOpen && (
         <ContactsUnificationModal onClose={() => setIsContactsModalOpen(false)} />
       )}
+
+      {/* Bulk Certificate Issuance Modal */}
+      {isBulkCertificatesModalOpen && (
+        <BulkCertificateModal onClose={() => setIsBulkCertificatesModalOpen(false)} />
+      )}
+
+      {/* Group Analytics & Reports Modal */}
+      {isGroupAnalyticsModalOpen && (
+        <GroupAnalyticsModal onClose={() => setIsGroupAnalyticsModalOpen(false)} />
+      )}
+
+      {/* Random Student Picker Roulette Modal */}
+      <RandomStudentPickerModal
+        isOpen={isRandomPickerModalOpen}
+        onClose={() => setIsRandomPickerModalOpen(false)}
+        students={students}
+        groups={groups}
+      />
     </div>
   );
 };

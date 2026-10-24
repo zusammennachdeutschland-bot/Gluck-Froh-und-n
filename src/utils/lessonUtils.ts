@@ -280,8 +280,15 @@ export const normalizeName = (name?: string): string => {
 };
 
 export const checkOverlap = (l1: any, l2: any) => {
-  if (l1.date !== l2.date) return false;
+  if (!l1 || !l2) return false;
   if (l1.id === l2.id) return false;
+  if (l1.date !== l2.date) return false;
+  
+  // If both lessons belong to the exact same group, it's a duplicate record of the same group session, not a schedule conflict between different groups
+  if (l1.groupId && l2.groupId && l1.groupId !== 'quick_group' && l1.groupId === l2.groupId) {
+    return false;
+  }
+
   const getMins = (t: string) => {
     if (!t) return 0;
     const parts = t.split(':').map(Number);

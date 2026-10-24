@@ -1,16 +1,12 @@
 import React from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioGameMode } from '../../types/lernstudio';
+import { GameThumbnailArt } from './GameArtAssets';
 import {
   X,
   Gamepad2,
-  Trophy,
-  Sparkles,
   Users,
   User,
-  ArrowLeft,
-  Flame,
-  Layers,
-  HelpCircle
+  ArrowLeft
 } from 'lucide-react';
 
 interface Props {
@@ -106,7 +102,6 @@ const GAME_OPTIONS: GameOption[] = [
 export const LernstudioGamesHubModal: React.FC<Props> = ({
   isOpen,
   set,
-  activeTheme,
   language = 'ar',
   onClose,
   onSelectGame
@@ -155,36 +150,36 @@ export const LernstudioGamesHubModal: React.FC<Props> = ({
                 onSelectGame(g.id, set);
                 onClose();
               }}
-              className="p-5 rounded-3xl bg-slate-800/80 hover:bg-slate-800 border-2 border-slate-700/80 hover:border-primary transition-all duration-200 cursor-pointer flex flex-col justify-between gap-4 group shadow-xl hover:shadow-2xl hover:scale-[1.01]"
+              className="p-4 rounded-3xl bg-slate-800/80 hover:bg-slate-800 border-2 border-slate-700/80 hover:border-primary transition-all duration-200 cursor-pointer flex flex-col justify-between gap-3 group shadow-xl hover:shadow-2xl hover:scale-[1.01] overflow-hidden"
             >
-              <div>
+              {/* Thumbnail header */}
+              <div className="w-full h-32 rounded-2xl overflow-hidden bg-slate-900 relative shrink-0 border border-slate-700">
+                <GameThumbnailArt gameId={g.id} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                <span className="absolute top-2 right-2 px-2.5 py-1 rounded-xl text-xs font-bold bg-black/70 text-white backdrop-blur-md flex items-center gap-1.5 border border-white/10">
+                  <span>{g.iconEmoji}</span>
+                  <span>{g.playersLabel}</span>
+                </span>
+              </div>
+
+              <div className="space-y-1">
                 {/* Meta info header */}
-                <div className="flex items-center justify-between text-xs text-slate-400 mb-2 font-bold">
+                <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
                   <span className="flex items-center gap-1.5">
                     {g.category === 'team' ? <Users className="w-3.5 h-3.5 text-amber-400" /> : <User className="w-3.5 h-3.5 text-emerald-400" />}
                     <span>{g.categoryLabel}</span>
                   </span>
-                  <span className="text-[11px] text-slate-400">{g.playersLabel}</span>
                 </div>
 
-                {/* Title & Emoji */}
-                <div className="flex items-start gap-3 mt-1">
-                  <span className="text-3xl p-2.5 rounded-2xl bg-slate-900 border border-slate-700 shrink-0">
-                    {g.iconEmoji}
-                  </span>
-                  <div>
-                    <h3 className="font-black text-sm sm:text-base text-white group-hover:text-primary transition-colors">
-                      {g.title}
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                      {g.description}
-                    </p>
-                  </div>
-                </div>
+                <h3 className="font-black text-sm sm:text-base text-white group-hover:text-primary transition-colors">
+                  {g.title}
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">
+                  {g.description}
+                </p>
               </div>
 
               {/* Action Button */}
-              <div className="pt-3 border-t border-slate-700/60 flex items-center justify-between">
+              <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between">
                 <span className="text-xs font-black text-slate-300">بدء اللعبة الآن</span>
                 <div
                   className={`px-4 py-2 rounded-xl text-xs font-black text-white bg-gradient-to-r ${g.buttonGradient} shadow-md group-hover:shadow-lg transition-all flex items-center gap-1`}

@@ -453,3 +453,46 @@ export function isContactAlreadyStandardized(currentName: string, proposedName: 
   const cleanProposed = proposedName.trim().replace(/\s+/g, ' ');
   return cleanCurrent.toLowerCase() === cleanProposed.toLowerCase();
 }
+
+export interface StudentContactProposal {
+  standardizedName: string;
+  studentName: string;
+  klasseLabel: string;
+  formattedPhone: string;
+}
+
+/**
+ * Builds standardized contact proposal specifically for a student:
+ * Format: "{Student English Two-Word Name} - Klasse {Class Number}"
+ * Example: "Ahmed Ali - Klasse 4"
+ */
+export function buildStudentContactProposal(student: Student): StudentContactProposal {
+  const enName = getStudentEnglishName(student) || cleanEnglishName(student.name);
+  const klasseLabel = formatKlasseName(student.grade);
+  const standardizedName = `${enName} - ${klasseLabel}`;
+  const formattedPhone = normalizeEgyptianPhone(student.studentPhone || student.phone);
+  return {
+    standardizedName,
+    studentName: enName,
+    klasseLabel,
+    formattedPhone,
+  };
+}
+
+/**
+ * Checks if a student's phone number is identical or matches their parent's phone number.
+ * If true, it means studentPhone was entered as parent's phone (erroneous duplicate).
+ */
+export function isStudentPhoneIdenticalToParent(studentPhone?: string | null, parentPhone?: string | null): boolean {
+  if (!studentPhone || !parentPhone) return false;
+  const sTrim = studentPhone.trim();
+  const pTrim = parentPhone.trim();
+  if (!sTrim || !pTrim) return false;
+  if (sTrim === pTrim) return true;
+
+  const sKey = getPhoneMatchKey(sTrim);
+  const pKey = getPhoneMatchKey(pTrim);
+  return Boolean(sKey && pKey && sKey === pKey);
+}
+
+

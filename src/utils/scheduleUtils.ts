@@ -268,6 +268,18 @@ export function getProjectedLessonsForRange(
   });
   const explicitKeys = new Set<string>();
   const deletedKeys = new Set<string>();
+
+  (explicitLessons || []).forEach(l => {
+    if (l.groupId && l.date && l.time) {
+      const normTime = l.time.trim();
+      const key = `${l.groupId}_${l.date}_${normTime}`;
+      if (l.deleted) {
+        deletedKeys.add(key);
+      } else {
+        explicitKeys.add(key);
+      }
+    }
+  });
   const projected: Lesson[] = [];
 
   const startD = parseLocalDate(startDateStr);
