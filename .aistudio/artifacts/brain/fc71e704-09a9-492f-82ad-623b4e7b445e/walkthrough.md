@@ -101,3 +101,22 @@ A complete, non-destructive contact standardization and cleanup system built dir
   4. Switched ProGuard rules to `proguard-android-optimize.txt`.
   5. Refactored `ContactsManagerPlugin.java` phone array mapping to use a type-safe `phoneArrays` map.
   6. Re-synced native assets and plugins via `npx cap sync android`.
+
+---
+
+## 5. Direct Phone Registration & Automated Group Creation Prompt
+
+### A. Saving Missing Contacts to Phone ("عايز اوبشن إني أسجلهم")
+- **Native Android Content Provider Integration**: Added `createContact`, `batchCreateContacts`, and `openContactEditor` in `ContactsManagerPlugin.java`. Contacts are saved directly to Android's `ContactsContract` using atomic batch operations with standard `StructuredName`, `Phone`, and `Note`.
+- **`ContactsUnificationModal.tsx` ("غير مسجل / Nicht im Tel")**:
+  - **Individual Actions**: Each missing student card now includes an inline edit pencil to customize the proposed name, a "تسجيل بالهاتف" (Save to Phone) button, and a "محرر الهاتف" (Open Native Editor) button.
+  - **Batch Operations**: Selection checkboxes with "تحديد الكل" / "إلغاء التحديد" and a prominent "تسجيل المحدد بالهاتف" button that creates all selected contacts in a single click with real-time progress indicators.
+  - **VCF Contact Card Export**: Teachers can export all or selected missing contacts as a `.vcf` vCard file.
+
+### B. Automated Group Creation Verification & Prompt ("يسألني اضيف الكونتاكتس او لو موجودة بس محتاجة تتعدل يعرفني")
+- **`NewGroupContactsPromptModal.tsx`**: A dedicated modal that inspects student phone numbers against the device's contacts:
+  - If a student is **not in the phone**, it offers 1-click single or batch saving to the phone.
+  - If a student's contact **already exists on the phone but needs name standardization** (e.g., `"أم أحمد"` ➔ `"Ahmed's Mom - Klasse 5"`), it alerts the teacher and provides 1-click name standardization.
+  - If already standardized, it displays a confirmation badge.
+- **Manual Group Flow (`AddGroupModal.tsx`)**: When creating a group with a student and phone number, the app automatically checks the contacts and prompts the teacher to save or standardize.
+- **AI Prompt Import (`AiImportModal.tsx`)**: Upon completing an AI prompt import, the success screen displays a smart contacts audit card with student counts needing addition or editing, with a 1-click action to review, save, and update all contacts immediately.

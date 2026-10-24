@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
   Zap, History, Play, Clock, Award, BookOpen, Layers, 
-  Gamepad2, SlidersHorizontal, ShieldCheck
+  Gamepad2, SlidersHorizontal, ShieldCheck, Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
@@ -191,10 +191,10 @@ export const BottomNav: React.FC = () => {
                   showQuickMenu ? 'rotate-45' : 'rotate-0'
                 }`}
                 style={{ WebkitTapHighlightColor: 'transparent', WebkitBackdropFilter: 'blur(12px)' }}
-                aria-label="Schnell-Eintrag"
-                title="Aktionen anzeigen"
+                aria-label="Schnell-Eintrag / Quick Action"
+                title="Schnelle Aktionen anzeigen"
               >
-                <Zap className="w-5 h-5 sm:w-5.5 sm:h-5.5 fill-white" />
+                <Plus className="w-5 h-5 sm:w-5.5 sm:h-5.5 stroke-[2.5]" />
               </button>
 
               {/* Quick Action Popover Menu */}

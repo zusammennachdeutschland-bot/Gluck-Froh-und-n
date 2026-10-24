@@ -9,7 +9,8 @@ import { ContactAuditItem } from '../utils/contactsStandardizer';
 import { 
   X, CheckCircle2, AlertTriangle, RefreshCw, Smartphone, 
   Search, ShieldCheck, CheckSquare, Square, 
-  Users, Copy, Check, Info, Sparkles, Edit3, Settings
+  Users, Copy, Check, Info, Sparkles, Edit3, Settings,
+  UserPlus, Download, ExternalLink
 } from 'lucide-react';
 
 interface ContactsUnificationModalProps {
@@ -32,6 +33,13 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
   const [customNames, setCustomNames] = useState<Record<string, string>>({});
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
   const [tempEditValue, setTempEditValue] = useState('');
+
+  // Missing students state & custom names
+  const [selectedMissingPhones, setSelectedMissingPhones] = useState<Set<string>>(new Set());
+  const [customMissingNames, setCustomMissingNames] = useState<Record<string, string>>({});
+  const [editingMissingPhone, setEditingMissingPhone] = useState<string | null>(null);
+  const [tempMissingEditValue, setTempMissingEditValue] = useState('');
+  const [savedMissingPhones, setSavedMissingPhones] = useState<Set<string>>(new Set());
 
   // Execution states
   const [isExecuting, setIsExecuting] = useState(false);
@@ -66,6 +74,11 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
         }
       });
       setSelectedIds(preselected);
+
+      // Pre-select missing students so user can 1-click save
+      const missingPhones = new Set<string>();
+      res.missingStudents.forEach(m => missingPhones.add(m.phone));
+      setSelectedMissingPhones(missingPhones);
     } catch (e) {
       console.error('Scan error:', e);
     } finally {
@@ -242,6 +255,144 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
     } finally {
       setIsExecuting(false);
     }
+  };
+
+  // Missing students helpers & handlers
+  const toggleSelectMissing = (phone: string) => {
+    setSelectedMissingPhones(prev => {
+      const next = new Set(prev);
+      if (next.has(phone)) next.delete(phone);
+      else next.add(phone);
+      return next;
+    });
+  };
+
+  const handleSelectAllMissing = (items: typeof filteredMissingStudents) => {
+    const next = new Set(selectedMissingPhones);
+    items.forEach(i => next.add(i.phone));
+    setSelectedMissingPhones(next);
+  };
+
+  const handleDeselectAllMissing = (items: typeof filteredMissingStudents) => {
+    const next = new Set(selectedMissingPhones);
+    items.forEach(i => next.delete(i.phone));
+    setSelectedMissingPhones(next);
+  };
+
+  const handleStartEditMissing = (phone: string, defaultName: string) => {
+    setEditingMissingPhone(phone);
+    setTempMissingEditValue(customMissingNames[phone] || defaultName);
+  };
+
+  const handleSaveEditMissing = (phone: string) => {
+    if (tempMissingEditValue.trim()) {
+      setCustomMissingNames(prev => ({ ...prev, [phone]: tempMissingEditValue.trim() }));
+    }
+    setEditingMissingPhone(null);
+  };
+
+  const handleCreateSingleMissingContact = async (item: { student: Student; proposedName: string; phone: string }) => {
+    setIsExecuting(true);
+    setProgressCurrent(1);
+    setProgressTotal(1);
+    const targetName = customMissingNames[item.phone] || item.proposedName;
+    setCurrentUpdatingName(targetName);
+
+    try {
+      const res = await contactsSyncService.createContact({
+        displayName: targetName,
+        phoneNumber: item.phone,
+        note: `طالب في ${item.student.grade} - تطبيق Glück`
+      });
+
+      if (res.success) {
+        setSavedMissingPhones(prev => new Set(prev).add(item.phone));
+        setExecutionReport({
+          updatedCount: 1,
+          failedCount: 0,
+          errors: []
+        });
+        await executeScan();
+      } else {
+        setExecutionReport({
+          updatedCount: 0,
+          failedCount: 1,
+          errors: [res.error || 'Failed to save contact']
+        });
+      }
+    } catch (e: any) {
+      setExecutionReport({
+        updatedCount: 0,
+        failedCount: 1,
+        errors: [e?.message || 'Error saving contact']
+      });
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const handleOpenContactEditorForMissing = async (item: { student: Student; proposedName: string; phone: string }) => {
+    const targetName = customMissingNames[item.phone] || item.proposedName;
+    await contactsSyncService.openContactEditor(
+      targetName,
+      item.phone,
+      `طالب في ${item.student.grade} - تطبيق Glück`
+    );
+  };
+
+  const handleBatchCreateSelectedMissing = async () => {
+    const itemsToCreate = filteredMissingStudents.filter(m => selectedMissingPhones.has(m.phone));
+    if (itemsToCreate.length === 0) return;
+
+    setIsExecuting(true);
+    setProgressCurrent(0);
+    setProgressTotal(itemsToCreate.length);
+
+    try {
+      const payload = itemsToCreate.map(m => ({
+        displayName: customMissingNames[m.phone] || m.proposedName,
+        phoneNumber: m.phone,
+        note: `طالب في ${m.student.grade} - تطبيق Glück`
+      }));
+
+      const res = await contactsSyncService.batchCreateContacts(payload, (curr, tot, name) => {
+        setProgressCurrent(curr);
+        setCurrentUpdatingName(name);
+      });
+
+      const newSaved = new Set(savedMissingPhones);
+      itemsToCreate.forEach(m => newSaved.add(m.phone));
+      setSavedMissingPhones(newSaved);
+
+      setExecutionReport({
+        updatedCount: res.createdCount,
+        failedCount: res.failedCount,
+        errors: res.errors
+      });
+
+      await executeScan();
+    } catch (e: any) {
+      setExecutionReport({
+        updatedCount: 0,
+        failedCount: itemsToCreate.length,
+        errors: [e?.message || 'Error in batch creation']
+      });
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const handleExportMissingVcf = () => {
+    const itemsToExport = (selectedMissingPhones.size > 0 
+      ? filteredMissingStudents.filter(m => selectedMissingPhones.has(m.phone))
+      : filteredMissingStudents
+    ).map(m => ({
+      displayName: customMissingNames[m.phone] || m.proposedName,
+      phoneNumber: m.phone,
+      note: `طالب في ${m.student.grade} - تطبيق Glück`
+    }));
+
+    contactsSyncService.downloadVcf('Glueck_Missing_Contacts', itemsToExport);
   };
 
   const isAndroid = contactsSyncService.isNativeAndroid();
@@ -532,7 +683,7 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
         </div>
 
         {/* Selection Toolbar with clean badge */}
-        {activeTab !== 'missing_in_phone' && filteredAuditItems.length > 0 && (
+        {activeTab !== 'missing_in_phone' && filteredAuditItems.length > 0 ? (
           <div className="px-4 py-2 sm:px-6 bg-surface-hover/30 border-b border-surface-border flex flex-wrap items-center justify-between gap-2.5 text-xs shrink-0">
             <div className="flex items-center gap-2">
               <button
@@ -559,7 +710,45 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
               </span>
             </div>
           </div>
-        )}
+        ) : activeTab === 'missing_in_phone' && filteredMissingStudents.length > 0 ? (
+          <div className="px-4 py-2 sm:px-6 bg-emerald-500/10 border-b border-emerald-500/20 flex flex-wrap items-center justify-between gap-2.5 text-xs shrink-0">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleSelectAllMissing(filteredMissingStudents)}
+                className="font-bold text-emerald-700 dark:text-emerald-400 hover:underline cursor-pointer"
+              >
+                {_t('تحديد الكل', 'Select all', 'Alle auswählen')}
+              </button>
+              <span className="text-text-muted">|</span>
+              <button
+                onClick={() => handleDeselectAllMissing(filteredMissingStudents)}
+                className="font-bold text-text-muted hover:text-text-main cursor-pointer"
+              >
+                {_t('إلغاء التحديد', 'Deselect all', 'Auswahl aufheben')}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 ms-auto">
+              <button
+                onClick={handleExportMissingVcf}
+                className="px-2.5 py-1 rounded-lg border border-surface-border bg-surface text-text-main hover:bg-surface-hover font-bold text-[11px] flex items-center gap-1 cursor-pointer shadow-2xs"
+                title={_t('تصدير كملف VCF', 'Export as VCF', 'Als VCF exportieren')}
+              >
+                <Download className="w-3 h-3 text-text-muted" />
+                <span>{_t('تصدير VCF', 'Export VCF', 'VCF Export')}</span>
+              </button>
+
+              <div className="flex items-center gap-1.5">
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-emerald-600 text-white shadow-2xs">
+                  {selectedMissingPhones.size}
+                </span>
+                <span className="font-bold text-text-main text-[11px]">
+                  {_t('محدد للتسجيل بالهاتف', 'selected to save', 'zum Speichern')}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {/* Main Content Area */}
         <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 space-y-2.5">
@@ -573,15 +762,28 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
           ) : activeTab === 'missing_in_phone' ? (
             // Missing Students in Phone Contacts View
             <div className="space-y-3">
-              <div className="p-3 rounded-xl bg-slate-500/10 border border-slate-500/20 text-xs text-text-muted flex items-center gap-2">
-                <Info className="w-4 h-4 text-slate-500 shrink-0" />
-                <span>
-                  {_t(
-                    'هؤلاء الطلاب لديهم أرقام هواتف مسجلة في التطبيق ولكن لا يوجد لهم جهات اتصال مقابلة على الهاتف. للعلم فقط (لا يتم الإنشاء التلقائي دون إذن).',
-                    'These students have phone numbers in Glück but no matching contacts on the phone. Informational only (no auto-creation).',
-                    'Diese Schüler haben Telefonnummern in Glück, aber keine passenden Kontakte auf dem Telefon.'
-                  )}
-                </span>
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-text-muted flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    {_t(
+                      'هؤلاء الطلاب لديهم أرقام هواتف مسجلة في تطبيق Glück ولكن ليس لهم جهات اتصال محفوظة في هاتفك. يمكنك حفظهم بالهاتف فردياً أو بضغطة زر واحدة للجميع.',
+                      'These students have phone numbers in Glück but no saved contacts on your phone. You can save them individually or batch-save all.',
+                      'Diese Schüler haben Telefonnummern in Glück, aber keine Kontakte auf dem Telefon. Sie können sie einzeln oder alle auf einmal speichern.'
+                    )}
+                  </span>
+                </div>
+
+                {filteredMissingStudents.length > 0 && (
+                  <button
+                    onClick={handleBatchCreateSelectedMissing}
+                    disabled={isExecuting || selectedMissingPhones.size === 0}
+                    className="self-end sm:self-center px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>{_t(`تسجيل المحدد بالهاتف (${selectedMissingPhones.size})`, `Save Selected (${selectedMissingPhones.size})`, `Ausgewählte speichern (${selectedMissingPhones.size})`)}</span>
+                  </button>
+                )}
               </div>
 
               {filteredMissingStudents.length === 0 ? (
@@ -590,30 +792,133 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {filteredMissingStudents.map((item, idx) => (
-                    <div key={idx} className="p-3 bg-surface border border-surface-border rounded-xl flex items-start justify-between gap-3 shadow-2xs">
-                      <div>
-                        <div className="font-bold text-text-main text-xs sm:text-sm">
-                          {item.student.name}
-                        </div>
-                        <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
-                          {item.proposedName}
-                        </div>
-                        <div className="text-[11px] text-text-muted mt-1 flex items-center gap-1.5 font-mono">
-                          <span>{item.phone}</span>
+                  {filteredMissingStudents.map((item, idx) => {
+                    const isSelected = selectedMissingPhones.has(item.phone);
+                    const isEditing = editingMissingPhone === item.phone;
+                    const isSaved = savedMissingPhones.has(item.phone);
+                    const displayNameToPropose = customMissingNames[item.phone] || item.proposedName;
+
+                    return (
+                      <div 
+                        key={idx} 
+                        className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between gap-3 shadow-2xs ${
+                          isSelected 
+                            ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-500/40' 
+                            : 'bg-surface border-surface-border'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          {/* Selection Checkbox */}
                           <button
-                            onClick={() => handleCopyPhone(`missing_${idx}`, item.phone)}
-                            className="p-1 hover:text-text-main cursor-pointer"
+                            type="button"
+                            onClick={() => toggleSelectMissing(item.phone)}
+                            className="mt-0.5 text-emerald-600 cursor-pointer shrink-0"
                           >
-                            {copiedPhoneId === `missing_${idx}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                            {isSelected ? (
+                              <CheckSquare className="w-5 h-5 text-emerald-600" />
+                            ) : (
+                              <Square className="w-5 h-5 text-surface-border-soft hover:text-text-muted" />
+                            )}
                           </button>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-bold text-text-main text-xs sm:text-sm truncate">
+                                {item.student.name}
+                              </div>
+                              <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
+                                {item.student.grade}
+                              </span>
+                            </div>
+
+                            {/* Proposed Name with inline edit */}
+                            <div className="mt-1">
+                              {isEditing ? (
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <input
+                                    type="text"
+                                    value={tempMissingEditValue}
+                                    onChange={e => setTempMissingEditValue(e.target.value)}
+                                    className="px-2 py-1 text-xs border border-emerald-500 rounded-lg bg-surface text-text-main flex-1 focus:outline-hidden"
+                                    autoFocus
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveEditMissing(item.phone)}
+                                    className="p-1 rounded-md bg-emerald-600 text-white cursor-pointer hover:bg-emerald-700"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingMissingPhone(null)}
+                                    className="p-1 rounded-md bg-slate-200 dark:bg-slate-700 text-text-main cursor-pointer"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
+                                  <span className="truncate">{displayNameToPropose}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditMissing(item.phone, item.proposedName)}
+                                    className="p-0.5 text-text-muted hover:text-text-main cursor-pointer"
+                                    title={_t('تعديل الاسم المقترح', 'Edit proposed name', 'Vorgeschlagenen Namen bearbeiten')}
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Phone number & copy */}
+                            <div className="text-[11px] text-text-muted mt-1 flex items-center gap-1.5 font-mono">
+                              <span>{item.phone}</span>
+                              <button
+                                onClick={() => handleCopyPhone(`missing_${idx}`, item.phone)}
+                                className="p-0.5 hover:text-text-main cursor-pointer"
+                              >
+                                {copiedPhoneId === `missing_${idx}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Card Action Buttons */}
+                        <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-surface-border/60">
+                          {isSaved ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-900/40 px-2.5 py-1 rounded-lg">
+                              <Check className="w-3.5 h-3.5" />
+                              <span>{_t('تم التسجيل بالهاتف', 'Saved in phone', 'Gespeichert')}</span>
+                            </span>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenContactEditorForMissing(item)}
+                                className="px-2.5 py-1 rounded-lg border border-surface-border text-text-muted hover:text-text-main hover:bg-surface-hover text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                                title={_t('فتح في تطبيق جهات اتصال الهاتف للمعاينة', 'Open in device contacts app', 'In Kontakte-App öffnen')}
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                <span className="hidden sm:inline">{_t('محرر الهاتف', 'Editor', 'Editor')}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleCreateSingleMissingContact(item)}
+                                disabled={isExecuting}
+                                className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs active:scale-95 transition-all cursor-pointer disabled:opacity-40"
+                              >
+                                <UserPlus className="w-3.5 h-3.5" />
+                                <span>{_t('تسجيل بالهاتف', 'Save to phone', 'Auf Telefon speichern')}</span>
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                        {item.student.grade}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -869,20 +1174,37 @@ export const ContactsUnificationModal: React.FC<ContactsUnificationModalProps> =
               {_t('إغلاق', 'Close', 'Schließen')}
             </button>
 
-            <button
-              onClick={handleExecuteStandardization}
-              disabled={isExecuting || selectedIds.size === 0}
-              className="flex-1 sm:flex-none px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-black shadow-md transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>
-                {_t(
-                  `توحيد الأسماء المحددة الآن (${selectedIds.size})`,
-                  `Standardize Selected (${selectedIds.size})`,
-                  `Ausgewählte vereinheitlichen (${selectedIds.size})`
-                )}
-              </span>
-            </button>
+            {activeTab === 'missing_in_phone' ? (
+              <button
+                onClick={handleBatchCreateSelectedMissing}
+                disabled={isExecuting || selectedMissingPhones.size === 0}
+                className="flex-1 sm:flex-none px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-black shadow-md transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>
+                  {_t(
+                    `تسجيل جهات الاتصال المحددة بالهاتف (${selectedMissingPhones.size})`,
+                    `Save Selected to Phone (${selectedMissingPhones.size})`,
+                    `Ausgewählte auf Telefon speichern (${selectedMissingPhones.size})`
+                  )}
+                </span>
+              </button>
+            ) : (
+              <button
+                onClick={handleExecuteStandardization}
+                disabled={isExecuting || selectedIds.size === 0}
+                className="flex-1 sm:flex-none px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white text-xs font-black shadow-md transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>
+                  {_t(
+                    `توحيد الأسماء المحددة الآن (${selectedIds.size})`,
+                    `Standardize Selected (${selectedIds.size})`,
+                    `Ausgewählte vereinheitlichen (${selectedIds.size})`
+                  )}
+                </span>
+              </button>
+            )}
           </div>
         </div>
       </div>

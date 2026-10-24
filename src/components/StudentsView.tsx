@@ -16,7 +16,6 @@ import { AiImportModal } from './AiImportModal';
 import { CascadeDeleteGroupModal } from './CascadeDeleteGroupModal';
 import { QuickGenderAssignModal } from './QuickGenderAssignModal';
 import { ContactsUnificationModal } from './ContactsUnificationModal';
-import { ExternalContactEditorModal } from './ExternalContactEditorModal';
 import { formatGroupScheduleDisplay, getDayNumber } from '../utils/scheduleUtils';
 import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
@@ -54,7 +53,6 @@ export const StudentsView: React.FC = () => {
   const [isAiImportModalOpen, setIsAiImportModalOpen] = useState(false);
   const [isGenderAssignModalOpen, setIsGenderAssignModalOpen] = useState(false);
   const [isContactsModalOpen, setIsContactsModalOpen] = useState(false);
-  const [isExternalEditorOpen, setIsExternalEditorOpen] = useState(false);
 
   // Student transfer & group clear states
   const [studentToMove, setStudentToMove] = useState<Student | null>(null);
@@ -437,51 +435,54 @@ export const StudentsView: React.FC = () => {
           <span>{t('students_and_groups_title')}</span>
         </h2>
 
-        <div className="grid grid-cols-2 sm:flex sm:items-center gap-1 sm:gap-2 w-full sm:w-auto">
+        {/* 4 Action Buttons in ONE Single Row - Icon Only on Mobile */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* 1. Add Student */}
           <button
+            type="button"
             onClick={() => setIsAddStudentModalOpen(true)}
-            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            className="p-2.5 sm:px-3 sm:py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap"
+            title={t('students_add_student')}
+            aria-label={t('students_add_student')}
           >
-            <UserPlus className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{t('students_add_student')}</span>
+            <UserPlus className="w-4 h-4 shrink-0" />
+            <span className="hidden sm:inline">{t('students_add_student')}</span>
           </button>
 
+          {/* 2. Add Group */}
           <button
             type="button"
             onClick={() => setIsAddGroupModalOpen(true)}
-            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-surface-hover hover:bg-surface-border active:scale-95 text-text-main border border-surface-border font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            className="p-2.5 sm:px-3 sm:py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+            title={t('students_add_group')}
+            aria-label={t('students_add_group')}
           >
-            <Plus className="w-3.5 h-3.5 shrink-0 text-primary" />
-            <span className="truncate">{t('students_add_group')}</span>
+            <Plus className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+            <span className="hidden sm:inline">{t('students_add_group')}</span>
           </button>
 
+          {/* 3. AI Import */}
           <button
             type="button"
             onClick={() => setIsAiImportModalOpen(true)}
-            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-primary-soft hover:bg-primary-soft/80 active:scale-95 text-primary border border-primary-border font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            className="p-2.5 sm:px-3 sm:py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+            title={t('auto_import_group_students')}
+            aria-label={t('auto_import_group_students')}
           >
-            <Bot className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{t('auto_import_group_students')}</span>
+            <Bot className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+            <span className="hidden sm:inline">{t('auto_import_group_students')}</span>
           </button>
 
+          {/* 4. Contacts Cleanup */}
           <button
             type="button"
             onClick={() => setIsContactsModalOpen(true)}
-            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            className="p-2.5 sm:px-3 sm:py-2 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
             title={_t('توحيد جهات الاتصال', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}
+            aria-label={_t('توحيد جهات الاتصال', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}
           >
-            <Sparkles className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <span className="truncate">{_t('توحيد جهات الاتصال', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsExternalEditorOpen(true)}
-            className="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-95 text-indigo-700 dark:text-indigo-400 border border-indigo-500/30 font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
-            title={_t('محرر جهات الاتصال الخارجي للذكاء الاصطناعي', 'External AI Contact Editor', 'Externer KI-Editor')}
-          >
-            <Bot className="w-3.5 h-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
-            <span className="truncate">{_t('محرر الذكاء الاصطناعي', 'AI Contact Editor', 'KI-Editor')}</span>
+            <Sparkles className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <span className="hidden sm:inline">{_t('توحيد جهات الاتصال', 'Contacts Cleanup', 'Kontakte vereinheitlichen')}</span>
           </button>
         </div>
       </div>
@@ -803,40 +804,29 @@ export const StudentsView: React.FC = () => {
                           {student.name}
                         </h3>
 
-                        {/* Student Gender Icon - right next to the name */}
+                        {/* Student Gender Badge - Visual non-interactive badge */}
                         {student.gender ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              updateStudent(student.id, { gender: student.gender === 'female' ? 'male' : 'female' });
-                            }}
-                            className="inline-flex items-center justify-center p-0.5 hover:scale-125 active:scale-95 transition-transform cursor-pointer bg-transparent border-0 shrink-0"
+                          <span
+                            className="inline-flex items-center justify-center p-0.5 shrink-0"
                             title={
                               student.gender === 'female'
-                                ? _t('طالبة (بنت) - اضغط للتبديل إلى ولد', 'Female student (Girl) - Click to toggle', 'Schülerin (Mädchen) - Klicken zum Umschalten')
-                                : _t('طالب (ولد) - اضغط للتبديل إلى بنت', 'Male student (Boy) - Click to toggle', 'Schüler (Junge) - Klicken zum Umschalten')
+                                ? _t('طالبة (بنت)', 'Female student (Girl)', 'Schülerin (Mädchen)')
+                                : _t('طالب (ولد)', 'Male student (Boy)', 'Schüler (Junge)')
                             }
                           >
                             {student.gender === 'female' ? (
-                              <Venus className="w-3.5 h-3.5 text-primary stroke-[2.2]" />
+                              <Venus className="w-3.5 h-3.5 text-pink-500 stroke-[2.2]" />
                             ) : (
-                              <Mars className="w-3.5 h-3.5 text-primary stroke-[2.2]" />
+                              <Mars className="w-3.5 h-3.5 text-blue-500 stroke-[2.2]" />
                             )}
-                          </button>
+                          </span>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const predicted = isLikelyFemaleStudent(student.name) ? 'female' : 'male';
-                              updateStudent(student.id, { gender: predicted });
-                            }}
-                            className="inline-flex items-center justify-center p-0.5 hover:scale-125 active:scale-95 transition-transform cursor-pointer bg-transparent border-0 shrink-0 text-text-muted/40 hover:text-primary"
-                            title={_t('تحديد جنس الطالب - اضغط للتحديد السريع', 'Set student gender - Click for quick set', 'Geschlecht festlegen - Klicken für Schnellauswahl')}
+                          <span
+                            className="inline-flex items-center justify-center p-0.5 shrink-0 text-slate-400"
+                            title={_t('جنس الطالب غير محدد', 'Gender not set', 'Geschlecht nicht festgelegt')}
                           >
                             <CircleHelp className="w-3.5 h-3.5 stroke-[1.8]" />
-                          </button>
+                          </span>
                         )}
 
                         {/* Grade Badge right next to name & gender */}
@@ -1339,10 +1329,10 @@ export const StudentsView: React.FC = () => {
       {/* SUMMARY SEGMENT - ULTRA COMPACT & ELEGANT */}
       {activeSegment === 'summary' && (
         <div className="space-y-2 sm:space-y-2.5 animate-fade-in text-xs select-none">
-          {/* 3 Unified Visual Ratio Bars (Theme-Adaptive) */}
-          <div className="space-y-2">
+          {/* 3 Unified Visual Ratio Bars inside a single sleek widget */}
+          <div className="p-3 rounded-2xl bg-surface border border-surface-border shadow-2xs divide-y divide-surface-border/60 space-y-2.5">
             {/* 1. Groups vs Private Visual Bar */}
-            <div className="p-2.5 rounded-xl bg-surface border border-surface-border shadow-2xs space-y-1.5">
+            <div className="pt-0.5 space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-bold">
                 <span className="text-primary flex items-center gap-1">
                   <span>🏫</span>
@@ -1370,7 +1360,7 @@ export const StudentsView: React.FC = () => {
             </div>
 
             {/* 2. Online vs Offline Visual Bar */}
-            <div className="p-2.5 rounded-xl bg-surface border border-surface-border shadow-2xs space-y-1.5">
+            <div className="pt-2.5 space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-bold">
                 <span className="text-primary flex items-center gap-1">
                   <Video className="w-3 h-3" />
@@ -1398,7 +1388,7 @@ export const StudentsView: React.FC = () => {
             </div>
 
             {/* 3. Gender Ratio Visual Bar */}
-            <div className="p-2.5 rounded-xl bg-surface border border-surface-border shadow-2xs space-y-1.5">
+            <div className="pt-2.5 space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-bold">
                 <span className="text-primary flex items-center gap-1">
                   <span>👦</span>
@@ -2004,11 +1994,6 @@ export const StudentsView: React.FC = () => {
       {/* Smart Google Contacts Cleanup & Unification Modal */}
       {isContactsModalOpen && (
         <ContactsUnificationModal onClose={() => setIsContactsModalOpen(false)} />
-      )}
-
-      {/* External AI Contact Editor Modal */}
-      {isExternalEditorOpen && (
-        <ExternalContactEditorModal onClose={() => setIsExternalEditorOpen(false)} />
       )}
     </div>
   );

@@ -50,3 +50,26 @@
   - [x] Updated root `android/build.gradle` to unified AGP 8.13.0.
   - [x] Added Java 21 `compileOptions` and updated ProGuard configuration to `proguard-android-optimize.txt` in `android/app/build.gradle`.
   - [x] Re-synced Capacitor native assets via `npx cap sync android`.
+
+- [x] **Stage 7: Direct Phone Registration & Automated Group Creation Prompt**
+  - [x] Implemented native `createContact`, `batchCreateContacts`, and `openContactEditor` in `ContactsManagerPlugin.java`.
+  - [x] Added `createContact`, `batchCreateContacts`, `openContactEditor`, `generateVcf`, `downloadVcf`, and `auditRosterContacts` in `contactsSyncService.ts`.
+  - [x] Updated `ContactsUnificationModal.tsx`:
+    - [x] Added 1-click individual "تسجيل بالهاتف" and "محرر الهاتف" to each card in "غير مسجل / Nicht im Tel".
+    - [x] Added batch selection ("تسجيل المحدد بالهاتف") and toolbar with VCF export.
+    - [x] Added inline name editing with pencil icon before saving.
+  - [x] Created `NewGroupContactsAuditModal.tsx` for manual and AI prompt group creation.
+  - [x] Removed obsolete AI Contact Editor modal and utilities.
+
+- [x] **Stage 8: Lernstudio Question Randomization & Unpredictable True/False Matching**
+  - [x] Implemented Fisher-Yates `shuffleArray` utility function in `LernstudioTeachModal.tsx`.
+  - [x] Eliminated deterministic alternating True/False logic (`idx % 2 === 0`) in Stage 2.
+  - [x] Added randomized balanced boolean matching pool for Stage 2 (True/False).
+  - [x] Randomized question presentation order across all stages (Stage 2, Stage 3, Stage 4).
+  - [x] Added `shuffleKey` state and dedicated Shuffle button in the modal header for on-demand re-randomization.
+  - [x] Triggered question re-shuffling on stage tab navigation, progress reset, and stage progression.
+  - [x] Verified build passes with 0 errors via `lint_applet` and `compile_applet`.
+  - [x] Created `NewGroupContactsPromptModal.tsx` for immediate contacts verification & registration.
+  - [x] Integrated `NewGroupContactsPromptModal` into manual group creation (`AddGroupModal.tsx`).
+  - [x] Integrated automated contacts audit & 1-click registration card into AI prompt import (`AiImportModal.tsx`).
+

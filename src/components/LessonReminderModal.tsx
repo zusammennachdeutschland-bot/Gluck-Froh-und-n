@@ -181,7 +181,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   const [showWhatsAppGroupSection, setShowWhatsAppGroupSection] = useState(Boolean(groupWhatsAppLink));
   
   // Mode selection for single-student groups or individual
-  const [sendMode, setSendMode] = useState<'individual' | 'group'>(
+  const [sendMode, setSendMode] = useState<'individual' | 'student' | 'group'>(
     isMultiStudentGroup ? 'group' : (groupWhatsAppLink ? 'group' : 'individual')
   );
 
@@ -408,6 +408,20 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       return;
     }
 
+    if (sendMode === 'student') {
+      const resolvedSt = resolveStudentWhatsAppContact(targetStudent, { quickStudentPhone: targetStudent?.studentPhone });
+      if (!resolvedSt.hasContact) {
+        alert(_t('رقم تليفون الطالب غير مسجل.', 'Student phone number is not registered.', 'Telefonnummer des Schülers ist nicht hinterlegt.'));
+        return;
+      }
+      try {
+        navigator.clipboard.writeText(activeMessage);
+      } catch (e) {}
+      const url = buildWhatsAppUrl(resolvedSt.contact, activeMessage);
+      window.open(url, '_blank');
+      return;
+    }
+
     const isGroupMode = isMultiStudentGroup || (targetGroup && sendMode === 'group');
 
     if (isGroupMode) {
@@ -569,8 +583,8 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
         {/* Collapsible Destination Settings (Only if clicked) */}
         {showRecipientSettings && (
           <div className="px-4 py-2.5 bg-surface-hover/60 border-b border-surface-border space-y-2 text-xs shrink-0 animate-fade-in">
-            {isSingleStudentGroup && (
-              <div className="flex bg-surface p-0.5 rounded-lg border border-surface-border gap-1 max-w-xs">
+            {(isSingleStudentGroup || targetStudent) && (
+              <div className="flex bg-surface p-0.5 rounded-lg border border-surface-border gap-1 max-w-sm">
                 <button
                   type="button"
                   onClick={() => setSendMode('individual')}
@@ -580,15 +594,28 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                 >
                   {_t('ولي الأمر', 'Parent', 'Eltern')}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setSendMode('group')}
-                  className={`flex-1 py-1 px-2 rounded-md text-[11px] font-bold transition-all ${
-                    sendMode === 'group' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted'
-                  }`}
-                >
-                  {_t('جروب الواتساب', 'WhatsApp Group', 'WhatsApp-Gruppe')}
-                </button>
+                {targetStudent?.studentPhone && (
+                  <button
+                    type="button"
+                    onClick={() => setSendMode('student')}
+                    className={`flex-1 py-1 px-2 rounded-md text-[11px] font-bold transition-all ${
+                      sendMode === 'student' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted'
+                    }`}
+                  >
+                    {_t('الطالب نفسه', 'Student', 'Schüler')}
+                  </button>
+                )}
+                {!isMultiStudentGroup && (
+                  <button
+                    type="button"
+                    onClick={() => setSendMode('group')}
+                    className={`flex-1 py-1 px-2 rounded-md text-[11px] font-bold transition-all ${
+                      sendMode === 'group' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted'
+                    }`}
+                  >
+                    {_t('جروب الواتساب', 'WhatsApp Group', 'Gruppe')}
+                  </button>
+                )}
               </div>
             )}
 

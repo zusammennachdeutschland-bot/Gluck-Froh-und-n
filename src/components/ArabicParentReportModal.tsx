@@ -1047,8 +1047,24 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleWhatsAppSend = async (target?: 'parent' | 'group') => {
+  const handleWhatsAppSend = async (target?: 'parent' | 'group' | 'student') => {
     persistRecordings(undefined, undefined, finalGeneratedText);
+
+    if (target === 'student') {
+      const studentContact = resolveStudentWhatsAppContact(activeStudent, { quickStudentPhone: activeStudent?.studentPhone });
+      if (!studentContact.hasContact) {
+        alert(_t('رقم تليفون الطالب غير مسجل.', 'Student phone number is not registered.', 'Telefonnummer des Schülers ist nicht hinterlegt.'));
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(finalGeneratedText);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {}
+      const url = buildWhatsAppUrl(studentContact.contact, finalGeneratedText);
+      window.open(url, '_blank');
+      return;
+    }
 
     if (target === 'group' || (activeTab === 'bulk' && target !== 'parent')) {
       const groupText = activeTab === 'bulk' ? finalGeneratedText : getBulkReportText();
@@ -1755,31 +1771,12 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
 
         </div>
 
-        {/* Footer Actions - Guaranteed visible and accessible */}
-        <div className="p-2.5 sm:p-3 bg-surface border-t border-surface-border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0 pb-[max(12px,env(safe-area-inset-bottom,12px))] shadow-lg z-10">
+        {/* Footer Actions - Standardized Primary & Secondary Hierarchy */}
+        <div className="p-3 bg-surface border-t border-surface-border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 shrink-0 pb-[max(12px,env(safe-area-inset-bottom,12px))] shadow-lg z-10">
           <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 flex-1 min-w-0">
             {isGroupLesson ? (
               <>
-                {/* Send to Group */}
-                <button
-                  id="send-whatsapp-group-btn"
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleWhatsAppSend('group');
-                  }}
-                  className="flex-1 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
-                  title={_t('إرسال تقرير الحصة لجروب الواتساب', 'Send report to WhatsApp Group', 'Bericht an WhatsApp-Gruppe senden')}
-                >
-                  <Users className="w-4 h-4 shrink-0" />
-                  <span className="truncate">
-                    {groupWhatsAppLink
-                      ? t('auto_send_to_whatsapp_group')
-                      : _t('إرسال لواتساب الجروب', 'Send to WhatsApp Group', 'An WhatsApp-Gruppe senden')}
-                  </span>
-                </button>
-
-                {/* Send to Parent */}
+                {/* Send to Parent (Primary) */}
                 <button
                   id="send-whatsapp-parent-btn"
                   type="button"
@@ -1787,7 +1784,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                     e.stopPropagation();
                     handleWhatsAppSend('parent');
                   }}
-                  className="flex-1 bg-primary-soft hover:bg-primary/20 text-primary border border-primary/30 active:scale-95 font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[42px]"
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs min-h-[42px] whitespace-nowrap shrink-0"
                   title={_t(`إرسال تقرير لولي أمر (${activeStudent?.name || 'الطالب'})`, `Send to parent (${activeStudent?.name || 'Student'})`, `An Eltern senden`)}
                 >
                   <Send className="w-4 h-4 shrink-0" />
@@ -1799,6 +1796,25 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                     )}
                   </span>
                 </button>
+
+                {/* Send to Group */}
+                <button
+                  id="send-whatsapp-group-btn"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleWhatsAppSend('group');
+                  }}
+                  className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 min-h-[42px] whitespace-nowrap shrink-0"
+                  title={_t('إرسال تقرير الحصة لجروب الواتساب', 'Send report to WhatsApp Group', 'Bericht an WhatsApp-Gruppe senden')}
+                >
+                  <Users className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                  <span className="truncate">
+                    {groupWhatsAppLink
+                      ? t('auto_send_to_whatsapp_group')
+                      : _t('واتساب الجروب', 'WhatsApp Group', 'WhatsApp-Gruppe')}
+                  </span>
+                </button>
               </>
             ) : (
               <button
@@ -1807,12 +1823,27 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                   e.stopPropagation();
                   handleWhatsAppSend('parent');
                 }}
-                className="flex-1 bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm min-h-[42px]"
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs min-h-[42px] whitespace-nowrap shrink-0"
               >
                 <Send className="w-4 h-4 shrink-0" />
                 <span className="truncate">
                   {t('auto_send_via_whatsapp')} ({activeStudent?.name || 'الطالب'})
                 </span>
+              </button>
+            )}
+
+            {activeStudent?.studentPhone && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleWhatsAppSend('student');
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[42px] whitespace-nowrap shrink-0"
+                title={_t('إرسال الواجب والتقرير للطالب مباشرة', 'Send homework & report to student directly', 'Hausaufgabe an Schüler direkt senden')}
+              >
+                <Send className="w-4 h-4 shrink-0" />
+                <span className="truncate">{_t('للطالب نفسه', 'To Student', 'An Schüler')}</span>
               </button>
             )}
 
@@ -1822,7 +1853,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                 e.stopPropagation();
                 handlePrint();
               }}
-              className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 sm:py-3 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[42px] shrink-0"
+              className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 min-h-[42px] shrink-0"
               title={t('auto_print')}
             >
               <Printer className="w-4 h-4" />
@@ -1835,10 +1866,10 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
               <a
                 href={`tel:${resolvedContact.contact}`}
                 onClick={(e) => e.stopPropagation()}
-                className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 sm:py-3 px-3 sm:px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[42px]"
+                className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 min-h-[42px]"
                 title={t('auto_phone_call')}
               >
-                <Phone className="w-4 h-4 text-primary" />
+                <Phone className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 <span className="hidden sm:inline">{t('auto_phone_call')}</span>
               </a>
             )}
@@ -1854,9 +1885,9 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                   onClose();
                 }
               }}
-              className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 sm:py-3 px-4 sm:px-5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-surface-border min-h-[42px]"
+              className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs py-2.5 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-slate-200 dark:border-slate-700 min-h-[42px]"
             >
-              <Home className="w-4 h-4 shrink-0 text-text-muted" />
+              <Home className="w-4 h-4 shrink-0 text-slate-500" />
               <span className="truncate">{t('auto_go_to_homescreen')}</span>
             </button>
           </div>

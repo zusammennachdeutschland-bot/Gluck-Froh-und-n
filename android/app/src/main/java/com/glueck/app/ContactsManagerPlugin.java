@@ -337,6 +337,156 @@ public class ContactsManagerPlugin extends Plugin {
         return true;
     }
 
+    /**
+     * Creates a new contact in phone storage atomically.
+     */
+    @PluginMethod
+    public void createContact(PluginCall call) {
+        String displayName = call.getString("displayName");
+        String phoneNumber = call.getString("phoneNumber");
+        String note = call.getString("note");
+
+        if (displayName == null || displayName.trim().isEmpty() || phoneNumber == null || phoneNumber.trim().isEmpty()) {
+            call.reject("Missing required parameters: displayName or phoneNumber");
+            return;
+        }
+
+        try {
+            boolean success = applyContactCreation(displayName.trim(), phoneNumber.trim(), note);
+            if (success) {
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("displayName", displayName.trim());
+                ret.put("phoneNumber", phoneNumber.trim());
+                call.resolve(ret);
+            } else {
+                call.reject("Failed to create contact");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error creating contact", e);
+            call.reject("Exception creating contact: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Batch creates multiple new contacts atomically.
+     */
+    @PluginMethod
+    public void batchCreateContacts(PluginCall call) {
+        JSArray contacts = call.getArray("contacts");
+        if (contacts == null || contacts.length() == 0) {
+            JSObject emptyRes = new JSObject();
+            emptyRes.put("createdCount", 0);
+            emptyRes.put("failedCount", 0);
+            emptyRes.put("errors", new JSArray());
+            call.resolve(emptyRes);
+            return;
+        }
+
+        int createdCount = 0;
+        int failedCount = 0;
+        JSArray errors = new JSArray();
+
+        for (int i = 0; i < contacts.length(); i++) {
+            try {
+                JSONObject item = contacts.getJSONObject(i);
+                String displayName = item.getString("displayName");
+                String phoneNumber = item.getString("phoneNumber");
+                String note = item.has("note") ? item.getString("note") : null;
+
+                boolean ok = applyContactCreation(displayName.trim(), phoneNumber.trim(), note);
+                if (ok) {
+                    createdCount++;
+                } else {
+                    failedCount++;
+                    errors.put("Could not create contact: " + displayName);
+                }
+            } catch (Exception e) {
+                failedCount++;
+                errors.put(e.getMessage());
+                Log.e(TAG, "Error in batch contact creation item " + i, e);
+            }
+        }
+
+        JSObject result = new JSObject();
+        result.put("createdCount", createdCount);
+        result.put("failedCount", failedCount);
+        result.put("errors", errors);
+        call.resolve(result);
+    }
+
+    /**
+     * Opens system Contacts insert screen pre-populated with details.
+     */
+    @PluginMethod
+    public void openContactEditor(PluginCall call) {
+        String displayName = call.getString("displayName");
+        String phoneNumber = call.getString("phoneNumber");
+        String note = call.getString("note");
+
+        try {
+            Intent intent = new Intent(Intent.ACTION_INSERT);
+            intent.setType(ContactsContract.Contacts.CONTENT_TYPE);
+            if (displayName != null && !displayName.trim().isEmpty()) {
+                intent.putExtra(ContactsContract.Intents.Insert.NAME, displayName.trim());
+            }
+            if (phoneNumber != null && !phoneNumber.trim().isEmpty()) {
+                intent.putExtra(ContactsContract.Intents.Insert.PHONE, phoneNumber.trim());
+            }
+            if (note != null && !note.trim().isEmpty()) {
+                intent.putExtra(ContactsContract.Intents.Insert.NOTES, note.trim());
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            JSObject ret = new JSObject();
+            ret.put("opened", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to open contact editor", e);
+            call.reject("Cannot open contact editor: " + e.getMessage());
+        }
+    }
+
+    private boolean applyContactCreation(String displayName, String phoneNumber, String note)
+            throws RemoteException, OperationApplicationException {
+        ContentResolver resolver = getContext().getContentResolver();
+        ArrayList<ContentProviderOperation> ops = new ArrayList<>();
+        int rawContactInsertIndex = ops.size();
+
+        ops.add(ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
+            .withValue(RawContacts.ACCOUNT_TYPE, null)
+            .withValue(RawContacts.ACCOUNT_NAME, null)
+            .build());
+
+        // Structured Name
+        ops.add(ContentProviderOperation.newInsert(Data.CONTENT_URI)
+            .withValueBackReference(Data.RAW_CONTACT_ID, rawContactInsertIndex)
+            .withValue(Data.MIMETYPE, StructuredName.CONTENT_ITEM_TYPE)
+            .withValue(StructuredName.DISPLAY_NAME, displayName)
+            .withValue(StructuredName.GIVEN_NAME, displayName)
+            .build());
+
+        // Phone Number
+        ops.add(ContentProviderOperation.newInsert(Data.CONTENT_URI)
+            .withValueBackReference(Data.RAW_CONTACT_ID, rawContactInsertIndex)
+            .withValue(Data.MIMETYPE, Phone.CONTENT_ITEM_TYPE)
+            .withValue(Phone.NUMBER, phoneNumber)
+            .withValue(Phone.TYPE, Phone.TYPE_MOBILE)
+            .build());
+
+        // Note
+        if (note != null && !note.trim().isEmpty()) {
+            ops.add(ContentProviderOperation.newInsert(Data.CONTENT_URI)
+                .withValueBackReference(Data.RAW_CONTACT_ID, rawContactInsertIndex)
+                .withValue(Data.MIMETYPE, Note.CONTENT_ITEM_TYPE)
+                .withValue(Note.NOTE, note.trim())
+                .build());
+        }
+
+        resolver.applyBatch(ContactsContract.AUTHORITY, ops);
+        return true;
+    }
+
     private String getRawContactIdForContact(String contactId) {
         ContentResolver resolver = getContext().getContentResolver();
         String selection = RawContacts.CONTACT_ID + " = ? AND " + RawContacts.DELETED + " = 0";

@@ -13,10 +13,12 @@ import { formatGroupScheduleDisplay } from '../utils/scheduleUtils';
 import { 
   Bot, Sparkles, Copy, Check, CheckCircle2, AlertTriangle, X, 
   Users, Calendar, Clock, DollarSign, ArrowRight, ShieldCheck, FileText, ChevronRight, MessageSquareCode,
-  AtSign, Phone, Layers, ExternalLink, MapPin, Video, MessageCircle
+  AtSign, Phone, Layers, ExternalLink, MapPin, Video, MessageCircle, Smartphone, UserPlus
 } from 'lucide-react';
 import { isWhatsAppUsername, formatContactDisplay } from '../utils/phoneUtils';
-import { Group } from '../types';
+import { Group, Student } from '../types';
+import { contactsSyncService } from '../services/contactsSyncService';
+import { NewGroupContactsPromptModal } from './NewGroupContactsPromptModal';
 
 const GROUP_PALETTE = ['indigo', 'purple', 'emerald', 'sky', 'amber', 'rose', 'blue'];
 
@@ -36,8 +38,15 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
   const [importText, setImportText] = useState<string>('');
   const [copied, setCopied] = useState<string | null>(null);
   const [importedGroups, setImportedGroups] = useState<Group[]>([]);
+  const [importedStudents, setImportedStudents] = useState<Student[]>([]);
   const [importedCount, setImportedCount] = useState<number>(0);
   const [isSuccess, setIsSuccess] = useState<boolean>(false);
+  const [contactsSummary, setContactsSummary] = useState<{
+    missingCount: number;
+    needsUpdateCount: number;
+    alreadyCount: number;
+  } | null>(null);
+  const [selectedGroupForContacts, setSelectedGroupForContacts] = useState<Group | null>(null);
 
   if (!isOpen) return null;
 
@@ -54,6 +63,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
     if (!parseResult.isValid || parseResult.groups.length === 0) return;
 
     const createdGroups: Group[] = [];
+    const createdAllStudents: Student[] = [];
     let totalStudentsAdded = 0;
 
     parseResult.groups.forEach((groupItem, gIdx) => {
@@ -120,7 +130,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
         const isStudentUser = hasStudentVal && (st.studentContactType === 'username' || isWhatsAppUsername(st.studentPhone));
         const cleanStudentUser = st.studentUsername || (isStudentUser && st.studentPhone ? st.studentPhone.replace(/^@/, '') : undefined);
 
-        addStudent({
+        const newStudent = addStudent({
           name: st.name,
           certificateName: st.certificateName || '',
           studentPhone: st.studentPhone || '',
@@ -134,6 +144,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
           scheduleRecurrence: st.scheduleRecurrence || group.recurrence || 'weekly',
           grade: group.grade
         });
+        createdAllStudents.push(newStudent);
         totalStudentsAdded++;
       });
 
@@ -144,15 +155,28 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
     });
 
     setImportedGroups(createdGroups);
+    setImportedStudents(createdAllStudents);
     setImportedCount(totalStudentsAdded);
     setIsSuccess(true);
+
+    // Audit contacts in background to populate smart contacts prompt
+    contactsSyncService.auditRosterContacts(createdAllStudents).then(res => {
+      setContactsSummary({
+        missingCount: res.missingInPhone.length,
+        needsUpdateCount: res.needsUpdate.length,
+        alreadyCount: res.alreadyStandardized.length
+      });
+    }).catch(e => console.warn('Error auditing imported contacts:', e));
   };
 
   const handleReset = () => {
     setImportText('');
     setIsSuccess(false);
     setImportedGroups([]);
+    setImportedStudents([]);
     setImportedCount(0);
+    setContactsSummary(null);
+    setSelectedGroupForContacts(null);
   };
 
   const handleClose = () => {
@@ -270,6 +294,61 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
                   </div>
                 ))}
               </div>
+
+              {/* SMART CONTACTS AUDIT & REGISTRATION PROMPT */}
+              {contactsSummary && (contactsSummary.missingCount > 0 || contactsSummary.needsUpdateCount > 0) ? (
+                <div className="max-w-xl mx-auto bg-amber-50/90 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/70 rounded-2xl p-4 text-start flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
+                      <Smartphone className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <div>
+                      <h5 className="font-black text-xs sm:text-sm text-text-main">
+                        {language === 'ar' ? 'فحص جهات اتصال الطلاب في هاتفك' : 'Student Phone Contacts Audit'}
+                      </h5>
+                      <div className="text-[11px] text-text-muted mt-1 space-y-1">
+                        {contactsSummary.missingCount > 0 && (
+                          <p className="text-amber-800 dark:text-amber-200 font-bold flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                            <span>
+                              {language === 'ar' 
+                                ? `يوجد ${contactsSummary.missingCount} طالب غير مسجلين في جهات اتصال هاتفك.` 
+                                : `${contactsSummary.missingCount} student(s) not in phone contacts.`}
+                            </span>
+                          </p>
+                        )}
+                        {contactsSummary.needsUpdateCount > 0 && (
+                          <p className="text-blue-800 dark:text-blue-200 font-bold flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                            <span>
+                              {language === 'ar' 
+                                ? `يوجد ${contactsSummary.needsUpdateCount} جهات اتصال مسجلة وتحتاج لتعديل وتوحيد الاسم.` 
+                                : `${contactsSummary.needsUpdateCount} contact(s) exist but need name update.`}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setSelectedGroupForContacts(importedGroups[0])}
+                    className="self-end sm:self-center px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white font-black text-xs flex items-center gap-2 transition-all shadow-md cursor-pointer active:scale-95 shrink-0"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>{language === 'ar' ? 'تسجيل وتعديل جهات الاتصال الآن' : 'Save & Update Contacts Now'}</span>
+                  </button>
+                </div>
+              ) : contactsSummary && contactsSummary.alreadyCount > 0 ? (
+                <div className="max-w-xl mx-auto bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800/70 rounded-xl p-3 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-bold">
+                    {language === 'ar' 
+                      ? 'جميع جهات اتصال الطلاب مسجلة ومطابقة للصيغة الموحدة في هاتفك!' 
+                      : 'All student contacts are already standardized and saved on your phone!'}
+                  </span>
+                </div>
+              ) : null}
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
                 <button
@@ -626,6 +705,24 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
         )}
 
       </div>
+
+      {selectedGroupForContacts && (
+        <NewGroupContactsPromptModal
+          group={selectedGroupForContacts}
+          students={importedStudents}
+          onClose={() => {
+            setSelectedGroupForContacts(null);
+            // Re-audit contacts in background after modal closes
+            contactsSyncService.auditRosterContacts(importedStudents).then(res => {
+              setContactsSummary({
+                missingCount: res.missingInPhone.length,
+                needsUpdateCount: res.needsUpdate.length,
+                alreadyCount: res.alreadyStandardized.length
+              });
+            }).catch(e => console.warn(e));
+          }}
+        />
+      )}
     </div>
   );
 };

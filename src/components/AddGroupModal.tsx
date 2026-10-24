@@ -7,6 +7,8 @@ import { GroupForm, GroupFormData } from './GroupForm';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { normalizeEgyptianPhone } from '../utils/contactsStandardizer';
+import { NewGroupContactsPromptModal } from './NewGroupContactsPromptModal';
+import { Group, Student } from '../types';
 
 interface AddGroupModalProps {
   onClose: () => void;
@@ -15,13 +17,17 @@ interface AddGroupModalProps {
 export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
   const { addGroup, addStudent, generateGroupScheduleLessons, profile, language, t, _t } = useApp();
 
-  
   const [isAiImportOpen, setIsAiImportOpen] = useState(false);
+  const [createdRosterForPrompt, setCreatedRosterForPrompt] = useState<{
+    group: Group;
+    students: Student[];
+  } | null>(null);
 
   // 1-to-1 Student Creation Option States
   const [createStudentWithGroup, setCreateStudentWithGroup] = useState(false);
   const [studentName, setStudentName] = useState('');
   const [studentParentName, setStudentParentName] = useState('');
+  const [studentPhone, setStudentPhone] = useState('');
   const [studentContactType, setStudentContactType] = useState<'phone' | 'username'>('phone');
   const [studentParentPhone, setStudentParentPhone] = useState('');
   const [studentGrade, setStudentGrade] = useState<GradeLevel>('Grade 9');
@@ -76,13 +82,19 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       whatsAppGroupLink: data.whatsAppGroupLink.trim()
     });
 
+    let createdStudent: Student | null = null;
     if (createStudentWithGroup && studentName.trim()) {
       const isUser = studentContactType === 'username' || isWhatsAppUsername(studentParentPhone);
       const cleanUser = cleanWhatsAppUsername(studentParentPhone);
       const finalPhone = isUser ? `@${cleanUser}` : normalizeEgyptianPhone(studentParentPhone);
       const finalParentName = studentParentName.trim() || `أم ${studentName.trim()}`;
 
-      addStudent({
+      const hasStudentVal = !!studentPhone.trim();
+      const isStudentUser = hasStudentVal && (isWhatsAppUsername(studentPhone) || studentPhone.startsWith('@'));
+      const cleanStudentUser = hasStudentVal ? cleanWhatsAppUsername(studentPhone) : '';
+      const finalStudentPhone = hasStudentVal ? (isStudentUser ? `@${cleanStudentUser}` : normalizeEgyptianPhone(studentPhone)) : '';
+
+      createdStudent = addStudent({
         name: studentName.trim(),
         groupId: createdGroup.id,
         grade: studentGrade || data.grade,
@@ -90,6 +102,9 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
         parentPhone: finalPhone,
         parentUsername: isUser ? cleanUser : undefined,
         parentContactType: isUser ? 'username' : 'phone',
+        studentPhone: finalStudentPhone || undefined,
+        studentUsername: isStudentUser ? cleanStudentUser : undefined,
+        studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
         notes: studentNotes.trim()
       });
     }
@@ -99,8 +114,14 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       generateGroupScheduleLessons(createdGroup.id, data.scheduleDays, data.scheduleTime, 4, data.dayTimes, createdGroup);
     }
 
-    /* confetti removed */
-    onClose();
+    if (createdStudent && createdStudent.parentPhone && !isWhatsAppUsername(createdStudent.parentPhone)) {
+      setCreatedRosterForPrompt({
+        group: createdGroup,
+        students: [createdStudent]
+      });
+    } else {
+      onClose();
+    }
   };
 
   return (
@@ -271,6 +292,28 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
                   </div>
                 </div>
 
+                {/* Student Phone / Username (Optional) */}
+                <div className="space-y-1.5 bg-surface p-2.5 rounded-xl border border-surface-border">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-text-muted">
+                      {_t('هاتف / يوزر نيم الطالب (اختياري)', 'Student Phone / Username (Optional)', 'Schüler Telefon / Benutzername')}
+                    </label>
+                  </div>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none text-text-muted">
+                      <Phone className="w-3.5 h-3.5 text-primary" />
+                    </div>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={studentPhone}
+                      onChange={(e) => setStudentPhone(e.target.value)}
+                      placeholder="+20 101 234 5678 or @student"
+                      className="w-full ps-9 pe-3 py-2 bg-background border border-surface-border rounded-xl text-xs font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-text-main">
                     {t('auto_grade')}
@@ -328,6 +371,17 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
           onClose();
         }}
       />
+
+      {createdRosterForPrompt && (
+        <NewGroupContactsPromptModal
+          group={createdRosterForPrompt.group}
+          students={createdRosterForPrompt.students}
+          onClose={() => {
+            setCreatedRosterForPrompt(null);
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 };

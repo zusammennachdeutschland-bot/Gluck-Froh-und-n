@@ -13,6 +13,8 @@ import {
   isContactAlreadyStandardized,
   ContactAuditItem
 } from '../utils/contactsStandardizer';
+import { isWhatsAppUsername } from '../utils/phoneUtils';
+import { storage } from './storageService';
 
 export interface RawDeviceContact {
   id: string;
@@ -233,6 +235,8 @@ export const contactsSyncService = {
   async runAudit(students: Student[]): Promise<ContactsAuditResult> {
     const activeStudents = students.filter(s => !s.deleted && s.status !== 'archived');
     const rawContacts = await this.fetchRawContacts(activeStudents);
+    const storedStandardizedIds = (await storage.getItem<string[]>('dl_standardized_contact_ids')) || [];
+    const standardizedSet = new Set(storedStandardizedIds);
 
     // 1. Group active students by parent phone match key
     const studentPhoneMap = new Map<string, Student[]>();
@@ -284,7 +288,8 @@ export const contactsSyncService = {
       if (matchedStudents.length > 0 && primaryPhone) {
         const proposal = buildStandardizedContactProposal(matchedStudents, primaryPhone);
         const isDuplicate = (phoneContactCountMap.get(matchedKey) || []).length > 1;
-        const isStandardized = isContactAlreadyStandardized(contact.displayName, proposal.standardizedName);
+        const wasUpdatedBefore = standardizedSet.has(contact.id);
+        const isStandardized = wasUpdatedBefore || isContactAlreadyStandardized(contact.displayName, proposal.standardizedName);
         const isReadOnly = Boolean(contact.isReadOnly);
         const isGoogle = Boolean(contact.isGoogleAccount);
 
@@ -300,7 +305,7 @@ export const contactsSyncService = {
           statusLabelDe = 'Englischer Name fehlt';
           statusDescriptionAr = proposal.ambiguityReasons.join(' | ');
           selectedForUpdate = false;
-        } else if (isDuplicate) {
+        } else if (isDuplicate && !wasUpdatedBefore) {
           status = 'DUPLICATE_ON_PHONE';
           statusLabelAr = 'رقم مكرر بجهات الاتصال';
           statusLabelDe = 'Doppelter Kontakt';
@@ -310,7 +315,7 @@ export const contactsSyncService = {
           status = 'ALREADY_STANDARDIZED';
           statusLabelAr = 'موحد ومطابق';
           statusLabelDe = 'Bereits standardisiert';
-          statusDescriptionAr = 'جهة الاتصال مطابقة تماماً للمعيار المطلوب.';
+          statusDescriptionAr = 'جهة الاتصال تم تعديلها ومطابقتها مسبقاً.';
           selectedForUpdate = false;
         } else if (isReadOnly && !isGoogle) {
           status = 'NEEDS_UPDATE';
@@ -434,7 +439,229 @@ export const contactsSyncService = {
       }
     }
 
+    // Record successfully updated items as standardized so they never prompt again
+    try {
+      const existingIds = (await storage.getItem<string[]>('dl_standardized_contact_ids')) || [];
+      const newIdsSet = new Set(existingIds);
+      itemsToUpdate.forEach(item => {
+        if (item.status !== 'MISSING_ENGLISH_NAME') {
+          newIdsSet.add(item.id);
+        }
+      });
+      await storage.setItem('dl_standardized_contact_ids', Array.from(newIdsSet));
+    } catch (e) {
+      console.warn('Failed to persist standardized contact IDs:', e);
+    }
+
     return { updatedCount, failedCount, errors };
+  },
+
+  /**
+   * Creates a single contact directly in device contacts or web simulation.
+   */
+  async createContact(contact: {
+    displayName: string;
+    phoneNumber: string;
+    note?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    if (!contact.displayName || !contact.phoneNumber) {
+      return { success: false, error: 'Name and phone number are required' };
+    }
+
+    if (this.isNativeAndroid()) {
+      try {
+        await ContactsManager.createContact({
+          displayName: contact.displayName.trim(),
+          phoneNumber: contact.phoneNumber.trim(),
+          note: contact.note?.trim()
+        });
+        return { success: true };
+      } catch (e: any) {
+        console.error('Failed to create native contact:', e);
+        return { success: false, error: e?.message || String(e) };
+      }
+    } else {
+      // In web simulation, add to simulatedWebContacts
+      if (!simulatedWebContacts) {
+        simulatedWebContacts = [];
+      }
+      const newId = `sim_contact_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      simulatedWebContacts.push({
+        id: newId,
+        displayName: contact.displayName.trim(),
+        phoneNumbers: [{
+          number: contact.phoneNumber.trim(),
+          normalizedNumber: normalizeEgyptianPhone(contact.phoneNumber)
+        }],
+        note: contact.note?.trim(),
+        isGoogleAccount: true,
+        isReadOnly: false
+      });
+      return { success: true };
+    }
+  },
+
+  /**
+   * Batch creates multiple contacts in device storage.
+   */
+  async batchCreateContacts(
+    contacts: Array<{ displayName: string; phoneNumber: string; note?: string }>,
+    onProgress?: (current: number, total: number, contactName: string) => void
+  ): Promise<{ createdCount: number; failedCount: number; errors: string[] }> {
+    const total = contacts.length;
+    let createdCount = 0;
+    let failedCount = 0;
+    const errors: string[] = [];
+
+    if (this.isNativeAndroid()) {
+      try {
+        const res = await ContactsManager.batchCreateContacts({ contacts });
+        return {
+          createdCount: Number(res?.createdCount) || 0,
+          failedCount: Number(res?.failedCount) || 0,
+          errors: Array.isArray(res?.errors) ? res.errors : []
+        };
+      } catch (e: any) {
+        // Fallback to loop if batch plugin call fails
+        for (let i = 0; i < total; i++) {
+          const c = contacts[i];
+          if (onProgress) onProgress(i + 1, total, c.displayName);
+          const res = await this.createContact(c);
+          if (res.success) createdCount++;
+          else {
+            failedCount++;
+            errors.push(`خطأ في حفظ "${c.displayName}": ${res.error}`);
+          }
+        }
+        return { createdCount, failedCount, errors };
+      }
+    } else {
+      // Web simulation
+      if (!simulatedWebContacts) {
+        simulatedWebContacts = [];
+      }
+      for (let i = 0; i < total; i++) {
+        const c = contacts[i];
+        if (onProgress) onProgress(i + 1, total, c.displayName);
+        await new Promise(r => setTimeout(r, 60));
+        const newId = `sim_contact_${Date.now()}_${i}`;
+        simulatedWebContacts.push({
+          id: newId,
+          displayName: c.displayName.trim(),
+          phoneNumbers: [{
+            number: c.phoneNumber.trim(),
+            normalizedNumber: normalizeEgyptianPhone(c.phoneNumber)
+          }],
+          note: c.note?.trim(),
+          isGoogleAccount: true,
+          isReadOnly: false
+        });
+        createdCount++;
+      }
+      return { createdCount, failedCount, errors };
+    }
+  },
+
+  /**
+   * Opens native Contact Editor to let user review/save with prefilled fields.
+   */
+  async openContactEditor(displayName: string, phoneNumber: string, note?: string): Promise<boolean> {
+    if (this.isNativeAndroid()) {
+      try {
+        await ContactsManager.openContactEditor({ displayName, phoneNumber, note });
+        return true;
+      } catch (e) {
+        console.warn('Failed to open native contact editor:', e);
+      }
+    }
+    return false;
+  },
+
+  /**
+   * Generates standard vCard (v3.0) content for one or more contacts.
+   */
+  generateVcf(contacts: Array<{ displayName: string; phoneNumber: string; note?: string }>): string {
+    const cards = contacts.map(c => {
+      const lines = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        `FN:${c.displayName.trim()}`,
+        `TEL;TYPE=CELL:${c.phoneNumber.trim()}`
+      ];
+      if (c.note?.trim()) {
+        lines.push(`NOTE:${c.note.trim()}`);
+      }
+      lines.push('END:VCARD');
+      return lines.join('\r\n');
+    });
+    return cards.join('\r\n\r\n');
+  },
+
+  /**
+   * Triggers download of a .vcf contact card file.
+   */
+  downloadVcf(filename: string, contacts: Array<{ displayName: string; phoneNumber: string; note?: string }>): void {
+    const vcfContent = this.generateVcf(contacts);
+    const blob = new Blob([vcfContent], { type: 'text/vcard;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename.endsWith('.vcf') ? filename : `${filename}.vcf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
+  /**
+   * Audits specifically the contacts for a given roster of students against phone contacts.
+   * Useful when creating a group to immediately identify which contacts are missing or need updating.
+   */
+  async auditRosterContacts(rosterStudents: Student[]): Promise<{
+    missingInPhone: Array<{ student: Student; proposedName: string; phone: string; note?: string }>;
+    needsUpdate: Array<{ contact: RawDeviceContact; item: ContactAuditItem; student: Student }>;
+    alreadyStandardized: Array<{ contact: RawDeviceContact; item: ContactAuditItem; student: Student }>;
+  }> {
+    const fullAudit = await this.runAudit(rosterStudents);
+    const validStudents = rosterStudents.filter(s => s.parentPhone && !isWhatsAppUsername(s.parentPhone));
+    const studentPhoneKeys = new Set(validStudents.map(s => getPhoneMatchKey(s.parentPhone)));
+
+    const missingInPhone = fullAudit.missingStudents
+      .filter(m => studentPhoneKeys.has(getPhoneMatchKey(m.phone)))
+      .map(m => ({
+        student: m.student,
+        proposedName: m.proposedName,
+        phone: m.phone,
+        note: `طالب في ${m.student.grade} - تطبيق Glück`
+      }));
+
+    const needsUpdateItems = fullAudit.items
+      .filter(i => i.status === 'NEEDS_UPDATE' && studentPhoneKeys.has(getPhoneMatchKey(i.phone)));
+
+    const standardizedItems = fullAudit.items
+      .filter(i => i.status === 'ALREADY_STANDARDIZED' && studentPhoneKeys.has(getPhoneMatchKey(i.phone)));
+
+    return {
+      missingInPhone,
+      needsUpdate: needsUpdateItems.map(i => ({
+        contact: {
+          id: i.id,
+          displayName: i.currentName,
+          phoneNumbers: [{ number: i.phone }]
+        },
+        item: i,
+        student: i.students[0]
+      })),
+      alreadyStandardized: standardizedItems.map(i => ({
+        contact: {
+          id: i.id,
+          displayName: i.currentName,
+          phoneNumbers: [{ number: i.phone }]
+        },
+        item: i,
+        student: i.students[0]
+      }))
+    };
   },
 
   /**

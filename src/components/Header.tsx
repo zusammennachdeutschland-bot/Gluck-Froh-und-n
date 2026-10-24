@@ -391,30 +391,13 @@ export const Header: React.FC = () => {
               )}
             </motion.button>
 
-            {/* Peer Sync Button - Always Visible right next to Settings */}
+            {/* Peer Sync Button */}
             <SyncHeaderButton 
               status={syncStatus}
               connectedCount={onlineCount}
               onClick={() => setIsSyncModalOpen(true)}
               isOpen={isSyncModalOpen}
             />
-
-            {/* Direct Settings Button */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-              onClick={() => setActiveTab('settings')}
-              className={`p-1.5 sm:p-2 rounded-full border transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
-                activeTab === 'settings'
-                  ? 'bg-primary text-white border-primary shadow-xs'
-                  : 'bg-background dark:bg-background hover:bg-surface-hover text-text-main border-surface-border/80'
-              }`}
-              aria-label="Settings"
-              title={t('nav_settings') || 'Einstellungen'}
-            >
-              <Settings className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${activeTab === 'settings' ? 'text-white' : 'text-primary'}`} />
-            </motion.button>
 
             {/* 3-Bars Main Menu Button (Includes Trash / Recently Deleted inside) */}
             <motion.button

@@ -82,6 +82,7 @@ export const SchoolScheduleView: React.FC = () => {
 
   // Full Reset State & Logic
   const [isConfirmResetOpen, setIsConfirmResetOpen] = useState(false);
+  const [resetConfirmInput, setResetConfirmInput] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -2267,7 +2268,7 @@ export const SchoolScheduleView: React.FC = () => {
               </h3>
             </div>
 
-            <div className="space-y-2 text-xs text-slate-600 dark:text-slate-400 font-semibold leading-relaxed">
+            <div className="space-y-3 text-xs text-slate-600 dark:text-slate-400 font-semibold leading-relaxed">
               <p>
                 {_t(
                   'سيتم حذف جدول المدرسة الحالي وجميع البيانات المرتبطة به، بما في ذلك:',
@@ -2288,22 +2289,48 @@ export const SchoolScheduleView: React.FC = () => {
                   'Diese Aktion kann nicht rückgängig gemacht werden.'
                 )}
               </p>
+
+              <div className="pt-2">
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {_t(
+                    'لتأكيد الحذف، اكتب كلمة "DELETE" أو "مسح" بالأسفل:',
+                    'To confirm deletion, type "DELETE" or "مسح" below:',
+                    'Zur Bestätigung geben Sie "DELETE" ein:'
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={resetConfirmInput}
+                  onChange={(e) => setResetConfirmInput(e.target.value)}
+                  placeholder="DELETE"
+                  className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-50 dark:border-gray-850">
               <button
                 type="button"
-                onClick={() => setIsConfirmResetOpen(false)}
+                onClick={() => {
+                  setIsConfirmResetOpen(false);
+                  setResetConfirmInput('');
+                }}
                 disabled={isResetting}
-                className="px-4 py-2 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-xs font-bold focus:outline-none"
+                className="px-4 py-2 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-xs font-bold focus:outline-none cursor-pointer"
               >
                 {_t('إلغاء', 'Cancel', 'Abbrechen')}
               </button>
               <button
                 type="button"
-                onClick={handleFullReset}
-                disabled={isResetting}
-                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-45 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold focus:outline-none shadow-md flex items-center gap-1.5"
+                onClick={() => {
+                  handleFullReset();
+                  setResetConfirmInput('');
+                }}
+                disabled={
+                  isResetting ||
+                  (resetConfirmInput.trim().toUpperCase() !== 'DELETE' && resetConfirmInput.trim() !== 'مسح')
+                }
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold focus:outline-none shadow-md flex items-center gap-1.5 cursor-pointer"
               >
                 {isResetting ? (
                   <>
@@ -2313,7 +2340,7 @@ export const SchoolScheduleView: React.FC = () => {
                 ) : (
                   <>
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>{_t('مسح الجدول بالكامل', 'Clear Entire Schedule', 'Plan vollständig löschen')}</span>
+                    <span>{_t('تأكيد مسح الجدول بالكامل', 'Confirm Clear Schedule', 'Plan löschen bestätigen')}</span>
                   </>
                 )}
               </button>

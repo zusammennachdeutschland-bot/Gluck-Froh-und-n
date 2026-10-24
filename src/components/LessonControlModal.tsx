@@ -2383,142 +2383,34 @@ export const LessonControlModal: React.FC = () => {
             </>
           )}
 
-          {/* PARENT COMMUNICATION QUICK BUTTONS */}
-          <div className="pt-1.5 border-t border-slate-100 dark:border-surface-border space-y-1">
+          {/* UNIFIED REPORT & COMMUNICATION TRIGGER */}
+          <div className="pt-2 border-t border-slate-100 dark:border-surface-border flex items-center justify-between gap-2">
             <p className="text-[11px] font-bold text-text-muted">
               {t('auto_parent_communication')}
             </p>
 
-            <div className={`grid ${isGroupLesson ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'} gap-1.5`}>
-              <button
-                type="button"
-                disabled={selectedLesson.status !== 'completed'}
-                onClick={() => {
-                  if (selectedLesson.status !== 'completed') {
-                    alert(t('alert_finish_lesson_first'));
-                    return;
-                  }
-                  setShowArabicParentReportModal(true);
-                }}
-                className={`font-black text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-2xs ${
-                  selectedLesson.status === 'completed'
-                    ? 'bg-primary hover:bg-primary-hover active:scale-95 text-white cursor-pointer'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed border border-slate-200/50'
-                }`}
-              >
-                <Send className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">تقرير ولي الأمر</span>
-              </button>
-
-              {isGroupLesson ? (
-                <>
-                  {/* Group WhatsApp */}
-                  <button
-                    type="button"
-                    onClick={handleWhatsAppClick}
-                    className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer shadow-2xs truncate"
-                    title={_t('إرسال رسالة لواتساب الجروب', 'Send WhatsApp message to group', 'WhatsApp-Nachricht an Gruppe senden')}
-                  >
-                    <Users className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">واتساب الجروب</span>
-                  </button>
-
-                  {/* Parent WhatsApp */}
-                  <button
-                    type="button"
-                    onClick={handleParentWhatsAppClick}
-                    className="bg-primary-soft hover:bg-primary/20 text-primary border border-primary/30 active:scale-95 font-black text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer shadow-2xs truncate"
-                    title={_t('إرسال رسالة واتساب لولي الأمر', 'Send WhatsApp message to parent', 'WhatsApp-Nachricht an Eltern senden')}
-                  >
-                    <MessageCircle className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">واتساب ولي الأمر</span>
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleWhatsAppClick}
-                  className="bg-primary hover:bg-primary-hover active:scale-95 text-white font-black text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer shadow-2xs truncate"
-                  title={_t('إرسال رسالة واتساب لولي الأمر', 'Send WhatsApp message to parent', 'WhatsApp-Nachricht an Eltern senden')}
-                >
-                  <MessageCircle className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">واتساب ولي الأمر</span>
-                </button>
-              )}
-
-              <a
-                href={
-                  isGroupLesson && activeLessonStudents.length > 1 && !targetStudent?.parentPhone
-                    ? '#'
-                    : (targetStudent?.parentPhone || selectedLesson?.quickParentPhone
-                        ? `tel:${(targetStudent?.parentPhone || selectedLesson?.quickParentPhone || '').replace(/[^0-9+]/g, '')}`
-                        : '#')
+            <button
+              type="button"
+              disabled={selectedLesson.status !== 'completed'}
+              onClick={() => {
+                if (selectedLesson.status !== 'completed') {
+                  alert(t('alert_finish_lesson_first'));
+                  return;
                 }
-                onClick={(e) => {
-                  if (isGroupLesson && activeLessonStudents.length > 1 && !targetStudent?.parentPhone) {
-                    e.preventDefault();
-                    setShowGroupWhatsAppModal(true);
-                  } else if (!targetStudent?.parentPhone && !selectedLesson?.quickParentPhone) {
-                    e.preventDefault();
-                    alert(t('alert_no_parent_phone'));
-                  }
-                }}
-                className={`bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center cursor-pointer border border-surface-border truncate ${
-                  !targetStudent?.phone ? 'col-span-2 sm:col-span-1' : ''
-                }`}
-              >
-                <Phone className="w-3 h-3 text-primary shrink-0" />
-                <span className="truncate">
-                  {isGroupLesson && activeLessonStudents.length > 1
-                    ? _t('أرقام الأولياء', 'Parents Contacts', 'Anruf Eltern')
-                    : 'Anruf Eltern'
-                  }
-                </span>
-              </a>
-
-              {targetStudent?.phone && !isGroupLesson && (
-                <a
-                  href={`tel:${targetStudent.phone}`}
-                  className="bg-surface-hover hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1 text-center border border-surface-border truncate col-span-2 sm:col-span-1"
-                >
-                  <Phone className="w-3 h-3 text-primary shrink-0" />
-                  <span className="truncate">Anruf Schüler</span>
-                </a>
-              )}
-            </div>
+                setShowArabicParentReportModal(true);
+              }}
+              className={`font-black text-xs py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-2xs ${
+                selectedLesson.status === 'completed'
+                  ? 'bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white cursor-pointer'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed border border-slate-200/50'
+              }`}
+            >
+              <Send className="w-3.5 h-3.5 shrink-0" />
+              <span>فتح تقرير ولي الأمر والتواصل</span>
+            </button>
           </div>
         </div>
       </div>
-
-      {/* Parent Summary Modal overlay */}
-      {showParentSummaryModal && (
-        <ParentSummaryModal
-          lesson={{
-            ...selectedLesson,
-            sessionNumber: currentSessionNumber || selectedLesson.sessionNumber || 1,
-            totalSessionsInPackage: cycleTotalSessions || packageChoice || selectedLesson.totalSessionsInPackage || 4,
-            report: {
-              ...(selectedLesson.report || {}),
-              attendanceStatus: attendance,
-              studentAttendance: studentAttendance,
-              homeworkStatus,
-              homeworkTitle,
-              homeworkDescription,
-              quizScore: Number(quizScore),
-              examScore: Number(examScore),
-              participationScore: Number(participationScore),
-              paymentStatus,
-              amountPaid: Number(amountPaid),
-              teacherNotes,
-              savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            }
-          }}
-          student={targetStudent}
-          profile={profile}
-          onClose={() => setShowParentSummaryModal(false)}
-          onGoToHomeScreen={closeLessonControl}
-        />
-      )}
 
       {/* Unified Parent Report Modal overlay */}
       {showArabicParentReportModal && (

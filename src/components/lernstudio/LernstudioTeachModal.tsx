@@ -13,8 +13,18 @@ import {
   Trophy,
   Star,
   RotateCcw,
-  Sparkles
+  Sparkles,
+  Shuffle
 } from 'lucide-react';
+
+function shuffleArray<T>(array: T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
 
 interface Props {
   isOpen: boolean;
@@ -59,6 +69,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
   const [stageQuestionIndex, setStageQuestionIndex] = useState<number>(0);
   const [completedStages, setCompletedStages] = useState<number[]>([]);
   const [stars, setStars] = useState<number>(0);
+  const [shuffleKey, setShuffleKey] = useState<number>(0);
 
   // Exercise interaction state
   const [selectedAnswer, setSelectedAnswer] = useState<string | boolean | null>(null);
@@ -132,6 +143,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     setIsAnswerSubmitted(false);
     setIsCorrectAnswer(null);
     setFeedbackMessage('');
+    setShuffleKey((k) => k + 1);
   };
 
   if (!isOpen || !set || !set.items || set.items.length === 0) return null;
@@ -143,40 +155,53 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     speakGermanText(text);
   };
 
-  // Generate Questions for Stage 2 (True / False)
+  // Generate Questions for Stage 2 (True / False) - Randomized questions and non-predictable True/False answers
   const stage2Questions = useMemo<TrueFalseQuestion[]>(() => {
-    return items.map((target, idx) => {
-      const isMatch = items.length === 1 ? true : idx % 2 === 0;
-      let displayed = target;
+    const shuffledTargets = shuffleArray<LernstudioItem>(items);
+    // Create a balanced pool of true/false (approximately 50% each) and shuffle thoroughly
+    const matchPool: boolean[] = [];
+    const half = Math.ceil(shuffledTargets.length / 2);
+    for (let i = 0; i < shuffledTargets.length; i++) {
+      matchPool.push(i < half);
+    }
+    const shuffledMatches = shuffleArray<boolean>(matchPool);
+
+    return shuffledTargets.map((target: LernstudioItem, idx: number) => {
+      const isMatch = items.length === 1 ? true : shuffledMatches[idx];
+      let displayed: LernstudioItem = target;
       if (!isMatch) {
         const distractors = items.filter((it) => it.id !== target.id);
-        displayed = distractors[Math.floor(Math.random() * distractors.length)] || target;
+        if (distractors.length > 0) {
+          displayed = distractors[Math.floor(Math.random() * distractors.length)];
+        }
       }
       return { targetItem: target, displayedItem: displayed, isMatch };
     });
-  }, [items]);
+  }, [items, shuffleKey]);
 
-  // Generate Questions for Stage 3 (2 Options Choice)
+  // Generate Questions for Stage 3 (2 Options Choice) - Randomized question order and choices
   const stage3Questions = useMemo<Choice2Question[]>(() => {
-    return items.map((target) => {
+    const shuffledTargets = shuffleArray<LernstudioItem>(items);
+    return shuffledTargets.map((target: LernstudioItem) => {
       const distractors = items.filter((it) => it.id !== target.id);
-      const distractor =
+      const distractor: LernstudioItem =
         distractors.length > 0
           ? distractors[Math.floor(Math.random() * distractors.length)]
           : { ...target, german: target.german + ' (آخرى)', arabic: 'اختيار آخر' };
 
-      const choices = [target, distractor].sort(() => Math.random() - 0.5);
+      const choices = shuffleArray<LernstudioItem>([target, distractor]);
       return { targetItem: target, choices };
     });
-  }, [items]);
+  }, [items, shuffleKey]);
 
-  // Generate Questions for Stage 4 (Full Set Choice)
+  // Generate Questions for Stage 4 (Full Set Choice) - Randomized question order and choices
   const stage4Questions = useMemo<ChoiceAllQuestion[]>(() => {
-    return items.map((target) => {
-      const choices = [...items].sort(() => Math.random() - 0.5);
+    const shuffledTargets = shuffleArray<LernstudioItem>(items);
+    return shuffledTargets.map((target: LernstudioItem) => {
+      const choices = shuffleArray<LernstudioItem>(items);
       return { targetItem: target, choices };
     });
-  }, [items]);
+  }, [items, shuffleKey]);
 
   // Auto-speak word whenever item or question changes across teach stages
   useEffect(() => {
@@ -221,6 +246,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     setCurrentStage(nextStageNum);
     setStageQuestionIndex(0);
     resetAnswerState();
+    setShuffleKey((k) => k + 1);
     saveProgress(nextStageNum, 0, updatedCompleted, stars + 2);
   };
 
@@ -425,6 +451,18 @@ export const LernstudioTeachModal: React.FC<Props> = ({
           <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
+              onClick={() => {
+                setStageQuestionIndex(0);
+                resetAnswerState();
+                setShuffleKey((k) => k + 1);
+              }}
+              className="p-1.5 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+              title="خلط وإعادة ترتيب الأسئلة عشوائياً"
+            >
+              <Shuffle className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
               onClick={handleResetProgress}
               className="p-1.5 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
               title="إعادة التقدّم من البداية"
@@ -456,6 +494,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                     setCurrentStage(stg.num);
                     setStageQuestionIndex(0);
                     resetAnswerState();
+                    setShuffleKey((k) => k + 1);
                   }}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer truncate border ${
                     isActive
