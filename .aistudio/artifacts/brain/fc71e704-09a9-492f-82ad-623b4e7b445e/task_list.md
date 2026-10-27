@@ -1,75 +1,79 @@
-# Glück — Contact Cleanup & Unification Task List
+# Task List: Glück Lernstudio — Complete Game Art, Audio & Effects Implementation
 
-- [x] **Stage 1: Standardization & Phone Normalization Engine**
-  - [x] Implement `src/utils/contactsStandardizer.ts`:
-    - [x] Egyptian phone normalization and matching (`normalizeEgyptianPhone`, `getPhoneMatchKey`).
-    - [x] English possessive formatting (`formatPossessive` with 's and ' for names ending in s, x, z).
-    - [x] Grade to Klasse extraction (`formatKlasseName`).
-    - [x] Single student name generation: `"{Student English Name}'s Mom - Klasse {Class Number}"`.
-    - [x] Sibling consolidation with `&` and commas: `"Ahmed & Mariam's Mom - Klasse 2 & 4"`.
-    - [x] Sibling class deduplication (e.g., identical class remains single `"Klasse 4"`).
-    - [x] Name length guard (>45 chars) with concise name + notes summary.
-  - [x] Create and execute comprehensive unit tests (`src/tests/contactsStandardizer.test.ts`): **36/36 tests passed (100%)**.
+- [x] **Project & Architecture Inspection**:
+  - [x] Identified all 34 educational games (11 Team/Group Games + 23 Solo Practice Games).
+  - [x] Added `solo_sentence` as the 23rd Solo Practice Game in types and views.
+  - [x] Verified zero remote URL dependencies for 100% offline Electron & Android Capacitor compliance.
 
-- [x] **Stage 2: Android Native Contacts Provider Plugin & Permissions**
-  - [x] Add `READ_CONTACTS` and `WRITE_CONTACTS` permissions to `android/app/src/main/AndroidManifest.xml`.
-  - [x] Implement `ContactsManagerPlugin.java` in `android/app/src/main/java/com/glueck/app/ContactsManagerPlugin.java`:
-    - [x] Permission check and request handler (`checkPermissions`, `requestPermissions`).
-    - [x] Read all contacts with phone numbers, account type (`com.google` vs device), display name, and notes.
-    - [x] Update display name via `ContentProviderOperation` batching on `ContactsContract.Data`.
-    - [x] Update contact notes for long sibling records.
-  - [x] Register `ContactsManagerPlugin.class` in `MainActivity.java`.
+- [x] **Audio Synthesizer & German Voice Pipeline**:
+  - [x] Implemented offline Web Audio API synthesizer (`playLernstudioSound`) with 21 synthesized game sounds (lasers, card flips/matches, engine revs, combos, hammer hits, balloon pops, water splashes, coin drops, victory fanfares).
+  - [x] Added proactive user-interaction listener (`pointerdown`, `touchstart`, `keydown`) to seamlessly resume `AudioContext` and bypass browser autoplay restrictions.
+  - [x] Implemented offline German voice encouragement engine (`playGermanVoiceFeedback`) with Web Speech API (`de-DE`) and melodic audio fallbacks (`"Richtig!"`, `"Super!"`, `"Fantastisch!"`, `"Weiter so!"`, `"Geschafft!"`, `"Du hast gewonnen!"`, `"Versuch es noch einmal!"`).
 
-- [x] **Stage 3: Contacts Sync & Audit Service**
-  - [x] Implement `src/services/contactsSyncService.ts`:
-    - [x] Bridge to native `ContactsManager` plugin with graceful web/browser fallback.
-    - [x] Scan and match algorithm against Glück's active students.
-    - [x] Categorization into audit buckets: Needing Update, Already Standardized, Duplicates, Needs Review, Missing in Phone, Read-Only.
-    - [x] Batch execution with progress callbacks and safety isolation.
+- [x] **Effects & Animation Controls**:
+  - [x] Created `useGameEffects` hook with contextual particle bursts, floating score popups, and victory celebration modals.
+  - [x] Built `GameSettingsControls` with persisted sound mute toggle and animation intensity selector (`Full` | `Reduced` [cuts particles ~65%] | `Off` [disables effects]), adhering to `prefers-reduced-motion` and persisted in `localStorage`.
 
-- [x] **Stage 4: User Interface ("Kontakte vereinheitlichen" / "توحيد جهات الاتصال")**
-  - [x] Implement `src/components/ContactsUnificationModal.tsx`:
-    - [x] Clean Glück-style header with German title & Arabic subtitle.
-    - [x] Stat metric cards for audit categories (Needs Update, Standardized, Duplicates, Review, Not in phone).
-    - [x] Search & category filter tabs.
-    - [x] Batch selection controls (Select All, Deselect All, count badge).
-    - [x] Diff comparison cards with before/after names, linked students, Google account badges.
-    - [x] Execution dialog with live progress bar and final audit report.
-  - [x] Add entry button in `src/components/StudentsView.tsx` toolbar.
-  - [x] Add entry category and subpage in `src/components/SettingsView.tsx`.
+- [x] **Nano Banana Game Art Pipeline**:
+  - [x] Created typed 34-game + 2 shared rewards Nano Banana Art Manifest (`nanoBananaGameArtManifest.ts`).
+  - [x] Hardened CLI generator script (`scripts/generate_nano_banana_assets.mjs`) with `--status`, `--dry-run`, `--batch=<id>`, `--item=<id>`, `--force`, and immediate quota-safe circuit breaker on 429 / `RESOURCE_EXHAUSTED`.
+  - [x] Created asset provenance ledger (`public/assets/games/asset_provenance.json`) tracking generation status, dimensions, and offline readiness.
+  - [x] Upgraded `GameArtAssets.tsx` with `GameStageBanner`, `GameThumbnailArt`, `SharedVictoryTrophyArt`, and `SharedMysteryChestArt`.
 
-- [x] **Stage 5: Verification & Compilation**
-  - [x] Verified TypeScript types and build via `lint_applet` (0 errors).
-  - [x] Verified full applet build via `compile_applet` (Build succeeded).
-  - [x] Executed automated unit tests (`runContactsStandardizerTests`): 36 assertions passed.
+- [x] **Phase 1 — Visual Quality Audit & Asset Refinement**:
+  - [x] Inspected the 36 local WebP assets under `/public/assets/games/` and opened representative images.
+  - [x] Identified visual weaknesses in `word_ninja_stage.webp` (simplistic line and spheres) and `space_fleet_stage.webp`.
+  - [x] Enhanced `word_ninja_stage.webp` with a complete 3D cartoon Japanese Katana (wrapped hilt, gold tsuba, gleaming steel edge, cyan energy aura), golden 4-point shurikens, sliced bamboo stalks, sliced target fruit, and impact slash sparks.
+  - [x] Enhanced `space_fleet_stage.webp` with dual-ringed Saturnian planet, ion engine thruster glows, multi-tier hull wings, and kinetic defense pulses.
+  - [x] Re-rasterized local offline WebP assets at 90% quality with 100% offline support.
 
-- [x] **Stage 6: Android CI/CD Build Compatibility (#74 & #75)**
-  - [x] Fixed `ContactsManagerPlugin.java` permission signature and JSON type conversions (`phoneArrays` type-safety).
-  - [x] Resolved Gradle 8.9 vs AGP 8.13.0 conflict introduced by `@capacitor-community/text-to-speech` 8.0.2.
-  - [x] Upgraded Gradle wrapper and CI runner configuration to Gradle 8.13 in `.github/workflows/build-apk.yml` and `gradle-wrapper.properties`.
-  - [x] Updated root `android/build.gradle` to unified AGP 8.13.0.
-  - [x] Added Java 21 `compileOptions` and updated ProGuard configuration to `proguard-android-optimize.txt` in `android/app/build.gradle`.
-  - [x] Re-synced Capacitor native assets via `npx cap sync android`.
+- [x] **Phase 2 — Nano Banana Quota Integrity**:
+  - [x] Verified `--status` audit: 36 total assets (0 Nano Banana generated, 36 high-fidelity local constructed fallbacks, 0 missing).
+  - [x] Maintained honest provenance ledger reflecting that live AI generation remains pending API quota availability without spamming retries.
 
-- [x] **Stage 7: Direct Phone Registration & Automated Group Creation Prompt**
-  - [x] Implemented native `createContact`, `batchCreateContacts`, and `openContactEditor` in `ContactsManagerPlugin.java`.
-  - [x] Added `createContact`, `batchCreateContacts`, `openContactEditor`, `generateVcf`, `downloadVcf`, and `auditRosterContacts` in `contactsSyncService.ts`.
-  - [x] Updated `ContactsUnificationModal.tsx`:
-    - [x] Added 1-click individual "تسجيل بالهاتف" and "محرر الهاتف" to each card in "غير مسجل / Nicht im Tel".
-    - [x] Added batch selection ("تسجيل المحدد بالهاتف") and toolbar with VCF export.
-    - [x] Added inline name editing with pencil icon before saving.
-  - [x] Created `NewGroupContactsAuditModal.tsx` for manual and AI prompt group creation.
-  - [x] Removed obsolete AI Contact Editor modal and utilities.
+- [x] **Phase 3 — Real Gameplay Smoke Tests**:
+  - [x] Created automated verification test suite (`scripts/test_lernstudio_gameplay_qa.mjs`).
+  - [x] Verified 34 games registry (11 team + 23 solo) and component mappings.
+  - [x] Verified all 36 WebP assets exist with valid RIFF/WEBP magic bytes.
+  - [x] Verified 21 educational sound effect keys and 7 German speech outcomes.
+  - [x] Verified animation modes (`Full`, `Reduced`, `Off`) and settings persistence in `localStorage`.
+  - [x] Verified consecutive correct answer multipliers, streak increments, and reset on incorrect answers without score loss.
+  - [x] Smoke test result: **15 Passed, 0 Failed**.
 
-- [x] **Stage 8: Lernstudio Question Randomization & Unpredictable True/False Matching**
-  - [x] Implemented Fisher-Yates `shuffleArray` utility function in `LernstudioTeachModal.tsx`.
-  - [x] Eliminated deterministic alternating True/False logic (`idx % 2 === 0`) in Stage 2.
-  - [x] Added randomized balanced boolean matching pool for Stage 2 (True/False).
-  - [x] Randomized question presentation order across all stages (Stage 2, Stage 3, Stage 4).
-  - [x] Added `shuffleKey` state and dedicated Shuffle button in the modal header for on-demand re-randomization.
-  - [x] Triggered question re-shuffling on stage tab navigation, progress reset, and stage progression.
-  - [x] Verified build passes with 0 errors via `lint_applet` and `compile_applet`.
-  - [x] Created `NewGroupContactsPromptModal.tsx` for immediate contacts verification & registration.
-  - [x] Integrated `NewGroupContactsPromptModal` into manual group creation (`AddGroupModal.tsx`).
-  - [x] Integrated automated contacts audit & 1-click registration card into AI prompt import (`AiImportModal.tsx`).
+- [x] **Phase 4 — Final Polish & Production Readiness**:
+  - [x] Priority 1: Improved visual quality on weakest assets (`tower_architects_stage.webp`, `sentence_builder_stage.webp`, `sorting_stage.webp`, `game_stage.webp`, `solo_sentence_stage.webp`) with rich, age-appropriate 3D illustrations.
+  - [x] Priority 2: Verified Nano Banana API configuration & live quota status (confirmed HTTP 429 quota exhaustion gracefully caught by circuit breaker; zero fake claims).
+  - [x] Priority 3: Executed real Electron Linux build (`release/linux-unpacked/glueck` 184MB standalone binary) and Capacitor Android sync (`android/app/src/main/assets/public`); formulated physical device QA checklist.
+  - [x] Priority 4: Verified compilation & typechecking (`tsc --noEmit` 0 errors, `vite build && esbuild server.ts` 0 errors, `compile_applet` passed).
+
+- [x] **Schedule Recurrence & Conflict Bug Fix (Week A vs Week B)**:
+  - [x] Fixed `checkOverlap` in `lessonUtils.ts`: Week A (`biweekly_a`) and Week B (`biweekly_b`) lessons never conflict.
+  - [x] Fixed `getProjectedLessonsForRange` in `scheduleUtils.ts`: Filter out unstarted scheduled lessons when the group is configured for the opposite alternating week.
+  - [x] Fixed `AppContext.tsx` (`updateGroup` & `generateGroupScheduleLessons`): Prune stale future lessons on opposite weeks when switching recurrence, and generate only matching week lessons.
+  - [x] Added startup sanitizer in `dataSanitizer.ts`: Cleans up legacy orphaned scheduled lessons on wrong alternating weeks from `dl_lessons`.
+  - [x] Fixed `ScheduleView.tsx`: Displays real recurrence badge (`🅰️ Alle 2 Wochen (A)`, `🅱️ Alle 2 Wochen (B)`, `🔄 Wöchentlich`) instead of hardcoded `Wöchentlich`.
+  - [x] Fixed `AddLessonModal.tsx`: Biweekly recurrence steps by 14 days and checks recurrence during conflict detection.
+
+- [x] **AI Prompt Generator & Content Import JSON Parsing Fix**:
+  - [x] Hardened `generateLernstudioPrompt` with strict RFC 8259 JSON syntax rules forbidding backslash escaping of brackets (`\[`, `\]`) and braces (`\{`, `\}`).
+  - [x] Built multi-stage `safeParseLernstudioJsonString` repairing escaped brackets/braces (`\[`, `\]`, `\{`, `\}`), smart/curly quotes, conversational preambles/postambles, comments, and trailing commas.
+  - [x] Ensured compatibility across all 6 game modes (`sentence4Elements` 4-item tuple fallback for Satzbau, `missingLetterWord` generation for Glücksrad, `hasArticles` detection for Artikel-Sortierboxen, and exercise parsing for Jeopardy/Team Race).
+  - [x] Verified 100% test pass on problematic JSON with `\[` and `\]`, clean JSON, noisy wrappers, and bare word sets. Zero lint errors.
+
+- [x] **Random Student Picker: Multi-Group Merging & Manual Custom Names**:
+  - [x] Added Multi-Group Merge mode (`isMergeMode`) with selectable group badges allowing joining 2 or more groups into a single combined roulette pool.
+  - [x] Added Manual Custom Names panel allowing typing or pasting comma/newline-separated student names with remove chips and instant participation in the wheel.
+  - [x] Maintained student repetition protection per round, star awarding, audio effects, and UI styling.
+
+- [x] **إضافة زر كتم الصوت الكامل في أعلى مود المعلم (`LernstudioTeachModal.tsx`)**:
+  - [x] تم إدراج زر تبديل الصوت (`Volume2` / `VolumeX`) في الشريط العلوي لـ `LernstudioTeachModal.tsx` بجانب أزرار الخلط وإعادة الترتيب والإغلاق.
+  - [x] عند النقر على كتم الصوت: يتم إيقاف أي نطق جارٍ فوراً عبر `stopGermanSpeech()`.
+  - [x] عند التفعيل أو الكتم: يتم الالتزام بحالة الصوت (`soundEnabled`) ومنع النطق التلقائي أو اليدوي لجميع الكلمات والأمثلة الصوتية.
+
+- [x] **إصلاح تقطع النطق الألماني ("Versuch es noch einmal!") وتوسيع فترة الانتقال بين الأسئلة**:
+  - [x] تم تعديل السرعة الصوتية لرسائل التوجيه الصوتية (`playGermanVoiceFeedback`) إلى سرعة متزنة وواضحة (0.85x).
+  - [x] تم زيادة مهلة الانتقال التلقائي بين الأسئلة عند الإجابة الخاطئة إلى **2.8 ثانية (2800ms)** وإلى **2.0 ثانية** عند الإجابة الصحيحة عبر جميع الألعاب.
+  - [x] تم زيادة مهلة الأمان لحزمة الصوت لمنع إنهاء القراءة الصوتية قبل اكتمال النطق كلياً.
+
+
 

@@ -1,8 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
+import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
 import {
   ArrowLeft,
   RotateCcw,
@@ -47,6 +50,7 @@ export const LernstudioWordDetectiveGame: React.FC<Props> = ({
   const [hintsUsed, setHintsUsed] = useState(0);
   const [isVictory, setIsVictory] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
+  const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
 
   const currentItem: LernstudioItem | undefined = items[currentIndex % items.length];
   const targetWord = (currentItem?.german || '').trim();
@@ -83,22 +87,28 @@ export const LernstudioWordDetectiveGame: React.FC<Props> = ({
       if (allDone) {
         speakGermanText(targetWord);
         setScore((s) => s + 100);
+        triggerCorrect(100, 'Gelöst!');
+        playGermanVoiceFeedback('correct');
 
         if (currentIndex + 1 >= items.length) {
           setIsVictory(true);
+          triggerVictory();
+          playGermanVoiceFeedback('victory');
         } else {
           setTimeout(() => {
             handleNextWord();
-          }, 1000);
+          }, 2400);
         }
       }
     } else {
       playLernstudioSound('wrong');
+      triggerWrong();
       const nextMistakes = mistakes + 1;
       setMistakes(nextMistakes);
 
       if (nextMistakes >= maxMistakes) {
         setIsGameOver(true);
+        playGermanVoiceFeedback('try_again');
       }
     }
   };
@@ -201,8 +211,17 @@ export const LernstudioWordDetectiveGame: React.FC<Props> = ({
           >
             <RotateCcw className="w-4 h-4" />
           </button>
+          <GameSettingsControls compact />
         </div>
       </div>
+
+      <GameEffectsOverlay particles={particles} popups={popups} showConfetti={isVictory} />
+      <GameStageBanner
+        mode="word_detective"
+        title="المحقق وكلمة السر (Word Detective)"
+        subtitle="فك شفرة الحروف الألمانية المخفية واكتشف الكلمة السرية!"
+        badgeText={`${currentIndex + 1} / ${items.length}`}
+      />
 
       {/* Target Clue Card */}
       {currentItem && (
@@ -212,7 +231,7 @@ export const LernstudioWordDetectiveGame: React.FC<Props> = ({
               <Key className="w-3.5 h-3.5 text-primary" />
               <span>لغز المفردة ({currentIndex + 1} من {items.length})</span>
             </span>
-            <span>{currentItem.article ? `أداة: ${currentItem.article}` : 'مفردات ألمانية'}</span>
+            <span>{currentItem.article ? (isWordSolved || isGameOver ? `أداة: ${currentItem.article}` : 'أداة التعريف: [ ؟ ]') : 'مفردات ألمانية'}</span>
           </div>
 
           {/* Target translation and Emoji */}
@@ -306,9 +325,7 @@ export const LernstudioWordDetectiveGame: React.FC<Props> = ({
       {/* Victory Screen */}
       {isVictory && (
         <div className="p-8 bg-surface border border-surface-border rounded-3xl text-center space-y-4 animate-scale-up max-w-lg mx-auto w-full shadow-xl">
-          <div className="p-4 bg-amber-500/10 text-amber-500 rounded-3xl border border-amber-500/30 inline-block">
-            <Trophy className="w-16 h-16" />
-          </div>
+          <SharedVictoryTrophyArt className="w-24 h-24 mx-auto rounded-3xl shadow-xl border border-amber-400/30" />
           <h2 className="text-2xl sm:text-3xl font-black text-text-main">
             أنت المحقق الأذكى! فككت كل شفرات الكلمات 🕵️‍♂️🎉
           </h2>

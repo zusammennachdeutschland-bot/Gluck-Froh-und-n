@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernstudio';
 import { buildDynamicQuestionPool, GameQuestion } from '../../../utils/lernstudioQuestionAdapter';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
 import {
   ArrowRight,
   Trophy,
@@ -37,6 +39,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displaySetTitle = getLocalizedSetTitle(set, language);
+  const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   const [teams, setTeams] = useState<RaceTeam[]>([
     { id: 'team_1', name: isRtl ? 'الفريق الأزرق 🦅' : 'Team Blue 🦅', color: '#3B82F6', score: 0, distance: 0, streak: 0 },
@@ -52,9 +55,14 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
   const [selectedOpt, setSelectedOpt] = useState<string | null>(null);
   const [answeredState, setAnsweredState] = useState<'correct' | 'wrong' | null>(null);
   const [boostApplied, setBoostApplied] = useState(false);
+  const [sentenceArranged, setSentenceArranged] = useState<string[]>([]);
 
   const activeTeam = teams[activeTeamIndex] || teams[0];
   const currentQuestion: GameQuestion = questionsPool[qIndex % questionsPool.length] || questionsPool[0];
+
+  useEffect(() => {
+    setSentenceArranged([]);
+  }, [qIndex]);
 
   const handleToggleTeamCount = (count: number) => {
     if (count === 2) {
@@ -87,9 +95,11 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
 
     if (isCorrect) {
       if (soundEnabled) {
-        playLernstudioSound('race_vroom');
-        playLernstudioSound('correct');
+        playLernstudioSound('engine_boost');
+        playGermanVoiceFeedback('correct');
       }
+      triggerSparkles(50, 40, activeTeam.color);
+      triggerScorePopup('+100 🏎️', 50, 30, 'positive');
 
       const currentStreak = activeTeam.streak + 1;
       const isBoost = currentStreak >= 2;
@@ -109,12 +119,19 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
       setTeams((prev) => prev.map((t, i) => (i === activeTeamIndex ? updatedTeam : t)));
 
       if (newDistance >= TARGET_DISTANCE) {
-        if (soundEnabled) playLernstudioSound('powerup_star');
+        if (soundEnabled) {
+          playLernstudioSound('victory');
+          playGermanVoiceFeedback('victory');
+        }
+        triggerCelebration(`بطل السباق الكبير: ${updatedTeam.name}! 🏎️🏁`, `النقاط: ${updatedTeam.score}`);
         setWinnerTeam(updatedTeam);
         return;
       }
     } else {
-      if (soundEnabled) playLernstudioSound('wrong');
+      if (soundEnabled) {
+        playLernstudioSound('wrong');
+        playGermanVoiceFeedback('wrong');
+      }
       setBoostApplied(false);
       setTeams((prev) =>
         prev.map((t, i) => (i === activeTeamIndex ? { ...t, streak: 0 } : t))
@@ -127,7 +144,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
       setBoostApplied(false);
       setActiveTeamIndex((prev) => (prev + 1) % teams.length);
       setQIndex((prev) => prev + 1);
-    }, 1800);
+    }, isCorrect ? 2000 : 2800);
   };
 
   const handleRestart = () => {
@@ -142,7 +159,8 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col font-sans select-none" dir={isRtl ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-slate-950 text-white flex flex-col font-sans select-none relative overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
+      <EffectsOverlay />
       {/* Top Bar */}
       <div className="h-16 border-b border-slate-800 bg-slate-900/90 backdrop-blur px-4 sm:px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
@@ -161,6 +179,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
         </div>
 
         <div className="flex items-center gap-3">
+          <SettingsBar />
           <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl text-xs font-bold">
             <span className="text-slate-400 px-2 flex items-center gap-1 text-[11px]">
               <Users className="w-3.5 h-3.5" /> الفرق:
@@ -188,68 +207,77 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
       </div>
 
       {/* Main Track & Question Arena */}
-      <div className="flex-1 p-4 sm:p-6 max-w-6xl mx-auto w-full flex flex-col gap-6">
+      <div className="flex-1 p-3 sm:p-6 pb-32 sm:pb-16 max-w-6xl mx-auto w-full flex flex-col gap-3 sm:gap-6 overflow-y-auto">
+        <div className="hidden sm:block">
+          <GameStageBanner
+            mode="race"
+            title={t.raceGameTitle}
+            subtitle={`${displaySetTitle} • تسابق نحو خط النهاية بالسرعة القصوى!`}
+            badgeText={`🏁 ${activeTeam.distance}/${TARGET_DISTANCE}`}
+          />
+        </div>
+
         {/* Race Track Canvas/Lanes */}
-        <div className="bg-slate-900 border-2 border-slate-800 rounded-3xl p-5 shadow-2xl relative overflow-hidden">
-          <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
-            <div className="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-wider">
-              <Flag className="w-4 h-4 text-amber-400" /> مضمار السباق نحو خط النهاية
+        <div className="bg-slate-900 border-2 border-slate-800 rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-2xl relative overflow-hidden shrink-0">
+          <div className="flex items-center justify-between mb-2 sm:mb-4 pb-2 border-b border-slate-800 text-[11px] sm:text-xs">
+            <div className="flex items-center gap-1.5 sm:gap-2 font-black text-slate-400 uppercase tracking-wider">
+              <Flag className="w-3.5 h-3.5 text-amber-400" /> مضمار السباق
             </div>
-            <div className="text-xs font-bold text-slate-400">
+            <div className="font-bold text-slate-400">
               الهدف: الوصول لخط النهاية (10 خطوات)
             </div>
           </div>
 
           {/* Lanes */}
-          <div className="space-y-4">
+          <div className="space-y-2 sm:space-y-4">
             {teams.map((t, idx) => {
               const isCurrent = idx === activeTeamIndex;
               const percent = (t.distance / TARGET_DISTANCE) * 100;
               return (
                 <div key={t.id} className="relative">
                   {/* Lane header */}
-                  <div className="flex items-center justify-between text-xs font-bold mb-1.5 px-1">
-                    <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: t.color }} />
+                  <div className="flex items-center justify-between text-[11px] sm:text-xs font-bold mb-1 px-1">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full" style={{ backgroundColor: t.color }} />
                       <span className={isCurrent ? 'text-white font-black' : 'text-slate-400'}>{t.name}</span>
                       {t.streak >= 2 && (
-                        <span className="flex items-center gap-1 text-[11px] text-amber-400 font-black animate-pulse">
-                          <Flame className="w-3.5 h-3.5 fill-amber-400" /> سرعة مضاعفة x2
+                        <span className="flex items-center gap-1 text-[10px] sm:text-[11px] text-amber-400 font-black animate-pulse">
+                          <Flame className="w-3 h-3 fill-amber-400" /> x2
                         </span>
                       )}
                     </div>
-                    <div className="text-slate-400 font-mono">
-                      {t.distance} / {TARGET_DISTANCE} خطوة · {t.score} نقطة
+                    <div className="text-slate-400 font-mono text-[10px] sm:text-xs">
+                      {t.distance}/{TARGET_DISTANCE} · {t.score}ن
                     </div>
                   </div>
 
                   {/* Asphalt Track Lane */}
-                  <div className="h-14 bg-slate-950 rounded-2xl border border-slate-800 relative overflow-hidden flex items-center px-3 shadow-inner">
+                  <div className="h-10 sm:h-14 bg-slate-950 rounded-xl sm:rounded-2xl border border-slate-800 relative overflow-hidden flex items-center px-2 sm:px-3 shadow-inner">
                     {/* Road markings */}
-                    <div className="absolute inset-0 flex items-center justify-between px-6 pointer-events-none opacity-20">
+                    <div className="absolute inset-0 flex items-center justify-between px-4 sm:px-6 pointer-events-none opacity-20">
                       {[...Array(10)].map((_, i) => (
-                        <div key={i} className="w-1.5 h-6 bg-white/60 rounded-full" />
+                        <div key={i} className="w-1 sm:w-1.5 h-4 sm:h-6 bg-white/60 rounded-full" />
                       ))}
                     </div>
 
                     {/* Finish Line Flag Pattern */}
-                    <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-transparent to-white/10 border-r-2 border-dashed border-amber-400/80 flex items-center justify-center">
-                      <span className="text-xs">🏁</span>
+                    <div className="absolute left-0 top-0 bottom-0 w-6 sm:w-8 bg-gradient-to-r from-transparent to-white/10 border-r-2 border-dashed border-amber-400/80 flex items-center justify-center">
+                      <span className="text-[10px] sm:text-xs">🏁</span>
                     </div>
 
                     {/* Moving Racer Car/Icon */}
                     <div
-                      className="absolute top-1/2 -translate-y-1/2 transition-all duration-700 ease-out flex items-center gap-1.5"
-                      style={{ right: `calc(${100 - percent}% - 30px)` }}
+                      className="absolute top-1/2 -translate-y-1/2 transition-all duration-700 ease-out flex items-center gap-1 sm:gap-1.5"
+                      style={{ right: `calc(${100 - percent}% - 24px)` }}
                     >
                       <div
-                        className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg shadow-lg border-2 border-white/80 transition-transform"
+                        className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl flex items-center justify-center text-sm sm:text-lg shadow-lg border border-white/80 transition-transform"
                         style={{ backgroundColor: t.color }}
                       >
                         🏎️
                       </div>
                       {isCurrent && (
-                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md bg-white text-slate-900 shadow-xs hidden sm:inline-block">
+                        <span className="text-[9px] sm:text-[10px] font-black px-1 py-0.5 rounded bg-white text-slate-900 shadow-xs hidden sm:inline-block">
                           دوره
                         </span>
                       )}
@@ -263,34 +291,91 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
 
         {/* Question Panel for Active Team */}
         {!winnerTeam && (
-          <div className="bg-slate-900/90 border-2 border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col gap-5">
+          <div className="bg-slate-900/90 border-2 border-slate-800 rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 shadow-2xl flex flex-col gap-3 sm:gap-5 shrink-0">
             {/* Active Team Banner */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+            <div className="flex items-center justify-between pb-2 sm:pb-4 border-b border-slate-800 text-xs sm:text-sm">
               <div className="flex items-center gap-2">
-                <span className="w-4 h-4 rounded-full animate-ping" style={{ backgroundColor: activeTeam.color }} />
-                <h3 className="text-base font-black" style={{ color: activeTeam.color }}>
+                <span className="w-3 h-3 sm:w-4 sm:h-4 rounded-full animate-ping" style={{ backgroundColor: activeTeam.color }} />
+                <h3 className="text-xs sm:text-base font-black" style={{ color: activeTeam.color }}>
                   سؤال الفريق المتسابق: {activeTeam.name}
                 </h3>
               </div>
               {boostApplied && (
-                <div className="flex items-center gap-1 px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 text-xs font-black">
-                  <Zap className="w-4 h-4 fill-amber-300" /> تقدم خطوتين!
+                <div className="flex items-center gap-1 px-2 py-0.5 sm:px-3 sm:py-1 rounded-xl bg-amber-500/20 text-amber-300 text-[10px] sm:text-xs font-black">
+                  <Zap className="w-3.5 h-3.5 fill-amber-300" /> تقدم خطوتين!
                 </div>
               )}
             </div>
 
             {/* Question Text */}
-            <div className="text-center py-2 space-y-2">
-              {currentQuestion.emoji && <div className="text-4xl">{currentQuestion.emoji}</div>}
-              <h2 className="text-xl sm:text-2xl font-black text-white">{currentQuestion.prompt}</h2>
+            <div className="text-center py-1 sm:py-2 space-y-1 sm:space-y-2">
+              {currentQuestion.emoji && <div className="text-2xl sm:text-4xl">{currentQuestion.emoji}</div>}
+              <h2 className="text-base sm:text-2xl font-black text-white">{currentQuestion.prompt}</h2>
               {currentQuestion.subPrompt && (
-                <p className="text-sm text-slate-400 font-bold">{currentQuestion.subPrompt}</p>
+                <p className="text-xs sm:text-sm text-slate-400 font-bold">{currentQuestion.subPrompt}</p>
               )}
             </div>
 
+            {/* Sentence Builder Interactive Word Bank Tiles */}
+            {currentQuestion.sentencePieces && currentQuestion.sentencePieces.length > 0 && (
+              <div className="space-y-3 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
+                <div className="min-h-12 p-2.5 bg-slate-900 rounded-xl border border-slate-700 flex flex-wrap gap-1.5 items-center justify-center">
+                  {sentenceArranged.length === 0 ? (
+                    <span className="text-xs text-slate-500 font-medium">اضغط على الكلمات بالترتيب الصحيح لتكوين الجملة</span>
+                  ) : (
+                    sentenceArranged.map((chunk, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        disabled={!!answeredState}
+                        onClick={() => {
+                          setSentenceArranged((prev) => prev.filter((_, i) => i !== idx));
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold shadow-xs hover:bg-indigo-500 cursor-pointer"
+                      >
+                        {chunk}
+                      </button>
+                    ))
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 justify-center">
+                  {currentQuestion.sentencePieces.map((piece, idx) => {
+                    const countInArranged = sentenceArranged.filter((p) => p === piece).length;
+                    const countInPieces = currentQuestion.sentencePieces!.filter((p) => p === piece).length;
+                    const isFullyUsed = countInArranged >= countInPieces;
+
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        disabled={isFullyUsed || !!answeredState}
+                        onClick={() => {
+                          const nextArranged = [...sentenceArranged, piece];
+                          setSentenceArranged(nextArranged);
+                          if (nextArranged.length === currentQuestion.sentencePieces!.length) {
+                            const built = nextArranged.join(' ').trim().toLowerCase();
+                            const expected = currentQuestion.correctAnswer.trim().toLowerCase();
+                            handleAnswer(built === expected);
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-xl border text-xs sm:text-sm font-bold transition-all ${
+                          isFullyUsed
+                            ? 'bg-slate-800 text-slate-600 border-slate-800 cursor-not-allowed'
+                            : 'bg-slate-800 hover:bg-slate-700 text-white border-slate-600 cursor-pointer active:scale-95'
+                        }`}
+                      >
+                        {piece}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Answer Options */}
-            {currentQuestion.options && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+            {currentQuestion.options && currentQuestion.options.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 pt-1 sm:pt-2">
                 {currentQuestion.options.map((opt, i) => {
                   const isSelected = selectedOpt === opt;
                   const isCorrect = opt.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
@@ -312,7 +397,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
                         setSelectedOpt(opt);
                         handleAnswer(isCorrect);
                       }}
-                      className={`p-4 rounded-2xl border-2 text-base font-black transition-all flex items-center justify-center cursor-pointer ${btnColor}`}
+                      className={`p-2.5 sm:p-4 rounded-xl sm:rounded-2xl border-2 text-xs sm:text-base font-black transition-all flex items-center justify-center cursor-pointer ${btnColor}`}
                     >
                       <span>{opt}</span>
                     </button>
@@ -322,20 +407,20 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
             )}
 
             {/* Teacher Fast Override */}
-            <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+            <div className="pt-2 sm:pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] sm:text-xs text-slate-400 flex-wrap gap-2">
               <span>تحكيم المعلم المباشر:</span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2">
                 <button
                   onClick={() => handleAnswer(true)}
                   disabled={!!answeredState}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 font-bold transition-colors cursor-pointer flex items-center gap-1"
+                  className="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 font-bold transition-colors cursor-pointer flex items-center gap-1 text-[11px] sm:text-xs"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" /> احتساب فوز الخطوة
                 </button>
                 <button
                   onClick={() => handleAnswer(false)}
                   disabled={!!answeredState}
-                  className="px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 font-bold transition-colors cursor-pointer flex items-center gap-1"
+                  className="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 font-bold transition-colors cursor-pointer flex items-center gap-1 text-[11px] sm:text-xs"
                 >
                   <XCircle className="w-3.5 h-3.5" /> احتساب تعطل
                 </button>
@@ -347,9 +432,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
         {/* Victory Celebration Modal */}
         {winnerTeam && (
           <div className="bg-slate-900 border-2 border-amber-500/60 rounded-3xl p-8 text-center shadow-2xl flex flex-col items-center gap-4 animate-scale-up">
-            <div className="w-20 h-20 rounded-full bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-4xl shadow-xl">
-              🏆
-            </div>
+            <SharedVictoryTrophyArt className="w-28 h-28 rounded-3xl shadow-xl border-2 border-amber-400/50" />
             <div>
               <span className="text-xs font-black text-amber-400 uppercase tracking-widest block mb-1">
                 بطل السباق الكبير!

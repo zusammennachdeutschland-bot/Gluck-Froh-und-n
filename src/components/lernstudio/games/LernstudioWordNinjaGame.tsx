@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
 import {
   ArrowLeft,
   RotateCcw,
@@ -60,6 +62,7 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
   const items = useMemo(() => set.items || [], [set.items]);
+  const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Game Progress
   const [currentTargetIndex, setCurrentTargetIndex] = useState<number>(0);
@@ -209,7 +212,9 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
 
     if (fruit.isTarget) {
       // Correct target sliced!
-      playLernstudioSound('card_match');
+      playLernstudioSound('slice');
+      playGermanVoiceFeedback('correct');
+      triggerSparkles(fruit.x, fruit.y, '#10b981');
       if (fruit.item?.german) {
         speakGermanText(fruit.item.german);
       }
@@ -218,13 +223,16 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
       setCombo(nextCombo);
       setMaxCombo((prev) => Math.max(prev, nextCombo));
       const pointsAdded = 20 * Math.min(4, nextCombo);
+      triggerScorePopup(`+${pointsAdded} 🥷`, fruit.x, Math.max(12, fruit.y - 8), 'positive');
       setScore((s) => s + pointsAdded);
 
       // Check if finished whole set
       if (currentTargetIndex + 1 >= items.length) {
         setTimeout(() => {
           setIsVictory(true);
-          playLernstudioSound('powerup_star');
+          playLernstudioSound('victory');
+          playGermanVoiceFeedback('victory');
+          triggerCelebration('نينجا الكلمات الأسطوري! 🥷✨', `النتيجة: ${score + pointsAdded} نقطة`);
         }, 600);
       } else {
         // Next target word after short moment
@@ -235,6 +243,7 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
     } else {
       // Sliced a decoy wrong word
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('wrong');
       setCombo(0);
     }
   };
@@ -252,9 +261,10 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
 
   return (
     <div
-      className="min-h-[85vh] p-3 sm:p-5 rounded-3xl space-y-4 select-none transition-all bg-background text-text-main"
+      className="min-h-[85vh] p-3 sm:p-5 rounded-3xl space-y-4 select-none transition-all bg-background text-text-main relative overflow-hidden"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
+      <EffectsOverlay />
       {/* Top Header */}
       <div className="bg-surface p-3.5 sm:p-4 rounded-2xl border border-surface-border shadow-2xs flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -281,7 +291,8 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
         </div>
 
         {/* Stats & Lives */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <SettingsBar />
           {/* Combo Indicator */}
           {combo > 1 && (
             <div className="px-3 py-1 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/30 text-xs font-black flex items-center gap-1">
@@ -319,6 +330,13 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
           </button>
         </div>
       </div>
+
+      <GameStageBanner
+        mode="word_ninja"
+        title={t.wordNinjaTitle}
+        subtitle={`${displayTitle} • اقطع فواكه الكلمات الصحيحة بسيف النينجا وتجنب القنابل!`}
+        badgeText={`🥷 ${score} نقطة`}
+      />
 
       {/* Target Mission Banner */}
       <div className="bg-surface/90 backdrop-blur-sm p-4 sm:p-5 rounded-2xl border border-primary/30 shadow-xs flex items-center justify-between gap-4 flex-wrap">
@@ -454,8 +472,8 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
         {isVictory && (
           <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-20">
             <div className="max-w-md w-full bg-surface p-6 rounded-3xl border border-surface-border text-center space-y-4 shadow-2xl">
-              <div className="w-16 h-16 rounded-3xl bg-amber-500/10 text-amber-500 border border-amber-500/20 mx-auto flex items-center justify-center text-4xl shadow-inner">
-                🏆
+              <div className="flex justify-center">
+                <SharedVictoryTrophyArt className="w-28 h-28 rounded-3xl shadow-xl border-2 border-amber-400/50" />
               </div>
               <h2 className="text-xl sm:text-2xl font-black text-text-main">
                 نينجا الكلمات الأسطوري! 🥷✨

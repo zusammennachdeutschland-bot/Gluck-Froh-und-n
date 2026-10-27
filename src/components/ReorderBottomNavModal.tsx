@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
   History, Award, Clock, BookOpen, Layers, Gamepad2,
-  SlidersHorizontal, ArrowUp, ArrowDown, RotateCcw, X, Check, Zap, ArrowUpToLine
+  SlidersHorizontal, ArrowUp, ArrowDown, RotateCcw, X, Check, Zap, ArrowUpToLine, ArrowDownToLine
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -103,6 +103,14 @@ export const ReorderBottomNavModal: React.FC<ReorderBottomNavModalProps> = ({ is
     const updated = [...bottomNavOrder];
     const [item] = updated.splice(index, 1);
     updated.splice(5, 0, item);
+    setBottomNavOrder(updated);
+  };
+
+  const removeFromBar = (index: number) => {
+    if (index >= 6) return;
+    const updated = [...bottomNavOrder];
+    const [item] = updated.splice(index, 1);
+    updated.push(item);
     setBottomNavOrder(updated);
   };
 
@@ -247,7 +255,7 @@ export const ReorderBottomNavModal: React.FC<ReorderBottomNavModalProps> = ({ is
 
                     {/* Action Buttons */}
                     <div className="flex items-center gap-1 shrink-0">
-                      {!isInBottomBar && (
+                      {!isInBottomBar ? (
                         <button
                           onClick={() => moveToBar(index)}
                           className="p-1.5 px-2 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer mr-1 rtl:ml-1"
@@ -256,7 +264,16 @@ export const ReorderBottomNavModal: React.FC<ReorderBottomNavModalProps> = ({ is
                           <ArrowUpToLine className="w-3.5 h-3.5" />
                           <span className="hidden sm:inline">{_t('للشريط', 'To Bar', 'Zur Leiste')}</span>
                         </button>
-                      )}
+                      ) : index !== 0 ? (
+                        <button
+                          onClick={() => removeFromBar(index)}
+                          className="p-1.5 px-2 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer mr-1 rtl:ml-1"
+                          title={_t('إزالة من الشريط السفلي', 'Remove from Bar', 'Aus Leiste entfernen')}
+                        >
+                          <ArrowDownToLine className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">{_t('إزالة', 'Remove', 'Entfernen')}</span>
+                        </button>
+                      ) : null}
 
                       <button
                         onClick={() => moveItem(index, 'up')}

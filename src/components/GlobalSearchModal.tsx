@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Search, X, Users, BookOpen, Calendar, DollarSign, ArrowRight, User } from 'lucide-react';
 import { normalizeSearchText } from '../utils/nameUtils';
-import { getStudentCode } from '../utils/studentCodeUtils';
 
 export const GlobalSearchModal: React.FC = () => {
   const { 
@@ -35,15 +34,12 @@ export const GlobalSearchModal: React.FC = () => {
   const q = normalizeSearchText(query);
 
   const matchedStudents = q ? students.filter(s => {
-    const sCode = getStudentCode(s);
     return (
       normalizeSearchText(s.name).includes(q) || 
       normalizeSearchText(s.certificateName).includes(q) || 
       normalizeSearchText(s.parentName).includes(q) || 
       normalizeSearchText(s.studentPhone).includes(q) || 
-      normalizeSearchText(s.parentPhone).includes(q) ||
-      normalizeSearchText(s.studentCode).includes(q) ||
-      normalizeSearchText(sCode).includes(q)
+      normalizeSearchText(s.parentPhone).includes(q)
     );
   }).slice(0, 5) : [];
 

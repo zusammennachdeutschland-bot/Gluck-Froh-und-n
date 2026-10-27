@@ -8,8 +8,10 @@ import {
   filterGroupsByDayAndTime,
   getStudentsForGroup
 } from '../../utils/groupScheduleUtils';
-import { playLernstudioSound } from '../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../utils/audioSpeechUtils';
+import { GameStageBanner, SharedVictoryTrophyArt } from './GameArtAssets';
+import { useGameEffects } from './effects/GameEffectsOverlay';
 import {
   Trophy,
   Plus,
@@ -34,7 +36,10 @@ import {
   Check,
   Search,
   Volume2,
-  Snail
+  Snail,
+  X,
+  Crown,
+  Flame
 } from 'lucide-react';
 
 interface Props {
@@ -80,12 +85,12 @@ export interface BaamboozleTile {
 }
 
 const COLOR_PALETTES = [
-  { name: 'Red', bg: 'bg-red-500', text: 'text-red-500', border: 'border-red-500', emoji: '🔴' },
-  { name: 'Blue', bg: 'bg-blue-500', text: 'text-blue-500', border: 'border-blue-500', emoji: '🔵' },
-  { name: 'Green', bg: 'bg-emerald-500', text: 'text-emerald-500', border: 'border-emerald-500', emoji: '🟢' },
-  { name: 'Yellow', bg: 'bg-amber-500', text: 'text-amber-500', border: 'border-amber-500', emoji: '🟡' },
-  { name: 'Purple', bg: 'bg-purple-500', text: 'text-purple-500', border: 'border-purple-500', emoji: '🟣' },
-  { name: 'Pink', bg: 'bg-pink-500', text: 'text-pink-500', border: 'border-pink-500', emoji: '🌸' }
+  { name: 'Red', labelAr: 'الأحمر', bg: 'bg-gradient-to-br from-rose-500 via-red-600 to-red-700', text: 'text-red-500', border: 'border-red-400', emoji: '🦁', badge: '🔴' },
+  { name: 'Blue', labelAr: 'الأزرق', bg: 'bg-gradient-to-br from-blue-500 via-indigo-600 to-cyan-700', text: 'text-blue-500', border: 'border-blue-400', emoji: '🦅', badge: '🔵' },
+  { name: 'Green', labelAr: 'الأخضر', bg: 'bg-gradient-to-br from-emerald-500 via-teal-600 to-green-700', text: 'text-emerald-500', border: 'border-emerald-400', emoji: '🐊', badge: '🟢' },
+  { name: 'Yellow', labelAr: 'الأصفر', bg: 'bg-gradient-to-br from-amber-400 via-amber-500 to-yellow-600', text: 'text-amber-500', border: 'border-amber-400', emoji: '🐯', badge: '🟡' },
+  { name: 'Purple', labelAr: 'البنفسجي', bg: 'bg-gradient-to-br from-purple-500 via-violet-600 to-indigo-700', text: 'text-purple-500', border: 'border-purple-400', emoji: '🦄', badge: '🟣' },
+  { name: 'Pink', labelAr: 'الوردي', bg: 'bg-gradient-to-br from-pink-500 via-rose-500 to-fuchsia-600', text: 'text-pink-500', border: 'border-pink-400', emoji: '🦊', badge: '🌸' }
 ];
 
 export function getPowerCardLocalized(type: PowerCardType, t: LernstudioTranslations) {
@@ -118,6 +123,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
   const activeLanguage = propLanguage || appLanguage;
   const language = activeLanguage;
   const t = getLernstudioTranslations(activeLanguage);
+  const { triggerSparkles, triggerFloatingText, triggerConfetti } = useGameEffects();
 
   // Game Setup State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -174,7 +180,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
         const color = COLOR_PALETTES[teamIdx % COLOR_PALETTES.length];
         return {
           id: `team_${teamIdx + 1}`,
-          name: assignedStudents.length > 0 ? names : (language === 'ar' ? `الفريق ${teamIdx + 1}` : `Team ${teamIdx + 1}`),
+          name: assignedStudents.length > 0 ? names : (language === 'ar' ? `الفريق ${color.labelAr || color.name} ${color.emoji}` : `Team ${color.name} ${color.emoji}`),
           colorBg: color.bg,
           colorText: color.text,
           colorBorder: color.border,
@@ -188,7 +194,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
       const baseColors = COLOR_PALETTES.slice(0, teamCount);
       const newTeams: BaamboozleTeam[] = baseColors.map((c, i) => ({
         id: `t_${i + 1}`,
-        name: language === 'ar' ? `الفريق ${c.name}` : `Team ${c.name}`,
+        name: language === 'ar' ? `الفريق ${c.labelAr || c.name} ${c.emoji}` : `Team ${c.name} ${c.emoji}`,
         colorBg: c.bg,
         colorText: c.text,
         colorBorder: c.border,
@@ -279,7 +285,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
     setIsGameOver(false);
     setIsPlaying(true);
     setHistoryStack([]);
-    /* confetti removed */
+    playLernstudioSound('powerup_star');
   };
 
   // Turn Navigation helper
@@ -383,7 +389,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
       prev.map((t) => (t.id === tile.id ? { ...t, isAnswered: true, answeredByTeamId: activeTeam.id } : t))
     );
 
-    /* confetti removed */
+    triggerSparkles(50, 50, '#fbbf24');
     setActiveTile(null);
     setShowAnswer(false);
     advanceTurn();
@@ -401,9 +407,12 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
         prev.map((t, idx) => (idx === activeTeamIndex ? { ...t, score: t.score + activeTile.points } : t))
       );
       playLernstudioSound('correct');
-      /* confetti removed */
+      playGermanVoiceFeedback('richtig');
+      triggerSparkles(50, 50, '#10b981');
+      triggerFloatingText(`+${activeTile.points} ★ Richtig!`, 50, 42, '#fbbf24');
     } else {
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
     }
 
     const remainingTiles = tiles.filter((t) => t.id !== activeTile.id && !t.isAnswered);
@@ -426,7 +435,9 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
   const checkGameOver = (allDone: boolean) => {
     if (allDone) {
       setIsGameOver(true);
-      /* confetti removed */
+      playLernstudioSound('fanfare_victory');
+      playGermanVoiceFeedback('gewonnen');
+      triggerConfetti();
     }
   };
 
@@ -443,6 +454,13 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
   if (!isPlaying) {
     return (
       <div className={`p-4 sm:p-8 rounded-3xl space-y-6 transition-all ${activeTheme.bgGradient}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
+        <GameStageBanner
+          gameId="classroom"
+          title={t.boardTitle}
+          subtitle={`${set.title} (${set.items?.length || 0} ${t.vocabularyCount})`}
+          emoji="🏆"
+        />
+
         {/* Top Header */}
         <div className="flex items-center justify-between gap-3 bg-surface/90 backdrop-blur-md p-4 rounded-3xl border border-surface-border shadow-xs">
           <div className="flex items-center gap-3">
@@ -732,7 +750,9 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
 
     return (
       <div className={`p-8 rounded-3xl text-center space-y-6 animate-scale-up ${activeTheme.cardBg}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
-        <Trophy className="w-20 h-20 text-amber-500 mx-auto" />
+        <div className="w-24 h-24 rounded-2xl overflow-hidden border border-amber-500/40 mx-auto shadow-lg">
+          <SharedVictoryTrophyArt className="w-full h-full object-cover" />
+        </div>
         <div className="space-y-1">
           <span className="text-xs font-black text-amber-500 uppercase tracking-widest block">{t.winnerTitle}</span>
           <h2 className="text-2xl sm:text-3xl font-black text-text-main">
@@ -791,6 +811,13 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
   // Active Main Game Board
   return (
     <div className={`p-4 sm:p-6 rounded-3xl space-y-5 transition-all ${activeTheme.bgGradient}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <GameStageBanner
+        gameId="classroom"
+        title={t.boardTitle}
+        subtitle={`${set.title} • ${t.remainingTiles} ${tiles.filter((t) => !t.isAnswered).length} / ${tiles.length}`}
+        emoji="🏆"
+      />
+
       {/* Top Bar Controls */}
       <div className="flex items-center justify-between gap-3 flex-wrap bg-surface/90 backdrop-blur-md p-3 sm:p-4 rounded-2xl border border-surface-border shadow-xs">
         <div className="flex items-center gap-2">
@@ -844,106 +871,242 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
         </div>
       </div>
 
-      {/* Turn Banner Indicator */}
-      <div className={`p-3.5 rounded-2xl border shadow-md flex items-center justify-between gap-3 ${currentActiveTeam.colorBg} text-white animate-pulse`}>
-        <div className="flex items-center gap-2">
-          <span className="text-xl">{currentActiveTeam.badgeEmoji}</span>
-          <span className="font-black text-sm sm:text-base">{t.currentTurn} {cleanTeamDisplayName(currentActiveTeam.name)}</span>
-        </div>
-
-        <span className="text-xs font-black bg-black/20 px-3 py-1 rounded-xl">
-          {t.scorePts} {currentActiveTeam.score}
-        </span>
-      </div>
-
-      {/* Teams Scoreboard Cards Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
+      {/* Arena Team Podiums Scoreboard */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3">
         {teams.map((team, idx) => {
           const isTurn = idx === activeTeamIndex;
+          const isLeading = teams.length > 1 && team.score > 0 && team.score === Math.max(...teams.map((t) => t.score));
           return (
             <div
               key={team.id}
-              className={`p-3 rounded-2xl border transition-all shadow-xs flex flex-col justify-between gap-2 ${
+              className={`relative overflow-hidden rounded-2xl sm:rounded-3xl p-3 sm:p-3.5 transition-all duration-300 flex flex-col justify-between gap-2.5 text-white shadow-md ${
                 team.colorBg
-              } text-white ${isTurn ? 'ring-4 ring-amber-400 scale-[1.02] shadow-lg' : 'opacity-80'}`}
+              } ${
+                isTurn
+                  ? 'ring-4 ring-amber-300 shadow-xl shadow-amber-500/30 scale-[1.02] z-10'
+                  : 'opacity-90 hover:opacity-100'
+              }`}
             >
-              <div className="flex items-center justify-between">
-                <span className="font-black text-xs truncate max-w-[100px]">{cleanTeamDisplayName(team.name)}</span>
-                <span className="text-base font-black">{team.score}</span>
+              {/* Gloss highlight overlay */}
+              <div className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent pointer-events-none rounded-t-2xl sm:rounded-t-3xl" />
+
+              {/* Turn Banner Tag */}
+              {isTurn && (
+                <div className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[9px] sm:text-[10px] shadow-sm animate-bounce">
+                    <span>👑</span>
+                    <span>{language === 'ar' ? 'دوركم الآن!' : 'YOUR TURN!'}</span>
+                  </span>
+                </div>
+              )}
+
+              {/* Leader Crown Tag */}
+              {!isTurn && isLeading && (
+                <div className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2">
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-black/25 text-amber-300 font-bold text-[9px] shadow-xs">
+                    <span>🏆</span>
+                  </span>
+                </div>
+              )}
+
+              {/* Team Identity Header */}
+              <div className="flex items-center gap-2.5 min-w-0 pr-1 pt-0.5">
+                <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-xl shrink-0 shadow-inner ${isTurn ? 'animate-pulse' : ''}`}>
+                  {team.badgeEmoji || '🦁'}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="font-black text-xs sm:text-sm block truncate drop-shadow-xs">
+                    {cleanTeamDisplayName(team.name)}
+                  </span>
+                  <span className="text-[10px] font-bold opacity-80 block truncate">
+                    {isTurn ? (language === 'ar' ? '🎯 الفريق النشط' : '🎯 Active Team') : (language === 'ar' ? 'فريق المنافسة' : 'Class Team')}
+                  </span>
+                </div>
               </div>
 
-              <div className="flex items-center gap-1 justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={() => handleUpdateTeamScore(idx, -5)}
-                  className="p-1 rounded-lg bg-black/20 hover:bg-black/40 text-white cursor-pointer transition-colors"
-                  title="-5"
-                >
-                  <Minus className="w-3 h-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleUpdateTeamScore(idx, 10)}
-                  className="p-1 rounded-lg bg-black/20 hover:bg-black/40 text-white cursor-pointer transition-colors"
-                  title="+10"
-                >
-                  <Plus className="w-3 h-3" />
-                </button>
+              {/* Score & Interactive Steppers */}
+              <div className="flex items-end justify-between gap-2 pt-1 border-t border-white/20">
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-extrabold uppercase tracking-wider opacity-80">
+                    {language === 'ar' ? 'النقاط' : 'Score'}
+                  </span>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight drop-shadow-sm">
+                      {team.score}
+                    </span>
+                    <span className="text-[10px] font-bold opacity-75">pts</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateTeamScore(idx, -5)}
+                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-black/30 hover:bg-black/50 active:scale-90 text-white font-black text-xs flex items-center justify-center cursor-pointer transition-all shadow-xs border border-white/10"
+                    title="-5"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateTeamScore(idx, 10)}
+                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-white/25 hover:bg-white/40 active:scale-90 text-white font-black text-xs flex items-center justify-center cursor-pointer transition-all shadow-xs border border-white/20"
+                    title="+10"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Grid of Numbered Cards */}
-      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-        {tiles.map((tile) => (
-          <button
-            key={tile.id}
-            type="button"
-            disabled={tile.isAnswered}
-            onClick={() => {
-              setActiveTile(tile);
-              setShowAnswer(false);
-              if (tile.isPowerCard && tile.powerType) {
-                const soundMap: Record<PowerCardType, any> = {
-                  gift_25: 'powerup_gift',
-                  steal_15: 'powerup_steal',
-                  swap_scores: 'powerup_swap',
-                  rocket_boost: 'powerup_rocket',
-                  lose_15: 'powerup_boom',
-                  reset_zero: 'powerup_boom',
-                  double_score: 'powerup_star',
-                  give_15: 'powerup_gift',
-                  skip_turn: 'powerup_skip'
+      {/* Grid of Numbered Mystery Game Cards */}
+      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 sm:gap-3.5 pt-1">
+        {tiles.map((tile) => {
+          const isAnswered = tile.isAnswered;
+          const conqueringTeam = tile.answeredByTeamId ? teams.find((t) => t.id === tile.answeredByTeamId) : null;
+
+          // Tier configuration for points
+          const pointTier =
+            tile.points <= 15
+              ? {
+                  badgeBg: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+                  accentBorder: 'hover:border-emerald-400',
+                  glowShadow: 'hover:shadow-emerald-500/20',
+                  icon: '🪙',
+                  label: `${tile.points} pts`
+                }
+              : tile.points <= 25
+              ? {
+                  badgeBg: 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30',
+                  accentBorder: 'hover:border-sky-400',
+                  glowShadow: 'hover:shadow-sky-500/20',
+                  icon: '💎',
+                  label: `${tile.points} pts`
+                }
+              : tile.points <= 35
+              ? {
+                  badgeBg: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+                  accentBorder: 'hover:border-amber-400',
+                  glowShadow: 'hover:shadow-amber-500/20',
+                  icon: '⚡',
+                  label: `${tile.points} pts`
+                }
+              : {
+                  badgeBg: 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30',
+                  accentBorder: 'hover:border-rose-400',
+                  glowShadow: 'hover:shadow-rose-500/20',
+                  icon: '👑',
+                  label: `${tile.points} pts`
                 };
-                playLernstudioSound(soundMap[tile.powerType] || 'powerup_star');
-              } else {
-                playLernstudioSound('correct');
-              }
-              if (timerSetting > 0) {
-                setTimerSeconds(timerSetting);
-                setIsTimerRunning(true);
-              } else {
-                setTimerSeconds(null);
-                setIsTimerRunning(false);
-              }
-            }}
-            className={`h-24 sm:h-28 rounded-2xl border-2 font-black flex flex-col items-center justify-center gap-1 transition-all shadow-md cursor-pointer ${
-              tile.isAnswered
-                ? 'bg-surface-hover/50 border-surface-border opacity-30 cursor-not-allowed text-text-muted'
-                : 'bg-surface hover:bg-primary-soft hover:scale-105 border-primary/50 text-text-main hover:border-primary'
-            }`}
-          >
-            <span className="text-2xl sm:text-3xl font-black">#{tile.id}</span>
-            {!tile.isAnswered && (
-              <span className="text-[10px] px-2 py-0.5 rounded-md bg-primary-soft text-primary font-mono">
-                {tile.points} pts
-              </span>
-            )}
-            {tile.isAnswered && <span className="text-[10px] text-emerald-600 font-bold">✓</span>}
-          </button>
-        ))}
+
+          return (
+            <button
+              key={tile.id}
+              type="button"
+              disabled={isAnswered}
+              onClick={() => {
+                setActiveTile(tile);
+                setShowAnswer(false);
+                if (tile.isPowerCard && tile.powerType) {
+                  const soundMap: Record<PowerCardType, any> = {
+                    gift_25: 'powerup_gift',
+                    steal_15: 'powerup_steal',
+                    swap_scores: 'powerup_swap',
+                    rocket_boost: 'powerup_rocket',
+                    lose_15: 'powerup_boom',
+                    reset_zero: 'powerup_boom',
+                    double_score: 'powerup_star',
+                    give_15: 'powerup_gift',
+                    skip_turn: 'powerup_skip'
+                  };
+                  playLernstudioSound(soundMap[tile.powerType] || 'powerup_star');
+                } else {
+                  playLernstudioSound('correct');
+                }
+                if (timerSetting > 0) {
+                  setTimerSeconds(timerSetting);
+                  setIsTimerRunning(true);
+                } else {
+                  setTimerSeconds(null);
+                  setIsTimerRunning(false);
+                }
+              }}
+              className={`relative group overflow-hidden rounded-2xl sm:rounded-3xl p-2.5 sm:p-3 h-28 sm:h-32 md:h-36 flex flex-col items-center justify-between transition-all duration-200 cursor-pointer text-center select-none ${
+                isAnswered
+                  ? conqueringTeam
+                    ? `${conqueringTeam.colorBg} text-white shadow-sm border border-white/20 opacity-95 cursor-default scale-[0.98]`
+                    : 'bg-surface-hover/60 border border-surface-border text-text-muted opacity-40 cursor-default scale-[0.98]'
+                  : `bg-surface border-2 border-surface-border/80 text-text-main shadow-[0_5px_0_#cbd5e1] dark:shadow-[0_5px_0_#0f172a] hover:shadow-[0_8px_0_#94a3b8] dark:hover:shadow-[0_8px_0_#1e293b] hover:-translate-y-1 active:translate-y-1 active:shadow-[0_2px_0_#94a3b8] dark:active:shadow-[0_1px_0_#0f172a] ${pointTier.accentBorder} ${pointTier.glowShadow}`
+              }`}
+            >
+              {/* Gloss shine reflection on active cards */}
+              {!isAnswered && (
+                <div className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/30 dark:from-white/10 to-transparent pointer-events-none rounded-t-2xl sm:rounded-t-3xl" />
+              )}
+
+              {/* Solved Card View */}
+              {isAnswered ? (
+                conqueringTeam ? (
+                  <div className="w-full h-full flex flex-col items-center justify-between py-1">
+                    <div className="w-full flex items-center justify-between text-[10px] font-black opacity-90 px-1">
+                      <span>#{tile.id}</span>
+                      <span className="inline-flex items-center gap-0.5">
+                        <Check className="w-3 h-3 stroke-[3]" />
+                      </span>
+                    </div>
+
+                    <div className="text-3xl sm:text-4xl transform scale-110 drop-shadow-md my-auto">
+                      {tile.item?.emoji || conqueringTeam.badgeEmoji || '⭐'}
+                    </div>
+
+                    <div className="w-full px-1.5 py-0.5 rounded-lg bg-black/25 backdrop-blur-2xs text-[9px] sm:text-[10px] font-black truncate max-w-full">
+                      {cleanTeamDisplayName(conqueringTeam.name)} (+{tile.points})
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-1">
+                    <span className="text-xs font-mono font-bold text-text-muted">#{tile.id}</span>
+                    <span className="text-xl">✓</span>
+                    <span className="text-[9px] font-bold text-text-muted">مُنجزة</span>
+                  </div>
+                )
+              ) : (
+                /* Unanswered Active Mystery Card */
+                <>
+                  {/* Top Mystery Accent Header */}
+                  <div className="w-full flex items-center justify-between px-1">
+                    <span className="text-[10px] font-black text-text-muted/70 group-hover:text-primary transition-colors font-mono">
+                      #{tile.id < 10 ? `0${tile.id}` : tile.id}
+                    </span>
+                    <span className="text-xs group-hover:scale-125 transition-transform">
+                      {tile.points >= 40 ? '🔥' : tile.points >= 30 ? '⚡' : '✨'}
+                    </span>
+                  </div>
+
+                  {/* Big Arcade Center Number */}
+                  <div className="flex flex-col items-center justify-center my-auto">
+                    <span className="text-3xl sm:text-4xl md:text-5xl font-black font-mono tracking-tight text-text-main group-hover:text-primary group-hover:scale-110 transition-all drop-shadow-xs">
+                      #{tile.id}
+                    </span>
+                  </div>
+
+                  {/* Bottom Points Badge */}
+                  <div className="w-full pt-1">
+                    <span
+                      className={`inline-flex items-center justify-center gap-1 w-full py-1 px-1.5 rounded-xl text-[10px] sm:text-xs font-black border transition-all ${pointTier.badgeBg} group-hover:scale-105 shadow-2xs`}
+                    >
+                      <span>{pointTier.icon}</span>
+                      <span className="font-mono">{pointTier.label}</span>
+                    </span>
+                  </div>
+                </>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* REVEAL CARD MODAL (Power Card OR Question Tile) */}
@@ -952,16 +1115,37 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
           <div className="bg-surface border border-surface-border rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl space-y-6 text-center animate-scale-up" dir={language === 'ar' ? 'rtl' : 'ltr'}>
             {/* Header info */}
             <div className="flex items-center justify-between border-b border-surface-border pb-3">
-              <span className="text-xs font-black text-primary">
-                #{activeTile.id} • {t.currentTurn} ({cleanTeamDisplayName(currentActiveTeam.name)})
-              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black px-2.5 py-1 rounded-xl bg-primary/10 text-primary border border-primary/20 font-mono">
+                  #{activeTile.id}
+                </span>
+                <span className="text-xs font-black text-text-muted">
+                  {t.currentTurn}: <span className="text-text-main font-bold">{cleanTeamDisplayName(currentActiveTeam.name)}</span>
+                </span>
+                <span className="text-xs font-mono font-black px-2 py-0.5 rounded-lg bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                  +{activeTile.points} pts
+                </span>
+              </div>
 
-              {timerSeconds !== null && !activeTile.isPowerCard && (
-                <div className="flex items-center gap-1.5 text-amber-500 font-mono font-black text-sm">
-                  <Clock className="w-4 h-4 animate-spin" />
-                  <span>{timerSeconds} {t.secondsText}</span>
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                {timerSeconds !== null && !activeTile.isPowerCard && (
+                  <div className="flex items-center gap-1.5 text-amber-500 font-mono font-black text-xs px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                    <Clock className="w-3.5 h-3.5 animate-spin" />
+                    <span>{timerSeconds} {t.secondsText}</span>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTile(null);
+                    setShowAnswer(false);
+                  }}
+                  className="p-1.5 rounded-xl text-text-muted hover:text-text-main hover:bg-surface-hover transition-colors cursor-pointer"
+                  title="إغلاق"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* POWER CARD EVENT REVEAL */}

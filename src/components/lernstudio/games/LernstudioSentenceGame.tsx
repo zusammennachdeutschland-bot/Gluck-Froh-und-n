@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernstudio';
 import { buildSentenceGameQuestions, SentenceGameQuestion } from '../../../utils/lernstudioQuestionAdapter';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations } from '../../../utils/lernstudioTranslations';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/GameEffectsOverlay';
 import {
   ArrowLeft,
   Volume2,
@@ -24,6 +26,7 @@ interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  initialMode?: 'solo' | 'team';
   onBack: () => void;
 }
 
@@ -31,10 +34,12 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
   set,
   activeTheme,
   language = 'ar',
+  initialMode = 'solo',
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
+  const { triggerSparkles, triggerFloatingText, triggerConfetti } = useGameEffects();
 
   const defaultTeams: TeamScore[] = useMemo(() => [
     { id: 'team_red', name: isRtl ? 'الفريق الأحمر 🦁' : 'Team Red 🦁', color: 'from-rose-500 to-red-600', score: 0 },
@@ -45,7 +50,7 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
 
   const questions = useMemo(() => buildSentenceGameQuestions(set), [set]);
 
-  const [gameMode, setGameMode] = useState<'solo' | 'team'>('solo');
+  const [gameMode, setGameMode] = useState<'solo' | 'team'>(initialMode);
   const [teams, setTeams] = useState<TeamScore[]>(defaultTeams.slice(0, 2));
   const [currentTeamIndex, setCurrentTeamIndex] = useState(0);
 
@@ -102,6 +107,8 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
     if (constructedSentence === expectedSentence) {
       setCheckedState('correct');
       playLernstudioSound('correct');
+      triggerSparkles(50, 45, '#10b981');
+      triggerFloatingText('+15 ★ Fantastisch!', 50, 38, '#fbbf24');
       handleSpeak(currentQ.germanFull);
 
       if (gameMode === 'solo') {
@@ -117,6 +124,8 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
     } else {
       setCheckedState('wrong');
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
+      triggerFloatingText('Versuch es noch einmal!', 50, 42, '#f43f5e');
       if (gameMode === 'solo') {
         setStreak(0);
       }
@@ -134,7 +143,9 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
       }
     } else {
       setIsGameOver(true);
-      playLernstudioSound('powerup_star');
+      playLernstudioSound('fanfare_victory');
+      playGermanVoiceFeedback('gewonnen');
+      triggerConfetti();
     }
   };
 
@@ -173,8 +184,8 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
     return (
       <div className={`p-6 rounded-3xl min-h-[85vh] flex flex-col items-center justify-center text-center space-y-6 ${activeTheme.bgGradient}`} dir={isRtl ? 'rtl' : 'ltr'}>
         <div className="bg-slate-900/90 border border-slate-800 p-8 rounded-3xl max-w-lg w-full space-y-6 shadow-2xl animate-scale-up">
-          <div className="w-16 h-16 bg-amber-500/20 rounded-2xl border border-amber-500/40 flex items-center justify-center mx-auto text-amber-400">
-            <Trophy className="w-8 h-8" />
+          <div className="w-24 h-24 rounded-2xl overflow-hidden border border-amber-500/40 mx-auto shadow-lg">
+            <SharedVictoryTrophyArt className="w-full h-full object-cover" />
           </div>
 
           <div>
@@ -228,7 +239,14 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
   }
 
   return (
-    <div className="p-4 sm:p-6 rounded-3xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main" dir={isRtl ? 'rtl' : 'ltr'}>
+    <div className="p-4 sm:p-6 rounded-3xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main space-y-4" dir={isRtl ? 'rtl' : 'ltr'}>
+      <GameStageBanner
+        gameId={gameMode === 'solo' ? 'solo_sentence' : 'sentence_builder'}
+        title={gameMode === 'solo' ? t.soloSentenceTitle : t.teamSentenceTitle}
+        subtitle={`${set.title} • ${t.questionProgress} ${currentIndex + 1} / ${questions.length}`}
+        emoji="✍️"
+      />
+
       {/* Top Header Bar */}
       <div className="bg-slate-900/90 backdrop-blur-md p-4 rounded-3xl border border-slate-800 shadow-md flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">

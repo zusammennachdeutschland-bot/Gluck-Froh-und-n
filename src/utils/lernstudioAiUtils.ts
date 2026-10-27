@@ -73,7 +73,14 @@ ANFORDERUNGEN AN JEDEN EINZELNEN BEGRIFF (items):
    - missing_letter: Wort mit Buchstabe zum Ergänzen.
    - plural_match: Frage nach der Pluralform.
 
-Gib AUSSCHLIESSLICH ein valides JSON-Objekt zurück ohne Markdown-Formatierung (keine \`\`\`json).
+Gib AUSSCHLIESSLICH ein valides, reines JSON-Objekt zurück.
+
+STRENGE REGELN ZUR JSON-SYNTAX (WICHTIG):
+1. Gib AUSSCHLIESSLICH ein valides, reines JSON-Objekt zurück ohne Markdown-Formatierung (KEINE Code-Blöcke wie \`\`\`json oder \`\`\`).
+2. Escape NIEMALS eckige Klammern [ oder ] mit Backslashes (schreibe IMMER [ und ], NIEMALS \\[ oder \\]).
+3. Escape NIEMALS geschweifte Klammern { oder } mit Backslashes (schreibe IMMER { und }, NIEMALS \\{ oder \\}).
+4. Verwende ausschließlich standardmäßige gerade doppelte Anführungszeichen (") für Keys und Strings, niemals geschwungene Anführungszeichen.
+5. Keine Kommentare (kein // oder /* */) und keine abschließenden Kommas (keine Trailing Commas vor ] oder }).
 
 JSON-STRUKTUR:
 {
@@ -123,17 +130,90 @@ JSON-STRUKTUR:
 }`;
 }
 
-export function validateAndParseLernstudioJson(jsonText: string): { success: boolean; data?: Partial<LernstudioSet>; error?: string } {
-  if (!jsonText || !jsonText.trim()) {
-    return { success: false, error: 'النص المدخل فارغ. يرجى لصق كود JSON الناتج من الذكاء الاصطناعي.' };
+/**
+ * Safely parses JSON string produced by AI models, repairing common formatting flaws
+ * like incorrectly escaped brackets (\[ \]), braces (\{ \}), smart quotes, markdown code fences,
+ * conversational preambles/postambles, comments, and trailing commas without corrupting valid data.
+ */
+export function safeParseLernstudioJsonString(rawText: string): any {
+  if (!rawText || !rawText.trim()) {
+    throw new Error('النص المدخل فارغ. يرجى لصق كود JSON الناتج من الذكاء الاصطناعي.');
   }
 
-  let cleaned = jsonText.trim();
-  // Strip markdown code blocks if AI wrapped it in ```json ... ```
-  cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+  let text = rawText.trim();
+
+  // Strip Markdown code block wrappers if present (e.g. ```json ... ```)
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
+  // 1. Direct parse attempt: Fast path with zero mutations for already valid JSON
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Continue to repair pipeline
+  }
+
+  // 2. Extract outermost JSON object if conversational text surrounds it
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    text = text.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(text);
+    } catch {
+      // Continue to repair pipeline
+    }
+  }
+
+  // 3. Normalize smart/curly quotes to standard straight quotes
+  let repaired = text
+    .replace(/[\u201C\u201D\u201E\u201F\u00AB\u00BB]/g, '"')
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'");
+
+  // 4. Fix escaped brackets and braces (e.g. \[ \] \{ \})
+  // If an odd number of backslashes immediately precedes a bracket/brace, the trailing slash was an illegal JSON escape.
+  repaired = repaired.replace(/(\\+)([\[\]{}])/g, (match, slashes, bracket) => {
+    if (slashes.length % 2 === 1) {
+      return slashes.slice(0, -1) + bracket;
+    }
+    return match;
+  });
+
+  // 5. Fix invalid escaped single quotes (\' -> ')
+  repaired = repaired.replace(/\\'/g, "'");
+
+  // Try parsing after fixing brackets and quotes
+  try {
+    return JSON.parse(repaired);
+  } catch {
+    // Continue to strip comments & trailing commas
+  }
+
+  // 6. Remove JS/C-style comments (// and /* ... */)
+  repaired = repaired.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
+
+  // 7. Remove trailing commas before closing braces or brackets
+  repaired = repaired.replace(/,\s*([\]}])/g, '$1');
 
   try {
-    const parsed = JSON.parse(cleaned);
+    return JSON.parse(repaired);
+  } catch {
+    // Continue to clean invalid non-standard escapes
+  }
+
+  // 8. Handle any remaining non-standard escape characters inside strings (e.g. \( \) \-)
+  repaired = repaired.replace(/(\\+)([^"\\\/bfnrtu])/g, (match, slashes, char) => {
+    if (slashes.length % 2 === 1) {
+      return slashes.slice(0, -1) + char;
+    }
+    return match;
+  });
+
+  return JSON.parse(repaired);
+}
+
+export function validateAndParseLernstudioJson(jsonText: string): { success: boolean; data?: Partial<LernstudioSet>; error?: string } {
+  try {
+    const parsed = safeParseLernstudioJsonString(jsonText);
 
     if (!parsed || typeof parsed !== 'object') {
       return { success: false, error: 'تنسيق البيانات غير صحيح (ليس كائن JSON).' };
@@ -156,8 +236,9 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
 
       // Extract article if present or explicitly supplied
       let article: 'der' | 'die' | 'das' | undefined = undefined;
-      if (it.article && ['der', 'die', 'das'].includes(String(it.article).toLowerCase().trim())) {
-        article = String(it.article).toLowerCase().trim() as 'der' | 'die' | 'das';
+      const rawArticle = String(it.article || '').toLowerCase().trim();
+      if (['der', 'die', 'das'].includes(rawArticle)) {
+        article = rawArticle as 'der' | 'die' | 'das';
       } else {
         const match = german.match(/^(der|die|das)\b/i);
         if (match) {
@@ -165,6 +246,7 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
         }
       }
 
+      // 4-element sentence structure for Satzbau (Sentence Builder) game
       let sentence4: [string, string, string, string] | undefined = undefined;
       if (Array.isArray(it.sentence4Elements) && it.sentence4Elements.length === 4) {
         sentence4 = [
@@ -194,7 +276,12 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
         }
       }
 
-      // Generate missing letter word if absent
+      // Guarantee 4 valid non-empty elements for sentence builder game
+      if (!sentence4 || sentence4.some((chunk) => !chunk)) {
+        sentence4 = ['Das', 'Wort', 'heißt', german];
+      }
+
+      // Generate missing letter word if absent for Glücksrad (Spin Wheel)
       let missingLetterWord = String(it.missingLetterWord || '').trim();
       if (!missingLetterWord && german) {
         const cleanWord = german.replace(/^(der|die|das)\s+/i, '');
@@ -225,7 +312,7 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
       return { success: false, error: 'الكلمات المدخلة تفتقر إلى الألفاظ الألمانية أو الترجمات العربية الصحيحة.' };
     }
 
-    // Process custom exercises or auto-generate fallback exercises
+    // Process custom exercises for Jeopardy and Race games
     const sanitizedExercises: LernstudioExercise[] = [];
     if (Array.isArray(parsed.customExercises) && parsed.customExercises.length > 0) {
       parsed.customExercises.forEach((ex: any, idx: number) => {
@@ -233,10 +320,10 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
         sanitizedExercises.push({
           id: `ex_${Date.now()}_${idx}`,
           type: ex.type || 'multiple_choice',
-          question: String(ex.question),
-          options: Array.isArray(ex.options) ? ex.options.map(String) : undefined,
-          correctAnswer: String(ex.correctAnswer),
-          explanation: ex.explanation ? String(ex.explanation) : undefined
+          question: String(ex.question).trim(),
+          options: Array.isArray(ex.options) ? ex.options.map((opt) => String(opt).trim()) : undefined,
+          correctAnswer: String(ex.correctAnswer).trim(),
+          explanation: ex.explanation ? String(ex.explanation).trim() : undefined
         });
       });
     }
@@ -250,7 +337,6 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
     const itemsWithRealArticles = sanitizedItems.filter(
       (it) => it.article && ['der', 'die', 'das'].includes(String(it.article).toLowerCase())
     );
-    // Explicit AI flag or auto-validation
     const hasArticles = parsed.hasArticles !== undefined
       ? Boolean(parsed.hasArticles) && itemsWithRealArticles.length >= 1
       : itemsWithRealArticles.length >= 2;

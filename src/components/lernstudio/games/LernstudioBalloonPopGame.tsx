@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
+import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
 import {
   ArrowLeft,
   RotateCcw,
@@ -64,6 +67,7 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
   const [isVictory, setIsVictory] = useState(false);
   const [balloons, setBalloons] = useState<Balloon[]>([]);
   const [poppedBurst, setPoppedBurst] = useState<{ x: number; y: number; text: string; correct: boolean } | null>(null);
+  const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
 
   const targetItem: LernstudioItem | undefined = items[targetIndex % items.length];
 
@@ -157,6 +161,7 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
     );
 
     if (isCorrect) {
+      playLernstudioSound('pop');
       playLernstudioSound('correct');
       speakGermanText(balloon.item.german);
 
@@ -164,17 +169,22 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
       const points = 100 + nextStreak * 25;
       setScore((s) => s + points);
       setStreak(nextStreak);
+      triggerCorrect(points, nextStreak >= 2 ? `x${nextStreak} Pop!` : 'Super!', balloon.xPercent, balloon.yPercent);
 
       // Check if finished all words
       if (targetIndex + 1 >= items.length) {
         setIsVictory(true);
+        triggerVictory();
+        playGermanVoiceFeedback('victory');
       } else {
         setTimeout(() => {
           setTargetIndex((prev) => prev + 1);
-        }, 400);
+        }, 2200);
       }
     } else {
       playLernstudioSound('wrong');
+      triggerWrong(balloon.xPercent, balloon.yPercent);
+      playGermanVoiceFeedback('try_again');
       setStreak(0);
       setLives((l) => {
         const next = l - 1;
@@ -268,8 +278,17 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
           >
             <RotateCcw className="w-4 h-4" />
           </button>
+          <GameSettingsControls compact />
         </div>
       </div>
+
+      <GameEffectsOverlay particles={particles} popups={popups} showConfetti={isVictory} />
+      <GameStageBanner
+        mode="balloon_pop"
+        title="فرقعة البالونات (Balloon Pop)"
+        subtitle="فرقع البالون الطائر الذي يحمل المفردة الألمانية الصحيحة!"
+        badgeText={`${targetIndex + 1} / ${items.length}`}
+      />
 
       {/* Target Word Banner */}
       {targetItem && !isGameOver && !isVictory && (
@@ -358,9 +377,7 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
         {/* Victory Screen */}
         {isVictory && (
           <div className="absolute inset-0 bg-surface/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center space-y-4 animate-scale-up z-40">
-            <div className="p-4 bg-amber-500/10 text-amber-500 rounded-3xl border border-amber-500/30">
-              <Trophy className="w-16 h-16" />
-            </div>
+            <SharedVictoryTrophyArt className="w-24 h-24 rounded-3xl shadow-xl border border-amber-400/30" />
             <h2 className="text-2xl sm:text-3xl font-black text-text-main">
               مبروك يا بطل! فرقعت كل البالونات بنجاح! 🎈🎉
             </h2>

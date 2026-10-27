@@ -37,18 +37,34 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
   // CONFLICT DETECTION ALGORITHM:
   // Check if chosen date + time overlaps with any existing lesson
   const findConflict = (checkTime: string): { conflictingLesson: typeof lessons[0]; conflictDate: string } | null => {
+    const rec = selectedGroup?.scheduleRecurrence || 'weekly';
+    const weekStep = rec === 'weekly' ? 1 : 2;
     if (isWeeklyRecurring) {
       for (let i = 0; i < repeatWeeks; i++) {
         const d = new Date(date);
-        d.setDate(d.getDate() + (i * 7));
+        d.setDate(d.getDate() + (i * 7 * weekStep));
         const dateStr = formatLocalDate(d);
-        const dummyLesson = { id: 'dummy', date: dateStr, time: checkTime, durationMinutes };
+        const dummyLesson = { 
+          id: 'dummy', 
+          date: dateStr, 
+          time: checkTime, 
+          durationMinutes,
+          groupId,
+          scheduleRecurrence: rec
+        };
         const found = lessons.find(l => l.status !== 'cancelled' && checkOverlap(dummyLesson, l));
         if (found) return { conflictingLesson: found, conflictDate: dateStr };
       }
       return null;
     } else {
-      const dummyLesson = { id: 'dummy', date, time: checkTime, durationMinutes };
+      const dummyLesson = { 
+        id: 'dummy', 
+        date, 
+        time: checkTime, 
+        durationMinutes,
+        groupId,
+        scheduleRecurrence: rec
+      };
       const found = lessons.find(l => l.status !== 'cancelled' && checkOverlap(dummyLesson, l));
       return found ? { conflictingLesson: found, conflictDate: date } : null;
     }

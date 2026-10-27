@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { LernstudioSet, LernstudioTheme } from '../../../types/lernstudio';
 import { getSetVocabularyItems, AdaptedVocabItem, getDistractorChoices } from '../../../utils/lernstudioVocabularyAdapter';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations } from '../../../utils/lernstudioTranslations';
-import { ArrowLeft, Volume2, RotateCcw, Palette, Sparkles } from 'lucide-react';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/GameEffectsOverlay';
+import { ArrowLeft, Volume2, RotateCcw, Palette } from 'lucide-react';
 
 interface Props {
   set: LernstudioSet;
@@ -34,6 +36,7 @@ export const LernstudioColorMasterGame: React.FC<Props> = ({
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
+  const { triggerSparkles, triggerFloatingText, triggerConfetti } = useGameEffects();
 
   const vocabItems = getSetVocabularyItems(set, language);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -75,28 +78,36 @@ export const LernstudioColorMasterGame: React.FC<Props> = ({
 
     if (choice.id === currentItem.id) {
       setIsCorrect(true);
+      playLernstudioSound('bubble_wash');
       playLernstudioSound('correct');
+      playGermanVoiceFeedback('fantastisch');
+      triggerSparkles(50, 45, '#ec4899');
+      triggerFloatingText('+100 🎨 Fantastisch!', 50, 38, '#a855f7');
       setScore((s) => s + 100);
       setColoredCount((c) => c + 1);
 
       setTimeout(() => {
         if (currentIndex + 1 >= vocabItems.length) {
           setIsVictory(true);
+          playLernstudioSound('fanfare_victory');
+          playGermanVoiceFeedback('gewonnen');
+          triggerConfetti();
         } else {
           setCurrentIndex((prev) => prev + 1);
           setIsAnswerSubmitted(false);
           setSelectedChoice(null);
           setIsCorrect(null);
         }
-      }, 1000);
+      }, 2000);
     } else {
       setIsCorrect(false);
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
       setTimeout(() => {
         setIsAnswerSubmitted(false);
         setSelectedChoice(null);
         setIsCorrect(null);
-      }, 1200);
+      }, 2800);
     }
   };
 
@@ -111,7 +122,14 @@ export const LernstudioColorMasterGame: React.FC<Props> = ({
   };
 
   return (
-    <div className="p-4 sm:p-6 rounded-3xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main" dir={isRtl ? 'rtl' : 'ltr'}>
+    <div className="p-4 sm:p-6 rounded-3xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main space-y-4" dir={isRtl ? 'rtl' : 'ltr'}>
+      <GameStageBanner
+        gameId="color_master"
+        title="تلوين المفردات (Color Master)"
+        subtitle={`${set.title} • ملونة: ${coloredCount}/10`}
+        emoji="🎨"
+      />
+
       {/* Top Bar */}
       <div className="bg-surface border border-surface-border p-4 rounded-3xl shadow-sm flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -192,8 +210,8 @@ export const LernstudioColorMasterGame: React.FC<Props> = ({
       ) : (
         /* Victory Screen */
         <div className="max-w-md w-full mx-auto my-auto bg-surface border border-surface-border p-8 rounded-3xl text-center space-y-6 shadow-2xl animate-scale-up">
-          <div className="p-4 bg-purple-500/10 text-purple-500 rounded-3xl inline-block">
-            <Sparkles className="w-16 h-16 animate-bounce" />
+          <div className="w-24 h-24 rounded-2xl overflow-hidden border border-purple-500/40 mx-auto shadow-lg">
+            <SharedVictoryTrophyArt className="w-full h-full object-cover" />
           </div>
           <div className="space-y-2">
             <h2 className="text-2xl font-black text-text-main">معرض الألوان المكتمل! 🎨✨</h2>

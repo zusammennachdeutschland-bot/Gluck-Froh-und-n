@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { GameStageBanner } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
 import {
   ArrowLeft,
   RotateCcw,
@@ -36,6 +38,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
   const items = useMemo(() => set.items || [], [set.items]);
+  const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Board: 9 cells (0 to 8)
   const [board, setBoard] = useState<(Player | null)[]>(Array(9).fill(null));
@@ -110,6 +113,9 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
 
     if (isCorrect) {
       playLernstudioSound('correct');
+      playGermanVoiceFeedback('correct');
+      triggerSparkles(50, 50, '#10b981');
+      triggerScorePopup(currentPlayer === 'X' ? '❌' : '⭕', 50, 40, 'positive');
       speakGermanText(activeQuestion.targetItem.german);
 
       setQuestionFeedback({
@@ -136,7 +142,9 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
             setWinner(result.winner);
             setWinningLine(result.line);
             setScores((s) => ({ ...s, [result.winner]: s[result.winner] + 1 }));
-            playLernstudioSound('powerup_star');
+            playLernstudioSound('victory');
+            playGermanVoiceFeedback('victory');
+            triggerCelebration(`الفائز: ${result.winner === 'X' ? teamXName : teamOName}! ❌⭕`);
           }
         } else {
           // Switch player
@@ -148,9 +156,10 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
             triggerAiMove(newBoard);
           }
         }
-      }, 700);
+      }, 1800);
     } else {
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('wrong');
       setQuestionFeedback({
         correct: false,
         msg: isRtl
@@ -158,7 +167,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
           : `Wrong! Correct word is: ${activeQuestion.targetItem.german}`
       });
 
-      // Failed to claim: turn switches to opponent
+      // Failed to claim: turn switches to opponent (allowing 2800ms for full feedback speech)
       setTimeout(() => {
         setActiveCellIndex(null);
         setActiveQuestion(null);
@@ -170,7 +179,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
         if (opponentMode === 'ai' && nextPlayer === 'O') {
           triggerAiMove(board);
         }
-      }, 1200);
+      }, 2800);
     }
   };
 
@@ -219,9 +228,10 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
 
   return (
     <div
-      className="min-h-[85vh] p-3 sm:p-5 rounded-3xl space-y-4 select-none transition-all bg-background text-text-main flex flex-col justify-between"
+      className="min-h-[85vh] p-3 sm:p-5 rounded-3xl space-y-4 select-none transition-all bg-background text-text-main flex flex-col justify-between relative overflow-hidden"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
+      <EffectsOverlay />
       {/* Top Header Bar */}
       <div className="bg-surface p-3 sm:p-4 rounded-2xl border border-surface-border shadow-2xs flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -249,6 +259,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
 
         {/* Mode Selector and Scoreboard */}
         <div className="flex items-center gap-2 flex-wrap">
+          <SettingsBar />
           <div className="flex rounded-xl bg-surface-hover p-1 border border-surface-border text-xs font-bold">
             <button
               type="button"
@@ -288,6 +299,13 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
           </button>
         </div>
       </div>
+
+      <GameStageBanner
+        mode="tictactoe"
+        title="لعبة X-O الكلمات (Word Tic-Tac-Toe)"
+        subtitle={`${displayTitle} • سيطر على شبكة الـ X-O عبر الإجابة الصحيحة!`}
+        badgeText={`❌ ${scores.X} : ${scores.O} ⭕`}
+      />
 
       {/* Turn Banner & Scoreboard Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

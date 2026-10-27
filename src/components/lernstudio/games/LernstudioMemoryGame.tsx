@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme } from '../../../types/lernstudio';
 import { generateMemoryCards, MemoryCard } from '../../../utils/lernstudioQuestionAdapter';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
+import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
 import {
   ArrowRight,
   RotateCcw,
@@ -36,6 +39,7 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
   const [isTimerRunning, setIsTimerRunning] = useState(true);
   const [isGameCompleted, setIsGameCompleted] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
 
   // Timer effect
   useEffect(() => {
@@ -55,9 +59,13 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
     if (cards.length > 0 && cards.every((c) => c.isMatched)) {
       setIsGameCompleted(true);
       setIsTimerRunning(false);
-      if (soundEnabled) playLernstudioSound('powerup_star');
+      triggerVictory();
+      if (soundEnabled) {
+        playLernstudioSound('powerup_star');
+        playGermanVoiceFeedback('victory');
+      }
     }
-  }, [cards, soundEnabled]);
+  }, [cards, soundEnabled, triggerVictory]);
 
   const handleCardClick = (card: MemoryCard) => {
     // Prevent clicking already flipped or matched cards or if two cards are already being checked
@@ -78,7 +86,11 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
 
       if (first.pairId === second.pairId) {
         // Match found!
-        if (soundEnabled) playLernstudioSound('card_match');
+        if (soundEnabled) {
+          playLernstudioSound('card_match');
+          playGermanVoiceFeedback('correct');
+        }
+        triggerCorrect(100, 'Paar gefunden!');
         setTimeout(() => {
           setCards((prev) =>
             prev.map((c) =>
@@ -91,6 +103,7 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
         // No match: flip back
         setTimeout(() => {
           if (soundEnabled) playLernstudioSound('wrong');
+          triggerWrong();
           setCards((prev) =>
             prev.map((c) =>
               c.id === first.id || c.id === second.id ? { ...c, isFlipped: false } : c
@@ -158,11 +171,22 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
           >
             {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-rose-400" />}
           </button>
+          <GameSettingsControls compact />
         </div>
       </div>
 
+      <GameEffectsOverlay particles={particles} popups={popups} showConfetti={isGameCompleted} />
+
       {/* Main Board */}
-      <div className="flex-1 p-4 sm:p-6 max-w-5xl mx-auto w-full flex flex-col items-center justify-center">
+      <div className="flex-1 p-4 sm:p-6 max-w-5xl mx-auto w-full flex flex-col items-center justify-center gap-4">
+        <div className="w-full">
+          <GameStageBanner
+            mode="memory"
+            title={t.memoryGameTitle}
+            subtitle="اقلب البطاقات السحرية وطابق المفردات الألمانية مع ترجمتها!"
+            badgeText={`${movesCount} حركة`}
+          />
+        </div>
         {/* Difficulty switcher */}
         <div className="flex items-center gap-2 mb-6 bg-slate-900 border border-slate-800 p-1 rounded-2xl text-xs font-bold">
           <span className="text-slate-400 px-3">عدد البطاقات:</span>
@@ -247,9 +271,7 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
       {isGameCompleted && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border-2 border-primary/60 rounded-3xl max-w-md w-full p-8 text-center shadow-2xl flex flex-col items-center gap-5 animate-scale-up">
-            <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center text-4xl shadow-xl">
-              🎉
-            </div>
+            <SharedVictoryTrophyArt className="w-24 h-24 rounded-3xl shadow-xl border border-amber-400/30" />
 
             <div>
               <h2 className="text-2xl font-black text-white">أحسنت! أتممت مطابقة البطاقات بنجاح</h2>

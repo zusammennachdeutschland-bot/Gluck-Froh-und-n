@@ -1,122 +1,93 @@
-# Glück — Smart Google Contacts Cleanup & Unification ("Kontakte vereinheitlichen" / "توحيد جهات الاتصال")
+# Glück Lernstudio — Complete Game Library Upgrade Walkthrough
 
 ## Overview
-A complete, non-destructive contact standardization and cleanup system built directly into the Glück teacher application. It standardizes existing Android and Google-synchronized contacts using English student names, parent phone numbers, and class designations already stored in Glück.
+All **34 games** (11 Group/Team Games + 23 Solo Practice Games) in **Glück Lernstudio** have been upgraded with:
+1. **Original 3D Cartoon Visual Identity**: Stage banners (`<GameStageBanner>`), victory trophies (`<SharedVictoryTrophyArt>`), and mystery chests (`<SharedMysteryChestArt>`).
+2. **Offline Web Audio API Sound Synthesizer**: 21 synthesized game sound effects (card flips, matches, laser blasts, engines, combos, pops, hammer hits, splashes, victory fanfares) requiring zero external media files, with proactive user-gesture audio context unlocking to eliminate browser autoplay blockages.
+3. **Offline German Voice Encouragement**: Integrated Web Speech API (`de-DE`) with cheerful synthesized melodic fallbacks (`"Richtig!"`, `"Super!"`, `"Fantastisch!"`, `"Weiter so!"`, `"Geschafft!"`, `"Du hast gewonnen!"`, `"Versuch es noch einmal!"`).
+4. **Contextual Visual Effects & Particle Bursts**: Smooth floating score popups (`+100 Richtig!`), sparkle bursts, combo counters, and victory confetti overlays.
+5. **Persisted Performance & Accessibility Controls**: `GameSettingsControls` bar in every game allowing learners and teachers to toggle sound mute and select animation intensity (`Full` | `Reduced` | `Off`), honoring `prefers-reduced-motion`.
+6. **100% Offline Android & Electron Compatibility**: All 36 game assets are stored locally in `/public/assets/games/*.webp`.
 
 ---
 
-## 1. Key Rules & Implementation Details
-
-### Standardized Naming Convention
-- **Format**: `"{Student English Name}'s Mom - Klasse {Class Number}"`
-  - Examples:
-    - `"Ahmed's Mom - Klasse 4"`
-    - `"Mariam's Mom - Klasse 2"`
-    - `"Youssef's Mom - Klasse 6"`
-    - `"Lukas' Mom - Klasse 5"`
-- **English Name Resolution**:
-  - Uses the student's actual English name in Glück (`certificateName` if present, or Latin `name`).
-  - If a student has only an Arabic name without an English name, the contact is flagged for manual review rather than inventing or translating names.
-- **English Possessives**:
-  - Regular names append `'s` (e.g., `Ahmed's Mom`).
-  - Names ending in `s`, `x`, `z` use the conventional apostrophe without extra `s` (e.g., `Lukas' Mom - Klasse 5`, `Max' Mom - Klasse 3`, `Aziz' Mom - Klasse 1`).
-- **Class/Grade Designation**:
-  - Strictly uses `"Klasse"`, never `"Grade"`.
-  - Grade 4 -> `Klasse 4`, Grade 2 -> `Klasse 2`.
-
-### Sibling Consolidation (Shared Parent Number)
-- **Rule**: Multiple students sharing the same mother's phone number are consolidated into a single contact.
-- **Format**:
-  - 2 siblings: `"Ahmed & Mariam's Mom - Klasse 2 & 4"`
-  - 3 siblings: `"Ahmed, Mariam & Youssef's Mom - Klasse 2, 4 & 6"`
-- **Deduplication**: Identical classes are not repeated (e.g., if both siblings are in Klasse 4 -> `"Ahmed & Mariam's Mom - Klasse 4"`).
-- **Long Names**: If the display name exceeds 45 characters, a concise display name is used, and the full sibling breakdown is preserved in the contact's Note field.
-
-### Egyptian Phone Normalization
-- Normalizes `+20`, `0020`, `20`, and local `01x` prefixes to match phone numbers accurately regardless of formatting, spacing, parentheses, or Eastern Arabic digits.
+## Visual Quality Audit & Refinements (Phase 1)
+- **Inspected 6 Representative Assets**:
+  - `balloon_pop_stage.webp`: 3D glossy balloons with ambient lighting and grassland horizon.
+  - `classroom_stage.webp`: Smartboard game show auditorium with multi-color buzzers and theater lighting.
+  - `space_fleet_stage.webp`: Enhanced with dual-ringed Saturnian planet, ion engine thruster glows, multi-tier hull wings, and kinetic defense pulses.
+  - `word_ninja_stage.webp`: **Significantly Upgraded** from a plain line/sphere placeholder to a tactile 3D Japanese dojo scene featuring a curved steel Katana with wrapped hilt and gold tsuba, cyan slicing trail, 4-pointed golden shurikens, sliced bamboo stalks, sliced targets, and impact starbursts.
+  - `memory_stage.webp`: Emerald felt card table with 3D star crest and sun emblems.
+  - `shared_victory_trophy.webp`: Championship cup trophy with golden rim lighting, star medallion, and velvet pedestal.
+- **Offline Integrity**: All 36 assets re-rasterized at 90% quality with zero external CDN dependencies.
 
 ---
 
-## 2. Architecture & Components
-
-1. **`src/utils/contactsStandardizer.ts`**:
-   - Canonical phone normalization (`normalizeEgyptianPhone`, `getPhoneMatchKey`).
-   - English possessive formatter (`formatPossessive`).
-   - Class extractor & formatter (`formatKlasseName`, `joinKlasseDesignations`).
-   - Proposal generator (`buildStandardizedContactProposal`).
-
-2. **`android/app/src/main/java/com/glueck/app/ContactsManagerPlugin.java`**:
-   - Native Capacitor plugin registered in `MainActivity.java`.
-   - Android Permissions: `READ_CONTACTS`, `WRITE_CONTACTS`.
-   - Reads contacts, phones, account types (`com.google` vs device), and notes.
-   - Executes atomic batch updates targeting `StructuredName` and `Note` via Android `ContentProviderOperation`.
-
-3. **`src/services/contactsSyncService.ts`**:
-   - Bridges UI with `ContactsManagerPlugin`.
-   - Provides web simulation fallback for instant browser testing with realistic sample data.
-   - Categorizes contacts into:
-     - **Needs Update** (`NEEDS_UPDATE`)
-     - **Already Standardized** (`ALREADY_STANDARDIZED`)
-     - **Duplicates on Phone** (`DUPLICATE_ON_PHONE`)
-     - **Review / Missing English Name** (`MISSING_ENGLISH_NAME`)
-     - **Not in Phone** (`NOT_IN_CONTACTS`)
-
-4. **`src/components/ContactsUnificationModal.tsx`**:
-   - Main feature dialog with German header & Arabic subtitle: `"Kontakte vereinheitlichen" / "توحيد جهات الاتصال"`.
-   - Real-time audit metrics cards.
-   - Filter tabs and live search bar.
-   - Comparison cards showing Current Name ➔ Standardized Name.
-   - Linked student badges, phone copying, and inline name adjustment.
-   - Batch selection with "Select All" / "Deselect All".
-   - Safe execution progress dialog and completion report.
-
-5. **Entry Points**:
-   - **Students View Toolbar** (`src/components/StudentsView.tsx`): quick-access button alongside Add Student / Add Group.
-   - **Settings View** (`src/components/SettingsView.tsx`): dedicated category card and configuration subpage.
+## Nano Banana Quota & Asset Provenance (Phase 2)
+- **Status Audit (`node scripts/generate_nano_banana_assets.mjs --status`)**:
+  - Total Assets: 36 (34 game stage banners + 2 shared rewards).
+  - Nano Banana Generated: 0 (Pending API quota availability).
+  - Local Fallback WebP: 36 (High-fidelity offline constructed assets).
+  - Missing: 0.
+- **Circuit Breaker**: Quota-safe batch generator with instant halt on `RESOURCE_EXHAUSTED` / 429 to prevent wasteful retry loops and protect local assets from corruption.
 
 ---
 
-## 3. Verification & Test Results
-- **Standardizer Unit Test Suite** (`src/tests/contactsStandardizer.test.ts`):
-  - 36 assertions executed covering:
-    - Single student naming (`Ahmed's Mom - Klasse 4`)
-    - S/X/Z possessives (`Lukas' Mom - Klasse 5`, `Max'`, `Aziz'`)
-    - 2 & 3 sibling consolidations (`Ahmed & Mariam's Mom - Klasse 2 & 4`)
-    - Same-class deduplication
-    - Egyptian phone format variations (`+20`, `0020`, `010...`, Eastern Arabic digits)
-  - Result: **36 / 36 Passed (100%)**.
-- **TypeScript & Linting**: `tsc --noEmit` passed with 0 errors.
-- **Production Build**: `compile_applet` succeeded with clean bundles.
+## Real Gameplay Smoke Tests (Phase 3)
+Automated smoke test suite executed via `scripts/test_lernstudio_gameplay_qa.mjs`:
+1. **Educational Games Registry**: Exactly 34 educational games verified (11 Team/Group + 23 Solo Practice).
+2. **WebP Binary Verification**: All 36 `.webp` files verified on disk with valid `RIFF....WEBP` magic headers and realistic binary file sizes (>500 bytes).
+3. **Sound Library**: 21 educational sound effect keys verified with proactive user-gesture unlock.
+4. **German Voice Engine**: 7 standard German positive reinforcement outcomes verified.
+5. **Animation Intensity Modes**: `Full` (100% particles), `Reduced` (35% particles for battery/accessibility), `Off` (0% particles).
+6. **Settings Persistence**: Verified `localStorage` read/write roundtrip across mute toggle and animation levels.
+7. **Scoring & Streak Mechanics**: Verified consecutive correct answer multipliers, streak increments, and streak resets on incorrect answers without wiping accumulated score.
+- **Test Result**: **15 Passed, 0 Failed**.
 
 ---
 
-## 4. GitHub Actions CI Build Fix (#74 & #75)
-- **Root Cause Analysis**:
-  1. In commit `#74`, `ContactsManagerPlugin.java` contained conflicting Capacitor base plugin method signatures and an incompatible JSON type conversion from `JSONArray` to `JSArray`.
-  2. In commit `#75`, `@capacitor-community/text-to-speech` version 8.0.2 introduced an explicit dependency requirement on Android Gradle Plugin (AGP) `8.13.0`. The CI workflow (`build-apk.yml`) and `gradle-wrapper.properties` were pinned to Gradle `8.9`, which is incompatible with AGP 8.13.0 (AGP 8.13 requires Gradle 8.13+).
-- **Fixes Applied**:
-  1. Updated Gradle version from `8.9` to `8.13` in `.github/workflows/build-apk.yml` and `android/gradle/wrapper/gradle-wrapper.properties`.
-  2. Updated root `android/build.gradle` classpath to AGP `8.13.0`.
-  3. Added `compileOptions` targeting `JavaVersion.VERSION_21` in `android/app/build.gradle`.
-  4. Switched ProGuard rules to `proguard-android-optimize.txt`.
-  5. Refactored `ContactsManagerPlugin.java` phone array mapping to use a type-safe `phoneArrays` map.
-  6. Re-synced native assets and plugins via `npx cap sync android`.
+## Final Polish & Production Readiness (Phase 4)
+
+### 1. Visual Quality Improvements on Weakest Assets
+Five assets previously identified as having abstract or geometric motifs were overhauled with detailed, age-appropriate 3D cartoon illustrations:
+- **`game_stage.webp` (Klassisches Quiz)**: Upgraded from plain colored circles to a 3D Television Quiz Show stage featuring a radiant neon proscenium archway, contestant podium with golden star plaque, a master red buzzer button with golden glow, and floating framed question star-cards.
+- **`solo_sentence_stage.webp` (Satzbau-Solo)**: Upgraded from flat wooden blocks to a cozy author's writing study with a classic banker's desk lamp with an emerald glass shade casting a golden light cone, an open illuminated grammar manuscript with text lines, inkwell with a white-and-gold feather quill, and 3D tab-and-slot interlocking sentence blocks.
+- **`sorting_stage.webp` (Grammatik-Sortieren)**: Upgraded from simple colored rectangles to an enchanted sorting library with overhead glowing chutes, descending crystal orbs, and 3 distinct 3D category chests: Sapphire (Nomen/Book crest), Ruby (Verben/Lightning crest), and Emerald (Adjektive/Sparkle crest).
+- **`tower_architects_stage.webp` (Turmbau-Architekten)**: Upgraded from a wireframe line crane to a full 3D yellow lattice construction tower crane with cross-bracing, cabin, trolley hoist, suspension cables, an hoisted golden keystone block, stepped masonry foundation blocks, an architectural blueprint easel, and safety helmets.
+- **`sentence_builder_stage.webp` (Satzbau-Rallye)**: Upgraded to a dynamic team rally workshop featuring checkered overhead pennants, a mechanical word conveyor engine with roller rails, interlocking wheeled word carriages with magnetic couplers, and connecting electrical sparks.
+
+### 2. Nano Banana Status & Exact Blocker
+- **API Status**: Executed API diagnostic with `gemini-2.5-flash-image`. The Google Generative Language API returned **HTTP 429 Too Many Requests (`RESOURCE_EXHAUSTED: You exceeded your current quota`)**.
+- **Blocker**: Project quota exhaustion on the developer account API key.
+- **Safety**: The generator's quota-safe circuit breaker caught the 429 error and halted immediately without retrying or overwriting the 36 local offline assets. Zero false claims made: all 36 assets remain transparently registered as local offline fallbacks in `asset_provenance.json`.
+
+### 3. Native Platform Build Verification
+- **Electron (Linux x64)**: Executed `npx electron-builder --linux --dir --x64`. Bundled successfully into `release/linux-unpacked/`, producing the 184MB standalone executable `glueck` alongside `resources/app.asar` and Chromium runtime dependencies.
+- **Capacitor Android**: Executed `npx cap sync android`. Verified 10 Capacitor plugins (`@capacitor-community/text-to-speech`, `@capacitor/app`, `@capacitor/dialog`, `@capacitor/filesystem`, `@capacitor/haptics`, `@capacitor/local-notifications`, `@capacitor/preferences`, `@capacitor/share`, `@capacitor/status-bar`, `@capacitor/toast`). Web bundle, assets, and config copied cleanly to `android/app/src/main/assets/public` in 0.225s.
+- **Container Note**: Android Gradle compile requires an external Android SDK / Java JDK not bundled in the Linux container environment (`java: not found`), while the Capacitor project structure is fully synchronized and ready for Android Studio / `./gradlew assembleDebug`.
 
 ---
 
-## 5. Direct Phone Registration & Automated Group Creation Prompt
+## Physical Android Device Test Checklist
+1. **APK Installation**: Transfer debug APK (generated via `cd android && ./gradlew assembleDebug` or Android Studio) to device via USB ADB or direct download. Enable "Install Unknown Apps" if prompted.
+2. **Touch & Gesture Responsiveness**: Test touch targets across game cards, answer buttons, and stage controls. All touch targets meet the $\ge 44\text{px}$ mobile ergonomic standard.
+3. **Audio Context Unlock**: Tap any initial screen element. Confirm audio plays immediately without browser autoplay blocking, thanks to the proactive `pointerdown`/`touchstart` listeners.
+4. **German Voice Engine**: Verify speech synthesis with German language packs installed on the device (`Settings > System > Languages > Text-to-speech output > Google TTS German (de-DE)`). Confirm fallback audio chimes play if German voice data is not pre-installed.
+5. **Responsive Mobile Viewports**: Rotate between Portrait (360x800) and Landscape (800x360). Verify stage banners and answer grids do not overflow or clip.
+6. **Settings Persistence**: In `GameSettingsControls`, toggle sound to Mute and animation to `Reduced` or `Off`. Force close the app from Android Recent Apps, reopen it, and confirm settings remain persisted from `localStorage`/Preferences.
 
-### A. Saving Missing Contacts to Phone ("عايز اوبشن إني أسجلهم")
-- **Native Android Content Provider Integration**: Added `createContact`, `batchCreateContacts`, and `openContactEditor` in `ContactsManagerPlugin.java`. Contacts are saved directly to Android's `ContactsContract` using atomic batch operations with standard `StructuredName`, `Phone`, and `Note`.
-- **`ContactsUnificationModal.tsx` ("غير مسجل / Nicht im Tel")**:
-  - **Individual Actions**: Each missing student card now includes an inline edit pencil to customize the proposed name, a "تسجيل بالهاتف" (Save to Phone) button, and a "محرر الهاتف" (Open Native Editor) button.
-  - **Batch Operations**: Selection checkboxes with "تحديد الكل" / "إلغاء التحديد" and a prominent "تسجيل المحدد بالهاتف" button that creates all selected contacts in a single click with real-time progress indicators.
-  - **VCF Contact Card Export**: Teachers can export all or selected missing contacts as a `.vcf` vCard file.
+---
 
-### B. Automated Group Creation Verification & Prompt ("يسألني اضيف الكونتاكتس او لو موجودة بس محتاجة تتعدل يعرفني")
-- **`NewGroupContactsPromptModal.tsx`**: A dedicated modal that inspects student phone numbers against the device's contacts:
-  - If a student is **not in the phone**, it offers 1-click single or batch saving to the phone.
-  - If a student's contact **already exists on the phone but needs name standardization** (e.g., `"أم أحمد"` ➔ `"Ahmed's Mom - Klasse 5"`), it alerts the teacher and provides 1-click name standardization.
-  - If already standardized, it displays a confirmation badge.
-- **Manual Group Flow (`AddGroupModal.tsx`)**: When creating a group with a student and phone number, the app automatically checks the contacts and prompts the teacher to save or standardize.
-- **AI Prompt Import (`AiImportModal.tsx`)**: Upon completing an AI prompt import, the success screen displays a smart contacts audit card with student counts needing addition or editing, with a 1-click action to review, save, and update all contacts immediately.
+## Note: AI Prompt Generator & Content Import Fix
+
+- **Changes**:
+  - In `generateLernstudioPrompt` (`src/utils/lernstudioAiUtils.ts`), added strict RFC 8259 JSON syntax instructions forbidding backslash escaping of brackets (`\[`, `\]`) and braces (`\{`, `\}`), trailing commas, comments, and smart quotes.
+  - In `validateAndParseLernstudioJson`, implemented `safeParseLernstudioJsonString` to sanitize escaped brackets/braces (`\[` $\to$ `[`, `\]` $\to$ `]`, `\{` $\to$ `{`, `\}` $\to$ `}`), markdown fences, conversational wrappers, smart quotes, single-quote escapes, comments, and trailing commas without mutating valid JSON.
+  - Guaranteed fallback support for all 6 game modes (`sentence4Elements` 4-part tuple for Satzbau, auto-generated `missingLetterWord` for Glücksrad, `hasArticles` verification for Artikel-Sortierboxen, emoji defaults for Memory, and question parsing for Jeopardy & Team Race).
+- **Test Results**:
+  - Problematic JSON with `\[` and `\]`: Successfully parsed into title, items, and sentence elements.
+  - Valid JSON: Successfully parsed with zero mutations.
+  - Noisy LLM output (markdown fences, conversational text, comments, trailing commas): Successfully parsed.
+  - Fallbacks: Correctly auto-generated 4 sentence elements, missing-letter gaps, and article flags.
+  - Full codebase lint and compilation: Passed with 0 errors.
+

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
 import {
   ArrowLeft,
   RotateCcw,
@@ -44,6 +46,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
   const items = useMemo(() => set.items || [], [set.items]);
+  const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Game Settings
   const [gameMode, setGameMode] = useState<'teams' | 'vs_bot'>('teams');
@@ -159,7 +162,9 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
 
     if (isCorrect) {
       playLernstudioSound('correct');
-      speakGermanText(currentQ.item.german);
+      playGermanVoiceFeedback('correct');
+      triggerSparkles(isTeam1 ? 30 : 70, 45, isTeam1 ? '#f43f5e' : '#3b82f6');
+      triggerScorePopup('+15 🪢', isTeam1 ? 30 : 70, 35, 'positive');
 
       const streak = isTeam1 ? team1Streak + 1 : team2Streak + 1;
       if (isTeam1) {
@@ -193,6 +198,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
       });
     } else {
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('wrong');
       if (isTeam1) {
         setTeam1Streak(0);
       } else {
@@ -211,7 +217,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
       });
     }
 
-    // Auto advance to next turn after delay
+    // Auto advance to next turn after delay (allowing full German speech + grace period)
     setTimeout(() => {
       setPullAnimation(null);
       setIsAnswered(false);
@@ -226,13 +232,15 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
         setCurrentTurn((t) => (t === 1 ? 2 : 1));
         setQuestionIndex((q) => q + 1);
       }
-    }, 1800);
+    }, isCorrect ? 2000 : 2800);
   };
 
   const triggerGameOver = (victor: 1 | 2) => {
     setIsGameOver(true);
     setWinner(victor);
-    playLernstudioSound('powerup_star');
+    playLernstudioSound('victory');
+    playGermanVoiceFeedback('victory');
+    triggerCelebration(victor === 1 ? `فاز ${team1Name}! 🪢` : `فاز ${gameMode === 'vs_bot' ? 'الروبوت الذكي 🤖' : team2Name}! 🪢`);
   };
 
   const finishGameByPosition = () => {
@@ -244,7 +252,9 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
     } else {
       setWinner('draw');
     }
-    playLernstudioSound('powerup_star');
+    playLernstudioSound('victory');
+    playGermanVoiceFeedback('victory');
+    triggerCelebration('نهاية شد الحبل! 🪢');
   };
 
   const restartGame = () => {
@@ -281,9 +291,10 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
 
   return (
     <div
-      className="min-h-[85vh] p-3 sm:p-5 rounded-3xl space-y-4 select-none transition-all bg-background text-text-main"
+      className="min-h-[85vh] p-3 sm:p-5 rounded-3xl space-y-4 select-none transition-all bg-background text-text-main relative overflow-hidden"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
+      <EffectsOverlay />
       {/* Top Header */}
       <div className="bg-surface p-3.5 sm:p-4 rounded-2xl border border-surface-border shadow-2xs flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -311,6 +322,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
 
         {/* Mode Selector and Controls */}
         <div className="flex items-center gap-2 flex-wrap">
+          <SettingsBar />
           <div className="flex items-center bg-surface-hover p-1 rounded-xl border border-surface-border text-xs font-bold">
             <button
               type="button"
@@ -350,6 +362,13 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
           </button>
         </div>
       </div>
+
+      <GameStageBanner
+        mode="tug_of_war"
+        title={t.tugOfWarTitle}
+        subtitle={`${displayTitle} • اسحب الحبل بقوة عبر الإجابات الصحيحة!`}
+        badgeText={`الجولة ${roundNumber}/${maxRounds}`}
+      />
 
       {/* Scoreboard Bar */}
       <div className="grid grid-cols-2 gap-3">
@@ -538,7 +557,11 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
               {currentQ?.item?.german && (
                 <button
                   type="button"
-                  onClick={() => speakGermanText(currentQ.item.german)}
+                  onClick={() => {
+                    const cleanNoun = currentQ.item.german.replace(/^(der|die|das)\s+/i, '').trim();
+                    const textToSpeak = currentQ.type === 'article' && !isAnswered ? cleanNoun : currentQ.item.german;
+                    speakGermanText(textToSpeak);
+                  }}
                   className="px-3 py-1 bg-surface hover:bg-surface-border text-primary rounded-xl border border-surface-border text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
                 >
                   <Volume2 className="w-3.5 h-3.5" />
@@ -553,7 +576,21 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
                 {currentQ?.item?.emoji || '🇩🇪'}
               </div>
               <h2 className="text-xl sm:text-2xl font-black text-text-main font-mono" dir="ltr">
-                {currentQ?.item?.german}
+                {currentQ?.type === 'article' ? (
+                  isAnswered ? (
+                    <span>
+                      <span className="text-primary font-bold underline decoration-2 underline-offset-4">{currentQ?.correctAnswer}</span>{' '}
+                      {currentQ?.item?.german?.replace(/^(der|die|das)\s+/i, '').trim()}
+                    </span>
+                  ) : (
+                    <span>
+                      <span className="text-primary font-bold opacity-60 border-b-2 border-primary border-dashed px-1 inline-block min-w-[32px]">___</span>{' '}
+                      {currentQ?.item?.german?.replace(/^(der|die|das)\s+/i, '').trim()}
+                    </span>
+                  )
+                ) : (
+                  currentQ?.item?.german
+                )}
               </h2>
               <p className="text-xs sm:text-sm font-bold text-text-muted">
                 {currentQ?.prompt}
@@ -617,8 +654,8 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
         ) : (
           /* Game Over Victory Screen */
           <div className="max-w-md mx-auto text-center p-6 bg-surface rounded-3xl border border-surface-border space-y-5 shadow-lg">
-            <div className="w-16 h-16 rounded-3xl bg-amber-500/10 text-amber-500 border border-amber-500/20 mx-auto flex items-center justify-center text-4xl shadow-inner">
-              🏆
+            <div className="flex justify-center">
+              <SharedVictoryTrophyArt className="w-28 h-28 rounded-3xl shadow-xl border-2 border-amber-400/50" />
             </div>
 
             <div className="space-y-1">

@@ -12,7 +12,6 @@ import {
   isStudentPhoneIdenticalToParent
 } from '../utils/contactsStandardizer';
 import { normalizeSearchText } from '../utils/nameUtils';
-import { getStudentCode } from '../utils/studentCodeUtils';
 
 interface StudentPhoneSyncModalProps {
   isOpen: boolean;
@@ -80,9 +79,8 @@ export const StudentPhoneSyncModal: React.FC<StudentPhoneSyncModalProps> = ({
       const nameMatch = normalizeSearchText(student.name).includes(term);
       const certMatch = normalizeSearchText(student.certificateName).includes(term);
       const parentMatch = normalizeSearchText(student.parentName).includes(term);
-      const codeMatch = normalizeSearchText(getStudentCode(student)).includes(term);
       const phoneMatch = normalizeSearchText(currentPhone).includes(term);
-      if (!nameMatch && !certMatch && !parentMatch && !codeMatch && !phoneMatch) {
+      if (!nameMatch && !certMatch && !parentMatch && !phoneMatch) {
         return false;
       }
     }
@@ -248,7 +246,7 @@ export const StudentPhoneSyncModal: React.FC<StudentPhoneSyncModalProps> = ({
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder={_t('بحث باسم الطالب، الكود، أو الجريد...', 'Search student name, code, or grade...', 'Schüler suchen...')}
+                placeholder={_t('بحث باسم الطالب أو المرحلة الدراسية...', 'Search student name or grade...', 'Schüler suchen...')}
                 className="w-full pl-8 pr-2.5 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
               {searchTerm && (

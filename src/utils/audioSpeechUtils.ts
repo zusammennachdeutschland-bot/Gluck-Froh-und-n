@@ -163,6 +163,117 @@ export const speakGermanText = async (text: string, rate: number = 0.85) => {
 };
 
 /**
+ * Pronounces German text and returns a Promise that resolves ONLY when speaking is complete.
+ * Enables smooth pacing, waiting animations, and prevents speech collisions with upcoming questions.
+ */
+export const speakGermanTextAndWait = (text: string, rate: number = 0.85): Promise<void> => {
+  return new Promise(async (resolve) => {
+    if (!text || typeof window === 'undefined') {
+      resolve();
+      return;
+    }
+
+    const cleanText = text.trim();
+    if (!cleanText) {
+      resolve();
+      return;
+    }
+
+    let isDone = false;
+    const finish = () => {
+      if (!isDone) {
+        isDone = true;
+        resolve();
+      }
+    };
+
+    // Fallback safety timeout based on text length (~130ms per char + 600ms buffer)
+    const timeoutMs = Math.min(Math.max(cleanText.length * 130 + 600, 2000), 6500);
+    const safetyTimer = setTimeout(() => {
+      finish();
+    }, timeoutMs);
+
+    // Stop prior speech to avoid overlap
+    await stopGermanSpeech();
+
+    const isCapacitorNative =
+      (window as any).Capacitor?.isNativePlatform?.() ||
+      window.location.protocol === 'capacitor:' ||
+      window.location.protocol === 'file:';
+
+    // 1. Native Capacitor TTS (already awaits completion)
+    if (isCapacitorNative || isNativeTtsAvailable !== false) {
+      try {
+        await TextToSpeech.speak({
+          text: cleanText,
+          lang: 'de-DE',
+          rate: Math.min(Math.max(rate, 0.4), 1.5),
+          pitch: 1.0,
+          volume: 1.0,
+          category: 'ambient',
+        });
+        isNativeTtsAvailable = true;
+        clearTimeout(safetyTimer);
+        finish();
+        return;
+      } catch (err: any) {
+        console.warn('Native Capacitor TextToSpeech attempt failed, trying Web Speech API:', err);
+        if (isCapacitorNative) {
+          isNativeTtsAvailable = false;
+        }
+      }
+    }
+
+    // 2. Web Speech API with onend / onerror event listeners
+    if ('speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.resume();
+
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.lang = 'de-DE';
+        utterance.rate = Math.min(Math.max(rate, 0.4), 1.5);
+        utterance.volume = 1.0;
+
+        if (cachedGermanVoice) {
+          utterance.voice = cachedGermanVoice;
+        } else {
+          const voices = window.speechSynthesis.getVoices();
+          const foundVoice =
+            voices.find((v) => v.lang === 'de-DE' || v.lang === 'de_DE') ||
+            voices.find((v) => v.lang.startsWith('de'));
+          if (foundVoice) {
+            cachedGermanVoice = foundVoice;
+            utterance.voice = foundVoice;
+          }
+        }
+
+        utterance.onend = () => {
+          clearTimeout(safetyTimer);
+          finish();
+        };
+
+        utterance.onerror = (e) => {
+          console.warn('SpeechSynthesis error:', e);
+          clearTimeout(safetyTimer);
+          finish();
+        };
+
+        window.speechSynthesis.speak(utterance);
+        return;
+      } catch (err) {
+        console.warn('Web SpeechSynthesis invocation failed:', err);
+        clearTimeout(safetyTimer);
+        finish();
+        return;
+      }
+    }
+
+    clearTimeout(safetyTimer);
+    finish();
+  });
+};
+
+/**
  * Helper function to pronounce German text at a slower speed (0.6x)
  */
 export const speakGermanTextSlow = (text: string) => {

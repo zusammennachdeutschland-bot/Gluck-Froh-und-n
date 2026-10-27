@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioItem, LernstudioExerciseType, LernstudioTheme } from '../../types/lernstudio';
 import { CheckCircle2, XCircle, RotateCcw, ArrowRight, Award, Trophy, HelpCircle, Eye, RefreshCw, ThumbsUp } from 'lucide-react';
-import { playLernstudioSound } from '../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../utils/lernstudioAudioUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../utils/lernstudioTranslations';
+import { GameStageBanner, SharedVictoryTrophyArt } from './GameArtAssets';
+import { useGameEffects } from './effects/GameEffectsOverlay';
 
 interface Props {
   set: LernstudioSet;
@@ -13,6 +15,7 @@ interface Props {
 
 export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, language = 'ar', onBack }) => {
   const t = getLernstudioTranslations(language);
+  const { triggerSparkles, triggerFloatingText, triggerConfetti } = useGameEffects();
 
   const [selectedGameType, setSelectedGameType] = useState<LernstudioExerciseType>('multiple_choice');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -88,7 +91,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       setCurrentIndex((prev) => prev + 1);
     } else {
       setIsCompleted(true);
-      /* confetti removed */
+      playLernstudioSound('fanfare_victory');
+      playGermanVoiceFeedback('gewonnen');
+      triggerConfetti();
     }
   };
 
@@ -111,7 +116,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       setStreak((st) => st + 1);
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
       playLernstudioSound('correct');
-      /* confetti removed */
+      playGermanVoiceFeedback('richtig');
+      triggerSparkles(50, 50, '#10b981');
+      triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
       setTimeout(() => {
         handleNextQuestion();
       }, 900);
@@ -122,6 +129,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         message: `${t.wrongAnswerMsg} (حاول مرة أخرى / Try again)`
       });
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
       setTimeout(() => {
         setFeedback(null);
         setSelectedOptionIndex(null);
@@ -142,7 +150,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       setStreak((st) => st + 1);
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
       playLernstudioSound('correct');
-      /* confetti removed */
+      playGermanVoiceFeedback('super');
+      triggerSparkles(50, 50, '#10b981');
+      triggerFloatingText('+10 ★ Super!', 50, 40, '#fbbf24');
       setTimeout(() => {
         handleNextQuestion();
       }, 900);
@@ -153,6 +163,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         message: `${t.wrongAnswerMsg} (حاول مرة أخرى)`
       });
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
       setTimeout(() => {
         setFeedback(null);
       }, 1000);
@@ -172,7 +183,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       setStreak((st) => st + 1);
       setFeedback({ isCorrect: true, message: t.perfectSentenceMsg });
       playLernstudioSound('correct');
-      /* confetti removed */
+      playGermanVoiceFeedback('fantastisch');
+      triggerSparkles(50, 50, '#10b981');
+      triggerFloatingText('+15 ★ Fantastisch!', 50, 40, '#fbbf24');
       setTimeout(() => {
         handleNextQuestion();
       }, 900);
@@ -184,6 +197,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         showSolution: false
       });
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
       setTimeout(() => {
         setFeedback(null);
       }, 1200);
@@ -203,7 +217,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       setStreak((st) => st + 1);
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
       playLernstudioSound('correct');
-      /* confetti removed */
+      playGermanVoiceFeedback('richtig');
+      triggerSparkles(50, 50, '#10b981');
+      triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
       setTimeout(() => {
         handleNextQuestion();
       }, 900);
@@ -214,6 +230,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         message: `${t.wrongAnswerMsg} (حاول مرة أخرى)`
       });
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
       setTimeout(() => {
         setFeedback(null);
       }, 1000);
@@ -231,7 +248,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       setStreak((st) => st + 1);
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
       playLernstudioSound('correct');
-      /* confetti removed */
+      playGermanVoiceFeedback('weiter_so');
+      triggerSparkles(50, 50, '#10b981');
+      triggerFloatingText('+10 ★ Weiter so!', 50, 40, '#fbbf24');
       setTimeout(() => {
         handleNextQuestion();
       }, 900);
@@ -242,6 +261,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         message: `${t.wrongAnswerMsg} (حاول مرة أخرى)`
       });
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
       setTimeout(() => {
         setFeedback(null);
         setScrambledSelected([]);
@@ -267,6 +287,13 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
 
   return (
     <div className="p-4 sm:p-6 rounded-3xl space-y-5 transition-all bg-background text-text-main" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <GameStageBanner
+        gameId="game"
+        title={t.comprehensivePracticeTitle}
+        subtitle={`${getLocalizedSetTitle(set, language)} • ${items.length} ${t.vocabularyCount}`}
+        emoji="🎯"
+      />
+
       {/* Header Bar */}
       <div className="flex items-center justify-between gap-3 flex-wrap bg-surface/80 backdrop-blur-md p-3 sm:p-4 rounded-2xl border border-surface-border shadow-xs">
         <div className="flex items-center gap-2">
@@ -360,7 +387,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       {/* Game Area */}
       {isCompleted ? (
         <div className={`p-8 rounded-3xl text-center space-y-5 ${activeTheme.cardBg}`}>
-          <Trophy className="w-16 h-16 text-amber-500 mx-auto" />
+          <div className="w-24 h-24 rounded-2xl overflow-hidden border border-amber-500/40 mx-auto shadow-lg">
+            <SharedVictoryTrophyArt className="w-full h-full object-cover" />
+          </div>
           <h2 className="text-2xl font-black text-text-main">{t.completedGameTitle}</h2>
           <p className="text-sm text-text-muted">
             {t.completedGameDesc} (<strong className="text-primary font-black">{score} {t.pointsLabel}</strong>)

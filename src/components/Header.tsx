@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { Lesson } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
 import { isPendingStatus } from '../utils/lessonUtils';
-import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
+import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
 import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2, SlidersHorizontal } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -243,6 +243,11 @@ export const Header: React.FC = () => {
         ) {
           const grp = groups.find(g => g.id === l.groupId && !g.deleted);
           if (grp) {
+            if (grp.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly') {
+              if (!isDateMatchingGroupRecurrence(grp.scheduleRecurrence, l.date)) {
+                return false;
+              }
+            }
             const activeSlots = getGroupScheduleSlots(grp);
             if (activeSlots.length > 0) {
               const lDate = parseLocalDate(l.date);

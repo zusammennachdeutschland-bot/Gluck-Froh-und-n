@@ -22,7 +22,7 @@ import { App as CapacitorApp } from '@capacitor/app';
 import { storage } from '../services/storageService';
 import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
-import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
+import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, isGroupPerLesson } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
@@ -66,7 +66,6 @@ export const DEFAULT_BOTTOM_NAV_ORDER = [
   'home',
   'schedule',
   'students',
-  'parentPortal',
   'payments',
   'lernstudio',
   'hod',
@@ -98,8 +97,8 @@ interface AppContextType {
   setAccentColor: (color: AccentColor) => void;
   t: (key: TranslationKey) => string;
   _t: (ar: string, en: string, de?: string) => string;
-  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio' | 'parentPortal';
-  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio' | 'parentPortal') => void;
+  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio';
+  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio') => void;
 
   // Lernstudio Sets
   lernstudioSets: LernstudioSet[];
@@ -620,7 +619,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('dl_quick_todos', todos);
   }, [todos]);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'schedule' | 'students' | 'history' | 'payments' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod'>('home');
+  const [activeTab, setActiveTabState] = useState<'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio'>('home');
+
+  const setActiveTab = useCallback((tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio') => {
+    const validTabs = ['home', 'schedule', 'students', 'history', 'payments', 'finance', 'reports', 'settings', 'freeTime', 'certificates', 'schoolSchedule', 'hod', 'lernstudio'];
+    if (validTabs.includes(tab)) {
+      setActiveTabState(tab);
+    } else {
+      setActiveTabState('home');
+    }
+  }, []);
 
   const [profile, setProfile] = useState<TeacherProfile>(() => {
     const saved = initialData['dl_profile'];
@@ -1947,9 +1955,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
 
   const setBottomNavOrder = (newOrder: string[]) => {
-    setBottomNavOrderState(newOrder);
+    const sanitizedOrder = (newOrder || []).filter(id => DEFAULT_BOTTOM_NAV_ORDER.includes(id));
+    setBottomNavOrderState(sanitizedOrder);
     try {
-      localStorage.setItem('dl_mobile_bottom_nav_order', JSON.stringify(newOrder));
+      localStorage.setItem('dl_mobile_bottom_nav_order', JSON.stringify(sanitizedOrder));
     } catch {}
   };
 
@@ -2759,9 +2768,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const oldSlotKeys = new Set(oldSlots.map(normalizeSlotKey));
     const newSlotKeys = new Set(newSlots.map(normalizeSlotKey));
 
+    const recurrenceChanged = (existingGroup.scheduleRecurrence || 'weekly') !== (updatedGroup.scheduleRecurrence || 'weekly');
     const scheduleChanged = (
       oldSlotKeys.size !== newSlotKeys.size ||
-      [...oldSlotKeys].some(k => !newSlotKeys.has(k))
+      [...oldSlotKeys].some(k => !newSlotKeys.has(k)) ||
+      recurrenceChanged
     );
 
     const todayStr = formatLocalDate();
@@ -2800,6 +2811,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         d.setDate(today.getDate() + dayOffset);
         const dayNum = d.getDay();
 
+        // Alternating week check (Week A vs Week B)
+        if (!isDateMatchingGroupRecurrence(updatedGroup.scheduleRecurrence, d)) {
+          continue;
+        }
+
         const matchingSlot = newSlots.find(s => getDayNumber(s.day) === dayNum);
         if (matchingSlot) {
           const dateStr = formatLocalDate(d);
@@ -2832,7 +2848,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               amountDue: perSessionPrice,
               amountPaid: 0,
               meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink) : undefined,
-              locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || 'Cairo Center') : undefined
+              locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || 'Cairo Center') : undefined,
+              scheduleRecurrence: updatedGroup.scheduleRecurrence || 'weekly',
+              biweeklyWeek: getAlternatingWeek(d)
             } as Lesson));
           }
         }
@@ -2859,6 +2877,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           title: isDefaultTitle ? `${updatedGroup.name} Lektion` : l.title,
           grade: updatedGroup.grade || l.grade,
           type: updatedGroup.type || l.type,
+          scheduleRecurrence: updatedGroup.scheduleRecurrence || 'weekly',
+          biweeklyWeek: l.date ? getAlternatingWeek(l.date) : l.biweeklyWeek,
           meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink || l.meetingLink) : undefined,
           locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || l.locationAddress) : undefined,
           durationMinutes: updatedGroup.lessonDurationMinutes || l.durationMinutes || 60,
@@ -2867,12 +2887,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         } as Lesson);
       });
 
-      // Step B: If schedule slots changed, cleanly remove stale future scheduled sessions
+      // Step B: If schedule slots or recurrence changed, cleanly remove stale future scheduled sessions
       if (scheduleChanged) {
         updatedLessons = updatedLessons.filter(l => {
           if (l.groupId !== id) return true;
           if (isHistoricalOrLocked(l)) return true;
-          return false;
+          // Prune future scheduled lesson that doesn't match new alternating week recurrence
+          if (updatedGroup.scheduleRecurrence && updatedGroup.scheduleRecurrence !== 'weekly') {
+            if (!isDateMatchingGroupRecurrence(updatedGroup.scheduleRecurrence, l.date)) {
+              return false;
+            }
+          }
+          // Also check slot day and time
+          const dayNum = parseLocalDate(l.date).getDay();
+          const matchesSlot = newSlots.some(s => getDayNumber(s.day) === dayNum && s.time === l.time);
+          if (!matchesSlot) return false;
+
+          return true;
         });
 
         if (newGeneratedLessons.length > 0) {
@@ -4773,7 +4804,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             ? targetGroup.pricePerSession
             : Math.round((targetGroup.monthlyPackagePrice || 1200) / (targetGroup.sessionCount || 4));
 
-          const dummyLesson = { id: 'dummy', date: dateStr, time: sessionTime, durationMinutes: targetGroup.lessonDurationMinutes || 60 };
+          const dummyLesson = { 
+            id: 'dummy', 
+            date: dateStr, 
+            time: sessionTime, 
+            durationMinutes: targetGroup.lessonDurationMinutes || 60,
+            groupId: targetGroup.id,
+            scheduleRecurrence: targetGroup.scheduleRecurrence || 'weekly'
+          };
           
           // Conflict check against other distinct groups
           const hasConflict = activeLessons.some(l => 
@@ -4808,15 +4846,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
     }
 
-    if (newLessons.length > 0) {
-      updateFullLessonsStorage(prev => {
-        const existingIds = new Set(prev.map(l => l.id));
-        const deduplicated = newLessons.filter(
-          nl => !existingIds.has(nl.id) && !prev.some(l => !l.deleted && l.groupId === nl.groupId && l.date === nl.date && l.time === nl.time)
-        );
-        return deduplicated.length > 0 ? [...prev, ...deduplicated] : prev;
-      });
-    }
+    const todayIso = formatLocalDate();
+    updateFullLessonsStorage(prev => {
+      // Clean up stale future scheduled lessons of this group that don't match the new alternating week recurrence
+      let cleanedPrev = prev;
+      if (targetGroup.scheduleRecurrence && targetGroup.scheduleRecurrence !== 'weekly') {
+        cleanedPrev = prev.filter(l => {
+          if (l.groupId !== groupId) return true;
+          if (l.deleted || l.status !== 'scheduled' || l.date < todayIso) return true;
+          if (l.report?.attendanceStatus || l.report?.teacherNotes || (l.amountPaid && l.amountPaid > 0)) return true;
+          return isDateMatchingGroupRecurrence(targetGroup.scheduleRecurrence, l.date);
+        });
+      }
+
+      if (newLessons.length === 0) {
+        return cleanedPrev.length !== prev.length ? cleanedPrev : prev;
+      }
+
+      const existingIds = new Set(cleanedPrev.map(l => l.id));
+      const deduplicated = newLessons.filter(
+        nl => !existingIds.has(nl.id) && !cleanedPrev.some(l => !l.deleted && l.groupId === nl.groupId && l.date === nl.date && l.time === nl.time)
+      );
+      return deduplicated.length > 0 ? [...cleanedPrev, ...deduplicated] : (cleanedPrev.length !== prev.length ? cleanedPrev : prev);
+    });
   };
 
   // Payments

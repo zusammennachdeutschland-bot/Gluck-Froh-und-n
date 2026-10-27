@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioItem, LernstudioGameMode } from '../../types/lernstudio';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../utils/lernstudioTranslations';
-import { speakGermanText, stopGermanSpeech } from '../../utils/audioSpeechUtils';
+import { speakGermanText, speakGermanTextAndWait, stopGermanSpeech } from '../../utils/audioSpeechUtils';
 import {
   X,
   Volume2,
+  VolumeX,
   ChevronRight,
   ChevronLeft,
   BookOpen,
@@ -70,12 +71,14 @@ export const LernstudioTeachModal: React.FC<Props> = ({
   const [completedStages, setCompletedStages] = useState<number[]>([]);
   const [stars, setStars] = useState<number>(0);
   const [shuffleKey, setShuffleKey] = useState<number>(0);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
   // Exercise interaction state
   const [selectedAnswer, setSelectedAnswer] = useState<string | boolean | null>(null);
   const [isAnswerSubmitted, setIsAnswerSubmitted] = useState<boolean>(false);
   const [isCorrectAnswer, setIsCorrectAnswer] = useState<boolean | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string>('');
+  const [isSpeakingFeedback, setIsSpeakingFeedback] = useState<boolean>(false);
 
   const clearAutoAdvanceTimer = () => {
     if (autoAdvanceTimerRef.current) {
@@ -84,22 +87,24 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     }
   };
 
-  // Load progress from localStorage
+  // Always reset to Stage 1 and start fresh from the beginning when modal opens
   useEffect(() => {
-    if (!isOpen || !set) return;
+    if (!isOpen) return;
+    setCurrentStage(1);
+    setStageQuestionIndex(0);
+    setCompletedStages([]);
+    setStars(0);
+    setSelectedAnswer(null);
+    setIsAnswerSubmitted(false);
+    setIsCorrectAnswer(null);
+    setFeedbackMessage('');
+    clearAutoAdvanceTimer();
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed.stage === 'number') {
-          setCurrentStage(Math.min(Math.max(parsed.stage, 1), 5));
-          setStageQuestionIndex(parsed.itemIndex || 0);
-          setCompletedStages(parsed.completedStages || []);
-          setStars(parsed.stars || 0);
-        }
+      if (set?.id) {
+        localStorage.removeItem(`lernstudio_teach_progress_${set.id}`);
       }
-    } catch (e) {
-      console.warn('Could not load teach progress', e);
+    } catch {
+      // storage cleanup
     }
   }, [isOpen, set?.id]);
 
@@ -107,6 +112,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
   useEffect(() => {
     return () => {
       clearAutoAdvanceTimer();
+      stopGermanSpeech();
     };
   }, []);
 
@@ -152,6 +158,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
 
   // German Speech Synthesis (Android & Mobile Cross-Platform)
   const handleSpeakGerman = (text: string) => {
+    if (!soundEnabled) return;
     speakGermanText(text);
   };
 
@@ -205,7 +212,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
 
   // Auto-speak word whenever item or question changes across teach stages
   useEffect(() => {
-    if (!isOpen || !items || items.length === 0) return;
+    if (!isOpen || !items || items.length === 0 || !soundEnabled) return;
 
     let textToSpeak = '';
     if (currentStage === 1 && items[stageQuestionIndex]) {
@@ -227,7 +234,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
         stopGermanSpeech();
       };
     }
-  }, [currentStage, stageQuestionIndex, items, isOpen, stage2Questions, stage3Questions, stage4Questions]);
+  }, [currentStage, stageQuestionIndex, items, isOpen, soundEnabled, stage2Questions, stage3Questions, stage4Questions]);
 
   // Reset answer state when question index or stage changes
   const resetAnswerState = () => {
@@ -236,6 +243,30 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     setIsAnswerSubmitted(false);
     setIsCorrectAnswer(null);
     setFeedbackMessage('');
+    setIsSpeakingFeedback(false);
+  };
+
+  // Speaks the correct German answer, shows waiting state, waits a brief moment after speech ends, then brings the next question
+  const handleCorrectAnswerAdvance = async (targetGerman: string, advanceCallback: () => void) => {
+    setIsSpeakingFeedback(true);
+    clearAutoAdvanceTimer();
+
+    if (soundEnabled) {
+      try {
+        // 1. Pronounce the correct German word and await speech completion
+        await speakGermanTextAndWait(targetGerman, 0.85);
+      } catch (err) {
+        console.warn('Speech wait error:', err);
+      }
+    }
+
+    // 2. Wait a pleasant pause after speech ends ("يستنى شوية")
+    autoAdvanceTimerRef.current = setTimeout(() => {
+      setIsSpeakingFeedback(false);
+      // 3. Advance to the next question ("يجيب إللي بعده")
+      advanceCallback();
+      // 4. Next question's useEffect will automatically trigger and pronounce the next word if sound is enabled
+    }, soundEnabled ? 600 : 350);
   };
 
   // Stage Transitions
@@ -296,13 +327,8 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     if (correct) {
       setStars((prev) => prev + 1);
       setFeedbackMessage('ممتاز! إجابة صحيحة 🌟');
-      handleSpeakGerman(currentQ.targetItem.german);
-
-      // Auto advance immediately after short success feedback
-      clearAutoAdvanceTimer();
-      autoAdvanceTimerRef.current = setTimeout(() => {
-        handleStage2NextQuestion();
-      }, 800);
+      // Speak correct word, wait with visual effect, then advance & pronounce next
+      handleCorrectAnswerAdvance(currentQ.targetItem.german, handleStage2NextQuestion);
     } else {
       setFeedbackMessage(
         `إجابة خاطئة! الإجابة الصحيحة هي: الكلمة ${
@@ -338,13 +364,8 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     if (correct) {
       setStars((prev) => prev + 1);
       setFeedbackMessage('رائع جداً! إجابة صحيحة 👏');
-      handleSpeakGerman(currentQ.targetItem.german);
-
-      // Auto advance immediately after short success feedback
-      clearAutoAdvanceTimer();
-      autoAdvanceTimerRef.current = setTimeout(() => {
-        handleStage3NextQuestion();
-      }, 800);
+      // Speak correct word, wait with visual effect, then advance & pronounce next
+      handleCorrectAnswerAdvance(currentQ.targetItem.german, handleStage3NextQuestion);
     } else {
       setFeedbackMessage(
         `اختيار خاطئ! الاختيار الصحيح هو: ${currentQ.targetItem.german} (${currentQ.targetItem.arabic})`
@@ -378,13 +399,8 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     if (correct) {
       setStars((prev) => prev + 1);
       setFeedbackMessage('بطل! إجابة صحيحة من بين كل الكلمات 🌟');
-      handleSpeakGerman(currentQ.targetItem.german);
-
-      // Auto advance immediately after short success feedback
-      clearAutoAdvanceTimer();
-      autoAdvanceTimerRef.current = setTimeout(() => {
-        handleStage4NextQuestion();
-      }, 800);
+      // Speak correct word, wait with visual effect, then advance & pronounce next
+      handleCorrectAnswerAdvance(currentQ.targetItem.german, handleStage4NextQuestion);
     } else {
       setFeedbackMessage(
         `حاول مرة أخرى! الإجابة الصحيحة هي: ${currentQ.targetItem.german} (${currentQ.targetItem.arabic})`
@@ -449,6 +465,26 @@ export const LernstudioTeachModal: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setSoundEnabled((prev) => {
+                  const next = !prev;
+                  if (!next) {
+                    stopGermanSpeech();
+                  }
+                  return next;
+                });
+              }}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-center ${
+                soundEnabled
+                  ? 'text-primary bg-primary/10 hover:bg-primary/20'
+                  : 'text-red-500 bg-red-500/10 hover:bg-red-500/20'
+              }`}
+              title={soundEnabled ? 'كتم الصوت تماماً والخيارات الصوتية' : 'تفعيل النطق والصوت'}
+            >
+              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -651,7 +687,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                   </button>
                 </div>
 
-                {/* Feedback Message */}
+                {/* Feedback Message with Waiting Effect */}
                 {isAnswerSubmitted && (
                   <div
                     className={`p-3.5 rounded-2xl border text-xs sm:text-sm font-bold animate-fade-in ${
@@ -660,7 +696,25 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                         : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400'
                     }`}
                   >
-                    {feedbackMessage}
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span>{feedbackMessage}</span>
+                      {isCorrectAnswer && (
+                        <span className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-500/30 shadow-2xs">
+                          <Volume2 className="w-3.5 h-3.5 animate-bounce text-emerald-500" />
+                          <span>{isSpeakingFeedback ? 'استمع لنطق الكلمة...' : 'الانتقال للسؤال التالي...'}</span>
+                          <span className="inline-flex items-center gap-0.5 mr-1">
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                            <span className="w-1 h-3.5 bg-emerald-500 rounded-full animate-pulse [animation-delay:150ms]" />
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse [animation-delay:300ms]" />
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                    {isCorrectAnswer && (
+                      <div className="w-full bg-emerald-500/20 rounded-full h-1 mt-2.5 overflow-hidden">
+                        <div className="h-full bg-emerald-500 rounded-full w-full animate-pulse" />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -730,7 +784,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                   })}
                 </div>
 
-                {/* Feedback Message */}
+                {/* Feedback Message with Waiting Effect */}
                 {isAnswerSubmitted && (
                   <div
                     className={`p-3.5 rounded-2xl border text-xs sm:text-sm font-bold animate-fade-in ${
@@ -739,7 +793,25 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                         : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400'
                     }`}
                   >
-                    {feedbackMessage}
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span>{feedbackMessage}</span>
+                      {isCorrectAnswer && (
+                        <span className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-500/30 shadow-2xs">
+                          <Volume2 className="w-3.5 h-3.5 animate-bounce text-emerald-500" />
+                          <span>{isSpeakingFeedback ? 'استمع لنطق الكلمة...' : 'الانتقال للسؤال التالي...'}</span>
+                          <span className="inline-flex items-center gap-0.5 mr-1">
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                            <span className="w-1 h-3.5 bg-emerald-500 rounded-full animate-pulse [animation-delay:150ms]" />
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse [animation-delay:300ms]" />
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                    {isCorrectAnswer && (
+                      <div className="w-full bg-emerald-500/20 rounded-full h-1 mt-2.5 overflow-hidden">
+                        <div className="h-full bg-emerald-500 rounded-full w-full animate-pulse" />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -799,16 +871,34 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                   })}
                 </div>
 
-                {/* Feedback Message */}
+                {/* Feedback Message with Waiting Effect */}
                 {isAnswerSubmitted && (
                   <div
-                    className={`p-3 rounded-xl border text-xs font-bold animate-fade-in ${
+                    className={`p-3.5 rounded-2xl border text-xs sm:text-sm font-bold animate-fade-in ${
                       isCorrectAnswer
                         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
                         : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400'
                     }`}
                   >
-                    {feedbackMessage}
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span>{feedbackMessage}</span>
+                      {isCorrectAnswer && (
+                        <span className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-500/30 shadow-2xs">
+                          <Volume2 className="w-3.5 h-3.5 animate-bounce text-emerald-500" />
+                          <span>{isSpeakingFeedback ? 'استمع لنطق الكلمة...' : 'الانتقال للسؤال التالي...'}</span>
+                          <span className="inline-flex items-center gap-0.5 mr-1">
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                            <span className="w-1 h-3.5 bg-emerald-500 rounded-full animate-pulse [animation-delay:150ms]" />
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse [animation-delay:300ms]" />
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                    {isCorrectAnswer && (
+                      <div className="w-full bg-emerald-500/20 rounded-full h-1 mt-2.5 overflow-hidden">
+                        <div className="h-full bg-emerald-500 rounded-full w-full animate-pulse" />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

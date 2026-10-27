@@ -83,8 +83,7 @@ export default defineConfig(() => {
       minify: 'esbuild' as const,
       rollupOptions: {
         input: {
-          main: path.resolve(__dirname, 'index.html'),
-          portal: path.resolve(__dirname, 'parent-portal/index.html')
+          main: path.resolve(__dirname, 'index.html')
         }
       }
     },

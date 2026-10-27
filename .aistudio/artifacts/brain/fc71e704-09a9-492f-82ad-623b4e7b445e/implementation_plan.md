@@ -1,262 +1,139 @@
-# Glück App — Comprehensive UI/UX Button Audit & Optimization Plan
+# Glück Lernstudio — Complete Nano Banana Game Art, Audio & Effects Plan
 
-## Executive Summary
-This document delivers an exhaustive, codebase-wide UI/UX audit and optimization plan for the Glück teacher and student management application. The audit specifically inspects buttons, action placements, duplicate workflows, inconsistent dimensions, redundant controls, and screen hierarchy across all 12 major modules. It establishes a unified, accessible button design system and provides a phased, non-destructive implementation roadmap.
+Upgrade all 34 educational games in Glück Lernstudio (11 group/team contests and 23 solo practice games) with custom 3D cartoon illustrations generated via Nano Banana (`generate_image`), bundled locally for 100% offline Android Capacitor and Electron operation, paired with a Web Audio API sound synthesizer, offline German voice reactions, and contextual particle celebrations.
 
 ---
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> **Audit & Planning Phase Complete — No Code Has Been Modified.**
-> Review the critical decisions and proposed consolidations below before proceeding to implementation.
+> **Revised Plan — Incorporating Mandatory Nano Banana Custom Game Art Generation.**
+> Review the complete 34-game Nano Banana art inventory, batch generation strategy, and execution order below, then click **Proceed** to begin implementation.
 
-- **Decision 1: Consolidation of Lesson Control & Arabic Parent Report Actions**
-  - *Current Problem*: `LessonControlModal.tsx` features an inline "Parent Communication" bar (WhatsApp, Call, Parent Report) while also automatically opening `ArabicParentReportModal.tsx` upon saving, where identical WhatsApp, Call, and Share buttons are rendered again. Furthermore, line 2494 contains dead JSX (`ParentSummaryModal`).
-  - *Proposed Solution*: Remove the redundant inline communication bar from the lesson completion footer in `LessonControlModal.tsx`. Keep the primary CTA as `"Save & Open Parent Report"`. All outbound messaging (Group WhatsApp, Parent WhatsApp, Student WhatsApp, Phone Call, Copy, Print) is consolidated inside the dedicated `ArabicParentReportModal.tsx`. Purge the dead `ParentSummaryModal` JSX.
-- **Decision 2: Deduplication of Quick Lesson Triggers**
-  - *Current Problem*: Starting a quick lesson is exposed in both the BottomNav Center FAB (`Zap` icon) and the top toolbar dropdown in `ScheduleView.tsx` (`+ Lesson` -> `Quick Lesson`).
-  - *Proposed Solution*: Retain the BottomNav FAB as the global shortcut for instant actions, but replace the ambiguous `Zap` icon with a clean, semantic `Plus` / `Sparkles` action trigger with a descriptive aria-label. Maintain `ScheduleView.tsx` toolbar "+ Scheduled Lesson" as the primary screen-level action.
-- **Decision 3: Settings Access Point Consolidation**
-  - *Current Problem*: Settings is accessible in three separate places: Top Header (`Header.tsx`), BottomNav Tab (`BottomNav.tsx`), and the 3-Bars Hamburger Drawer.
-  - *Proposed Solution*: Standardize Top Header to contain only real-time utilities (Sync status, Notifications, User profile). The BottomNav Tab "Settings" remains the canonical entry point. Remove the redundant Settings button from the 3-Bars drawer and surface buried high-value utilities (such as "Recently Deleted / Trash" and "Backup & Restore") prominently.
-- **Decision 4: Introduction of Reusable Button Primitives**
-  - *Current Problem*: Zero shared button components exist in `src/components/common/`. Every screen writes inline Tailwind classes with 7 different border radii (`rounded-md` through `rounded-full`) and heights ranging from 24px to 54px.
-  - *Proposed Solution*: Introduce `Button.tsx`, `IconButton.tsx`, and `ActionToolbar.tsx` in `src/components/common/` with strict WCAG touch targets ($\ge 40\text{px}$ mobile), uniform radius tokens (`rounded-xl`), and standard variants (`primary`, `secondary`, `tertiary`, `destructive`, `ghost`).
+- **Confirmed Decision 1: Authorized Nano Banana (`generate_image`) Custom Artwork Pipeline**
+  - *Confirmed Approach*: Use the built-in Nano Banana image generation tool (`generate_image`) to produce original, high-craft 3D cartoon environments, mascots, interactive props, and victory rewards for the game library. Every generated asset is copied into the local project asset registry so it bundles cleanly for offline Android and Electron builds with zero remote runtime URLs.
+  - *No Text Baked Into Art*: All generated illustrations strictly exclude embedded text (`no text, no letters, no numbers, no watermarks`), keeping German/Arabic prompts, scores, timers, and controls as crisp, accessible UI elements layered above the artwork.
+
+- **Confirmed Decision 2: Organized Batch Generation & Pilot Validation**
+  - *Confirmed Approach*: Execute artwork generation in structured thematic batches—starting with a representative sample game to validate style, aspect ratio (`16:9` stages, `1:1` character/prop cutouts), performance, and layout integration—followed by full batch rollout across all 11 Team Games and 23 Solo Practice Games, while sharing universal celebration trophies/medals to prevent redundant duplicates.
+
+- **Confirmed Decision 3: Web Audio API Synthesizer, Offline German Voice & Motion Controls**
+  - *Confirmed Approach*: Pair the custom Nano Banana visual assets with a zero-latency Web Audio API synthesizer, offline German spoken reactions (*“Richtig!”*, *“Super!”*, *“Fantastisch!”*, *“Sehr gut!”*, *“Weiter so!”*, *“Geschafft!”*, *“Du hast gewonnen!”*, *“Versuch es noch einmal!”*), and persisted accessibility settings (`Full`, `Reduced`, `Off` animation intensity + independent audio toggles).
 
 ---
 
-## A. Application Areas Inspected & Limitations
+## 1. Overview & Core Concept
 
-### 1. Modules and Components Inspected
-1. **Global App Shell & Navigation**:
-   - `src/components/Header.tsx` (Top header, notification bell, sync trigger, settings icon, 3-bars hamburger drawer, search overlay).
-   - `src/components/BottomNav.tsx` (Dynamic 6-tab navigation, custom FAB center action, tab reorder drawer).
-2. **Lessons & Lesson Execution**:
-   - `src/components/LessonControlModal.tsx` (Live lesson execution, stopwatch, attendance toggles, behavior notes, audio recorder, homework tracker, report generator).
-   - `src/components/ArabicParentReportModal.tsx` (Parent report preview, text customization, WhatsApp dispatchers, print/copy actions).
-   - `src/components/ParentSummaryModal.tsx` (Inspected for dead code / duplicate modal wrappers).
-3. **Schedule & Timetables**:
-   - `src/components/ScheduleView.tsx` (Weekly calendar, daily agenda, "+ Lesson" unified dropdown, "Export & Tools" menu, timeline cards).
-   - `src/components/SchoolScheduleView.tsx` (Official school schedule, period grid, live session banner, custom sessions, timetable settings).
-4. **Students & Groups**:
-   - `src/components/StudentsView.tsx` (Student list, group filter bar, multi-select floating action bar, inline quick-gender toggles, 8-item student kebab menu).
-   - `src/components/StudentProfileModal.tsx` (Detail view, edit form, contact shortcuts, score cards).
-   - `src/components/ContactsUnificationModal.tsx` (Google contacts synchronization and batch renaming).
-5. **Finance & Investments**:
-   - `src/components/finance/FinanceView.tsx` & `FinanceDashboard.tsx` (Net worth cards, quick action buttons, account transfers, bullion/gold tracker, monthly targets).
-   - `src/components/finance/AccountsManager.tsx`, `InvestmentsManager.tsx`, `TransactionHistory.tsx`.
-6. **Reports & Analytics**:
-   - `src/components/ReportsView.tsx` (Lesson history, filter pills, week-by-week accordions, attendance stats, bulk export).
-7. **Department & Teacher Management**:
-   - `src/components/HodHubView.tsx` (Head of Department hub, observation visits, weekly teacher plans, stage manager follow-ups, PDF generators).
-8. **Administration & Settings**:
-   - `src/components/SettingsView.tsx` (System preferences, theme switch, database backup/restore, school schedule configuration).
-   - `src/components/PortalAdminDashboard.tsx` (Parent portal PIN generation, QR codes, student sync).
-
-### 2. Inspection Limitations
-- The audit was conducted statically via deep TypeScript/AST review and semantic DOM trace. No live database writes, simulated parent WhatsApp messages, or destructive deletions were triggered during inspection.
-- Native Android Capacitor plugins (`ContactsManagerPlugin.java`, audio recording) were inspected for UI triggers and fallback states in browser viewports.
+- **What It Does**: Replaces flat or generic placeholders across all 34 Glück Lernstudio games with rich, tactile 3D cartoon illustrations generated with Nano Banana, accompanied by responsive sound effects, spoken German encouragement, and celebratory particle effects.
+- **Target Audience**: Primary and middle school German learners and classroom teachers using smartboards, Android tablets, and desktop devices.
+- **Key Value**: Gives every single game a memorable, toy-like visual world that directly reflects its gameplay mechanics while maintaining 100% offline reliability and preserving all existing educational rules and question adapters.
 
 ---
 
-## B. Executive Summary: Confirmed Issues by Category
+## 2. User Experience & Visual Design
 
-Across the Glück application codebase, **66 distinct UI/UX button and action issues** were confirmed and cataloged:
+### Global Art Direction (Nano Banana Style Constitution)
 
-| Category | Description | Count |
-| :--- | :--- | :--- |
-| **Category 1: Duplicate & Redundant Buttons** | Exact same action rendered $\ge 2$ times on the same screen or workflow; competing entry points. | **18** |
-| **Category 2: Visual Inconsistency & Sizing** | Random border radii, padding mismatch, touch targets $< 40\text{px}$, unstyled or stretched buttons. | **24** |
-| **Category 3: Action Placement & Hierarchy** | Destructive actions adjacent to neutral buttons; primary actions buried in submenus; misplaced toolbars. | **14** |
-| **Category 4: Dead Code & Unreachable Actions** | Unreachable JSX, unwired `onClick` handlers, or modal wrappers whose trigger state is never true. | **3** |
-| **Category 5: Missing Actions & Feedback** | Missing loading spinners on async operations, missing two-step confirmations on dangerous batch actions. | **7** |
-| **TOTAL** | **Confirmed Codebase Action Issues** | **66** |
+- **Shared Style Prompt Suffix**: Every Nano Banana generation prompt shares a unified art direction anchor:
+  > *"3D stylized cartoon game illustration, Pixar and Nintendo toy-like aesthetic, warm studio lighting, soft ambient occlusion shadows, tactile rounded surfaces, vibrant saturated colors, friendly primary-school educational game style, clean composition, no text, no letters, no numbers, no UI overlays, no watermarks."*
+- **Aspect Ratios & Asset Roles**:
+  - **Stage & Arena Backgrounds (`16:9`)**: Wide scenic environments with a calm central/upper composition zone so question cards, timers, and interactive sprites remain 100% legible.
+  - **Characters, Mascots & Interactive Objects (`1:1` or `4:3`)**: Isolated on clean solid/high-contrast backdrops or transparent-ready compositions for animated sprites, avatars, targets, and mystery containers.
+  - **Shared Victory & Reward Assets (`1:1`)**: Golden championship trophy, silver/bronze medals, glowing star clusters, and treasure chests reused across victory celebration overlays.
 
 ---
 
-## C. Global Design Inconsistencies & Button Standards
+## 3. Technical Architecture & Execution Pipeline
 
-### 1. Existing Inconsistencies Identified
-- **Border Radius Anarchy**: Codebase uses `rounded-sm`, `rounded-md`, `rounded-lg`, `rounded-xl`, `rounded-2xl`, `rounded-3xl`, and `rounded-full` without semantic distinction.
-- **Touch Target Failures**: Table action buttons in `StudentsView.tsx` and `ReportsView.tsx` have dimensions as small as $24\text{px} \times 24\text{px}$ (`p-1 text-xs`), severely violating mobile accessibility standards ($\ge 44\text{px}$).
-- **Stretched CTAs**: On desktop viewports, dialog footer buttons frequently use `w-full` inside vertical stacks rather than compact, aligned action rows on the right.
-- **Accidental Gender Clicks**: The gender toggle in `StudentsView.tsx` (`Venus`/`Mars` icon) is rendered as an unbordered inline button directly in the row; accidental taps while scrolling toggle the student's gender without notice.
-
-### 2. Proposed Button Design System Standards
-
-All buttons across Glück will adhere to standard Tailwind design tokens:
+### Architecture & Asset Flow Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           GLÜCK BUTTON DESIGN SYSTEM                            │
-├──────────────┬──────────────┬──────────────┬──────────────┬─────────────────────┤
-│ Variant      │ Background   │ Text/Icon    │ Border       │ State (Hover/Focus) │
-├──────────────┼──────────────┼──────────────┼──────────────┼─────────────────────┤
-│ Primary      │ bg-indigo-600│ text-white   │ None         │ hover:bg-indigo-700 │
-│ Secondary    │ bg-slate-100 │ text-slate-800│ border-slate-200│ hover:bg-slate-200 │
-│ Tertiary/Text│ transparent  │ text-slate-600│ None         │ hover:bg-slate-100  │
-│ Destructive  │ bg-rose-50   │ text-rose-600│ border-rose-200│ hover:bg-rose-100  │
-│ Destructive-Solid│ bg-rose-600│ text-white │ None         │ hover:bg-rose-700   │
-│ Icon-Only    │ transparent  │ text-slate-600│ None / subtle│ hover:bg-slate-100  │
-└──────────────┴──────────────┴──────────────┴──────────────┴─────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                  NANO BANANA ART & AUDIO INTEGRATION ARCHITECTURE                │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────┐      ┌───────────────────────────────────────────┐  │
+│  │  Nano Banana Generator  │─────>│        Local Bundled Asset Registry       │  │
+│  │ (16:9 Stages & 1:1 Art) │      │ (Offline WebP/PNG + Typed Asset Manifest) │  │
+│  └─────────────────────────┘      └─────────────────────┬─────────────────────┘  │
+│                                                         │                        │
+│  ┌─────────────────────────┐                            ▼                        │
+│  │  GameSettings & Storage │─────>┌───────────────────────────────────────────┐  │
+│  │ (Master/SFX/Voice/Anim) │      │   34 Game Views (11 Team + 23 Solo Games) │  │
+│  └─────────────────────────┘      │  • Custom Stage Backdrop & Animated Props │  │
+│                                   │  • Real UI Controls & Vocab Adapters      │  │
+│  ┌─────────────────────────┐      │  • Web Audio SFX & Offline DE Voice Cues  │  │
+│  │  GameCelebration Modal  │<─────│  • Sparkle Bursts & Floating Score Popups │  │
+│  └─────────────────────────┘      └───────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Standard Dimensions & Touch Targets:
-- **Default Height / Touch Target**:
-  - `sm` (Table/List Compact): `h-9` ($36\text{px}$ desktop / min touch target container $44\text{px}$ via padding), `px-3 text-xs font-medium rounded-lg`.
-  - `md` (Standard Form & Card Action): `h-10` ($40\text{px}$), `px-4 text-sm font-medium rounded-xl`.
-  - `lg` (Primary Dialog & Modal CTA): `h-12` ($48\text{px}$), `px-5 text-base font-semibold rounded-xl`.
-- **Icon Sizing Rule**:
-  - Inside `sm` buttons: `w-4 h-4` (`16px`).
-  - Inside `md` buttons: `w-4.5 h-4.5` (`18px`).
-  - Inside `lg` buttons: `w-5 h-5` (`20px`).
-  - Icon-to-text gap: strictly `gap-2` (`8px`).
-- **Standard Focus Ring**: `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2`.
+### Staged Execution Order
+
+1. **Stage 1 — Audit & Shared Infrastructure**:
+   - Establish the typed local Asset Registry, the Web Audio API sound/voice manager, the particle/floating-score effect layer, the Victory Celebration overlay, and the persistent Audio/Animation Settings bar.
+2. **Stage 2 — Representative Sample Generation & Validation**:
+   - Generate and integrate the complete Nano Banana art pack for the representative pilot game (*Smart Classroom Quiz* + shared victory reward pack), bundle locally, and verify visual fidelity, responsive layout, control legibility, and build cleanliness.
+3. **Stage 3 — Batch Generation for Group & Team Games (11 Games)**:
+   - Generate and bundle custom Nano Banana artwork in thematic batches (Arena/Quiz Batch, Racing/Construction Batch, Space/Sci-Fi Batch) and wire into all 11 team games with real state-driven animations and audio.
+4. **Stage 4 — Batch Generation for Solo Practice Games (23 Games)**:
+   - Generate and bundle custom Nano Banana artwork across the 23 solo games in thematic batches (Arcade Action Batch, Adventure/Exploration Batch, Workshop/Factory Batch, Detective/Mystery & Grammar Batch) and integrate with each game's mechanics.
+5. **Stage 5 — Verification & Offline Build Audit**:
+   - Verify every asset path, test all 34 game entry points, confirm zero remote asset URLs, and run full lint and production build checks.
 
 ---
 
-## D. Detailed Screen-by-Screen Audit
+## 4. Complete 34-Game Nano Banana Art Inventory & Prompt Plan
 
-| Issue ID | Module / Screen | File Path | Current Behavior | Identified Problem | Affected Buttons | Classification | Recommended Solution | Proposed Placement | Scope | Priority | Complexity | Test Procedure |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ISS-01** | Global Header | `src/components/Header.tsx` | Settings gear icon in header links to Settings tab | Duplicates BottomNav Settings tab and 3-bars drawer Settings item | Header Settings button (L290) | Redundancy | Remove Settings gear from top bar; replace with user profile/avatar quick popover | Right header utility cluster | Local | P2 | Low | Verify navigation to Settings remains seamless via BottomNav |
-| **ISS-02** | Global Drawer | `src/components/Header.tsx` | "Recently Deleted" is hidden inside 3-bars hamburger drawer with a tiny blue dot | Hard to discover for teachers attempting to recover mistakenly deleted students | Drawer Item "Recently Deleted" (L432) | Poor Placement | Move "Trash / Deleted" to a dedicated action tab or prominent link inside `StudentsView.tsx` & `SettingsView.tsx` | Student list toolbar & Data Management | Shared | P1 | Med | Delete a student and verify recovery can be initiated directly from StudentsView |
-| **ISS-03** | Bottom Nav | `src/components/BottomNav.tsx` | Center FAB uses rotating `Zap` icon to open quick menu | Icon does not communicate "Add/Start Lesson"; creates confusion | Center FAB button (L120) | Ambiguity | Replace `Zap` with `Plus` icon with badge, label "Schnellstart / Quick Start" | BottomNav Center FAB | Local | P2 | Low | Check mobile tap opens popup with clear actions |
-| **ISS-04** | Lesson Control | `src/components/LessonControlModal.tsx` | Parent communication section renders WhatsApp, Call, and Report buttons | Duplicates identical actions in `ArabicParentReportModal.tsx`; saving report already opens parent report modal | L2386–2489 WhatsApp & Call buttons | Duplication | Remove inline comms buttons from footer; consolidate all message dispatching into `ArabicParentReportModal` | Single CTA: "Save & Open Parent Report" | Local | P0 | Med | Complete a lesson, click Save, verify ArabicParentReportModal opens cleanly with all send options |
-| **ISS-05** | Lesson Control | `src/components/LessonControlModal.tsx` | `showParentSummaryModal && <ParentSummaryModal />` rendered at L2494 | Dead code: `setShowParentSummaryModal(true)` is never invoked anywhere | `ParentSummaryModal` JSX | Dead Code | Safely remove the unreachable state and component instance | N/A (Delete dead code) | Local | P2 | Low | Compile applet; ensure zero regressions in lesson flow |
-| **ISS-06** | Arabic Parent Report | `src/components/ArabicParentReportModal.tsx` | 6 full-width buttons crowded in modal footer | Buttons overflow small phone viewports; secondary actions compete with primary "Send WhatsApp" | Footer button row (L1775–1895) | Layout & Hierarchy | Make "Send to Parent WhatsApp" the sole Primary CTA; group "Send to Group", "Send to Student", and "Copy" in a secondary segmented action row; move "Print" into overflow menu | Bottom modal sticky action bar | Local | P1 | Med | Open modal on 360px mobile viewport; verify zero horizontal overflow |
-| **ISS-07** | Students View | `src/components/StudentsView.tsx` | 5 top buttons ("Add Student", "Add Group", "AI Import", "Clean Contacts", "Gender") rendered in horizontal flex | Top bar wraps into multiple uneven lines on mobile; confusing mix of student actions and utility actions | Top toolbar buttons (L340–420) | Clutter & Hierarchy | Keep "+ Student" as Primary CTA; group "Add Group" & "AI Import" into a "+ Add..." dropdown; move "Clean Contacts" & "Gender" into a "Tools" menu | Top unified toolbar with split button | Local | P1 | Med | Test toolbar on mobile and tablet screens |
-| **ISS-08** | Students View | `src/components/StudentsView.tsx` | Gender icon (`Venus`/`Mars`) on student item card toggles gender on single click | High rate of accidental gender alteration while tapping card to view details | Inline Gender button (L820) | Destructive / UX Bug | Turn gender icon into display badge; gender change is only editable inside the Student Profile Modal or via intentional long-press | Student Profile Modal edit form | Local | P1 | Low | Tap student card; verify profile opens without toggling gender |
-| **ISS-09** | Schedule View | `src/components/ScheduleView.tsx` | "+ Lesson" dropdown offers "Quick Lesson" and "Start Lesson Now" | Duplicates BottomNav Center FAB quick action workflow | Toolbar dropdown items (L210) | Duplication | Standardize: "+ Lesson" opens standard new lesson modal; quick instant lessons are clearly badged as "Start Now" | Schedule View Header | Local | P2 | Low | Test creating both scheduled and ad-hoc lessons |
-| **ISS-10** | School Schedule | `src/components/SchoolScheduleView.tsx` | "Clear Entire School Schedule" is a red button placed adjacent to "Cancel" in modal footer | Extreme risk of accidental wipeout; lacks required typed confirmation | Delete Schedule button (L2150) | Dangerous / Lack of Confirmation | Require a 2-step typed modal confirmation ("TYPE 'DELETE' TO CONFIRM") before clearing timetable | Dedicated confirmation modal | Local | P0 | Med | Click clear schedule; verify prompt blocks immediate execution |
-| **ISS-11** | Finance Dashboard | `src/components/finance/FinanceDashboard.tsx` | 4 Quick action buttons use rounded-2xl pastel gradient cards | Visual language diverges from Glück's rounded-xl slate/indigo aesthetic; buttons take 40% of viewport | Quick Action cards (L340–410) | Visual Inconsistency | Align cards to Glück design tokens: standard border-slate-200, rounded-xl, cohesive icons and typography | Dashboard Action Strip | Local | P2 | Low | Verify Finance dashboard renders consistently with dark and light mode |
-| **ISS-12** | HOD Hub | `src/components/HodHubView.tsx` | PDF Download, WhatsApp Share, and Print buttons copied across 4 separate tabs with varying icon sizes | Triplicate implementation with inconsistent padding (`p-1.5` vs `p-3`) | Tab action footers (L2400, L3800, L5100) | Inconsistency & Maintenance | Extract shared `DocumentActionToolbar` component with standardized PDF, WhatsApp, and Print buttons | Shared subcomponent in `HodHubView` | Shared | P2 | Med | Test export in Observation Visits, Weekly Plans, and Follow-ups |
-| **ISS-13** | Reports View | `src/components/ReportsView.tsx` | Week accordions feature duplicate individual "Export Week" buttons beside main export | Cluttered accordion headers; users confused about which export does what | Accordion header buttons (L280) | Redundancy | Retain top global Export (with range selector); inside week accordions, keep only simple expand/collapse toggle and summary metrics | Week Header | Local | P2 | Low | Export individual week vs all weeks cleanly |
-| **ISS-14** | Portal Admin | `src/components/PortalAdminDashboard.tsx` | PIN generation button has no loading state during Firestore token generation | Users double-click while waiting, generating multiple duplicate access PINs | Generate PIN button (L310) | Missing Feedback | Add disabled state + spinner during PIN generation promise resolution | Table row action | Local | P1 | Low | Generate PIN with simulated delay; verify button shows loading spinner |
+### Shared Celebration & Reward Batch
+- **Assets**:
+  1. `shared_victory_trophy` (`1:1`): Gleaming 3D cartoon golden championship cup with star emblems and confetti ribbons.
+  2. `shared_mystery_chest` (`1:1`): Ornate cartoon wooden and gold treasure chest overflowing with glowing stars and coins.
 
 ---
 
-## E. Duplicate Actions & Proposed Consolidation
+### Part A: Group & Team Games (11 Games)
 
-### 1. Lesson Communication Consolidation
-```
-[CURRENT DUPLICATED STATE]
-LessonControlModal Footer:
-  ├── Button 1: "Parent Report" -> opens ArabicParentReportModal
-  ├── Button 2: "Group WhatsApp" -> opens wa.me link
-  ├── Button 3: "Parent WhatsApp" -> opens wa.me link
-  ├── Button 4: "Call Parents" -> opens tel: link
-  └── Auto-save trigger -> ALSO opens ArabicParentReportModal!
-ArabicParentReportModal Footer:
-  ├── Button 1: "Send to Group WhatsApp"
-  ├── Button 2: "Send to Parent WhatsApp"
-  ├── Button 3: "Send to Student WhatsApp"
-  ├── Button 4: "Call Parents"
-  └── Button 5: "Copy Report"
-
-[PROPOSED STREAMLINED STATE]
-LessonControlModal Footer:
-  └── Primary CTA: "Save & Generate Report" (single clear action)
-ArabicParentReportModal (Unified Communication Center):
-  ├── Primary CTA: "Send via WhatsApp to Parent" (Prominent)
-  ├── Secondary Segment: "Send to Group" | "Send to Student" | "Copy Text"
-  └── Overflow Menu (3-dots): "Call Phone", "Print PDF", "Raw Template"
-```
-
-### 2. Multi-Level Settings Consolidation
-- **Problem**: Settings is exposed in Header, Bottom Nav, and Navigation Drawer.
-- **Consolidation**: Retain Bottom Nav "Settings" as the single primary navigation route. Header retains only quick Sync status and Notifications. Free up drawer space for "Trash / Recently Deleted" and "Database Backup".
-
-### 3. Creation Action Hierarchy ("Add Student" vs "Add Group")
-- **Problem**: In `StudentsView.tsx`, buttons for adding individual students, creating new classes/groups, importing via AI, and cleaning contacts all share identical visual prominence.
-- **Consolidation**:
-  - **Primary CTA**: "+ Add Student" (`bg-indigo-600 text-white`).
-  - **Secondary Action Dropdown**: "Actions / Import" -> containing "Create Group", "AI Import (Excel/Sheet)", and "Clean Google Contacts".
+| # | Game Name (Mode ID) | Required Artwork & Aspect Ratio | Intended In-Game Usage & Animation | Nano Banana Generation Prompt Summary |
+| :--- | :--- | :--- | :--- | :--- |
+| **1** | **Smart Classroom Quiz** (`classroom`) | • Stage BG (`16:9`)<br>• Surprise Card Icons (`1:1`) | • Full-board TV studio backdrop behind question grid<br>• Animated flip reveals for Steal, Double, Swap, Shield & Bomb cards | *"Colorful 3D cartoon television quiz show stage studio with glowing spotlights, velvet curtains, and festive podiums, no text"* |
+| **2** | **Tug of War** (`tug_of_war`) | • Arena BG (`16:9`)<br>• Pulling Team Mascots (`1:1`) | • Stadium field backdrop with central mud/grass line<br>• Left/right team mascots shifting horizontally with rope tension | *"Vibrant 3D cartoon outdoor sports stadium arena with green turf, festive banners, and a central competition zone, no text"* |
+| **3** | **Spin Wheel Challenge** (`wheel`) | • Game Show Stage (`16:9`)<br>• Host Mascot (`1:1`) | • Carnival/studio stage behind the interactive spinning wheel<br>• Cheerful mascot reacting to wheel spin and prize reveal | *"Festive 3D cartoon carnival game show stage with warm marquee lights, colorful bunting, and golden spotlights, no text"* |
+| **4** | **Team Car Race** (`race`) | • Racing Circuit BG (`16:9`)<br>• Cartoon Race Cars (`1:1`) | • Multi-lane raceway backdrop with grandstands and checkered arch<br>• Team cars advancing smoothly along lanes with boost trails | *"3D cartoon grand prix racing circuit track with cheering crowd grandstands, green hills, and checkered finish arch, no text"* |
+| **5** | **Team Auction** (`team_auction`) | • Auction Hall BG (`16:9`)<br>• Golden Gavel & Coin Vault (`1:1`) | • Grand auction theater backdrop<br>• Animated gavel strike and coin stack transfers on winning bids | *"3D cartoon royal auction hall interior with red velvet stage, wooden podium, warm chandelier lighting, and gold coins, no text"* |
+| **6** | **Galaxy Space Fleet** (`space_fleet`) | • Deep Space Nebula BG (`16:9`)<br>• Cartoon Starships & Alien Boss (`1:1`) | • Cosmic starfield stage behind fleet battle<br>• Starships firing animated laser beams on correct vocabulary hits | *"Colorful 3D cartoon outer space galaxy scene with glowing purple and blue nebula clouds, distant ringed planets, and stars, no text"* |
+| **7** | **Rocket Countdown** (`rocket_countdown`) | • Launchpad Station BG (`16:9`)<br>• Cartoon Space Rocket (`1:1`) | • Cape Canaveral-style cartoon launch pad<br>• Rocket fueling stages, countdown vibration, and smoke/firework liftoff | *"3D cartoon space launchpad station at sunset with control tower, launch gantry, and scenic mountains, no text"* |
+| **8** | **Tower Architects** (`tower_architects`) | • City Construction Skyline (`16:9`)<br>• Builder Mascot & Crane (`1:1`) | • Sunny city construction site backdrop<br>• Modular tower floors dropping and stacking per correct answer | *"3D cartoon sunny city skyline construction site with yellow tower cranes, blue sky, and fluffy clouds, no text"* |
+| **9** | **Space Defender** (`space_defense`) | • Planetary Defense Base (`16:9`)<br>• UFO Invaders & Turret (`1:1`) | • Sci-fi moon base backdrop<br>• Turret rotating and firing energy bolts at descending UFO targets | *"3D cartoon sci-fi planetary defense moon base looking up at starry space with glowing energy shields, no text"* |
+| **10** | **Word Tic-Tac-Toe** (`tictactoe`) | • Neon Arcade Arena (`16:9`)<br>• 3D X & O Gems (`1:1`) | • Tabletop/stadium arena framing the 3×3 grid<br>• Tactile 3D X and O emblems snapping into cells with winning beam | *"3D cartoon board game arena table in a cozy magical study room with warm lighting and golden trim, no text"* |
+| **11** | **Team Sentence Builder** (`sentence_builder`) | • Grammar Workshop BG (`16:9`) | • Collaborative magnetic board studio<br>• Tactile word tiles snapping into grammar slots with team celebration | *"3D cartoon bright classroom invention studio with wooden workbenches, colorful gears, and warm sunlight, no text"* |
 
 ---
 
-## F. Missing or Poorly Placed Actions & Proposed Improvements
+### Part B: Solo Practice Games (23 Games)
 
-1. **Batch Student Actions**:
-   - Currently, selecting multiple students in `StudentsView.tsx` shows only "Move to Group" and "Delete".
-   - *Improvement*: Add "Batch WhatsApp Broadcast" and "Export Selected" to the floating multi-select bar.
-2. **Undo / Restore Affordance**:
-   - Deleting a lesson or student currently has no immediate "Undo" snackbar button.
-   - *Improvement*: When an item is moved to trash, trigger a 5-second transient toast notification with an immediate "Undo / Rückgängig machen" button.
-3. **Async Loading States**:
-   - When generating Parent Report PDFs or syncing with Google Contacts, buttons remain clickable.
-   - *Improvement*: Standardize all asynchronous buttons to display an inline `animate-spin` Lucide `Loader2` icon and `disabled` attribute while the promise is pending.
-
----
-
-## G. Shared Components & Architectural Improvements
-
-Currently, `src/components/common/` lacks reusable button primitives. We will establish three lightweight, accessible shared components:
-
-### 1. `src/components/common/Button.tsx`
-A unified, typed button primitive supporting:
-- **Variants**: `primary`, `secondary`, `tertiary`, `destructive`, `outline`, `ghost`.
-- **Sizes**: `sm` (36px list/table), `md` (40px standard), `lg` (48px primary dialog).
-- **States**: `isLoading` (replaces icon with spinner, disables pointer events), `disabled`, `leftIcon`, `rightIcon`.
-- **Accessibility**: Automatic `focus-visible` styling and minimum touch target wrapper for mobile.
-
-### 2. `src/components/common/IconButton.tsx`
-Standardized icon button with mandatory `aria-label` or tooltip, consistent square dimensions (`w-9 h-9`, `w-10 h-10`), and uniform hover rings.
-
-### 3. `src/components/common/ActionToolbar.tsx`
-A responsive action container that automatically groups primary actions on the left/start and secondary/overflow actions into a three-dot menu on small viewports.
-
----
-
-## H. Prioritized Implementation Roadmap
-
-The implementation is structured into 4 safe, progressive phases to guarantee zero regression:
-
-### Phase 1: Shared Button Primitives & Design System (Non-Breaking)
-- Create `src/components/common/Button.tsx` and `src/components/common/IconButton.tsx`.
-- Establish centralized color, radius, and sizing tokens.
-- *Risk*: Zero risk. Existing screens remain untouched until primitives are verified.
-
-### Phase 2: High-Impact Duplication & Dangerous Action Cleanup
-- **LessonControlModal & ArabicParentReportModal**: Consolidate parent communication buttons into `ArabicParentReportModal`; delete dead `ParentSummaryModal` JSX.
-- **SchoolScheduleView**: Implement two-step typed confirmation modal for "Clear Entire School Schedule".
-- **StudentsView**: Change inline gender toggle into a non-destructive badge, moving edit action into profile.
-
-### Phase 3: Screen-by-Screen Hierarchy & Placement Refinement
-- **Header & Navigation**: Consolidate Settings entry points; surface "Recently Deleted / Trash".
-- **StudentsView Toolbar**: Implement unified split action button ("+ Student" primary, "Group / Import" dropdown).
-- **Finance & HOD Hub**: Standardize action cards and extract `DocumentActionToolbar`.
-
-### Phase 4: Final Verification, Cross-Device Testing & Linting
-- Verify on mobile viewports (360px, 390px, 412px) and desktop (1440px).
-- Verify RTL Arabic layout and German/English translations.
-- Run `lint_applet` and `compile_applet`.
-
----
-
-## I. Acceptance Checklist for Verifying Implementation
-
-- [ ] **Zero Dead Code**: `ParentSummaryModal` unreachable JSX in `LessonControlModal.tsx` is completely removed.
-- [ ] **No Duplicate Communication Buttons**: Lesson completion footer has exactly one primary action: `"Save & Open Parent Report"`.
-- [ ] **Accidental Gender Click Eliminated**: Tapping student cards in `StudentsView.tsx` no longer alters gender data.
-- [ ] **Safe Destructive Actions**: "Clear Entire School Schedule" cannot be triggered with a single accidental click.
-- [ ] **Touch Target Compliance**: Every interactive button on mobile has a minimum touch target $\ge 40\text{px}$.
-- [ ] **Single-Line Button Labels**: All button texts adhere to `whitespace-nowrap shrink-0` with no awkward mid-word wrapping.
-- [ ] **Clean Compilation**: `npm run build` passes with zero TypeScript errors or broken imports.
-
----
-
-## J. Explicit List of Unresolved Questions & User Decisions
-
-Before code edits begin, please confirm your preferences on these 3 optional design choices:
-
-1. **Trash / Recently Deleted Placement**:
-   - *Option A (Recommended)*: Add a prominent "Trash / Deleted Items" icon button in the `StudentsView.tsx` toolbar so teachers can restore deleted students instantly.
-   - *Option B*: Keep it in `SettingsView.tsx` under Data Management.
-2. **BottomNav Center Action FAB**:
-   - *Option A (Recommended)*: Change the center `Zap` icon to a `Plus` icon labeled "Quick Lesson", opening a streamlined quick-start sheet.
-   - *Option B*: Keep the `Zap` icon styling but improve the popup menu clarity.
-3. **Student Card Gender Editing**:
-   - *Option A (Recommended)*: Static visual badge on the card (`👦` / `👧`), editable only inside the full Student Profile Modal.
-   - *Option B*: Retain inline clicking on the card, but require a quick confirmation popover before updating the database.
+| # | Game Name (Mode ID) | Required Artwork & Aspect Ratio | Intended In-Game Usage & Animation | Nano Banana Generation Prompt Summary |
+| :--- | :--- | :--- | :--- | :--- |
+| **12** | **Balloon Pop** (`balloon_pop`) | • Sky Meadow BG (`16:9`)<br>• Glossy 3D Balloons (`1:1`) | • Scenic sky and floating clouds backdrop<br>• Swaying colorful balloons rising and popping into confetti bursts | *"3D cartoon sunny blue sky over rolling green hills with fluffy white clouds and hot air balloons in the distance, no text"* |
+| **13** | **Whack-A-Word** (`whack_a_mole`) | • Garden Burrows BG (`16:9`)<br>• Cute Cartoon Mole (`1:1`) | • Lush garden lawn with earthen mounds<br>• Friendly mole popping up with vocabulary cards and playful mallet bounce | *"3D cartoon sunny vegetable garden meadow with wooden fences, flowers, and soft green grass, no text"* |
+| **14** | **Vocab Basket Catch** (`basket_catch`) | • Sunny Orchard BG (`16:9`)<br>• Woven Picnic Basket (`1:1`) | • Fruit orchard backdrop<br>• Player sliding the woven basket left/right to catch falling items | *"3D cartoon sunlit apple orchard with lush green trees, wooden barrels, and astone garden path, no text"* |
+| **15** | **Word Ninja** (`word_ninja`) | • Bamboo Dojo BG (`16:9`)<br>• Cartoon Ninja Mascot (`1:1`) | • Traditional wooden dojo backdrop<br>• Ninja mascot reacting as vocabulary targets are sliced with katana trails | *"3D cartoon Japanese martial arts dojo interior with polished wooden floors, paper lanterns, and bamboo garden view, no text"* |
+| **16** | **Bridge Builder** (`bridge_builder`) | • River Canyon BG (`16:9`)<br>• Explorer Mascot (`1:1`) | • Sparkling river between two cliff shores<br>• Planks snapping into place and explorer walking across safely | *"3D cartoon scenic river canyon with two grassy cliff banks, sparkling blue water, and pine trees, no text"* |
+| **17** | **Island Crossing** (`island_crossing`) | • Tropical Lagoon BG (`16:9`)<br>• Stepping Islands (`1:1`) | • Turquoise tropical lagoon backdrop<br>• Character hopping from island to island with water splash rings | *"3D cartoon tropical turquoise ocean lagoon with palm tree islands, sandy beaches, and sunny sky, no text"* |
+| **18** | **Submarine Explorer** (`submarine_explore`) | • Coral Reef Abyss BG (`16:9`)<br>• Yellow Cartoon Submarine (`1:1`) | • Underwater coral reef environment<br>• Submarine diving with rising bubbles, sonar pulses, and treasure finds | *"3D cartoon underwater coral reef scene with sunbeams piercing blue water, colorful corals, and sea plants, no text"* |
+| **19** | **Robot Repair** (`robot_repair`) | • Robotics Lab BG (`16:9`)<br>• Expressive Cartoon Robot (`1:1`) | • Futuristic tinkerer workshop<br>• Robot lighting up and dancing as vocabulary circuits are repaired | *"3D cartoon friendly robotics workshop lab with glowing circuit screens, tool racks, and a cute toy robot, no text"* |
+| **20** | **Color Master** (`color_master`) | • Art Studio BG (`16:9`) | • Bright painter's studio with easels and paint pots<br>• Accessible color sorting vats with explicit labels and paint splashes | *"3D cartoon sunlit artist painting studio with wooden easels, colorful paint jars, brushes, and splatters, no text"* |
+| **21** | **Factory Machine** (`factory_machine`) | • Toy Factory BG (`16:9`) | • Whimsical automated factory floor<br>• Animated conveyor belts transporting vocabulary crates into chutes | *"3D cartoon whimsical toy factory interior with conveyor belts, brass gears, sorting chutes, and warm lights, no text"* |
+| **22** | **Puzzle Masters** (`puzzle_masters`) | • Thematic Reveal Artworks (`16:9`) | • Original Nano Banana illustrations hidden behind interlocking puzzle tiles that unlock per correct answer | *"3D cartoon magical German fairytale castle in a sunny alpine valley with a rainbow and forest, no text"* |
+| **23** | **Target Attack** (`target_attack`) | • Archery Range BG (`16:9`)<br>• 3D Bullseye Target (`1:1`) | • Forest archery tournament range<br>• Arrows flying into bullseye targets with impact bounce | *"3D cartoon medieval forest tournament archery range with wooden fences, colorful tents, and green trees, no text"* |
+| **24** | **Vending Machine** (`vending_machine`) | • Arcade Lobby BG (`16:9`)<br>• 3D Vending Machine (`1:1`) | • Cozy snack plaza backdrop<br>• Illuminated vending machine dispensing illustrated treats on correct input | *"3D cartoon colorful retro-modern snack vending machine glowing in a cheerful school lounge, no text"* |
+| **25** | **What's in the Box?** (`whats_in_box`) | • Magic Stage BG (`16:9`)<br>• Expressive Mystery Box (`1:1`) | • Theater spotlight backdrop<br>• Shaking mystery box unlocking clue padlocks before popping open | *"3D cartoon magical wooden mystery gift box with golden locks and glowing sparkles on a velvet stage, no text"* |
+| **26** | **Word Rhythm** (`word_rhythm`) | • Concert Stage BG (`16:9`) | • Vibrant music festival stage<br>• Pulsing soundwave rings and musical note tiles synced to synth chords | *"3D cartoon music concert stage with colorful speakers, glowing neon soundwaves, and musical instruments, no text"* |
+| **27** | **Word Wash** (`word_wash`) | • Bubble Wash Station BG (`16:9`) | • Cheerful car/sign wash bay<br>• Foam bubbles and mud layers scrubbed away by an animated sponge | *"3D cartoon cheerful bubble wash station with glossy soap suds, water splashes, yellow sponges, and tiled wall, no text"* |
+| **28** | **Follow the Clues** (`follow_clues`) | • Mystery Trail Map BG (`16:9`) | • Illustrated adventure island/town trail<br>• Magnifying glass spotlight and glowing footprints revealing progressive clues | *"3D cartoon adventure treasure map table with brass compass, magnifying glass, lantern, and tropical trail, no text"* |
+| **29** | **Race Pit Stop** (`pit_stop`) | • Pit Lane Garage BG (`16:9`)<br>• Pit Crew Race Car (`1:1`) | • Formula pit stop bay<br>• Animated wheel changes, wrench spins, and fuel gauge fill on correct answers | *"3D cartoon racing pit stop garage with red toolboxes, racing tires, checkered floor, and pit lane, no text"* |
+| **30** | **Word Detective** (`word_detective`) | • Detective Office BG (`16:9`)<br>• Sleuth Mascot (`1:1`) | • Cozy detective study with corkboard<br>• Detective mascot inspecting clue cards and revealing hidden letters | *"3D cartoon friendly detective office with a clue corkboard, red yarn, magnifying glass, and warm desk lamp, no text"* |
+| **31** | **der / die / das Bins** (`sorting`) | • Sorting Courtyard BG (`16:9`)<br>• 3 Article Containers (`1:1`) | • Distinct blue (*der*), pink (*die*), and green (*das*) 3D sorting containers with shape/icon badges | *"3D cartoon colorful recycling and sorting plaza with three vibrant open containers in blue, pink, and green, no text"* |
+| **32** | **Memory Match** (`memory`) | • Enchanted Table BG (`16:9`)<br>• Custom Card Back Art (`1:1`) | • Cozy game table backdrop<br>• Custom illustrated 3D card backs with smooth perspective flip animations | *"3D cartoon ornate magical card back emblem with a golden star crest on royal blue pattern, no text"* |
+| **33** | **Comprehensive Practice** (`game`) | • Lernstudio Arena BG (`16:9`) | • Bright learning studio backdrop across all 5 exercise types with streak fireworks and mascot cheering | *"3D cartoon futuristic bright learning studio classroom with floating holographic stars, bookshelves, and warm light, no text"* |
+| **34** | **Solo Sentence Builder** (`solo_sentence`) | • Grammar Desk BG (`16:9`) | • Focused solo sentence-building workbench with magnetic word blocks and grammar check animations | *"3D cartoon cozy wooden study desk with colorful building blocks, lamp, and sunny window view, no text"* |

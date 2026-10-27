@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
+import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
 import {
   ArrowLeft,
   RotateCcw,
@@ -46,6 +49,7 @@ export const LernstudioWhackAMoleGame: React.FC<Props> = ({
   const [isGameOver, setIsGameOver] = useState(false);
   const [isVictory, setIsVictory] = useState(false);
   const [hammerPos, setHammerPos] = useState<{ holeIdx: number; correct: boolean } | null>(null);
+  const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
 
   // 6 Holes (2 rows x 3 cols)
   const [holes, setHoles] = useState<MoleHole[]>(
@@ -116,16 +120,20 @@ export const LernstudioWhackAMoleGame: React.FC<Props> = ({
     );
 
     if (isCorrect) {
+      playLernstudioSound('whack');
       playLernstudioSound('combo_ding');
-      playLernstudioSound('correct');
       speakGermanText(hole.item.german);
 
       const nextStreak = streak + 1;
+      const pts = 100 + nextStreak * 25;
       setStreak(nextStreak);
-      setScore((s) => s + 100 + nextStreak * 25);
+      setScore((s) => s + pts);
+      triggerCorrect(pts, nextStreak >= 2 ? `x${nextStreak} Whack!` : 'Treffer!');
 
       if (targetIndex + 1 >= items.length) {
         setIsVictory(true);
+        triggerVictory();
+        playGermanVoiceFeedback('victory');
       } else {
         setTimeout(() => {
           setTargetIndex((prev) => prev + 1);
@@ -133,6 +141,8 @@ export const LernstudioWhackAMoleGame: React.FC<Props> = ({
       }
     } else {
       playLernstudioSound('wrong');
+      triggerWrong();
+      playGermanVoiceFeedback('try_again');
       setStreak(0);
       setLives((l) => {
         const next = l - 1;
@@ -212,8 +222,17 @@ export const LernstudioWhackAMoleGame: React.FC<Props> = ({
           >
             <RotateCcw className="w-4 h-4" />
           </button>
+          <GameSettingsControls compact />
         </div>
       </div>
+
+      <GameEffectsOverlay particles={particles} popups={popups} showConfetti={isVictory} />
+      <GameStageBanner
+        mode="whack_a_mole"
+        title="اضرب الخلد والمفردات (Whack-A-Word)"
+        subtitle="اضرب الخلد السريع الذي يحمل الكلمة الألمانية المطابقة بالمطرقة!"
+        badgeText={`${targetIndex + 1} / ${items.length}`}
+      />
 
       {/* Target Mission Banner */}
       {targetItem && !isGameOver && !isVictory && (
@@ -290,9 +309,7 @@ export const LernstudioWhackAMoleGame: React.FC<Props> = ({
         {/* Victory Screen */}
         {isVictory && (
           <div className="absolute inset-0 bg-surface/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center space-y-4 animate-scale-up z-40 rounded-3xl">
-            <div className="p-4 bg-amber-500/10 text-amber-500 rounded-3xl border border-amber-500/30">
-              <Trophy className="w-16 h-16" />
-            </div>
+            <SharedVictoryTrophyArt className="w-24 h-24 rounded-3xl shadow-xl border border-amber-400/30" />
             <h2 className="text-2xl sm:text-3xl font-black text-text-main">
               ضربات خارقة! اصطدت جميع الكلمات بنجاح 🔨🎉
             </h2>

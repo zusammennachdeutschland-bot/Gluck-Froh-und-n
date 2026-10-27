@@ -6,7 +6,6 @@ import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cl
 import { getTeacherArabicName } from '../utils/teacherUtils';
 import { formatTimeDisplay, parseLocalDate } from '../utils/timeUtils';
 import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString } from '../utils/genderUtils';
-import { getStudentCode } from '../utils/studentCodeUtils';
 import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
 import { getTimeBasedGreeting, getCairoHour } from '../utils/greetingUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
@@ -644,7 +643,6 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
     const studentDisplayName = (reportLanguage === 'de' || reportLanguage === 'en')
       ? (englishStudentName || activeStudent?.name || lesson.studentName || 'Student')
       : (activeStudent?.displayNameAr || activeStudent?.nameAr || activeStudent?.name || lesson.studentName || 'الطالب');
-    const activeStudentCode = activeStudent ? getStudentCode(activeStudent) : (lesson.studentId ? getStudentCode({ id: lesson.studentId, name: lesson.studentName || '' }) : '');
     const explicitGender = activeStudent ? (activeStudent.gender || lesson.report?.studentPerformance?.[activeStudent.id]?.gender) : undefined;
     const isFemale = isLikelyFemaleStudent(studentDisplayName, explicitGender);
     const studentRoleLabel = isFemale ? 'الطالبة' : 'الطالب';
@@ -723,7 +721,7 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
 
     const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
     const cycleLine = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
-    const codeLine = activeStudentCode ? `🔑 كود الطالب للمتابعة: *${activeStudentCode}*` : '';
+    const codeLine = '';
 
     const taughtToday = lesson.report?.arabicTopicsExplained || lesson.report?.teacherNotes || lesson.topic || 'لم يحدد بعد';
     const nextHomework = lesson.report?.arabicHomeworkRequired || lesson.report?.homeworkDescription || (lesson.report?.homeworkTitle ? `${lesson.report.homeworkTitle}` : 'لا يوجد واجب');
@@ -762,8 +760,7 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
       const datePart = lesson.date ? `📅 Date: ${lesson.date}` : '';
       const timePart = lesson.time ? `⏰ Time: ${lesson.time}` : '';
       const cyclePart = hasCycle ? `🔢 Session: Session ${currentSessionNumber} of ${totalCycleSessions}` : '';
-      const codePart = activeStudentCode ? `🔑 Student Code: *${activeStudentCode}*` : '';
-      const headerText = [greeting, `📊 Session Report for: *${studentDisplayName}* 🇩🇪`, datePart, timePart, cyclePart, codePart].filter(Boolean).join('\n');
+      const headerText = [greeting, `📊 Session Report for: *${studentDisplayName}* 🇩🇪`, datePart, timePart, cyclePart].filter(Boolean).join('\n');
       
       let body = `${headerText}\n\n• Attendance: ${attendanceStr}`;
       if (!isAbsent) {
@@ -789,8 +786,7 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
       const datePart = lesson.date ? `📅 Datum: ${lesson.date}` : '';
       const timePart = lesson.time ? `⏰ Uhrzeit: ${lesson.time}` : '';
       const cyclePart = hasCycle ? `🔢 Unterrichtsstunde: Sitzung ${currentSessionNumber} von ${totalCycleSessions}` : '';
-      const codePart = activeStudentCode ? `🔑 Schüler-Code: *${activeStudentCode}*` : '';
-      const headerText = [greeting, `📊 Unterrichtsbericht für: *${studentDisplayName}* 🇩🇪`, datePart, timePart, cyclePart, codePart].filter(Boolean).join('\n');
+      const headerText = [greeting, `📊 Unterrichtsbericht für: *${studentDisplayName}* 🇩🇪`, datePart, timePart, cyclePart].filter(Boolean).join('\n');
 
       let body = `${headerText}\n\n• Anwesenheit: ${attendanceStr}`;
       if (!isAbsent) {
@@ -903,7 +899,7 @@ ${selectedOutro}`;
       if (isAbsent) {
         const generated = `${conciseGreeting}
 ⚡ كبسولة تقرير حصة الألماني:
-👤 ${studentRoleLabel}: *${studentDisplayName}* ${activeStudentCode ? `(كود: ${activeStudentCode})` : ''}
+👤 ${studentRoleLabel}: *${studentDisplayName}*
 ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
 ❌ حالة الحضور: غائب${isFemale ? 'ة' : ''} عن الحصة اليوم
@@ -944,7 +940,7 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
       const generated = `${conciseGreeting}
 🇩🇪 كبسولة تقرير حصة الألماني:
-👤 ${studentRoleLabel}: *${studentDisplayName}* ${activeStudentCode ? `(كود: ${activeStudentCode})` : ''}
+👤 ${studentRoleLabel}: *${studentDisplayName}*
 ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
 📖 ما تم شرحه: ${taughtToday}
@@ -964,7 +960,6 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
       standardGreeting,
       `📊 تقرير متابعة الحصة:`,
       `👤 ${studentRoleLabel}: ${studentDisplayName}`,
-      codeLine,
       dayDateLine,
       timeLine,
       cycleLine
@@ -1397,32 +1392,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                 })()}
               </div>
 
-              {/* Student Code for Parent Portal */}
-              {activeStudent && (
-                <div>
-                  <span className="text-text-muted font-bold block mb-0.5">
-                    {_t('كود الطالب (المنصة)', 'Student Code (Portal)', 'Schüler-Code')}
-                  </span>
-                  <div className="flex items-center gap-1.5 pt-0.5">
-                    <span className="font-mono font-black text-primary text-xs">
-                      {getStudentCode(activeStudent)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigator.clipboard.writeText(getStudentCode(activeStudent));
-                        setCopiedCodeInModal(true);
-                        setTimeout(() => setCopiedCodeInModal(false), 2000);
-                      }}
-                      className="p-1 hover:bg-primary-soft rounded-md transition-colors cursor-pointer text-primary"
-                      title={_t('نسخ كود الطالب', 'Copy student code', 'Code kopieren')}
-                    >
-                      {copiedCodeInModal ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                </div>
-              )}
+
 
               <div>
                 <span className="text-text-muted font-bold block mb-0.5">

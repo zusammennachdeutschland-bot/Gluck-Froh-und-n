@@ -289,6 +289,16 @@ export const checkOverlap = (l1: any, l2: any) => {
     return false;
   }
 
+  // If one lesson is strictly Week A and the other is strictly Week B, they occur in alternate weeks and never conflict!
+  const rec1 = l1.scheduleRecurrence;
+  const rec2 = l2.scheduleRecurrence;
+  if (
+    (rec1 === 'biweekly_a' && rec2 === 'biweekly_b') ||
+    (rec1 === 'biweekly_b' && rec2 === 'biweekly_a')
+  ) {
+    return false;
+  }
+
   const getMins = (t: string) => {
     if (!t) return 0;
     const parts = t.split(':').map(Number);

@@ -63,7 +63,8 @@ export type LernstudioGameMode =
   | 'vending_machine'
   | 'whats_in_box'
   | 'word_rhythm'
-  | 'word_wash';
+  | 'word_wash'
+  | 'solo_sentence';
 
 export interface LernstudioExercise {
   id: string;

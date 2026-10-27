@@ -49,11 +49,25 @@ export function buildDynamicQuestionPool(set: LernstudioSet, language: string = 
   // 1. Incorporate any custom exercises from set
   if (set.customExercises && set.customExercises.length > 0) {
     set.customExercises.forEach((ex, idx) => {
+      let options = ex.options;
+      if ((!options || options.length === 0) && ex.correctAnswer) {
+        const words = ex.correctAnswer.split(' ').filter(Boolean);
+        if (words.length >= 2) {
+          const correctSent = ex.correctAnswer;
+          const perm1 = [...words].sort(() => 0.5 - Math.random()).join(' ');
+          const perm2 = [...words].reverse().join(' ');
+          const perm3 = [...words].sort(() => Math.random() - 0.5).join(' ');
+          options = Array.from(new Set([correctSent, perm1, perm2, perm3]))
+            .filter(Boolean)
+            .sort(() => 0.5 - Math.random());
+        }
+      }
+
       pool.push({
         id: ex.id || `custom_${idx}`,
         type: ex.type,
         prompt: ex.question,
-        options: ex.options,
+        options: options,
         correctAnswer: ex.correctAnswer,
         explanation: ex.explanation
       });
@@ -193,6 +207,14 @@ export function buildDynamicQuestionPool(set: LernstudioSet, language: string = 
           ? `Ordne die Wörter zu einem richtigen Satz:`
           : `رتّب الكلمات لتكوين جملة صحيحة:`;
 
+      const correctSentence = sentencePieces.join(' ');
+      const perm1 = [...sentencePieces].sort(() => 0.5 - Math.random()).join(' ');
+      const perm2 = [...sentencePieces].reverse().join(' ');
+      const perm3 = [...sentencePieces].sort(() => Math.random() - 0.5).join(' ');
+      const sentOptions = Array.from(new Set([correctSentence, perm1, perm2, perm3]))
+        .filter(Boolean)
+        .sort(() => 0.5 - Math.random());
+
       pool.push({
         id: `dyn_sent_${item.id}_${index}`,
         type: 'sentence_builder',
@@ -200,8 +222,9 @@ export function buildDynamicQuestionPool(set: LernstudioSet, language: string = 
         subPrompt: item.exampleSentenceArabic || itemTrans,
         emoji: item.emoji,
         sentencePieces: sentencePieces,
-        correctAnswer: sentencePieces.join(' '),
-        explanation: item.exampleSentenceGerman || sentencePieces.join(' '),
+        options: sentOptions,
+        correctAnswer: correctSentence,
+        explanation: item.exampleSentenceGerman || correctSentence,
         itemRef: item
       });
     }

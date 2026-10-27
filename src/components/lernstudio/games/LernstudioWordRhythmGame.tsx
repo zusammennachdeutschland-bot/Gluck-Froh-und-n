@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { LernstudioSet, LernstudioTheme } from '../../../types/lernstudio';
 import { getSetVocabularyItems, AdaptedVocabItem, getDistractorChoices } from '../../../utils/lernstudioVocabularyAdapter';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations } from '../../../utils/lernstudioTranslations';
-import { ArrowLeft, Volume2, RotateCcw, Music, Sparkles, Disc } from 'lucide-react';
+import { ArrowLeft, Volume2, RotateCcw, Music, Disc } from 'lucide-react';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
 
 interface Props {
   set: LernstudioSet;
@@ -21,6 +23,7 @@ export const LernstudioWordRhythmGame: React.FC<Props> = ({
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
+  const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   const vocabItems = getSetVocabularyItems(set, language);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -63,12 +66,18 @@ export const LernstudioWordRhythmGame: React.FC<Props> = ({
     if (choice.id === currentItem.id) {
       setIsCorrect(true);
       playLernstudioSound('correct');
+      playGermanVoiceFeedback('correct');
+      triggerSparkles(50, 45, '#d946ef');
+      triggerScorePopup('+100 🎵', 50, 35, 'positive');
       setScore((s) => s + 100);
       setBeatCount((b) => b + 1);
 
       setTimeout(() => {
         if (currentIndex + 1 >= vocabItems.length) {
           setIsVictory(true);
+          playLernstudioSound('victory');
+          playGermanVoiceFeedback('victory');
+          triggerCelebration('عزف متناغم واحترافي! 🎵', `النقاط: ${score + 100}`);
         } else {
           setCurrentIndex((prev) => prev + 1);
           setIsAnswerSubmitted(false);
@@ -79,6 +88,7 @@ export const LernstudioWordRhythmGame: React.FC<Props> = ({
     } else {
       setIsCorrect(false);
       playLernstudioSound('wrong');
+      playGermanVoiceFeedback('wrong');
       setTimeout(() => {
         setIsAnswerSubmitted(false);
         setSelectedChoice(null);
@@ -98,7 +108,8 @@ export const LernstudioWordRhythmGame: React.FC<Props> = ({
   };
 
   return (
-    <div className="p-4 sm:p-6 rounded-3xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main" dir={isRtl ? 'rtl' : 'ltr'}>
+    <div className="p-4 sm:p-6 rounded-3xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main relative overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
+      <EffectsOverlay />
       {/* Top Header */}
       <div className="bg-surface border border-surface-border p-4 rounded-3xl shadow-sm flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -110,7 +121,8 @@ export const LernstudioWordRhythmGame: React.FC<Props> = ({
             <h1 className="text-base sm:text-lg font-black text-text-main">إيقاع النغمات (Word Rhythm)</h1>
           </div>
         </div>
-        <div className="flex items-center gap-3 text-xs font-black">
+        <div className="flex items-center gap-3 text-xs font-black flex-wrap">
+          <SettingsBar />
           <span className="px-3 py-1.5 rounded-xl bg-primary-soft text-primary">النقاط: {score}</span>
           <span className="px-3 py-1.5 rounded-xl bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400">النغمات: {beatCount}/10</span>
         </div>
@@ -118,7 +130,13 @@ export const LernstudioWordRhythmGame: React.FC<Props> = ({
 
       {/* Main Stage */}
       {!isVictory ? (
-        <div className="max-w-2xl w-full mx-auto my-auto space-y-6">
+        <div className="max-w-2xl w-full mx-auto my-auto space-y-5">
+          <GameStageBanner
+            mode="word_rhythm"
+            title="إيقاع النغمات (Word Rhythm)"
+            subtitle="اعزف ألحان المفردات الألمانية على المسرح المضيء!"
+            badgeText={`${beatCount}/10 🎵`}
+          />
           <div className="bg-surface border border-surface-border p-6 rounded-3xl text-center space-y-4 shadow-sm relative overflow-hidden">
             <div className="flex justify-center items-center gap-2 text-fuchsia-500 font-bold text-xs">
               <Music className="w-5 h-5 animate-bounce" />
@@ -186,18 +204,18 @@ export const LernstudioWordRhythmGame: React.FC<Props> = ({
       ) : (
         /* Victory Screen */
         <div className="max-w-md w-full mx-auto my-auto bg-surface border border-surface-border p-8 rounded-3xl text-center space-y-6 shadow-2xl animate-scale-up">
-          <div className="p-4 bg-fuchsia-500/10 text-fuchsia-500 rounded-3xl inline-block">
-            <Sparkles className="w-16 h-16 animate-bounce" />
+          <div className="flex justify-center">
+            <SharedVictoryTrophyArt className="w-28 h-28 rounded-3xl shadow-xl border-2 border-amber-400/50" />
           </div>
           <div className="space-y-2">
             <h2 className="text-2xl font-black text-text-main">عزف متناغم واحترافي! 🎵✨</h2>
             <p className="text-xs text-text-muted font-bold">جمعت {score} نقطة وأتقنت النغمات الـ 10 بالكامل!</p>
           </div>
           <div className="flex gap-3 justify-center">
-            <button onClick={handleRestart} className="px-6 py-3 bg-fuchsia-600 text-white rounded-2xl font-bold flex items-center gap-2">
+            <button onClick={handleRestart} className="px-6 py-3 bg-fuchsia-600 text-white rounded-2xl font-bold flex items-center gap-2 cursor-pointer">
               <RotateCcw className="w-4 h-4" /> إعادة اللعب
             </button>
-            <button onClick={onBack} className="px-6 py-3 bg-surface-hover text-text-muted rounded-2xl font-bold">
+            <button onClick={onBack} className="px-6 py-3 bg-surface-hover text-text-muted rounded-2xl font-bold cursor-pointer">
               القائمة الرئيسية
             </button>
           </div>
@@ -206,3 +224,4 @@ export const LernstudioWordRhythmGame: React.FC<Props> = ({
     </div>
   );
 };
+

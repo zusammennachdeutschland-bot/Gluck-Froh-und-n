@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
 import { parseLocalDate, formatLocalDate } from '../utils/timeUtils';
-import { getProjectedLessonsForRange, getCurrentAlternatingWeek, getAlternatingWeek } from '../utils/scheduleUtils';
+import { getProjectedLessonsForRange, getCurrentAlternatingWeek, getAlternatingWeek, getRecurrenceLabel } from '../utils/scheduleUtils';
 import { 
   Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, ChevronDown,
   Video, MapPin, CheckCircle2, AlertTriangle, Trash2, ArrowLeftRight, 
@@ -1052,11 +1052,28 @@ export const ScheduleView: React.FC = () => {
                             </>
                           ) : null}
 
-                          {/* Weekly */}
+                          {/* Recurrence Badge */}
                           <span className="text-text-muted/40 text-[10px]">•</span>
-                          <span className="text-[11px] font-semibold text-text-muted">
-                            {t('schedule_weekly')}
-                          </span>
+                          {(() => {
+                            const grp = groups.find(g => g.id === lesson.groupId);
+                            const rec = lesson.scheduleRecurrence || grp?.scheduleRecurrence || 'weekly';
+                            const isBiweeklyA = rec === 'biweekly_a';
+                            const isBiweeklyB = rec === 'biweekly_b';
+                            return (
+                              <span className={`text-[11px] font-semibold flex items-center gap-1 ${
+                                isBiweeklyA 
+                                  ? 'text-primary font-bold' 
+                                  : isBiweeklyB 
+                                    ? 'text-primary font-bold' 
+                                    : 'text-text-muted'
+                              }`}>
+                                {isBiweeklyA && <span className="text-[10px]">🅰️</span>}
+                                {isBiweeklyB && <span className="text-[10px]">🅱️</span>}
+                                {!isBiweeklyA && !isBiweeklyB && <Repeat className="w-2.5 h-2.5 opacity-60" />}
+                                <span>{getRecurrenceLabel(rec, language)}</span>
+                              </span>
+                            );
+                          })()}
 
                           {/* Status Badges */}
                           {isCompleted && (

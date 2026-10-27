@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
-import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
+import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
 import { 
   CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check
 } from 'lucide-react';
@@ -60,6 +60,12 @@ export const TodaysProgressTimeline: React.FC = () => {
         ) {
           const grp = groups.find(g => g.id === l.groupId && !g.deleted);
           if (grp) {
+            // Filter out lessons if date doesn't match group alternating week recurrence
+            if (grp.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly') {
+              if (!isDateMatchingGroupRecurrence(grp.scheduleRecurrence, l.date)) {
+                return false;
+              }
+            }
             const activeSlots = getGroupScheduleSlots(grp);
             if (activeSlots.length > 0) {
               const lDate = parseLocalDate(l.date);

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
 import {
   ArrowLeft,
   RotateCcw,
@@ -52,6 +54,7 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
   const items = useMemo(() => set.items || [], [set.items]);
+  const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Game Settings
   const [playMode, setPlayMode] = useState<'solo' | 'teams'>('solo');
@@ -119,13 +122,15 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
     );
 
     if (isCorrect) {
-      playLernstudioSound('powerup_rocket');
-      playLernstudioSound('correct');
+      playLernstudioSound('laser');
+      playGermanVoiceFeedback('correct');
+      triggerSparkles(ship.xPercent, ship.yPercent, '#06b6d4');
       speakGermanText(ship.item.german);
 
       const nextStreak = streak + 1;
       setStreak(nextStreak);
       const points = 100 + nextStreak * 30;
+      triggerScorePopup(`+${points} 🚀`, ship.xPercent, Math.max(10, ship.yPercent - 8), 'positive');
 
       if (playMode === 'teams') {
         setTeamScores((s) => ({
@@ -141,6 +146,9 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
 
       if (targetIndex + 1 >= items.length) {
         setIsVictory(true);
+        playLernstudioSound('victory');
+        playGermanVoiceFeedback('victory');
+        triggerCelebration('انتصار أسطوري! تم تدمير جميع الأهداف الفضائية! 🚀');
       } else {
         setTimeout(() => {
           setTargetIndex((prev) => prev + 1);
@@ -148,7 +156,7 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
       }
     } else {
       playLernstudioSound('powerup_boom');
-      playLernstudioSound('wrong');
+      playGermanVoiceFeedback('wrong');
       setStreak(0);
       setShields((prev) => {
         const next = prev - 25;
@@ -177,9 +185,10 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
 
   return (
     <div
-      className="min-h-[85vh] p-3 sm:p-5 rounded-3xl space-y-4 select-none transition-all bg-slate-950 text-white flex flex-col justify-between"
+      className="min-h-[85vh] p-3 sm:p-5 rounded-3xl space-y-4 select-none transition-all bg-slate-950 text-white flex flex-col justify-between relative overflow-hidden"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
+      <EffectsOverlay />
       {/* Top Header Bar */}
       <div className="bg-slate-900/90 p-3 sm:p-4 rounded-2xl border border-slate-800 shadow-lg flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -207,6 +216,7 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
 
         {/* Mode Selector and Stats */}
         <div className="flex items-center gap-2 flex-wrap">
+          <SettingsBar />
           <div className="flex rounded-xl bg-slate-800 p-1 border border-slate-700 text-xs font-bold">
             <button
               type="button"
@@ -276,6 +286,13 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
           </button>
         </div>
       </div>
+
+      <GameStageBanner
+        mode="space_defense"
+        title="معركة الدفاع الفضائي (Space Defender)"
+        subtitle={`${displayTitle} • دمر السفن الفضائية الغازية التي تحمل الكلمة الألمانية الصحيحة!`}
+        badgeText={`🛡️ ${shields}%`}
+      />
 
       {/* Target Mission Command Console */}
       {targetItem && !isGameOver && !isVictory && (
@@ -402,9 +419,7 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
         {/* Victory Screen */}
         {isVictory && (
           <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center space-y-4 animate-scale-up z-50">
-            <div className="p-4 bg-cyan-500/10 text-cyan-400 rounded-3xl border border-cyan-500/30">
-              <Trophy className="w-16 h-16" />
-            </div>
+            <SharedVictoryTrophyArt className="w-28 h-28 rounded-3xl shadow-xl border-2 border-cyan-400/50" />
             <h2 className="text-2xl sm:text-3xl font-black text-white">
               انتصار أسطوري! تم تدمير جميع الأهداف الفضائية! 🚀🎉
             </h2>

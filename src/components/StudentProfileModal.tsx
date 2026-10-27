@@ -10,16 +10,15 @@ import {
   X, Phone, Send, FileText, Upload, Trash2, Calendar, Award, DollarSign, 
   BookOpen, CheckCircle2, AlertCircle, Download, FileCheck, User, Edit3, Save, Check, Sparkles,
   RefreshCw, Shield, Lock, MoreHorizontal, MessageSquare, Info, Star, GraduationCap, Users, Plus, Eye, Share2,
-  AtSign, Video, ExternalLink, Copy, Play, Repeat
+  AtSign, Video, ExternalLink, Copy, Play, Repeat, RotateCcw
 } from 'lucide-react';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { CreateCertificateModal } from './certificates/CreateCertificateModal';
 import { CertificatePreviewModal } from './certificates/CertificatePreviewModal';
 import { downloadCertificatePDF, shareCertificateWhatsApp } from '../utils/certificateExportUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
-import { getStudentCode } from '../utils/studentCodeUtils';
-import { portalSyncService } from '../services/portalSyncService';
 import { ensureTwoPartName, transliterateArabicNameToEnglish } from '../utils/nameUtils';
+import { normalizeEgyptianPhone } from '../utils/contactsStandardizer';
 
 interface StudentProfileModalProps {
   student: Student;
@@ -28,19 +27,19 @@ interface StudentProfileModalProps {
 }
 
 export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ student, onClose, initialTab = 'overview' }) => {
-  const { groups, lessons, payments, certificates, profile, uploadStudentDocument, deleteStudentDocument, updateStudent, updateStudentCertificateName, deleteStudent, archiveStudent, t, _t } = useApp();
+  const { students, groups, lessons, payments, certificates, profile, uploadStudentDocument, deleteStudentDocument, updateStudent, updateStudentCertificateName, deleteStudent, archiveStudent, t, _t } = useApp();
+
+  // Always resolve the live, updated student record from AppContext
+  const currentStudent = (students || []).find(s => s.id === student.id) || student;
 
   const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'recordings' | 'edit'>(initialTab);
   const [selectedCategory, setSelectedCategory] = useState<'homework' | 'exam' | 'doc'>('homework');
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isIssueCertModalOpen, setIsIssueCertModalOpen] = useState(false);
   const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
-  const [latinNameInput, setLatinNameInput] = useState(student.certificateName || '');
+  const [latinNameInput, setLatinNameInput] = useState(currentStudent.certificateName || '');
   const [isLatinSaved, setIsLatinSaved] = useState(false);
   const [copiedRecId, setCopiedRecId] = useState<string | null>(null);
-  const [copiedPortalCode, setCopiedPortalCode] = useState(false);
-  const [resettingPortal, setResettingPortal] = useState(false);
-  const [tempPasswordResult, setTempPasswordResult] = useState<string | null>(null);
 
   // Lock body scroll while modal is active and handle Escape key
   useEffect(() => {
@@ -61,31 +60,111 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   }, [onClose]);
 
   // Editable Student Fields
-  const studentCode = getStudentCode(student);
-  const [editName, setEditName] = useState(student.name);
-  const [editStudentCode, setEditStudentCode] = useState(student.studentCode || studentCode);
-  const [editCertificateName, setEditCertificateName] = useState(student.certificateName || '');
-  const [editGender, setEditGender] = useState<'male' | 'female'>(student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male'));
-  const [editGroupId, setEditGroupId] = useState(student.groupId);
-  const [editGrade, setEditGrade] = useState<GradeLevel>(student.grade);
-  const [editParentName, setEditParentName] = useState(student.parentName);
-  const isInitialParentUser = isWhatsAppUsername(student.parentPhone) || student.parentContactType === 'username';
-  const isInitialStudentUser = isWhatsAppUsername(student.studentPhone) || student.studentContactType === 'username';
+  const [editName, setEditName] = useState(currentStudent.name || '');
+  const [editCertificateName, setEditCertificateName] = useState(currentStudent.certificateName || '');
+  const [editGender, setEditGender] = useState<'male' | 'female'>(currentStudent.gender || (isLikelyFemaleStudent(currentStudent.name) ? 'female' : 'male'));
+  const [editGroupId, setEditGroupId] = useState(currentStudent.groupId || '');
+  const [editGrade, setEditGrade] = useState<GradeLevel>(currentStudent.grade);
+  const [editParentName, setEditParentName] = useState(currentStudent.parentName || '');
+  const isInitialParentUser = isWhatsAppUsername(currentStudent.parentPhone) || currentStudent.parentContactType === 'username';
+  const isInitialStudentUser = isWhatsAppUsername(currentStudent.studentPhone) || currentStudent.studentContactType === 'username';
   const [editParentContactType, setEditParentContactType] = useState<'phone' | 'username'>(isInitialParentUser ? 'username' : 'phone');
-  const [editParentPhone, setEditParentPhone] = useState(student.parentPhone);
+  const [editParentPhone, setEditParentPhone] = useState(currentStudent.parentPhone || '');
   const [editStudentContactType, setEditStudentContactType] = useState<'phone' | 'username'>(isInitialStudentUser ? 'username' : 'phone');
-  const [editStudentPhone, setEditStudentPhone] = useState(student.studentPhone);
-  const [editNotes, setEditNotes] = useState(student.notes || '');
-  const [editScheduleRecurrence, setEditScheduleRecurrence] = useState<ScheduleRecurrence>(student.scheduleRecurrence || 'weekly');
-  const [editStatus, setEditStatus] = useState<'active' | 'archived'>(student.status || 'active');
+  const [editStudentPhone, setEditStudentPhone] = useState(currentStudent.studentPhone || '');
+  const [editNotes, setEditNotes] = useState(currentStudent.notes || '');
+  const [editScheduleRecurrence, setEditScheduleRecurrence] = useState<ScheduleRecurrence>(currentStudent.scheduleRecurrence || 'weekly');
+  const [editStatus, setEditStatus] = useState<'active' | 'archived'>(currentStudent.status || 'active');
   const [saveSuccessToast, setSaveSuccessToast] = useState(false);
 
-  const assignedGroup = (groups || []).find(g => g.id === (activeTab === 'edit' ? editGroupId : student.groupId));
-  const studentCertificates = (certificates || []).filter(c => c.studentId === student.id && !c.deleted);
+  // Synchronize form states whenever currentStudent updates in AppContext
+  useEffect(() => {
+    const parentIsUser = isWhatsAppUsername(currentStudent.parentPhone) || currentStudent.parentContactType === 'username';
+    const studentIsUser = isWhatsAppUsername(currentStudent.studentPhone) || currentStudent.studentContactType === 'username';
+
+    setEditName(currentStudent.name || '');
+    setEditCertificateName(currentStudent.certificateName || '');
+    setEditGender(currentStudent.gender || (isLikelyFemaleStudent(currentStudent.name) ? 'female' : 'male'));
+    setEditGroupId(currentStudent.groupId || '');
+    setEditGrade(currentStudent.grade);
+    setEditParentName(currentStudent.parentName || '');
+    setEditParentContactType(parentIsUser ? 'username' : 'phone');
+    setEditParentPhone(currentStudent.parentPhone || '');
+    setEditStudentContactType(studentIsUser ? 'username' : 'phone');
+    setEditStudentPhone(currentStudent.studentPhone || '');
+    setEditNotes(currentStudent.notes || '');
+    setEditScheduleRecurrence(currentStudent.scheduleRecurrence || 'weekly');
+    setEditStatus(currentStudent.status || 'active');
+    setLatinNameInput(currentStudent.certificateName || '');
+  }, [
+    currentStudent.id,
+    currentStudent.updatedAt,
+    currentStudent.name,
+    currentStudent.certificateName,
+    currentStudent.gender,
+    currentStudent.groupId,
+    currentStudent.grade,
+    currentStudent.parentName,
+    currentStudent.parentPhone,
+    currentStudent.studentPhone,
+    currentStudent.notes,
+    currentStudent.scheduleRecurrence,
+    currentStudent.status
+  ]);
+
+  // Track modified fields compared against current student state
+  const initialGender = currentStudent.gender || (isLikelyFemaleStudent(currentStudent.name) ? 'female' : 'male');
+  const initialParentContactType = isWhatsAppUsername(currentStudent.parentPhone) || currentStudent.parentContactType === 'username' ? 'username' : 'phone';
+  const initialStudentContactType = isWhatsAppUsername(currentStudent.studentPhone) || currentStudent.studentContactType === 'username' ? 'username' : 'phone';
+
+  const isNameDiff = editName.trim() !== (currentStudent.name || '').trim();
+  const isCertificateNameDiff = editCertificateName.trim() !== (currentStudent.certificateName || '').trim();
+  const isGenderDiff = editGender !== initialGender;
+  const isGroupDiff = editGroupId !== currentStudent.groupId;
+  const isGradeDiff = editGrade !== currentStudent.grade;
+  const isScheduleDiff = editScheduleRecurrence !== (currentStudent.scheduleRecurrence || 'weekly');
+  const isParentNameDiff = editParentName.trim() !== (currentStudent.parentName || '').trim();
+  const isParentPhoneDiff = editParentPhone.trim() !== (currentStudent.parentPhone || '').trim();
+  const isStudentPhoneDiff = editStudentPhone.trim() !== (currentStudent.studentPhone || '').trim();
+  const isNotesDiff = editNotes.trim() !== (currentStudent.notes || '').trim();
+  const isStatusDiff = editStatus !== (currentStudent.status || 'active');
+
+  const modifiedFieldsCount = [
+    isNameDiff,
+    isCertificateNameDiff,
+    isGenderDiff,
+    isGroupDiff,
+    isGradeDiff,
+    isScheduleDiff,
+    isParentNameDiff,
+    isParentPhoneDiff,
+    isStudentPhoneDiff,
+    isNotesDiff,
+    isStatusDiff
+  ].filter(Boolean).length;
+
+  const handleResetAllEdits = () => {
+    setEditName(currentStudent.name || '');
+    setEditCertificateName(currentStudent.certificateName || '');
+    setEditGender(initialGender);
+    setEditGroupId(currentStudent.groupId || '');
+    setEditGrade(currentStudent.grade);
+    setEditParentName(currentStudent.parentName || '');
+    setEditParentContactType(initialParentContactType);
+    setEditParentPhone(currentStudent.parentPhone || '');
+    setEditStudentContactType(initialStudentContactType);
+    setEditStudentPhone(currentStudent.studentPhone || '');
+    setEditNotes(currentStudent.notes || '');
+    setEditScheduleRecurrence(currentStudent.scheduleRecurrence || 'weekly');
+    setEditStatus(currentStudent.status || 'active');
+  };
+
+  const assignedGroup = (groups || []).find(g => g.id === (activeTab === 'edit' ? editGroupId : currentStudent.groupId));
+  const studentCertificates = (certificates || []).filter(c => c.studentId === currentStudent.id && !c.deleted);
   const studentLessons = (lessons || []).filter(l => {
     if (l.status === 'cancelled') return false;
-    const matchesGroup = student.groupId ? l.groupId === student.groupId : false;
-    const matchesStudent = l.studentId === student.id || l.studentName === student.name;
+    const matchesGroup = currentStudent.groupId ? l.groupId === currentStudent.groupId : false;
+    const matchesStudent = l.studentId === currentStudent.id || l.studentName === currentStudent.name;
     return matchesGroup || matchesStudent;
   });
   const studentPayments = (payments || []).filter(p => p.studentId === student.id || p.studentName === student.name);
@@ -178,47 +257,50 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
   }
 
   // Attendance stats
-  const presentCount = studentLessons.filter(l => l.status === 'completed' && l.report && (l.report.studentAttendance?.[student.id] || l.report.attendanceStatus || 'present') === 'present').length;
-  const lateCount = studentLessons.filter(l => l.status === 'completed' && l.report && (l.report.studentAttendance?.[student.id] || l.report.attendanceStatus || 'present') === 'late').length;
-  const absentCount = studentLessons.filter(l => l.status === 'completed' && l.report && (l.report.studentAttendance?.[student.id] || l.report.attendanceStatus || 'present') === 'absent').length;
+  const presentCount = studentLessons.filter(l => l.status === 'completed' && l.report && (l.report.studentAttendance?.[currentStudent.id] || l.report.attendanceStatus || 'present') === 'present').length;
+  const lateCount = studentLessons.filter(l => l.status === 'completed' && l.report && (l.report.studentAttendance?.[currentStudent.id] || l.report.attendanceStatus || 'present') === 'late').length;
+  const absentCount = studentLessons.filter(l => l.status === 'completed' && l.report && (l.report.studentAttendance?.[currentStudent.id] || l.report.attendanceStatus || 'present') === 'absent').length;
 
   const handleSaveStudent = (e: React.FormEvent) => {
     e.preventDefault();
     const isParentUser = editParentContactType === 'username' || isWhatsAppUsername(editParentPhone);
     const cleanParentUser = cleanWhatsAppUsername(editParentPhone);
-    const finalParentPhone = isParentUser ? `@${cleanParentUser}` : editParentPhone.trim();
+    const finalParentPhone = isParentUser 
+      ? (cleanParentUser ? `@${cleanParentUser}` : '') 
+      : normalizeEgyptianPhone(editParentPhone.trim());
 
     const hasStudentVal = !!editStudentPhone.trim();
     const isStudentUser = hasStudentVal && (editStudentContactType === 'username' || isWhatsAppUsername(editStudentPhone));
     const cleanStudentUser = hasStudentVal ? cleanWhatsAppUsername(editStudentPhone) : '';
-    const finalStudentPhone = hasStudentVal ? (isStudentUser ? `@${cleanStudentUser}` : editStudentPhone.trim()) : '';
+    const finalStudentPhone = hasStudentVal 
+      ? (isStudentUser ? (cleanStudentUser ? `@${cleanStudentUser}` : '') : normalizeEgyptianPhone(editStudentPhone.trim())) 
+      : '';
 
-    updateStudent(student.id, {
-      name: editName,
-      studentCode: editStudentCode.trim() || studentCode,
-      certificateName: editCertificateName,
+    updateStudent(currentStudent.id, {
+      name: editName.trim(),
+      certificateName: editCertificateName.trim(),
       gender: editGender,
       groupId: editStatus === 'archived' ? '' : editGroupId,
-      archivedGroupId: editStatus === 'archived' ? (editGroupId || student.groupId || student.archivedGroupId || '') : student.archivedGroupId,
+      archivedGroupId: editStatus === 'archived' ? (editGroupId || currentStudent.groupId || currentStudent.archivedGroupId || '') : currentStudent.archivedGroupId,
       scheduleRecurrence: editScheduleRecurrence,
       grade: editGrade,
-      parentName: editParentName,
+      parentName: editParentName.trim(),
       parentPhone: finalParentPhone,
-      parentUsername: isParentUser ? cleanParentUser : undefined,
+      parentUsername: isParentUser ? cleanParentUser : '',
       parentContactType: isParentUser ? 'username' : 'phone',
       studentPhone: finalStudentPhone,
-      studentUsername: isStudentUser ? cleanStudentUser : undefined,
-      studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
-      notes: editNotes,
-      status: editStatus
+      studentUsername: isStudentUser ? cleanStudentUser : '',
+      studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : 'phone'),
+      notes: editNotes.trim(),
+      status: editStatus,
+      updatedAt: Date.now()
     });
 
     setSaveSuccessToast(true);
-    /* confetti removed */
     setTimeout(() => {
       setSaveSuccessToast(false);
       setActiveTab('overview');
-    }, 1200);
+    }, 1000);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -258,17 +340,17 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
               {_t('بطاقة الطالب الذكية', 'STUDENT CARD', 'SCHÜLER SMART CARD')}
             </span>
             <span className="text-[10px] font-black text-primary shrink-0">
-              {student.grade}
+              {currentStudent.grade}
             </span>
             <span className="text-text-muted/40">•</span>
             <span className="text-[10px] font-bold text-text-muted shrink-0">
-              {(student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female' ? '👧 طالبة' : '👦 طالب'}
+              {(currentStudent.gender || (isLikelyFemaleStudent(currentStudent.name) ? 'female' : 'male')) === 'female' ? '👧 طالبة' : '👦 طالب'}
             </span>
             <span className="text-text-muted/40">•</span>
             <span className={`text-[10px] font-bold shrink-0 ${
-              student.status === 'active' ? 'text-primary' : 'text-text-muted'
+              currentStudent.status === 'active' ? 'text-primary' : 'text-text-muted'
             }`}>
-              {student.status === 'active' ? _t('نشط ✓', 'Active ✓', 'Aktiv ✓') : _t('مؤرشف ⚪', 'Archived ⚪', 'Archiviert ⚪')}
+              {currentStudent.status === 'active' ? _t('نشط ✓', 'Active ✓', 'Aktiv ✓') : _t('مؤرشف ⚪', 'Archived ⚪', 'Archiviert ⚪')}
             </span>
           </div>
 
@@ -290,19 +372,19 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
             <div className="flex items-center justify-between gap-2" dir="rtl">
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <AvatarImage
-                  name={student.name}
+                  name={currentStudent.name}
                   className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl text-base sm:text-lg font-black shadow-2xs border border-surface-border shrink-0"
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <h2 className="text-sm sm:text-base font-black text-text-main tracking-tight truncate">
-                      {student.name}
+                      {currentStudent.name}
                     </h2>
                     <button
                       type="button"
                       onClick={() => {
-                        const nextGender = (student.gender || (isLikelyFemaleStudent(student.name) ? 'female' : 'male')) === 'female' ? 'male' : 'female';
-                        updateStudent(student.id, { gender: nextGender });
+                        const nextGender = (currentStudent.gender || (isLikelyFemaleStudent(currentStudent.name) ? 'female' : 'male')) === 'female' ? 'male' : 'female';
+                        updateStudent(currentStudent.id, { gender: nextGender });
                       }}
                       className="text-[10px] font-bold text-text-muted hover:text-primary transition-colors cursor-pointer"
                       title={_t('انقر لتغيير التحديد بين ولد وبنت', 'Click to toggle gender', 'Klicken zum Ändern')}
@@ -322,12 +404,12 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                       </span>
                     )}
 
-                    {student.scheduleRecurrence === 'biweekly_a' && (
+                    {currentStudent.scheduleRecurrence === 'biweekly_a' && (
                       <span className="font-bold text-[9.5px] px-1.5 py-0.2 rounded-md bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
                         🅰️ {_t('أسبوع (أ)', 'Bi-weekly (A)', 'Alle 2 Wochen (A)')}
                       </span>
                     )}
-                    {student.scheduleRecurrence === 'biweekly_b' && (
+                    {currentStudent.scheduleRecurrence === 'biweekly_b' && (
                       <span className="font-bold text-[9.5px] px-1.5 py-0.2 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
                         🅱️ {_t('أسبوع (ب)', 'Bi-weekly (B)', 'Alle 2 Wochen (B)')}
                       </span>
@@ -358,17 +440,13 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
               </div>
             </div>
 
-            {/* Bottom Row inside card: Phone & Portal Code Bar */}
+            {/* Bottom Row inside card: Phone Bar */}
             <div className="flex items-center justify-between gap-2 pt-1 border-t border-surface-border/50 text-[10.5px]">
-              {student.parentPhone && (
+              {currentStudent.parentPhone && (
                 <span className="font-mono text-text-muted font-bold flex items-center gap-1 truncate" dir="ltr">
-                  📞 {formatContactDisplay(student.parentPhone)}
+                  📞 {formatContactDisplay(currentStudent.parentPhone)}
                 </span>
               )}
-
-              <span className="font-mono text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-md text-[10px] font-black shrink-0" title="كود تسجيل دخول ومتابعة ولي الأمر">
-                كود البوابة: {getStudentCode(student)}
-              </span>
             </div>
           </div>
 
@@ -546,7 +624,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                         <GraduationCap className="w-4 h-4 text-indigo-500" />
                         <span className="font-bold text-slate-500 dark:text-slate-400">Klasse:</span>
                       </div>
-                      <span className="font-black text-slate-800 dark:text-white">{student.grade}</span>
+                      <span className="font-black text-slate-800 dark:text-white">{currentStudent.grade}</span>
                     </div>
 
                     {/* Elternteil */}
@@ -555,7 +633,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                         <User className="w-4 h-4 text-sky-500" />
                         <span className="font-bold text-slate-500 dark:text-slate-400">Elternteil:</span>
                       </div>
-                      <span className="font-black text-slate-800 dark:text-white">{student.parentName || 'N/A'}</span>
+                      <span className="font-black text-slate-800 dark:text-white">{currentStudent.parentName || 'N/A'}</span>
                     </div>
 
                     {/* Telefon Eltern */}
@@ -564,7 +642,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                         <Phone className="w-4 h-4 text-emerald-500" />
                         <span className="font-bold text-slate-500 dark:text-slate-400">Telefon Eltern:</span>
                       </div>
-                      <span className="font-mono font-black text-slate-800 dark:text-white">{student.parentPhone || 'N/A'}</span>
+                      <span className="font-mono font-black text-slate-800 dark:text-white">{currentStudent.parentPhone || 'N/A'}</span>
                     </div>
 
                     {/* Telefon Schüler */}
@@ -573,7 +651,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                         <Phone className="w-4 h-4 text-emerald-400" />
                         <span className="font-bold text-slate-500 dark:text-slate-400">Telefon Schüler:</span>
                       </div>
-                      <span className="font-mono font-black text-slate-800 dark:text-white">{student.studentPhone || 'N/A'}</span>
+                      <span className="font-mono font-black text-slate-800 dark:text-white">{currentStudent.studentPhone || 'N/A'}</span>
                     </div>
 
                     {/* Beigetreten */}
@@ -582,7 +660,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                         <Calendar className="w-4 h-4 text-rose-500" />
                         <span className="font-bold text-slate-500 dark:text-slate-400">Beigetreten:</span>
                       </div>
-                      <span className="font-mono font-black text-slate-800 dark:text-white">{student.joinedDate || '2026-08-10'}</span>
+                      <span className="font-mono font-black text-slate-800 dark:text-white">{currentStudent.joinedDate || '2026-08-10'}</span>
                     </div>
                   </div>
 
@@ -609,108 +687,12 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                     </div>
                   )}
 
-                  {/* Parent Portal Access & Reset Card */}
-                  <div className="p-3.5 sm:p-4 bg-gradient-to-r from-blue-50/80 to-indigo-50/80 dark:from-blue-950/20 dark:to-indigo-950/20 border border-blue-200/80 dark:border-blue-900/40 rounded-2xl space-y-3">
-                    <div className="flex items-center justify-between border-b border-blue-100 dark:border-blue-900/40 pb-2">
-                      <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-black text-xs">
-                        <Shield className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                        <span>{_t('بوابة ولي الأمر (Parent Portal)', 'Parent Portal Access', 'Elternportal')}</span>
-                      </div>
-                      <span className="text-[10px] bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-bold">
-                        {_t('نشط للولي', 'Active', 'Aktiv')}
-                      </span>
-                    </div>
+                  {/* Notes Block */}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                      <div className="flex items-center justify-between p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-blue-100 dark:border-blue-900/30">
-                        <span className="font-bold text-slate-500 dark:text-slate-400">{_t('كود الطالب:', 'Student Code:', 'Code:')}</span>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono font-black text-blue-600 dark:text-blue-400 text-sm tracking-wider">{studentCode}</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(studentCode);
-                              setCopiedPortalCode(true);
-                              setTimeout(() => setCopiedPortalCode(false), 2000);
-                            }}
-                            className="p-1 text-slate-400 hover:text-blue-600 rounded transition-colors cursor-pointer"
-                            title={_t('نسخ الكود', 'Copy Code', 'Kopieren')}
-                          >
-                            {copiedPortalCode ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-blue-100 dark:border-blue-900/30">
-                        <span className="font-bold text-slate-500 dark:text-slate-400">{_t('رابط البوابة:', 'Portal URL:', 'Portal-Link:')}</span>
-                        <a
-                          href="/portal/"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                        >
-                          <span>/portal/</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                    </div>
-
-                    {tempPasswordResult && (
-                      <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/40 rounded-xl text-amber-800 dark:text-amber-300 text-xs flex items-center justify-between">
-                        <div>
-                          <span className="font-bold block">{_t('كلمة المرور المؤقتة الجديدة:', 'New Temporary Password:', 'Neues temporäres Passwort:')}</span>
-                          <span className="font-mono font-black text-sm tracking-widest text-amber-900 dark:text-amber-200">{tempPasswordResult}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(tempPasswordResult);
-                          }}
-                          className="px-2 py-1 bg-amber-200 dark:bg-amber-900/60 rounded text-[11px] font-bold cursor-pointer"
-                        >
-                          {_t('نسخ', 'Copy', 'Kopieren')}
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-2 pt-1 flex-wrap sm:flex-nowrap">
-                      {student.parentPhone && (
-                        <a
-                          href={buildWhatsAppUrl(student.parentPhone, `مرحباً، رابط بوابة متابعة ولي الأمر لمتابعة الطالب (${student.name}):\n${window.location.origin}/portal/\nكود الطالب: ${studentCode}\nرقم الهاتف: ${student.parentPhone}`)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex-1 py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-2xs"
-                        >
-                          <Send className="w-3.5 h-3.5" />
-                          <span>{_t('إرسال بيانات البوابة واتساب', 'Share on WhatsApp', 'Per WhatsApp senden')}</span>
-                        </a>
-                      )}
-                      <button
-                        type="button"
-                        disabled={resettingPortal}
-                        onClick={async () => {
-                          setResettingPortal(true);
-                          try {
-                            const tempPass = await portalSyncService.resetParentPassword(studentCode);
-                            setTempPasswordResult(tempPass);
-                          } catch (e: any) {
-                            alert(e.message || 'فشلت إعادة التعيين');
-                          } finally {
-                            setResettingPortal(false);
-                          }
-                        }}
-                        className="py-1.5 px-2.5 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-2xs"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${resettingPortal ? 'animate-spin' : ''}`} />
-                        <span>{_t('إعادة تعيين كلمة مرور الولي', 'Reset Password', 'Passwort zurücksetzen')}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {student.notes && (
+                  {currentStudent.notes && (
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
                       <span className="font-bold text-slate-400 uppercase tracking-widest text-[9px] block mb-1">Notizen</span>
-                      <p className="text-text-main font-semibold italic text-slate-700 dark:text-slate-300 leading-normal">{student.notes}</p>
+                      <p className="text-text-main font-semibold italic text-slate-700 dark:text-slate-300 leading-normal">{currentStudent.notes}</p>
                     </div>
                   )}
                 </div>
@@ -1240,26 +1222,73 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
             {/* EDIT STUDENT DATA TAB */}
             {activeTab === 'edit' && (
               <form onSubmit={handleSaveStudent} className="space-y-3.5 pt-1">
-                {/* Student Code, Name & English Name */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                      <span>{_t('كود الطالب (Portal Code)', 'Student Code', 'Schüler-Code')}</span>
-                      <span className="text-[10px] text-primary font-bold">{_t('لبوابة ولي الأمر', 'For Parent Portal', 'Für Elternportal')}</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={editStudentCode}
-                      onChange={(e) => setEditStudentCode(e.target.value)}
-                      placeholder="e.g. STU-1001"
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-primary text-primary dark:text-sky-300 uppercase tracking-wider"
-                    />
+                {/* Change Tracker Summary Banner */}
+                <div className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-2 shadow-2xs ${
+                  modifiedFieldsCount > 0 
+                    ? 'bg-amber-500/10 dark:bg-amber-950/40 border-amber-500/30' 
+                    : 'bg-surface-hover border-surface-border'
+                }`}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`p-1.5 rounded-xl shrink-0 ${
+                      modifiedFieldsCount > 0 
+                        ? 'bg-amber-500 text-white shadow-2xs' 
+                        : 'bg-surface border border-surface-border text-text-muted'
+                    }`}>
+                      <RefreshCw className={`w-4 h-4 ${modifiedFieldsCount > 0 ? 'animate-spin-slow' : ''}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-xs font-black text-text-main truncate">
+                          {modifiedFieldsCount > 0 
+                            ? _t(`تم تعديل ${modifiedFieldsCount} من الحقول`, `${modifiedFieldsCount} fields modified`, `${modifiedFieldsCount} Felder geändert`)
+                            : _t('لم يتم إدخال أي تعديلات حتى الآن', 'No field modifications yet', 'Keine Änderungen bisher')}
+                        </h4>
+                        {modifiedFieldsCount > 0 ? (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500 text-white animate-pulse">
+                            {_t('مُعدَّل', 'Modified', 'Geändert')}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-surface border border-surface-border text-text-muted">
+                            {_t('غير مُعدَّل', 'Untouched', 'Unverändert')}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-text-muted truncate mt-0.5">
+                        {modifiedFieldsCount > 0
+                          ? _t('تم تعليق الحقول المعدلة بشارة صفراء، يمكنك التراجع عن أي حقل على حدة', 'Modified fields are tagged in amber. Revert individually or all at once.', 'Geänderte Felder sind hervorgehoben.')
+                          : _t('عدِّل أي حقل لتمييزه ومتابعة ما قمت بتغييره قبل الحفظ', 'Change any field to track modified vs unchanged data.', 'Ändern Sie ein Feld zur Verfolgung.')}
+                      </p>
+                    </div>
                   </div>
+
+                  {modifiedFieldsCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleResetAllEdits}
+                      className="px-2.5 py-1.5 bg-surface hover:bg-surface-hover text-rose-600 dark:text-rose-400 border border-surface-border hover:border-rose-300 rounded-xl text-xs font-extrabold transition-all cursor-pointer shrink-0 flex items-center gap-1 shadow-2xs"
+                      title={_t('استعادة القيمة الأصلية لكافة الحقول', 'Revert all fields to initial state', 'Alle zurücksetzen')}
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">{_t('تراجع عن الكل', 'Revert All', 'Alle zurücksetzen')}</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Student Name & English Name */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                        {_t('اسم الطالب (Student Name) *', 'Student Name *', 'Schüler Name *')}
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span>{_t('اسم الطالب (Student Name) *', 'Student Name *', 'Schüler Name *')}</span>
+                        {isNameDiff ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                            <button type="button" onClick={() => setEditName(student.name)} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium text-text-muted/60">✓ {_t('غير مُعدَّل', 'Original', 'Original')}</span>
+                        )}
                       </label>
                       {editName.trim() && (
                         <button
@@ -1283,14 +1312,24 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                       required
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
+                      className={`w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white transition-all ${
+                        isNameDiff ? 'ring-2 ring-amber-500/40 border-amber-500/60 bg-amber-500/5 dark:bg-amber-950/20' : 'border-slate-100 dark:border-slate-800'
+                      }`}
                     />
                   </div>
 
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                        {_t('الاسم بالإنجليزية للشهادات (English Name)', 'English Name for Certificates', 'Englischer Name für Zertifikate')}
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span>{_t('الاسم بالإنجليزية للشهادات', 'English Name for Certificates', 'Englischer Name für Zertifikate')}</span>
+                        {isCertificateNameDiff ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                            <button type="button" onClick={() => setEditCertificateName(student.certificateName || '')} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium text-text-muted/60">✓ {_t('غير مُعدَّل', 'Original', 'Original')}</span>
+                        )}
                       </label>
                       {editCertificateName.trim() && (
                         <button
@@ -1308,16 +1347,28 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                       value={editCertificateName}
                       onChange={(e) => setEditCertificateName(e.target.value)}
                       placeholder="e.g. Ahmed Ali"
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white font-mono tracking-wide"
+                      className={`w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white font-mono tracking-wide transition-all ${
+                        isCertificateNameDiff ? 'ring-2 ring-amber-500/40 border-amber-500/60 bg-amber-500/5 dark:bg-amber-950/20' : 'border-slate-100 dark:border-slate-800'
+                      }`}
                     />
                   </div>
                 </div>
 
                 {/* Gender Toggle */}
                 <div className="space-y-1">
-                  <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                    {_t('جنس الطالب (Gender)', 'Gender', 'Geschlecht')}
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <span>{_t('جنس الطالب (Gender)', 'Gender', 'Geschlecht')}</span>
+                      {isGenderDiff ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                          <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                          <button type="button" onClick={() => setEditGender(initialGender)} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-medium text-text-muted/60">✓ {_t('غير مُعدَّل', 'Original', 'Original')}</span>
+                      )}
+                    </label>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -1349,13 +1400,25 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                 {/* Group & Grade */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                      Zugewiesene Gruppe (Group)
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span>Zugewiesene Gruppe (Group)</span>
+                        {isGroupDiff ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                            <button type="button" onClick={() => setEditGroupId(student.groupId)} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium text-text-muted/60">✓ {_t('غير مُعدَّل', 'Original', 'Original')}</span>
+                        )}
+                      </label>
+                    </div>
                     <select
                       value={editGroupId}
                       onChange={(e) => setEditGroupId(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
+                      className={`w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white transition-all ${
+                        isGroupDiff ? 'ring-2 ring-amber-500/40 border-amber-500/60 bg-amber-500/5 dark:bg-amber-950/20' : 'border-slate-100 dark:border-slate-800'
+                      }`}
                     >
                       {groups.map(g => (
                         <option key={g.id} value={g.id}>
@@ -1366,13 +1429,25 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                      {_t('المستوى / الصف الدراسي', 'Grade / Course Level', 'Klassenstufe / Niveau')}
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span>{_t('المستوى / الصف الدراسي', 'Grade / Course Level', 'Klassenstufe / Niveau')}</span>
+                        {isGradeDiff ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                            <button type="button" onClick={() => setEditGrade(student.grade)} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium text-text-muted/60">✓ {_t('غير مُعدَّل', 'Original', 'Original')}</span>
+                        )}
+                      </label>
+                    </div>
                     <select
                       value={editGrade}
                       onChange={(e) => setEditGrade(e.target.value as GradeLevel)}
-                      className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
+                      className={`w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white transition-all ${
+                        isGradeDiff ? 'ring-2 ring-amber-500/40 border-amber-500/60 bg-amber-500/5 dark:bg-amber-950/20' : 'border-slate-100 dark:border-slate-800'
+                      }`}
                     >
                       <optgroup label={_t('مستويات الكورسات واللغات (Courses)', 'Course Levels (Language)', 'Sprachniveaus')}>
                         {COURSE_LEVELS.map(g => (
@@ -1391,15 +1466,24 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                 </div>
 
                 {/* Alternating Week Attendance Selector */}
-                <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                <div className={`space-y-1.5 p-3 rounded-xl border transition-all ${
+                  isScheduleDiff ? 'bg-amber-500/5 dark:bg-amber-950/20 border-amber-500/40 ring-2 ring-amber-500/30' : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+                }`}>
                   <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
                       <Repeat className="w-3.5 h-3.5 text-primary" />
                       {_t('نظام حضور الطالب (أسبوعي / أسبوع وآسبوع)', 'Attendance Recurrence (Weekly / Bi-weekly)', 'Teilnahme-Rhythmus')}
                     </span>
-                    <span className="text-[10px] text-slate-500 font-normal">
-                      {_t('أسبوع آه وأسبوع لأ', 'Alternating weeks', 'Alle 2 Wochen')}
-                    </span>
+                    {isScheduleDiff ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                        <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                        <button type="button" onClick={() => setEditScheduleRecurrence(student.scheduleRecurrence || 'weekly')} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-500 font-normal">
+                        {_t('أسبوع آه وأسبوع لأ', 'Alternating weeks', 'Alle 2 Wochen')}
+                      </span>
+                    )}
                   </label>
                   <div className="grid grid-cols-3 gap-1.5">
                     <button
@@ -1454,22 +1538,44 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                 {/* Parent Name & Phone */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                      Eltern Name (Parent Name)
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span>Eltern Name (Parent Name)</span>
+                        {isParentNameDiff ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                            <button type="button" onClick={() => setEditParentName(student.parentName)} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium text-text-muted/60">✓ {_t('غير مُعدَّل', 'Original', 'Original')}</span>
+                        )}
+                      </label>
+                    </div>
                     <input
                       type="text"
                       value={editParentName}
                       onChange={(e) => setEditParentName(e.target.value)}
                       placeholder="Herr / Frau Ali"
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
+                      className={`w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white transition-all ${
+                        isParentNameDiff ? 'ring-2 ring-amber-500/40 border-amber-500/60 bg-amber-500/5 dark:bg-amber-950/20' : 'border-slate-100 dark:border-slate-800'
+                      }`}
                     />
                   </div>
 
-                  <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                  <div className={`space-y-1.5 p-2.5 rounded-xl border transition-all ${
+                    isParentPhoneDiff ? 'bg-amber-500/5 dark:bg-amber-950/20 border-amber-500/40 ring-2 ring-amber-500/30' : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200/60 dark:border-slate-800'
+                  }`}>
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                        {_t('هاتف / يوزر نيم ولي الأمر', 'Parent Phone / WhatsApp Username', 'Eltern Telefon / WhatsApp-User')}
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span>{_t('هاتف / يوزر نيم ولي الأمر', 'Parent Phone / WhatsApp Username', 'Eltern Telefon / WhatsApp-User')}</span>
+                        {isParentPhoneDiff ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                            <button type="button" onClick={() => { setEditParentPhone(student.parentPhone); setEditParentContactType(initialParentContactType); }} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium text-text-muted/60">✓ {_t('غير مُعدَّل', 'Original', 'Original')}</span>
+                        )}
                       </label>
                       <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-0.5 text-[10px] font-bold">
                         <button
@@ -1533,10 +1639,20 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
                 {/* Student Phone & Status */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                  <div className={`space-y-1.5 p-2.5 rounded-xl border transition-all ${
+                    isStudentPhoneDiff ? 'bg-amber-500/5 dark:bg-amber-950/20 border-amber-500/40 ring-2 ring-amber-500/30' : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200/60 dark:border-slate-800'
+                  }`}>
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                        {_t('هاتف / يوزر نيم الطالب (اختياري)', 'Student Direct Phone / Username (Optional)', 'Schüler Telefon / User')}
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span>{_t('هاتف / يوزر نيم الطالب (اختياري)', 'Student Direct Phone / Username (Optional)', 'Schüler Telefon / User')}</span>
+                        {isStudentPhoneDiff ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                            <button type="button" onClick={() => { setEditStudentPhone(student.studentPhone); setEditStudentContactType(initialStudentContactType); }} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium text-text-muted/60">✓ {_t('غير مُعدَّل', 'Original', 'Original')}</span>
+                        )}
                       </label>
                       <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-0.5 text-[10px] font-bold">
                         <button
@@ -1598,13 +1714,25 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                      Status (Student Status)
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span>Status (Student Status)</span>
+                        {isStatusDiff ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                            <button type="button" onClick={() => setEditStatus(student.status || 'active')} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium text-text-muted/60">✓ {_t('غير مُعدَّل', 'Original', 'Original')}</span>
+                        )}
+                      </label>
+                    </div>
                     <select
                       value={editStatus}
                       onChange={(e) => setEditStatus(e.target.value as 'active' | 'archived')}
-                      className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
+                      className={`w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white transition-all ${
+                        isStatusDiff ? 'ring-2 ring-amber-500/40 border-amber-500/60 bg-amber-500/5 dark:bg-amber-950/20' : 'border-slate-100 dark:border-slate-800'
+                      }`}
                     >
                       <option value="active">🟢 Aktiv (Active Student)</option>
                       <option value="archived">⚪ Pausiert / Archiviert (Archived)</option>
@@ -1614,15 +1742,27 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
                 {/* Notes */}
                 <div className="space-y-1">
-                  <label className="text-xs font-black text-slate-700 dark:text-slate-300">
-                    Notizen (Teacher Notes)
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <span>Notizen (Teacher Notes)</span>
+                      {isNotesDiff ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                          <span>✏️ {_t('مُعدَّل', 'Modified', 'Geändert')}</span>
+                          <button type="button" onClick={() => setEditNotes(student.notes || '')} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('تراجع', 'Revert', 'Zurück')}>↺</button>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-medium text-text-muted/60">✓ {_t('غير مُعدَّل', 'Original', 'Original')}</span>
+                      )}
+                    </label>
+                  </div>
                   <textarea
                     rows={2}
                     value={editNotes}
                     onChange={(e) => setEditNotes(e.target.value)}
                     placeholder="Notizen zum Schüler, Lernstand..."
-                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white"
+                    className={`w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-primary text-slate-800 dark:text-white transition-all ${
+                      isNotesDiff ? 'ring-2 ring-amber-500/40 border-amber-500/60 bg-amber-500/5 dark:bg-amber-950/20' : 'border-slate-100 dark:border-slate-800'
+                    }`}
                   />
                 </div>
 

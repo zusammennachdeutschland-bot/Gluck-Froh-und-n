@@ -260,10 +260,31 @@ export function getProjectedLessonsForRange(
 ): Lesson[] {
   const activeGroups = (groups || []).filter(g => !g.deleted && g.status !== 'archived');
   const activeGroupIds = new Set(activeGroups.map(g => g.id));
+  const groupsById = new Map<string, Group>(activeGroups.map(g => [g.id, g]));
 
   const explicit = (explicitLessons || []).filter(l => {
     if (l.deleted) return false;
     if (l.groupId && l.groupId !== 'quick_group' && !activeGroupIds.has(l.groupId)) return false;
+
+    // Filter out unstarted scheduled lessons that don't match the active group's alternating recurrence
+    if (l.groupId && l.status === 'scheduled') {
+      const grp = groupsById.get(l.groupId);
+      const effectiveRecurrence = (grp?.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly')
+        ? grp.scheduleRecurrence
+        : (l.scheduleRecurrence || 'weekly');
+      if (effectiveRecurrence !== 'weekly') {
+        const hasEngagement = Boolean(
+          l.report?.attendanceStatus ||
+          l.report?.teacherNotes ||
+          (l.amountPaid && l.amountPaid > 0) ||
+          (l.studentPayments && Object.keys(l.studentPayments).length > 0)
+        );
+        if (!hasEngagement && !isDateMatchingGroupRecurrence(effectiveRecurrence, l.date)) {
+          return false; // Skip unstarted scheduled lesson on the wrong alternating week!
+        }
+      }
+    }
+
     return true;
   });
   const explicitKeys = new Set<string>();
@@ -276,7 +297,24 @@ export function getProjectedLessonsForRange(
       if (l.deleted) {
         deletedKeys.add(key);
       } else {
-        explicitKeys.add(key);
+        const grp = groupsById.get(l.groupId);
+        const effectiveRecurrence = (grp?.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly')
+          ? grp.scheduleRecurrence
+          : (l.scheduleRecurrence || 'weekly');
+        const hasEngagement = Boolean(
+          l.report?.attendanceStatus ||
+          l.report?.teacherNotes ||
+          (l.amountPaid && l.amountPaid > 0) ||
+          (l.studentPayments && Object.keys(l.studentPayments).length > 0)
+        );
+        if (
+          effectiveRecurrence === 'weekly' ||
+          l.status !== 'scheduled' ||
+          hasEngagement ||
+          isDateMatchingGroupRecurrence(effectiveRecurrence, l.date)
+        ) {
+          explicitKeys.add(key);
+        }
       }
     }
   });
@@ -344,7 +382,15 @@ export function getProjectedLessonsForRange(
   for (const l of combined) {
     if (!seenIds.has(l.id)) {
       seenIds.add(l.id);
-      uniqueLessons.push(l);
+      const grp = groupsById.get(l.groupId || '');
+      const rec = (grp?.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly')
+        ? grp.scheduleRecurrence
+        : (l.scheduleRecurrence || 'weekly');
+      uniqueLessons.push({
+        ...l,
+        scheduleRecurrence: rec,
+        biweeklyWeek: l.biweeklyWeek || (l.date ? getAlternatingWeek(l.date) : undefined)
+      });
     }
   }
 

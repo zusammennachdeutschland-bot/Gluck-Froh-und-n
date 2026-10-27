@@ -21,6 +21,8 @@ import {
   INITIAL_INSPIRATION_SETTINGS,
   INITIAL_INSPIRATION_MESSAGES
 } from '../data/initialData';
+import { isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
+import { formatLocalDate } from '../utils/timeUtils';
 
 export function sanitizeInitialData(rawData: Record<string, any>): Record<string, any> {
   const sanitized: Record<string, any> = { ...rawData };
@@ -75,25 +77,105 @@ export function sanitizeInitialData(rawData: Record<string, any>): Record<string
 
   // 2. Students
   const rawStudents = ensureArray<Student>('dl_students', []);
+  // Purge any lingering portal or student code keys from localStorage
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k && (
+          k.toLowerCase().includes('portal') ||
+          k.toLowerCase().includes('elternportal') ||
+          k.toLowerCase().includes('studentcode') ||
+          k.toLowerCase().includes('student_code')
+        )) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach(k => window.localStorage.removeItem(k));
+
+      const navOrderRaw = window.localStorage.getItem('dl_mobile_bottom_nav_order');
+      if (navOrderRaw && navOrderRaw.toLowerCase().includes('portal')) {
+        window.localStorage.removeItem('dl_mobile_bottom_nav_order');
+      }
+
+      const sidebarNavOrderRaw = window.localStorage.getItem('dl_sidebar_nav_order');
+      if (sidebarNavOrderRaw && sidebarNavOrderRaw.toLowerCase().includes('portal')) {
+        window.localStorage.removeItem('dl_sidebar_nav_order');
+      }
+
+      const activeTabRaw = window.localStorage.getItem('dl_active_tab');
+      if (activeTabRaw && activeTabRaw.toLowerCase().includes('portal')) {
+        window.localStorage.removeItem('dl_active_tab');
+      }
+    } catch {}
+  }
+
   sanitized['dl_students'] = rawStudents
     .filter(s => s && typeof s === 'object')
-    .map((s, idx) => ({
-      ...s,
-      id: String(s.id || `st_${Date.now()}_${idx}`),
-      name: String(s.name || 'طالب بدون اسم'),
-      groupId: String(s.groupId || '')
-    }));
+    .map((s, idx) => {
+      const st = { ...s };
+      if ('studentCode' in st) {
+        delete (st as any).studentCode;
+        needsPersistCleaned = true;
+      }
+      if ('studentCodes' in st) {
+        delete (st as any).studentCodes;
+        needsPersistCleaned = true;
+      }
+      return {
+        ...st,
+        id: String(st.id || `st_${Date.now()}_${idx}`),
+        name: String(st.name || 'طالب بدون اسم'),
+        groupId: String(st.groupId || '')
+      };
+    });
 
   // 3. Lessons
   const rawLessons = ensureArray<Lesson>('dl_lessons', []);
+  const groupsMap = new Map<string, Group>(
+    (sanitized['dl_groups'] || []).map((g: Group) => [g.id, g])
+  );
+  const todayStr = formatLocalDate(new Date());
+
   sanitized['dl_lessons'] = rawLessons
     .filter(l => l && typeof l === 'object')
-    .map((l, idx) => ({
-      ...l,
-      id: String(l.id || `lsn_${Date.now()}_${idx}`),
-      date: typeof l.date === 'string' ? l.date : '',
-      time: typeof l.time === 'string' ? l.time : ''
-    }));
+    .filter(l => {
+      // Filter out stale future scheduled lessons on wrong alternating week if group has biweekly schedule
+      if (l.groupId && l.date && l.date >= todayStr && l.status === 'scheduled') {
+        const grp = groupsMap.get(l.groupId);
+        const effectiveRecurrence = (grp?.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly')
+          ? grp.scheduleRecurrence
+          : (l.scheduleRecurrence || 'weekly');
+        if (effectiveRecurrence !== 'weekly') {
+          const hasEngagement = Boolean(
+            l.report?.attendanceStatus ||
+            l.report?.teacherNotes ||
+            (l.amountPaid && l.amountPaid > 0) ||
+            (l.studentPayments && Object.keys(l.studentPayments).length > 0)
+          );
+          if (!hasEngagement && !isDateMatchingGroupRecurrence(effectiveRecurrence, l.date)) {
+            needsPersistCleaned = true;
+            return false;
+          }
+        }
+      }
+      return true;
+    })
+    .map((l, idx) => {
+      const grp = groupsMap.get(l.groupId || '');
+      const rec = (grp?.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly')
+        ? grp.scheduleRecurrence
+        : (l.scheduleRecurrence || 'weekly');
+      return {
+        ...l,
+        id: String(l.id || `lsn_${Date.now()}_${idx}`),
+        date: typeof l.date === 'string' ? l.date : '',
+        time: typeof l.time === 'string' ? l.time : '',
+        scheduleRecurrence: rec,
+        biweeklyWeek: l.biweeklyWeek || (l.date ? getAlternatingWeek(l.date) : undefined)
+      };
+    });
 
   // 4. Payments
   const rawPayments = ensureArray<PaymentRecord>('dl_payments', []);

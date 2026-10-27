@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
-import { getGroupScheduleSlots, getDayNumber } from '../utils/scheduleUtils';
+import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
 import { Calendar, Video, MapPin, Home, User, Clock, ChevronRight } from 'lucide-react';
 
 export const TomorrowsLessonsWidget: React.FC = () => {
@@ -28,6 +28,11 @@ export const TomorrowsLessonsWidget: React.FC = () => {
         ) {
           const grp = groups.find(g => g.id === l.groupId && !g.deleted);
           if (grp) {
+            if (grp.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly') {
+              if (!isDateMatchingGroupRecurrence(grp.scheduleRecurrence, l.date)) {
+                return false;
+              }
+            }
             const activeSlots = getGroupScheduleSlots(grp);
             if (activeSlots.length > 0) {
               const lDate = parseLocalDate(l.date);

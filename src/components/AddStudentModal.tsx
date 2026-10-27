@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { GradeLevel, ScheduleRecurrence } from '../types';
-import { X, UserPlus, Info, Phone, AtSign, Sparkles, Repeat } from 'lucide-react';
+import { X, UserPlus, Info, Phone, AtSign, Sparkles, Repeat, RotateCcw } from 'lucide-react';
 import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
 import { transliterateArabicNameToEnglish, ensureTwoPartName } from '../utils/nameUtils';
@@ -46,6 +46,37 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
   });
 
   const selectedGroup = groups.find(g => g.id === groupId);
+
+  // Track filled / entered fields
+  const isNameFilled = !!name.trim();
+  const isCertNameFilled = !!certificateName.trim();
+  const isParentNameFilled = !!parentName.trim();
+  const isParentPhoneFilled = !!parentPhone.trim();
+  const isStudentPhoneFilled = !!studentPhone.trim();
+  const isNotesFilled = !!notes.trim();
+
+  const filledFieldsCount = [
+    isNameFilled,
+    isCertNameFilled,
+    isParentNameFilled,
+    isParentPhoneFilled,
+    isStudentPhoneFilled,
+    isNotesFilled
+  ].filter(Boolean).length;
+
+  const handleClearForm = async () => {
+    setName('');
+    setCertificateName('');
+    setGender('male');
+    setHasManualGender(false);
+    setParentName('');
+    setParentPhone('');
+    setParentContactType('phone');
+    setStudentPhone('');
+    setStudentContactType('phone');
+    setNotes('');
+    await storage.removeItem('dl_draft_add_student');
+  };
 
   // Load draft on mount
   useEffect(() => {
@@ -180,11 +211,55 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 space-y-3 sm:space-y-4 max-h-[78vh] overflow-y-auto">
+          {/* Top Status & Clear Draft Banner */}
+          {filledFieldsCount > 0 ? (
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center justify-between text-xs gap-2 shadow-2xs">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-black text-emerald-900 dark:text-emerald-200">
+                      {_t(`تم تعبئة ${filledFieldsCount} حقول`, `${filledFieldsCount} fields filled`, `${filledFieldsCount} Felder ausgefüllt`)}
+                    </span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">
+                      {_t('مسوّدة نشطة', 'Draft active', 'Entwurf aktiv')}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-emerald-700 dark:text-emerald-400 truncate mt-0.5">
+                    {_t('تُحفظ البيانات تلقائياً، يمكنك المسح للبدء بطالب جديد', 'Saved automatically. Click reset for new student.', 'Automatisch gespeichert.')}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleClearForm}
+                className="px-2.5 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-all cursor-pointer flex items-center gap-1 shrink-0 shadow-2xs"
+                title={_t('مسح كافة البيانات والبدء من جديد', 'Clear form and reset draft', 'Formular zurücksetzen')}
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>{_t('مسح النموذج', 'Reset', 'Leeren')}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="p-2.5 bg-surface-hover/80 border border-surface-border rounded-xl text-center text-[11px] text-text-muted font-medium">
+              <span>💡 {_t('أدخل اسم الطالب ورقم ولي الأمر لإضافته للمجموعة', 'Fill student name & parent phone to add student.', 'Geben Sie Name & Telefon ein.')}</span>
+            </div>
+          )}
+
           {/* Student Name */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-text-main">
-                {t('auto_student_name')} <span className="text-rose-500">*</span>
+              <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                <span>{t('auto_student_name')} <span className="text-rose-500">*</span></span>
+                {isNameFilled ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                    <span>✓ {_t('مُدخَل', 'Filled', 'Ausgefüllt')}</span>
+                    <button type="button" onClick={() => setName('')} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('مسح', 'Clear', 'Löschen')}>✕</button>
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-text-muted/60">{_t('فارغ', 'Empty', 'Leer')}</span>
+                )}
               </label>
               {name.trim() && (
                 <button
@@ -222,7 +297,9 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
                   setCertificateName(autoEn);
                 }
               }}
-              className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
+              className={`w-full px-3.5 py-2.5 bg-surface-hover border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary transition-all ${
+                isNameFilled ? 'ring-2 ring-emerald-500/30 border-emerald-500/50 bg-emerald-500/5' : 'border-surface-border dark:border-surface-border-soft'
+              }`}
             />
 
             {/* Gender Selector with AI suggestion */}
@@ -278,9 +355,17 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
           {/* English/Latin Name for Certificates */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-text-main flex items-center gap-1">
+              <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
                 <span>{_t('اسم الطالب بالإنجليزية للشهادات', 'Student English Name (for Certificates)', 'Englischer Name des Schülers')}</span>
                 <span className="text-rose-500 text-[10px] font-black font-mono">* REQUIRED</span>
+                {isCertNameFilled ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                    <span>✓ {_t('مُدخَل', 'Filled', 'Ausgefüllt')}</span>
+                    <button type="button" onClick={() => setCertificateName('')} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('مسح', 'Clear', 'Löschen')}>✕</button>
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-text-muted/60">{_t('فارغ', 'Empty', 'Leer')}</span>
+                )}
               </label>
               {certificateName.trim() && (
                 <button
@@ -299,7 +384,9 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
               placeholder={_t('مثال: Ahmed Ali', 'e.g. Ahmed Ali', 'z.B. Ahmed Ali')}
               value={certificateName}
               onChange={(e) => setCertificateName(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary font-mono tracking-wide"
+              className={`w-full px-3.5 py-2.5 bg-surface-hover border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary font-mono tracking-wide transition-all ${
+                isCertNameFilled ? 'ring-2 ring-emerald-500/30 border-emerald-500/50 bg-emerald-500/5' : 'border-surface-border dark:border-surface-border-soft'
+              }`}
             />
           </div>
 
@@ -451,25 +538,47 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
 
           {/* Parent Name */}
           <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main">
-              {t('auto_parent_name')}
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                <span>{t('auto_parent_name')}</span>
+                {isParentNameFilled ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                    <span>✓ {_t('مُدخَل', 'Filled', 'Ausgefüllt')}</span>
+                    <button type="button" onClick={() => setParentName('')} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('مسح', 'Clear', 'Löschen')}>✕</button>
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-text-muted/60">{_t('فارغ', 'Empty', 'Leer')}</span>
+                )}
+              </label>
+            </div>
             <input
               type="text"
               placeholder={t('auto_e_g_ali_mahmoud')}
               value={parentName}
               onChange={(e) => setParentName(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
+              className={`w-full px-3.5 py-2.5 bg-surface-hover border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary transition-all ${
+                isParentNameFilled ? 'ring-2 ring-emerald-500/30 border-emerald-500/50 bg-emerald-500/5' : 'border-surface-border dark:border-surface-border-soft'
+              }`}
             />
           </div>
 
           {/* Phone Numbers / WhatsApp Usernames */}
           <div className="space-y-3">
             {/* Parent Contact */}
-            <div className="space-y-1.5 bg-slate-50/50 dark:bg-slate-800/30 p-2.5 rounded-xl border border-surface-border-soft">
+            <div className={`space-y-1.5 p-2.5 rounded-xl border transition-all ${
+              isParentPhoneFilled ? 'bg-emerald-500/5 border-emerald-500/40 ring-2 ring-emerald-500/30' : 'bg-slate-50/50 dark:bg-slate-800/30 border-surface-border-soft'
+            }`}>
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-text-main flex items-center gap-1">
+                <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
                   <span>{_t('هاتف أو يوزر نيم ولي الأمر *', 'Parent Phone or WhatsApp Username *', 'Eltern Telefon / WhatsApp-User *')}</span>
+                  {isParentPhoneFilled ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                      <span>✓ {_t('مُدخَل', 'Filled', 'Ausgefüllt')}</span>
+                      <button type="button" onClick={() => setParentPhone('')} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('مسح', 'Clear', 'Löschen')}>✕</button>
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-text-muted/60">{_t('فارغ', 'Empty', 'Leer')}</span>
+                  )}
                 </label>
                 <div className="flex items-center bg-surface border border-surface-border rounded-lg p-0.5 text-[10px] font-bold">
                   <button
@@ -527,10 +636,20 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
             </div>
 
             {/* Student Contact (Optional) */}
-            <div className="space-y-1.5 bg-slate-50/50 dark:bg-slate-800/30 p-2.5 rounded-xl border border-surface-border-soft">
+            <div className={`space-y-1.5 p-2.5 rounded-xl border transition-all ${
+              isStudentPhoneFilled ? 'bg-emerald-500/5 border-emerald-500/40 ring-2 ring-emerald-500/30' : 'bg-slate-50/50 dark:bg-slate-800/30 border-surface-border-soft'
+            }`}>
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-text-muted flex items-center gap-1">
+                <label className="text-xs font-bold text-text-muted flex items-center gap-1.5">
                   <span>{_t('هاتف أو يوزر نيم الطالب (اختياري)', 'Student Phone or WhatsApp Username (Optional)', 'Schüler Telefon / User (Optional)')}</span>
+                  {isStudentPhoneFilled ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                      <span>✓ {_t('مُدخَل', 'Filled', 'Ausgefüllt')}</span>
+                      <button type="button" onClick={() => setStudentPhone('')} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('مسح', 'Clear', 'Löschen')}>✕</button>
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-text-muted/60">{_t('فارغ', 'Empty', 'Leer')}</span>
+                  )}
                 </label>
                 <div className="flex items-center bg-surface border border-surface-border rounded-lg p-0.5 text-[10px] font-bold">
                   <button
@@ -589,15 +708,27 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
 
           {/* Notes */}
           <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main">
-              {t('auto_student_notes')}
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                <span>{t('auto_student_notes')}</span>
+                {isNotesFilled ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                    <span>✓ {_t('مُدخَل', 'Filled', 'Ausgefüllt')}</span>
+                    <button type="button" onClick={() => setNotes('')} className="ms-1 text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" title={_t('مسح', 'Clear', 'Löschen')}>✕</button>
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-text-muted/60">{_t('فارغ', 'Empty', 'Leer')}</span>
+                )}
+              </label>
+            </div>
             <textarea
               rows={2}
               placeholder={t('auto_special_focus_notes_or_weakn')}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3 py-2 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs focus:outline-none"
+              className={`w-full px-3 py-2 bg-surface-hover border rounded-xl text-xs focus:outline-none transition-all ${
+                isNotesFilled ? 'ring-2 ring-emerald-500/30 border-emerald-500/50 bg-emerald-500/5' : 'border-surface-border dark:border-surface-border-soft'
+              }`}
             />
           </div>
 

@@ -23,7 +23,6 @@ import { RandomStudentPickerModal } from './RandomStudentPickerModal';
 import { formatGroupScheduleDisplay, getDayNumber } from '../utils/scheduleUtils';
 import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
-import { getStudentCode } from '../utils/studentCodeUtils';
 import { normalizeSearchText } from '../utils/nameUtils';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { AvatarImage } from './AvatarImage';
@@ -49,10 +48,19 @@ export const StudentsView: React.FC = () => {
   const [selectedGroupDay, setSelectedGroupDay] = useState<string>('all');
 
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+
+  // Keep selectedStudent synchronized with AppContext updates
+  React.useEffect(() => {
+    if (selectedStudent) {
+      const updated = students.find(s => s.id === selectedStudent.id);
+      if (updated && updated !== selectedStudent) {
+        setSelectedStudent(updated);
+      }
+    }
+  }, [students]);
   const [selectedStudentTab, setSelectedStudentTab] = useState<'overview' | 'attendance' | 'scores' | 'payments' | 'files' | 'certificates' | 'recordings' | 'edit'>('overview');
   const [selectedGroupInitialTab, setSelectedGroupInitialTab] = useState<'details' | 'recordings'>('details');
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
-  const [copiedStudentCodeId, setCopiedStudentCodeId] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [isAiImportModalOpen, setIsAiImportModalOpen] = useState(false);
   const [isGenderAssignModalOpen, setIsGenderAssignModalOpen] = useState(false);
@@ -321,7 +329,6 @@ export const StudentsView: React.FC = () => {
     const term = normalizeSearchText(searchTerm);
     return activeStudents.filter(s => {
       const studentGroup = s.groupId ? groupMap.get(s.groupId) : undefined;
-      const sCode = getStudentCode(s);
       const matchesSearch = !term ||
                             normalizeSearchText(s.name).includes(term) || 
                             normalizeSearchText(s.certificateName).includes(term) ||
@@ -329,8 +336,6 @@ export const StudentsView: React.FC = () => {
                             normalizeSearchText(s.studentPhone).includes(term) ||
                             normalizeSearchText(s.parentPhone).includes(term) ||
                             normalizeSearchText(s.grade).includes(term) ||
-                            normalizeSearchText(sCode).includes(term) ||
-                            normalizeSearchText(s.studentCode).includes(term) ||
                             (studentGroup && normalizeSearchText(studentGroup.name).includes(term));
       const matchesGrade = selectedGrade === 'all' || s.grade === selectedGrade;
 
@@ -804,7 +809,6 @@ export const StudentsView: React.FC = () => {
             paginatedStudents.map((student, idx) => {
               const studentGroup = groups.find(g => g.id === student.groupId);
               const cleanParentPhone = cleanPhoneNumberForTel(student.parentPhone);
-              const studentCode = getStudentCode(student);
               const isSelected = selectedStudentIds.includes(student.id);
 
               return (

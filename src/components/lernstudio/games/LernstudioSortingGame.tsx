@@ -1,8 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme } from '../../../types/lernstudio';
 import { extractSortingItems, SortingItem } from '../../../utils/lernstudioQuestionAdapter';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
+import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
 import {
   ArrowLeft,
   RotateCcw,
@@ -34,6 +37,7 @@ export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, langu
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; selectedArticle: string } | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isGameOver, setIsGameOver] = useState(false);
+  const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
 
   const currentItem: SortingItem | undefined = itemsPool[currentIndex];
 
@@ -48,13 +52,19 @@ export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, langu
       if (soundEnabled) {
         playLernstudioSound('combo_ding');
         playLernstudioSound('correct');
+        playGermanVoiceFeedback(streak + 1 >= 3 ? 'combo' : 'correct');
       }
       const newStreak = streak + 1;
       const pts = 50 * (newStreak >= 5 ? 3 : newStreak >= 3 ? 2 : 1);
       setScore((s) => s + pts);
       setStreak(newStreak);
+      triggerCorrect(pts, `${article} ${currentItem.nounOnly}!`);
     } else {
-      if (soundEnabled) playLernstudioSound('wrong');
+      if (soundEnabled) {
+        playLernstudioSound('wrong');
+        playGermanVoiceFeedback('try_again');
+      }
+      triggerWrong();
       setStreak(0);
       const newLives = lives - 1;
       setLives(newLives);
@@ -70,8 +80,10 @@ export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, langu
         setCurrentIndex((prev) => prev + 1);
       } else {
         setIsGameOver(true);
+        triggerVictory();
+        if (soundEnabled) playGermanVoiceFeedback('victory');
       }
-    }, 900);
+    }, isCorrect ? 1800 : 2800);
   };
 
   const handleRestart = () => {
@@ -157,11 +169,22 @@ export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, langu
           >
             {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-rose-400" />}
           </button>
+          <GameSettingsControls compact />
         </div>
       </div>
 
+      <GameEffectsOverlay particles={particles} popups={popups} showConfetti={isGameOver && lives > 0} />
+
       {/* Main Sorting Game Area */}
-      <div className="flex-1 p-4 sm:p-6 max-w-4xl mx-auto w-full flex flex-col justify-between items-center py-8">
+      <div className="flex-1 p-4 sm:p-6 max-w-4xl mx-auto w-full flex flex-col justify-between items-center py-6 gap-4">
+        <div className="w-full">
+          <GameStageBanner
+            mode="sorting"
+            title={t.sortingGameHeader}
+            subtitle="صنّف كل اسم ألماني في صندوق الأداة الصحيح (der / die / das)!"
+            badgeText={`${currentIndex + 1} / ${itemsPool.length}`}
+          />
+        </div>
         {/* Current Word Target Card */}
         {currentItem && !isGameOver ? (
           <div className="w-full max-w-md flex flex-col items-center gap-4 animate-scale-up">
@@ -258,9 +281,7 @@ export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, langu
         {/* Game Over / Summary */}
         {isGameOver && (
           <div className="bg-slate-900 border-2 border-slate-800 rounded-3xl p-8 max-w-md w-full text-center shadow-2xl flex flex-col items-center gap-4 animate-scale-up">
-            <div className="w-20 h-20 rounded-full bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-4xl shadow-xl">
-              🏆
-            </div>
+            <SharedVictoryTrophyArt className="w-24 h-24 rounded-3xl shadow-xl border border-amber-400/30" />
             <div>
               <h2 className="text-2xl font-black text-white">
                 {t.completedGameTitle}

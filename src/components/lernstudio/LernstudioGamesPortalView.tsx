@@ -3,6 +3,7 @@ import { LernstudioSet, LernstudioTheme, LernstudioGameMode } from '../../types/
 import { isArticleGameSupported, extractSortingItems } from '../../utils/lernstudioQuestionAdapter';
 import { getLernstudioTranslations, getLocalizedSetTitle } from '../../utils/lernstudioTranslations';
 import { GameThumbnailArt } from './GameArtAssets';
+import { GameSettingsControls } from './effects/GameEffectsOverlay';
 import {
   ArrowLeft,
   Gamepad2,
@@ -276,6 +277,13 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
       emoji: '🎯',
       category: 'solo',
       categoryKey: 'comprehensivePracticeCategory'
+    },
+    {
+      id: 'solo_sentence',
+      titleKey: 'soloSentenceTitle',
+      emoji: '✍️',
+      category: 'solo',
+      categoryKey: 'soloSentenceCategory'
     }
   ];
 
@@ -309,6 +317,9 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
             </span>
           </div>
         </div>
+
+        {/* Game Settings Controls (Sound + FX Intensity) */}
+        <GameSettingsControls />
       </div>
 
       {/* Main Container */}

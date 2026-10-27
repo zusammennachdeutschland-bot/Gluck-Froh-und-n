@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernstudio';
 import { buildDynamicQuestionPool, GameQuestion } from '../../../utils/lernstudioQuestionAdapter';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
+import { GameStageBanner } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
 import {
   RotateCcw,
   ArrowRight,
@@ -50,6 +52,7 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displaySetTitle = getLocalizedSetTitle(set, language);
+  const { triggerSparkles, triggerScorePopup, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Teams setup
   const [teams, setTeams] = useState<TeamScore[]>([
@@ -267,19 +270,27 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
     setAnsweredState(isCorrect ? 'correct' : 'wrong');
 
     if (isCorrect) {
-      if (soundEnabled) playLernstudioSound('correct');
+      if (soundEnabled) {
+        playLernstudioSound('correct');
+        playGermanVoiceFeedback('correct');
+      }
       let pts = selectedSegment?.value || 100;
       if (selectedSegment?.type === 'double') {
         pts = 200;
       }
+      triggerSparkles(50, 45, '#f59e0b');
+      triggerScorePopup(`+${pts} 🎡`, 50, 35, 'positive');
       awardActiveTeamPoints(pts);
     } else {
-      if (soundEnabled) playLernstudioSound('wrong');
+      if (soundEnabled) {
+        playLernstudioSound('wrong');
+        playGermanVoiceFeedback('wrong');
+      }
     }
 
     setTimeout(() => {
       nextTeamTurn();
-    }, 2000);
+    }, isCorrect ? 2000 : 2800);
   };
 
   // Add / Remove teams
@@ -307,7 +318,8 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white flex flex-col font-sans select-none" dir={isRtl ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-slate-900 text-white flex flex-col font-sans select-none relative overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
+      <EffectsOverlay />
       {/* Top Bar */}
       <div className="h-16 border-b border-slate-800 bg-slate-900/80 backdrop-blur px-4 sm:px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
@@ -344,6 +356,7 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
             ))}
           </div>
 
+          <SettingsBar />
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
@@ -352,6 +365,15 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
             {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-rose-400" />}
           </button>
         </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 pt-4">
+        <GameStageBanner
+          mode="wheel"
+          title={t.wheelGameTitle}
+          subtitle={`${displaySetTitle} • أدر عجلة الحظ الذهبية واكسب النقاط والمضاعفات!`}
+          badgeText={`دور ${activeTeam.name}`}
+        />
       </div>
 
       {/* Main Content Area */}

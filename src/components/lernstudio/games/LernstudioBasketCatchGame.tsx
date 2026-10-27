@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
-import { playLernstudioSound } from '../../../utils/lernstudioAudioUtils';
+import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
+import { useGameEffects } from '../effects/useGameEffects';
+import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
 import {
   ArrowLeft,
   RotateCcw,
@@ -51,6 +54,7 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
   const [isGameOver, setIsGameOver] = useState(false);
   const [isVictory, setIsVictory] = useState(false);
   const [catchFlash, setCatchFlash] = useState<{ text: string; correct: boolean } | null>(null);
+  const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const targetItem: LernstudioItem | undefined = items[targetIndex % items.length];
@@ -116,17 +120,23 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
             setTimeout(() => setCatchFlash(null), 800);
 
             if (isCorrect) {
+              playLernstudioSound('catch');
               playLernstudioSound('card_match');
               speakGermanText(word.item.german);
               setScore((s) => s + 100);
+              triggerCorrect(100, 'Gefangen!', basketXPercent, 80);
 
               if (targetIndex + 1 >= items.length) {
                 setIsVictory(true);
+                triggerVictory();
+                playGermanVoiceFeedback('victory');
               } else {
                 setTargetIndex((ti) => ti + 1);
               }
             } else {
               playLernstudioSound('wrong');
+              triggerWrong(basketXPercent, 80);
+              playGermanVoiceFeedback('try_again');
               setLives((l) => {
                 const nextL = l - 1;
                 if (nextL <= 0) setIsGameOver(true);
@@ -263,8 +273,17 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
           >
             <RotateCcw className="w-4 h-4" />
           </button>
+          <GameSettingsControls compact />
         </div>
       </div>
+
+      <GameEffectsOverlay particles={particles} popups={popups} showConfetti={isVictory} />
+      <GameStageBanner
+        mode="basket_catch"
+        title="سلة التقاط الكلمات (Basket Catch)"
+        subtitle="حرك السلة في البستان المشمس لالتقاط المفردة الألمانية الصحيحة!"
+        badgeText={`${targetIndex + 1} / ${items.length}`}
+      />
 
       {/* Target Mission Banner */}
       {targetItem && !isGameOver && !isVictory && (
@@ -347,9 +366,7 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
         {/* Victory Screen */}
         {isVictory && (
           <div className="absolute inset-0 bg-surface/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center space-y-4 animate-scale-up z-40">
-            <div className="p-4 bg-amber-500/10 text-amber-500 rounded-3xl border border-amber-500/30">
-              <Trophy className="w-16 h-16" />
-            </div>
+            <SharedVictoryTrophyArt className="w-24 h-24 rounded-3xl shadow-xl border border-amber-400/30" />
             <h2 className="text-2xl sm:text-3xl font-black text-text-main">
               مبروك! التقطت جميع الكلمات بنجاح في السلة! 🧺🎉
             </h2>
