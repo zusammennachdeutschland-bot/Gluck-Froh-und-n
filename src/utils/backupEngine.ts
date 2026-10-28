@@ -6,6 +6,7 @@ import {
   Teacher, ParentComplaint, HodGermanStudent, AICertificateBackground, SchoolNote,
   FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment
 } from '../types';
+import { LernstudioSet } from '../types/lernstudio';
 import { formatLocalDate } from './timeUtils';
 
 export type BackupCategory = 
@@ -25,7 +26,8 @@ export type BackupCategory =
   | 'dashboard'
   | 'notifications'
   | 'certificates'
-  | 'school_notes';
+  | 'school_notes'
+  | 'lernstudio';
 
 export const ALL_BACKUP_CATEGORIES: { id: BackupCategory; labelKey: string; labelEn: string; labelAr: string; icon: string; descriptionEn: string; descriptionAr: string }[] = [
   { id: 'students', labelKey: 'students', labelEn: 'Students', labelAr: 'الطلاب', icon: 'User', descriptionEn: 'All student profiles, parents, & notes', descriptionAr: 'جميع ملفات الطلاب وأولياء الأمور والملاحظات' },
@@ -35,6 +37,7 @@ export const ALL_BACKUP_CATEGORIES: { id: BackupCategory; labelKey: string; labe
   { id: 'exams', labelKey: 'exams', labelEn: 'Exams & Quiz Scores', labelAr: 'الدرجات والاختبارات', icon: 'Award', descriptionEn: 'Quiz, exam, and participation scores', descriptionAr: 'درجات الاختبارات القصيرة والامتحانات والتفاعل' },
   { id: 'financial', labelKey: 'financial', labelEn: 'Financial Records & Payments', labelAr: 'المدفوعات والسجلات المالية', icon: 'DollarSign', descriptionEn: 'Payment transactions, dues, & balances', descriptionAr: 'سجلات الدفع والرسوم المستحقة والمتحصلات' },
   { id: 'schedule', labelKey: 'schedule', labelEn: 'Schedule & Lessons', labelAr: 'الجدول والحصص', icon: 'Calendar', descriptionEn: 'Scheduled, completed, & past lessons', descriptionAr: 'جميع الحصص المجدولة والمكتملة والتاريخية' },
+  { id: 'lernstudio', labelKey: 'lernstudio', labelEn: 'Lernstudio Sets & Vocab', labelAr: 'مجموعات Lernstudio والمفردات', icon: 'Gamepad2', descriptionEn: 'Custom vocabulary sets, items, & exercises', descriptionAr: 'مجموعات المفردات والكلمات والتمارين المخصصة' },
   { id: 'school_hod', labelKey: 'school_hod', labelEn: 'School & HOD Hub', labelAr: 'إدارة المدرسة ورئيس القسم', icon: 'GraduationCap', descriptionEn: 'School, stage managers, secretaries, visits, reports, follow-ups, complaints, action plans, & weekly plans', descriptionAr: 'بيانات المدرسة، مديري المراحل، السكرتيرات، الزيارات والتوجيه، التقارير والمتابعة، الشكاوى، وخطط علاج الطلاب' },
   { id: 'school_notes', labelKey: 'school_notes', labelEn: 'School & Lesson Notes', labelAr: 'ملاحظات الحصص والفصول والطلاب', icon: 'FileText', descriptionEn: 'All class, student, and lesson notes', descriptionAr: 'جميع ملاحظات الفصول والطلاب والحصص المدرسية' },
   { id: 'certificates', labelKey: 'certificates', labelEn: 'Certificates & Honors', labelAr: 'الشهادات والتكريمات', icon: 'Trophy', descriptionEn: 'All issued certificates & student honors', descriptionAr: 'سجلات وتواريخ وتفاصيل جميع الشهادات والتكريمات' },
@@ -64,6 +67,7 @@ export interface SmartBackupPayload {
     payments: number;
     notifications: number;
     todos: number;
+    lernstudioSets?: number;
     certificates?: number;
     schoolRecords?: number;
     schoolNotes?: number;
@@ -100,6 +104,7 @@ export interface SmartBackupPayload {
     todos?: TodoItem[];
     certificates?: CertificateRecord[];
     schoolNotes?: SchoolNote[];
+    lernstudioSets?: LernstudioSet[];
     financeAccounts?: FinanceAccount[];
     financeCategories?: FinanceCategory[];
     financeTransactions?: FinanceTransaction[];
@@ -128,6 +133,7 @@ export interface RestoreAnalysisResult {
     exams: number;
     payments: number;
     notifications: number;
+    lernstudioSets?: number;
     settingsIncluded: boolean;
   };
   impact: {
@@ -305,6 +311,7 @@ export function calculateBackupStats(
     hodActionPlans?: StudentActionPlan[];
     hodVisits?: VisitRecord[];
     schoolNotes?: SchoolNote[];
+    lernstudioSets?: LernstudioSet[];
     financeAccounts?: FinanceAccount[];
     financeCategories?: FinanceCategory[];
     financeTransactions?: FinanceTransaction[];
@@ -324,11 +331,13 @@ export function calculateBackupStats(
   let schoolRecordCount = 0;
   let certificateCount = 0;
   let schoolNotesCount = 0;
+  let lernstudioSetCount = 0;
   let financeCount = 0;
 
   if (selectedCategories.includes('students')) studentCount = appState.students.length;
   if (selectedCategories.includes('groups')) groupCount = appState.groups.length;
   if (selectedCategories.includes('schedule')) lessonCount = appState.lessons.length;
+  if (selectedCategories.includes('lernstudio') && appState.lernstudioSets) lernstudioSetCount = appState.lernstudioSets.length;
   if (selectedCategories.includes('financial')) {
     paymentCount = appState.payments.length;
     financeCount = (appState.financeAccounts?.length || 0) + 
@@ -379,12 +388,12 @@ export function calculateBackupStats(
     schoolRecordCount = schoolBase + hodSt + hodCmp + hodAct + hodVis;
   }
 
-  const totalRecords = studentCount + groupCount + lessonCount + paymentCount + financeCount + notificationCount + schoolRecordCount + certificateCount + schoolNotesCount;
+  const totalRecords = studentCount + groupCount + lessonCount + paymentCount + financeCount + notificationCount + schoolRecordCount + certificateCount + schoolNotesCount + lernstudioSetCount;
   
   // Estimate size KB (~150 bytes per student, 200 per lesson, 180 per payment, 250 per school/HOD record)
   const estimatedSizeBytes = Math.max(
     1024,
-    (studentCount * 180) + (groupCount * 250) + (lessonCount * 320) + (paymentCount * 220) + (financeCount * 200) + (schoolRecordCount * 250) + (certificateCount * 300) + (schoolNotesCount * 220) + 1500
+    (studentCount * 180) + (groupCount * 250) + (lessonCount * 320) + (paymentCount * 220) + (financeCount * 200) + (schoolRecordCount * 250) + (certificateCount * 300) + (schoolNotesCount * 220) + (lernstudioSetCount * 500) + 1500
   );
   
   const estimatedSizeKb = Math.round(estimatedSizeBytes / 1024);
@@ -478,6 +487,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     { key: 'hodVisits', label: 'hodVisits' },
     { key: 'customAiBackgrounds', label: 'customAiBackgrounds' },
     { key: 'schoolNotes', label: 'schoolNotes' },
+    { key: 'lernstudioSets', label: 'lernstudioSets' },
     { key: 'financeAccounts', label: 'financeAccounts' },
     { key: 'financeCategories', label: 'financeCategories' },
     { key: 'financeTransactions', label: 'financeTransactions' },
@@ -1013,6 +1023,27 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     });
   }
 
+  // Sanitize Lernstudio Sets
+  const rawLernstudioSets: any[] = Array.isArray(data.lernstudioSets) ? data.lernstudioSets : [];
+  const sanitizedLernstudioSets: LernstudioSet[] = [];
+  for (let i = 0; i < rawLernstudioSets.length; i++) {
+    const set = rawLernstudioSets[i];
+    if (!set || typeof set !== 'object' || Array.isArray(set)) continue;
+    const id = typeof set.id === 'string' && set.id.trim() ? set.id.trim() : `set_${Date.now()}_${i}`;
+    sanitizedLernstudioSets.push({
+      ...set,
+      id,
+      title: typeof set.title === 'string' ? set.title : 'Untitled Set',
+      level: set.level || 'A1',
+      topic: typeof set.topic === 'string' ? set.topic : 'General',
+      difficulty: set.difficulty || 'easy',
+      items: Array.isArray(set.items) ? set.items : [],
+      customExercises: Array.isArray(set.customExercises) ? set.customExercises : [],
+      createdAt: typeof set.createdAt === 'string' ? set.createdAt : new Date().toISOString(),
+      updatedAt: typeof set.updatedAt === 'number' ? set.updatedAt : Date.now()
+    });
+  }
+
   // Sanitize School & HOD Settings
   const rawSchool = data.schoolSettings || data.profile?.schoolSettings;
   const sanitizedSchool = sanitizeSchoolSettings(rawSchool);
@@ -1044,6 +1075,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       hodVisits: sanitizedHodVisits,
       customAiBackgrounds: sanitizedCustomBg,
       schoolNotes: sanitizedSchoolNotes,
+      lernstudioSets: sanitizedLernstudioSets,
       financeAccounts: sanitizedFinanceAccounts,
       financeCategories: sanitizedFinanceCategories,
       financeTransactions: sanitizedFinanceTransactions,
@@ -1472,6 +1504,9 @@ export function analyzeBackupPayload(
       if (data.schoolNotes && data.schoolNotes.length > 0) {
         categories.push('school_notes');
       }
+      if (data.lernstudioSets && data.lernstudioSets.length > 0) {
+        categories.push('lernstudio');
+      }
       if (data.profile) {
         categories.push('settings', 'availability', 'templates', 'meeting_links');
       }
@@ -1493,6 +1528,7 @@ export function analyzeBackupPayload(
         exams: examCount,
         payments: payments.length,
         notifications: notifications.length,
+        lernstudioSets: data.lernstudioSets ? data.lernstudioSets.length : 0,
         settingsIncluded: !!data.profile
       },
       impact: {

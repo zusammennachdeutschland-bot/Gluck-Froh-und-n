@@ -1,4 +1,5 @@
 import { GoldHolding } from '../services/goldPrice/goldPriceTypes';
+import { LernstudioSet } from './lernstudio';
 
 export type GradeLevel = 
   | 'Grade 1' | 'Grade 2' | 'Grade 3' | 'Grade 4' 
@@ -144,6 +145,7 @@ export interface SyncDeltaPayload {
     financeTransactions?: FinanceTransaction[];
     financeRecurring?: FinanceRecurring[];
     financeInstallments?: FinanceInstallment[];
+    lernstudioSets?: LernstudioSet[];
   };
   syncEvents?: Array<{
     id: string;
@@ -1000,6 +1002,7 @@ export interface BackupData {
   financeInstallments?: FinanceInstallment[];
   financeNotifications?: FinanceNotification[];
   goldHoldings?: GoldHolding[];
+  lernstudioSets?: LernstudioSet[];
 }
 
 export type InspirationFrequency = 'disabled' | 'daily' | 'before_first_lesson' | 'random_daily';

@@ -516,8 +516,8 @@ export const LernstudioTeachModal: React.FC<Props> = ({
         </div>
 
         {/* Stages Stepper Nav */}
-        <div className="bg-surface-hover/60 border-b border-surface-border px-3 py-2 overflow-x-auto shrink-0 scrollbar-none">
-          <div className="flex items-center justify-between min-w-[500px] gap-1">
+        <div className="bg-surface-hover/60 border-b border-surface-border px-2 py-2 shrink-0 overflow-x-auto scrollbar-none">
+          <div className="grid grid-cols-5 gap-1 sm:gap-1.5 w-full min-w-[340px]">
             {stagesList.map((stg) => {
               const isActive = currentStage === stg.num;
               const isDone = completedStages.includes(stg.num);
@@ -532,16 +532,17 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                     resetAnswerState();
                     setShuffleKey((k) => k + 1);
                   }}
-                  className={`flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer truncate border ${
+                  className={`flex items-center justify-center gap-1 px-1 sm:px-2 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all cursor-pointer border truncate min-w-0 ${
                     isActive
-                      ? 'bg-primary text-white border-primary shadow-sm scale-[1.02]'
+                      ? 'bg-primary text-white border-primary shadow-xs scale-[1.02]'
                       : isDone
                       ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
                       : 'bg-surface/80 text-text-muted hover:bg-surface border-surface-border'
                   }`}
+                  title={stg.title}
                 >
-                  <span className="text-sm">{isDone ? '✔️' : stg.icon}</span>
-                  <span className="truncate">{stg.title}</span>
+                  <span className="text-xs sm:text-sm shrink-0">{isDone ? '✔️' : stg.icon}</span>
+                  <span className="truncate text-[10px] sm:text-xs">{stg.title}</span>
                 </button>
               );
             })}
@@ -841,7 +842,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                 </div>
 
                 {/* All Options Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-w-xl mx-auto max-h-[220px] overflow-y-auto p-1">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-w-xl mx-auto max-h-[300px] sm:max-h-[360px] overflow-y-auto p-2 border border-surface-border/40 rounded-2xl bg-surface-hover/20 scrollbar-thin">
                   {stage4Questions[stageQuestionIndex].choices.map((choice) => {
                     const isSelected = selectedAnswer === choice.id;
                     const isTarget = choice.id === stage4Questions[stageQuestionIndex].targetItem.id;

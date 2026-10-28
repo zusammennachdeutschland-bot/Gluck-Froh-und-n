@@ -68,6 +68,7 @@ import {
   Palette,
   Download,
   Copy,
+  Check,
   Trash2,
   Archive,
   Edit3,
@@ -125,6 +126,10 @@ export const LernstudioView: React.FC<Props> = ({
 
   const [isWordsModalOpen, setIsWordsModalOpen] = useState(false);
   const [selectedSetForWordsModal, setSelectedSetForWordsModal] = useState<LernstudioSet | null>(null);
+
+  // Copy Set Code State
+  const [copiedSetId, setCopiedSetId] = useState<string | null>(null);
+  const [copiedSetMessage, setCopiedSetMessage] = useState<string | null>(null);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -222,15 +227,48 @@ export const LernstudioView: React.FC<Props> = ({
   }, [filteredSets, currentPage]);
 
   // Handlers
-  const handleDuplicateSet = (set: LernstudioSet) => {
-    const duplicated: LernstudioSet = {
-      ...set,
-      id: `set_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      title: `${set.title} (${language === 'ar' ? 'نسخة' : 'Copy'})`,
-      createdAt: new Date().toISOString(),
-      updatedAt: Date.now()
+  const handleCopySetCode = (set: LernstudioSet) => {
+    const setExportData = {
+      title: set.title,
+      topic: set.topic || 'ألماني',
+      grade: set.grade || '',
+      level: set.level || 'A1',
+      difficulty: set.difficulty || 'medium',
+      hasArticles: set.hasArticles !== false,
+      sentenceBuilderSupported: set.sentenceBuilderSupported !== false,
+      description: set.description || `مجموعة ${set.title}`,
+      items: (set.items || []).map((it) => ({
+        german: it.german,
+        article: it.article || null,
+        arabic: it.arabic,
+        english: it.english || '',
+        plural: it.plural || '',
+        exampleSentenceGerman: it.exampleSentenceGerman || '',
+        exampleSentenceArabic: it.exampleSentenceArabic || '',
+        emoji: it.emoji || '',
+        missingLetterWord: it.missingLetterWord || '',
+        sentence4Elements: it.sentence4Elements || null
+      })),
+      customExercises: set.customExercises || []
     };
-    onSaveSet(duplicated);
+
+    const jsonString = JSON.stringify(setExportData, null, 2);
+
+    try {
+      navigator.clipboard.writeText(jsonString);
+      setCopiedSetId(set.id);
+      setCopiedSetMessage(
+        language === 'ar'
+          ? `تم نسخ كود مجموعة (${set.title}) إلى الحافظة بنجاح! يمكن للطرف الآخر لصقه مباشرة في خيار (استيراد ذكي / AI Import).`
+          : `Set code for (${set.title}) copied to clipboard! Share it to paste in AI Import.`
+      );
+      setTimeout(() => {
+        setCopiedSetId(null);
+        setCopiedSetMessage(null);
+      }, 4500);
+    } catch (e) {
+      console.warn('Clipboard write error', e);
+    }
   };
 
   const handleShareWhatsApp = (set: LernstudioSet) => {
@@ -997,11 +1035,23 @@ export const LernstudioView: React.FC<Props> = ({
 
                           <button
                             type="button"
-                            onClick={() => handleDuplicateSet(set)}
-                            className="p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
-                            title={t.duplicateSet}
+                            onClick={() => handleCopySetCode(set)}
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer relative ${
+                              copiedSetId === set.id
+                                ? 'text-emerald-500 bg-emerald-500/10'
+                                : 'text-text-muted hover:text-primary hover:bg-surface-hover'
+                            }`}
+                            title={
+                              copiedSetId === set.id
+                                ? (language === 'ar' ? 'تم نسخ كود المجموعة!' : 'Set Code Copied!')
+                                : (language === 'ar' ? 'نسخ كود المجموعة (JSON) للمشاركة والاستيراد' : 'Copy Set Code (JSON)')
+                            }
                           >
-                            <Layers className="w-3.5 h-3.5" />
+                            {copiedSetId === set.id ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-500 animate-bounce" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
                           </button>
 
                           <button
@@ -1154,6 +1204,25 @@ export const LernstudioView: React.FC<Props> = ({
           students={students}
           groups={groups}
         />
+
+        {/* Toast Notification Banner for Copied Set Code */}
+        {copiedSetMessage && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[130] bg-slate-900 text-white border border-emerald-500/50 shadow-2xl px-5 py-3.5 rounded-2xl flex items-center gap-3 animate-scale-up max-w-lg w-[92vw]" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+            <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-xl shrink-0">
+              <Check className="w-5 h-5" />
+            </div>
+            <div className="text-xs font-bold leading-relaxed flex-1">
+              {copiedSetMessage}
+            </div>
+            <button
+              type="button"
+              onClick={() => setCopiedSetMessage(null)}
+              className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer text-xs font-bold"
+            >
+              ✕
+            </button>
+          </div>
+        )}
       </div>
     );
   };

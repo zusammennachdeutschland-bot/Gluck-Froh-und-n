@@ -931,25 +931,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
 
   const saveLernstudioSet = (newSet: LernstudioSet) => {
+    const mutated = wrapMutation(newSet);
     setLernstudioSets(prev => {
       const exists = prev.some(s => s.id === newSet.id);
       let updated: LernstudioSet[];
       if (exists) {
-        updated = prev.map(s => s.id === newSet.id ? wrapMutation(newSet) : s);
+        updated = prev.map(s => s.id === newSet.id ? mutated : s);
       } else {
-        updated = [wrapMutation(newSet), ...prev];
+        updated = [mutated, ...prev];
       }
       storage.setItem('dl_lernstudio_sets', updated);
       return updated;
     });
+    autoSyncEngine.notifyMutation('lernstudioSets', newSet.id);
   };
 
   const deleteLernstudioSet = (setId: string) => {
     setLernstudioSets(prev => {
+      const target = prev.find(s => s.id === setId);
+      if (target) {
+        wrapDeletion(target);
+      }
       const updated = prev.filter(s => s.id !== setId);
       storage.setItem('dl_lernstudio_sets', updated);
       return updated;
     });
+    autoSyncEngine.notifyMutation('lernstudioSets', setId);
   };
 
   // Persist cleaned deduplicated records on startup if duplicates were found
@@ -5887,6 +5894,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeRecurring,
       financeInstallments,
       goldHoldings,
+      lernstudioSets,
       syncQueue: []
     };
 
@@ -6022,6 +6030,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setGoldHoldings(data.goldHoldings);
         await storage.setItem('gluck_gold_holdings', data.goldHoldings);
       }
+      if (data.lernstudioSets) {
+        setLernstudioSets(data.lernstudioSets);
+        await storage.setItem('dl_lernstudio_sets', data.lernstudioSets);
+      }
 
       // Reconcile and safeguard synchronization metadata
       const reconciledState = await applyRestoreSyncSafeguards(
@@ -6032,6 +6044,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           payments: data.payments || [],
           notifications: data.notifications || [],
           certificates: data.certificates || [],
+          lernstudioSets: data.lernstudioSets || [],
           hodStudents: data.hodStudents || [],
           hodComplaints: data.hodComplaints || [],
           hodActionPlans: data.hodActionPlans || [],
@@ -6108,6 +6121,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeRecurring,
       financeInstallments,
       financeNotifications,
+      lernstudioSets,
       syncQueue: [],
     };
     const jsonStr = JSON.stringify(backupObj, null, 2);
@@ -6413,7 +6427,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     financeTransactions,
     financeRecurring,
     financeInstallments,
-    financeNotifications
+    financeNotifications,
+    lernstudioSets
   });
   useEffect(() => {
     localDataRef.current = { 
@@ -6435,9 +6450,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeTransactions,
       financeRecurring,
       financeInstallments,
-      financeNotifications
+      financeNotifications,
+      lernstudioSets
     };
-  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications]);
+  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, lernstudioSets]);
 
   const syncDataSource: SyncDataSource = {
     getLocalData: () => {
@@ -6596,6 +6612,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         case 'financeNotifications': {
           setFinanceNotifications(data);
           await storage.setItem('dl_finance_notifications', data);
+          break;
+        }
+        case 'lernstudioSets': {
+          setLernstudioSets(data);
+          await storage.setItem('dl_lernstudio_sets', data);
           break;
         }
         case 'settings': {
