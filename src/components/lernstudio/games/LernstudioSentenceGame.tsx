@@ -3,7 +3,7 @@ import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernst
 import { buildSentenceGameQuestions, SentenceGameQuestion } from '../../../utils/lernstudioQuestionAdapter';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
-import { getLernstudioTranslations } from '../../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedTeamName } from '../../../utils/lernstudioTranslations';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/GameEffectsOverlay';
 import {
@@ -42,13 +42,13 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
   const { triggerSparkles, triggerFloatingText, triggerConfetti } = useGameEffects();
 
   const defaultTeams: TeamScore[] = useMemo(() => [
-    { id: 'team_red', name: isRtl ? 'الفريق الأحمر 🦁' : 'Team Red 🦁', color: 'from-rose-500 to-red-600', score: 0 },
-    { id: 'team_blue', name: isRtl ? 'الفريق الأزرق 🦅' : 'Team Blue 🦅', color: 'from-blue-500 to-cyan-600', score: 0 },
-    { id: 'team_green', name: isRtl ? 'الفريق الأخضر 🐉' : 'Team Green 🐉', color: 'from-emerald-500 to-teal-600', score: 0 },
-    { id: 'team_gold', name: isRtl ? 'الفريق الذهبي 👑' : 'Team Gold 👑', color: 'from-amber-500 to-yellow-600', score: 0 },
-  ], [isRtl]);
+    { id: 'team_red', name: getLocalizedTeamName('teamRed', language, 'الفريق الأحمر 🦁'), color: 'from-rose-500 to-red-600', score: 0 },
+    { id: 'team_blue', name: getLocalizedTeamName('teamBlue', language, 'الفريق الأزرق 🦅'), color: 'from-blue-500 to-cyan-600', score: 0 },
+    { id: 'team_green', name: getLocalizedTeamName('teamGreen', language, 'الفريق الأخضر 🐉'), color: 'from-emerald-500 to-teal-600', score: 0 },
+    { id: 'team_gold', name: getLocalizedTeamName('teamYellow', language, 'الفريق الذهبي 👑'), color: 'from-amber-500 to-yellow-600', score: 0 },
+  ], [language]);
 
-  const questions = useMemo(() => buildSentenceGameQuestions(set), [set]);
+  const questions = useMemo(() => buildSentenceGameQuestions(set, language), [set, language]);
 
   const [gameMode, setGameMode] = useState<'solo' | 'team'>(initialMode);
   const [teams, setTeams] = useState<TeamScore[]>(defaultTeams.slice(0, 2));
@@ -167,7 +167,7 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
         <div className="text-4xl">✍️</div>
         <h2 className="text-lg font-black text-white">{t.sentenceGameHeader}</h2>
         <p className="text-sm text-slate-300 max-w-md">
-          {isRtl ? 'لا توجد أسئلة أو جمل كافية لإنشاء لعبة بناء الجمل في هذه المجموعة.' : 'No sentence questions available for this set.'}
+          {language === 'ar' ? 'لا توجد أسئلة أو جمل كافية لإنشاء لعبة بناء الجمل في هذه المجموعة.' : language === 'de' ? 'Keine Satzbau-Übungen für dieses Set verfügbar.' : 'No sentence questions available for this set.'}
         </p>
         <button
           onClick={onBack}

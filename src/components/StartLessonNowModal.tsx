@@ -197,7 +197,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
       amountDue,
       amountPaid: 0,
       meetingLink: lessonType === 'online' ? (selectedGroup?.zoomLink || profile.defaultZoomLink) : undefined,
-      locationAddress: lessonType === 'offline' ? (selectedGroup?.address || 'Hauptstraße 45, Cairo') : undefined
+      locationAddress: lessonType === 'offline' ? (selectedGroup?.address || '') : undefined
     };
 
     // Add directly using custom context dispatch via addLesson logic or custom trigger

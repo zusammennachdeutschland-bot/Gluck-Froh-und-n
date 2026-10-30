@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
-import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation, getLocalizedTeamName } from '../../../utils/lernstudioTranslations';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import {
@@ -50,8 +50,13 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
 
   // Game Settings
   const [gameMode, setGameMode] = useState<'teams' | 'vs_bot'>('teams');
-  const [team1Name, setTeam1Name] = useState<string>('الفريق الأحمر 🔴');
-  const [team2Name, setTeam2Name] = useState<string>('الفريق الأزرق 🔵');
+  const [team1Name, setTeam1Name] = useState<string>(() => getLocalizedTeamName('teamRed', language, 'الفريق الأحمر 🔴'));
+  const [team2Name, setTeam2Name] = useState<string>(() => getLocalizedTeamName('teamBlue', language, 'الفريق الأزرق 🔵'));
+
+  useEffect(() => {
+    setTeam1Name(getLocalizedTeamName('teamRed', language, 'الفريق الأحمر 🔴'));
+    setTeam2Name(getLocalizedTeamName('teamBlue', language, 'الفريق الأزرق 🔵'));
+  }, [language]);
   
   // Game State
   // ropePosition: from -100 (Team 1 wins) to +100 (Team 2 / Bot wins), 0 is middle
@@ -78,6 +83,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
   // Generate Questions from items
   const questions: QuestionData[] = useMemo(() => {
     if (!items.length) return [];
+    const safeLang = (language || 'ar').toLowerCase();
     
     return items.map((item, idx) => {
       const otherItems = items.filter((_, i) => i !== idx);
@@ -87,9 +93,17 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
       const isArticleQ = canDoArticle && Math.random() > 0.55;
 
       if (isArticleQ) {
+        const cleanNoun = item.german.replace(/^(der|die|das)\s+/i, '');
+        const articlePrompt =
+          safeLang === 'en'
+            ? `What is the correct definite article for "${cleanNoun}"?`
+            : safeLang === 'de'
+            ? `Welcher Artikel gehört zu "${cleanNoun}"?`
+            : `ما هي أداة التعريف الصحيحة لـ "${cleanNoun}"؟`;
+
         return {
           item,
-          prompt: `ما هي أداة التعريف الصحيحة لـ "${item.german.replace(/^(der|die|das)\s+/i, '')}"؟`,
+          prompt: articlePrompt,
           options: ['der', 'die', 'das'],
           correctAnswer: item.article || 'der',
           type: 'article'
@@ -104,7 +118,6 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
       
       const targetTrans = getItemTranslation(item, language);
       const options = [targetTrans, ...wrongTrans].sort(() => 0.5 - Math.random());
-      const safeLang = (language || 'ar').toLowerCase();
 
       const qPrompt =
         safeLang === 'en'
@@ -194,7 +207,9 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
 
       setFeedback({
         isCorrect: true,
-        message: streak > 1 ? 'سحبة نارية عملاقة! 🔥 +25 نقطة' : 'سحبة قوية وصحيحة! 💪 +15 نقطة'
+        message: streak > 1
+          ? (language === 'ar' ? 'سحبة نارية عملاقة! 🔥 +25 نقطة' : language === 'de' ? 'Riesiger Feuerzug! 🔥 +25 Punkte' : 'Giant fire pull! 🔥 +25 pts')
+          : (language === 'ar' ? 'سحبة قوية وصحيحة! 💪 +15 نقطة' : language === 'de' ? 'Starker richtiger Zug! 💪 +15 Punkte' : 'Strong correct pull! 💪 +15 pts')
       });
     } else {
       playLernstudioSound('wrong');
@@ -213,7 +228,11 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
 
       setFeedback({
         isCorrect: false,
-        message: `إجابة غير صحيحة! الصحيح هو: "${currentQ.correctAnswer}"`
+        message: language === 'ar'
+          ? `إجابة غير صحيحة! الصحيح هو: "${currentQ.correctAnswer}"`
+          : language === 'de'
+          ? `Falsche Antwort! Richtig ist: "${currentQ.correctAnswer}"`
+          : `Wrong answer! Correct is: "${currentQ.correctAnswer}"`
       });
     }
 
@@ -240,7 +259,9 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
     setWinner(victor);
     playLernstudioSound('victory');
     playGermanVoiceFeedback('victory');
-    triggerCelebration(victor === 1 ? `فاز ${team1Name}! 🪢` : `فاز ${gameMode === 'vs_bot' ? 'الروبوت الذكي 🤖' : team2Name}! 🪢`);
+    const victorName = victor === 1 ? team1Name : (gameMode === 'vs_bot' ? t.smartBot : team2Name);
+    const winMsg = language === 'ar' ? `فاز ${victorName}! 🪢` : language === 'de' ? `${victorName} hat gewonnen! 🪢` : `${victorName} won! 🪢`;
+    triggerCelebration(winMsg);
   };
 
   const finishGameByPosition = () => {
@@ -254,7 +275,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
     }
     playLernstudioSound('victory');
     playGermanVoiceFeedback('victory');
-    triggerCelebration('نهاية شد الحبل! 🪢');
+    triggerCelebration(language === 'ar' ? 'نهاية شد الحبل! 🪢' : language === 'de' ? 'Ende des Tauziehens! 🪢' : 'Tug of war ended! 🪢');
   };
 
   const restartGame = () => {
@@ -277,7 +298,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
   if (!items.length) {
     return (
       <div className="p-6 bg-surface rounded-2xl border border-surface-border text-center space-y-4">
-        <p className="text-text-muted">هذه المجموعة لا تحتوي على كلمات كافية للعب.</p>
+        <p className="text-text-muted">{t.notEnoughWords}</p>
         <button
           type="button"
           onClick={onBack}
@@ -314,7 +335,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
                 {t.tugOfWarTitle}
               </h1>
               <p className="text-[11px] text-text-muted font-bold truncate">
-                {displayTitle} • الجولة {roundNumber} من {maxRounds}
+                {displayTitle} • {language === 'ar' ? `الجولة ${roundNumber} من ${maxRounds}` : language === 'de' ? `Runde ${roundNumber} von ${maxRounds}` : `Round ${roundNumber} of ${maxRounds}`}
               </p>
             </div>
           </div>
@@ -335,7 +356,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              <span>فرق</span>
+              <span>{t.teamsLabel}</span>
             </button>
             <button
               type="button"
@@ -348,7 +369,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
               }`}
             >
               <Bot className="w-3.5 h-3.5" />
-              <span>ضد الروبوت</span>
+              <span>{t.vsBot}</span>
             </button>
           </div>
 
@@ -356,7 +377,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
             type="button"
             onClick={restartGame}
             className="p-2 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl border border-surface-border transition-all cursor-pointer"
-            title="إعادة اللعبة"
+            title={language === 'ar' ? 'إعادة اللعبة' : language === 'de' ? 'Spiel neu starten' : 'Restart game'}
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -366,8 +387,14 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
       <GameStageBanner
         mode="tug_of_war"
         title={t.tugOfWarTitle}
-        subtitle={`${displayTitle} • اسحب الحبل بقوة عبر الإجابات الصحيحة!`}
-        badgeText={`الجولة ${roundNumber}/${maxRounds}`}
+        subtitle={
+          language === 'ar'
+            ? `${displayTitle} • اسحب الحبل بقوة عبر الإجابات الصحيحة!`
+            : language === 'de'
+            ? `${displayTitle} • Ziehe das Seil mit richtigen Antworten!`
+            : `${displayTitle} • Pull the rope strongly with correct answers!`
+        }
+        badgeText={language === 'ar' ? `الجولة ${roundNumber}/${maxRounds}` : language === 'de' ? `Runde ${roundNumber}/${maxRounds}` : `Round ${roundNumber}/${maxRounds}`}
       />
 
       {/* Scoreboard Bar */}
@@ -389,7 +416,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
                 {team1Name}
               </div>
               <div className="text-[11px] font-bold text-text-muted flex items-center gap-1">
-                <span>{team1Score} نقطة</span>
+                <span>{team1Score} {t.pointsUnit}</span>
                 {team1Streak > 1 && (
                   <span className="text-amber-500 flex items-center font-black">
                     <Flame className="w-3 h-3 fill-current" /> {team1Streak}x
@@ -400,7 +427,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
           </div>
           {currentTurn === 1 && !isGameOver && (
             <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">
-              دوركم الآن!
+              {t.activeTurnBadge}
             </span>
           )}
         </div>
@@ -419,10 +446,10 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
             </div>
             <div>
               <div className="text-xs sm:text-sm font-black text-blue-600 dark:text-blue-400">
-                {gameMode === 'vs_bot' ? 'الروبوت الذكي 🤖' : team2Name}
+                {gameMode === 'vs_bot' ? t.smartBot : team2Name}
               </div>
               <div className="text-[11px] font-bold text-text-muted flex items-center gap-1">
-                <span>{team2Score} نقطة</span>
+                <span>{team2Score} {t.pointsUnit}</span>
                 {team2Streak > 1 && (
                   <span className="text-amber-500 flex items-center font-black">
                     <Flame className="w-3 h-3 fill-current" /> {team2Streak}x
@@ -433,7 +460,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
           </div>
           {currentTurn === 2 && !isGameOver && (
             <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-500 text-white animate-pulse">
-              {gameMode === 'vs_bot' ? 'يفكر...' : 'دوركم الآن!'}
+              {gameMode === 'vs_bot' ? `${t.thinkingBot}...` : t.activeTurnBadge}
             </span>
           )}
         </div>
@@ -448,10 +475,10 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
 
           {/* Winning Threshold Markers */}
           <div className="absolute top-2 left-6 text-[10px] font-black text-rose-500/60 uppercase">
-            منطقة فوز الأحمر ◀
+            {language === 'ar' ? 'منطقة فوز الأحمر ◀' : language === 'de' ? '◀ Roter Sieg' : '◀ Red Victory Zone'}
           </div>
           <div className="absolute top-2 right-6 text-[10px] font-black text-blue-500/60 uppercase">
-            ▶ منطقة فوز الأزرق
+            {language === 'ar' ? '▶ منطقة فوز الأزرق' : language === 'de' ? 'Blauer Sieg ▶' : 'Blue Victory Zone ▶'}
           </div>
 
           {/* Interactive Rope with Mascots */}
@@ -519,9 +546,9 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
           {/* Rope Balance Indicator Bar */}
           <div className="mt-6 max-w-md mx-auto">
             <div className="flex items-center justify-between text-[11px] font-bold text-text-muted mb-1">
-              <span className="text-rose-500 font-black">الأحمر: {Math.max(0, Math.round(-ropePosition))}%</span>
-              <span>توازن الحبل</span>
-              <span className="text-blue-500 font-black">الأزرق: {Math.max(0, Math.round(ropePosition))}%</span>
+              <span className="text-rose-500 font-black">{language === 'ar' ? `الأحمر: ${Math.max(0, Math.round(-ropePosition))}%` : language === 'de' ? `Rot: ${Math.max(0, Math.round(-ropePosition))}%` : `Red: ${Math.max(0, Math.round(-ropePosition))}%`}</span>
+              <span>{language === 'ar' ? 'توازن الحبل' : language === 'de' ? 'Seilbalance' : 'Rope Balance'}</span>
+              <span className="text-blue-500 font-black">{language === 'ar' ? `الأزرق: ${Math.max(0, Math.round(ropePosition))}%` : language === 'de' ? `Blau: ${Math.max(0, Math.round(ropePosition))}%` : `Blue: ${Math.max(0, Math.round(ropePosition))}%`}</span>
             </div>
             <div className="h-2 w-full bg-surface-hover rounded-full overflow-hidden flex">
               <div
@@ -546,9 +573,9 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
                   {currentTurn === 1 ? '🔴' : gameMode === 'vs_bot' ? '🤖' : '🔵'}
                 </span>
                 <span className="text-xs sm:text-sm font-black text-text-main">
-                  دور:{' '}
+                  {t.currentTurnLabel}:{' '}
                   <span className={currentTurn === 1 ? 'text-rose-500' : 'text-blue-500'}>
-                    {currentTurn === 1 ? team1Name : gameMode === 'vs_bot' ? 'الروبوت الألماني' : team2Name}
+                    {currentTurn === 1 ? team1Name : gameMode === 'vs_bot' ? t.smartBot : team2Name}
                   </span>
                 </span>
               </div>
@@ -565,7 +592,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
                   className="px-3 py-1 bg-surface hover:bg-surface-border text-primary rounded-xl border border-surface-border text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
                 >
                   <Volume2 className="w-3.5 h-3.5" />
-                  <span>نطق الكلمة</span>
+                  <span>{t.pronounceWord}</span>
                 </button>
               )}
             </div>
@@ -602,7 +629,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
               <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-center space-y-2 animate-pulse">
                 <Bot className="w-6 h-6 text-blue-500 mx-auto animate-spin" />
                 <p className="text-xs font-bold text-blue-600 dark:text-blue-400">
-                  الروبوت يقرأ الكلمة ويستعد للسحب...
+                  {language === 'ar' ? 'الروبوت يقرأ الكلمة ويستعد للسحب...' : language === 'de' ? 'Der Bot liest das Wort und zieht...' : 'The bot is reading the word and pulling...'}
                 </p>
               </div>
             )}
@@ -661,26 +688,30 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
             <div className="space-y-1">
               <h2 className="text-xl sm:text-2xl font-black text-text-main">
                 {winner === 1
-                  ? `فاز ${team1Name}! 🎉`
+                  ? (language === 'ar' ? `فاز ${team1Name}! 🎉` : language === 'de' ? `${team1Name} hat gewonnen! 🎉` : `${team1Name} won! 🎉`)
                   : winner === 2
-                  ? `فاز ${gameMode === 'vs_bot' ? 'الروبوت الذكي 🤖' : team2Name}! 🎉`
-                  : 'تعادل ملحمي بين الفريقين! 🤝'}
+                  ? (language === 'ar' ? `فاز ${gameMode === 'vs_bot' ? t.smartBot : team2Name}! 🎉` : language === 'de' ? `${gameMode === 'vs_bot' ? t.smartBot : team2Name} hat gewonnen! 🎉` : `${gameMode === 'vs_bot' ? t.smartBot : team2Name} won! 🎉`)
+                  : t.tieGame}
               </h2>
               <p className="text-xs font-bold text-text-muted">
-                تم سحب الحبل بنجاح بعد {roundNumber} جولة من التحديات والمفردات الألمانية!
+                {language === 'ar'
+                  ? `تم سحب الحبل بنجاح بعد ${roundNumber} جولة من التحديات والمفردات الألمانية!`
+                  : language === 'de'
+                  ? `Das Seil wurde nach ${roundNumber} Runden erfolgreich gezogen!`
+                  : `Tug of war successfully concluded after ${roundNumber} rounds!`}
               </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3 p-3 bg-surface-hover rounded-2xl border border-surface-border text-center">
               <div>
                 <div className="text-[11px] font-bold text-text-muted">{team1Name}</div>
-                <div className="text-lg font-black text-rose-500">{team1Score} نقطة</div>
+                <div className="text-lg font-black text-rose-500">{team1Score} {t.pointsUnit}</div>
               </div>
               <div>
                 <div className="text-[11px] font-bold text-text-muted">
-                  {gameMode === 'vs_bot' ? 'الروبوت' : team2Name}
+                  {gameMode === 'vs_bot' ? t.vsBot : team2Name}
                 </div>
-                <div className="text-lg font-black text-blue-500">{team2Score} نقطة</div>
+                <div className="text-lg font-black text-blue-500">{team2Score} {t.pointsUnit}</div>
               </div>
             </div>
 
@@ -691,14 +722,14 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
                 className="flex-1 py-3 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer inline-flex items-center justify-center gap-2"
               >
                 <RotateCcw className="w-4 h-4" />
-                <span>لعب مباراة جديدة</span>
+                <span>{t.playAgain}</span>
               </button>
               <button
                 type="button"
                 onClick={onBack}
                 className="py-3 px-4 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-xs font-bold border border-surface-border transition-all cursor-pointer"
               >
-                بوابة الألعاب
+                {t.gamesPortalBack}
               </button>
             </div>
           </div>

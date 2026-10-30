@@ -221,3 +221,28 @@ export const applyFullPaymentsUpdate = (
   return { nextFull, nextActive };
 };
 
+/**
+ * Task 4: Splits a package payment across `count` lessons so that the per-lesson amounts
+ * sum to `amountPaid` exactly (putting any rounding remainder on the last lesson).
+ */
+export const splitPaymentAcrossLessons = (amountPaid: number, count: number): number[] => {
+  const round2 = (v: number) => Math.round(v * 100) / 100;
+  const safeTotal = round2(Number(amountPaid) || 0);
+  if (!Number.isFinite(count) || count <= 1) {
+    return [safeTotal];
+  }
+  const n = Math.floor(count);
+  const isIntegerTotal = Number.isInteger(safeTotal);
+  const baseShare = isIntegerTotal
+    ? Math.floor(safeTotal / n)
+    : Math.floor((safeTotal * 100) / n) / 100;
+  const shares: number[] = [];
+  let allocated = 0;
+  for (let i = 0; i < n - 1; i++) {
+    shares.push(baseShare);
+    allocated = round2(allocated + baseShare);
+  }
+  shares.push(round2(safeTotal - allocated));
+  return shares;
+};
+

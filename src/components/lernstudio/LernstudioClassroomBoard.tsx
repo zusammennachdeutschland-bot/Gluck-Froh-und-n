@@ -241,12 +241,12 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
   const handleStartGame = () => {
     const items = [...(set.items || [])];
     if (items.length === 0) {
-      alert(language === 'ar' ? 'يرجى إضافة كلمات إلى المجموعة أولاً لإنشاء لعبة الفصل.' : 'Please add vocabulary items to this set first.');
+      alert(language === 'ar' ? 'يرجى إضافة كلمات إلى المجموعة أولاً لإنشاء لعبة الفصل.' : language === 'de' ? 'Bitte fügen Sie dieser Gruppe zuerst Vokabeln hinzu.' : 'Please add vocabulary items to this set first.');
       return;
     }
 
     if (teams.length === 0) {
-      alert(language === 'ar' ? 'يرجى اختيار فريق أو مجموعة واحدة على الأقل.' : 'Please select at least one group or team.');
+      alert(language === 'ar' ? 'يرجى اختيار فريق أو مجموعة واحدة على الأقل.' : language === 'de' ? 'Bitte wählen Sie mindestens ein Team aus.' : 'Please select at least one group or team.');
       return;
     }
 
@@ -274,7 +274,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
         isPowerCard: isPower,
         powerType: isPower ? randomPower : undefined,
         item,
-        question: getItemTranslation(item, activeLanguage) || item.exampleSentenceArabic || item.emoji || 'What is the German word?',
+        question: getItemTranslation(item, activeLanguage) || (activeLanguage === 'ar' ? item.exampleSentenceArabic : item.exampleSentenceGerman) || item.emoji || (activeLanguage === 'de' ? 'Was ist das deutsche Wort?' : activeLanguage === 'ar' ? 'ما هي الكلمة بالألمانية؟' : 'What is the German word?'),
         answer: item.german + (item.plural ? ` (Plural: ${item.plural})` : '') + (item.exampleSentenceGerman ? ` • ${item.exampleSentenceGerman}` : ''),
         isAnswered: false
       };
@@ -1070,7 +1070,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
                   <div className="w-full h-full flex flex-col items-center justify-center gap-1">
                     <span className="text-xs font-mono font-bold text-text-muted">#{tile.id}</span>
                     <span className="text-xl">✓</span>
-                    <span className="text-[9px] font-bold text-text-muted">مُنجزة</span>
+                    <span className="text-[9px] font-bold text-text-muted">{language === 'ar' ? 'مُنجزة' : language === 'de' ? 'Erledigt' : 'Done'}</span>
                   </div>
                 )
               ) : (
@@ -1141,7 +1141,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
                     setShowAnswer(false);
                   }}
                   className="p-1.5 rounded-xl text-text-muted hover:text-text-main hover:bg-surface-hover transition-colors cursor-pointer"
-                  title="إغلاق"
+                  title={language === 'ar' ? 'إغلاق' : language === 'de' ? 'Schließen' : 'Close'}
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1198,7 +1198,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
                         className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black inline-flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
                       >
                         <Volume2 className="w-4 h-4" />
-                        <span>نطق عادي (1.0x)</span>
+                        <span>{language === 'ar' ? 'نطق عادي (1.0x)' : language === 'de' ? 'Normal (1.0x)' : 'Normal (1.0x)'}</span>
                       </button>
 
                       <button
@@ -1207,7 +1207,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({ set, activeTheme, la
                         className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black inline-flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
                       >
                         <Snail className="w-4 h-4" />
-                        <span>نطق بطيء (0.6x)</span>
+                        <span>{language === 'ar' ? 'نطق بطيء (0.6x)' : language === 'de' ? 'Langsam (0.6x)' : 'Slow (0.6x)'}</span>
                       </button>
                     </div>
                   </div>

@@ -219,7 +219,7 @@ export function buildDynamicQuestionPool(set: LernstudioSet, language: string = 
         id: `dyn_sent_${item.id}_${index}`,
         type: 'sentence_builder',
         prompt: sentencePrompt,
-        subPrompt: item.exampleSentenceArabic || itemTrans,
+        subPrompt: safeLang === 'en' ? (item.english || itemTrans) : safeLang === 'de' ? (item.german || itemTrans) : (item.exampleSentenceArabic || itemTrans),
         emoji: item.emoji,
         sentencePieces: sentencePieces,
         options: sentOptions,

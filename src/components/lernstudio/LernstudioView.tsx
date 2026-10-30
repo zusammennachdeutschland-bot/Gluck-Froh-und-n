@@ -705,7 +705,7 @@ export const LernstudioView: React.FC<Props> = ({
                   className={`px-2 py-0.5 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
                     currentThemeId === tId ? activeTheme.primaryBg : 'text-text-muted hover:text-text-main'
                   }`}
-                  title={LERNSTUDIO_THEMES[tId].name}
+                  title={language === 'ar' ? LERNSTUDIO_THEMES[tId].nameArabic : LERNSTUDIO_THEMES[tId].name}
                 >
                   {LERNSTUDIO_THEMES[tId].emoji}
                 </button>
@@ -717,10 +717,10 @@ export const LernstudioView: React.FC<Props> = ({
               type="button"
               onClick={() => setIsRandomPickerOpen(true)}
               className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-md cursor-pointer inline-flex items-center gap-1.5 shrink-0 transform hover:scale-105 transition-all"
-              title="اختيار طالب عشوائي للحصة"
+              title={language === 'ar' ? 'اختيار طالب عشوائي للحصة' : language === 'de' ? 'Zufallsauswahl für die Stunde' : 'Pick random student for lesson'}
             >
               <Dices className="w-4 h-4" />
-              <span>عجلة اختيار الطالب 🎲</span>
+              <span>{language === 'ar' ? 'عجلة اختيار الطالب 🎲' : language === 'de' ? 'Zufallsauswahl 🎲' : 'Random Picker 🎲'}</span>
             </button>
 
             {/* AI Generator Button */}
@@ -826,9 +826,9 @@ export const LernstudioView: React.FC<Props> = ({
               onChange={(e) => setSelectedSourceFilter(e.target.value as SetSourceFilter)}
               className="w-full sm:w-auto px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate cursor-pointer font-medium"
             >
-              <option value="all">🏷️ {language === 'ar' ? 'المصدر: الكل' : 'Quelle: Alle'} ({sets.length})</option>
-              <option value="custom">✍️ {language === 'ar' ? 'مجموعاتي الخاصة' : 'Meine Sets'} ({customSetsCount})</option>
-              <option value="builtin">🇩🇪 {language === 'ar' ? 'المناهج الجاهزة' : 'Lehrplan-Sets'} ({builtinSetsCount})</option>
+              <option value="all">🏷️ {language === 'ar' ? 'المصدر: الكل' : language === 'de' ? 'Quelle: Alle' : 'Source: All'} ({sets.length})</option>
+              <option value="custom">✍️ {language === 'ar' ? 'مجموعاتي الخاصة' : language === 'de' ? 'Meine Sets' : 'My Sets'} ({customSetsCount})</option>
+              <option value="builtin">🇩🇪 {language === 'ar' ? 'المناهج الجاهزة' : language === 'de' ? 'Lehrplan-Sets' : 'Curriculum Sets'} ({builtinSetsCount})</option>
             </select>
 
             <select

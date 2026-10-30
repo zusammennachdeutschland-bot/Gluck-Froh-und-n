@@ -1,4 +1,4 @@
-import { Group, Lesson, PaymentRecord, Student } from '../types';
+import { Group, Lesson, LessonReport, PaymentRecord, Student } from '../types';
 import { normalizeDateToISO } from './timeUtils';
 import { isDateMatchingGroupRecurrence } from './scheduleUtils';
 
@@ -265,6 +265,93 @@ export const calculateSequentialSessionNumber = (
   return Math.max(1, Math.min(cycleTotalSessions, computedNum));
 };
 
+/**
+ * Re-calculates sessionNumber (with forceRecalculate: true) ONLY for lessons of the same group
+ * (or same private student when there is no group) that have status === 'scheduled' and come
+ * AFTER the changed lesson in date/time order (or including changedLesson itself when un-cancelled back to 'scheduled').
+ * Never modifies completed or in_progress lessons.
+ */
+export const resequenceScheduledLessonsAfterChange = (
+  allLessons: Lesson[],
+  changedLesson: Partial<Lesson> | null | undefined,
+  options?: {
+    group?: Partial<Group> | null;
+    student?: { id?: string; name?: string; groupId?: string } | null;
+    students?: Array<{ id: string; name: string; groupId?: string }>;
+    wrapMutation?: <T>(item: T) => T;
+  }
+): Lesson[] => {
+  if (!changedLesson || !Array.isArray(allLessons)) return allLessons;
+
+  const targetGroupId = changedLesson.groupId || options?.group?.id;
+  const targetStudentId = changedLesson.studentId || options?.student?.id;
+  const targetStudentName = changedLesson.studentName || options?.student?.name;
+  const grp = options?.group;
+  const st = options?.student;
+  const wrap = options?.wrapMutation || (<T>(item: T) => item);
+
+  const pivotTime = `${changedLesson.date || ''}T${normalizeTime(changedLesson.time) || '00:00'}`;
+  const includeSelf = changedLesson.status === 'scheduled' && !changedLesson.deleted;
+
+  const result = [...allLessons];
+  const candidateIndices: number[] = [];
+
+  result.forEach((l, idx) => {
+    if (l.deleted || l.status !== 'scheduled') return;
+
+    const matchesGrp = targetGroupId
+      ? l.groupId === targetGroupId
+      : Boolean(grp?.id && l.groupId === grp.id);
+    const matchesSt = !targetGroupId && !grp?.id && (
+      (targetStudentId ? l.studentId === targetStudentId : Boolean(st?.id && l.studentId === st.id)) ||
+      (targetStudentName ? normalizeName(l.studentName || l.quickStudentName) === normalizeName(targetStudentName) : false)
+    );
+
+    if (!matchesGrp && !matchesSt) return;
+
+    if (l.id && changedLesson.id && l.id === changedLesson.id) {
+      if (includeSelf) candidateIndices.push(idx);
+      return;
+    }
+
+    const lTime = `${l.date || ''}T${normalizeTime(l.time) || '00:00'}`;
+    if (lTime >= pivotTime) {
+      candidateIndices.push(idx);
+    }
+  });
+
+  candidateIndices.sort((idxA, idxB) => {
+    const a = result[idxA];
+    const b = result[idxB];
+    const timeA = `${a.date || ''}T${normalizeTime(a.time) || '00:00'}`;
+    const timeB = `${b.date || ''}T${normalizeTime(b.time) || '00:00'}`;
+    return timeA.localeCompare(timeB);
+  });
+
+  for (const idx of candidateIndices) {
+    const l = result[idx];
+    const expectedSessionNum = calculateSequentialSessionNumber(l, result, {
+      group: grp,
+      student: st,
+      students: options?.students,
+      forceRecalculate: true,
+    });
+    const cycleCount = (grp?.sessionCount && grp.sessionCount > 1)
+      ? grp.sessionCount
+      : (l.totalSessionsInPackage || changedLesson.totalSessionsInPackage || 4);
+
+    if (l.sessionNumber !== expectedSessionNum || l.totalSessionsInPackage !== cycleCount) {
+      result[idx] = wrap({
+        ...l,
+        sessionNumber: expectedSessionNum,
+        totalSessionsInPackage: cycleCount,
+      });
+    }
+  }
+
+  return result;
+};
+
 export const normalizeTime = (t?: string): string => {
   if (!t) return '';
   const clean = t.trim();
@@ -285,6 +372,13 @@ export const checkOverlap = (l1: any, l2: any) => {
   if (l1.id === l2.id) return false;
   if (l1.date !== l2.date) return false;
   
+  // Completed and cancelled sessions have already concluded or been voided; they must NEVER trigger active schedule conflicts
+  const isL1Done = l1.status === 'completed' || l1.status === 'cancelled' || (l1.report && l1.report.attendanceStatus === 'completed');
+  const isL2Done = l2.status === 'completed' || l2.status === 'cancelled' || (l2.report && l2.report.attendanceStatus === 'completed');
+  if (isL1Done || isL2Done) {
+    return false;
+  }
+
   // If both lessons belong to the exact same group, it's a duplicate record of the same group session, not a schedule conflict between different groups
   if (l1.groupId && l2.groupId && l1.groupId !== 'quick_group' && l1.groupId === l2.groupId) {
     return false;
@@ -903,3 +997,134 @@ export const filterBillableReportPayments = (
     return true;
   });
 };
+
+export type StudentReportAttendanceStatus = 'present' | 'absent' | 'late' | 'unrecorded';
+
+/**
+ * Task 2.1: Resolves "what was taught today" using ONLY arabicTopicsExplained and lesson.topic.
+ * Never falls back to lesson.report.teacherNotes (private internal notes).
+ */
+export const resolveTaughtTodayTopic = (
+  lesson: Partial<Lesson> | null | undefined,
+  localReport?: Partial<LessonReport> | null
+): { text: string; isMissing: boolean } => {
+  const fromLocalReport = (localReport?.arabicTopicsExplained || '').trim();
+  const fromLessonReport = (lesson?.report?.arabicTopicsExplained || '').trim();
+  const fromLessonTopic = ((lesson as any)?.topic || '').trim();
+  const text = fromLocalReport || fromLessonReport || fromLessonTopic;
+  return {
+    text,
+    isMissing: !text,
+  };
+};
+
+/**
+ * Task 2.2: Single shared helper returning 'present' | 'absent' | 'late' | 'unrecorded'.
+ * Used identically for both filtering and displaying absent/late students.
+ */
+export const resolveStudentReportAttendance = (
+  studentId: string | undefined,
+  lesson: Partial<Lesson> | null | undefined,
+  localAttendance?: Record<string, 'present' | 'late' | 'absent'>,
+  localReport?: Partial<LessonReport> | null,
+  isGroupLesson?: boolean
+): StudentReportAttendanceStatus => {
+  const checkVal = (val: unknown): 'present' | 'absent' | 'late' | undefined => {
+    if (val === 'present' || val === 'absent' || val === 'late') return val;
+    return undefined;
+  };
+
+  if (studentId) {
+    const fromLocal = checkVal(localAttendance?.[studentId]);
+    if (fromLocal) return fromLocal;
+    const fromLocalReport = checkVal(localReport?.studentAttendance?.[studentId]);
+    if (fromLocalReport) return fromLocalReport;
+    const fromLessonReport = checkVal(lesson?.report?.studentAttendance?.[studentId]);
+    if (fromLessonReport) return fromLessonReport;
+  }
+
+  if (!isGroupLesson) {
+    const fallbackStId = lesson?.studentId;
+    if (fallbackStId) {
+      const fromLessonStLocal = checkVal(localAttendance?.[fallbackStId]);
+      if (fromLessonStLocal) return fromLessonStLocal;
+      const fromLessonStReport = checkVal(
+        localReport?.studentAttendance?.[fallbackStId] ?? lesson?.report?.studentAttendance?.[fallbackStId]
+      );
+      if (fromLessonStReport) return fromLessonStReport;
+    }
+    const fromSingle = checkVal(
+      localAttendance?.['single'] ??
+      localReport?.studentAttendance?.['single'] ??
+      lesson?.report?.studentAttendance?.['single']
+    );
+    if (fromSingle) return fromSingle;
+    const fromOverall = checkVal(localReport?.attendanceStatus ?? lesson?.report?.attendanceStatus);
+    if (fromOverall) return fromOverall;
+  }
+
+  return 'unrecorded';
+};
+
+/**
+ * Task 2.3: Resolves assigned homework text. When homework is not specified ('غير محدد' or empty),
+ * does NOT print 'لا يوجد واجب' / 'Keine Hausaufgabe' / 'None assigned' unless 'no homework' was explicitly chosen.
+ */
+export const resolveReportHomework = (
+  report: Partial<LessonReport> | null | undefined,
+  localReport?: Partial<LessonReport> | null,
+  lang: 'ar' | 'en' | 'de' = 'ar'
+): { text: string; isExplicitNone: boolean; isMissing: boolean } => {
+  const raw = (
+    localReport?.arabicHomeworkRequired ??
+    report?.arabicHomeworkRequired ??
+    localReport?.homeworkDescription ??
+    report?.homeworkDescription ??
+    localReport?.homeworkTitle ??
+    report?.homeworkTitle ??
+    ''
+  ).trim();
+
+  const hwStatus = (localReport?.homeworkStatus ?? report?.homeworkStatus) as string | undefined;
+  const hwOpt = (localReport?.arabicHomeworkOption ?? report?.arabicHomeworkOption ?? '').trim();
+
+  const explicitNoneLabels = ['لا يوجد واجب', 'لا يوجد', 'none', 'none assigned', 'keine', 'keine hausaufgabe'];
+  const isExplicitNone =
+    hwStatus === 'none' ||
+    hwOpt === 'none' ||
+    explicitNoneLabels.includes(raw.toLowerCase()) ||
+    explicitNoneLabels.includes(hwOpt.toLowerCase());
+
+  if (isExplicitNone) {
+    const noneText = lang === 'ar' ? 'لا يوجد واجب' : lang === 'de' ? 'Keine Hausaufgabe' : 'None assigned';
+    return { text: noneText, isExplicitNone: true, isMissing: false };
+  }
+
+  if (!raw || raw === 'غير محدد') {
+    return { text: '', isExplicitNone: false, isMissing: true };
+  }
+
+  return { text: raw, isExplicitNone: false, isMissing: false };
+};
+
+/**
+ * Task 2.3: Resolves previous-homework completion status text.
+ * Only returns 'لا يوجد واجب سابق' / 'Keine Hausaufgabe' / 'None assigned' when hwDone === 'none' was explicitly chosen;
+ * returns '' when hwDone is undefined or 'غير محدد'.
+ */
+export const resolvePreviousHomeworkStatusText = (
+  hwDone: 'yes' | 'no' | 'none' | string | undefined,
+  lang: 'ar' | 'en' | 'de' = 'ar'
+): string => {
+  if (hwDone === 'yes') {
+    return lang === 'ar' ? 'تم الحل بالكامل 👍' : lang === 'de' ? 'Vollständig erledigt 👍' : 'Completed fully 👍';
+  }
+  if (hwDone === 'no') {
+    return lang === 'ar' ? 'لم يتم الحل 👎' : lang === 'de' ? 'Nicht erledigt 👎' : 'Not completed 👎';
+  }
+  if (hwDone === 'none') {
+    return lang === 'ar' ? 'لا يوجد واجب سابق' : lang === 'de' ? 'Keine Hausaufgabe' : 'None assigned';
+  }
+  return '';
+};
+

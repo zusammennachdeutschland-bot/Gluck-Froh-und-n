@@ -4,9 +4,9 @@ import { Lesson, Student, TeacherProfile, LessonReport } from '../types';
 import { useApp } from '../context/AppContext';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay } from '../utils/phoneUtils';
 import { getTeacherArabicName } from '../utils/teacherUtils';
-import { formatTimeDisplay, parseLocalDate } from '../utils/timeUtils';
+import { formatTimeDisplay, parseLocalDate, getLocalDateStr } from '../utils/timeUtils';
 import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString } from '../utils/genderUtils';
-import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
+import { calculateSequentialSessionNumber, resolveTaughtTodayTopic, resolveStudentReportAttendance, resolveReportHomework, resolvePreviousHomeworkStatusText } from '../utils/lessonUtils';
 import { getTimeBasedGreeting, getCairoHour } from '../utils/greetingUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { 
@@ -17,6 +17,7 @@ import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { escapeHtml } from '../utils/securityUtils';
 
 export { isLikelyFemaleStudent } from '../utils/genderUtils';
+export { resolveTaughtTodayTopic, resolveStudentReportAttendance, resolveReportHomework, resolvePreviousHomeworkStatusText } from '../utils/lessonUtils';
 
 const ARABIC_DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -72,6 +73,17 @@ const formatArabicTime = (timeStr?: string): string => {
   return formatTimeDisplay(timeStr, 'ar');
 };
 
+const formatReportTime = (timeStr?: string, lang: string = 'ar'): string => {
+  if (!timeStr) return '';
+  if (lang === 'ar') return formatArabicTime(timeStr);
+  if (timeStr.includes('AM') || timeStr.includes('PM') || timeStr.includes('م') || timeStr.includes('ص')) return timeStr;
+  if (timeStr.includes('-')) {
+    const parts = timeStr.split('-').map(s => s.trim());
+    return parts.map(p => formatTimeDisplay(p, lang)).join(' - ');
+  }
+  return formatTimeDisplay(timeStr, lang);
+};
+
 interface ArabicParentReportModalProps {
   lesson: Lesson;
   student?: Student;
@@ -92,6 +104,9 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const { students, groups, lessons, updateLesson, saveLessonReport, _t, language, t, reportLanguage, reportT } = useApp();
   const [copied, setCopied] = useState(false);
   const [showGroupProfile, setShowGroupProfile] = useState(false);
+
+  // Check if this lesson is scheduled for today
+  const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
 
   // Find the associated group robustly (by groupId, student's groupId, groupName, or title match)
   const associatedGroup = groups.find(g => g.id === lesson.groupId)
@@ -281,6 +296,14 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     Boolean(lesson.report?.recordingLink2 || lesson.recordingLink2)
   );
   const [autoSavedNotice, setAutoSavedNotice] = useState<boolean>(false);
+  const [showAbsentNamesInGroupReport, setShowAbsentNamesInGroupReport] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('dl_show_absent_names_in_group_report');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
 
   // Local student attendance state for real-time toggling & syncing
   const [localAttendance, setLocalAttendance] = useState<Record<string, 'present' | 'late' | 'absent'>>(() => {
@@ -438,21 +461,62 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     return '';
   };
 
+  const formatRecordingsByLang = (link1: string, link2: string, lang: 'ar' | 'en' | 'de'): string => {
+    if (lang === 'ar') return formatRecordingsArabic(link1, link2);
+    const l1 = link1.trim();
+    const l2 = link2.trim();
+    if (lang === 'de') {
+      if (l1 && l2) {
+        return `\n\n🎥 Unterrichtsaufnahmen (2 Teile):\n• Teil 1: ${l1}\n• Teil 2: ${l2}`;
+      }
+      if (l1) return `\n\n🎥 Unterrichtsaufnahme:\n${l1}`;
+      if (l2) return `\n\n🎥 Unterrichtsaufnahme:\n${l2}`;
+      return '';
+    }
+    if (l1 && l2) {
+      return `\n\n🎥 Lesson Recordings (2 Parts):\n• Part 1: ${l1}\n• Part 2: ${l2}`;
+    }
+    if (l1) return `\n\n🎥 Lesson Recording:\n${l1}`;
+    if (l2) return `\n\n🎥 Lesson Recording:\n${l2}`;
+    return '';
+  };
+
+  const taughtTodayInfo = useMemo(() => resolveTaughtTodayTopic(lesson, localReport), [lesson, localReport]);
+  const homeworkInfo = useMemo(
+    () => resolveReportHomework(lesson.report, localReport, reportLanguage === 'en' || reportLanguage === 'de' ? reportLanguage : 'ar'),
+    [lesson.report, localReport, reportLanguage]
+  );
+
+  const unrecordedStudents = useMemo(() => {
+    if (isGroupLesson) {
+      return groupStudents.filter(
+        st => resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true) === 'unrecorded'
+      );
+    }
+    if (activeStudent) {
+      return resolveStudentReportAttendance(activeStudent.id, lesson, localAttendance, localReport, false) === 'unrecorded'
+        ? [activeStudent]
+        : [];
+    }
+    return [];
+  }, [isGroupLesson, groupStudents, activeStudent, lesson, localAttendance, localReport]);
+
   // Generate Bulk Group Report Text
   const getBulkReportText = () => {
-    const taughtToday = lesson.report?.arabicTopicsExplained || lesson.report?.teacherNotes || lesson.topic || 'لم يحدد بعد';
-    const nextHomework = lesson.report?.arabicHomeworkRequired || lesson.report?.homeworkDescription || (lesson.report?.homeworkTitle ? `${lesson.report.homeworkTitle}` : 'لا يوجد واجب');
+    const taughtToday = taughtTodayInfo.text;
+    const nextHomework = homeworkInfo.text;
     
+    const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
     const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
     const dateFormatted = formatArabicDate(lesson.date);
     const timeFormatted = formatArabicTime(lesson.time);
 
     const dayDateLine = dayName && dateFormatted 
-      ? `📅 اليوم: ${dayName} (${dateFormatted})`
+      ? `📅 ${isLessonToday ? 'اليوم' : 'موعد الحصة'}: ${dayName} (${dateFormatted})`
       : dayName 
-        ? `📅 اليوم: ${dayName}`
+        ? `📅 ${isLessonToday ? 'اليوم' : 'يوم الحصة'}: ${dayName}`
         : dateFormatted 
-          ? `📅 التاريخ: ${dateFormatted}` 
+          ? `📅 ${isLessonToday ? 'التاريخ' : 'تاريخ الحصة'}: ${dateFormatted}` 
           : '';
 
     const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
@@ -466,28 +530,40 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
     const isMorning = getCairoHour() < 12;
 
+    const absentsOrLates = groupStudents.filter(st => {
+      const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
+      return stAtt === 'absent' || stAtt === 'late';
+    });
+    const absentCount = absentsOrLates.filter(st => resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true) === 'absent').length;
+    const lateCount = absentsOrLates.filter(st => resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true) === 'late').length;
+
     if (reportLanguage === 'en') {
       const groupTitle = associatedGroup?.name || lesson.title || 'German Group';
-      const absentsOrLates = groupStudents.filter(st => {
-        const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || lesson.report?.attendanceStatus || 'present';
-        return stAtt !== 'present';
-      });
-
+      const enTimeFormatted = formatReportTime(lesson.time, 'en');
       const enGreeting = getTimeBasedGreeting('en', { isGroup: true });
       let text = `${enGreeting}\n📊 Group Session Report: *${groupTitle}* 🇩🇪\n`;
-      if (lesson.date) text += `📅 Date: ${lesson.date}\n`;
-      if (lesson.time) text += `⏰ Time: ${lesson.time}\n`;
+      if (dateFormatted) text += `📅 Date: ${dateFormatted}\n`;
+      if (enTimeFormatted) text += `⏰ Time: ${enTimeFormatted}\n`;
       if (hasCycle) text += `🔢 Session: Session ${currentSessionNumber} of ${totalCycleSessions}\n`;
-      text += `\n📖 Today's Topic:\n${taughtToday}\n\n📝 Homework for all students:\n${nextHomework}`;
-      if (recordingLink) text += `\n\n🎥 Lesson Recording:\n${recordingLink}`;
+      if (taughtToday) text += `\n📖 ${isLessonToday ? "Today's Topic" : 'Lesson Topic'}:\n${taughtToday}`;
+      if (nextHomework) text += `\n\n📝 Homework for all students:\n${nextHomework}`;
+      if (previousHomework.trim()) text += `\n\n📋 Previous Homework:\n• ${previousHomework.trim()}`;
+      text += formatRecordingsByLang(recordingLink, recordingLink2, 'en');
       if (absentsOrLates.length > 0) {
         text += `\n----------------------------------\n⚠️ Attendance Notes:\n`;
-        absentsOrLates.forEach((st) => {
-          const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || 'absent';
-          const stEnName = st.certificateName || st.displayNameEn || st.nameEn;
-          const stDisplayName = stEnName || st.name;
-          text += `• ${stDisplayName}: ${stAtt === 'late' ? 'Late ⚠️' : 'Absent ❌'}\n`;
-        });
+        if (showAbsentNamesInGroupReport) {
+          absentsOrLates.forEach((st) => {
+            const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
+            const stEnName = st.certificateName || st.displayNameEn || st.nameEn;
+            const stDisplayName = stEnName || st.name;
+            text += `• ${stDisplayName}: ${stAtt === 'late' ? 'Late ⚠️' : 'Absent ❌'}\n`;
+          });
+        } else {
+          const summaryParts: string[] = [];
+          if (absentCount > 0) summaryParts.push(`Absent: ${absentCount} ❌`);
+          if (lateCount > 0) summaryParts.push(`Late: ${lateCount} ⚠️`);
+          text += `• ${summaryParts.join(' | ')}\n`;
+        }
       }
       text += `\n\nThank you,\n${profile.displayName || teacherSig} - German Language Teacher 🇩🇪`;
       return text;
@@ -495,131 +571,115 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
     if (reportLanguage === 'de') {
       const groupTitle = associatedGroup?.name || lesson.title || 'Deutsch-Gruppe';
-      const absentsOrLates = groupStudents.filter(st => {
-        const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || lesson.report?.attendanceStatus || 'present';
-        return stAtt !== 'present';
-      });
-
+      const deTimeFormatted = formatReportTime(lesson.time, 'de');
       const deGreeting = getTimeBasedGreeting('de', { isGroup: true });
       let text = `${deGreeting}\n📊 Gruppenbericht: *${groupTitle}* 🇩🇪\n`;
-      if (lesson.date) text += `📅 Datum: ${lesson.date}\n`;
-      if (lesson.time) text += `⏰ Uhrzeit: ${lesson.time}\n`;
+      if (dateFormatted) text += `📅 Datum: ${dateFormatted}\n`;
+      if (deTimeFormatted) text += `⏰ Uhrzeit: ${deTimeFormatted}\n`;
       if (hasCycle) text += `🔢 Unterrichtsstunde: Sitzung ${currentSessionNumber} von ${totalCycleSessions}\n`;
-      text += `\n📖 Heute durchgenommen:\n${taughtToday}\n\n📝 Hausaufgabe:\n${nextHomework}`;
-      if (recordingLink) text += `\n\n🎥 Unterrichtsaufnahme:\n${recordingLink}`;
+      if (taughtToday) text += `\n📖 ${isLessonToday ? 'Heute durchgenommen' : 'Im Unterricht durchgenommen'}:\n${taughtToday}`;
+      if (nextHomework) text += `\n\n📝 Hausaufgabe:\n${nextHomework}`;
+      if (previousHomework.trim()) text += `\n\n📋 Vorherige Hausaufgabe:\n• ${previousHomework.trim()}`;
+      text += formatRecordingsByLang(recordingLink, recordingLink2, 'de');
       if (absentsOrLates.length > 0) {
         text += `\n----------------------------------\n⚠️ Anwesenheitshinweise:\n`;
-        absentsOrLates.forEach((st) => {
-          const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || 'absent';
-          const stEnName = st.certificateName || st.displayNameEn || st.nameEn;
-          const stDisplayName = stEnName || st.name;
-          text += `• ${stDisplayName}: ${stAtt === 'late' ? 'Verspätet ⚠️' : 'Abwesend ❌'}\n`;
-        });
+        if (showAbsentNamesInGroupReport) {
+          absentsOrLates.forEach((st) => {
+            const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
+            const stEnName = st.certificateName || st.displayNameEn || st.nameEn;
+            const stDisplayName = stEnName || st.name;
+            text += `• ${stDisplayName}: ${stAtt === 'late' ? 'Verspätet ⚠️' : 'Abwesend ❌'}\n`;
+          });
+        } else {
+          const summaryParts: string[] = [];
+          if (absentCount > 0) summaryParts.push(`Abwesend: ${absentCount} ❌`);
+          if (lateCount > 0) summaryParts.push(`Verspätet: ${lateCount} ⚠️`);
+          text += `• ${summaryParts.join(' | ')}\n`;
+        }
       }
       text += `\n\nMit freundlichen Grüßen,\n${profile.displayName || teacherSig} - Deutschlehrer 🇩🇪`;
       return text;
     }
 
+    const renderArabicAttendanceNotes = (headerText: string): string => {
+      if (absentsOrLates.length === 0) return '';
+      let out = headerText;
+      if (showAbsentNamesInGroupReport) {
+        absentsOrLates.forEach((st) => {
+          const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
+          out += `• ${st.name}: ${stAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌'}\n`;
+        });
+      } else {
+        const parts: string[] = [];
+        if (absentCount > 0) parts.push(`عدد الغياب: ${absentCount} ❌`);
+        if (lateCount > 0) parts.push(`عدد التأخير: ${lateCount} ⚠️`);
+        out += `• ${parts.join(' | ')}\n`;
+      }
+      return out;
+    };
+
     if (reportStyle === 'egyptian') {
       const egyptianGreetings = isMorning ? [
-        'صباح الخير يا فندم / أهلاً بحضرتك 👋',
         'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
-        'صباح الفل لحضراتكم 👋',
-        'أهلاً بحضرتك يا فندم 👋'
+        'السلام عليكم ورحمة الله وبركاته، صباح الخير بحضراتكم جميعاً 👋',
+        'السلام عليكم ورحمة الله وبركاته، أهلاً بحضراتكم 👋',
+        'السلام عليكم يا فندم 👋'
       ] : [
-        'مساء الخير يا فندم / أهلاً بحضرتك 👋',
         'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
-        'مساء الفل لحضراتكم 👋',
-        'أهلاً بحضرتك يا فندم 👋'
+        'السلام عليكم ورحمة الله وبركاته، مساء الخير بحضراتكم جميعاً 👋',
+        'السلام عليكم ورحمة الله وبركاته، أهلاً بحضراتكم 👋',
+        'السلام عليكم يا فندم 👋'
       ];
       const selectedGreeting = egyptianGreetings[styleSeed % egyptianGreetings.length];
       const groupTitle = associatedGroup?.name || lesson.title || 'مجموعة الألماني';
 
-      const absentsOrLates = groupStudents.filter(st => {
-        const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || lesson.report?.attendanceStatus || 'present';
-        return stAtt !== 'present';
-      });
+      const topicBlock = taughtToday ? `\n\n📖 ${isLessonToday ? 'اللي اتشرح النهاردة في الحصة' : 'اللي اتشرح في الحصة'}:\n${taughtToday}` : '';
+      const hwBlock = nextHomework ? `\n\n📝 الواجب المطلوب:\n${nextHomework}` : '';
+      const prevHwBlock = previousHomework.trim() ? `\n\n📋 الواجب السابق المطلوب كان:\n• ${previousHomework.trim()}` : '';
 
       let text = `${selectedGreeting}
 📊 تقرير حصة الألماني لمجموعة: *${groupTitle}* 🇩🇪
-${[dayDateLine, timeLine, cycleLine].filter(Boolean).join('\n')}
-
-📖 اللي اتشرح النهاردة في الحصة:
-${taughtToday}
-
-📝 الواجب المطلوب:
-${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق المطلوب كان:\n• ${previousHomework.trim()}` : ''}${recordingSection}
+${[dayDateLine, timeLine, cycleLine].filter(Boolean).join('\n')}${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
 `;
 
-      if (absentsOrLates.length > 0) {
-        text += `\n----------------------------------\n⚠️ تنبيهات الغياب والتأخير:\n`;
-        absentsOrLates.forEach((st) => {
-          const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || 'absent';
-          text += `• ${st.name}: ${stAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌'}\n`;
-        });
-      }
-
+      text += renderArabicAttendanceNotes(`\n----------------------------------\n⚠️ تنبيهات الغياب والتأخير:\n`);
       text += `\nمع تحيات: *${teacherSig}* 🇩🇪`;
       return text;
     }
 
     if (reportStyle === 'concise') {
-      const absentsOrLates = groupStudents.filter(st => {
-        const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || lesson.report?.attendanceStatus || 'present';
-        return stAtt !== 'present';
-      });
+      const conciseGreeting = isMorning ? 'السلام عليكم ورحمة الله وبركاته، صباح الخير 👋' : 'السلام عليكم ورحمة الله وبركاته، مساء الخير 👋';
+      const topicBlock = taughtToday ? `\n📌 ${isLessonToday ? 'ما تم شرحه اليوم' : 'ما تم شرحه'}: ${taughtToday}` : '';
+      const hwBlock = nextHomework ? `\n📝 الواجب المقرر: ${nextHomework}` : '';
+      const prevHwBlock = previousHomework.trim() ? `\n• الواجب السابق: ${previousHomework.trim()}` : '';
 
-      const conciseGreeting = isMorning ? '🌅 صباح الخير 👋' : '🌇 مساء الخير 👋';
       let text = `${conciseGreeting}\n⚡ تقرير سريع - ${associatedGroup?.name || lesson.title || 'حصة ألماني'} 🇩🇪
 ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
-
-📌 ما تم شرحه: ${taughtToday}
-📝 الواجب المقرر: ${nextHomework}${previousHomework.trim() ? `\n• الواجب السابق: ${previousHomework.trim()}` : ''}${recordingSection}
+${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
 `;
 
-      if (absentsOrLates.length > 0) {
-        text += `\n⚠️ الغياب والتأخير:\n`;
-        absentsOrLates.forEach((st) => {
-          const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || 'absent';
-          text += `• ${st.name}: ${stAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌'}\n`;
-        });
-      }
-
+      text += renderArabicAttendanceNotes(`\n⚠️ الغياب والتأخير:\n`);
       text += `\nمع تحيات: *${teacherSig}* 🇩🇪`;
       return text;
     }
 
     // Standard Arabic
     const headerParts = [
-      isMorning ? 'صباح الخير، السلام عليكم ورحمة الله وبركاته يا فندم 👋' : 'مساء الخير، السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+      isMorning ? 'السلام عليكم ورحمة الله وبركاته، صباح الخير يا فندم 👋' : 'السلام عليكم ورحمة الله وبركاته، مساء الخير يا فندم 👋',
       `📊 تقرير الحصة لمجموعة: ${associatedGroup?.name || lesson.title || 'مجموعة اللغة الألمانية'}`,
       dayDateLine,
       timeLine,
       cycleLine
     ].filter(Boolean).join('\n');
 
-    const absentsOrLates = groupStudents.filter(st => {
-      const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || lesson.report?.attendanceStatus || 'present';
-      return stAtt !== 'present';
-    });
+    const topicBlock = taughtToday ? `\n\n📖 ${isLessonToday ? 'تم اليوم شرح' : 'تم شرح'}:\n${taughtToday}` : '';
+    const hwBlock = nextHomework ? `\n\n📝 الواجب المقرر:\n${nextHomework}` : '';
+    const prevHwBlock = previousHomework.trim() ? `\n\n📋 الواجب السابق المطلوب كان:\n• ${previousHomework.trim()}` : '';
 
-    let text = `${headerParts}
-
-📖 تم اليوم شرح:
-${taughtToday}
-
-📝 الواجب المقرر:
-${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق المطلوب كان:\n• ${previousHomework.trim()}` : ''}${recordingSection}
+    let text = `${headerParts}${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
 `;
 
-    if (absentsOrLates.length > 0) {
-      text += `\n----------------------------------\n⚠️ تنبيهات الغياب والتأخير:\n`;
-      absentsOrLates.forEach((st) => {
-        const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || 'absent';
-        text += `• ${st.name}: ${stAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌'}\n`;
-      });
-    }
-
+    text += renderArabicAttendanceNotes(`\n----------------------------------\n⚠️ تنبيهات الغياب والتأخير:\n`);
     text += `\nمع تحيات: *${teacherSig}* 🇩🇪`;
     return text;
   };
@@ -633,7 +693,7 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
       return;
     }
 
-    let homeworkOption = 'غير محدد';
+    let homeworkOption = '';
     let dictationScore = 'مكانش فيه';
     let examScore = 'مكانش فيه';
     let studentNote = '';
@@ -649,92 +709,9 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
     const studentRoleLabel = isFemale ? 'الطالبة' : 'الطالب';
 
     const activeStudentId = activeStudent?.id;
-    const isAbsent = Boolean(
-      (activeStudentId && localAttendance[activeStudentId] === 'absent') ||
-      (lesson.studentId && localAttendance[lesson.studentId] === 'absent') ||
-      localAttendance['single'] === 'absent' ||
-      (activeStudentId && localReport?.studentAttendance?.[activeStudentId] === 'absent') ||
-      (activeStudentId && lesson.report?.studentAttendance?.[activeStudentId] === 'absent') ||
-      (lesson.studentId && lesson.report?.studentAttendance?.[lesson.studentId] === 'absent') ||
-      localReport?.attendanceStatus === 'absent' ||
-      lesson.report?.attendanceStatus === 'absent'
-    );
-
-    const isLate = !isAbsent && Boolean(
-      (activeStudentId && localAttendance[activeStudentId] === 'late') ||
-      (lesson.studentId && localAttendance[lesson.studentId] === 'late') ||
-      localAttendance['single'] === 'late' ||
-      (activeStudentId && localReport?.studentAttendance?.[activeStudentId] === 'late') ||
-      (activeStudentId && lesson.report?.studentAttendance?.[activeStudentId] === 'late') ||
-      (lesson.studentId && lesson.report?.studentAttendance?.[lesson.studentId] === 'late') ||
-      localReport?.attendanceStatus === 'late' ||
-      lesson.report?.attendanceStatus === 'late'
-    );
-
-    if (isAbsent) {
-      attendanceAlert = '❌ تنبيه: غياب عن الحصة';
-      homeworkOption = 'غياب';
-      dictationScore = '';
-      examScore = '';
-      perfFeedback = '';
-      studentNote = (activeStudentId ? (localReport?.studentNotes?.[activeStudentId] || lesson.report?.studentNotes?.[activeStudentId]) : '') || '';
-    } else {
-      if (isLate) {
-        attendanceAlert = '⚠️ تنبيه: حضور متأخر';
-      }
-
-      const hwDone = activeStudentId 
-        ? (localReport?.studentHomeworkDone?.[activeStudentId] ?? lesson.report?.studentHomeworkDone?.[activeStudentId]) 
-        : (lesson.report?.studentHomeworkDone?.[lesson.studentId || ''] ?? lesson.report?.studentHomeworkDone?.['single']);
-      const hasHwStatus = hwDone === 'yes' || hwDone === 'no' || hwDone === 'none';
-      homeworkOption = hwDone === 'yes' ? 'تم الحل بالكامل 👍' : hwDone === 'no' ? 'لم يتم الحل 👎' : hwDone === 'none' ? 'لا يوجد واجب سابق' : '';
-
-      const dictationGrade = activeStudentId 
-        ? (localReport?.studentDictationGrade?.[activeStudentId] ?? lesson.report?.studentDictationGrade?.[activeStudentId]) 
-        : (lesson.report?.studentDictationGrade?.[lesson.studentId || ''] ?? lesson.report?.studentDictationGrade?.['single']);
-      const hasDictation = dictationGrade !== undefined && dictationGrade !== null && dictationGrade !== -1;
-      dictationScore = hasDictation ? `${dictationGrade} / 10` : '';
-
-      const examGrade = activeStudentId 
-        ? (localReport?.studentExamGrade?.[activeStudentId] ?? lesson.report?.studentExamGrade?.[activeStudentId]) 
-        : (lesson.report?.studentExamGrade?.[lesson.studentId || ''] ?? lesson.report?.studentExamGrade?.['single']);
-      const hasExam = examGrade !== undefined && examGrade !== null && examGrade !== -1;
-      examScore = hasExam ? `${examGrade} / 10` : '';
-
-      perfFeedback = activeStudentId 
-        ? (localReport?.studentPerformance?.[activeStudentId]?.generatedFeedback?.parent || lesson.report?.studentPerformance?.[activeStudentId]?.generatedFeedback?.parent || '') 
-        : '';
-
-      studentNote = (activeStudentId ? (localReport?.studentNotes?.[activeStudentId] || lesson.report?.studentNotes?.[activeStudentId]) : '') || '';
-    }
-
-    const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
-    const dateFormatted = formatArabicDate(lesson.date);
-    const timeFormatted = formatArabicTime(lesson.time);
-
-    const dayDateLine = dayName && dateFormatted 
-      ? `📅 اليوم: ${dayName} (${dateFormatted})`
-      : dayName 
-        ? `📅 اليوم: ${dayName}`
-        : dateFormatted 
-          ? `📅 التاريخ: ${dateFormatted}` 
-          : '';
-
-    const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
-    const cycleLine = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
-    const codeLine = '';
-
-    const taughtToday = lesson.report?.arabicTopicsExplained || lesson.report?.teacherNotes || lesson.topic || 'لم يحدد بعد';
-    const nextHomework = lesson.report?.arabicHomeworkRequired || lesson.report?.homeworkDescription || (lesson.report?.homeworkTitle ? `${lesson.report.homeworkTitle}` : 'لا يوجد واجب');
-    const cleanStudentNote = studentNote.trim();
-
-    const teacherArName = getTeacherArabicName(profile, 'المعلم');
-    const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
-    const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
-
-    const notesSection = cleanStudentNote ? `\n\n📌 ملاحظات المعلم:\n• ${cleanStudentNote}` : '';
-    const recordingSection = formatRecordingsArabic(recordingLink, recordingLink2);
-    const alertSection = attendanceAlert ? `\n\n${attendanceAlert}` : '';
+    const resolvedAtt = resolveStudentReportAttendance(activeStudentId, lesson, localAttendance, localReport, isGroupLesson);
+    const isAbsent = resolvedAtt === 'absent';
+    const isLate = resolvedAtt === 'late';
 
     const hwDone = activeStudentId 
       ? (localReport?.studentHomeworkDone?.[activeStudentId] ?? lesson.report?.studentHomeworkDone?.[activeStudentId]) 
@@ -751,27 +728,105 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
       : (lesson.report?.studentExamGrade?.[lesson.studentId || ''] ?? lesson.report?.studentExamGrade?.['single']);
     const hasExam = !isAbsent && examGrade !== undefined && examGrade !== null && examGrade !== -1;
 
+    if (isAbsent) {
+      attendanceAlert = '❌ تنبيه: غياب عن الحصة';
+      homeworkOption = 'غياب';
+      dictationScore = '';
+      examScore = '';
+      perfFeedback = '';
+      studentNote = (activeStudentId ? (localReport?.studentNotes?.[activeStudentId] || lesson.report?.studentNotes?.[activeStudentId]) : '') || '';
+    } else {
+      if (isLate) {
+        attendanceAlert = '⚠️ تنبيه: حضور متأخر';
+      }
+
+      homeworkOption = resolvePreviousHomeworkStatusText(hwDone, 'ar');
+      dictationScore = hasDictation ? `${dictationGrade} / 10` : '';
+      examScore = hasExam ? `${examGrade} / 10` : '';
+
+      perfFeedback = activeStudentId 
+        ? (localReport?.studentPerformance?.[activeStudentId]?.generatedFeedback?.parent || lesson.report?.studentPerformance?.[activeStudentId]?.generatedFeedback?.parent || '') 
+        : '';
+
+      studentNote = (activeStudentId ? (localReport?.studentNotes?.[activeStudentId] || lesson.report?.studentNotes?.[activeStudentId]) : '') || '';
+    }
+
+    const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
+    const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
+    const dateFormatted = formatArabicDate(lesson.date);
+    const timeFormatted = formatArabicTime(lesson.time);
+
+    const dayDateLine = dayName && dateFormatted 
+      ? `📅 ${isLessonToday ? 'اليوم' : 'موعد الحصة'}: ${dayName} (${dateFormatted})`
+      : dayName 
+        ? `📅 ${isLessonToday ? 'اليوم' : 'يوم الحصة'}: ${dayName}`
+        : dateFormatted 
+          ? `📅 ${isLessonToday ? 'التاريخ' : 'تاريخ الحصة'}: ${dateFormatted}` 
+          : '';
+
+    const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
+    const cycleLine = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
+    const codeLine = '';
+
+    const sessionTimingPhrase = isLessonToday
+      ? 'اليوم'
+      : (dayName ? `ليوم ${dayName} (${dateFormatted})` : (dateFormatted ? `بتاريخ ${dateFormatted}` : 'في الحصة'));
+
+    const sessionTopicHeader = isLessonToday
+      ? 'اللي اتشرح النهاردة في الحصة'
+      : 'اللي اتشرح في الحصة';
+
+    const sessionStandardTopicHeader = isLessonToday
+      ? 'ما تم شرحه اليوم في الحصة'
+      : 'ما تم شرحه في الحصة';
+
+    const cleanPerfFeedback = (!isLessonToday && perfFeedback)
+      ? perfFeedback.replace(/النهارده/g, 'في الحصة').replace(/النهاردة/g, 'في الحصة').replace(/\bاليوم\b/g, 'في الحصة')
+      : perfFeedback;
+
+    const taughtToday = taughtTodayInfo.text;
+    const nextHomework = homeworkInfo.text;
+    const cleanStudentNote = studentNote.trim();
+
+    const teacherArName = getTeacherArabicName(profile, 'المعلم');
+    const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
+    const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
+
+    const notesSection = cleanStudentNote ? `\n\n📌 ملاحظات المعلم:\n• ${cleanStudentNote}` : '';
+    const recordingSection = formatRecordingsArabic(recordingLink, recordingLink2);
+    const alertSection = attendanceAlert ? `\n\n${attendanceAlert}` : '';
+
     const isMorning = getCairoHour() < 12;
 
     // ENGLISH REPORT FORMULA
     if (reportLanguage === 'en') {
       const attendanceStr = isAbsent ? '❌ Absent' : isLate ? '⚠️ Late' : '✅ Present';
-      const hwStr = isAbsent ? 'Absent' : homeworkOption === 'تم الحل بالكامل 👍' ? 'Completed fully 👍' : homeworkOption === 'لم يتم الحل 👎' ? 'Not completed 👎' : 'None assigned';
+      const hwStr = resolvePreviousHomeworkStatusText(hwDone, 'en');
       const greeting = getTimeBasedGreeting('en');
-      const datePart = lesson.date ? `📅 Date: ${lesson.date}` : '';
-      const timePart = lesson.time ? `⏰ Time: ${lesson.time}` : '';
+      const enTimeFormatted = formatReportTime(lesson.time, 'en');
+      const datePart = dateFormatted ? `📅 Date: ${dateFormatted}` : '';
+      const timePart = enTimeFormatted ? `⏰ Time: ${enTimeFormatted}` : '';
       const cyclePart = hasCycle ? `🔢 Session: Session ${currentSessionNumber} of ${totalCycleSessions}` : '';
       const headerText = [greeting, `📊 Session Report for: *${studentDisplayName}* 🇩🇪`, datePart, timePart, cyclePart].filter(Boolean).join('\n');
       
       let body = `${headerText}\n\n• Attendance: ${attendanceStr}`;
       if (!isAbsent) {
-        body += `\n• Previous Homework: ${hwStr}`;
+        if (hasHwStatus) {
+          if (hwDone === 'none') {
+            body += `\n• Previous Homework: None assigned`;
+          } else {
+            const prevHwEn = previousHomework.trim() ? `${previousHomework.trim()} (${hwStr})` : hwStr;
+            body += `\n• Previous Homework: ${prevHwEn}`;
+          }
+        } else if (previousHomework.trim()) {
+          body += `\n• Previous Homework: ${previousHomework.trim()}`;
+        }
         if (dictationScore) body += `\n• Quiz / Dictation: ${dictationScore}`;
         if (examScore) body += `\n• Exam Score: ${examScore}`;
       }
-      body += `\n\n📖 Today's Topic:\n${taughtToday}`;
-      body += `\n\n📝 Homework:\n${nextHomework}`;
-      if (recordingLink) body += `\n\n🎥 Lesson Recording:\n${recordingLink}`;
+      if (taughtToday) body += `\n\n📖 ${isLessonToday ? "Today's Topic" : 'Lesson Topic'}:\n${taughtToday}`;
+      if (nextHomework) body += `\n\n📝 Homework:\n${nextHomework}`;
+      body += formatRecordingsByLang(recordingLink, recordingLink2, 'en');
       if (cleanStudentNote) body += `\n\n📌 Teacher Notes:\n${cleanStudentNote}`;
       if (perfFeedback) body += `\n\n🌟 Performance Feedback:\n${perfFeedback}`;
       body += `\n\nThank you,\n${profile.displayName || teacherSig} - German Language Teacher 🇩🇪`;
@@ -782,22 +837,32 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
     // GERMAN REPORT FORMULA
     if (reportLanguage === 'de') {
       const attendanceStr = isAbsent ? '❌ Abwesend' : isLate ? '⚠️ Verspätet' : '✅ Anwesend';
-      const hwStr = isAbsent ? 'Abwesend' : homeworkOption === 'تم الحل بالكامل 👍' ? 'Vollständig erledigt 👍' : homeworkOption === 'لم يتم الحل 👎' ? 'Nicht erledigt 👎' : 'Keine Hausaufgabe';
+      const hwStr = resolvePreviousHomeworkStatusText(hwDone, 'de');
       const greeting = getTimeBasedGreeting('de');
-      const datePart = lesson.date ? `📅 Datum: ${lesson.date}` : '';
-      const timePart = lesson.time ? `⏰ Uhrzeit: ${lesson.time}` : '';
+      const deTimeFormatted = formatReportTime(lesson.time, 'de');
+      const datePart = dateFormatted ? `📅 Datum: ${dateFormatted}` : '';
+      const timePart = deTimeFormatted ? `⏰ Uhrzeit: ${deTimeFormatted}` : '';
       const cyclePart = hasCycle ? `🔢 Unterrichtsstunde: Sitzung ${currentSessionNumber} von ${totalCycleSessions}` : '';
       const headerText = [greeting, `📊 Unterrichtsbericht für: *${studentDisplayName}* 🇩🇪`, datePart, timePart, cyclePart].filter(Boolean).join('\n');
 
       let body = `${headerText}\n\n• Anwesenheit: ${attendanceStr}`;
       if (!isAbsent) {
-        body += `\n• Vorherige Hausaufgabe: ${hwStr}`;
+        if (hasHwStatus) {
+          if (hwDone === 'none') {
+            body += `\n• Vorherige Hausaufgabe: Keine Hausaufgabe`;
+          } else {
+            const prevHwDe = previousHomework.trim() ? `${previousHomework.trim()} (${hwStr})` : hwStr;
+            body += `\n• Vorherige Hausaufgabe: ${prevHwDe}`;
+          }
+        } else if (previousHomework.trim()) {
+          body += `\n• Vorherige Hausaufgabe: ${previousHomework.trim()}`;
+        }
         if (dictationScore) body += `\n• Diktat / Quiz: ${dictationScore}`;
         if (examScore) body += `\n• Prüfung / Test: ${examScore}`;
       }
-      body += `\n\n📖 Heute durchgenommen:\n${taughtToday}`;
-      body += `\n\n📝 Hausaufgabe:\n${nextHomework}`;
-      if (recordingLink) body += `\n\n🎥 Unterrichtsaufnahme:\n${recordingLink}`;
+      if (taughtToday) body += `\n\n📖 ${isLessonToday ? 'Heute durchgenommen' : 'Im Unterricht durchgenommen'}:\n${taughtToday}`;
+      if (nextHomework) body += `\n\n📝 Hausaufgabe:\n${nextHomework}`;
+      body += formatRecordingsByLang(recordingLink, recordingLink2, 'de');
       if (cleanStudentNote) body += `\n\n📌 Anmerkung der Lehrkraft:\n${cleanStudentNote}`;
       if (perfFeedback) body += `\n\n🌟 Unterrichtsbeteiligung:\n${perfFeedback}`;
       body += `\n\nVielen Dank,\n${profile.displayName || teacherSig} - Deutschlehrer 🇩🇪`;
@@ -808,27 +873,33 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
     // EGYPTIAN DIALECT FORMULA (صيغة مصرية راقية ومحبوبة لأولياء الأمور)
     if (reportStyle === 'egyptian') {
       const egyptianGreetings = isMorning ? [
-        'صباح الخير يا فندم 👋',
-        'أهلاً بحضرتك يا فندم 👋',
         'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
-        'صباح الفل يا فندم 👋',
-        'تحياتي لحضرتك يا فندم 👋',
-        `أهلاً بولي أمر ${studentRoleLabel} العزيز${isFemale ? 'ة' : ''} 👋`
+        'السلام عليكم ورحمة الله وبركاته، صباح الخير يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، أهلاً بحضرتك يا فندم 👋',
+        'السلام عليكم يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، تحياتي لحضرتك يا فندم 👋',
+        `السلام عليكم ورحمة الله وبركاته، أهلاً بولي أمر ${studentRoleLabel} العزيز${isFemale ? 'ة' : ''} 👋`
       ] : [
-        'مساء الخير يا فندم 👋',
-        'أهلاً بحضرتك يا فندم 👋',
         'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
-        'مساء الفل يا فندم 👋',
-        'تحياتي لحضرتك يا فندم 👋',
-        `أهلاً بولي أمر ${studentRoleLabel} العزيز${isFemale ? 'ة' : ''} 👋`
+        'السلام عليكم ورحمة الله وبركاته، مساء الخير يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، أهلاً بحضرتك يا فندم 👋',
+        'السلام عليكم يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، تحياتي لحضرتك يا فندم 👋',
+        `السلام عليكم ورحمة الله وبركاته، أهلاً بولي أمر ${studentRoleLabel} العزيز${isFemale ? 'ة' : ''} 👋`
       ];
       const selectedGreeting = egyptianGreetings[styleSeed % egyptianGreetings.length];
       
-      const egyptianIntros = [
+      const egyptianIntros = isLessonToday ? [
         `حبيت أبلغ حضرتك بتقرير حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* اليوم 🇩🇪:`,
         `تقرير حصة الألماني اليوم لـ ${studentRoleLabel} *${studentDisplayName}* 🇩🇪:`,
         `ملخص حصة الألماني ومستوى ${studentRoleLabel} *${studentDisplayName}* اليوم 🇩🇪:`,
         `تفاصيل ومتابعة حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* النهارده 🇩🇪:`,
+        `تقرير ومتابعة أداء ${studentRoleLabel} *${studentDisplayName}* في حصة الألماني 🇩🇪:`
+      ] : [
+        `حبيت أبلغ حضرتك بتقرير حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* (${sessionTimingPhrase}) 🇩🇪:`,
+        `تقرير حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* (${sessionTimingPhrase}) 🇩🇪:`,
+        `ملخص حصة الألماني ومستوى ${studentRoleLabel} *${studentDisplayName}* (${sessionTimingPhrase}) 🇩🇪:`,
+        `تفاصيل ومتابعة حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* (${sessionTimingPhrase}) 🇩🇪:`,
         `تقرير ومتابعة أداء ${studentRoleLabel} *${studentDisplayName}* في حصة الألماني 🇩🇪:`
       ];
       const selectedIntro = egyptianIntros[styleSeed % egyptianIntros.length];
@@ -843,18 +914,18 @@ ${nextHomework}${previousHomework.trim() ? `\n\n📋 الواجب السابق �
 
       // If student was absent: do NOT print homework solved, dictation, or quiz grades
       if (isAbsent) {
+        const topicBlock = taughtToday ? `\n\n📖 ${sessionTopicHeader} (يرجى مذاكرته وتعويضه):\n${taughtToday}` : '';
+        const hwBlock = nextHomework ? `\n\n📝 الواجب المطلوب للمرة الجاية:\n${nextHomework}` : '';
+        const absenceNotice = isLessonToday 
+          ? `• ${studentRoleLabel} غائب${isFemale ? 'ة' : ''} عن الحصة اليوم، أتمنى ${isFemale ? 'لها' : 'له'} دوام الصحة والتوفيق وأرجو الاطمئنان ${isFemale ? 'عليها' : 'عليه'} 🌸`
+          : `• ${studentRoleLabel} كان${isFemale ? 'ت' : ''} غائب${isFemale ? 'ة' : ''} عن الحصة (${sessionTimingPhrase})، نتمنى ${isFemale ? 'لها' : 'له'} دوام الصحة والتوفيق 🌸`;
+
         const generated = `${selectedGreeting}
 ${selectedIntro}
 ${[dayDateLine, timeLine, cycleLine, codeLine].filter(Boolean).join('\n')}
 
 ❌ تنبيه الغياب:
-• ${studentRoleLabel} غائب${isFemale ? 'ة' : ''} عن الحصة اليوم، أتمنى ${isFemale ? 'لها' : 'له'} دوام الصحة والتوفيق وأرجو الاطمئنان ${isFemale ? 'عليها' : 'عليه'} 🌸
-
-📖 اللي اتشرح النهاردة في الحصة (يرجى مذاكرته وتعويضه):
-${taughtToday}
-
-📝 الواجب المطلوب للمرة الجاية:
-${nextHomework}${recordingSection}${notesSection}
+${absenceNotice}${topicBlock}${hwBlock}${recordingSection}${notesSection}
 
 ${selectedOutro}`;
 
@@ -876,16 +947,16 @@ ${selectedOutro}`;
 
       const dictationSection = hasDictation ? `\n\n✍️ درجة الإملاء:\n${dictationGrade} / 10` : '';
       const examSection = hasExam ? `\n\n🎯 درجة الكويز (Quiz):\n${examGrade} / 10` : '';
+      const topicBlock = taughtToday ? `\n\n📖 ${sessionTopicHeader}:\n${taughtToday}` : '';
+      const hwBlock = nextHomework ? `\n\n📝 الواجب المطلوب للمرة الجاية:\n${nextHomework}` : '';
+
+      const perfSection = perfFeedback 
+        ? (isLessonToday ? `\n\n🌟 مستوى وأداء ${studentRoleLabel} اليوم:\n• ${perfFeedback}` : `\n\n🌟 مستوى وأداء ${studentRoleLabel} في الحصة:\n• ${cleanPerfFeedback}`)
+        : '';
 
       const generated = `${selectedGreeting}
 ${selectedIntro}
-${[dayDateLine, timeLine, cycleLine, codeLine].filter(Boolean).join('\n')}
-
-📖 اللي اتشرح النهاردة في الحصة:
-${taughtToday}
-
-📝 الواجب المطلوب للمرة الجاية:
-${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfFeedback ? `\n\n🌟 مستوى وأداء ${studentRoleLabel} اليوم:\n• ${perfFeedback}` : ''}${alertSection}
+${[dayDateLine, timeLine, cycleLine, codeLine].filter(Boolean).join('\n')}${topicBlock}${hwBlock}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfSection}${alertSection}
 
 ${selectedOutro}`;
 
@@ -895,17 +966,17 @@ ${selectedOutro}`;
 
     // CONCISE FORMULA (صيغة كبسولة سريعة ومختصرة)
     if (reportStyle === 'concise') {
-      const conciseGreeting = isMorning ? '🌅 صباح الخير 👋' : '🌇 مساء الخير 👋';
+      const conciseGreeting = isMorning ? 'السلام عليكم ورحمة الله وبركاته، صباح الخير 👋' : 'السلام عليكم ورحمة الله وبركاته، مساء الخير 👋';
       // If student was absent: remove the evaluation block with homework, quiz, dictation
       if (isAbsent) {
+        const topicBlock = taughtToday ? `\n📖 ما تم شرحه: ${taughtToday}` : '';
+        const hwBlock = nextHomework ? `\n📝 الواجب المقرر: ${nextHomework}` : '';
         const generated = `${conciseGreeting}
 ⚡ كبسولة تقرير حصة الألماني:
 👤 ${studentRoleLabel}: *${studentDisplayName}*
 ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
-❌ حالة الحضور: غائب${isFemale ? 'ة' : ''} عن الحصة اليوم
-📖 ما تم شرحه: ${taughtToday}
-📝 الواجب المقرر: ${nextHomework}${recordingSection}${cleanStudentNote ? `\n📌 ملاحظة: ${cleanStudentNote}` : ''}
+❌ حالة الحضور: ${isLessonToday ? `غائب${isFemale ? 'ة' : ''} عن الحصة اليوم` : `كان${isFemale ? 'ت' : ''} غائب${isFemale ? 'ة' : ''} عن الحصة`}${topicBlock}${hwBlock}${recordingSection}${cleanStudentNote ? `\n📌 ملاحظة: ${cleanStudentNote}` : ''}
 
 تحياتي، *${teacherSig}* 🇩🇪`;
 
@@ -938,14 +1009,17 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
       }
 
       const evalSection = evalLines.length > 0 ? `\n\n📊 التقييم:\n${evalLines.join('\n')}` : '';
+      const topicBlock = taughtToday ? `\n📖 ما تم شرحه: ${taughtToday}` : '';
+      const hwBlock = nextHomework ? `\n📝 الواجب: ${nextHomework}` : '';
+      const perfSection = perfFeedback
+        ? `\n\n🌟 التقييم: ${isLessonToday ? perfFeedback : cleanPerfFeedback}`
+        : '';
 
       const generated = `${conciseGreeting}
 🇩🇪 كبسولة تقرير حصة الألماني:
 👤 ${studentRoleLabel}: *${studentDisplayName}*
 ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
-
-📖 ما تم شرحه: ${taughtToday}
-📝 الواجب: ${nextHomework}${recordingSection}${evalSection}${perfFeedback ? `\n\n🌟 التقييم: ${perfFeedback}` : ''}${cleanStudentNote ? `\n📌 ملاحظة: ${cleanStudentNote}` : ''}
+${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStudentNote ? `\n📌 ملاحظة: ${cleanStudentNote}` : ''}
 
 تحياتي، *${teacherSig}*`;
 
@@ -955,11 +1029,11 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
     // STANDARD ARABIC FORMULA (الصيغة الفصحى المنظمة)
     const standardGreeting = isMorning 
-      ? 'صباح الخير، السلام عليكم ورحمة الله وبركاته يا فندم 👋' 
-      : 'مساء الخير، السلام عليكم ورحمة الله وبركاته يا فندم 👋';
+      ? 'السلام عليكم ورحمة الله وبركاته، صباح الخير يا فندم 👋' 
+      : 'السلام عليكم ورحمة الله وبركاته، مساء الخير يا فندم 👋';
     const headerParts = [
       standardGreeting,
-      `📊 تقرير متابعة الحصة:`,
+      isLessonToday ? `📊 تقرير متابعة الحصة:` : `📊 تقرير متابعة الحصة (${sessionTimingPhrase}):`,
       `👤 ${studentRoleLabel}: ${studentDisplayName}`,
       dayDateLine,
       timeLine,
@@ -968,16 +1042,12 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
 
     // If student was absent: remove previous homework, dictation, and exam score
     if (isAbsent) {
+      const topicBlock = taughtToday ? `\n\n📖 ${sessionStandardTopicHeader} (يرجى الاستدراك):\n${taughtToday}` : '';
+      const hwBlock = nextHomework ? `\n\n📝 الواجب المقرر للمرة القادمة:\n${nextHomework}` : '';
       const generated = `${headerParts}
 
 ❌ حالة الحضور:
-• ${studentRoleLabel} غائب${isFemale ? 'ة' : ''} عن الحصة اليوم.
-
-📖 ما تم شرحه اليوم في الحصة (يرجى الاستدراك):
-${taughtToday}
-
-📝 الواجب المقرر للمرة القادمة:
-${nextHomework}${recordingSection}${notesSection}
+• ${studentRoleLabel} ${isLessonToday ? `غائب${isFemale ? 'ة' : ''} عن الحصة اليوم.` : `كان${isFemale ? 'ت' : ''} غائب${isFemale ? 'ة' : ''} عن الحصة.`}${topicBlock}${hwBlock}${recordingSection}${notesSection}
 
 مع تحيات: *${teacherSig}* 🇩🇪`;
 
@@ -999,14 +1069,14 @@ ${nextHomework}${recordingSection}${notesSection}
 
     const dictationSection = hasDictation ? `\n\n✍️ درجة الإملاء:\n${dictationGrade} / 10` : '';
     const examSection = hasExam ? `\n\n🎯 درجة الامتحان (Quiz):\n${examGrade} / 10` : '';
+    const topicBlock = taughtToday ? `\n\n📖 ${isLessonToday ? 'تم اليوم شرح' : 'تم شرح'}:\n${taughtToday}` : '';
+    const hwBlock = nextHomework ? `\n\n📝 الواجب:\n${nextHomework}` : '';
 
-    const generated = `${headerParts}
+    const perfSection = perfFeedback 
+      ? (isLessonToday ? `\n\n🌟 أداء الحصة:\n• ${perfFeedback}` : `\n\n🌟 أداء الحصة:\n• ${cleanPerfFeedback}`)
+      : '';
 
-📖 تم اليوم شرح:
-${taughtToday}
-
-📝 الواجب:
-${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfFeedback ? `\n\n🌟 أداء الحصة:\n• ${perfFeedback}` : ''}${alertSection}
+    const generated = `${headerParts}${topicBlock}${hwBlock}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfSection}${alertSection}
 
 مع تحيات: *${teacherSig}* 🇩🇪`;
 
@@ -1032,7 +1102,10 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
     profile.displayName,
     profile.displayNameAr,
     profile.nameAr,
-    reportLanguage
+    reportLanguage,
+    showAbsentNamesInGroupReport,
+    taughtTodayInfo,
+    homeworkInfo
   ]);
 
   const handleCopyText = () => {
@@ -1258,6 +1331,21 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
             </div>
           )}
 
+          {/* Warnings for missing topic, missing homework, or unrecorded attendance */}
+          {(taughtTodayInfo.isMissing || homeworkInfo.isMissing || unrecordedStudents.length > 0) && (
+            <div className="p-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl text-[11px] font-bold text-amber-800 dark:text-amber-200 space-y-1">
+              {taughtTodayInfo.isMissing && (
+                <div>⚠️ {_t('تنبيه: لم يتم تحديد ما تم شرحه في الحصة (تم استبعاد ملاحظات المعلم الخاصة حفاظاً على الخصوصية).', 'Warning: Lesson topic is not specified (private teacher notes are excluded).', 'Warnung: Unterrichtsthema nicht angegeben (private Lehrernotizen sind ausgeschlossen).')}</div>
+              )}
+              {homeworkInfo.isMissing && (
+                <div>⚠️ {_t('تنبيه: الواجب المطلوب غير محدد (تم إخفاء قسم الواجب من الرسالة بدلاً من طباعة "لا يوجد واجب").', 'Warning: Homework is not specified (homework section omitted).', 'Warnung: Hausaufgabe nicht angegeben (Abschnitt ausgeblendet).')}</div>
+              )}
+              {unrecordedStudents.length > 0 && (
+                <div>⚠️ {_t(`تنبيه: يوجد ${unrecordedStudents.length} طالب لم يُسجّل حضورهم بعد (لم يتم إدراجهم كغائبين).`, `Warning: ${unrecordedStudents.length} student(s) have unrecorded attendance (not listed as absent).`, `Warnung: ${unrecordedStudents.length} Schüler ohne erfasste Anwesenheit (nicht als abwesend gelistet).`)}</div>
+              )}
+            </div>
+          )}
+
           {/* Student Selection List (For individual reports) */}
           {activeTab === 'individual' && groupStudents.length > 0 && (
             <div className="space-y-2">
@@ -1272,7 +1360,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
               <div className="flex flex-wrap gap-1.5 max-h-24 sm:max-h-28 overflow-y-auto p-1.5 bg-surface-hover/50 rounded-xl border border-surface-border/50">
                 {groupStudents.map(st => {
                   const isSelected = selectedStudentId === st.id;
-                  const stAtt = localAttendance[st.id] || lesson.report?.studentAttendance?.[st.id] || 'present';
+                  const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
                   return (
                     <button
                       key={st.id}
@@ -1295,9 +1383,9 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                       <span className={`text-[9px] px-1 rounded font-bold ${
                         isSelected 
                           ? 'bg-white/20 text-white' 
-                          : stAtt === 'present' ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40' : stAtt === 'late' ? 'text-amber-600 bg-amber-50 dark:bg-amber-950/40' : 'text-red-600 bg-red-50 dark:bg-red-950/40'
+                          : stAtt === 'present' ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40' : stAtt === 'late' ? 'text-amber-600 bg-amber-50 dark:bg-amber-950/40' : stAtt === 'absent' ? 'text-red-600 bg-red-50 dark:bg-red-950/40' : 'text-slate-500 bg-slate-100 dark:bg-slate-800'
                       }`}>
-                        {stAtt === 'present' ? '✓' : stAtt === 'late' ? '!' : '✕'}
+                        {stAtt === 'present' ? '✓' : stAtt === 'late' ? '!' : stAtt === 'absent' ? '✕' : '؟'}
                       </span>
                     </button>
                   );
@@ -1324,32 +1412,13 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
               {/* Attendance Quick Toggle */}
               <div>
                 <span className="text-text-muted font-bold block mb-1">
-                  {_t('حالة الحضور اليوم:', 'Attendance Today:', 'Anwesenheit:')}
+                  {isLessonToday
+                    ? _t('حالة الحضور اليوم:', 'Attendance Today:', 'Anwesenheit:')
+                    : _t('حالة الحضور في الحصة:', 'Attendance in Lesson:', 'Anwesenheit in der Stunde:')}
                 </span>
                 {(() => {
                   const targetId = activeStudent?.id || lesson.studentId || 'single';
-                  const activeStudentId = activeStudent?.id;
-                  const isStAbsent = Boolean(
-                    (activeStudentId && localAttendance[activeStudentId] === 'absent') ||
-                    (lesson.studentId && localAttendance[lesson.studentId] === 'absent') ||
-                    localAttendance['single'] === 'absent' ||
-                    (activeStudentId && localReport?.studentAttendance?.[activeStudentId] === 'absent') ||
-                    (activeStudentId && lesson.report?.studentAttendance?.[activeStudentId] === 'absent') ||
-                    (lesson.studentId && lesson.report?.studentAttendance?.[lesson.studentId] === 'absent') ||
-                    localReport?.attendanceStatus === 'absent' ||
-                    lesson.report?.attendanceStatus === 'absent'
-                  );
-                  const isStLate = !isStAbsent && Boolean(
-                    (activeStudentId && localAttendance[activeStudentId] === 'late') ||
-                    (lesson.studentId && localAttendance[lesson.studentId] === 'late') ||
-                    localAttendance['single'] === 'late' ||
-                    (activeStudentId && localReport?.studentAttendance?.[activeStudentId] === 'late') ||
-                    (activeStudentId && lesson.report?.studentAttendance?.[activeStudentId] === 'late') ||
-                    (lesson.studentId && lesson.report?.studentAttendance?.[lesson.studentId] === 'late') ||
-                    localReport?.attendanceStatus === 'late' ||
-                    lesson.report?.attendanceStatus === 'late'
-                  );
-                  const currentStAtt = isStAbsent ? 'absent' : isStLate ? 'late' : 'present';
+                  const currentStAtt = resolveStudentReportAttendance(activeStudent?.id, lesson, localAttendance, localReport, isGroupLesson);
                   return (
                     <div className="inline-flex items-center gap-0.5 bg-surface p-0.5 rounded-lg border border-surface-border shadow-2xs">
                       <button
@@ -1418,7 +1487,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
               </div>
             </div>
           ) : (
-            <div className="p-2.5 sm:p-3 bg-primary-soft/40 border border-primary-border/40 rounded-xl space-y-1 text-xs">
+            <div className="p-2.5 sm:p-3 bg-primary-soft/40 border border-primary-border/40 rounded-xl space-y-2 text-xs">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-text-muted font-bold block mb-0.5">{t('auto_group')}</span>
@@ -1455,6 +1524,22 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
                   </span>
                 )}
               </div>
+              <label className="flex items-center gap-2 pt-1.5 border-t border-primary-border/30 cursor-pointer select-none text-[11px] font-bold text-text-main">
+                <input
+                  type="checkbox"
+                  checked={showAbsentNamesInGroupReport}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setShowAbsentNamesInGroupReport(checked);
+                    setIsManualEdited(false);
+                    try {
+                      localStorage.setItem('dl_show_absent_names_in_group_report', String(checked));
+                    } catch {}
+                  }}
+                  className="rounded border-surface-border text-primary focus:ring-primary/30"
+                />
+                <span>{_t('إظهار أسماء الغائبين والمتأخرين في تقرير المجموعة', 'Show absent/late names in group report', 'Namen der Abwesenden/Verspäteten im Gruppenbericht anzeigen')}</span>
+              </label>
             </div>
           )}
 
@@ -1464,7 +1549,9 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
               <div className="flex items-center gap-1.5">
                 <ClipboardCheck className="w-4 h-4 text-primary" />
                 <span className="text-xs font-black text-text-main">
-                  {_t('الواجب السابق (الذي تمت مراجعته اليوم)', 'Previous Homework (Checked Today)', 'Vorherige Hausaufgabe')}
+                  {isLessonToday
+                    ? _t('الواجب السابق (الذي تمت مراجعته اليوم)', 'Previous Homework (Checked Today)', 'Vorherige Hausaufgabe')
+                    : _t('الواجب السابق (الذي تمت مراجعته في الحصة)', 'Previous Homework (Checked in Lesson)', 'Vorherige Hausaufgabe')}
                 </span>
               </div>
               {detectedPreviousHomework && (

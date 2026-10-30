@@ -92,7 +92,7 @@ export const ScheduleView: React.FC = () => {
   const conflictsMap = useMemo(() => {
     const map: Record<string, Lesson[]> = {};
     activeLessons.forEach((l) => {
-      if (l.status === 'cancelled') return;
+      if (l.status === 'cancelled' || l.status === 'completed') return;
       const key = `${l.date}_${l.time}`;
       if (!map[key]) map[key] = [];
       map[key].push(l);
@@ -102,11 +102,12 @@ export const ScheduleView: React.FC = () => {
 
   const allConflicts = useMemo(() => {
     const conflicts: string[] = [];
-    const nonCancelled = activeLessons.filter(l => l.status !== 'cancelled');
+    // Only active, uncompleted, non-cancelled sessions participate in schedule conflicts
+    const activeUnfinished = activeLessons.filter(l => l.status !== 'cancelled' && l.status !== 'completed');
     
     // Group by date first to avoid O(N^2) across the entire dataset
     const lessonsByDate: Record<string, Lesson[]> = {};
-    nonCancelled.forEach(l => {
+    activeUnfinished.forEach(l => {
       if (!lessonsByDate[l.date]) lessonsByDate[l.date] = [];
       lessonsByDate[l.date].push(l);
     });
@@ -126,17 +127,19 @@ export const ScheduleView: React.FC = () => {
   }, [activeLessons]);
 
   const hasConflict = (lessonId: string) => {
+    const target = activeLessons.find(l => l.id === lessonId);
+    if (!target || target.status === 'completed' || target.status === 'cancelled') return false;
     return allConflicts.includes(lessonId);
   };
 
   const getConflictingLessonsForLesson = (lesson: Lesson) => {
-    if (lesson.status === 'cancelled') return [];
-    return dayLessons.filter(l => l.id !== lesson.id && l.status !== 'cancelled' && checkOverlap(lesson, l));
+    if (lesson.status === 'cancelled' || lesson.status === 'completed') return [];
+    return dayLessons.filter(l => l.id !== lesson.id && l.status !== 'cancelled' && l.status !== 'completed' && checkOverlap(lesson, l));
   };
 
   const findConflictingLesson = (date: string, time: string, excludeLessonId?: string) => {
     const dummy = { id: 'dummy', date, time, durationMinutes: 60 };
-    return activeLessons.find(l => l.id !== excludeLessonId && l.status !== 'cancelled' && checkOverlap(dummy, l));
+    return activeLessons.find(l => l.id !== excludeLessonId && l.status !== 'cancelled' && l.status !== 'completed' && checkOverlap(dummy, l));
   };
 
   const checkTimeConflict = (date: string, time: string, excludeLessonId?: string) => {
@@ -152,7 +155,7 @@ export const ScheduleView: React.FC = () => {
 
   // Specific conflicts for the currently selected day only
   const selectedDayConflicts = useMemo(() => {
-    return dayLessons.filter((l) => allConflicts.includes(l.id));
+    return dayLessons.filter((l) => l.status !== 'cancelled' && l.status !== 'completed' && allConflicts.includes(l.id));
   }, [dayLessons, allConflicts]);
 
   // Exact conflicting pairs for the selected day
@@ -160,7 +163,11 @@ export const ScheduleView: React.FC = () => {
     const pairs: { lessonA: Lesson; lessonB: Lesson }[] = [];
     for (let i = 0; i < dayLessons.length; i++) {
       for (let j = i + 1; j < dayLessons.length; j++) {
-        if (dayLessons[i].status !== 'cancelled' && dayLessons[j].status !== 'cancelled' && checkOverlap(dayLessons[i], dayLessons[j])) {
+        if (
+          dayLessons[i].status !== 'cancelled' && dayLessons[i].status !== 'completed' &&
+          dayLessons[j].status !== 'cancelled' && dayLessons[j].status !== 'completed' &&
+          checkOverlap(dayLessons[i], dayLessons[j])
+        ) {
           pairs.push({ lessonA: dayLessons[i], lessonB: dayLessons[j] });
         }
       }
@@ -901,7 +908,7 @@ export const ScheduleView: React.FC = () => {
               {dayLessons.map((lesson) => {
                 const isCompleted = lesson.status === 'completed';
                 const isCancelled = lesson.status === 'cancelled';
-                const conflict = hasConflict(lesson.id);
+                const conflict = !isCompleted && !isCancelled && hasConflict(lesson.id);
 
                 return (
                   <div

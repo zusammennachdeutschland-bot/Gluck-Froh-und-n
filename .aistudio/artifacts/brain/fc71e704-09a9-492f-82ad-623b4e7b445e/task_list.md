@@ -54,6 +54,15 @@
   - [x] Fixed `ScheduleView.tsx`: Displays real recurrence badge (`🅰️ Alle 2 Wochen (A)`, `🅱️ Alle 2 Wochen (B)`, `🔄 Wöchentlich`) instead of hardcoded `Wöchentlich`.
   - [x] Fixed `AddLessonModal.tsx`: Biweekly recurrence steps by 14 days and checks recurrence during conflict detection.
 
+- [x] **Schedule Conflicts on Completed/Rescheduled Lessons Fix**:
+  - [x] Identified root cause: `checkOverlap` and `ScheduleView.tsx` only checked `l.status !== 'cancelled'`, erroneously treating historical `completed` (`ABGESCHLOSSEN`) sessions as active future collisions.
+  - [x] Fixed `checkOverlap` in `lessonUtils.ts`: Completed (`status === 'completed'`) and cancelled (`status === 'cancelled'`) sessions never trigger or participate in schedule conflicts.
+  - [x] Fixed `ScheduleView.tsx`: Excluded completed and cancelled lessons from `conflictsMap`, `allConflicts`, `hasConflict`, `getConflictingLessonsForLesson`, `findConflictingLesson`, and `dayConflictPairs`.
+  - [x] Suppressed `[⚠️ KONFLIKT]` badge and `[Beheben]` resolution box on all completed lessons.
+  - [x] Fixed `getProjectedLessonsForRange` in `scheduleUtils.ts`: If a group has already completed its session(s) on a given date, do not project redundant unstarted scheduled lessons on that same date after a time reschedule.
+  - [x] Fixed `updateGroup`, auto-sync `useEffect`, and `refreshCalendarAndDashboard` in `AppContext.tsx`: Purges redundant unstarted scheduled sessions on dates where the group already held its session, preventing ghost sessions.
+  - [x] Added automated test suite in `tasks1to7.test.ts` verifying completed vs scheduled overlap is false, and projection duplicate prevention holds.
+
 - [x] **AI Prompt Generator & Content Import JSON Parsing Fix**:
   - [x] Hardened `generateLernstudioPrompt` with strict RFC 8259 JSON syntax rules forbidding backslash escaping of brackets (`\[`, `\]`) and braces (`\{`, `\}`).
   - [x] Built multi-stage `safeParseLernstudioJsonString` repairing escaped brackets/braces (`\[`, `\]`, `\{`, `\}`), smart/curly quotes, conversational preambles/postambles, comments, and trailing commas.
@@ -73,6 +82,18 @@
 - [x] **تعديل تصميم مود المعلم (`LernstudioTeachModal.tsx`) لمنع قص القائمة والتبويبات على الهواتف**:
   - [x] تم تحويل شريط التبويبات العلوي للمراحل الخمس إلى شبكة استجابية متناسقة (`grid grid-cols-5`) تتكيف مع جميع شاشات الهواتف بدلاً من العرض الثابت المسبب للتمرير الجانبي وقص المراحل (4 و 5).
   - [x] تم توسيع ارتفاع شبكة خيارات الأسئلة في المرحلة الرابعة إلى `max-h-[300px]` على الموبايل و `max-h-[360px]` على الشاشات الأكبر مع حواف داخلية تضمن ظهور كامل خيارات المفردات (بما فيها الصف السفلي) دون قص أو اقتطاع.
+
+- [x] **توحيد لغات منصة الألعاب (Lernstudio Language Unification)**:
+  - [x] فحص شامل لكافة النصوص في منصة الألعاب والألعاب التفاعلية للكشف عن التداخل اللغوي عند اختيار اللغة الإنجليزية أو الألمانية.
+  - [x] توسيع قاموس الترجمات المشترك في `lernstudioTranslations.ts` لتغطية أسماء الفرق، لوحات الترتيب، عبارات الحماس، شرائح العجلة الدوارة، وأزرار التحكيم والتحكم.
+  - [x] تعديل محول الأسئلة `lernstudioQuestionAdapter.ts` لدعم صياغات الأسئلة بالإنجليزية والألمانية بدون فرض الترجمة العربية.
+  - [x] توحيد نصوص واجهة منصة الألعاب (`LernstudioGamesPortalView.tsx`)، والشريط العلوي والمنتقي (`LernstudioView.tsx`)، ولوحة الفصل التفاعلية (`LernstudioClassroomBoard.tsx`).
+  - [x] تعريب وترجمة كاملة لألعاب الفرق مثل لعبة عجلة الحظ (`LernstudioWheelGame.tsx`)، سباق السيارات (`LernstudioRaceGame.tsx`)، شد الحبل (`LernstudioTugOfWarGame.tsx`)، الدفاع الفضائي (`LernstudioSpaceDefenseGame.tsx`)، مهندسو الأبراج (`LernstudioTowerArchitectsGame.tsx`)، ولعبة بناء الجمل (`LernstudioSentenceGame.tsx`).
+  - [x] اجتياز فحص الترجمة والأخطاء البرمجية (`lint_applet` و `compile_applet`) بنجاح بدون أي أخطاء.
+
+- [x] **ضبط نطق الكلمة عند الإجابة في مود المعلم (`LernstudioTeachModal.tsx`)**:
+  - [x] عند الإجابة الصحيحة: عدم إعادة نطق الكلمة مرة أخرى (لأنها نُطقت بالفعل عند طرح السؤال)، مع تشغيل رنين النجاح الخفيف وتفعيل الانتقال السلس للسؤال التالي بدون انتظار قراءة صوتية ثانية.
+  - [x] عند الإجابة الخاطئة: إعادة نطق الكلمة الألمانية الصحيحة تلقائياً فوراً ليتعلم الطالب النطق الصحيح عند الخطأ، مع إتاحة زر استماع سريع للكلمة.
 
 
 

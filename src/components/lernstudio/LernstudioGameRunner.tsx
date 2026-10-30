@@ -227,7 +227,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       setStreak(0);
       setFeedback({
         isCorrect: false,
-        message: `${t.wrongAnswerMsg} (حاول مرة أخرى)`
+        message: `${t.wrongAnswerMsg} ${language === 'ar' ? '(حاول مرة أخرى)' : language === 'de' ? '(Versuche es noch einmal)' : '(Try again)'}`
       });
       playLernstudioSound('wrong');
       playGermanVoiceFeedback('noch_einmal');
@@ -258,7 +258,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       setStreak(0);
       setFeedback({
         isCorrect: false,
-        message: `${t.wrongAnswerMsg} (حاول مرة أخرى)`
+        message: `${t.wrongAnswerMsg} ${language === 'ar' ? '(حاول مرة أخرى)' : language === 'de' ? '(Versuche es noch einmal)' : '(Try again)'}`
       });
       playLernstudioSound('wrong');
       playGermanVoiceFeedback('noch_einmal');
@@ -420,13 +420,13 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
             {/* Question Progress bar */}
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs font-extrabold text-text-muted">
-                <span>{t.questionProgress} {currentIndex + 1} / {items.length}</span>
-                <span>{Math.round(((currentIndex + 1) / items.length) * 100)}%</span>
+                <span>{t.questionProgress} {items.length > 0 ? currentIndex + 1 : 0} / {items.length}</span>
+                <span>{items.length > 0 ? Math.round(((currentIndex + 1) / items.length) * 100) : 0}%</span>
               </div>
               <div className="w-full h-2 bg-surface-hover rounded-full overflow-hidden">
                 <div
                   className="h-full bg-primary transition-all duration-300 rounded-full"
-                  style={{ width: `${((currentIndex + 1) / items.length) * 100}%` }}
+                  style={{ width: `${items.length > 0 ? ((currentIndex + 1) / items.length) * 100 : 0}%` }}
                 />
               </div>
             </div>
@@ -691,7 +691,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
                     onClick={handleNextQuestion}
                     className="px-5 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-black shadow-md cursor-pointer transition-all inline-flex items-center gap-1"
                   >
-                    <span>{currentIndex + 1 < items.length ? (language === 'ar' ? 'السؤال التالي ➔' : 'Next Question ➔') : (language === 'ar' ? 'إنهاء التدريب 🎉' : 'Finish Practice 🎉')}</span>
+                    <span>{currentIndex + 1 < items.length ? (language === 'ar' ? 'السؤال التالي ➔' : language === 'de' ? 'Nächste Frage ➔' : 'Next Question ➔') : (language === 'ar' ? 'إنهاء التدريب 🎉' : language === 'de' ? 'Training beenden 🎉' : 'Finish Practice 🎉')}</span>
                   </button>
                 </div>
               </div>

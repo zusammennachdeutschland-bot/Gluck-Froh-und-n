@@ -66,12 +66,12 @@ export function getTimeBasedGreeting(
   // Arabic
   if (style === 'egyptian') {
     if (isGroup) {
-      return isMorning ? 'صباح الخير بحضراتكم جميعاً 👋' : 'أهلاً بحضراتكم جميعاً يا فندم 👋';
+      return isMorning ? 'السلام عليكم ورحمة الله وبركاته، صباح الخير بحضراتكم جميعاً 👋' : 'السلام عليكم ورحمة الله وبركاته، أهلاً بحضراتكم جميعاً يا فندم 👋';
     }
     if (recipientName) {
-      return isMorning ? `صباح الخير ${recipientName} 👋` : `أهلاً بحضرتك ${recipientName} 👋`;
+      return isMorning ? `السلام عليكم ورحمة الله وبركاته، صباح الخير ${recipientName} 👋` : `السلام عليكم ورحمة الله وبركاته، أهلاً بحضرتك ${recipientName} 👋`;
     }
-    return isMorning ? 'صباح الخير يا فندم 👋' : 'أهلاً بحضرتك يا فندم 👋';
+    return isMorning ? 'السلام عليكم ورحمة الله وبركاته، صباح الخير يا فندم 👋' : 'السلام عليكم ورحمة الله وبركاته، أهلاً بحضرتك يا فندم 👋';
   }
 
   // Standard Arabic

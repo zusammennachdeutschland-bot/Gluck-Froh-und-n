@@ -318,6 +318,17 @@ export function getProjectedLessonsForRange(
       }
     }
   });
+  // Map non-deleted explicit lessons by group and date to prevent projecting duplicate sessions
+  // when a group has already completed its scheduled session(s) on a given date.
+  const explicitGroupDateMap = new Map<string, Lesson[]>();
+  explicit.forEach(l => {
+    if (l.groupId && l.date) {
+      const gDateKey = `${l.groupId}_${l.date}`;
+      if (!explicitGroupDateMap.has(gDateKey)) explicitGroupDateMap.set(gDateKey, []);
+      explicitGroupDateMap.get(gDateKey)!.push(l);
+    }
+  });
+
   const projected: Lesson[] = [];
 
   const startD = parseLocalDate(startDateStr);
@@ -339,6 +350,17 @@ export function getProjectedLessonsForRange(
       }
 
       const matchingSlots = slots.filter(s => getDayNumber(s.day) === dayNum);
+      const existingForGroupOnDate = explicitGroupDateMap.get(`${group.id}_${dateStr}`) || [];
+      const hasCompletedOnDate = existingForGroupOnDate.some(
+        l => l.status === 'completed' || (l.report && l.report.attendanceStatus)
+      );
+
+      // If group already held / completed its session on this date, do not project redundant unstarted sessions on the same date!
+      if (hasCompletedOnDate && existingForGroupOnDate.length >= matchingSlots.length) {
+        cursor.setDate(cursor.getDate() + 1);
+        continue;
+      }
+
       for (const slot of matchingSlots) {
         const sessionTime = slot.time || group.scheduleTime || '17:00';
         const key = `${group.id}_${dateStr}_${sessionTime}`;

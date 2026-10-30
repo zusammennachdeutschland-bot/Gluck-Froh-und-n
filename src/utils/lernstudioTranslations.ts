@@ -246,6 +246,50 @@ export interface LernstudioTranslations {
   displayedResults: string;
   setsUnit: string;
   resetFilters: string;
+
+  // Common Shared Games Keys
+  playAgain: string;
+  backToGames: string;
+  mainMenu: string;
+  retryBtn: string;
+  notEnoughWords: string;
+  pronounceWord: string;
+  teamsLabel: string;
+  pointsUnit: string;
+  scoreLabel: string;
+  currentTurnLabel: string;
+  tieGame: string;
+  vsBot: string;
+  smartBot: string;
+  thinkingBot: string;
+  teacherVerdict: string;
+  markCorrect: string;
+  markWrong: string;
+  teamRed: string;
+  teamBlue: string;
+  teamGreen: string;
+  teamYellow: string;
+  confirmSentenceAnswer: string;
+  arrangeWordsOrder: string;
+  wheelSpinNow: string;
+  wheelSpinning: string;
+  spinWheelFor: string;
+  pointsStolenAlert: string;
+  luckyBonusAlert: string;
+  speedChallenge: string;
+  goldenQuestion: string;
+  doublePoints: string;
+  luckyBonus: string;
+  freePass: string;
+  stealPoints: string;
+  fromOpponent: string;
+  soundMute: string;
+  soundUnmute: string;
+  leaderboardTitle: string;
+  activeTurnBadge: string;
+  teamNumber: string;
+  turnNowOn: string;
+  teamQuestion: string;
 }
 
 const translations: Record<AppLanguage, LernstudioTranslations> = {
@@ -480,7 +524,50 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     completedGameTitle: 'ممتاز! أكملت التدريب بنجاح 🎉',
     completedGameDesc: 'حققت نتيجة ممتازة في هذا الموضوع.',
     restartGameBtn: 'إعادة اللعب من جديد',
-    returnToSetsBtn: 'العودة لقائمة المجموعات'
+    returnToSetsBtn: 'العودة لقائمة المجموعات',
+
+    playAgain: 'إعادة اللعب',
+    backToGames: 'بوابة الألعاب',
+    mainMenu: 'القائمة الرئيسية',
+    retryBtn: 'إعادة المحاولة',
+    notEnoughWords: 'هذه المجموعة تحتاج إلى كلمات إضافية للعب.',
+    pronounceWord: 'نطق الكلمة',
+    teamsLabel: 'الفرق:',
+    pointsUnit: 'نقطة',
+    scoreLabel: 'النقاط:',
+    currentTurnLabel: 'الدور:',
+    tieGame: 'تعادل ملحمي بين الفريقين! 🤝',
+    vsBot: 'ضد الروبوت 🤖',
+    smartBot: 'الروبوت الذكي 🤖',
+    thinkingBot: 'يفكر...',
+    teacherVerdict: 'تحكيم المعلم المباشر:',
+    markCorrect: 'احتساب صح',
+    markWrong: 'احتساب خطأ',
+    teamRed: 'الفريق الأحمر 🦁',
+    teamBlue: 'الفريق الأزرق 🦅',
+    teamGreen: 'الفريق الأخضر 🐊',
+    teamYellow: 'الفريق الأصفر ⚡',
+    confirmSentenceAnswer: 'تأكيد إجابة الجملة',
+    arrangeWordsOrder: 'اضغط على الكلمات بالترتيب لتكوين الجملة',
+    wheelSpinNow: 'دَوّر الآن',
+    wheelSpinning: 'تدور...',
+    spinWheelFor: 'تدوير العجلة لـ',
+    pointsStolenAlert: 'سرقة نقاط!',
+    luckyBonusAlert: 'مكافأة حظ سعيدة!',
+    speedChallenge: 'تحدي سريع',
+    goldenQuestion: 'سؤال ذهبي',
+    doublePoints: 'مضاعفة x2',
+    luckyBonus: 'مكافأة حظ',
+    freePass: 'بدون سؤال',
+    stealPoints: 'سرقة نقاط',
+    fromOpponent: 'من الخصم',
+    soundMute: 'كتم الصوت',
+    soundUnmute: 'تشغيل الصوت',
+    leaderboardTitle: 'لوحة نقاط الفرق',
+    activeTurnBadge: 'الدور الحالي',
+    teamNumber: 'فريق رقم',
+    turnNowOn: 'الدور الآن على:',
+    teamQuestion: 'سؤال'
   },
 
   en: {
@@ -714,7 +801,50 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     completedGameTitle: 'Great job! Practice completed 🎉',
     completedGameDesc: 'You achieved a great score in this topic.',
     restartGameBtn: 'Play Again',
-    returnToSetsBtn: 'Back to Sets'
+    returnToSetsBtn: 'Back to Sets',
+
+    playAgain: 'Play Again',
+    backToGames: 'Games Portal',
+    mainMenu: 'Main Menu',
+    retryBtn: 'Try Again',
+    notEnoughWords: 'This set needs more vocabulary items to play.',
+    pronounceWord: 'Pronounce Word',
+    teamsLabel: 'Teams:',
+    pointsUnit: 'pts',
+    scoreLabel: 'Score:',
+    currentTurnLabel: 'Turn:',
+    tieGame: 'Epic Tie between Teams! 🤝',
+    vsBot: 'vs. Bot 🤖',
+    smartBot: 'Smart Bot 🤖',
+    thinkingBot: 'Thinking...',
+    teacherVerdict: 'Teacher Verdict:',
+    markCorrect: 'Mark Correct',
+    markWrong: 'Mark Wrong',
+    teamRed: 'Team Red 🦁',
+    teamBlue: 'Team Blue 🦅',
+    teamGreen: 'Team Green 🐊',
+    teamYellow: 'Team Yellow ⚡',
+    confirmSentenceAnswer: 'Confirm Sentence Answer',
+    arrangeWordsOrder: 'Tap the words in order to form the sentence',
+    wheelSpinNow: 'Spin Now',
+    wheelSpinning: 'Spinning...',
+    spinWheelFor: 'Spin Wheel for',
+    pointsStolenAlert: 'Points Stolen!',
+    luckyBonusAlert: 'Lucky Bonus!',
+    speedChallenge: 'Speed Challenge',
+    goldenQuestion: 'Golden Question',
+    doublePoints: 'Double x2',
+    luckyBonus: 'Lucky Bonus',
+    freePass: 'Free Pass',
+    stealPoints: 'Steal Points',
+    fromOpponent: 'From Opponent',
+    soundMute: 'Mute Sound',
+    soundUnmute: 'Unmute Sound',
+    leaderboardTitle: 'Team Scoreboard',
+    activeTurnBadge: 'Active Turn',
+    teamNumber: 'Team #',
+    turnNowOn: 'Current Turn:',
+    teamQuestion: 'Question for'
   },
 
   de: {
@@ -948,9 +1078,121 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     completedGameTitle: 'Super! Übung erfolgreich beendet 🎉',
     completedGameDesc: 'Du hast ein tolles Ergebnis erzielt.',
     restartGameBtn: 'Erneut spielen',
-    returnToSetsBtn: 'Zurück zu den Sets'
+    returnToSetsBtn: 'Zurück zu den Sets',
+
+    playAgain: 'Erneut spielen',
+    backToGames: 'Spiele-Portal',
+    mainMenu: 'Hauptmenü',
+    retryBtn: 'Wiederholen',
+    notEnoughWords: 'Dieses Set benötigt mehr Vokabeln zum Spielen.',
+    pronounceWord: 'Wort vorlesen',
+    teamsLabel: 'Teams:',
+    pointsUnit: 'Pkt',
+    scoreLabel: 'Punkte:',
+    currentTurnLabel: 'Am Zug:',
+    tieGame: 'Unentschieden zwischen den Teams! 🤝',
+    vsBot: 'gegen Bot 🤖',
+    smartBot: 'Smarter Bot 🤖',
+    thinkingBot: 'Überlegt...',
+    teacherVerdict: 'Lehrer-Entscheidung:',
+    markCorrect: 'Als Richtig werten',
+    markWrong: 'Als Falsch werten',
+    teamRed: 'Team Rot 🦁',
+    teamBlue: 'Team Blau 🦅',
+    teamGreen: 'Team Grün 🐊',
+    teamYellow: 'Team Gelb ⚡',
+    confirmSentenceAnswer: 'Satzantwort bestätigen',
+    arrangeWordsOrder: 'Tippe die Wörter in der richtigen Reihenfolge an',
+    wheelSpinNow: 'Jetzt drehen',
+    wheelSpinning: 'Dreht sich...',
+    spinWheelFor: 'Glücksrad drehen für',
+    pointsStolenAlert: 'Punkte gestohlen!',
+    luckyBonusAlert: 'Glücks-Bonus!',
+    speedChallenge: 'Blitz-Duell',
+    goldenQuestion: 'Goldene Frage',
+    doublePoints: 'Doppelt x2',
+    luckyBonus: 'Glücks-Bonus',
+    freePass: 'Ohne Frage',
+    stealPoints: 'Punkte-Diebstahl',
+    fromOpponent: 'Vom Gegner',
+    soundMute: 'Stummschalten',
+    soundUnmute: 'Ton an',
+    leaderboardTitle: 'Team-Bestenliste',
+    activeTurnBadge: 'Am Zug',
+    teamNumber: 'Team #',
+    turnNowOn: 'Aktueller Zug:',
+    teamQuestion: 'Frage für'
   }
 };
+
+export interface WheelSegment {
+  id: string;
+  label: string;
+  subLabel?: string;
+  color: string;
+  textColor: string;
+  type: 'points' | 'bonus' | 'double' | 'steal' | 'challenge';
+  value: number;
+}
+
+export function getWheelSegments(lang?: string): WheelSegment[] {
+  const safeLang = (lang || 'ar').toLowerCase() as AppLanguage;
+  if (safeLang === 'de') {
+    return [
+      { id: '1', label: '100 Pkt', color: '#3B82F6', textColor: '#FFFFFF', type: 'points', value: 100 },
+      { id: '2', label: 'Blitz-Duell', subLabel: 'Goldene Frage', color: '#EC4899', textColor: '#FFFFFF', type: 'challenge', value: 250 },
+      { id: '3', label: '50 Pkt', color: '#10B981', textColor: '#FFFFFF', type: 'points', value: 50 },
+      { id: '4', label: 'Doppelt x2', subLabel: '2x Punkte', color: '#F59E0B', textColor: '#FFFFFF', type: 'double', value: 2 },
+      { id: '5', label: '150 Pkt', color: '#8B5CF6', textColor: '#FFFFFF', type: 'points', value: 150 },
+      { id: '6', label: 'Punkte-Diebstahl', subLabel: 'Vom Gegner', color: '#EF4444', textColor: '#FFFFFF', type: 'steal', value: 50 },
+      { id: '7', label: '200 Pkt', color: '#06B6D4', textColor: '#FFFFFF', type: 'points', value: 200 },
+      { id: '8', label: 'Glücks-Bonus', subLabel: 'Ohne Frage', color: '#14B8A6', textColor: '#FFFFFF', type: 'bonus', value: 100 },
+    ];
+  }
+  if (safeLang === 'en') {
+    return [
+      { id: '1', label: '100 Pts', color: '#3B82F6', textColor: '#FFFFFF', type: 'points', value: 100 },
+      { id: '2', label: 'Speed Quiz', subLabel: 'Golden Question', color: '#EC4899', textColor: '#FFFFFF', type: 'challenge', value: 250 },
+      { id: '3', label: '50 Pts', color: '#10B981', textColor: '#FFFFFF', type: 'points', value: 50 },
+      { id: '4', label: 'Double x2', subLabel: '2x Points', color: '#F59E0B', textColor: '#FFFFFF', type: 'double', value: 2 },
+      { id: '5', label: '150 Pts', color: '#8B5CF6', textColor: '#FFFFFF', type: 'points', value: 150 },
+      { id: '6', label: 'Steal Points', subLabel: 'From Rival', color: '#EF4444', textColor: '#FFFFFF', type: 'steal', value: 50 },
+      { id: '7', label: '200 Pts', color: '#06B6D4', textColor: '#FFFFFF', type: 'points', value: 200 },
+      { id: '8', label: 'Lucky Bonus', subLabel: 'Free Pass', color: '#14B8A6', textColor: '#FFFFFF', type: 'bonus', value: 100 },
+    ];
+  }
+  return [
+    { id: '1', label: '100 نقطة', color: '#3B82F6', textColor: '#FFFFFF', type: 'points', value: 100 },
+    { id: '2', label: 'تحدي سريع', subLabel: 'سؤال ذهبي', color: '#EC4899', textColor: '#FFFFFF', type: 'challenge', value: 250 },
+    { id: '3', label: '50 نقطة', color: '#10B981', textColor: '#FFFFFF', type: 'points', value: 50 },
+    { id: '4', label: 'مضاعفة x2', subLabel: 'ضعف النقاط', color: '#F59E0B', textColor: '#FFFFFF', type: 'double', value: 2 },
+    { id: '5', label: '150 نقطة', color: '#8B5CF6', textColor: '#FFFFFF', type: 'points', value: 150 },
+    { id: '6', label: 'سرقة نقاط', subLabel: 'من الخصم', color: '#EF4444', textColor: '#FFFFFF', type: 'steal', value: 50 },
+    { id: '7', label: '200 نقطة', color: '#06B6D4', textColor: '#FFFFFF', type: 'points', value: 200 },
+    { id: '8', label: 'مكافأة حظ', subLabel: 'بدون سؤال', color: '#14B8A6', textColor: '#FFFFFF', type: 'bonus', value: 100 },
+  ];
+}
+
+export function getLocalizedTeamName(teamKey: string, lang?: string, fallback?: string): string {
+  const safeLang = (lang || 'ar').toLowerCase() as AppLanguage;
+  const key = teamKey.toLowerCase();
+  if (key.includes('red') || key.includes('أحمر') || key === 'team_2' || key === 'team_red') {
+    return safeLang === 'ar' ? 'الفريق الأحمر 🦁' : safeLang === 'de' ? 'Team Rot 🦁' : 'Team Red 🦁';
+  }
+  if (key.includes('blue') || key.includes('أزرق') || key === 'team_1' || key === 'team_blue') {
+    return safeLang === 'ar' ? 'الفريق الأزرق 🦅' : safeLang === 'de' ? 'Team Blau 🦅' : 'Team Blue 🦅';
+  }
+  if (key.includes('green') || key.includes('أخضر') || key === 'team_3' || key === 'team_green') {
+    return safeLang === 'ar' ? 'الفريق الأخضر 🐊' : safeLang === 'de' ? 'Team Grün 🐊' : 'Team Green 🐊';
+  }
+  if (key.includes('yellow') || key.includes('أصفر') || key === 'team_4' || key === 'team_yellow') {
+    return safeLang === 'ar' ? 'الفريق الأصفر ⚡' : safeLang === 'de' ? 'Team Gelb ⚡' : 'Team Yellow ⚡';
+  }
+  if (key.includes('bot') || key.includes('روبوت') || key === 'vs_bot') {
+    return safeLang === 'ar' ? 'الروبوت الذكي 🤖' : safeLang === 'de' ? 'Smarter Bot 🤖' : 'Smart Bot 🤖';
+  }
+  return fallback || (safeLang === 'ar' ? 'الفريق' : safeLang === 'de' ? 'Team' : 'Team');
+}
 
 export function getLernstudioTranslations(lang?: string): LernstudioTranslations {
   const safeLang = (lang || 'ar').toLowerCase() as AppLanguage;

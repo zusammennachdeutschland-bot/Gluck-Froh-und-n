@@ -333,7 +333,9 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                 <h2 className="text-sm sm:text-base font-black text-text-main">
                   {t.teamContestsSection}
                 </h2>
-                <p className="text-[11px] text-text-muted font-medium">ألعاب حماسية جماعية للفرق والسبورة الذكية</p>
+                <p className="text-[11px] text-text-muted font-medium">
+                  {language === 'ar' ? 'ألعاب حماسية جماعية للفرق والسبورة الذكية' : language === 'de' ? 'Spannende Gruppenspiele für Teams und Smartboard' : 'Exciting group games for teams and smartboard'}
+                </p>
               </div>
             </div>
             <span className="text-xs font-bold px-3 py-1 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
@@ -353,7 +355,7 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                   <GameThumbnailArt gameId={game.id} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                   <span className="absolute top-2 right-2 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-black/60 text-white backdrop-blur-md flex items-center gap-1">
                     <span>{game.emoji}</span>
-                    <span>فرق</span>
+                    <span>{t.teamLabel}</span>
                   </span>
                 </div>
 
@@ -394,7 +396,9 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                 <h2 className="text-sm sm:text-base font-black text-text-main">
                   {t.soloPracticeSection}
                 </h2>
-                <p className="text-[11px] text-text-muted font-medium">تمارين تفاعلية وتدريب فردي ممتع</p>
+                <p className="text-[11px] text-text-muted font-medium">
+                  {language === 'ar' ? 'تمارين تفاعلية وتدريب فردي ممتع' : language === 'de' ? 'Interaktive Übungen und unterhaltsames Einzeltraining' : 'Interactive exercises and fun individual practice'}
+                </p>
               </div>
             </div>
             <span className="text-xs font-bold px-3 py-1 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
@@ -423,7 +427,7 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                     <GameThumbnailArt gameId={game.id} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                     <span className="absolute top-2 right-2 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-black/60 text-white backdrop-blur-md flex items-center gap-1">
                       <span>{game.emoji}</span>
-                      <span>فردي</span>
+                      <span>{t.soloLabel}</span>
                     </span>
                   </div>
 

@@ -7,6 +7,7 @@ import {
 import { Student, Group } from '../types';
 import { AvatarImage } from './AvatarImage';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
+import { Toast } from '@capacitor/toast';
 
 interface RandomStudentPickerModalProps {
   isOpen: boolean;
@@ -194,8 +195,9 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
       const updated = Array.from(new Set([...prev, ...splitNames]));
       try {
         localStorage.setItem('glueck_picker_custom_names', JSON.stringify(updated));
-      } catch {
-        // storage fallback
+      } catch (err) {
+        console.error('Failed to persist custom picker names to localStorage:', err);
+        Toast.show({ text: '⚠️ تعذر حفظ الأسماء في ذاكرة الجهاز (الذاكرة ممتلئة)', duration: 'short' }).catch(() => {});
       }
       return updated;
     });
@@ -208,8 +210,9 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
       const updated = prev.filter(n => n !== nameToRemove);
       try {
         localStorage.setItem('glueck_picker_custom_names', JSON.stringify(updated));
-      } catch {
-        // storage fallback
+      } catch (err) {
+        console.error('Failed to update custom picker names in localStorage:', err);
+        Toast.show({ text: '⚠️ تعذر تحديث الأسماء في ذاكرة الجهاز', duration: 'short' }).catch(() => {});
       }
       return updated;
     });
@@ -220,8 +223,9 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     setCustomNames([]);
     try {
       localStorage.removeItem('glueck_picker_custom_names');
-    } catch {
-      // storage fallback
+    } catch (err) {
+      console.error('Failed to clear custom picker names from localStorage:', err);
+      Toast.show({ text: '⚠️ تعذر مسح الأسماء من ذاكرة الجهاز', duration: 'short' }).catch(() => {});
     }
     handleResetRound();
   };

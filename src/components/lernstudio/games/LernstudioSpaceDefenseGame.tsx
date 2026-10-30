@@ -300,11 +300,11 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
           <div className="flex items-center justify-between text-xs font-bold text-slate-400 px-3">
             <span>
               {playMode === 'teams'
-                ? `دور إطلاق النار: ${currentTeamTurn === 1 ? 'الفريق الأزرق 🔵' : 'الفريق الأحمر 🔴'}`
-                : 'رادار الرصد الفضائي'}
+                ? `${t.currentTurnLabel}: ${currentTeamTurn === 1 ? (language === 'ar' ? 'الفريق الأزرق 🔵' : language === 'de' ? 'Team Blau 🔵' : 'Team Blue 🔵') : (language === 'ar' ? 'الفريق الأحمر 🔴' : language === 'de' ? 'Team Rot 🔴' : 'Team Red 🔴')}`
+                : (language === 'ar' ? 'رادار الرصد الفضائي' : language === 'de' ? 'Weltraum-Radar' : 'Space Radar')}
             </span>
             <span className="font-mono text-cyan-400">
-              هدف {targetIndex + 1} من {items.length}
+              {language === 'ar' ? `هدف ${targetIndex + 1} من ${items.length}` : language === 'de' ? `Ziel ${targetIndex + 1} von ${items.length}` : `Target ${targetIndex + 1} of ${items.length}`}
             </span>
           </div>
 
@@ -421,18 +421,18 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
           <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center space-y-4 animate-scale-up z-50">
             <SharedVictoryTrophyArt className="w-28 h-28 rounded-3xl shadow-xl border-2 border-cyan-400/50" />
             <h2 className="text-2xl sm:text-3xl font-black text-white">
-              انتصار أسطوري! تم تدمير جميع الأهداف الفضائية! 🚀🎉
+              {language === 'ar' ? 'انتصار أسطوري! تم تدمير جميع الأهداف الفضائية! 🚀🎉' : language === 'de' ? 'Legendärer Sieg! Alle Ziele zerstört! 🚀🎉' : 'Legendary Victory! All targets destroyed! 🚀🎉'}
             </h2>
             <p className="text-sm font-bold text-slate-300">
               {playMode === 'teams'
-                ? `الفائز: ${
+                ? `${language === 'ar' ? 'الفائز' : language === 'de' ? 'Gewinner' : 'Winner'}: ${
                     teamScores.team1 > teamScores.team2
-                      ? 'الفريق الأزرق 🔵'
+                      ? (language === 'ar' ? 'الفريق الأزرق 🔵' : language === 'de' ? 'Team Blau 🔵' : 'Team Blue 🔵')
                       : teamScores.team2 > teamScores.team1
-                      ? 'الفريق الأحمر 🔴'
-                      : 'تعادل الفريقين!'
+                      ? (language === 'ar' ? 'الفريق الأحمر 🔴' : language === 'de' ? 'Team Rot 🔴' : 'Team Red 🔴')
+                      : t.tieGame
                   }`
-                : `جمعت ${teamScores.team1} نقطة بدرع كوكب ${shields}%!`}
+                : (language === 'ar' ? `جمعت ${teamScores.team1} نقطة بدرع كوكب ${shields}%!` : language === 'de' ? `${teamScores.team1} Punkte gesammelt mit ${shields}% Schild!` : `Collected ${teamScores.team1} points with ${shields}% planet shields!`)}
             </p>
             <div className="flex items-center gap-3 pt-2">
               <button
@@ -441,14 +441,14 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
                 className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-2xl font-black text-sm shadow-xl transition-all cursor-pointer inline-flex items-center gap-2"
               >
                 <RotateCcw className="w-4 h-4" />
-                <span>معركة جديدة</span>
+                <span>{t.playAgain}</span>
               </button>
               <button
                 type="button"
                 onClick={onBack}
                 className="px-6 py-3 bg-slate-800 text-white border border-slate-700 rounded-2xl font-bold text-sm hover:bg-slate-700 transition-all cursor-pointer"
               >
-                العودة للألعاب
+                {t.gamesPortalBack}
               </button>
             </div>
           </div>

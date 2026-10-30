@@ -52,8 +52,8 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
   if (!currentItem || vocabItems.length === 0) {
     return (
       <div className="p-6 text-center space-y-4">
-        <p className="text-text-muted">هذه المجموعة تحتاج إلى كلمات إضافية للعب.</p>
-        <button onClick={onBack} className="px-4 py-2 bg-primary text-white rounded-xl">عودة</button>
+        <p className="text-text-muted">{t.notEnoughWords}</p>
+        <button onClick={onBack} className="px-4 py-2 bg-primary text-white rounded-xl cursor-pointer">{t.backToGames}</button>
       </div>
     );
   }
@@ -120,7 +120,12 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
     setIsVictory(false);
   };
 
-  const winningTeamName = towerFloors[0] > towerFloors[1] ? 'الفريق الأوّل (🔴)' : towerFloors[1] > towerFloors[0] ? 'الفريق الثاني (🔵)' : 'تعادل الفريقين! 🤝';
+  const winningTeamName =
+    towerFloors[0] > towerFloors[1]
+      ? (language === 'ar' ? 'الفريق الأوّل (🔴)' : 'Team 1 (🔴)')
+      : towerFloors[1] > towerFloors[0]
+      ? (language === 'ar' ? 'الفريق الثاني (🔵)' : 'Team 2 (🔵)')
+      : t.tieGame;
 
   return (
     <div className="p-4 sm:p-6 rounded-3xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main relative overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
@@ -140,10 +145,10 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
         <div className="flex items-center gap-2 flex-wrap">
           <SettingsBar />
           <div className={`px-3 py-1.5 rounded-xl border font-black text-xs ${activeTeam === 0 ? 'bg-red-500 text-white border-red-500 shadow-md ring-2 ring-red-400' : 'bg-surface text-text-muted border-surface-border'}`}>
-            🔴 برج 1: {towerFloors[0]} طوابق
+            🔴 {language === 'ar' ? 'برج 1' : 'Tower 1'}: {towerFloors[0]} {language === 'ar' ? 'طوابق' : language === 'de' ? 'Stockwerke' : 'floors'}
           </div>
           <div className={`px-3 py-1.5 rounded-xl border font-black text-xs ${activeTeam === 1 ? 'bg-blue-500 text-white border-blue-500 shadow-md ring-2 ring-blue-400' : 'bg-surface text-text-muted border-surface-border'}`}>
-            🔵 برج 2: {towerFloors[1]} طوابق
+            🔵 {language === 'ar' ? 'برج 2' : 'Tower 2'}: {towerFloors[1]} {language === 'ar' ? 'طوابق' : language === 'de' ? 'Stockwerke' : 'floors'}
           </div>
         </div>
       </div>
@@ -154,15 +159,15 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
           <GameStageBanner
             mode="tower_architects"
             title="مهندسو الأبراج (Tower Architects)"
-            subtitle="ارفع طوابق ناطحة السحاب عالياً عبر الإجابات الصحيحة!"
+            subtitle={language === 'ar' ? 'ارفع طوابق ناطحة السحاب عالياً عبر الإجابات الصحيحة!' : language === 'de' ? 'Baue deinen Wolkenkratzer mit richtigen Antworten!' : 'Build the skyscraper higher with correct answers!'}
             badgeText={`🏙️ ${towerFloors[0]} : ${towerFloors[1]}`}
           />
           <div className="bg-surface border border-surface-border p-6 rounded-3xl text-center space-y-4 shadow-sm relative">
             <div className="flex items-center justify-between">
               <span className={`px-3 py-1 rounded-full text-xs font-black text-white ${activeTeam === 0 ? 'bg-red-500' : 'bg-blue-500'}`}>
-                دور {activeTeam === 0 ? 'الفريق الأوّل (🔴)' : 'الفريق الثاني (🔵)'}
+                {t.currentTurnLabel}: {activeTeam === 0 ? (language === 'ar' ? 'الفريق الأوّل (🔴)' : 'Team 1 (🔴)') : (language === 'ar' ? 'الفريق الثاني (🔵)' : 'Team 2 (🔵)')}
               </span>
-              <span className="text-xs font-bold text-text-muted">الكلمة {currentIndex + 1} / {vocabItems.length}</span>
+              <span className="text-xs font-bold text-text-muted">{language === 'ar' ? 'الكلمة' : language === 'de' ? 'Wort' : 'Word'} {currentIndex + 1} / {vocabItems.length}</span>
             </div>
 
             {/* Towers Side-by-Side Graphic */}
@@ -231,18 +236,18 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
             <SharedVictoryTrophyArt className="w-28 h-28 rounded-3xl shadow-xl border-2 border-amber-400/50" />
           </div>
           <div className="space-y-2">
-            <h2 className="text-2xl font-black text-text-main">فوز {winningTeamName}! 🏙️🎉</h2>
+            <h2 className="text-2xl font-black text-text-main">{language === 'ar' ? `فوز ${winningTeamName}! 🏙️🎉` : `${winningTeamName} Victory! 🏙️🎉`}</h2>
             <div className="text-xs font-bold text-text-muted space-y-1">
-              <p>طوابق برج 1: {towerFloors[0]}</p>
-              <p>طوابق برج 2: {towerFloors[1]}</p>
+              <p>{language === 'ar' ? 'طوابق برج 1' : 'Tower 1 Floors'}: {towerFloors[0]}</p>
+              <p>{language === 'ar' ? 'طوابق برج 2' : 'Tower 2 Floors'}: {towerFloors[1]}</p>
             </div>
           </div>
           <div className="flex gap-3 justify-center">
             <button onClick={handleRestart} className="px-6 py-3 bg-primary text-white rounded-2xl font-bold flex items-center gap-2 cursor-pointer">
-              <RotateCcw className="w-4 h-4" /> إعادة اللعب
+              <RotateCcw className="w-4 h-4" /> {t.playAgain}
             </button>
             <button onClick={onBack} className="px-6 py-3 bg-surface-hover text-text-muted rounded-2xl font-bold cursor-pointer">
-              القائمة الرئيسية
+              {t.mainMenu}
             </button>
           </div>
         </div>

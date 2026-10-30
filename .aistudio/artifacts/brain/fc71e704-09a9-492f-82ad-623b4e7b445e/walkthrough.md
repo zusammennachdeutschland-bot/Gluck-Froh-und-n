@@ -91,3 +91,21 @@ Five assets previously identified as having abstract or geometric motifs were ov
   - Fallbacks: Correctly auto-generated 4 sentence elements, missing-letter gaps, and article flags.
   - Full codebase lint and compilation: Passed with 0 errors.
 
+---
+
+## Parent Report Phrasing for Past Lessons (Task 10)
+
+- **Requirement**: When generating a parent report for a past or different day, the report must not say "اليوم" (today) or "النهاردة", because the lesson did not take place today.
+- **Implemented Fix**:
+  - Dynamically check `isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr())`.
+  - When `isLessonToday === true`: retain natural today-based phrasing ("اليوم", "النهاردة", "اللي اتشرح النهاردة في الحصة").
+  - When `isLessonToday === false`:
+    - Header line displays `📅 موعد الحصة: يوم الأربعاء (28/10/2026)` or `📅 تاريخ الحصة:` instead of `📅 اليوم:`.
+    - Lesson intros adapt to `(ليوم ...)` or `(في الحصة)`.
+    - Topic header adapts to `📖 اللي اتشرح في الحصة:` / `📖 ما تم شرحه في الحصة:`.
+    - Performance feedback adapts to `مستوى وأداء الطالب في الحصة:` and strips any accidental "النهاردة"/"اليوم" text.
+    - Attendance alert adapts to `كان/كانت غائباً عن الحصة`.
+    - English and German headers adapt: `Today's Topic` $\to$ `Lesson Topic` / `Taught in Lesson`, `Heute durchgenommen` $\to$ `Im Unterricht durchgenommen`.
+    - Modal UI toggle and homework review labels adapt smoothly.
+- **Verification**: All TypeScript checks passed, build succeeded, and test suite executed with 100% pass rate.
+

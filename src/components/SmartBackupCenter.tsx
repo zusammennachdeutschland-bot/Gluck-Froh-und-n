@@ -292,6 +292,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         setExportProgress(90);
 
         if (Capacitor.isNativePlatform()) {
+          let nativeSaved = false;
           try {
             // 1. Try saving directly into device Documents directory
             try {
@@ -301,6 +302,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
                 directory: Directory.Documents,
                 encoding: Encoding.UTF8
               });
+              nativeSaved = true;
             } catch (docErr) {
               console.warn('Could not save directly to Documents, continuing with Cache:', docErr);
             }
@@ -312,6 +314,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
               directory: Directory.Cache,
               encoding: Encoding.UTF8
             });
+            nativeSaved = true;
 
             // 3. Prompt native share sheet with safe timeout race (never hang)
             try {
@@ -341,7 +344,12 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-          } catch {}
+          } catch (webDownloadErr) {
+            console.error('Web fallback download failed:', webDownloadErr);
+            if (!nativeSaved) {
+              throw webDownloadErr;
+            }
+          }
         } else {
           // Download JSON
           const blob = new Blob([jsonString], { type: 'application/json' });
@@ -445,6 +453,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         const fileName = `Glueck_Quick_Backup_${formatLocalDate()}.json`;
 
         if (Capacitor.isNativePlatform()) {
+          let nativeSaved = false;
           try {
             // 1. Save directly into device Documents directory
             try {
@@ -454,6 +463,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
                 directory: Directory.Documents,
                 encoding: Encoding.UTF8
               });
+              nativeSaved = true;
             } catch (docErr) {
               console.warn('Could not save to Documents, continuing with Cache:', docErr);
             }
@@ -465,6 +475,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
               directory: Directory.Cache,
               encoding: Encoding.UTF8
             });
+            nativeSaved = true;
 
             // 3. Prompt native share sheet with safe timeout race (never hang)
             try {
@@ -494,7 +505,12 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-          } catch {}
+          } catch (webDownloadErr) {
+            console.error('Simple backup web fallback download failed:', webDownloadErr);
+            if (!nativeSaved) {
+              throw webDownloadErr;
+            }
+          }
         } else {
           const blob = new Blob([jsonString], { type: 'application/json' });
           const url = URL.createObjectURL(blob);
@@ -581,15 +597,20 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         financeRecurring,
         financeInstallments
       };
+      let snapshotSaved = false;
       try {
         await storage.setItem('dl_restore_point_snapshot', currentSnapshot);
+        snapshotSaved = true;
       } catch (storageErr) {
         console.warn('Storage snapshot notice:', storageErr);
       }
       try {
         localStorage.setItem('dl_restore_point_snapshot', JSON.stringify(currentSnapshot));
-      } catch {}
-      setHasRestorePoint(true);
+        snapshotSaved = true;
+      } catch (lsErr) {
+        console.error('Failed to save restore point snapshot to localStorage:', lsErr);
+      }
+      setHasRestorePoint(snapshotSaved);
 
       setTimeout(async () => {
         try {
@@ -937,15 +958,20 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       financeInstallments
     };
 
+    let snapshotSaved = false;
     try {
       await storage.setItem('dl_restore_point_snapshot', currentSnapshot);
+      snapshotSaved = true;
     } catch (storageErr) {
       console.warn('Storage snapshot notice:', storageErr);
     }
     try {
       localStorage.setItem('dl_restore_point_snapshot', JSON.stringify(currentSnapshot));
-    } catch {}
-    setHasRestorePoint(true);
+      snapshotSaved = true;
+    } catch (lsErr) {
+      console.error('Failed to save restore point snapshot to localStorage:', lsErr);
+    }
+    setHasRestorePoint(snapshotSaved);
     setRestoreProgress(30);
 
     setTimeout(async () => {
@@ -1448,12 +1474,22 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         if (rpStr) {
           try {
             rp = JSON.parse(rpStr);
-          } catch {}
+          } catch (parseErr) {
+            console.error('Failed to parse restore point snapshot from localStorage:', parseErr);
+          }
         }
         if (!rp) {
           rp = await storage.getItem('dl_restore_point_snapshot');
         }
         if (!rp) {
+          console.error('Rollback failed: no valid restore point snapshot found.');
+          const errMsg = _t(
+            '❌ تعذر استرجاع نقطة الاستعادة السابقة (البيانات غير موجودة أو تالفة).',
+            '❌ Failed to load previous restore point snapshot.',
+            '❌ Wiederherstellungspunkt konnte nicht geladen werden.'
+          );
+          setSimpleErrorMsg(errMsg);
+          setRestoreSuccessMsg(errMsg);
           setIsRollingBack(false);
           return;
         }

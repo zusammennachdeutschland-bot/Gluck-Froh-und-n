@@ -308,7 +308,9 @@ export async function clearAllLocalDataAndReset(): Promise<void> {
         snapshot[k] = await storage.getItem(k);
       }
       window.localStorage.setItem('dl_emergency_backup_' + Date.now(), JSON.stringify(snapshot));
-    } catch {}
+    } catch (backupErr) {
+      console.error('Failed to write emergency backup snapshot before reset:', backupErr);
+    }
 
     // 2. Clear IndexedDB
     await storage.clear();

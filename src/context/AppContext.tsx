@@ -12,7 +12,7 @@ import {
   FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment, FinanceNotification,
   TodoItem, PaymentPlanType
 } from '../types';
-import { recalculateAllAccountBalances, computeAccountBalance, shouldSettlePendingCycleRecord } from '../services/financeService';
+import { recalculateAllAccountBalances, computeAccountBalance, shouldSettlePendingCycleRecord, splitPaymentAcrossLessons } from '../services/financeService';
 import { 
   clearActiveLessonNotification, getPendingScheduledNotifications, 
   cancelScheduledNotification, cancelAllScheduledNotifications, rebuildAllNotificationSchedules,
@@ -23,7 +23,7 @@ import { storage } from '../services/storageService';
 import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
-import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, makeLessonSlotKey } from '../utils/lessonUtils';
+import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resequenceScheduledLessonsAfterChange, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, makeLessonSlotKey } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import LiveTimer from '../services/liveTimerPlugin';
@@ -2460,6 +2460,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const sessionTime = matchingSlot.time || '17:00';
           const slotKey = makeLessonSlotKey(group.id, dateStr, sessionTime);
 
+          // If group already has a completed session on this date, do not auto-generate another scheduled session
+          const existingForGroupOnDate = lessons.filter(l => l.groupId === group.id && l.date === dateStr && !l.deleted);
+          const hasCompletedOnDate = existingForGroupOnDate.some(
+            l => l.status === 'completed' || (l.report && l.report.attendanceStatus)
+          );
+          const daySlotsCount = slots.filter(s => getDayNumber(s.day) === dayNum).length || 1;
+          if (hasCompletedOnDate && existingForGroupOnDate.length >= daySlotsCount) {
+            continue;
+          }
+
           if (!existingSlotSet.has(slotKey)) {
             existingSlotSet.add(slotKey);
             const sessionNumber = isPerLesson
@@ -2601,6 +2611,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 if (!matchesAnySlot) {
                   staleLessonIds.add(lesson.id);
                   return false; // Safely purge stale future session from older schedule
+                }
+
+                // Also purge unstarted scheduled session if group ALREADY completed its session(s) on this date
+                const daySlotsCount = activeSlots.filter(s => getDayNumber(s.day) === lDayNum).length || 1;
+                const completedCountOnDate = filteredAndDeduplicated.filter(
+                  l => l.groupId === lesson.groupId &&
+                       l.date === lesson.date &&
+                       !l.deleted &&
+                       (l.status === 'completed' || (l.report && l.report.attendanceStatus))
+                ).length;
+
+                if (completedCountOnDate >= daySlotsCount) {
+                  staleLessonIds.add(lesson.id);
+                  return false; // Safely purge redundant unstarted scheduled session since group already completed session today
                 }
               }
             }
@@ -2937,6 +2961,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const dateStr = formatLocalDate(d);
           const sessionTime = matchingSlot.time || '17:00';
           const slotKey = makeLessonSlotKey(id, dateStr, sessionTime);
+
+          // If group already has a completed session on this date, do not generate duplicate/extra slots
+          const existingForGroupOnDate = lessons.filter(l => l.groupId === id && l.date === dateStr && !l.deleted);
+          const hasCompletedOnDate = existingForGroupOnDate.some(
+            l => l.status === 'completed' || (l.report && l.report.attendanceStatus)
+          );
+          const daySlotsCount = newSlots.filter(s => getDayNumber(s.day) === dayNum).length || 1;
+          if (hasCompletedOnDate && existingForGroupOnDate.length >= daySlotsCount) {
+            continue;
+          }
 
           if (!existingSlotSet.has(slotKey)) {
             existingSlotSet.add(slotKey);
@@ -4192,7 +4226,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           sessionNumber: currentSessionNum,
           totalSessionsInPackage: totalSessions,
           meetingLink: lessonData.type === 'online' ? (targetGroup?.zoomLink || profile.defaultZoomLink) : undefined,
-          locationAddress: lessonData.type === 'offline' ? (targetGroup?.address || 'Hauptstraße 45, Cairo') : undefined,
+          locationAddress: lessonData.type === 'offline' ? (lessonData.locationAddress || targetGroup?.address || '') : undefined,
           scheduleRecurrence: effectiveRecurrence,
           biweeklyWeek: getAlternatingWeek(lessonDate)
         } as Lesson));
@@ -4217,9 +4251,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const updater = (allLessons: Lesson[]) => {
       let found = false;
       let targetItem: Lesson | undefined;
-      const updated = allLessons.map(l => {
+      let previousStatus: LessonStatus | undefined;
+      let updated = allLessons.map(l => {
         if (l.id === id) {
           found = true;
+          previousStatus = l.status;
           const mutated = wrapMutation({ ...l, ...updates } as Lesson);
           targetItem = mutated;
           return mutated;
@@ -4231,41 +4267,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           ? selectedLesson 
           : lessons.find(l => l.id === id);
         if (base) {
+          previousStatus = base.status;
           const mutated = wrapMutation({ ...base, ...updates } as Lesson);
           targetItem = mutated;
           updated.unshift(mutated);
         }
       }
 
-      if (updates.status === 'cancelled' && targetItem) {
+      const isCancelledOrUncancelled =
+        updates.status === 'cancelled' ||
+        (previousStatus === 'cancelled' && updates.status === 'scheduled');
+
+      if (isCancelledOrUncancelled && targetItem) {
         const targetGroupId = targetItem.groupId;
         const targetStudentId = targetItem.studentId;
         const targetStudentName = targetItem.studentName;
         const grp = groups.find(g => (targetGroupId && g.id === targetGroupId) || (targetItem?.groupName && g.name === targetItem?.groupName));
         const st = students.find(s => (targetStudentId && s.id === targetStudentId) || (targetStudentName && s.name === targetStudentName));
 
-        updated.forEach((l, idx) => {
-          if (l.status === 'cancelled' || l.deleted) return;
-          const matchesGrp = targetGroupId ? l.groupId === targetGroupId : (grp?.id && l.groupId === grp.id);
-          const matchesSt = targetStudentId ? l.studentId === targetStudentId : (st?.id && l.studentId === st.id);
-          const matchesStName = targetStudentName ? (l.studentName === targetStudentName) : false;
-
-          if (matchesGrp || matchesSt || matchesStName) {
-            const expectedSessionNum = calculateSequentialSessionNumber(l, updated, {
-              group: grp,
-              student: st,
-              students
-            });
-            const cycleCount = grp?.sessionCount || l.totalSessionsInPackage || targetItem?.totalSessionsInPackage || 4;
-
-            if (l.sessionNumber !== expectedSessionNum || l.totalSessionsInPackage !== cycleCount) {
-              updated[idx] = wrapMutation({
-                ...l,
-                sessionNumber: expectedSessionNum,
-                totalSessionsInPackage: cycleCount
-              });
-            }
-          }
+        updated = resequenceScheduledLessonsAfterChange(updated, targetItem, {
+          group: grp,
+          student: st,
+          students,
+          wrapMutation
         });
       }
 
@@ -4288,15 +4312,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
     const updater = (allLessons: Lesson[]) => {
       let found = false;
-      const updated = allLessons.map(l => {
+      let deletedItem: Lesson | undefined;
+      let updated = allLessons.map(l => {
         if (l.id === id) {
           found = true;
-          return wrapDeletion(l);
+          deletedItem = wrapDeletion(l);
+          return deletedItem;
         }
         return l;
       });
       if (!found && targetLesson) {
-        return [wrapDeletion(targetLesson), ...updated];
+        deletedItem = wrapDeletion(targetLesson);
+        updated = [deletedItem, ...updated];
+      }
+      const baseLesson = targetLesson || deletedItem;
+      if (baseLesson && baseLesson.status === 'scheduled') {
+        const targetGroupId = baseLesson.groupId;
+        const targetStudentId = baseLesson.studentId;
+        const targetStudentName = baseLesson.studentName;
+        const grp = groups.find(g => (targetGroupId && g.id === targetGroupId) || (baseLesson.groupName && g.name === baseLesson.groupName));
+        const st = students.find(s => (targetStudentId && s.id === targetStudentId) || (targetStudentName && s.name === targetStudentName));
+        updated = resequenceScheduledLessonsAfterChange(updated, { ...baseLesson, deleted: true }, {
+          group: grp,
+          student: st,
+          students,
+          wrapMutation
+        });
       }
       return updated;
     };
@@ -4391,6 +4432,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             status: 'completed',
             sessionNumber: finalSessionNumber,
             totalSessionsInPackage: updatedTotalSessions,
+            topic: report.arabicTopicsExplained || report.teacherNotes || (l as any).topic,
             paymentStatus: report.paymentStatus !== undefined ? report.paymentStatus : (l.paymentStatus || 'pending'),
             amountPaid: report.amountPaid !== undefined ? report.amountPaid : (l.amountPaid ?? finalAmountPaid),
             recordingLink: report.recordingLink !== undefined ? report.recordingLink : l.recordingLink,
@@ -4402,30 +4444,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         return l;
       });
 
-      if (!found) {
-        const newCompleted: Lesson = wrapMutation({
-          ...targetLesson,
-          status: 'completed',
-          sessionNumber: finalSessionNumber,
-          totalSessionsInPackage: updatedTotalSessions,
-          paymentStatus: report.paymentStatus !== undefined ? report.paymentStatus : (targetLesson.paymentStatus || 'pending'),
-          amountPaid: report.amountPaid !== undefined ? report.amountPaid : (targetLesson.amountPaid ?? finalAmountPaid),
-          recordingLink: report.recordingLink !== undefined ? report.recordingLink : targetLesson.recordingLink,
-          recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : targetLesson.recordingLink2,
-          studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : targetLesson.studentPayments,
-          report
-        } as Lesson);
-        return [newCompleted, ...updated];
-      }
-      return updated;
+      const withCompleted = !found
+        ? [
+            wrapMutation({
+              ...targetLesson,
+              status: 'completed',
+              sessionNumber: finalSessionNumber,
+              totalSessionsInPackage: updatedTotalSessions,
+              topic: report.arabicTopicsExplained || report.teacherNotes || (targetLesson as any).topic,
+              paymentStatus: report.paymentStatus !== undefined ? report.paymentStatus : (targetLesson.paymentStatus || 'pending'),
+              amountPaid: report.amountPaid !== undefined ? report.amountPaid : (targetLesson.amountPaid ?? finalAmountPaid),
+              recordingLink: report.recordingLink !== undefined ? report.recordingLink : targetLesson.recordingLink,
+              recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : targetLesson.recordingLink2,
+              studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : targetLesson.studentPayments,
+              report
+            } as Lesson),
+            ...updated
+          ]
+        : updated;
+
+      const st = students.find(s => (targetLesson.studentId && s.id === targetLesson.studentId) || (targetLesson.studentName && s.name === targetLesson.studentName));
+      const completedPivot = withCompleted.find(l => l.id === lessonId);
+      return resequenceScheduledLessonsAfterChange(withCompleted, completedPivot, {
+        group: targetGroup,
+        student: st,
+        students,
+        wrapMutation
+      });
     };
 
-    updateFullLessonsStorage(reportUpdater);
+    syncEventQueue.enqueue('lesson_updated', { lessonId, status: 'completed', timestamp: Date.now() });
+    const lessonUpdatePromise = updateFullLessonsStorage(reportUpdater);
     autoSyncEngine.notifyMutation('lessons', lessonId);
 
     // Auto-sync payment records directly into Payments Center (Zahlungszentrum) based on attended lesson cycles
     const paymentUpdater = (prevPayments: PaymentRecord[]) => {
       let nextPayments = [...prevPayments];
+      const latestLessons = (fullLessonsRef.current && fullLessonsRef.current.length > 0) ? fullLessonsRef.current : lessons;
 
       const targetStudents = groupSts.length > 0
         ? groupSts
@@ -4470,7 +4525,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             }
           });
           
-          const unbilledCompletedLessons = lessons.filter(l => {
+          const unbilledCompletedLessons = latestLessons.filter(l => {
+             if (l.deleted) return false;
              if (l.status !== 'completed' && l.id !== targetLesson.id) return false;
              
              // Check if lesson belongs to student's group or student individually
@@ -4519,7 +4575,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             // Generate virtual dates for the first cycle if needed
             if (virtualOffset > 0) {
               for (let i = 1; i <= virtualOffset; i++) {
-                const matchedLesson = lessons.find(l => 
+                const matchedLesson = latestLessons.find(l => 
                   ((targetLesson.groupId && l.groupId === targetLesson.groupId) || (st.id && l.studentId === st.id)) && 
                   l.sessionNumber === i
                 );
@@ -4553,7 +4609,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 });
                 for (let i = 1; i <= bundleSize; i++) {
                   if (!existingNums.has(i)) {
-                    const matchedLesson = lessons.find(l => 
+                    const matchedLesson = latestLessons.find(l => 
                       ((targetLesson.groupId && l.groupId === targetLesson.groupId) || (st.id && l.studentId === st.id)) && 
                       l.sessionNumber === i
                     );
@@ -4604,7 +4660,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
             if (virtualOffset > 0) {
               for (let i = 1; i <= virtualOffset; i++) {
-                const matchedLesson = lessons.find(l => 
+                const matchedLesson = latestLessons.find(l => 
                   ((targetLesson.groupId && l.groupId === targetLesson.groupId) || (st.id && l.studentId === st.id)) && 
                   l.sessionNumber === i
                 );
@@ -4636,7 +4692,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 });
                 for (let i = 1; i <= bundleSize; i++) {
                   if (!existingNums.has(i)) {
-                    const matchedLesson = lessons.find(l => 
+                    const matchedLesson = latestLessons.find(l => 
                       ((targetLesson.groupId && l.groupId === targetLesson.groupId) || (st.id && l.studentId === st.id)) && 
                       l.sessionNumber === i
                     );
@@ -4689,8 +4745,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return nextPayments;
     };
 
-    updateFullPaymentsStorage(paymentUpdater);
-    autoSyncEngine.notifyMutation('payments', lessonId);
+    lessonUpdatePromise.then(() => {
+      updateFullPaymentsStorage(paymentUpdater);
+      autoSyncEngine.notifyMutation('payments', lessonId);
+    });
 
     // Update students payment status in state
     setStudents(prev => prev.map(s => {
@@ -4799,37 +4857,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         updated.unshift(cancelledBase);
       }
 
-      // Re-sequence ALL remaining non-cancelled lessons in the group or student so session numbering strictly stays continuous
+      // Re-sequence scheduled lessons after the cancelled lesson in the group or student so session numbering stays continuous
       const grp = groups.find(g => (targetGroupId && g.id === targetGroupId) || (target?.groupName && g.name === target?.groupName));
       const st = students.find(s => (targetStudentId && s.id === targetStudentId) || (targetStudentName && s.name === targetStudentName));
+      const cancelledPivot = updated.find(l => l.id === lessonId) || (target ? { ...target, status: 'cancelled' as LessonStatus } : null);
 
-      updated.forEach((l, idx) => {
-        if (l.status === 'cancelled' || l.deleted) return;
-        
-        const matchesGrp = targetGroupId ? l.groupId === targetGroupId : (grp?.id && l.groupId === grp.id);
-        const matchesSt = targetStudentId ? l.studentId === targetStudentId : (st?.id && l.studentId === st.id);
-        const matchesStName = targetStudentName ? (l.studentName === targetStudentName) : false;
-
-        if (matchesGrp || matchesSt || matchesStName) {
-          // Re-compute expected sequential session number strictly excluding cancelled lessons
-          const expectedSessionNum = calculateSequentialSessionNumber(l, updated, {
-            group: grp,
-            student: st,
-            students
-          });
-          const cycleCount = grp?.sessionCount || l.totalSessionsInPackage || target?.totalSessionsInPackage || 4;
-
-          if (l.sessionNumber !== expectedSessionNum || l.totalSessionsInPackage !== cycleCount) {
-            updated[idx] = wrapMutation({
-              ...l,
-              sessionNumber: expectedSessionNum,
-              totalSessionsInPackage: cycleCount
-            });
-          }
-        }
+      return resequenceScheduledLessonsAfterChange(updated, cancelledPivot, {
+        group: grp,
+        student: st,
+        students,
+        wrapMutation
       });
-
-      return updated;
     };
 
     updateFullLessonsStorage(updater);
@@ -4852,6 +4890,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       closeLessonControl();
     }
 
+    if (activeLessonSession && activeLessonSession.lessonId === lessonId) {
+      setActiveLessonSession(null);
+      clearActiveLessonNotification();
+      storage.removeItem('dl_active_lesson_session');
+    }
+
+    storage.removeItem(`dl_draft_report_${lessonId}`);
     autoSyncEngine.notifyMutation('lessons', lessonId);
   };
 
@@ -5159,56 +5204,72 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (match) targetDates.add(normalizeDateToISO(match[1]));
     });
 
-    const perLessonFee = data.lessonIds.length > 0 ? Math.round(data.amountPaid / data.lessonIds.length) : data.amountPaid;
-    updateFullLessonsStorage(allLessons => allLessons.map(l => {
-      const matchesId = targetIds.has(l.id);
-      const matchesDate = (l.studentId === data.studentId || (l.groupId && l.groupId === data.groupId)) && targetDates.has(l.date);
-      if (matchesId || matchesDate) {
-        const currentStudentPayments = l.studentPayments || {};
-        const updatedStudentPayments = {
-          ...currentStudentPayments,
-          [data.studentId]: {
-            studentId: data.studentId,
-            studentName: data.studentName,
-            paymentStatus: 'paid' as const,
-            amountPaid: perLessonFee,
-            amountDue: perLessonFee
-          }
-        };
-
-        const isGroupLesson = Boolean(l.groupId);
-        let allGroupStudentsPaid = false;
-        if (isGroupLesson) {
-          const groupSts = students.filter(s => s.groupId === l.groupId && !s.deleted && s.status !== 'archived');
-          allGroupStudentsPaid = groupSts.length > 0 && groupSts.every(gst => {
-            const sp = updatedStudentPayments[gst.id];
-            return sp?.paymentStatus === 'paid' || (sp as any)?.status === 'paid';
-          });
+    updateFullLessonsStorage(allLessons => {
+      const matchingIndices: number[] = [];
+      allLessons.forEach((l, idx) => {
+        const matchesId = targetIds.has(l.id);
+        const matchesDate = (l.studentId === data.studentId || (l.groupId && l.groupId === data.groupId)) && targetDates.has(l.date);
+        if (matchesId || matchesDate) {
+          matchingIndices.push(idx);
         }
+      });
 
-        const overallStatus = isGroupLesson
-          ? (allGroupStudentsPaid ? 'paid' : 'partial')
-          : 'paid';
+      const splitCount = matchingIndices.length > 0 ? matchingIndices.length : Math.max(1, data.lessonIds.length);
+      const shares = splitPaymentAcrossLessons(data.amountPaid, splitCount);
+      const shareByLessonIndex = new Map<number, number>();
+      matchingIndices.forEach((lessonIdx, orderIdx) => {
+        shareByLessonIndex.set(lessonIdx, shares[orderIdx] ?? shares[shares.length - 1]);
+      });
 
-        const totalPaidOnLesson = Object.values(updatedStudentPayments).reduce(
-          (sum: number, sp: any) => sum + (sp?.amountPaid || sp?.amount || 0), 0
-        );
+      return allLessons.map((l, idx) => {
+        if (shareByLessonIndex.has(idx)) {
+          const perLessonFee = shareByLessonIndex.get(idx)!;
+          const currentStudentPayments = l.studentPayments || {};
+          const updatedStudentPayments = {
+            ...currentStudentPayments,
+            [data.studentId]: {
+              studentId: data.studentId,
+              studentName: data.studentName,
+              paymentStatus: 'paid' as const,
+              amountPaid: perLessonFee,
+              amountDue: perLessonFee
+            }
+          };
 
-        return wrapMutation({
-          ...l,
-          paymentStatus: overallStatus,
-          amountPaid: totalPaidOnLesson,
-          studentPayments: updatedStudentPayments,
-          report: l.report ? {
-            ...l.report,
+          const isGroupLesson = Boolean(l.groupId);
+          let allGroupStudentsPaid = false;
+          if (isGroupLesson) {
+            const groupSts = students.filter(s => s.groupId === l.groupId && !s.deleted && s.status !== 'archived');
+            allGroupStudentsPaid = groupSts.length > 0 && groupSts.every(gst => {
+              const sp = updatedStudentPayments[gst.id];
+              return sp?.paymentStatus === 'paid' || (sp as any)?.status === 'paid';
+            });
+          }
+
+          const overallStatus = isGroupLesson
+            ? (allGroupStudentsPaid ? 'paid' : 'partial')
+            : 'paid';
+
+          const totalPaidOnLesson = Object.values(updatedStudentPayments).reduce(
+            (sum: number, sp: any) => sum + (sp?.amountPaid || sp?.amount || 0), 0
+          );
+
+          return wrapMutation({
+            ...l,
             paymentStatus: overallStatus,
             amountPaid: totalPaidOnLesson,
-            studentPayments: updatedStudentPayments
-          } : undefined
-        } as Lesson);
-      }
-      return l;
-    }));
+            studentPayments: updatedStudentPayments,
+            report: l.report ? {
+              ...l.report,
+              paymentStatus: overallStatus,
+              amountPaid: totalPaidOnLesson,
+              studentPayments: updatedStudentPayments
+            } : undefined
+          } as Lesson);
+        }
+        return l;
+      });
+    });
 
     if (data.amountPaid > 0) {
       addFinanceTransaction({

@@ -2210,7 +2210,8 @@ export const HodHubView: React.FC = () => {
     const band = targetPlan.gradeBand;
     const sec = getSecretaryForGradeBand(band, schoolSettings, targetPlan.secretaryName, targetPlan.secretaryPhone);
     const text = generateWeeklyPlanMessage(targetPlan, weekNum, sec.name, schoolSettings.hodName);
-    const cleanPhone = (sec.phone || targetPlan.secretaryPhone || '').replace(/[^0-9]/g, '');
+    const rawPhoneDigits = (sec.phone || targetPlan.secretaryPhone || '').replace(/[^0-9]/g, '');
+    const cleanPhone = rawPhoneDigits.length === 11 && rawPhoneDigits.startsWith('0') ? `20${rawPhoneDigits.slice(1)}` : rawPhoneDigits;
     const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
     
     const freshSentAt = formatLocalDate();
@@ -4317,7 +4318,7 @@ export const HodHubView: React.FC = () => {
                       <Phone className="w-4 h-4 text-emerald-500" />
                       <span>{t.phone}</span>
                     </a>
-                    <a href={`https://wa.me/${t.phone.replace(/[^0-9]/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex-1 py-2.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 border border-emerald-200 rounded-xl text-[11px] font-bold transition-colors flex items-center justify-center gap-2">
+                    <a href={`https://wa.me/${(() => { const d = t.phone.replace(/[^0-9]/g, ''); return d.length === 11 && d.startsWith('0') ? `20${d.slice(1)}` : d; })()}`} target="_blank" rel="noopener noreferrer" className="flex-1 py-2.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 border border-emerald-200 rounded-xl text-[11px] font-bold transition-colors flex items-center justify-center gap-2">
                       <MessageCircle className="w-4 h-4" />
                       <span>WhatsApp</span>
                     </a>

@@ -324,7 +324,8 @@ export const TeacherAttendanceModal: React.FC<TeacherAttendanceModalProps> = ({
 
   const secretaryPhone = useMemo(() => {
     if (!linkedSecretary?.phone) return '';
-    return linkedSecretary.phone.replace(/[^0-9]/g, '');
+    const digits = linkedSecretary.phone.replace(/[^0-9]/g, '');
+    return digits.length === 11 && digits.startsWith('0') ? `20${digits.slice(1)}` : digits;
   }, [linkedSecretary]);
 
   const whatsAppShareUrl = useMemo(() => {

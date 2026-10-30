@@ -1,9 +1,10 @@
-import { isPendingStatus, isGroupPerLesson } from "../utils/lessonUtils";
+import { isPendingStatus, isGroupPerLesson, calculateSequentialSessionNumber } from "../utils/lessonUtils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Lesson, Group } from '../types';
+import { Lesson, Group, LessonReport, AttendanceStatus, PaymentStatus } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
 import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+import { storage } from '../services/storageService';
 import { 
   CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check
 } from 'lucide-react';
@@ -21,11 +22,118 @@ const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string
 };
 
 export const TodaysProgressTimeline: React.FC = () => {
-  const { lessons, groups, students, openLessonControl, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t, language } = useApp();
+  const { lessons, groups, students, openLessonControl, saveLessonReport, cancelLesson, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t, language } = useApp();
   const [now, setNow] = useState(new Date());
   const [isPastPendingExpanded, setIsPastPendingExpanded] = useState(false);
   const [showAllPastPending, setShowAllPastPending] = useState(false);
   const [selectedGroupForModal, setSelectedGroupForModal] = useState<Group | null>(null);
+
+  const handleQuickCompleteLesson = (e: React.MouseEvent, targetLesson: Lesson) => {
+    e.stopPropagation();
+
+    const targetGroup = targetLesson.groupId
+      ? (groups.find(g => g.id === targetLesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()))
+      : (targetLesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupName!.trim().toLowerCase()) : undefined);
+
+    const targetStudent = students.find(s =>
+      !s.deleted && s.status !== 'archived' && (
+        (targetLesson.studentId && s.id === targetLesson.studentId) ||
+        (targetLesson.studentName && s.name.trim().toLowerCase() === targetLesson.studentName.trim().toLowerCase())
+      )
+    );
+
+    const groupSts = targetGroup
+      ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id)
+      : [];
+    const matchingWeekGroupSts = groupSts.filter(s => !targetLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, targetLesson.date));
+    const activeLessonStudents = targetGroup
+      ? (matchingWeekGroupSts.length > 0 ? matchingWeekGroupSts : groupSts)
+      : (targetStudent ? [targetStudent] : []);
+
+    const studentAttendanceMap: Record<string, AttendanceStatus> = { ...(targetLesson.report?.studentAttendance || {}) };
+    const studentHomeworkDoneMap: Record<string, 'yes' | 'no' | 'none'> = { ...(targetLesson.report?.studentHomeworkDone || {}) };
+    const studentDictationGradeMap: Record<string, number> = { ...(targetLesson.report?.studentDictationGrade || {}) };
+    const studentExamGradeMap: Record<string, number> = { ...(targetLesson.report?.studentExamGrade || {}) };
+    const studentNotesMap: Record<string, string> = { ...(targetLesson.report?.studentNotes || {}) };
+    const studentPaymentsMap: Record<string, { status: PaymentStatus; amount: number }> = {};
+
+    activeLessonStudents.forEach(st => {
+      if (!studentAttendanceMap[st.id]) {
+        studentAttendanceMap[st.id] = 'present';
+      }
+      studentHomeworkDoneMap[st.id] = 'none';
+      if (studentDictationGradeMap[st.id] === undefined) {
+        studentDictationGradeMap[st.id] = -1;
+      }
+      if (studentExamGradeMap[st.id] === undefined) {
+        studentExamGradeMap[st.id] = -1;
+      }
+      if (studentNotesMap[st.id] === undefined) {
+        studentNotesMap[st.id] = '';
+      }
+      const existingPay = (targetLesson.studentPayments as any)?.[st.id] || (targetLesson.report?.studentPayments as any)?.[st.id];
+      studentPaymentsMap[st.id] = {
+        status: existingPay?.paymentStatus || existingPay?.status || 'pending',
+        amount: existingPay?.amountPaid ?? existingPay?.amount ?? 0
+      };
+    });
+
+    const isPerLessonGroup = Boolean(
+      isGroupPerLesson(targetGroup) ||
+      (targetStudent && (targetStudent.paymentPlan === 'per_lesson' || targetStudent.bundleSize === 1)) ||
+      targetLesson.totalSessionsInPackage === 1
+    );
+    const cycleTotalSessions = isPerLessonGroup
+      ? 1
+      : ((targetGroup?.sessionCount && targetGroup.sessionCount > 1)
+          ? targetGroup.sessionCount
+          : (targetLesson.totalSessionsInPackage && targetLesson.totalSessionsInPackage > 1 ? targetLesson.totalSessionsInPackage : 4));
+
+    const autoSessionNum = calculateSequentialSessionNumber(targetLesson, lessons, {
+      group: targetGroup,
+      student: targetStudent,
+      students
+    });
+    const rawSessionNum = (typeof targetLesson.sessionNumber === 'number' && targetLesson.sessionNumber >= 1)
+      ? targetLesson.sessionNumber
+      : autoSessionNum;
+    const finalSessionNumber = isPerLessonGroup
+      ? 1
+      : (rawSessionNum > cycleTotalSessions ? (((rawSessionNum - 1) % cycleTotalSessions) + 1) : Math.max(1, rawSessionNum));
+
+    const noHwLabel = language === 'de' ? 'Keine Hausaufgabe' : language === 'en' ? 'None assigned' : 'لا يوجد واجب';
+    const reportData: LessonReport = {
+      ...(targetLesson.report || {}),
+      attendanceStatus: 'present',
+      studentAttendance: studentAttendanceMap,
+      homeworkStatus: 'none' as any,
+      arabicHomeworkOption: 'none',
+      homeworkTitle: noHwLabel,
+      homeworkDescription: noHwLabel,
+      arabicHomeworkRequired: 'لا يوجد واجب',
+      arabicPreviousHomework: 'لا يوجد واجب سابق',
+      previousHomeworkDescription: 'لا يوجد واجب سابق',
+      teacherNotes: 'wiederholen',
+      arabicTopicsExplained: 'wiederholen',
+      studentHomeworkDone: studentHomeworkDoneMap,
+      studentDictationGrade: studentDictationGradeMap,
+      studentExamGrade: studentExamGradeMap,
+      studentNotes: studentNotesMap,
+      paymentStatus: targetLesson.paymentStatus || 'pending',
+      amountPaid: targetLesson.amountPaid || 0,
+      ...(activeLessonStudents.length > 1 ? { studentPayments: studentPaymentsMap } : {}),
+      savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    saveLessonReport(targetLesson.id, reportData, cycleTotalSessions, finalSessionNumber);
+    storage.removeItem(`dl_draft_report_${targetLesson.id}`);
+  };
+
+  const handleQuickCancelLesson = (e: React.MouseEvent, targetLesson: Lesson) => {
+    e.stopPropagation();
+    cancelLesson(targetLesson.id);
+    storage.removeItem(`dl_draft_report_${targetLesson.id}`);
+  };
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -272,10 +380,25 @@ export const TodaysProgressTimeline: React.FC = () => {
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-[9px] font-bold bg-primary/10 text-primary dark:text-primary px-1.5 py-0.5 rounded transition-colors group-hover:bg-primary/20">
-                            {t('timeline_requires_action')}
-                          </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => handleQuickCompleteLesson(e, pLesson)}
+                            className="w-7 h-7 rounded-lg bg-primary/15 hover:bg-primary text-primary hover:text-white border border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                            title={_t('تمت الحصة (wiederholen + بدون واجب)', 'Mark Completed (wiederholen + no HW)', 'Erledigt (wiederholen + keine HA)')}
+                            aria-label="Mark completed with wiederholen and no homework"
+                          >
+                            <Check className="w-4 h-4 stroke-[2.5]" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleQuickCancelLesson(e, pLesson)}
+                            className="w-7 h-7 rounded-lg bg-surface/80 hover:bg-primary/15 text-text-muted hover:text-primary border border-primary-border/60 flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                            title={_t('إلغاء الحصة', 'Cancel Lesson', 'Lektion absagen')}
+                            aria-label="Cancel lesson"
+                          >
+                            <X className="w-4 h-4 stroke-[2.5]" />
+                          </button>
                           <ChevronRight className={`w-3.5 h-3.5 text-primary dark:text-primary shrink-0 transition-transform ${
                             language === 'ar' ? 'rotate-180 group-hover:-translate-x-0.5' : 'group-hover:translate-x-0.5'
                           }`} />
@@ -461,6 +584,96 @@ export const TodaysProgressTimeline: React.FC = () => {
                 metaParts.push(`${countToShow} ${_t('طلاب', 'students', 'Schüler')}`);
               }
 
+              const isLiveActive = state === 'active' && !isCompletedState && !isCancelledState;
+
+              if (isLiveActive) {
+                return (
+                  <div 
+                    key={lesson.id}
+                    onClick={() => openLessonControl(lesson)}
+                    className="group relative flex flex-col p-2.5 sm:p-3 my-1.5 rounded-2xl border-2 border-primary-border bg-surface bg-primary-soft shadow-xs cursor-pointer transition-all hover:shadow-md hover:border-primary/50 space-y-1.5"
+                  >
+                    {/* 1. Header: Live & Session Badges + Clean Single-Line Time Range */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-primary text-white shadow-2xs shrink-0">
+                          <span>{_t('بث مباشر الآن', 'Live Now', 'Jetzt live')}</span>
+                        </span>
+                        {lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 && !isGroupPerLesson(targetGroup) && (
+                          <span className="text-[10px] sm:text-[11px] font-mono font-bold text-primary bg-primary/15 dark:bg-primary/25 px-1.5 py-0.5 rounded-md shrink-0">
+                            {_t('حصة', 'Session', 'Std.')} {lesson.sessionNumber}/{lesson.totalSessionsInPackage}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="text-sm sm:text-base font-black font-mono tracking-tight text-primary whitespace-nowrap shrink-0">
+                        {lesson.time} – {endTime || `${lesson.durationMinutes || 60}m`}
+                      </div>
+                    </div>
+
+                    {/* 2. Middle Row: Student / Group Title & Action Controls */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        {targetGroup ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedGroupForModal(targetGroup);
+                            }}
+                            className="text-sm sm:text-base font-black text-text-main dark:text-white text-start truncate block hover:text-primary hover:underline leading-snug"
+                            title={_t('انقر لفتح ملف المجموعة', 'Click to open group profile', 'Klicken für Gruppenprofil')}
+                          >
+                            {targetGroup.name}
+                          </button>
+                        ) : (
+                          <h4 className="text-sm sm:text-base font-black text-text-main dark:text-white truncate leading-snug">
+                            {lesson.studentName || lesson.groupName || lesson.title}
+                          </h4>
+                        )}
+                      </div>
+
+                      {/* Action Controls */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleQuickCompleteLesson(e, lesson)}
+                          className="w-7 h-7 rounded-lg bg-primary text-white hover:bg-primary-hover flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                          title={_t('تمت الحصة (wiederholen + بدون واجب)', 'Mark Completed (wiederholen + no HW)', 'Erledigt (wiederholen + keine HA)')}
+                          aria-label="Mark completed with wiederholen and no homework"
+                        >
+                          <Check className="w-4 h-4 stroke-[2.75]" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleQuickCancelLesson(e, lesson)}
+                          className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                          title={_t('إلغاء الحصة', 'Cancel Lesson', 'Lektion absagen')}
+                          aria-label="Cancel lesson"
+                        >
+                          <X className="w-4 h-4 stroke-[2.75]" />
+                        </button>
+                        <div className="w-6 h-6 rounded-lg bg-primary/15 dark:bg-primary/25 flex items-center justify-center text-primary">
+                          <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isRtl ? 'rotate-180' : ''}`} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 3. Bottom Row: Full-width Metadata with clean visibility */}
+                    {metaParts.length > 0 && (
+                      <div className="flex items-center gap-1.5 text-[11px] sm:text-xs text-text-muted dark:text-slate-300 font-medium flex-wrap pt-0.5 border-t border-primary-border/40">
+                        {metaParts.map((part, idx) => (
+                          <React.Fragment key={idx}>
+                            {idx > 0 && <span className="opacity-40 select-none">·</span>}
+                            <span>{part}</span>
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
               return (
                 <div 
                   key={lesson.id}
@@ -470,8 +683,6 @@ export const TodaysProgressTimeline: React.FC = () => {
                       ? 'bg-slate-50/50 dark:bg-slate-900/30 border-slate-200/50 dark:border-slate-800/50 opacity-75 hover:opacity-100'
                       : isCancelledState
                       ? 'bg-rose-500/[0.02] dark:bg-rose-950/10 border-rose-500/20 dark:border-rose-900/25 opacity-70 hover:opacity-95'
-                      : state === 'active'
-                      ? 'bg-primary/5 dark:bg-primary-soft border-primary/50 dark:border-primary/60 shadow-xs shadow-primary/10 ring-1 ring-primary/25'
                       : 'bg-white dark:bg-slate-900/70 border-slate-200/70 dark:border-surface-border/70 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-2xs'
                   }`}
                 >
@@ -560,8 +771,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                         )}
 
                         {state === 'active' && !isCompletedState && !isCancelledState && (
-                          <span className="inline-flex items-center gap-1 text-[9px] sm:text-[9.5px] font-bold text-primary dark:text-primary-hover bg-primary/10 dark:bg-primary/20 px-1.5 py-0.5 rounded-full shrink-0">
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+                          <span className="inline-flex items-center text-[9px] sm:text-[9.5px] font-bold text-primary dark:text-primary-hover bg-primary/10 dark:bg-primary/20 px-2 py-0.5 rounded-full shrink-0">
                             <span>{t('timeline_live_now')}</span>
                           </span>
                         )}
@@ -590,7 +800,29 @@ export const TodaysProgressTimeline: React.FC = () => {
                   </div>
 
                   {/* 3. Trailing Action Controls */}
-                  <div className="flex items-center gap-0.5 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!isCompletedState && !isCancelledState && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => handleQuickCompleteLesson(e, lesson)}
+                          className="w-6 h-6 rounded-md bg-primary-soft hover:bg-primary text-primary hover:text-white border border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                          title={_t('تمت الحصة (wiederholen + بدون واجب)', 'Mark Completed (wiederholen + no HW)', 'Erledigt (wiederholen + keine HA)')}
+                          aria-label="Mark completed with wiederholen and no homework"
+                        >
+                          <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleQuickCancelLesson(e, lesson)}
+                          className="w-6 h-6 rounded-md bg-surface-hover/70 hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                          title={_t('إلغاء الحصة', 'Cancel Lesson', 'Lektion absagen')}
+                          aria-label="Cancel lesson"
+                        >
+                          <X className="w-3.5 h-3.5 stroke-[2.5]" />
+                        </button>
+                      </>
+                    )}
                     {(isCompletedState || isCancelledState) && (
                       <button
                         type="button"

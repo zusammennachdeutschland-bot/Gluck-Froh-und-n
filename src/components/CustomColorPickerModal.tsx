@@ -186,7 +186,8 @@ export const CustomColorPickerModal: React.FC<CustomColorPickerModalProps> = ({
 
   // Handle RGB inputs
   const handleRgbChange = (channel: 'r' | 'g' | 'b', value: number) => {
-    const clamped = Math.max(0, Math.min(255, value || 0));
+    const safeVal = Number.isFinite(value) ? value : 0;
+    const clamped = Math.max(0, Math.min(255, safeVal));
     const newRgb = { ...currentRgb, [channel]: clamped };
     const hsv = rgbToHsv(newRgb.r, newRgb.g, newRgb.b);
     setHue(hsv.h);
@@ -368,7 +369,7 @@ export const CustomColorPickerModal: React.FC<CustomColorPickerModalProps> = ({
                     min={0}
                     max={255}
                     value={currentRgb.r}
-                    onChange={(e) => handleRgbChange('r', parseInt(e.target.value))}
+                    onChange={(e) => { const v = parseInt(e.target.value, 10); handleRgbChange('r', Number.isNaN(v) ? 0 : v); }}
                     className="w-full bg-surface border border-surface-border rounded-md px-1.5 py-0.5 font-mono text-[11px] text-center text-text-main focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   <input
@@ -376,7 +377,7 @@ export const CustomColorPickerModal: React.FC<CustomColorPickerModalProps> = ({
                     min={0}
                     max={255}
                     value={currentRgb.g}
-                    onChange={(e) => handleRgbChange('g', parseInt(e.target.value))}
+                    onChange={(e) => { const v = parseInt(e.target.value, 10); handleRgbChange('g', Number.isNaN(v) ? 0 : v); }}
                     className="w-full bg-surface border border-surface-border rounded-md px-1.5 py-0.5 font-mono text-[11px] text-center text-text-main focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   <input
@@ -384,7 +385,7 @@ export const CustomColorPickerModal: React.FC<CustomColorPickerModalProps> = ({
                     min={0}
                     max={255}
                     value={currentRgb.b}
-                    onChange={(e) => handleRgbChange('b', parseInt(e.target.value))}
+                    onChange={(e) => { const v = parseInt(e.target.value, 10); handleRgbChange('b', Number.isNaN(v) ? 0 : v); }}
                     className="w-full bg-surface border border-surface-border rounded-md px-1.5 py-0.5 font-mono text-[11px] text-center text-text-main focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
