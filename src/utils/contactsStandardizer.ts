@@ -163,11 +163,12 @@ export function getStudentEnglishName(student: Student): string | null {
 }
 
 /**
- * Cleans, title-cases, and formats the student's English name as a clean two-part name (الاسم الثنائي).
+ * Cleans, title-cases, and formats the student's English name preserving up to 3 parts (الاسم الثلاثي).
  * Examples:
  * - "ahmed ibrahim" -> "Ahmed Ibrahim"
- * - "farida osama mohamed" -> "Farida Osama"
- * - "abdel rahman mourad hamed" -> "Abdelrahman Mourad"
+ * - "farida osama mohamed" -> "Farida Osama Mohamed"
+ * - "yomna mourad hamed" -> "Yomna Mourad Hamed"
+ * - "abdel rahman mourad hamed" -> "Abdelrahman Mourad Hamed"
  * - "lukas" -> "Lukas"
  */
 export function cleanEnglishName(rawName: string): string {
@@ -187,27 +188,23 @@ export function cleanEnglishName(rawName: string): string {
     return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
   });
 
-  if (capitalized.length === 1) {
-    return capitalized[0];
+  if (capitalized.length <= 2) {
+    return capitalized.join(' ');
   }
 
-  if (capitalized.length === 2) {
-    return `${capitalized[0]} ${capitalized[1]}`;
-  }
-
-  // If 3 or more parts, handle compound prefixes (Abdel, Abdul, Abd, El, Al)
+  // Handle compound prefixes (Abdel, Abdul, Abd, El, Al)
   const firstLower = capitalized[0].toLowerCase();
   const compoundPrefixes = ['abdel', 'abdul', 'abd', 'el', 'al'];
 
   if (compoundPrefixes.includes(firstLower) && capitalized.length >= 3) {
     const compoundFirstName = `${capitalized[0]}${capitalized[1].toLowerCase()}`;
     const formattedCompoundFirst = compoundFirstName.charAt(0).toUpperCase() + compoundFirstName.slice(1);
-    const secondName = capitalized[2];
-    return `${formattedCompoundFirst} ${secondName}`;
+    const rest = capitalized.slice(2, 4); // Take next 2 parts to complete a clean triple name
+    return `${formattedCompoundFirst} ${rest.join(' ')}`;
   }
 
-  // Default for 3+ parts: take the first two parts (First Name + Second Name)
-  return `${capitalized[0]} ${capitalized[1]}`;
+  // Preserve up to 3 parts (triple name)
+  return capitalized.slice(0, 3).join(' ');
 }
 
 /**

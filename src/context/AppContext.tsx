@@ -2360,6 +2360,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (profile.enableLessonAlerts === false && profile.enableBrowserPush === false) return;
 
     const checkUpcomingLessonsAlerts = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       const now = new Date();
       const todayStr = formatLocalDate(now);
       const nowMins = now.getHours() * 60 + now.getMinutes();

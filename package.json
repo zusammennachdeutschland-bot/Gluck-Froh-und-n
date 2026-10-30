@@ -9,6 +9,7 @@
     "name": "AGS",
     "email": "zusammennachdeutschland@gmail.com"
   },
+  "homepage": "https://ags-teacher-app.local",
   "build": {
     "appId": "com.ags.teacherapp",
     "productName": "AGS Teacher App",
@@ -16,7 +17,7 @@
     "directories": {
       "output": "release"
     },
-    "compression": "maximum",
+    "compression": "normal",
     "electronVersion": "34.2.0",
     "asar": true,
     "linux": {

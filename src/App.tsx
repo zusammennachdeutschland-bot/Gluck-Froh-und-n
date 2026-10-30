@@ -16,20 +16,23 @@ import { InspirationCardWidget } from './components/InspirationCardWidget';
 import { SchoolTodayCard } from './components/SchoolTodayCard';
 import { ScheduleView } from './components/ScheduleView';
 import { StudentsView } from './components/StudentsView';
-import { FinanceView } from './components/finance/FinanceView';
-import { ReportsView } from './components/ReportsView';
-import { SessionHistoryView } from './components/SessionHistoryView';
-import { SettingsView } from './components/SettingsView';
-import { FreeTimeSlotsView } from './components/FreeTimeSlotsView';
-import { CertificateCenter } from './components/certificates/CertificateCenter';
-import { SchoolScheduleView } from './components/SchoolScheduleView';
-import { HodHubView } from './components/HodHubView';
-import { LernstudioView } from './components/lernstudio/LernstudioView';
-
 import { DesktopSidebar } from './components/desktop/DesktopSidebar';
 import { DesktopTopBar } from './components/desktop/DesktopTopBar';
 import { DesktopDashboard } from './components/desktop/DesktopDashboard';
 import { useDesktopShortcuts } from './hooks/useDesktopShortcuts';
+
+// Lazy loaded heavy tab views and components for fast desktop cold start
+const FinanceView = React.lazy(() => import('./components/finance/FinanceView').then(m => ({ default: m.FinanceView })));
+const ReportsView = React.lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
+const SessionHistoryView = React.lazy(() => import('./components/SessionHistoryView').then(m => ({ default: m.SessionHistoryView })));
+const SettingsView = React.lazy(() => import('./components/SettingsView').then(m => ({ default: m.SettingsView })));
+const FreeTimeSlotsView = React.lazy(() => import('./components/FreeTimeSlotsView').then(m => ({ default: m.FreeTimeSlotsView })));
+const CertificateCenter = React.lazy(() => import('./components/certificates/CertificateCenter').then(m => ({ default: m.CertificateCenter })));
+const SchoolScheduleView = React.lazy(() => import('./components/SchoolScheduleView').then(m => ({ default: m.SchoolScheduleView })));
+const HodHubView = React.lazy(() => import('./components/HodHubView').then(m => ({ default: m.HodHubView })));
+const LernstudioView = React.lazy(() => import('./components/lernstudio/LernstudioView').then(m => ({ default: m.LernstudioView })));
+const BackupModal = React.lazy(() => import('./components/BackupModal').then(m => ({ default: m.BackupModal })));
+const AddFinanceTransactionModal = React.lazy(() => import('./components/finance/modals/AddFinanceTransactionModal').then(m => ({ default: m.AddFinanceTransactionModal })));
 
 import { AnimatePresence, motion } from 'motion/react';
 import { BottomNav } from './components/BottomNav';
@@ -42,9 +45,7 @@ import { StartLessonNowModal } from './components/StartLessonNowModal';
 import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { RecentlyDeletedModal } from './components/RecentlyDeletedModal';
 import { SetupWizard } from './components/SetupWizard';
-import { BackupModal } from './components/BackupModal';
 import { FloatingNetworkMonitor } from './components/FloatingNetworkMonitor';
-import { AddFinanceTransactionModal } from './components/finance/modals/AddFinanceTransactionModal';
 import { LoadingScreen } from './components/LoadingScreen';
 
 import { useLessonReminders } from './hooks/useLessonReminders';
@@ -539,59 +540,61 @@ function MainApp() {
             key={`mobile-${activeTab}`}
             className="space-y-2.5 sm:space-y-3 animate-in fade-in duration-150"
           >
-            {activeTab === 'home' && (
-              <>
-                {/* Daily Inspiration & Gratitude Card */}
-                <InspirationCardWidget />
+            <React.Suspense fallback={<LoadingScreen />}>
+              {activeTab === 'home' && (
+                <>
+                  {/* Daily Inspiration & Gratitude Card */}
+                  <InspirationCardWidget />
 
-                {/* School Today Card */}
-                <SchoolTodayCard />
+                  {/* School Today Card */}
+                  <SchoolTodayCard />
 
-                {/* Homework Follow-up Reminder Card */}
-                <HomeworkFollowUpWidget />
+                  {/* Homework Follow-up Reminder Card */}
+                  <HomeworkFollowUpWidget />
 
-                {/* Today's Progress Timeline */}
-                <TodaysProgressTimeline />
+                  {/* Today's Progress Timeline */}
+                  <TodaysProgressTimeline />
 
-                {/* Compact Collapsible To-Do Widget */}
-                <QuickTodoWidget />
+                  {/* Compact Collapsible To-Do Widget */}
+                  <QuickTodoWidget />
 
-                {/* Tomorrow's Lessons Compact Widget */}
-                <TomorrowsLessonsWidget />
-                <AvailableTodayWidget />
+                  {/* Tomorrow's Lessons Compact Widget */}
+                  <TomorrowsLessonsWidget />
+                  <AvailableTodayWidget />
 
-                {/* Weekly & Monthly Statistics */}
-                <DailyStats />
+                  {/* Weekly & Monthly Statistics */}
+                  <DailyStats />
 
-                {/* Payment Alerts */}
-                <PaymentAlertsCard />
+                  {/* Payment Alerts */}
+                  <PaymentAlertsCard />
 
-                {/* Smart Daily Summary Widget at bottom of Dashboard */}
-                <SmartDailySummaryWidget />
-              </>
-            )}
+                  {/* Smart Daily Summary Widget at bottom of Dashboard */}
+                  <SmartDailySummaryWidget />
+                </>
+              )}
 
-            {activeTab === 'schedule' && <ScheduleView />}
-            {activeTab === 'students' && <StudentsView />}
-            {activeTab === 'history' && <SessionHistoryView />}
-            {activeTab === 'payments' && <FinanceView />}
-            {activeTab === 'reports' && <ReportsView />}
-            {activeTab === 'settings' && <SettingsView />}
-            {activeTab === 'freeTime' && <FreeTimeSlotsView />}
-            {activeTab === 'certificates' && <CertificateCenter />}
-            {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
-            {activeTab === 'hod' && <HodHubView />}
-            {activeTab === 'lernstudio' && (
-              <LernstudioView
-                sets={lernstudioSets || []}
-                groups={groups || []}
-                schoolName={profile?.displayNameAr || profile?.displayName || 'Glück'}
-                teacherName={profile?.displayName}
-                onSaveSet={saveLernstudioSet}
-                onDeleteSet={deleteLernstudioSet}
-                language={language}
-              />
-            )}
+              {activeTab === 'schedule' && <ScheduleView />}
+              {activeTab === 'students' && <StudentsView />}
+              {activeTab === 'history' && <SessionHistoryView />}
+              {activeTab === 'payments' && <FinanceView />}
+              {activeTab === 'reports' && <ReportsView />}
+              {activeTab === 'settings' && <SettingsView />}
+              {activeTab === 'freeTime' && <FreeTimeSlotsView />}
+              {activeTab === 'certificates' && <CertificateCenter />}
+              {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
+              {activeTab === 'hod' && <HodHubView />}
+              {activeTab === 'lernstudio' && (
+                <LernstudioView
+                  sets={lernstudioSets || []}
+                  groups={groups || []}
+                  schoolName={profile?.displayNameAr || profile?.displayName || 'Glück'}
+                  teacherName={profile?.displayName}
+                  onSaveSet={saveLernstudioSet}
+                  onDeleteSet={deleteLernstudioSet}
+                  language={language}
+                />
+              )}
+            </React.Suspense>
 
             {/* Generous Clearance Spacer for Floating BottomNav */}
             <div className="h-16 sm:h-20 w-full pointer-events-none shrink-0" aria-hidden="true" />
@@ -623,28 +626,30 @@ function MainApp() {
                   exit={{ opacity: 0, y: -6 }}
                   transition={{ duration: 0.15 }}
                 >
-                  {activeTab === 'home' && <DesktopDashboard />}
-                  {activeTab === 'schedule' && <ScheduleView />}
-                  {activeTab === 'students' && <StudentsView />}
-                  {activeTab === 'history' && <SessionHistoryView />}
-                  {activeTab === 'payments' && <FinanceView />}
-                  {activeTab === 'reports' && <ReportsView />}
-                  {activeTab === 'settings' && <SettingsView />}
-                  {activeTab === 'freeTime' && <FreeTimeSlotsView />}
-                  {activeTab === 'certificates' && <CertificateCenter />}
-                  {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
-                  {activeTab === 'hod' && <HodHubView />}
-                  {activeTab === 'lernstudio' && (
-                    <LernstudioView
-                      sets={lernstudioSets || []}
-                      groups={groups || []}
-                      schoolName={profile?.displayNameAr || profile?.displayName || 'Glück'}
-                      teacherName={profile?.displayName}
-                      onSaveSet={saveLernstudioSet}
-                      onDeleteSet={deleteLernstudioSet}
-                      language={language}
-                    />
-                  )}
+                  <React.Suspense fallback={<LoadingScreen />}>
+                    {activeTab === 'home' && <DesktopDashboard />}
+                    {activeTab === 'schedule' && <ScheduleView />}
+                    {activeTab === 'students' && <StudentsView />}
+                    {activeTab === 'history' && <SessionHistoryView />}
+                    {activeTab === 'payments' && <FinanceView />}
+                    {activeTab === 'reports' && <ReportsView />}
+                    {activeTab === 'settings' && <SettingsView />}
+                    {activeTab === 'freeTime' && <FreeTimeSlotsView />}
+                    {activeTab === 'certificates' && <CertificateCenter />}
+                    {activeTab === 'schoolSchedule' && <SchoolScheduleView />}
+                    {activeTab === 'hod' && <HodHubView />}
+                    {activeTab === 'lernstudio' && (
+                      <LernstudioView
+                        sets={lernstudioSets || []}
+                        groups={groups || []}
+                        schoolName={profile?.displayNameAr || profile?.displayName || 'Glück'}
+                        teacherName={profile?.displayName}
+                        onSaveSet={saveLernstudioSet}
+                        onDeleteSet={deleteLernstudioSet}
+                        language={language}
+                      />
+                    )}
+                  </React.Suspense>
                 </motion.div>
               </AnimatePresence>
             </div>
@@ -653,23 +658,25 @@ function MainApp() {
       </div>
 
       {/* ================= SHARED GLOBAL MODALS & DIALOGS ================= */}
-      <FloatingNetworkMonitor />
-      {isControlModalOpen && <LessonControlModal />}
-      {isAddLessonModalOpen && <AddLessonModal onClose={() => setIsAddLessonModalOpen(false)} />}
-      {isAddQuickLessonModalOpen && <AddQuickLessonModal onClose={() => setIsAddQuickLessonModalOpen(false)} />}
-      {isStartLessonNowModalOpen && <StartLessonNowModal onClose={() => setIsStartLessonNowModalOpen(false)} />}
-      {isAddStudentModalOpen && <AddStudentModal onClose={() => setIsAddStudentModalOpen(false)} />}
-      {isAddGroupModalOpen && <AddGroupModal onClose={() => setIsAddGroupModalOpen(false)} />}
-      {isBackupModalOpen && <BackupModal onClose={() => setIsBackupModalOpen(false)} />}
-      <GlobalSearchModal />
-      <RecentlyDeletedModal />
-      <SetupWizard />
-      {quickTransactionType && (
-        <AddFinanceTransactionModal
-          type={quickTransactionType}
-          onClose={() => setQuickTransactionType(null)}
-        />
-      )}
+      <React.Suspense fallback={null}>
+        <FloatingNetworkMonitor />
+        {isControlModalOpen && <LessonControlModal />}
+        {isAddLessonModalOpen && <AddLessonModal onClose={() => setIsAddLessonModalOpen(false)} />}
+        {isAddQuickLessonModalOpen && <AddQuickLessonModal onClose={() => setIsAddQuickLessonModalOpen(false)} />}
+        {isStartLessonNowModalOpen && <StartLessonNowModal onClose={() => setIsStartLessonNowModalOpen(false)} />}
+        {isAddStudentModalOpen && <AddStudentModal onClose={() => setIsAddStudentModalOpen(false)} />}
+        {isAddGroupModalOpen && <AddGroupModal onClose={() => setIsAddGroupModalOpen(false)} />}
+        {isBackupModalOpen && <BackupModal onClose={() => setIsBackupModalOpen(false)} />}
+        <GlobalSearchModal />
+        <RecentlyDeletedModal />
+        <SetupWizard />
+        {quickTransactionType && (
+          <AddFinanceTransactionModal
+            type={quickTransactionType}
+            onClose={() => setQuickTransactionType(null)}
+          />
+        )}
+      </React.Suspense>
     </div>
   );
 }

@@ -1,42 +1,75 @@
 const { app, BrowserWindow, protocol } = require('electron');
 const path = require('path');
 
+// Single instance lock to prevent duplicate heavy Electron processes
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  process.exit(0);
+}
+
+// Chromium GPU Acceleration & Hardware Rendering flags for Linux (X11 & Wayland) and Desktop
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,CanvasOopRasterization,RasterColorConversion');
+app.commandLine.appendSwitch('ozone-platform-hint', 'auto'); // Auto-detect Wayland vs X11 on Linux
+app.commandLine.appendSwitch('renderer-process-limit', '4');
+app.commandLine.appendSwitch('disk-cache-size', '104857600'); // 100 MB disk cache cap
+
+let mainWindow = null;
+
 function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    minWidth: 900,
+    minHeight: 600,
+    show: false, // Prevent white flash on Linux startup
+    backgroundColor: '#0f172a', // Matches dark theme background
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false
+      contextIsolation: false,
+      backgroundThrottling: true, // Throttles background timers when minimized to save CPU/RAM
+      spellcheck: false, // Saves ~100MB+ RAM by disabling Chromium spellcheck dictionaries
+      webSecurity: false
     },
     icon: path.join(__dirname, '../dist/icon.png')
   });
 
-  // Load the index.html from a url
-  win.loadFile(path.join(__dirname, '../dist/index.html'));
-  
-  // Optional: Open the DevTools.
-  // win.webContents.openDevTools()
+  // Load the compiled index.html
+  mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+
+  // Reveal window seamlessly when ready to render
+  mainWindow.once('ready-to-show', () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
   createWindow();
 
   app.on('activate', () => {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();

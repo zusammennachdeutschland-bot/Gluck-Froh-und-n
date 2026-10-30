@@ -84,9 +84,28 @@ export default defineConfig(() => {
     build: {
       cssMinify: true,
       minify: 'esbuild' as const,
+      chunkSizeWarningLimit: 2000,
       rollupOptions: {
         input: {
           main: path.resolve(__dirname, 'index.html')
+        },
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('lucide-react')) {
+                return 'vendor-icons';
+              }
+              if (id.includes('recharts')) {
+                return 'vendor-charts';
+              }
+              if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('canvas-confetti')) {
+                return 'vendor-export-pdf';
+              }
+              if (id.includes('@capacitor') || id.includes('localforage')) {
+                return 'vendor-capacitor-storage';
+              }
+            }
+          }
         }
       }
     },

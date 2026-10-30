@@ -286,7 +286,7 @@ export const LessonControlModal: React.FC = () => {
         setStudentPayments(initialMap);
       }
       setShowReportForm(true);
-      setIsEditingReport(false);
+      setIsEditingReport(true);
     } else if (selectedLesson) {
       setAmountPaid(selectedLesson.amountDue);
       setPaymentStatus(selectedLesson.paymentStatus);
@@ -2383,32 +2383,7 @@ export const LessonControlModal: React.FC = () => {
             </>
           )}
 
-          {/* UNIFIED REPORT & COMMUNICATION TRIGGER */}
-          <div className="pt-2 border-t border-slate-100 dark:border-surface-border flex items-center justify-between gap-2">
-            <p className="text-[11px] font-bold text-text-muted">
-              {t('auto_parent_communication')}
-            </p>
 
-            <button
-              type="button"
-              disabled={selectedLesson.status !== 'completed'}
-              onClick={() => {
-                if (selectedLesson.status !== 'completed') {
-                  alert(t('alert_finish_lesson_first'));
-                  return;
-                }
-                setShowArabicParentReportModal(true);
-              }}
-              className={`font-black text-xs py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-2xs ${
-                selectedLesson.status === 'completed'
-                  ? 'bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white cursor-pointer'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed border border-slate-200/50'
-              }`}
-            >
-              <Send className="w-3.5 h-3.5 shrink-0" />
-              <span>فتح تقرير ولي الأمر والتواصل</span>
-            </button>
-          </div>
         </div>
       </div>
 

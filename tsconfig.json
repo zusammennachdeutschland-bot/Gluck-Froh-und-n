@@ -24,7 +24,6 @@
     "noEmit": true
   },
   "exclude": [
-    "parent-portal",
     "dist",
     "node_modules",
     "release",

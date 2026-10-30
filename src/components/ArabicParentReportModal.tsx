@@ -1203,6 +1203,14 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
     }
   };
 
+  const studentPhoneVal = (activeStudent?.studentPhone || activeStudent?.phone || '').trim();
+  const parentPhoneVal = (activeStudent?.parentPhone || '').trim();
+  const hasStudentDirectPhone = Boolean(
+    studentPhoneVal &&
+    studentPhoneVal.length > 0 &&
+    (!parentPhoneVal || studentPhoneVal.replace(/\D/g, '') !== parentPhoneVal.replace(/\D/g, ''))
+  );
+
   return (
     <div 
       onClick={(e) => {
@@ -1214,7 +1222,7 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className={`bg-surface border border-surface-border w-full max-w-xl rounded-t-[28px] sm:rounded-2xl shadow-2xl flex flex-col h-[94dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden animate-scale-up ${language === 'ar' ? 'text-right' : 'text-left'}`} 
+        className={`bg-surface border border-surface-border w-full max-w-xl rounded-t-[28px] sm:rounded-2xl shadow-2xl flex flex-col max-h-[92dvh] sm:max-h-[90vh] h-auto overflow-hidden animate-scale-up ${language === 'ar' ? 'text-right' : 'text-left'}`} 
         dir={language === 'ar' ? 'rtl' : 'ltr'}
       >
         <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
@@ -1331,20 +1339,7 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
             </div>
           )}
 
-          {/* Warnings for missing topic, missing homework, or unrecorded attendance */}
-          {(taughtTodayInfo.isMissing || homeworkInfo.isMissing || unrecordedStudents.length > 0) && (
-            <div className="p-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl text-[11px] font-bold text-amber-800 dark:text-amber-200 space-y-1">
-              {taughtTodayInfo.isMissing && (
-                <div>⚠️ {_t('تنبيه: لم يتم تحديد ما تم شرحه في الحصة (تم استبعاد ملاحظات المعلم الخاصة حفاظاً على الخصوصية).', 'Warning: Lesson topic is not specified (private teacher notes are excluded).', 'Warnung: Unterrichtsthema nicht angegeben (private Lehrernotizen sind ausgeschlossen).')}</div>
-              )}
-              {homeworkInfo.isMissing && (
-                <div>⚠️ {_t('تنبيه: الواجب المطلوب غير محدد (تم إخفاء قسم الواجب من الرسالة بدلاً من طباعة "لا يوجد واجب").', 'Warning: Homework is not specified (homework section omitted).', 'Warnung: Hausaufgabe nicht angegeben (Abschnitt ausgeblendet).')}</div>
-              )}
-              {unrecordedStudents.length > 0 && (
-                <div>⚠️ {_t(`تنبيه: يوجد ${unrecordedStudents.length} طالب لم يُسجّل حضورهم بعد (لم يتم إدراجهم كغائبين).`, `Warning: ${unrecordedStudents.length} student(s) have unrecorded attendance (not listed as absent).`, `Warnung: ${unrecordedStudents.length} Schüler ohne erfasste Anwesenheit (nicht als abwesend gelistet).`)}</div>
-              )}
-            </div>
-          )}
+
 
           {/* Student Selection List (For individual reports) */}
           {activeTab === 'individual' && groupStudents.length > 0 && (
@@ -1829,89 +1824,77 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
 
         </div>
 
-        {/* Footer Actions - Standardized Primary & Secondary Hierarchy */}
-        <div className="p-3 bg-surface border-t border-surface-border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 shrink-0 pb-[max(12px,env(safe-area-inset-bottom,12px))] shadow-lg z-10">
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 flex-1 min-w-0">
-            {isGroupLesson ? (
-              <>
-                {/* Send to Parent (Primary) */}
-                <button
-                  id="send-whatsapp-parent-btn"
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleWhatsAppSend('parent');
-                  }}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs min-h-[42px] whitespace-nowrap shrink-0"
-                  title={_t(`إرسال تقرير لولي أمر (${activeStudent?.name || 'الطالب'})`, `Send to parent (${activeStudent?.name || 'Student'})`, `An Eltern senden`)}
-                >
-                  <Send className="w-4 h-4 shrink-0" />
-                  <span className="truncate">
-                    {_t(
-                      `إرسال لولي الأمر (${activeStudent?.name || 'الطالب'})`,
-                      `Send to Parent (${activeStudent?.name || 'Student'})`,
-                      `An Eltern senden`
-                    )}
-                  </span>
-                </button>
-
-                {/* Send to Group */}
-                <button
-                  id="send-whatsapp-group-btn"
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleWhatsAppSend('group');
-                  }}
-                  className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 min-h-[42px] whitespace-nowrap shrink-0"
-                  title={_t('إرسال تقرير الحصة لجروب الواتساب', 'Send report to WhatsApp Group', 'Bericht an WhatsApp-Gruppe senden')}
-                >
-                  <Users className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                  <span className="truncate">
-                    {groupWhatsAppLink
-                      ? t('auto_send_to_whatsapp_group')
-                      : _t('واتساب الجروب', 'WhatsApp Group', 'WhatsApp-Gruppe')}
-                  </span>
-                </button>
-              </>
+        {/* Footer Actions - Clean, unified, responsive action bar */}
+        <div className="p-2.5 sm:p-3 bg-surface border-t border-surface-border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0 pb-[max(10px,env(safe-area-inset-bottom,10px))] shadow-lg z-10">
+          <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+            {/* Primary WhatsApp Action:
+                - In Group Report Mode (`activeTab === 'bulk'`): HIDE "An Eltern senden"! Show ONLY "An WhatsApp-Gruppe senden".
+                - In Individual Report Mode (`activeTab === 'individual'`): Show "Send to Parent" (or Send via WhatsApp)
+            */}
+            {activeTab === 'bulk' ? (
+              <button
+                id="send-whatsapp-group-btn"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleWhatsAppSend('group');
+                }}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs min-h-[40px] whitespace-nowrap"
+                title={_t('إرسال تقرير الحصة لجروب الواتساب', 'Send report to WhatsApp Group', 'Bericht an WhatsApp-Gruppe senden')}
+              >
+                <Users className="w-4 h-4 shrink-0" />
+                <span className="truncate">
+                  {groupWhatsAppLink
+                    ? t('auto_send_to_whatsapp_group')
+                    : _t('إرسال لجروب الواتساب', 'Send to WhatsApp Group', 'An WhatsApp-Gruppe senden')}
+                </span>
+              </button>
             ) : (
               <button
+                id="send-whatsapp-parent-btn"
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleWhatsAppSend('parent');
                 }}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs min-h-[42px] whitespace-nowrap shrink-0"
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs min-h-[40px] whitespace-nowrap"
+                title={_t(`إرسال تقرير لولي أمر (${activeStudent?.name || 'الطالب'})`, `Send to parent (${activeStudent?.name || 'Student'})`, `An Eltern senden`)}
               >
                 <Send className="w-4 h-4 shrink-0" />
                 <span className="truncate">
-                  {t('auto_send_via_whatsapp')} ({activeStudent?.name || 'الطالب'})
+                  {_t(
+                    `إرسال لولي الأمر (${activeStudent?.name || 'الطالب'})`,
+                    `Send to Parent (${activeStudent?.name || 'Student'})`,
+                    `An Eltern senden`
+                  )}
                 </span>
               </button>
             )}
 
-            {activeStudent?.studentPhone && (
+            {/* Direct Student WhatsApp Button (Conditional: registered student phone && different from parent phone) */}
+            {hasStudentDirectPhone && (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleWhatsAppSend('student');
                 }}
-                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[42px] whitespace-nowrap shrink-0"
-                title={_t('إرسال الواجب والتقرير للطالب مباشرة', 'Send homework & report to student directly', 'Hausaufgabe an Schüler direkt senden')}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[40px] whitespace-nowrap shrink-0"
+                title={_t('إرسال الواجب والتقرير للطالب مباشرة على الواتساب', 'Send homework & report to student directly on WhatsApp', 'Hausaufgabe an Schüler direkt senden')}
               >
-                <Send className="w-4 h-4 shrink-0" />
+                <Send className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{_t('للطالب نفسه', 'To Student', 'An Schüler')}</span>
               </button>
             )}
 
+            {/* Print Button */}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 handlePrint();
               }}
-              className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 min-h-[42px] shrink-0"
+              className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[40px] shrink-0"
               title={t('auto_print')}
             >
               <Printer className="w-4 h-4" />
@@ -1920,11 +1903,12 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Call Parent Button (Individual tab only) */}
             {activeTab === 'individual' && resolvedContact.hasContact && !resolvedContact.isUsername && (
               <a
                 href={`tel:${resolvedContact.contact}`}
                 onClick={(e) => e.stopPropagation()}
-                className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 min-h-[42px]"
+                className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[40px]"
                 title={t('auto_phone_call')}
               >
                 <Phone className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
@@ -1932,6 +1916,7 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
               </a>
             )}
 
+            {/* Go to Homescreen / Startseite Button */}
             <button
               type="button"
               onClick={(e) => {
@@ -1943,7 +1928,7 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
                   onClose();
                 }
               }}
-              className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs py-2.5 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-slate-200 dark:border-slate-700 min-h-[42px]"
+              className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-surface-border min-h-[40px]"
             >
               <Home className="w-4 h-4 shrink-0 text-slate-500" />
               <span className="truncate">{t('auto_go_to_homescreen')}</span>

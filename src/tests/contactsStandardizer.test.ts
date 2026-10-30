@@ -123,10 +123,11 @@ export function runContactsStandardizerTests(): { passed: number; failed: number
   assert(isContactAlreadyStandardized("ahmed's mom - klasse 4", "Ahmed's Mom - Klasse 4") === true, 'Case-insensitive match');
   assert(isContactAlreadyStandardized("Mama Ahmed", "Ahmed's Mom - Klasse 4") === false, 'Different name detected');
 
-  // 9. Two-part English name formatting tests
+  // 9. English name formatting tests (supports up to 3 parts / triple names)
   assert(cleanEnglishName('ahmed ibrahim') === 'Ahmed Ibrahim', '2-part name title case');
-  assert(cleanEnglishName('farida osama mohamed ali') === 'Farida Osama', '4-part name truncated to 2-part');
-  assert(cleanEnglishName('abdel rahman mourad hamed') === 'Abdelrahman Mourad', 'Compound prefix handled');
+  assert(cleanEnglishName('farida osama mohamed ali') === 'Farida Osama Mohamed', '4-part name formatted to 3-part (triple name)');
+  assert(cleanEnglishName('yomna mourad hamed') === 'Yomna Mourad Hamed', '3-part name fully preserved');
+  assert(cleanEnglishName('abdel rahman mourad hamed') === 'Abdelrahman Mourad Hamed', 'Compound prefix handled with 3 parts preserved');
   assert(cleanEnglishName('Lukas') === 'Lukas', 'Single name preserved');
 
   return { passed, failed, errors };

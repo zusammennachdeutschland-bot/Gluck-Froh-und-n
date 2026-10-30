@@ -103,6 +103,8 @@ export const safeLocalStorageSetItem = (
   }
 };
 
+const writeDebounceTimers: Record<string, any> = {};
+
 export const storage = {
   async getItem<T>(key: string): Promise<T | null> {
     try {
@@ -139,7 +141,7 @@ export const storage = {
   },
 
   async setItem<T>(key: string, value: T): Promise<void> {
-    // Keep memory store updated always
+    // Keep memory store updated synchronously in O(1)
     memoryStore[key] = value;
 
     let savedInForage = false;
@@ -152,13 +154,25 @@ export const storage = {
       console.warn('Error writing to localforage:', key, e);
     }
 
-    try {
-      if (isLocalStorageSupported) {
-        const valStr = typeof value === 'string' ? value : JSON.stringify(value);
-        safeLocalStorageSetItem(key, valStr, savedInForage);
+    // Defer synchronous localStorage serialization to requestIdleCallback/setTimeout
+    // to keep UI thread 100% smooth and non-blocking
+    if (isLocalStorageSupported) {
+      if (writeDebounceTimers[key]) {
+        clearTimeout(writeDebounceTimers[key]);
       }
-    } catch (e) {
-      console.warn('Error serializing for localStorage:', key, e);
+
+      const isHeavy = HEAVY_EVICTABLE_LOCALSTORAGE_KEYS.includes(key);
+      const delay = isHeavy ? 200 : 30;
+
+      writeDebounceTimers[key] = setTimeout(() => {
+        delete writeDebounceTimers[key];
+        try {
+          const valStr = typeof value === 'string' ? value : JSON.stringify(value);
+          safeLocalStorageSetItem(key, valStr, savedInForage);
+        } catch (e) {
+          console.warn('Error serializing for localStorage:', key, e);
+        }
+      }, delay);
     }
   },
 

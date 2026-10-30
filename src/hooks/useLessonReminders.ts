@@ -18,6 +18,7 @@ export const useLessonReminders = () => {
       if (!profile || (profile.enableLessonAlerts === false && profile.enableBrowserPush === false && !notificationSettings.masterEnabled)) return;
 
       const checkReminders = async () => {
+        if (typeof document !== 'undefined' && document.hidden) return;
         try {
           const now = new Date();
           const todayStr = formatLocalDate(now);
