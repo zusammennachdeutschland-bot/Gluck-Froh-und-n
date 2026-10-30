@@ -2,10 +2,12 @@ import { SchoolSettings, VisitRecord, StageFollowUpRecord, StudentActionPlan } f
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Capacitor } from '@capacitor/core';
+import { escapeHtml } from './securityUtils';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { sanitizeModernCssColors } from './certificateExportUtils';
 import { getReportSchoolLogoHtml, getEffectiveSchoolName, getReportSchoolNameHtml } from './alsunLogoData';
+import { formatLocalDate } from './timeUtils';
 
 export function getVisitsForStageReport(
   record: StageFollowUpRecord,
@@ -52,22 +54,22 @@ export function generateStageFollowUpFirstPageContentHtml(
   '</div>';
 
   const schoolNameHtml = getReportSchoolNameHtml(settings, { isRtl, tag: 'h1', fontSize: '14pt' });
-  const departmentName = settings.departmentName || '';
-  const academicYear = settings.academicYear || '';
-  const term = settings.currentTerm || '';
+  const departmentName = escapeHtml(settings.departmentName || '');
+  const academicYear = escapeHtml(settings.academicYear || '');
+  const term = escapeHtml(settings.currentTerm || '');
   const hodName = settings.hodName || '';
 
   const periodLabel = record.periodType === 'weekly' ? 'أسبوعية' : record.periodType === 'monthly' ? 'شهرية' : 'فصلية';
-  const weekLabel = record.weekNumber ? ` - الأسبوع ${record.weekNumber}` : '';
+  const weekLabel = record.weekNumber ? ` - الأسبوع ${escapeHtml(record.weekNumber)}` : '';
 
   const teacherRowsHtml = record.teachersData.map((td, index) => {
     const evals = [
-      td.curriculumAdherence ? `<b>المنهج:</b> ${td.curriculumAdherence}` : '',
-      td.bookletChecking ? `<b>الكراسات:</b> ${td.bookletChecking}` : '',
-      td.classroomManagement ? `<b>إدارة الفصل:</b> ${td.classroomManagement}` : '',
-      td.punctuality ? `<b>المواعيد:</b> ${td.punctuality}` : '',
-      td.complaintsStatus ? `<b>الشكاوى:</b> ${td.complaintsStatus}` : '',
-      td.customNotes ? `<b>ملاحظات:</b> ${td.customNotes}` : ''
+      td.curriculumAdherence ? `<b>المنهج:</b> ${escapeHtml(td.curriculumAdherence)}` : '',
+      td.bookletChecking ? `<b>الكراسات:</b> ${escapeHtml(td.bookletChecking)}` : '',
+      td.classroomManagement ? `<b>إدارة الفصل:</b> ${escapeHtml(td.classroomManagement)}` : '',
+      td.punctuality ? `<b>المواعيد:</b> ${escapeHtml(td.punctuality)}` : '',
+      td.complaintsStatus ? `<b>الشكاوى:</b> ${escapeHtml(td.complaintsStatus)}` : '',
+      td.customNotes ? `<b>ملاحظات:</b> ${escapeHtml(td.customNotes)}` : ''
     ].filter(Boolean).join('<br/>');
 
     const visitsInfo = td.visitsCount > 0 ? `${td.visitsCount} زيارة (متوسط ${td.visitsAvgScore}/75)` : 'لا توجد زيارات جديدة';
@@ -75,14 +77,14 @@ export function generateStageFollowUpFirstPageContentHtml(
 
     return '<tr>' +
       `<td style="text-align: center; font-weight: bold; vertical-align: middle;">${index + 1}</td>` +
-      `<td style="text-align: right; font-weight: bold; padding: 5px 6px; vertical-align: middle;">${td.teacherName}</td>` +
-      `<td style="text-align: center; vertical-align: middle; padding: 5px;">${(td.assignedClasses || []).join(', ') || '-'}<br/><small style="color: #475569;">(${td.totalSessions || 0} حصة/أسبوع)</small></td>` +
+      `<td style="text-align: right; font-weight: bold; padding: 5px 6px; vertical-align: middle;">${escapeHtml(td.teacherName)}</td>` +
+      `<td style="text-align: center; vertical-align: middle; padding: 5px;">${escapeHtml((td.assignedClasses || []).join(', ') || '-')}<br/><small style="color: #475569;">(${td.totalSessions || 0} حصة/أسبوع)</small></td>` +
       `<td style="text-align: center; font-size: 8.5pt; vertical-align: middle; padding: 5px;"><div style="margin-bottom: 2px;">${visitsInfo}</div><div style="color: ${td.complaintsCount > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold;">${complaintsInfo}</div></td>` +
       `<td style="text-align: right; font-size: 8.5pt; line-height: 1.35; padding: 5px 6px; vertical-align: middle;">${evals || 'لا توجد تقييمات مسجلة.'}</td>` +
     '</tr>';
   }).join('');
 
-  const formattedHodName = hodName.replace(/^أ[\.\/]\s*/, '');
+  const formattedHodName = escapeHtml(hodName.replace(/^أ[\.\/]\s*/, ''));
 
   return '<div class="stage-report-single-page">' +
     '<div class="stage-report-main-content">' +
@@ -96,11 +98,11 @@ export function generateStageFollowUpFirstPageContentHtml(
       '</div>' +
       '<div class="title">تقرير متابعة وتقييم معلمي المرحلة (' + periodLabel + weekLabel + ')</div>' +
       '<div class="meta-grid">' +
-        '<div class="meta-item"><span class="meta-label">المرحلة / الصفوف:</span> ' + record.gradeBand + '</div>' +
-        '<div class="meta-item"><span class="meta-label">مدير المرحلة:</span> ' + (record.stageManagerName || '..................................') + '</div>' +
+        '<div class="meta-item"><span class="meta-label">المرحلة / الصفوف:</span> ' + escapeHtml(record.gradeBand) + '</div>' +
+        '<div class="meta-item"><span class="meta-label">مدير المرحلة:</span> ' + escapeHtml(record.stageManagerName || '..................................') + '</div>' +
         '<div class="meta-item"><span class="meta-label">نوع المتابعة:</span> متابعة ' + periodLabel + '</div>' +
-        '<div class="meta-item"><span class="meta-label">رقم الأسبوع:</span> الأسبوع ' + (record.weekNumber || 1) + '</div>' +
-        '<div class="meta-item"><span class="meta-label">تاريخ المتابعة:</span> ' + record.date + '</div>' +
+        '<div class="meta-item"><span class="meta-label">رقم الأسبوع:</span> الأسبوع ' + escapeHtml(record.weekNumber || 1) + '</div>' +
+        '<div class="meta-item"><span class="meta-label">تاريخ المتابعة:</span> ' + escapeHtml(record.date) + '</div>' +
         '<div class="meta-item"><span class="meta-label">رئيس القسم:</span> ' + formattedHodName + '</div>' +
         '<div class="meta-item" style="grid-column: span 2;"><span class="meta-label">عدد المعلمين التابعين:</span> ' + record.teachersData.length + ' معلم</div>' +
       '</div>' +
@@ -134,17 +136,17 @@ export function generateStageFollowUpFirstPageContentHtml(
             '</thead>' +
             '<tbody>' +
               record.includedVisits.map((v: any, i) => {
-                const teacherName = v.teacherName || '-';
-                const classGrade = v.className || v.class || v.gradeClass || '-';
-                const dateVal = v.visitedDate || v.date || '-';
-                const topic = v.lessonTopic || v.topic || v.focusAreas || 'زيارة صفية دورية';
+                const teacherName = escapeHtml(v.teacherName || '-');
+                const classGrade = escapeHtml(v.className || v.class || v.gradeClass || '-');
+                const dateVal = escapeHtml(v.visitedDate || v.date || '-');
+                const topic = escapeHtml(v.lessonTopic || v.topic || v.focusAreas || 'زيارة صفية دورية');
                 const scoreVal = v.overallScore ?? v.totalScore ?? v.score;
-                const scoreText = (scoreVal !== undefined && scoreVal !== null) ? `${scoreVal}/75` : '-';
-                const catText = v.overallCategory ? ` (${v.overallCategory})` : '';
+                const scoreText = (scoreVal !== undefined && scoreVal !== null) ? `${escapeHtml(scoreVal)}/75` : '-';
+                const catText = v.overallCategory ? ` (${escapeHtml(v.overallCategory)})` : '';
                 return '<tr>' +
                   `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
                   `<td style="text-align: right; font-weight: bold;">${teacherName}</td>` +
-                  `<td style="text-align: center;">${classGrade}${v.periodNumber ? ' - ح' + v.periodNumber : ''}</td>` +
+                  `<td style="text-align: center;">${classGrade}${v.periodNumber ? ' - ح' + escapeHtml(v.periodNumber) : ''}</td>` +
                   `<td style="text-align: center; font-mono;">${dateVal}</td>` +
                   `<td style="text-align: right;">${topic}</td>` +
                   `<td style="text-align: center; font-weight: bold; color: #2563eb;">${scoreText}${catText}</td>` +
@@ -171,8 +173,8 @@ export function generateStageFollowUpFirstPageContentHtml(
                 const isResolved = c.actionTaken && c.actionTaken.includes('RESOLVED');
                 return '<tr>' +
                   `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-                  `<td style="text-align: right; font-weight: bold;">${c.studentNameAr || c.studentNameEn} (${c.gradeClass})</td>` +
-                  `<td style="text-align: right;">${c.reason}</td>` +
+                  `<td style="text-align: right; font-weight: bold;">${escapeHtml(c.studentNameAr || c.studentNameEn)} (${escapeHtml(c.gradeClass)})</td>` +
+                  `<td style="text-align: right;">${escapeHtml(c.reason)}</td>` +
                   `<td style="text-align: center; font-weight: bold;">${isResolved ? 'تم الحل' : 'قيد المتابعة'}</td>` +
                 '</tr>';
               }).join('') +
@@ -197,8 +199,8 @@ export function generateStageFollowUpFirstPageContentHtml(
                 const isResolved = plan.status === 'RESOLVED';
                 return '<tr>' +
                   `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-                  `<td style="text-align: right; font-weight: bold;">${plan.studentNameAr || plan.studentNameEn} (${plan.gradeClass})</td>` +
-                  `<td style="text-align: right;">أ/ ${plan.teacherName} — ${(plan.weaknessAreas || []).join('، ')}</td>` +
+                  `<td style="text-align: right; font-weight: bold;">${escapeHtml(plan.studentNameAr || plan.studentNameEn)} (${escapeHtml(plan.gradeClass)})</td>` +
+                  `<td style="text-align: right;">أ/ ${escapeHtml(plan.teacherName)} — ${escapeHtml((plan.weaknessAreas || []).join('، '))}</td>` +
                   `<td style="text-align: center; font-weight: bold;">${isResolved ? 'مغلقة' : 'نشطة'}</td>` +
                 '</tr>';
               }).join('') +
@@ -237,7 +239,7 @@ export function generateStageFollowUpFirstPageContentHtml(
                     const score = td.disciplineScore !== undefined ? td.disciplineScore : 100;
                     return '<tr>' +
                       `<td style="text-align: center; font-weight: bold;">${i + 1}</td>` +
-                      `<td style="text-align: right; font-weight: bold; padding: 4px 6px;">${td.teacherName}</td>` +
+                      `<td style="text-align: right; font-weight: bold; padding: 4px 6px;">${escapeHtml(td.teacherName)}</td>` +
                       `<td style="text-align: center; color: ${absences > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold;">${absences}</td>` +
                       `<td style="text-align: center; color: ${late > 0 ? '#d97706' : '#16a34a'}; font-weight: bold;">${late}</td>` +
                       `<td style="text-align: center; color: ${early > 0 ? '#ea580c' : '#16a34a'}; font-weight: bold;">${early}</td>` +
@@ -275,19 +277,19 @@ export function generateStageFollowUpFirstPageContentHtml(
               '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
                 '<b style="color: #dc2626;">المعلمون الأكثر غياباً (Most Absent):</b><br/>' +
                 ((record.attendanceSummary?.mostAbsentTeachers && record.attendanceSummary.mostAbsentTeachers.length > 0)
-                  ? record.attendanceSummary.mostAbsentTeachers.map(t => `${t.name} (${t.count} أيام)`).join('، ')
+                  ? record.attendanceSummary.mostAbsentTeachers.map(t => `${escapeHtml(t.name)} (${t.count} أيام)`).join('، ')
                   : 'لا توجد حالات غياب') +
               '</div>' +
               '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
                 '<b style="color: #d97706;">الأكثر تأخيراً (Most Late):</b><br/>' +
                 ((record.attendanceSummary?.mostLateTeachers && record.attendanceSummary.mostLateTeachers.length > 0)
-                  ? record.attendanceSummary.mostLateTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
+                  ? record.attendanceSummary.mostLateTeachers.map(t => `${escapeHtml(t.name)} (${t.minutes}m)`).join('، ')
                   : 'لا توجد تأخيرات') +
               '</div>' +
               '<div style="flex: 1; border: 1px solid #000; padding: 4px; background: #fafafa; font-size: 7.5pt;">' +
                 '<b style="color: #ea580c;">الأكثر انصرافاً مبكراً (Early Leave):</b><br/>' +
                 ((record.attendanceSummary?.mostEarlyLeaveTeachers && record.attendanceSummary.mostEarlyLeaveTeachers.length > 0)
-                  ? record.attendanceSummary.mostEarlyLeaveTeachers.map(t => `${t.name} (${t.minutes}m)`).join('، ')
+                  ? record.attendanceSummary.mostEarlyLeaveTeachers.map(t => `${escapeHtml(t.name)} (${t.minutes}m)`).join('، ')
                   : 'لا توجد حالات') +
               '</div>' +
             '</div>' +
@@ -297,7 +299,7 @@ export function generateStageFollowUpFirstPageContentHtml(
       (record.overallStageNotes ? (
         '<div class="feedback-section">' +
           '<div class="feedback-title">توصيات وملاحظات رئيس القسم العامة للمرحلة:</div>' +
-          '<div style="font-size: 9pt; font-weight: 500; line-height: 1.4; white-space: pre-wrap;">' + record.overallStageNotes + '</div>' +
+          '<div style="font-size: 9pt; font-weight: 500; line-height: 1.4; white-space: pre-wrap;">' + escapeHtml(record.overallStageNotes) + '</div>' +
         '</div>'
       ) : '') +
     '</div>' +
@@ -309,7 +311,7 @@ export function generateStageFollowUpFirstPageContentHtml(
       '</div>' +
       '<div class="sig-block">' +
         '<div class="sig-job-title">مدير المرحلة</div>' +
-        '<div class="sig-person-name" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">' + (record.stageManagerName || '..................................') + '</div>' +
+        '<div class="sig-person-name" style="letter-spacing: 2px; color: #64748b; font-weight: normal;">' + escapeHtml(record.stageManagerName || '..................................') + '</div>' +
         '<div class="sig-dotted-line">..................................</div>' +
       '</div>' +
     '</div>' +
@@ -331,7 +333,7 @@ export function generateStageFollowUpFirstPageHtml(
     '<head>' +
       '<meta charset="UTF-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-      '<title>Stage Follow-Up - ' + record.stageManagerName + '</title>' +
+      '<title>Stage Follow-Up - ' + escapeHtml(record.stageManagerName) + '</title>' +
       '<link rel="preconnect" href="https://fonts.googleapis.com">' +
       '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
       '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
@@ -391,7 +393,7 @@ export function generateStageFollowUpReportHtml(
     '<head>' +
       '<meta charset="UTF-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-      '<title>Stage Follow-Up - ' + record.stageManagerName + '</title>' +
+      '<title>Stage Follow-Up - ' + escapeHtml(record.stageManagerName) + '</title>' +
       '<link rel="preconnect" href="https://fonts.googleapis.com">' +
       '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
       '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
@@ -849,36 +851,36 @@ export function generateObservationReportContentHtml(
       '<div class="header-logo">' + logoHtml + '</div>' +
       '<div class="header-text">' +
         schoolNameHtml +
-        '<p>' + departmentName + ' | ' + academicYear + ' - ' + term + '</p>' +
+        '<p>' + escapeHtml(departmentName) + ' | ' + escapeHtml(academicYear) + ' - ' + escapeHtml(term) + '</p>' +
       '</div>' +
       '<div>' + flagHtml + '</div>' +
     '</div>' +
     '<div class="title">' + t('Teacher Classroom Observation Form', 'نموذج تقييم زيارة صفية للمعلم') + '</div>' +
     '<div class="meta-grid">' +
-      '<div class="meta-item"><span class="meta-label">' + t('Teacher Name:', 'اسم المعلم:') + '</span> ' + visit.teacherName + '</div>' +
+      '<div class="meta-item"><span class="meta-label">' + t('Teacher Name:', 'اسم المعلم:') + '</span> ' + escapeHtml(visit.teacherName) + '</div>' +
       '<div class="meta-item"><span class="meta-label">' + t('Subject:', 'المادة:') + '</span> ' + t('German', 'لغة ألمانية') + '</div>' +
-      '<div class="meta-item"><span class="meta-label">' + t('Grade/Class:', 'الفصل:') + '</span> ' + visit.className + '</div>' +
-      '<div class="meta-item"><span class="meta-label">' + t('Period:', 'الحصة:') + '</span> ' + (visit.periodNumber || '-') + '</div>' +
-      '<div class="meta-item"><span class="meta-label">' + t('Date:', 'التاريخ:') + '</span> ' + visit.visitedDate + '</div>' +
-      '<div class="meta-item"><span class="meta-label">' + t('Observer:', 'المشرف:') + '</span> ' + hodName + '</div>' +
+      '<div class="meta-item"><span class="meta-label">' + t('Grade/Class:', 'الفصل:') + '</span> ' + escapeHtml(visit.className) + '</div>' +
+      '<div class="meta-item"><span class="meta-label">' + t('Period:', 'الحصة:') + '</span> ' + escapeHtml(visit.periodNumber || '-') + '</div>' +
+      '<div class="meta-item"><span class="meta-label">' + t('Date:', 'التاريخ:') + '</span> ' + escapeHtml(visit.visitedDate) + '</div>' +
+      '<div class="meta-item"><span class="meta-label">' + t('Observer:', 'المشرف:') + '</span> ' + escapeHtml(hodName) + '</div>' +
     '</div>' +
     categoriesHtml +
     '<div class="overall-box">' +
-      '<span>' + t('Total Score', 'النتيجة الكلية') + ': <b>' + (visit.overallScore || '-') + '/75</b></span>' +
-      '<span>' + t('Category', 'التقييم العام') + ': <b>' + (visit.overallCategory || '-') + '</b></span>' +
+      '<span>' + t('Total Score', 'النتيجة الكلية') + ': <b>' + escapeHtml(String(visit.overallScore || '-')) + '/75</b></span>' +
+      '<span>' + t('Category', 'التقييم العام') + ': <b>' + escapeHtml(visit.overallCategory || '-') + '</b></span>' +
     '</div>' +
     '<div class="feedback-section">' +
       '<div class="feedback-title">' + t('Supervisor Notes & Recommendations', 'ملاحظات وتوصيات المشرف') + '</div>' +
-      '<div class="feedback-content">' + (visit.consolidatedNotes || 'لا توجد ملاحظات إضافية.') + '</div>' +
+      '<div class="feedback-content">' + escapeHtml(visit.consolidatedNotes || 'لا توجد ملاحظات إضافية.') + '</div>' +
     '</div>' +
     '<div class="signatures">' +
       '<div class="sig-block">' +
         '<div class="sig-title">' + t('Teacher\'s Signature', 'توقيع المعلم') + '</div>' +
-        '<div class="sig-line">' + visit.teacherName + '</div>' +
+        '<div class="sig-line">' + escapeHtml(visit.teacherName) + '</div>' +
       '</div>' +
       '<div class="sig-block">' +
         '<div class="sig-title">' + t('Supervisor\'s Signature', 'توقيع المشرف') + '</div>' +
-        '<div class="sig-line">' + hodName + '</div>' +
+        '<div class="sig-line">' + escapeHtml(hodName) + '</div>' +
       '</div>' +
     '</div>' +
   '</div>';
@@ -899,7 +901,7 @@ export function generateObservationReportHtml(
     '<head>' +
       '<meta charset="UTF-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-      '<title>Observation Report - ' + visit.teacherName + '</title>' +
+      '<title>Observation Report - ' + escapeHtml(visit.teacherName) + '</title>' +
       '<link rel="preconnect" href="https://fonts.googleapis.com">' +
       '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
       '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">' +
@@ -1189,7 +1191,7 @@ export async function downloadCombinedObservationReportsPdf(
     }
 
     const pdf = await generateCombinedObservationReportsPdfInstance(visits, settings, isRtl, lang, onProgress);
-    const dateStr = new Date().toISOString().slice(0, 10);
+    const dateStr = formatLocalDate();
     const teacherName = visits.length === 1 
       ? (visits[0].teacherName || 'Teacher').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_')
       : 'مجموعة_معلمين';
@@ -1427,7 +1429,7 @@ export async function shareCombinedObservationReportsViaWhatsApp(
     return shareObservationReportViaWhatsApp(visits[0], settings, isRtl, lang);
   }
 
-  const dateStr = new Date().toISOString().slice(0, 10);
+  const dateStr = formatLocalDate();
   const fileName = `تقارير_زيارات_مجمعة_${visits.length}_${dateStr}.pdf`;
   const textSummary =
     `📋 *تقارير زيارات صفية مجمعة (${visits.length} تقرير)*\n` +
@@ -1526,10 +1528,10 @@ export function generateActionPlansReportHtml(
   }
 
   const schoolNameHtml = getReportSchoolNameHtml(settings, { isRtl, tag: 'div', fontSize: '14pt' });
-  const departmentName = settings.departmentName || '';
-  const currentTerm = settings.currentTerm || '';
+  const departmentName = escapeHtml(settings.departmentName || '');
+  const currentTerm = escapeHtml(settings.currentTerm || '');
   const rawHodName = settings.hodName || '';
-  const hodName = rawHodName.replace(/^أ[\.\/]\s*/, ''); // strip prefix if present to format cleanly with أ/
+  const hodName = escapeHtml(rawHodName.replace(/^أ[\.\/]\s*/, '')); // strip prefix if present to format cleanly with أ/
 
   const activeCount = filteredPlans.filter(p => p.status === 'ACTIVE').length;
   const resolvedCount = filteredPlans.filter(p => p.status === 'RESOLVED').length;
@@ -1541,17 +1543,17 @@ export function generateActionPlansReportHtml(
   const tableRowsHtml = filteredPlans.length === 0
     ? '<tr><td colspan="7" style="text-align:center; padding: 12px; color: #64748b; font-style: italic;">لا توجد خطط دعم مسجلة تطابق محددات التصفية المختارة.</td></tr>'
     : filteredPlans.map((p, idx) => {
-        const weaknessStr = p.weaknessAreas && p.weaknessAreas.length > 0 ? p.weaknessAreas.join(' • ') : '-';
-        const actionStr = p.actionSteps && p.actionSteps.length > 0 ? p.actionSteps.join(' • ') : '-';
+        const weaknessStr = p.weaknessAreas && p.weaknessAreas.length > 0 ? escapeHtml(p.weaknessAreas.join(' • ')) : '-';
+        const actionStr = p.actionSteps && p.actionSteps.length > 0 ? escapeHtml(p.actionSteps.join(' • ')) : '-';
         const statusBadge = p.status === 'ACTIVE'
           ? '<span style="background-color: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; border: 1px solid #fcd34d; font-size: 8pt; font-weight: bold;">🟡 قيد المتابعة</span>'
           : '<span style="background-color: #d1fae5; color: #065f46; padding: 2px 8px; border-radius: 4px; border: 1px solid #6ee7b7; font-size: 8pt; font-weight: bold;">🟢 تم الإغلاق</span>';
 
         return '<tr style="background-color: ' + (idx % 2 === 0 ? '#ffffff' : '#f8fafc') + ';">' +
           `<td style="text-align: center; font-weight: bold; padding: 6px; border: 1px solid #cbd5e1;">${idx + 1}</td>` +
-          `<td style="font-weight: bold; color: #0f172a; padding: 6px; border: 1px solid #cbd5e1;">${p.studentNameAr || p.studentNameEn}${p.studentNameEn && p.studentNameAr ? `<br/><small style="color: #64748b; font-weight: normal;">(${p.studentNameEn})</small>` : ''}</td>` +
-          `<td style="text-align: center; font-weight: bold; padding: 6px; border: 1px solid #cbd5e1;">${p.gradeClass}</td>` +
-          `<td style="font-weight: bold; color: #334155; padding: 6px; border: 1px solid #cbd5e1;">${p.teacherName}</td>` +
+          `<td style="font-weight: bold; color: #0f172a; padding: 6px; border: 1px solid #cbd5e1;">${escapeHtml(p.studentNameAr || p.studentNameEn)}${p.studentNameEn && p.studentNameAr ? `<br/><small style="color: #64748b; font-weight: normal;">(${escapeHtml(p.studentNameEn)})</small>` : ''}</td>` +
+          `<td style="text-align: center; font-weight: bold; padding: 6px; border: 1px solid #cbd5e1;">${escapeHtml(p.gradeClass)}</td>` +
+          `<td style="font-weight: bold; color: #334155; padding: 6px; border: 1px solid #cbd5e1;">${escapeHtml(p.teacherName)}</td>` +
           `<td style="font-size: 8.5pt; color: #9f1239; padding: 6px; border: 1px solid #cbd5e1;">${weaknessStr}</td>` +
           `<td style="font-size: 8.5pt; color: #065f46; padding: 6px; border: 1px solid #cbd5e1;">${actionStr}</td>` +
           `<td style="text-align: center; padding: 6px; border: 1px solid #cbd5e1;">${statusBadge}</td>` +
@@ -1614,7 +1616,7 @@ export function generateActionPlansReportHtml(
       '</div>' +
 
       '<div class="metadata-bar">' +
-        '<div class="meta-item"><span class="meta-label">المرحلة التعليمية:</span> <span class="meta-value">' + stageName + '</span></div>' +
+        '<div class="meta-item"><span class="meta-label">المرحلة التعليمية:</span> <span class="meta-value">' + escapeHtml(stageName) + '</span></div>' +
         '<div class="meta-item"><span class="meta-label">الفصل الدراسي:</span> <span class="meta-value">' + currentTerm + '</span></div>' +
         '<div class="meta-item"><span class="meta-label">تاريخ الإصدار:</span> <span class="meta-value">' + new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }) + '</span></div>' +
       '</div>' +
@@ -1728,7 +1730,7 @@ export async function downloadActionPlansPdf(
     const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
 
     pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-    const fileName = `خطط_علاجية_${new Date().toISOString().split('T')[0]}.pdf`;
+    const fileName = `خطط_علاجية_${formatLocalDate()}.pdf`;
 
     await savePdfFileCrossPlatform(pdf, fileName, 'خطط علاجية للطلاب');
     return { success: true, filename: fileName };
@@ -1765,7 +1767,7 @@ export async function saveReportToPhoneStorage(
 ): Promise<{ success: boolean; filename: string; method: 'pdf' | 'share' | 'html'; error?: string }> {
   const safeTeacherName = (visit.teacherName || 'Teacher').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
   const safeClassName = (visit.className || 'Class').replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
-  const dateStr = visit.visitedDate || new Date().toISOString().split('T')[0];
+  const dateStr = visit.visitedDate || formatLocalDate();
   const pdfFileName = `تقرير_زيارة_${safeTeacherName}_${safeClassName}_${dateStr}.pdf`;
   const htmlFileName = `تقرير_زيارة_${safeTeacherName}_${safeClassName}_${dateStr}.html`;
 
@@ -1797,7 +1799,7 @@ export async function saveCombinedReportsToPhoneStorage(
     return { success: false, filename: '', method: 'pdf', error: 'No visits selected' };
   }
 
-  const dateStr = new Date().toISOString().slice(0, 10);
+  const dateStr = formatLocalDate();
   const pdfFileName = `تقارير_زيارات_مجمعة_${visits.length}_${dateStr}.pdf`;
   const htmlFileName = `تقارير_زيارات_مجمعة_${visits.length}_${dateStr}.html`;
 

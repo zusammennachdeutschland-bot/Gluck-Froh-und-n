@@ -84,6 +84,8 @@ export const formatLocalDate = (date: Date = new Date()): string => {
   return `${y}-${m}-${d}`;
 };
 
+export const getLocalDateStr = formatLocalDate;
+
 export interface TimeSlot {
   start: string;
   end: string;

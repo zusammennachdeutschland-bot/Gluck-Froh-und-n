@@ -12,7 +12,7 @@ import {
   FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment, FinanceNotification,
   TodoItem, PaymentPlanType
 } from '../types';
-import { recalculateAllAccountBalances, computeAccountBalance } from '../services/financeService';
+import { recalculateAllAccountBalances, computeAccountBalance, shouldSettlePendingCycleRecord } from '../services/financeService';
 import { 
   clearActiveLessonNotification, getPendingScheduledNotifications, 
   cancelScheduledNotification, cancelAllScheduledNotifications, rebuildAllNotificationSchedules,
@@ -23,7 +23,7 @@ import { storage } from '../services/storageService';
 import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
-import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, isGroupPerLesson } from '../utils/lessonUtils';
+import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, makeLessonSlotKey } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import LiveTimer from '../services/liveTimerPlugin';
@@ -59,7 +59,7 @@ import { alarmAudioService } from '../services/alarmAudioService';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { validateAndSanitizeBackupPayload } from '../utils/backupEngine';
+import { validateAndSanitizeBackupPayload, hasBackupSection, MAX_BACKUP_FILE_SIZE_BYTES, isBackupFileSizeValid } from '../utils/backupEngine';
 import { syncAllWidgetsToNative } from '../services/widgetService';
 
 export const DEFAULT_BOTTOM_NAV_ORDER = [
@@ -129,7 +129,7 @@ interface AppContextType {
 
   // Backup System
   lastBackupTime: string;
-  performBackup: () => void;
+  performBackup: () => Promise<string>;
   importBackupFile: (customJson?: string) => Promise<boolean>;
   exportBackupFile: () => void;
   verifyBackupIntegrity: () => BackupIntegrityReport;
@@ -173,6 +173,8 @@ interface AppContextType {
   saveLessonReport: (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number) => void;
   cancelLesson: (lessonId: string, notes?: string) => void;
   generateGroupScheduleLessons: (groupId: string, days: string[], time: string, numWeeks?: number, customDayTimes?: Record<string, string>, groupOverride?: Group) => void;
+  previewInvalidBiweeklyAutoLessons: () => Promise<Lesson[]>;
+  cleanupInvalidBiweeklyAutoLessons: (lessonIds?: string[]) => Promise<number>;
 
   // Recently Deleted (Soft Delete)
   recentlyDeleted: RecentlyDeletedData;
@@ -432,6 +434,8 @@ interface AppContextType {
   clearSyncHistory: () => Promise<void>;
   updateSyncState: (newState: SyncStateMetadata) => Promise<void>;
   startHosting: () => Promise<{ip: string, pin: string, port: number}>;
+  externalDataVersion: number;
+  bumpExternalDataVersion: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -562,6 +566,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
     }
     initSync();
+  }, []);
+
+  const [externalDataVersion, setExternalDataVersion] = useState<number>(0);
+  const bumpExternalDataVersion = useCallback(() => {
+    setExternalDataVersion(v => v + 1);
   }, []);
 
   const wrapMutation = <T extends any>(item: T): T => {
@@ -748,20 +757,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
   });
 
-  // Memory Optimization: Filter active lessons for global RAM state (current month / last 60 days + future / pending)
+  // Memory Optimization: Filter active lessons for global RAM state (current month / last 60 days + future / pending + unpaid completed for paying students up to 365 days)
   const filterActiveLessons = (raw: Lesson[]): Lesson[] => {
     const sixtyDaysAgo = new Date();
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
     const cutoffStr = formatLocalDate(sixtyDaysAgo);
 
-    const filtered = (Array.isArray(raw) ? raw : []).filter(l => {
-      if (!l) return false;
-      if (l.deleted) return false;
-      if (!l.date || typeof l.date !== 'string') return true;
-      if (l.date >= cutoffStr) return true;
-      if (l.status === 'scheduled' || isPendingStatus(l.status)) return true;
-      return false;
-    });
+    const oneYearAgo = new Date();
+    oneYearAgo.setDate(oneYearAgo.getDate() - 365);
+    const maxCutoffStr = formatLocalDate(oneYearAgo);
+
+    const filtered = (Array.isArray(raw) ? raw : []).filter(l =>
+      shouldRetainLessonInActiveWindow(l, cutoffStr, maxCutoffStr, students, groups)
+    );
 
     const bestLessons = new Map<string, Lesson>();
     filtered.forEach(lesson => {
@@ -1697,7 +1705,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           amount,
           accountId: p.financeAccountId || defaultAccId,
           categoryId: 'cat_student_fees',
-          date: (p.paidDate || p.dueDate || new Date().toISOString()).split('T')[0],
+          date: (p.paidDate || p.dueDate || formatLocalDate()).split('T')[0],
           note: `سداد اشتراك: ${p.studentName} (${p.groupName || 'مجموعة'})`,
           relatedStudentId: p.studentId,
           relatedPaymentId: p.id,
@@ -1869,14 +1877,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setActiveAlarmLesson(null);
   }, [activeAlarmLesson]);
 
+  // Rebuild notification schedules immediately on app open & foreground resume (Follow-up #2),
+  // and debounce rebuilds when lessons/students/groups/profile change.
+  const hasRebuiltOnOpenRef = useRef(false);
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const runRebuild = () => {
       rebuildAllNotificationSchedules(notificationSettings, lessons, groups, students, payments, profile, language)
         .then(() => getPendingScheduledNotifications().then(setPendingScheduledNotifications))
         .catch(err => console.warn('Auto notification schedule rebuild error:', err));
-    }, 5000);
+    };
+
+    if (!hasRebuiltOnOpenRef.current) {
+      hasRebuiltOnOpenRef.current = true;
+      runRebuild();
+      return;
+    }
+
+    const timer = setTimeout(runRebuild, 5000);
     return () => clearTimeout(timer);
   }, [lessons, students.length, groups.length, profile, language]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        rebuildAllNotificationSchedules(notificationSettings, lessons, groups, students, payments, profile, language)
+          .then(() => getPendingScheduledNotifications().then(setPendingScheduledNotifications))
+          .catch(() => {});
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibility);
+    }
+    let appListenerPromise: Promise<{ remove: () => Promise<void> }> | null = null;
+    if (Capacitor.isNativePlatform()) {
+      appListenerPromise = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) {
+          rebuildAllNotificationSchedules(notificationSettings, lessons, groups, students, payments, profile, language)
+            .then(() => getPendingScheduledNotifications().then(setPendingScheduledNotifications))
+            .catch(() => {});
+        }
+      });
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibility);
+      }
+      if (appListenerPromise) {
+        appListenerPromise.then(h => h.remove()).catch(() => {});
+      }
+    };
+  }, [notificationSettings, lessons, groups, students, payments, profile, language]);
 
   // Inspiration & Gratitude Reminders State
   const [inspirationSettings, setInspirationSettings] = useState<InspirationSettings>(() => {
@@ -2281,21 +2331,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     if (method === 'notification' || method === 'both') {
-      const inspTitle = _t('💡 الإلهام والامتنان | Glück', '💡 Daily Inspiration | Glück', '💡 Tägliche Inspiration | Glück');
       const appNotifTitle = _t('💡 إلهام وامتنان اليوم', '💡 Today\'s Inspiration', '💡 Heutige Inspiration');
-
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification(inspTitle, {
-            body: selectedMsg.text,
-            icon: '/icon.png'
-          });
-        } catch {
-          // ignore
-        }
-      }
-
-      addAppNotification(appNotifTitle, selectedMsg.text, 'system');
+      addAppNotification(appNotifTitle, selectedMsg.text, 'system', { tag: `inspiration_${todayStr}` });
     }
   }, [inspirationSettings, inspirationMessages, isInspirationDismissedToday, activeInspirationCard, lessons, _t]);
 
@@ -2312,8 +2349,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const saved = initialData['dl_notified_lesson_alerts'];
     return saved !== null && saved !== undefined && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
   });
+  const notifiedLessonAlertsRef = useRef<Record<string, boolean>>(notifiedLessonAlerts);
 
   useEffect(() => {
+    notifiedLessonAlertsRef.current = notifiedLessonAlerts;
     storage.setItem('dl_notified_lesson_alerts', notifiedLessonAlerts);
   }, [notifiedLessonAlerts]);
 
@@ -2334,9 +2373,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const lessonMins = timeParts[0] * 60 + timeParts[1];
         const diffMins = lessonMins - nowMins;
 
-        const alertKey = `${lesson.id}_${lesson.date}_30m`;
-        if (diffMins >= 0 && diffMins <= 30 && !notifiedLessonAlerts[alertKey]) {
-          setNotifiedLessonAlerts(prev => ({ ...prev, [alertKey]: true }));
+        const slotKey = lesson.groupId || lesson.studentId || lesson.id;
+        const alertKey = `${slotKey}_${lesson.date}_${lesson.time}_30m`;
+        if (diffMins >= 0 && diffMins <= 30 && !notifiedLessonAlertsRef.current[alertKey] && !notifiedLessonAlertsRef.current[`${lesson.id}_${lesson.date}_30m`]) {
+          notifiedLessonAlertsRef.current = {
+            ...notifiedLessonAlertsRef.current,
+            [alertKey]: true,
+            [`${lesson.id}_${lesson.date}_30m`]: true
+          };
+          setNotifiedLessonAlerts(prev => ({
+            ...prev,
+            [alertKey]: true,
+            [`${lesson.id}_${lesson.date}_30m`]: true
+          }));
 
           const studentOrGroupName = lesson.studentName || (lesson.groupName && lesson.groupName !== 'Quick Lesson' ? lesson.groupName : '') || lesson.title || _t('الحصّة', 'Lesson', 'Lektion');
           const titleText = language === 'ar'
@@ -2350,20 +2399,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             ? `Die Lektion "${studentOrGroupName}" beginnt ${diffMins === 0 ? 'jetzt' : `in ${diffMins} Minuten`} um ${lesson.time} Uhr!`
             : `Lesson "${studentOrGroupName}" starts ${diffMins === 0 ? 'now' : `in ${diffMins} mins`} at ${lesson.time}!`;
 
-          if (profile.enableLessonAlerts !== false) {
-            addAppNotification(titleText, bodyText, 'reminder', { lessonId: lesson.id });
-          }
+          // Avoid duplicate OS notification on native when scheduled LocalNotifications are already active (#10)
+          const nativeScheduledActive = Capacitor.isNativePlatform() && notificationSettings.masterEnabled && notificationSettings.lessonReminder.enabled;
 
-          if (profile.enableBrowserPush && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-            try {
-              new window.Notification(titleText, {
-                body: bodyText,
-                icon: '/favicon.ico',
-                tag: alertKey
-              });
-            } catch (err) {
+          if (profile.enableLessonAlerts !== false) {
+            addAppNotification(titleText, bodyText, 'reminder', {
+              lessonId: lesson.id,
+              tag: `upcoming-${alertKey}`,
+              skipSystemNotification: nativeScheduledActive || profile.enableBrowserPush === false
+            });
+          } else if (profile.enableBrowserPush && !nativeScheduledActive) {
+            sendSystemNotification(titleText, bodyText, `upcoming-${alertKey}`, { lessonId: lesson.id }).catch(err => {
               console.error('Error firing push notification:', err);
-            }
+            });
           }
         }
       });
@@ -2372,39 +2420,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     checkUpcomingLessonsAlerts();
     const interval = setInterval(checkUpcomingLessonsAlerts, 20000);
     return () => clearInterval(interval);
-  }, [lessons, profile.enableLessonAlerts, profile.enableBrowserPush, notifiedLessonAlerts, language]);
+  }, [lessons, profile.enableLessonAlerts, profile.enableBrowserPush, notifiedLessonAlerts, notificationSettings.masterEnabled, notificationSettings.lessonReminder.enabled, language]);
 
-  // Auto-sync recurring group schedules directly into calendar
+  // Auto-sync recurring group schedules directly into calendar (#27 Set optimization)
   useEffect(() => {
     if (!groups || groups.length === 0) return;
 
     const newAutoLessons: Lesson[] = [];
     const today = new Date();
-    const todayStr = formatLocalDate();
+    const existingSlotSet = buildLessonSlotSet(lessons);
+    const groupLessonCounts = new Map<string, number>();
+    for (const l of lessons) {
+      if (!l.deleted && l.groupId) {
+        groupLessonCounts.set(l.groupId, (groupLessonCounts.get(l.groupId) || 0) + 1);
+      }
+    }
 
     groups.forEach(group => {
       if (group.deleted || group.status === 'archived') return;
       const slots = getGroupScheduleSlots(group);
       if (slots.length === 0) return;
 
+      const isPerLesson = isGroupPerLesson(group);
+      const perSessionPrice = isPerLesson && group.pricePerSession
+        ? group.pricePerSession
+        : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 4));
+      let groupAddedCount = 0;
+      const baseGroupCount = groupLessonCounts.get(group.id) || 0;
+
       for (let dayOffset = 0; dayOffset < 365; dayOffset++) { // 1 full year ahead
         const d = new Date();
         d.setDate(today.getDate() + dayOffset);
+        if (!isDateMatchingGroupRecurrence(group.scheduleRecurrence, d)) continue;
         const dayNum = d.getDay();
 
         const matchingSlot = slots.find(s => getDayNumber(s.day) === dayNum);
         if (matchingSlot) {
           const dateStr = formatLocalDate(d);
           const sessionTime = matchingSlot.time || '17:00';
+          const slotKey = makeLessonSlotKey(group.id, dateStr, sessionTime);
 
-          const existsInLessons = lessons.some(l => !l.deleted && l.groupId === group.id && l.date === dateStr && l.time === sessionTime);
-          const existsInNew = newAutoLessons.some(l => l.groupId === group.id && l.date === dateStr && l.time === sessionTime);
-
-          if (!existsInLessons && !existsInNew) {
-            const isPerLesson = isGroupPerLesson(group);
-            const perSessionPrice = isPerLesson && group.pricePerSession
-              ? group.pricePerSession
-              : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 4));
+          if (!existingSlotSet.has(slotKey)) {
+            existingSlotSet.add(slotKey);
+            const sessionNumber = isPerLesson
+              ? 1
+              : ((((group.startingSessionNumber || 1) - 1 + baseGroupCount + groupAddedCount) % (group.sessionCount || 4)) + 1);
+            groupAddedCount += 1;
 
             newAutoLessons.push(wrapMutation({
               id: `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`,
@@ -2416,14 +2477,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               durationMinutes: group.lessonDurationMinutes || 60,
               type: group.type,
               grade: group.grade,
-              sessionNumber: isPerLesson ? 1 : ((((group.startingSessionNumber || 1) - 1 + lessons.filter(l => l.groupId === group.id && !l.deleted).length + newAutoLessons.length) % (group.sessionCount || 4)) + 1),
+              sessionNumber,
               totalSessionsInPackage: isPerLesson ? 1 : (group.sessionCount || 4),
               status: 'scheduled',
               paymentStatus: 'pending',
               amountDue: perSessionPrice,
               amountPaid: 0,
               meetingLink: group.type === 'online' ? (group.zoomLink || profile.defaultZoomLink) : undefined,
-              locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined
+              locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
+              scheduleRecurrence: group.scheduleRecurrence || 'weekly',
+              biweeklyWeek: getAlternatingWeek(d)
             } as Lesson));
           }
         }
@@ -2432,8 +2495,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     if (newAutoLessons.length > 0) {
       setLessons(prev => {
+        const prevSlotSet = buildLessonSlotSet(prev);
         const deduplicated = newAutoLessons.filter(
-          nl => !prev.some(l => !l.deleted && l.groupId === nl.groupId && l.date === nl.date && l.time === nl.time)
+          nl => !prevSlotSet.has(makeLessonSlotKey(nl.groupId || '', nl.date, nl.time))
         );
         return deduplicated.length > 0 ? [...prev, ...deduplicated] : prev;
       });
@@ -2460,17 +2524,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const registerFinanceActivity = useCallback(() => {
     setProfile(prev => {
-      const today = new Date().toISOString().split('T')[0];
+      const today = formatLocalDate();
       if (prev.financeLastActivityDate === today) return prev; // Already registered today
       
       let newStreak = (prev.financeStreak || 0) + 1;
       if (prev.financeLastActivityDate) {
-        const lastActivity = new Date(prev.financeLastActivityDate);
+        const lastActivity = parseLocalDate(prev.financeLastActivityDate);
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         
-        const lastActivityStr = lastActivity.toISOString().split('T')[0];
-        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        const lastActivityStr = formatLocalDate(lastActivity);
+        const yesterdayStr = formatLocalDate(yesterday);
         
         if (lastActivityStr !== yesterdayStr && lastActivityStr !== today) {
           newStreak = 1; // Streak broken
@@ -2677,8 +2741,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     };
   }, [groups, updateFullStudentsStorage, updateFullLessonsStorage, updateFullPaymentsStorage, refreshCalendarAndDashboard]);
 
+  // Manual preview & soft-delete cleanup of invalid biweekly l_auto_ lessons (#7)
+  const previewInvalidBiweeklyAutoLessons = useCallback(async (): Promise<Lesson[]> => {
+    const allLessons = await getHistoricalLessons();
+    return findInvalidBiweeklyAutoLessons(allLessons, groups);
+  }, [getHistoricalLessons, groups]);
+
+  const cleanupInvalidBiweeklyAutoLessons = useCallback(async (lessonIds?: string[]): Promise<number> => {
+    const allLessons = await getHistoricalLessons();
+    const candidates = findInvalidBiweeklyAutoLessons(allLessons, groups);
+    const targetIds = new Set(
+      lessonIds && lessonIds.length > 0 ? lessonIds : candidates.map(c => c.id)
+    );
+    if (targetIds.size === 0) return 0;
+
+    let deletedCount = 0;
+    const deletedItemsForTrash: Array<{ item: Lesson; deletedAt: string }> = [];
+    const nowIso = new Date().toISOString();
+
+    await updateFullLessonsStorage(prev =>
+      prev.map(l => {
+        if (!l.deleted && targetIds.has(l.id)) {
+          deletedCount += 1;
+          deletedItemsForTrash.push({ item: l, deletedAt: nowIso });
+          return wrapDeletion(l);
+        }
+        return l;
+      })
+    );
+
+    if (deletedItemsForTrash.length > 0) {
+      setRecentlyDeleted(prev => ({
+        ...prev,
+        lessons: [...deletedItemsForTrash, ...prev.lessons].slice(0, 200)
+      }));
+      refreshCalendarAndDashboard();
+      autoSyncEngine.notifyMutation('lessons', 'biweekly_cleanup');
+    }
+
+    return deletedCount;
+  }, [getHistoricalLessons, groups, updateFullLessonsStorage, refreshCalendarAndDashboard]);
+
   // Synchronized notification handler (app state + phone system)
   const addAppNotification = (title: string, message: string, type: 'system' | 'reminder' | 'payment', extraFields?: any) => {
+    const { skipSystemNotification, tag, ...restExtra } = extraFields || {};
     const newNotif: NotificationItem = {
       id: `notif_${type}_${Date.now()}`,
       title,
@@ -2686,15 +2792,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       type,
       read: false,
-      ...extraFields
+      ...restExtra
     };
 
     setNotifications(prev => [newNotif, ...prev.slice(0, 49)]);
 
-    // Mirror to native device main notification tray
-    sendSystemNotification(title, message, type).catch(err => {
-      console.warn('Failed to dispatch native system notification:', err);
-    });
+    if (!skipSystemNotification) {
+      // Mirror to native device main notification tray using deterministic tag (#10)
+      sendSystemNotification(title, message, tag || type, restExtra).catch(err => {
+        console.warn('Failed to dispatch native system notification:', err);
+      });
+    }
   };
 
   // Group operations
@@ -2812,6 +2920,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         ? updatedGroup.pricePerSession
         : Math.round((updatedGroup.monthlyPackagePrice || 1200) / sessionCount);
 
+      const existingSlotSet = buildLessonSlotSet(lessons);
       const today = new Date();
       for (let dayOffset = 0; dayOffset < 365; dayOffset++) { // 1 full year ahead
         const d = new Date();
@@ -2827,14 +2936,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         if (matchingSlot) {
           const dateStr = formatLocalDate(d);
           const sessionTime = matchingSlot.time || '17:00';
+          const slotKey = makeLessonSlotKey(id, dateStr, sessionTime);
 
-          const alreadyExists = lessons.some(l => 
-            l.groupId === id && !l.deleted && l.date === dateStr && l.time === sessionTime
-          ) || newGeneratedLessons.some(nl => 
-            nl.groupId === id && nl.date === dateStr && nl.time === sessionTime
-          );
-
-          if (!alreadyExists) {
+          if (!existingSlotSet.has(slotKey)) {
+            existingSlotSet.add(slotKey);
             const currentSessionIndex = pastGroupLessonsCount + newGeneratedLessons.length;
             const sessionNumber = ((startingNum - 1 + currentSessionIndex) % sessionCount) + 1;
 
@@ -4057,11 +4162,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const totalSessions = isPerLesson ? 1 : (targetGroup?.sessionCount || 4);
 
     const createdLessons: Lesson[] = [];
-    const baseDate = new Date(lessonData.date);
+    const baseDate = parseLocalDate(lessonData.date);
+    const effectiveRecurrence = lessonData.scheduleRecurrence || targetGroup?.scheduleRecurrence || 'weekly';
+    const weekStep = effectiveRecurrence === 'weekly' ? 1 : 2;
 
     for (let week = 0; week < repeatWeeks; week++) {
       const lessonDate = new Date(baseDate);
-      lessonDate.setDate(baseDate.getDate() + (week * 7));
+      lessonDate.setDate(baseDate.getDate() + (week * 7 * weekStep));
       const dateStr = formatLocalDate(lessonDate);
 
       // Check if an active non-deleted lesson already exists on this date/time for this target
@@ -4085,7 +4192,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           sessionNumber: currentSessionNum,
           totalSessionsInPackage: totalSessions,
           meetingLink: lessonData.type === 'online' ? (targetGroup?.zoomLink || profile.defaultZoomLink) : undefined,
-          locationAddress: lessonData.type === 'offline' ? (targetGroup?.address || 'Hauptstraße 45, Cairo') : undefined
+          locationAddress: lessonData.type === 'offline' ? (targetGroup?.address || 'Hauptstraße 45, Cairo') : undefined,
+          scheduleRecurrence: effectiveRecurrence,
+          biweeklyWeek: getAlternatingWeek(lessonDate)
         } as Lesson));
       } else {
         // Return existing lesson instead of creating duplicate
@@ -4764,6 +4873,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const today = new Date();
 
     const activeLessons = lessons.filter(l => !l.deleted && l.status !== 'cancelled');
+    const existingSlotSet = buildLessonSlotSet(activeLessons);
+    const activeGroupLessonsCount = activeLessons.filter(l => l.groupId === groupId).length;
+    const isPerLesson = isGroupPerLesson(targetGroup);
+    const perSessionPrice = isPerLesson && targetGroup.pricePerSession
+      ? targetGroup.pricePerSession
+      : Math.round((targetGroup.monthlyPackagePrice || 1200) / (targetGroup.sessionCount || 4));
 
     const checkOverlap = (l1: { date: string; time: string; durationMinutes: number }, l2: { date: string; time: string; durationMinutes: number }) => {
       if (l1.date !== l2.date) return false;
@@ -4793,24 +4908,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
         const dateStr = formatLocalDate(d);
         const sessionTime = matchingSlot.time || defaultTime || '17:00';
+        const slotKey = makeLessonSlotKey(groupId, dateStr, sessionTime);
 
-        // Check if an active non-deleted lesson already exists for this group on this date & time
-        const exists = activeLessons.some(l => 
-          l.groupId === groupId && 
-          l.date === dateStr && 
-          l.time === sessionTime
-        ) || newLessons.some(nl => 
-          nl.groupId === groupId && 
-          nl.date === dateStr && 
-          nl.time === sessionTime
-        );
-
-        if (!exists) {
-          const isPerLesson = isGroupPerLesson(targetGroup);
-          const perSessionPrice = isPerLesson && targetGroup.pricePerSession
-            ? targetGroup.pricePerSession
-            : Math.round((targetGroup.monthlyPackagePrice || 1200) / (targetGroup.sessionCount || 4));
-
+        if (!existingSlotSet.has(slotKey)) {
           const dummyLesson = { 
             id: 'dummy', 
             date: dateStr, 
@@ -4827,6 +4927,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           ) || newLessons.some(l => checkOverlap(dummyLesson, l));
           
           if (!hasConflict) {
+            existingSlotSet.add(slotKey);
             newLessons.push(wrapMutation({
               id: `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}_${dayOffset}`,
               groupId: targetGroup.id,
@@ -4837,7 +4938,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               durationMinutes: targetGroup.lessonDurationMinutes || 60,
               type: targetGroup.type,
               grade: targetGroup.grade,
-              sessionNumber: isPerLesson ? 1 : ((((targetGroup.startingSessionNumber || 1) - 1 + activeLessons.filter(l => l.groupId === groupId).length + newLessons.length) % (targetGroup.sessionCount || 4)) + 1),
+              sessionNumber: isPerLesson ? 1 : ((((targetGroup.startingSessionNumber || 1) - 1 + activeGroupLessonsCount + newLessons.length) % (targetGroup.sessionCount || 4)) + 1),
               totalSessionsInPackage: isPerLesson ? 1 : (targetGroup.sessionCount || 4),
               status: 'scheduled',
               paymentStatus: 'pending',
@@ -4855,26 +4956,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     const todayIso = formatLocalDate();
     updateFullLessonsStorage(prev => {
-      // Clean up stale future scheduled lessons of this group that don't match the new alternating week recurrence
+      // Soft-delete stale future scheduled lessons of this group that don't match the new alternating week recurrence
       let cleanedPrev = prev;
       if (targetGroup.scheduleRecurrence && targetGroup.scheduleRecurrence !== 'weekly') {
-        cleanedPrev = prev.filter(l => {
-          if (l.groupId !== groupId) return true;
-          if (l.deleted || l.status !== 'scheduled' || l.date < todayIso) return true;
-          if (l.report?.attendanceStatus || l.report?.teacherNotes || (l.amountPaid && l.amountPaid > 0)) return true;
-          return isDateMatchingGroupRecurrence(targetGroup.scheduleRecurrence, l.date);
+        cleanedPrev = prev.map(l => {
+          if (l.groupId !== groupId) return l;
+          if (l.deleted || l.status !== 'scheduled' || l.date < todayIso) return l;
+          if (l.report?.attendanceStatus || l.report?.teacherNotes || (l.amountPaid && l.amountPaid > 0)) return l;
+          if (!isDateMatchingGroupRecurrence(targetGroup.scheduleRecurrence, l.date)) {
+            return wrapDeletion(l);
+          }
+          return l;
         });
       }
 
       if (newLessons.length === 0) {
-        return cleanedPrev.length !== prev.length ? cleanedPrev : prev;
+        return cleanedPrev;
       }
 
       const existingIds = new Set(cleanedPrev.map(l => l.id));
+      const prevSlotSet = buildLessonSlotSet(cleanedPrev);
       const deduplicated = newLessons.filter(
-        nl => !existingIds.has(nl.id) && !cleanedPrev.some(l => !l.deleted && l.groupId === nl.groupId && l.date === nl.date && l.time === nl.time)
+        nl => !existingIds.has(nl.id) && !prevSlotSet.has(makeLessonSlotKey(nl.groupId || '', nl.date, nl.time))
       );
-      return deduplicated.length > 0 ? [...cleanedPrev, ...deduplicated] : (cleanedPrev.length !== prev.length ? cleanedPrev : prev);
+      return deduplicated.length > 0 ? [...cleanedPrev, ...deduplicated] : cleanedPrev;
     });
   };
 
@@ -5010,20 +5115,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           } as PaymentRecord);
         }
         // Settle any duplicate or lingering pending record for the same student that contains any of these lesson IDs or dates
-        if (p.studentId === data.studentId && (p.status === 'not_yet' || p.status === 'pending' || p.status === 'unpaid')) {
-          const overlapsIds = p.lessonIds && p.lessonIds.some(id => targetIds.has(id));
-          const overlapsDates = p.lessonDates && data.lessonDates && p.lessonDates.some(d => data.lessonDates.includes(d));
-          const overlapsCycle = p.groupId === data.groupId || !data.groupId;
-          if (overlapsIds || overlapsDates || overlapsCycle) {
-            return wrapMutation({
-              ...p,
-              status: 'paid',
-              amountPaid: p.amountDue,
-              remainingBalance: 0,
-              paidDate: today,
-              notes: `${p.notes || ''} (مسدد بالكامل)`.trim()
-            } as PaymentRecord);
-          }
+        if (shouldSettlePendingCycleRecord(p, { studentId: data.studentId, lessonIds: data.lessonIds, lessonDates: data.lessonDates })) {
+          return wrapMutation({
+            ...p,
+            status: 'paid',
+            amountPaid: p.amountDue,
+            remainingBalance: 0,
+            paidDate: today,
+            notes: `${p.notes || ''} (مسدد بالكامل)`.trim()
+          } as PaymentRecord);
         }
         return p;
       });
@@ -5157,7 +5257,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         notes: 'Noch offen (In Erwartung)',
         createdAt: new Date().toISOString()
       } as PaymentRecord);
-      setPayments(prev => [newRecord, ...prev]);
+      updateFullPaymentsStorage(prev => [newRecord, ...prev]);
     }
   };
 
@@ -5334,7 +5434,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     let newStStatus: PaymentStatus = 'pending';
     const targetAccountId = financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
 
-    setPayments(prev => prev.map(p => {
+    updateFullPaymentsStorage(prev => prev.map(p => {
       if (p.id === paymentId) {
         targetStId = p.studentId;
         const isPaid = p.status === 'paid' || (p.amountPaid >= p.amountDue && p.amountDue > 0);
@@ -5416,7 +5516,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         notes: 'Schnell-Buchung (1-Klick Status)'
       } as PaymentRecord);
 
-      setPayments(prev => [newRec, ...prev]);
+      updateFullPaymentsStorage(prev => [newRec, ...prev]);
       setStudents(prev => prev.map(s => s.id === studentId ? wrapMutation({ ...s, paymentStatus: 'paid' } as Student) : s));
 
       if (fee > 0) {
@@ -5865,7 +5965,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   // BACKUP & SYNC VERIFICATION SYSTEM
-  const performBackup = () => {
+  const performBackup = async (): Promise<string> => {
     const backupObj: BackupData = {
       timestamp: new Date().toISOString(),
       version: '2.0.0',
@@ -5899,16 +5999,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     };
 
     const jsonStr = JSON.stringify(backupObj);
-    storage.setItem('dl_local_backup_data', jsonStr);
+    await storage.setItem('dl_local_backup_data', jsonStr);
     const now = new Date().toISOString();
-    storage.setItem('dl_last_backup_time', now);
+    await storage.setItem('dl_last_backup_time', now);
     setLastBackupTime(now);
+    return jsonStr;
   };
 
   const importBackupFile = async (customJson?: string): Promise<boolean> => {
     try {
       const sourceStr = customJson || await storage.getItem('dl_local_backup_data');
       if (!sourceStr) return false;
+      if (!isBackupFileSizeValid(sourceStr.length)) {
+        console.error(`importBackupFile rejected: payload exceeds ${MAX_BACKUP_FILE_SIZE_BYTES} bytes (25MB).`);
+        return false;
+      }
 
       const parsed = JSON.parse(sourceStr);
       const validation = validateAndSanitizeBackupPayload(parsed);
@@ -5918,22 +6023,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
 
       const data = validation.data;
-      if (data.profile || data.schoolSettings) {
-        const baseProfile = data.profile || profile;
-        const mergedSchoolSettings = data.schoolSettings || baseProfile.schoolSettings;
+      const hasProfile = hasBackupSection(parsed, 'profile');
+      const hasSchoolSettings = hasBackupSection(parsed, 'schoolSettings');
+      const hasGroups = hasBackupSection(parsed, 'groups');
+      const hasStudents = hasBackupSection(parsed, 'students');
+      const hasLessons = hasBackupSection(parsed, 'lessons');
+      const hasPayments = hasBackupSection(parsed, 'payments');
+
+      if ((hasProfile && data.profile) || (hasSchoolSettings && data.schoolSettings)) {
+        const baseProfile = (hasProfile && data.profile) ? data.profile : profile;
+        const mergedSchoolSettings = (hasSchoolSettings && data.schoolSettings) ? data.schoolSettings : baseProfile.schoolSettings;
         const mergedProfile = { ...baseProfile, schoolSettings: mergedSchoolSettings };
         setProfile(mergedProfile);
         await storage.setItem('dl_profile', mergedProfile);
       }
-      if (data.groups) {
+      if (hasGroups && data.groups) {
         setGroups(data.groups);
         await storage.setItem('dl_groups', data.groups);
       }
-      if (data.students) {
+      if (hasStudents && data.students) {
         setStudents(data.students);
         await storage.setItem('dl_students', data.students);
       }
-      if (data.lessons) {
+      if (hasLessons && data.lessons) {
         const seenL = new Set<string>();
         const dedupedLessons = (Array.isArray(data.lessons) ? data.lessons : []).filter((l: any) => {
           if (!l || !l.id || seenL.has(l.id)) return false;
@@ -5941,10 +6053,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return true;
         });
         fullLessonsRef.current = dedupedLessons;
-        setLessons(filterActiveLessons(dedupedLessons));
         await storage.setItem('dl_lessons', dedupedLessons);
+        setLessons(filterActiveLessons(dedupedLessons));
       }
-      if (data.payments) {
+      if (hasPayments && data.payments) {
         const seenP = new Set<string>();
         const dedupedPayments = (Array.isArray(data.payments) ? data.payments : []).filter((p: any) => {
           if (!p || !p.id || seenP.has(p.id)) return false;
@@ -5952,85 +6064,85 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return true;
         });
         fullPaymentsRef.current = dedupedPayments;
-        setPayments(filterActivePayments(dedupedPayments));
         await storage.setItem('dl_payments', dedupedPayments);
+        setPayments(filterActivePayments(dedupedPayments));
       }
-      if (data.notifications) {
+      if (hasBackupSection(parsed, 'notifications') && data.notifications) {
         setNotifications(data.notifications);
         await storage.setItem('dl_notifications', data.notifications);
       }
-      if (data.certificates) {
+      if (hasBackupSection(parsed, 'certificates') && data.certificates) {
         setCertificates(data.certificates);
         await storage.setItem('dl_certificates', data.certificates);
       }
-      if (data.todos) {
+      if (hasBackupSection(parsed, 'todos') && data.todos) {
         setTodos(data.todos);
         await storage.setItem('dl_quick_todos', data.todos);
       }
-      if (data.theme) {
+      if (hasBackupSection(parsed, 'theme') && data.theme) {
         setTheme(data.theme);
         await storage.setItem('dl_theme', data.theme);
       }
-      if (data.accentColor) {
+      if (hasBackupSection(parsed, 'accentColor') && data.accentColor) {
         setAccentColor(data.accentColor);
       }
-      if (data.notificationSettings) {
+      if (hasBackupSection(parsed, 'notificationSettings') && data.notificationSettings) {
         setNotificationSettings(data.notificationSettings);
         await storage.setItem('dl_notification_settings', data.notificationSettings);
       }
-      if (data.inspirationSettings) {
+      if (hasBackupSection(parsed, 'inspirationSettings') && data.inspirationSettings) {
         setInspirationSettings(data.inspirationSettings);
         await storage.setItem('dl_inspiration_settings', data.inspirationSettings);
       }
-      if (data.inspirationMessages) {
+      if (hasBackupSection(parsed, 'inspirationMessages') && data.inspirationMessages) {
         setInspirationMessages(data.inspirationMessages);
         await storage.setItem('dl_inspiration_messages', data.inspirationMessages);
       }
-      if (data.hodStudents) {
+      if (hasBackupSection(parsed, 'hodStudents') && data.hodStudents) {
         setHodStudents(data.hodStudents);
         await storage.setItem('hod_german_students', data.hodStudents);
       }
-      if (data.hodComplaints) {
+      if (hasBackupSection(parsed, 'hodComplaints') && data.hodComplaints) {
         setHodComplaints(data.hodComplaints);
         await storage.setItem('hod_complaints', data.hodComplaints);
       }
-      if (data.hodActionPlans) {
+      if (hasBackupSection(parsed, 'hodActionPlans') && data.hodActionPlans) {
         setHodActionPlans(data.hodActionPlans);
         await storage.setItem('hod_student_action_plans', data.hodActionPlans);
       }
-      if (data.hodVisits) {
+      if (hasBackupSection(parsed, 'hodVisits') && data.hodVisits) {
         setHodVisits(data.hodVisits);
         await storage.setItem('hod_visit_records', data.hodVisits);
       }
-      if (data.schoolNotes) {
+      if (hasBackupSection(parsed, 'schoolNotes') && data.schoolNotes) {
         setSchoolNotes(data.schoolNotes);
         await storage.setItem('dl_school_notes', data.schoolNotes);
       }
-      if (data.financeAccounts) {
+      if (hasBackupSection(parsed, 'financeAccounts') && data.financeAccounts) {
         setFinanceAccounts(data.financeAccounts);
         await storage.setItem('dl_finance_accounts', data.financeAccounts);
       }
-      if (data.financeCategories) {
+      if (hasBackupSection(parsed, 'financeCategories') && data.financeCategories) {
         setFinanceCategories(data.financeCategories);
         await storage.setItem('dl_finance_categories', data.financeCategories);
       }
-      if (data.financeTransactions) {
+      if (hasBackupSection(parsed, 'financeTransactions') && data.financeTransactions) {
         setFinanceTransactions(data.financeTransactions);
         await storage.setItem('dl_finance_transactions', data.financeTransactions);
       }
-      if (data.financeRecurring) {
+      if (hasBackupSection(parsed, 'financeRecurring') && data.financeRecurring) {
         setFinanceRecurring(data.financeRecurring);
         await storage.setItem('dl_finance_recurring', data.financeRecurring);
       }
-      if (data.financeInstallments) {
+      if (hasBackupSection(parsed, 'financeInstallments') && data.financeInstallments) {
         setFinanceInstallments(data.financeInstallments);
         await storage.setItem('dl_finance_installments', data.financeInstallments);
       }
-      if (data.goldHoldings && Array.isArray(data.goldHoldings)) {
+      if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings && Array.isArray(data.goldHoldings)) {
         setGoldHoldings(data.goldHoldings);
         await storage.setItem('gluck_gold_holdings', data.goldHoldings);
       }
-      if (data.lernstudioSets) {
+      if (hasBackupSection(parsed, 'lernstudioSets') && data.lernstudioSets) {
         setLernstudioSets(data.lernstudioSets);
         await storage.setItem('dl_lernstudio_sets', data.lernstudioSets);
       }
@@ -6038,24 +6150,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       // Reconcile and safeguard synchronization metadata
       const reconciledState = await applyRestoreSyncSafeguards(
         {
-          groups: data.groups || [],
-          students: data.students || [],
-          lessons: data.lessons || [],
-          payments: data.payments || [],
-          notifications: data.notifications || [],
-          certificates: data.certificates || [],
-          lernstudioSets: data.lernstudioSets || [],
-          hodStudents: data.hodStudents || [],
-          hodComplaints: data.hodComplaints || [],
-          hodActionPlans: data.hodActionPlans || [],
-          hodVisits: data.hodVisits || [],
-          schoolNotes: data.schoolNotes || [],
-          financeAccounts: data.financeAccounts || [],
-          financeCategories: data.financeCategories || [],
-          financeTransactions: data.financeTransactions || [],
-          financeRecurring: data.financeRecurring || [],
-          financeInstallments: data.financeInstallments || [],
-          financeNotifications: data.financeNotifications || []
+          groups: hasGroups ? (data.groups || []) : groups,
+          students: hasStudents ? (data.students || []) : students,
+          lessons: hasLessons ? (data.lessons || []) : fullLessonsRef.current,
+          payments: hasPayments ? (data.payments || []) : fullPaymentsRef.current,
+          notifications: hasBackupSection(parsed, 'notifications') ? (data.notifications || []) : notifications,
+          certificates: hasBackupSection(parsed, 'certificates') ? (data.certificates || []) : certificates,
+          lernstudioSets: hasBackupSection(parsed, 'lernstudioSets') ? (data.lernstudioSets || []) : lernstudioSets,
+          hodStudents: hasBackupSection(parsed, 'hodStudents') ? (data.hodStudents || []) : hodStudents,
+          hodComplaints: hasBackupSection(parsed, 'hodComplaints') ? (data.hodComplaints || []) : hodComplaints,
+          hodActionPlans: hasBackupSection(parsed, 'hodActionPlans') ? (data.hodActionPlans || []) : hodActionPlans,
+          hodVisits: hasBackupSection(parsed, 'hodVisits') ? (data.hodVisits || []) : hodVisits,
+          schoolNotes: hasBackupSection(parsed, 'schoolNotes') ? (data.schoolNotes || []) : schoolNotes,
+          financeAccounts: hasBackupSection(parsed, 'financeAccounts') ? (data.financeAccounts || []) : financeAccounts,
+          financeCategories: hasBackupSection(parsed, 'financeCategories') ? (data.financeCategories || []) : financeCategories,
+          financeTransactions: hasBackupSection(parsed, 'financeTransactions') ? (data.financeTransactions || []) : financeTransactions,
+          financeRecurring: hasBackupSection(parsed, 'financeRecurring') ? (data.financeRecurring || []) : financeRecurring,
+          financeInstallments: hasBackupSection(parsed, 'financeInstallments') ? (data.financeInstallments || []) : financeInstallments,
+          financeNotifications: hasBackupSection(parsed, 'financeNotifications') ? (data.financeNotifications || []) : []
         },
         syncStateRef.current
       );
@@ -6069,17 +6181,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       // Rebuild notification schedules immediately using restored data to prevent duplicates or orphaned timers
       try {
         await rebuildAllNotificationSchedules(
-          data.notificationSettings || notificationSettings,
-          data.lessons || data.lessons || [],
-          data.groups || data.groups || [],
-          data.students || data.students || [],
-          data.payments || data.payments || [],
-          data.profile || data.profile || profile,
+          (hasBackupSection(parsed, 'notificationSettings') && data.notificationSettings) ? data.notificationSettings : notificationSettings,
+          hasLessons ? (data.lessons || []) : lessons,
+          hasGroups ? (data.groups || []) : groups,
+          hasStudents ? (data.students || []) : students,
+          hasPayments ? (data.payments || []) : payments,
+          (hasProfile && data.profile) ? data.profile : profile,
           language
         );
       } catch (err) {
         console.error('Failed to rebuild notification schedules after restore:', err);
       }
+
+      setExternalDataVersion(v => v + 1);
 
       /* confetti removed */
       return true;
@@ -6518,8 +6632,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             return true;
           });
           fullLessonsRef.current = deduped;
-          setLessons(filterActiveLessons(deduped));
           await storage.setItem('dl_lessons', deduped);
+          setLessons(filterActiveLessons(deduped));
           break;
         }
         case 'payments': {
@@ -6530,8 +6644,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             return true;
           });
           fullPaymentsRef.current = deduped;
-          setPayments(filterActivePayments(deduped));
           await storage.setItem('dl_payments', deduped);
+          setPayments(filterActivePayments(deduped));
           break;
         }
         case 'notifications': {
@@ -6629,6 +6743,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 setLanguageState(incomingProfile.language);
               }
               await storage.setItem('dl_profile', incomingProfile);
+              setExternalDataVersion(v => v + 1);
             }
             if (incoming?.recentlyDeleted) {
               setRecentlyDeleted(incoming.recentlyDeleted);
@@ -6958,6 +7073,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         updateFullPaymentsStorage,
         updateFullStudentsStorage,
         purgeOrphanedRecords,
+        previewInvalidBiweeklyAutoLessons,
+        cleanupInvalidBiweeklyAutoLessons,
         syncState,
         isSyncReady,
         connectionState,
@@ -6971,7 +7088,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         getSyncHistory,
         clearSyncHistory,
         updateSyncState: syncDataSource.updateSyncState,
-        startHosting
+        startHosting,
+        externalDataVersion,
+        bumpExternalDataVersion
       }}
     >
       {children}

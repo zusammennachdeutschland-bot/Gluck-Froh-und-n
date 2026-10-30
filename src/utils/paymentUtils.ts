@@ -1,7 +1,7 @@
 import { Student, Group, Lesson, PaymentRecord, ScheduleRecurrence } from '../types';
 import { areDuplicateLessons, isGroupPerLesson } from './lessonUtils';
 import { resolveStudentWhatsAppContact } from './phoneUtils';
-import { normalizeDateToISO } from './timeUtils';
+import { normalizeDateToISO, formatLocalDate } from './timeUtils';
 import { isDateMatchingGroupRecurrence } from './scheduleUtils';
 
 export interface CyclePricingResult {
@@ -280,7 +280,7 @@ export const calculateDuePaymentCycles = (
     }
 
     const processedLessons: ProcessedLesson[] = [];
-    const latestLessonDate = billableCompletedLessons[billableCompletedLessons.length - 1]?.date || new Date().toISOString().split('T')[0];
+    const latestLessonDate = billableCompletedLessons[billableCompletedLessons.length - 1]?.date || formatLocalDate();
     const maxCompletedSessionNum = Math.max(0, ...billableCompletedLessons.map(l => l.sessionNumber || 0));
     const anchorSessionNum = maxCompletedSessionNum > 0 ? maxCompletedSessionNum : cycleLength;
     

@@ -9,6 +9,12 @@ import {
 import { LernstudioSet } from '../types/lernstudio';
 import { formatLocalDate } from './timeUtils';
 
+export const MAX_BACKUP_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB max backup file size (#14)
+
+export function isBackupFileSizeValid(sizeBytes: number): boolean {
+  return typeof sizeBytes === 'number' && !isNaN(sizeBytes) && sizeBytes >= 0 && sizeBytes <= MAX_BACKUP_FILE_SIZE_BYTES;
+}
+
 export type BackupCategory = 
   | 'students'
   | 'groups'
@@ -164,92 +170,92 @@ export interface RestoreHistoryEntry {
   notes?: string;
 }
 
-// Helper: Encrypt standard string using Web Crypto API or Salted XOR + Base64
+// Helper: Encrypt standard string strictly using Web Crypto API (AES-256-GCM)
 export async function encryptBackupData(dataObj: any, password?: string): Promise<string> {
   const jsonString = JSON.stringify(dataObj);
   if (!password || password.trim() === '') {
     return jsonString;
   }
-  
-  try {
-    if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
-      const enc = new TextEncoder();
-      const passBytes = enc.encode(password);
-      const dataBytes = enc.encode(jsonString);
-      
-      const keyMaterial = await window.crypto.subtle.importKey(
-        'raw', passBytes, { name: 'PBKDF2' }, false, ['deriveBits', 'deriveKey']
-      );
-      const salt = window.crypto.getRandomValues(new Uint8Array(16));
-      const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      
-      const key = await window.crypto.subtle.deriveKey(
-        {
-          name: 'PBKDF2',
-          salt,
-          iterations: 100000,
-          hash: 'SHA-256',
-        },
-        keyMaterial,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt']
-      );
-      
-      const encryptedBuffer = await window.crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv },
-        key,
-        dataBytes
-      );
-      
-      const combined = new Uint8Array(salt.length + iv.length + encryptedBuffer.byteLength);
-      combined.set(salt, 0);
-      combined.set(iv, salt.length);
-      combined.set(new Uint8Array(encryptedBuffer), salt.length + iv.length);
-      
-      return btoa(String.fromCharCode(...combined));
-    }
-  } catch (err) {
-    console.warn('SubtleCrypto encryption failed, using fallback:', err);
+
+  const cryptoObj = (typeof window !== 'undefined' && window.crypto)
+    ? window.crypto
+    : (typeof globalThis !== 'undefined' ? (globalThis as any).crypto : undefined);
+
+  if (!cryptoObj || !cryptoObj.subtle) {
+    throw new Error('Web Crypto API (crypto.subtle) is required for backup encryption.');
   }
-  
-  // Fallback simple salted encoding
-  const salt = password + '_TA_SALT_2026';
-  let result = '';
-  for (let i = 0; i < jsonString.length; i++) {
-    const charCode = jsonString.charCodeAt(i) ^ salt.charCodeAt(i % salt.length);
-    result += String.fromCharCode(charCode);
-  }
-  return btoa(encodeURIComponent(result));
+
+  const enc = new TextEncoder();
+  const passBytes = enc.encode(password);
+  const dataBytes = enc.encode(jsonString);
+
+  const keyMaterial = await cryptoObj.subtle.importKey(
+    'raw', passBytes, { name: 'PBKDF2' }, false, ['deriveBits', 'deriveKey']
+  );
+  const salt = cryptoObj.getRandomValues(new Uint8Array(16));
+  const iv = cryptoObj.getRandomValues(new Uint8Array(12));
+
+  const key = await cryptoObj.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations: 100000,
+      hash: 'SHA-256',
+    },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt']
+  );
+
+  const encryptedBuffer = await cryptoObj.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    dataBytes
+  );
+
+  const combined = new Uint8Array(salt.length + iv.length + encryptedBuffer.byteLength);
+  combined.set(salt, 0);
+  combined.set(iv, salt.length);
+  combined.set(new Uint8Array(encryptedBuffer), salt.length + iv.length);
+
+  return btoa(String.fromCharCode(...combined));
 }
 
-// Helper: Decrypt string using Web Crypto API or Salted XOR + Base64
+// Helper: Decrypt string using Web Crypto API, or fallback to legacy Salted XOR + Base64 with warning
 export async function decryptBackupData(encryptedStr: string, password?: string): Promise<any> {
   if (!password || password.trim() === '') {
     return JSON.parse(encryptedStr);
   }
-  
-  try {
-    if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
-      const binaryString = atob(encryptedStr);
+
+  const cryptoObj = (typeof window !== 'undefined' && window.crypto)
+    ? window.crypto
+    : (typeof globalThis !== 'undefined' ? (globalThis as any).crypto : undefined);
+
+  const isExplicitXor = encryptedStr.startsWith('XOR:');
+  const cleanPayload = isExplicitXor ? encryptedStr.slice(4) : encryptedStr;
+
+  if (!isExplicitXor && cryptoObj && cryptoObj.subtle) {
+    try {
+      const binaryString = atob(cleanPayload);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
-      
+
       if (bytes.length > 28) {
         const salt = bytes.slice(0, 16);
         const iv = bytes.slice(16, 28);
         const ciphertext = bytes.slice(28);
-        
+
         const enc = new TextEncoder();
         const passBytes = enc.encode(password);
-        
-        const keyMaterial = await window.crypto.subtle.importKey(
+
+        const keyMaterial = await cryptoObj.subtle.importKey(
           'raw', passBytes, { name: 'PBKDF2' }, false, ['deriveBits', 'deriveKey']
         );
-        
-        const key = await window.crypto.subtle.deriveKey(
+
+        const key = await cryptoObj.subtle.deriveKey(
           {
             name: 'PBKDF2',
             salt,
@@ -261,32 +267,37 @@ export async function decryptBackupData(encryptedStr: string, password?: string)
           false,
           ['decrypt']
         );
-        
-        const decryptedBuffer = await window.crypto.subtle.decrypt(
+
+        const decryptedBuffer = await cryptoObj.subtle.decrypt(
           { name: 'AES-GCM', iv },
           key,
           ciphertext
         );
-        
+
         const dec = new TextDecoder();
         return JSON.parse(dec.decode(decryptedBuffer));
       }
+    } catch {
+      // May be a legacy XOR-encoded backup; try legacy decoder below
     }
-  } catch (err) {
-    console.warn('SubtleCrypto decryption failed, trying fallback:', err);
   }
-  
-  // Fallback simple salted decoding
+
+  // Legacy salted XOR decoding (backward compatibility for older backups only)
   try {
-    const rawStr = decodeURIComponent(atob(encryptedStr));
+    const rawStr = decodeURIComponent(atob(cleanPayload));
     const salt = password + '_TA_SALT_2026';
     let result = '';
     for (let i = 0; i < rawStr.length; i++) {
       const charCode = rawStr.charCodeAt(i) ^ salt.charCodeAt(i % salt.length);
       result += String.fromCharCode(charCode);
     }
-    return JSON.parse(result);
+    const parsedLegacy = JSON.parse(result);
+    console.warn('[Security Warning] Decrypted legacy XOR-encoded backup. Re-export this backup to upgrade to AES-256-GCM encryption.');
+    return parsedLegacy;
   } catch (e) {
+    if (!cryptoObj || !cryptoObj.subtle) {
+      throw new Error('Web Crypto API (crypto.subtle) is required to decrypt backups.');
+    }
     throw new Error('Invalid encryption password or corrupted file.');
   }
 }
@@ -1089,6 +1100,35 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       todos: Array.isArray(data.todos) ? data.todos : undefined
     }
   };
+}
+
+/**
+ * Checks whether a specific data section key was explicitly present in the original raw backup payload.
+ * Prevents partial backups (e.g. financial-only) from overwriting absent sections (e.g. students, groups, lessons) with empty arrays.
+ */
+export function hasBackupSection(rawPayload: any, key: string): boolean {
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return false;
+  const rawData = (rawPayload.data && typeof rawPayload.data === 'object' && !Array.isArray(rawPayload.data))
+    ? rawPayload.data
+    : rawPayload;
+  return Object.prototype.hasOwnProperty.call(rawData, key) && rawData[key] !== undefined;
+}
+
+/**
+ * Applies sanitized backup sections onto an existing state object ONLY for keys explicitly present in the raw backup payload.
+ */
+export function applyPartialBackupSections<T extends Record<string, any>>(
+  currentState: T,
+  rawPayload: any,
+  sanitizedData: Record<string, any>
+): T {
+  const nextState: Record<string, any> = { ...currentState };
+  for (const key of Object.keys(sanitizedData)) {
+    if (hasBackupSection(rawPayload, key)) {
+      nextState[key] = sanitizedData[key];
+    }
+  }
+  return nextState as T;
 }
 
 export function sanitizeSchoolSettings(raw: any): SchoolSettings | undefined {

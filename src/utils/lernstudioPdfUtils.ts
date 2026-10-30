@@ -3,6 +3,7 @@ import html2canvas from 'html2canvas';
 import { LernstudioSet } from '../types/lernstudio';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
+import { escapeHtml } from './securityUtils';
 
 export interface WorksheetOptions {
   schoolName?: string;
@@ -37,11 +38,11 @@ export async function generateLernstudioWorksheetPdf(
   container.style.boxSizing = 'border-box';
   container.style.lineHeight = '1.5';
 
-  const school = options.schoolName || 'Glück Lernstudio';
-  const teacher = options.teacherName || 'الأستاذ المعلم';
-  const grade = options.gradeName || set.grade || 'جميع الصفوف';
-  const subject = options.subjectName || 'اللغة الألمانية';
-  const dateStr = options.dateStr || new Date().toLocaleDateString('de-DE');
+  const school = escapeHtml(options.schoolName || 'Glück Lernstudio');
+  const teacher = escapeHtml(options.teacherName || 'الأستاذ المعلم');
+  const grade = escapeHtml(options.gradeName || set.grade || 'جميع الصفوف');
+  const subject = escapeHtml(options.subjectName || 'اللغة الألمانية');
+  const dateStr = escapeHtml(options.dateStr || new Date().toLocaleDateString('de-DE'));
 
   // Build HTML Content with embedded Cairo Google Font & strict Arabic/German Bidi isolation
   let html = `
@@ -118,8 +119,8 @@ export async function generateLernstudioWorksheetPdf(
         <tr>
           <td style="width: 55%; border-right: 1px solid #000000;" class="de-text">
             <div style="font-size: 16px; font-weight: 800; margin-bottom: 4px;">${school}</div>
-            <div><strong>Fach:</strong> ${subject} (${set.level})</div>
-            <div><strong>Thema:</strong> ${set.title || set.topic}</div>
+            <div><strong>Fach:</strong> ${subject} (${escapeHtml(set.level)})</div>
+            <div><strong>Thema:</strong> ${escapeHtml(set.title || set.topic)}</div>
             <div><strong>Datum:</strong> ${dateStr}</div>
           </td>
           <td style="width: 45%;" class="ar-text" dir="rtl">
@@ -133,7 +134,7 @@ export async function generateLernstudioWorksheetPdf(
       <!-- WORKSHEET TITLE BANNER -->
       <div style="text-align: center; margin-bottom: 24px; border-bottom: 2px solid #000; padding-bottom: 10px;">
         <h1 style="margin: 0; font-size: 18px; font-weight: 800; text-transform: uppercase;">
-          ${isTeacher ? 'ARBEITSBLATT - LÖSUNGSSCHLÜSSEL (نموذج إجابة المدرس)' : `ARBEITSBLATT: ${(set.title || set.topic).toUpperCase()}`}
+          ${isTeacher ? 'ARBEITSBLATT - LÖSUNGSSCHLÜSSEL (نموذج إجابة المدرس)' : `ARBEITSBLATT: ${escapeHtml((set.title || set.topic).toUpperCase())}`}
         </h1>
       </div>
   `;
@@ -160,10 +161,10 @@ export async function generateLernstudioWorksheetPdf(
     set.items.forEach((item) => {
       html += `
         <tr>
-          <td class="de-text" style="font-weight: 700;">${item.emoji ? item.emoji + ' ' : ''}${item.german}</td>
-          <td class="de-text">${item.plural || '-'}</td>
-          <td class="de-text">${item.exampleSentenceGerman || '-'}</td>
-          <td class="ar-text" dir="rtl" style="font-weight: 600;">${item.arabic}</td>
+          <td class="de-text" style="font-weight: 700;">${item.emoji ? escapeHtml(item.emoji) + ' ' : ''}${escapeHtml(item.german)}</td>
+          <td class="de-text">${escapeHtml(item.plural || '-')}</td>
+          <td class="de-text">${escapeHtml(item.exampleSentenceGerman || '-')}</td>
+          <td class="ar-text" dir="rtl" style="font-weight: 600;">${escapeHtml(item.arabic)}</td>
         </tr>
       `;
     });
@@ -186,15 +187,15 @@ export async function generateLernstudioWorksheetPdf(
     `;
 
     set.items.forEach((item, idx) => {
-      const missingPrompt = item.missingLetterWord || item.german.replace(/[aeiouAEIOU]/g, '_');
+      const missingPrompt = escapeHtml(item.missingLetterWord || item.german.replace(/[aeiouAEIOU]/g, '_'));
       if (isTeacher) {
         html += `
           <div style="margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
             <div class="de-text">
-              <strong>${idx + 1}) ${item.german}</strong>
+              <strong>${idx + 1}) ${escapeHtml(item.german)}</strong>
               <span style="color: #008000; font-weight: bold; margin-left: 12px;">[Lösung: ${missingPrompt}]</span>
             </div>
-            <div class="ar-text" dir="rtl" style="color: #555;">(${item.arabic})</div>
+            <div class="ar-text" dir="rtl" style="color: #555;">(${escapeHtml(item.arabic)})</div>
           </div>
         `;
       } else {
@@ -204,7 +205,7 @@ export async function generateLernstudioWorksheetPdf(
               <strong>${idx + 1})</strong> <span style="font-family: monospace; font-size: 15px; letter-spacing: 2px; font-weight: bold;">${missingPrompt}</span>
               <span style="margin-left: 16px; color: #888;">_____________________</span>
             </div>
-            <div class="ar-text" dir="rtl" style="color: #444; font-weight: 600;">(${item.arabic})</div>
+            <div class="ar-text" dir="rtl" style="color: #444; font-weight: 600;">(${escapeHtml(item.arabic)})</div>
           </div>
         `;
       }
@@ -238,11 +239,11 @@ export async function generateLernstudioWorksheetPdf(
               <div class="de-text">
                 <strong>${idx + 1}) Satzbausteine:</strong> 
                 <span style="background-color: #fff; border: 1px solid #999; padding: 2px 8px; border-radius: 4px; font-weight: bold;">
-                  [ ${shuffled.join('   /   ')} ]
+                  [ ${shuffled.map(s => escapeHtml(s)).join('   /   ')} ]
                 </span>
               </div>
               <div class="ar-text" dir="rtl" style="font-size: 11px; color: #666;">
-                (${item.exampleSentenceArabic || item.arabic})
+                (${escapeHtml(item.exampleSentenceArabic || item.arabic)})
               </div>
             </div>
         `;
@@ -250,7 +251,7 @@ export async function generateLernstudioWorksheetPdf(
         if (isTeacher) {
           html += `
             <div class="de-text" style="color: #008000; font-weight: bold; margin-top: 4px;">
-              LÖSUNG: ${item.exampleSentenceGerman || elements.join(' ')}
+              LÖSUNG: ${escapeHtml(item.exampleSentenceGerman || elements.join(' '))}
             </div>
           `;
         } else {
@@ -377,11 +378,11 @@ export function printLernstudioWorksheetDirectly(
   options: WorksheetOptions = {}
 ): void {
   const isTeacher = Boolean(options.includeAnswerKey);
-  const school = options.schoolName || 'Glück Lernstudio';
-  const teacher = options.teacherName || 'الأستاذ المعلم';
-  const grade = options.gradeName || set.grade || 'جميع الصفوف';
-  const subject = options.subjectName || 'اللغة الألمانية';
-  const dateStr = options.dateStr || new Date().toLocaleDateString('de-DE');
+  const school = escapeHtml(options.schoolName || 'Glück Lernstudio');
+  const teacher = escapeHtml(options.teacherName || 'الأستاذ المعلم');
+  const grade = escapeHtml(options.gradeName || set.grade || 'جميع الصفوف');
+  const subject = escapeHtml(options.subjectName || 'اللغة الألمانية');
+  const dateStr = escapeHtml(options.dateStr || new Date().toLocaleDateString('de-DE'));
 
   const win = window.open('', '_blank');
   if (!win) {
@@ -394,7 +395,7 @@ export function printLernstudioWorksheetDirectly(
     <html dir="rtl">
     <head>
       <meta charset="utf-8">
-      <title>Arbeitsblatt - ${set.title}</title>
+      <title>Arbeitsblatt - ${escapeHtml(set.title)}</title>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
         @page { size: A4 portrait; margin: 15mm; }
@@ -414,8 +415,8 @@ export function printLernstudioWorksheetDirectly(
         <tr>
           <td style="width: 55%; border-left: 1px solid #000;" class="de-text">
             <div style="font-size: 16px; font-weight: 800;">${school}</div>
-            <div>Fach: ${subject} (${set.level})</div>
-            <div>Thema: ${set.title || set.topic}</div>
+            <div>Fach: ${subject} (${escapeHtml(set.level)})</div>
+            <div>Thema: ${escapeHtml(set.title || set.topic)}</div>
             <div>Datum: ${dateStr}</div>
           </td>
           <td style="width: 45%;" class="ar-text">
@@ -428,7 +429,7 @@ export function printLernstudioWorksheetDirectly(
 
       <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 8px;">
         <h1 style="font-size: 18px; margin: 0;">
-          ${isTeacher ? 'ARBEITSBLATT - LÖSUNGSSCHLÜSSEL (نموذج إجابة المدرس)' : `ARBEITSBLATT: ${(set.title || set.topic).toUpperCase()}`}
+          ${isTeacher ? 'ARBEITSBLATT - LÖSUNGSSCHLÜSSEL (نموذج إجابة المدرس)' : `ARBEITSBLATT: ${escapeHtml((set.title || set.topic).toUpperCase())}`}
         </h1>
       </div>
   `;
@@ -450,10 +451,10 @@ export function printLernstudioWorksheetDirectly(
     set.items.forEach((item) => {
       html += `
         <tr>
-          <td class="de-text" style="font-weight: bold;">${item.emoji ? item.emoji + ' ' : ''}${item.german}</td>
-          <td class="de-text">${item.plural || '-'}</td>
-          <td class="de-text">${item.exampleSentenceGerman || '-'}</td>
-          <td class="ar-text" style="font-weight: bold;">${item.arabic}</td>
+          <td class="de-text" style="font-weight: bold;">${item.emoji ? escapeHtml(item.emoji) + ' ' : ''}${escapeHtml(item.german)}</td>
+          <td class="de-text">${escapeHtml(item.plural || '-')}</td>
+          <td class="de-text">${escapeHtml(item.exampleSentenceGerman || '-')}</td>
+          <td class="ar-text" style="font-weight: bold;">${escapeHtml(item.arabic)}</td>
         </tr>
       `;
     });
@@ -463,11 +464,11 @@ export function printLernstudioWorksheetDirectly(
   if (options.includeMissingLetters !== false && set.items.length > 0) {
     html += `<div class="section-title">2. Ergänze die fehlenden Buchstaben / أكمل الحرف الناقص:</div>`;
     set.items.forEach((item, idx) => {
-      const missingPrompt = item.missingLetterWord || item.german.replace(/[aeiouAEIOU]/g, '_');
+      const missingPrompt = escapeHtml(item.missingLetterWord || item.german.replace(/[aeiouAEIOU]/g, '_'));
       html += `
         <div style="margin-bottom: 8px; display: flex; justify-content: space-between;">
-          <div class="de-text"><strong>${idx + 1})</strong> <span style="font-family: monospace; letter-spacing: 2px;">${missingPrompt}</span> ${isTeacher ? `<span style="color: green; font-weight: bold;">[${item.german}]</span>` : '___________'}</div>
-          <div class="ar-text">(${item.arabic})</div>
+          <div class="de-text"><strong>${idx + 1})</strong> <span style="font-family: monospace; letter-spacing: 2px;">${missingPrompt}</span> ${isTeacher ? `<span style="color: green; font-weight: bold;">[${escapeHtml(item.german)}]</span>` : '___________'}</div>
+          <div class="ar-text">(${escapeHtml(item.arabic)})</div>
         </div>
       `;
     });

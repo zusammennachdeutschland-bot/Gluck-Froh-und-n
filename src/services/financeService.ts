@@ -1,4 +1,4 @@
-import { FinanceAccount, FinanceTransaction } from '../types';
+import { FinanceAccount, FinanceTransaction, PaymentRecord } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -147,3 +147,77 @@ export const calculateTodaysIncome = (transactions: FinanceTransaction[]) => {
 
   return Math.round(todayIncome * 100) / 100;
 };
+
+/**
+ * Fix #1: Determines whether an existing pending payment record belongs to the exact cycle being settled
+ * (by overlapping non-virtual lessonIds or lessonDates), preventing unrelated cycles in the same group from being settled.
+ */
+export const shouldSettlePendingCycleRecord = (
+  record: PaymentRecord,
+  paidCycle: { studentId: string; lessonIds?: string[]; lessonDates?: string[] }
+): boolean => {
+  if (record.studentId !== paidCycle.studentId) return false;
+  const st = String(record.status || '');
+  if (st !== 'not_yet' && st !== 'pending' && st !== 'unpaid') return false;
+
+  const targetIds = new Set((paidCycle.lessonIds || []).filter(id => !id.startsWith('virtual_')));
+  const overlapsIds = Boolean(record.lessonIds && record.lessonIds.some(id => targetIds.has(id)));
+  const overlapsDates = Boolean(
+    record.lessonDates &&
+    paidCycle.lessonDates &&
+    record.lessonDates.some(d => paidCycle.lessonDates!.includes(d))
+  );
+
+  return overlapsIds || overlapsDates;
+};
+
+/**
+ * Fix #2: Computes total students needing payment and total amount due without double-counting records
+ * already represented in dueCycles and using amountDue/amountPaid so NaN never occurs.
+ */
+export const calculateStudentDueBannerTotals = (
+  dueCycles: { id: string; existingPaymentRecordId?: string; amountDue?: number }[],
+  payments: PaymentRecord[]
+): { totalStudentsNeedingPayment: number; totalAmountDueFromStudents: number } => {
+  const safeCycles = Array.isArray(dueCycles) ? dueCycles : [];
+  const safePayments = Array.isArray(payments) ? payments : [];
+
+  const coveredRecordIds = new Set<string>();
+  for (const cycle of safeCycles) {
+    if (cycle.id) coveredRecordIds.add(cycle.id);
+    if (cycle.existingPaymentRecordId) coveredRecordIds.add(cycle.existingPaymentRecordId);
+  }
+
+  const standalonePendingList = safePayments.filter(p => {
+    const st = String(p.status || '');
+    return !p.deleted && (st === 'not_paid' || st === 'partial') && !coveredRecordIds.has(p.id);
+  });
+
+  const cycleTotal = safeCycles.reduce((sum, c) => sum + (Number(c.amountDue) || 0), 0);
+  const pendingTotal = standalonePendingList.reduce((sum, p) => {
+    const legacyRec = p as PaymentRecord & { amount?: number; paidAmount?: number };
+    const due = Number(legacyRec.amountDue ?? legacyRec.amount ?? 0) || 0;
+    const paid = Number(legacyRec.amountPaid ?? legacyRec.paidAmount ?? 0) || 0;
+    return sum + Math.max(0, due - paid);
+  }, 0);
+
+  return {
+    totalStudentsNeedingPayment: safeCycles.length + standalonePendingList.length,
+    totalAmountDueFromStudents: Math.round((cycleTotal + pendingTotal) * 100) / 100,
+  };
+};
+
+/**
+ * Fix #3: Applies a payment state updater to the full archive list as well as active RAM state,
+ * ensuring quick toggles and pending cycle records are never lost on subsequent archive syncs.
+ */
+export const applyFullPaymentsUpdate = (
+  fullPayments: PaymentRecord[],
+  updater: (prev: PaymentRecord[]) => PaymentRecord[],
+  filterActive: (all: PaymentRecord[]) => PaymentRecord[]
+): { nextFull: PaymentRecord[]; nextActive: PaymentRecord[] } => {
+  const nextFull = updater(fullPayments);
+  const nextActive = filterActive(nextFull);
+  return { nextFull, nextActive };
+};
+

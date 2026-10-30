@@ -56,15 +56,31 @@ class SyncHistoryService {
     const existing = await this.getHistory();
     const entryId = report.id || ('hist_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7));
 
+    // Check if an entry for the same report ID or identical peer + timestamp window already exists (#18)
+    const duplicateExisting = existing.find(
+      item =>
+        item.id === entryId ||
+        (item.peerId === report.peerId &&
+          item.status === report.status &&
+          Math.abs((item.timestamp || 0) - (report.timestamp || 0)) < 1500 &&
+          item.transferredCount === report.totalRecordsTransferred)
+    );
+
+    const effectiveId = duplicateExisting ? duplicateExisting.id : entryId;
+    const effectiveTrigger =
+      trigger !== 'Manual Sync'
+        ? trigger
+        : duplicateExisting?.trigger || trigger;
+
     const newEntry: SyncHistoryEntry = {
-      id: entryId,
+      id: effectiveId,
       timestamp: report.timestamp || Date.now(),
-      trigger,
+      trigger: effectiveTrigger,
       peerId: report.peerId,
       peerName: report.peerName,
       durationMs: report.durationMs || 0,
-      uploadedCount,
-      downloadedCount,
+      uploadedCount: uploadedCount || duplicateExisting?.uploadedCount || 0,
+      downloadedCount: downloadedCount || duplicateExisting?.downloadedCount || 0,
       conflictCount: report.conflictsResolved || 0,
       status: report.status,
       summary: report.status === 'failed' 

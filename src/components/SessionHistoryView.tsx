@@ -56,7 +56,7 @@ export const SessionHistoryView: React.FC = () => {
   };
 
   const currentWeekStart = getWeekStart(new Date());
-  const currentMonthPrefix = new Date().toISOString().substring(0, 7); // "YYYY-MM"
+  const currentMonthPrefix = formatLocalDate().substring(0, 7); // "YYYY-MM"
 
   // Filtered and Sorted Lessons (Newest First)
   const filteredLessons = useMemo(() => {

@@ -27,6 +27,82 @@ try {
   console.warn('localStorage is not available in this context (probably blocked in iframe).', e);
 }
 
+const HEAVY_EVICTABLE_LOCALSTORAGE_KEYS = [
+  'dl_auto_backup_history_snapshots',
+  'dl_local_backup_data',
+  'dl_lernstudio_sets',
+  'dl_web_scheduled_notifications',
+  'dl_lessons',
+  'dl_payments'
+];
+
+const LOCALFORAGE_ONLY_HEAVY_KEYS = new Set([
+  'dl_auto_backup_history_snapshots',
+  'dl_local_backup_data'
+]);
+
+const MAX_LOCALSTORAGE_MIRROR_BYTES = 512 * 1024; // 512 KB cap per key when localforage is active
+
+export const isQuotaExceededError = (err: unknown): boolean => {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as any;
+  return (
+    e.name === 'QuotaExceededError' ||
+    e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+    e.code === 22 ||
+    e.code === 1014 ||
+    (typeof e.message === 'string' && e.message.toLowerCase().includes('quota'))
+  );
+};
+
+export const safeLocalStorageSetItem = (
+  key: string,
+  valStr: string,
+  savedInPrimaryDb: boolean = false
+): boolean => {
+  if (!isLocalStorageSupported) return false;
+
+  // Skip mirroring massive backup snapshots into 5MB localStorage if already persisted in IndexedDB
+  if (savedInPrimaryDb && (LOCALFORAGE_ONLY_HEAVY_KEYS.has(key) || valStr.length > MAX_LOCALSTORAGE_MIRROR_BYTES)) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // ignore
+    }
+    return true;
+  }
+
+  try {
+    localStorage.setItem(key, valStr);
+    return true;
+  } catch (e) {
+    if (isQuotaExceededError(e)) {
+      // Evict heavy/redundant keys from localStorage (they remain safe in IndexedDB / memoryStore)
+      for (const evictKey of HEAVY_EVICTABLE_LOCALSTORAGE_KEYS) {
+        if (evictKey === key) continue;
+        try {
+          localStorage.removeItem(evictKey);
+        } catch {
+          // ignore
+        }
+      }
+      // Retry writing the target key if it fits
+      if (!savedInPrimaryDb || valStr.length <= MAX_LOCALSTORAGE_MIRROR_BYTES) {
+        try {
+          localStorage.setItem(key, valStr);
+          return true;
+        } catch (retryErr) {
+          console.warn('localStorage quota still exceeded after eviction for key:', key, retryErr);
+          return false;
+        }
+      }
+      return false;
+    }
+    console.warn('Error writing to localStorage:', key, e);
+    return false;
+  }
+};
+
 export const storage = {
   async getItem<T>(key: string): Promise<T | null> {
     try {
@@ -66,9 +142,11 @@ export const storage = {
     // Keep memory store updated always
     memoryStore[key] = value;
 
+    let savedInForage = false;
     try {
       if (isLocalforageSupported) {
         await localforage.setItem(key, value);
+        savedInForage = true;
       }
     } catch (e) {
       console.warn('Error writing to localforage:', key, e);
@@ -77,10 +155,10 @@ export const storage = {
     try {
       if (isLocalStorageSupported) {
         const valStr = typeof value === 'string' ? value : JSON.stringify(value);
-        localStorage.setItem(key, valStr);
+        safeLocalStorageSetItem(key, valStr, savedInForage);
       }
     } catch (e) {
-      console.warn('Error writing to localStorage:', key, e);
+      console.warn('Error serializing for localStorage:', key, e);
     }
   },
 

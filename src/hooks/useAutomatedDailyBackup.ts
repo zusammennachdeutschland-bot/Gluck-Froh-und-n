@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatLocalDate } from '../utils/timeUtils';
 import { storage } from '../services/storageService';
@@ -10,6 +10,8 @@ import { storage } from '../services/storageService';
  */
 export const useAutomatedDailyBackup = () => {
   const { performBackup, profile } = useApp();
+  const performBackupRef = useRef(performBackup);
+  performBackupRef.current = performBackup;
 
   useEffect(() => {
     if (!profile) return;
@@ -26,21 +28,23 @@ export const useAutomatedDailyBackup = () => {
         if (isDailyEnabled && lastAutoBackupDate !== todayStr) {
           console.log('[Auto Daily Backup] Executing scheduled in-storage daily data backup...');
           
-          // 1. Perform latest state snapshot
-          performBackup();
+          // 1. Perform latest state snapshot and await JSON string
+          const snapshotJson = await performBackupRef.current();
 
-          // 2. Save snapshot into auto-backup historical ring buffer in persistent storage
-          const snapshotJson = await storage.getItem('dl_local_backup_data');
           if (snapshotJson) {
             const retentionCount = Number(localStorage.getItem('dl_backup_retention')) || 10;
             const historySnapshotsRaw = await storage.getItem('dl_auto_backup_history_snapshots');
             let historySnapshots: Array<{ date: string; timestamp: string; data: string }> = [];
 
-            if (historySnapshotsRaw && typeof historySnapshotsRaw === 'string') {
-              try {
-                historySnapshots = JSON.parse(historySnapshotsRaw);
-              } catch {
-                historySnapshots = [];
+            if (historySnapshotsRaw) {
+              if (typeof historySnapshotsRaw === 'string') {
+                try {
+                  historySnapshots = JSON.parse(historySnapshotsRaw);
+                } catch {
+                  historySnapshots = [];
+                }
+              } else if (Array.isArray(historySnapshotsRaw)) {
+                historySnapshots = historySnapshotsRaw;
               }
             }
 
@@ -48,10 +52,11 @@ export const useAutomatedDailyBackup = () => {
             historySnapshots = historySnapshots.filter(s => s.date !== todayStr);
 
             // Add new snapshot at top
+            const dataStr = typeof snapshotJson === 'string' ? snapshotJson : JSON.stringify(snapshotJson);
             historySnapshots.unshift({
               date: todayStr,
               timestamp: new Date().toISOString(),
-              data: String(snapshotJson)
+              data: dataStr
             });
 
             // Enforce retention limit
@@ -83,5 +88,5 @@ export const useAutomatedDailyBackup = () => {
       clearTimeout(initialTimer);
       clearInterval(interval);
     };
-  }, [profile, performBackup]);
+  }, [profile]);
 };

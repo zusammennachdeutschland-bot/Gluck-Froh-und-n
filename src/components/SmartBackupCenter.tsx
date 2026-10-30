@@ -13,7 +13,9 @@ import { Share } from '@capacitor/share';
 import { 
   ALL_BACKUP_CATEGORIES, BackupCategory, calculateBackupStats, 
   generateBackupFilename, encryptBackupData, decryptBackupData, 
-  analyzeBackupPayload, validateAndSanitizeBackupPayload, RestoreAnalysisResult, RestoreHistoryEntry 
+  analyzeBackupPayload, validateAndSanitizeBackupPayload, hasBackupSection,
+  MAX_BACKUP_FILE_SIZE_BYTES, isBackupFileSizeValid,
+  RestoreAnalysisResult, RestoreHistoryEntry 
 } from '../utils/backupEngine';
 import { 
   Download, Upload, ShieldCheck, Database, Lock, Unlock, 
@@ -35,14 +37,16 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
     profile, notificationSettings, inspirationSettings, 
     inspirationMessages, todos, certificates,
     hodStudents, hodComplaints, hodActionPlans, hodVisits,
-    schoolNotes,
+    schoolNotes, goldHoldings, lernstudioSets,
     financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments,
     setStudents, setGroups, setLessons, setPayments, setNotifications, setProfile, 
     setNotificationSettings, setInspirationSettings, setInspirationMessages,
     setTodos, setCertificates,
     setHodStudents, setHodComplaints, setHodActionPlans, setHodVisits,
-    setSchoolNotes,
+    setSchoolNotes, setGoldHoldings, setLernstudioSets,
     setFinanceAccounts, setFinanceCategories, setFinanceTransactions, setFinanceRecurring, setFinanceInstallments,
+    updateFullLessonsStorage, updateFullPaymentsStorage,
+    bumpExternalDataVersion,
     lastBackupTime, performBackup, exportBackupFile, importBackupFile,
     t, _t
   } = useApp();
@@ -219,6 +223,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         }
         if (selectedCategories.includes('certificates')) payloadData.certificates = certificates;
         if (selectedCategories.includes('school_notes')) payloadData.schoolNotes = schoolNotes;
+        if (selectedCategories.includes('lernstudio')) payloadData.lernstudioSets = lernstudioSets;
         if (selectedCategories.includes('settings')) {
           payloadData.profile = profile;
           payloadData.schoolSettings = profile.schoolSettings;
@@ -226,6 +231,8 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           payloadData.inspirationSettings = inspirationSettings;
           payloadData.inspirationMessages = inspirationMessages;
           payloadData.todos = todos;
+          payloadData.lernstudioSets = lernstudioSets;
+          payloadData.goldHoldings = goldHoldings;
         }
         if (selectedCategories.includes('availability')) payloadData.workingHours = profile.workingHours;
         if (selectedCategories.includes('templates')) payloadData.parentMessageTemplates = profile.parentMessageTemplates;
@@ -349,7 +356,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         }
 
         // Update last backup time
-        performBackup();
+        await performBackup();
 
         setExportProgress(100);
         setExportStatusMsg(t('auto_backup_file_created_and_down'));
@@ -391,6 +398,8 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           hodActionPlans,
           hodVisits,
           schoolNotes,
+          lernstudioSets,
+          goldHoldings,
           financeAccounts,
           financeCategories,
           financeTransactions,
@@ -498,7 +507,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           URL.revokeObjectURL(url);
         }
 
-        performBackup(); // update last backup time
+        await performBackup(); // update last backup time
         setSimpleSuccessMsg(
           _t(
             'تم حفظ النسخة الاحتياطية بنجاح في مجلد المستندات / التنزيلات على جهازك!',
@@ -520,6 +529,18 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!isBackupFileSizeValid(file.size)) {
+      setSimpleErrorMsg(
+        _t(
+          'حجم ملف النسخة الاحتياطية يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
+          'Backup file size exceeds the maximum allowed limit (25 MB).',
+          'Die Backup-Datei überschreitet das zulässige Limit (25 MB).'
+        )
+      );
+      if (simpleFileInputRef.current) simpleFileInputRef.current.value = '';
+      return;
+    }
+
     setSimpleRestoreFileName(file.name);
     setSimpleSuccessMsg(null);
     setSimpleErrorMsg(null);
@@ -531,13 +552,15 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
 
       setIsSimpleRestoring(true);
       
-      // Safety step: Create automatic restore point first!
+      // Safety step: Create automatic restore point first (with full lessons & payments archive)!
+      const fullLessonsSnapshot = (await storage.getItem<Lesson[]>('dl_lessons')) || lessons;
+      const fullPaymentsSnapshot = (await storage.getItem<PaymentRecord[]>('dl_payments')) || payments;
       const currentSnapshot = {
         timestamp: new Date().toISOString(),
         students,
         groups,
-        lessons,
-        payments,
+        lessons: fullLessonsSnapshot,
+        payments: fullPaymentsSnapshot,
         notifications,
         certificates,
         profile,
@@ -550,6 +573,8 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         hodActionPlans,
         hodVisits,
         schoolNotes,
+        lernstudioSets,
+        goldHoldings,
         financeAccounts,
         financeCategories,
         financeTransactions,
@@ -599,123 +624,163 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           let finalFinanceRecurring = financeRecurring;
           let finalFinanceInstallments = financeInstallments;
 
-          if (data.students) finalStudents = data.students;
-          if (data.groups) finalGroups = data.groups;
-          if (data.lessons) finalLessons = data.lessons;
-          if (data.payments) finalPayments = data.payments;
-          if (data.profile) finalProfile = { ...profile, ...data.profile };
-          if (data.schoolSettings && finalProfile) {
+          const hasStudents = hasBackupSection(parsed, 'students');
+          const hasGroups = hasBackupSection(parsed, 'groups');
+          const hasLessons = hasBackupSection(parsed, 'lessons');
+          const hasPayments = hasBackupSection(parsed, 'payments');
+          const hasProfile = hasBackupSection(parsed, 'profile');
+          const hasSchoolSettings = hasBackupSection(parsed, 'schoolSettings');
+
+          if (hasStudents && data.students) finalStudents = data.students;
+          if (hasGroups && data.groups) finalGroups = data.groups;
+          if (hasLessons && data.lessons) finalLessons = data.lessons;
+          if (hasPayments && data.payments) finalPayments = data.payments;
+          if (hasProfile && data.profile) finalProfile = { ...profile, ...data.profile };
+          if (hasSchoolSettings && data.schoolSettings && finalProfile) {
             finalProfile = { ...finalProfile, schoolSettings: data.schoolSettings };
           }
-          if (data.todos) finalTodos = data.todos;
-          if (data.certificates) finalCertificates = data.certificates;
-          if (data.schoolNotes) finalSchoolNotes = data.schoolNotes;
-          if (data.notifications) finalNotifications = data.notifications;
-          if (data.notificationSettings) finalNotificationSettings = data.notificationSettings;
-          if (data.inspirationSettings) finalInspirationSettings = data.inspirationSettings;
-          if (data.inspirationMessages) finalInspirationMessages = data.inspirationMessages;
-          if (data.hodStudents) finalHodStudents = data.hodStudents;
-          if (data.hodComplaints) finalHodComplaints = data.hodComplaints;
-          if (data.hodActionPlans) finalHodActionPlans = data.hodActionPlans;
-          if (data.hodVisits) finalHodVisits = data.hodVisits;
-          if (data.financeAccounts) finalFinanceAccounts = data.financeAccounts;
-          if (data.financeCategories) finalFinanceCategories = data.financeCategories;
-          if (data.financeTransactions) finalFinanceTransactions = data.financeTransactions;
-          if (data.financeRecurring) finalFinanceRecurring = data.financeRecurring;
-          if (data.financeInstallments) finalFinanceInstallments = data.financeInstallments;
+          if (hasBackupSection(parsed, 'todos') && data.todos) finalTodos = data.todos;
+          if (hasBackupSection(parsed, 'certificates') && data.certificates) finalCertificates = data.certificates;
+          if (hasBackupSection(parsed, 'schoolNotes') && data.schoolNotes) finalSchoolNotes = data.schoolNotes;
+          if (hasBackupSection(parsed, 'notifications') && data.notifications) finalNotifications = data.notifications;
+          if (hasBackupSection(parsed, 'notificationSettings') && data.notificationSettings) finalNotificationSettings = data.notificationSettings;
+          if (hasBackupSection(parsed, 'inspirationSettings') && data.inspirationSettings) finalInspirationSettings = data.inspirationSettings;
+          if (hasBackupSection(parsed, 'inspirationMessages') && data.inspirationMessages) finalInspirationMessages = data.inspirationMessages;
+          if (hasBackupSection(parsed, 'hodStudents') && data.hodStudents) finalHodStudents = data.hodStudents;
+          if (hasBackupSection(parsed, 'hodComplaints') && data.hodComplaints) finalHodComplaints = data.hodComplaints;
+          if (hasBackupSection(parsed, 'hodActionPlans') && data.hodActionPlans) finalHodActionPlans = data.hodActionPlans;
+          if (hasBackupSection(parsed, 'hodVisits') && data.hodVisits) finalHodVisits = data.hodVisits;
+          if (hasBackupSection(parsed, 'financeAccounts') && data.financeAccounts) finalFinanceAccounts = data.financeAccounts;
+          if (hasBackupSection(parsed, 'financeCategories') && data.financeCategories) finalFinanceCategories = data.financeCategories;
+          if (hasBackupSection(parsed, 'financeTransactions') && data.financeTransactions) finalFinanceTransactions = data.financeTransactions;
+          if (hasBackupSection(parsed, 'financeRecurring') && data.financeRecurring) finalFinanceRecurring = data.financeRecurring;
+          if (hasBackupSection(parsed, 'financeInstallments') && data.financeInstallments) finalFinanceInstallments = data.financeInstallments;
 
-          // ATOMIC STATE AND STORAGE COMMIT
-          setStudents(finalStudents);
-          await storage.setItem('dl_students', finalStudents);
+          // ATOMIC STATE AND STORAGE COMMIT (only for sections present in the original backup file)
+          if (hasStudents && data.students) {
+            setStudents(finalStudents);
+            await storage.setItem('dl_students', finalStudents);
+          }
 
-          setGroups(finalGroups);
-          await storage.setItem('dl_groups', finalGroups);
+          if (hasGroups && data.groups) {
+            setGroups(finalGroups);
+            await storage.setItem('dl_groups', finalGroups);
+          }
 
-          setLessons(finalLessons);
-          await storage.setItem('dl_lessons', finalLessons);
+          if (hasLessons && data.lessons) {
+            await updateFullLessonsStorage(allLessons => {
+              const activeMap = new Map<string, Lesson>(finalLessons.map(l => [l.id, l]));
+              const fullIds = new Set(allLessons.map(l => l.id));
+              const merged = allLessons.map(l => activeMap.get(l.id) || l);
+              finalLessons.forEach(l => {
+                if (!fullIds.has(l.id)) merged.push(l);
+              });
+              return merged;
+            });
+          }
 
-          setPayments(finalPayments);
-          await storage.setItem('dl_payments', finalPayments);
+          if (hasPayments && data.payments) {
+            await updateFullPaymentsStorage(allPayments => {
+              const activeMap = new Map<string, PaymentRecord>(finalPayments.map(p => [p.id, p]));
+              const fullIds = new Set(allPayments.map(p => p.id));
+              const merged = allPayments.map(p => activeMap.get(p.id) || p);
+              finalPayments.forEach(p => {
+                if (!fullIds.has(p.id)) merged.push(p);
+              });
+              return merged;
+            });
+          }
 
-          setProfile(finalProfile);
-          await storage.setItem('dl_profile', finalProfile);
+          if ((hasProfile && data.profile) || (hasSchoolSettings && data.schoolSettings)) {
+            setProfile(finalProfile);
+            await storage.setItem('dl_profile', finalProfile);
+          }
 
-          if (data.todos) {
+          if (hasBackupSection(parsed, 'todos') && data.todos) {
             setTodos(finalTodos);
             await storage.setItem('dl_quick_todos', finalTodos);
           }
 
-          if (data.certificates) {
+          if (hasBackupSection(parsed, 'certificates') && data.certificates) {
             setCertificates(finalCertificates);
             await storage.setItem('dl_certificates', finalCertificates);
           }
 
-          if (data.schoolNotes) {
+          if (hasBackupSection(parsed, 'schoolNotes') && data.schoolNotes) {
             setSchoolNotes(finalSchoolNotes);
             await storage.setItem('dl_school_notes', finalSchoolNotes);
           }
 
-          if (data.notifications) {
+          if (hasBackupSection(parsed, 'notifications') && data.notifications) {
             setNotifications(finalNotifications);
             await storage.setItem('dl_notifications', finalNotifications);
           }
 
-          if (data.notificationSettings) {
+          if (hasBackupSection(parsed, 'notificationSettings') && data.notificationSettings) {
             setNotificationSettings(finalNotificationSettings);
             await storage.setItem('dl_notification_settings', finalNotificationSettings);
           }
 
-          if (data.inspirationSettings) {
+          if (hasBackupSection(parsed, 'inspirationSettings') && data.inspirationSettings) {
             setInspirationSettings(finalInspirationSettings);
             await storage.setItem('dl_inspiration_settings', finalInspirationSettings);
           }
 
-          if (data.inspirationMessages) {
+          if (hasBackupSection(parsed, 'inspirationMessages') && data.inspirationMessages) {
             setInspirationMessages(finalInspirationMessages);
             await storage.setItem('dl_inspiration_messages', finalInspirationMessages);
           }
 
-          if (data.hodStudents) {
+          if (hasBackupSection(parsed, 'hodStudents') && data.hodStudents) {
             setHodStudents(finalHodStudents);
             await storage.setItem('hod_german_students', finalHodStudents);
           }
 
-          if (data.hodComplaints) {
+          if (hasBackupSection(parsed, 'hodComplaints') && data.hodComplaints) {
             setHodComplaints(finalHodComplaints);
             await storage.setItem('hod_complaints', finalHodComplaints);
           }
 
-          if (data.hodActionPlans) {
+          if (hasBackupSection(parsed, 'hodActionPlans') && data.hodActionPlans) {
             setHodActionPlans(finalHodActionPlans);
             await storage.setItem('hod_student_action_plans', finalHodActionPlans);
           }
 
-          if (data.hodVisits) {
+          if (hasBackupSection(parsed, 'hodVisits') && data.hodVisits) {
             setHodVisits(finalHodVisits);
             await storage.setItem('hod_visit_records', finalHodVisits);
           }
 
-          if (data.financeAccounts) {
+          if (hasBackupSection(parsed, 'financeAccounts') && data.financeAccounts) {
             setFinanceAccounts(finalFinanceAccounts);
             await storage.setItem('dl_finance_accounts', finalFinanceAccounts);
           }
-          if (data.financeCategories) {
+          if (hasBackupSection(parsed, 'financeCategories') && data.financeCategories) {
             setFinanceCategories(finalFinanceCategories);
             await storage.setItem('dl_finance_categories', finalFinanceCategories);
           }
-          if (data.financeTransactions) {
+          if (hasBackupSection(parsed, 'financeTransactions') && data.financeTransactions) {
             setFinanceTransactions(finalFinanceTransactions);
             await storage.setItem('dl_finance_transactions', finalFinanceTransactions);
           }
-          if (data.financeRecurring) {
+          if (hasBackupSection(parsed, 'financeRecurring') && data.financeRecurring) {
             setFinanceRecurring(finalFinanceRecurring);
             await storage.setItem('dl_finance_recurring', finalFinanceRecurring);
           }
-          if (data.financeInstallments) {
+          if (hasBackupSection(parsed, 'financeInstallments') && data.financeInstallments) {
             setFinanceInstallments(finalFinanceInstallments);
             await storage.setItem('dl_finance_installments', finalFinanceInstallments);
           }
+          if (hasBackupSection(parsed, 'lernstudioSets') && data.lernstudioSets) {
+            setLernstudioSets(data.lernstudioSets);
+            await storage.setItem('dl_lernstudio_sets', data.lernstudioSets);
+          }
+          if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings) {
+            setGoldHoldings(data.goldHoldings);
+            await storage.setItem('gluck_gold_holdings', data.goldHoldings);
+          }
 
+          bumpExternalDataVersion();
           setSimpleSuccessMsg(t('auto_all_data_restored_successful'));
           
           // Log to history
@@ -754,6 +819,27 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (!isBackupFileSizeValid(file.size)) {
+      setRestoreFileName(file.name);
+      setAnalysis({
+        isValid: false,
+        isEncrypted: false,
+        version: '1.0.0',
+        timestamp: new Date().toISOString(),
+        backupType: 'Partial',
+        categories: [],
+        counts: { students: 0, groups: 0, lessons: 0, attendance: 0, homework: 0, exams: 0, payments: 0, notifications: 0, settingsIncluded: false },
+        impact: { addStudents: 0, updateStudents: 0, addGroups: 0, updateGroups: 0, addLessons: 0, updateLessons: 0, addPayments: 0, updatePayments: 0, duplicateEntries: 0, conflicts: 0 },
+        errorMessage: _t(
+          'حجم ملف النسخة الاحتياطية يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
+          'Backup file size exceeds the maximum allowed limit (25 MB).',
+          'Die Backup-Datei überschreitet das zulässige Limit (25 MB).'
+        )
+      });
+      e.target.value = '';
+      return;
+    }
 
     setRestoreFileName(file.name);
     const reader = new FileReader();
@@ -821,12 +907,15 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
     console.log('lessons before', lessons.length);
     console.log('payments before', payments.length);
 
+    const fullLessonsSnapshot = (await storage.getItem<Lesson[]>('dl_lessons')) || lessons;
+    const fullPaymentsSnapshot = (await storage.getItem<PaymentRecord[]>('dl_payments')) || payments;
+
     const currentSnapshot = {
       timestamp: new Date().toISOString(),
       students,
       groups,
-      lessons,
-      payments,
+      lessons: fullLessonsSnapshot,
+      payments: fullPaymentsSnapshot,
       notifications,
       certificates,
       profile,
@@ -839,6 +928,8 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       hodActionPlans,
       hodVisits,
       schoolNotes,
+      lernstudioSets,
+      goldHoldings,
       financeAccounts,
       financeCategories,
       financeTransactions,
@@ -1202,13 +1293,35 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           await storage.setItem('dl_groups', finalGroups);
         }
         if (selectedRestoreCategories.includes('schedule') && data.lessons) {
-          setLessons(finalLessons);
-          await storage.setItem('dl_lessons', finalLessons);
+          if (restoreMode === 'replace') {
+            await updateFullLessonsStorage(() => finalLessons);
+          } else {
+            await updateFullLessonsStorage(allLessons => {
+              const activeMap = new Map<string, Lesson>(finalLessons.map(l => [l.id, l]));
+              const fullIds = new Set(allLessons.map(l => l.id));
+              const merged = allLessons.map(l => activeMap.get(l.id) || l);
+              finalLessons.forEach(l => {
+                if (!fullIds.has(l.id)) merged.push(l);
+              });
+              return merged;
+            });
+          }
         }
         if (selectedRestoreCategories.includes('financial')) {
           if (data.payments) {
-            setPayments(finalPayments);
-            await storage.setItem('dl_payments', finalPayments);
+            if (restoreMode === 'replace') {
+              await updateFullPaymentsStorage(() => finalPayments);
+            } else {
+              await updateFullPaymentsStorage(allPayments => {
+                const activeMap = new Map<string, PaymentRecord>(finalPayments.map(p => [p.id, p]));
+                const fullIds = new Set(allPayments.map(p => p.id));
+                const merged = allPayments.map(p => activeMap.get(p.id) || p);
+                finalPayments.forEach(p => {
+                  if (!fullIds.has(p.id)) merged.push(p);
+                });
+                return merged;
+              });
+            }
           }
           if (data.financeAccounts) {
             setFinanceAccounts(finalFinanceAccounts);
@@ -1262,6 +1375,14 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             setTodos(finalTodos);
             await storage.setItem('dl_quick_todos', finalTodos);
           }
+          if (data.goldHoldings) {
+            setGoldHoldings(data.goldHoldings);
+            await storage.setItem('gluck_gold_holdings', data.goldHoldings);
+          }
+        }
+        if ((selectedRestoreCategories.includes('lernstudio') || selectedRestoreCategories.includes('settings')) && data.lernstudioSets) {
+          setLernstudioSets(data.lernstudioSets);
+          await storage.setItem('dl_lernstudio_sets', data.lernstudioSets);
         }
         if (selectedRestoreCategories.includes('school_hod')) {
           if (data.hodStudents) {
@@ -1286,6 +1407,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           await storage.setItem('dl_profile', finalProfile);
         }
 
+        bumpExternalDataVersion();
         console.log('restore finished');
 
         setRestoreProgress(100);
@@ -1344,12 +1466,10 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           await storage.setItem('dl_groups', rp.groups);
         }
         if (rp.lessons) {
-          setLessons(rp.lessons);
-          await storage.setItem('dl_lessons', rp.lessons);
+          await updateFullLessonsStorage(() => rp.lessons);
         }
         if (rp.payments) {
-          setPayments(rp.payments);
-          await storage.setItem('dl_payments', rp.payments);
+          await updateFullPaymentsStorage(() => rp.payments);
         }
         if (rp.notifications) {
           setNotifications(rp.notifications);
@@ -1419,6 +1539,16 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           setFinanceInstallments(rp.financeInstallments);
           await storage.setItem('dl_finance_installments', rp.financeInstallments);
         }
+        if (rp.lernstudioSets) {
+          setLernstudioSets(rp.lernstudioSets);
+          await storage.setItem('dl_lernstudio_sets', rp.lernstudioSets);
+        }
+        if (rp.goldHoldings) {
+          setGoldHoldings(rp.goldHoldings);
+          await storage.setItem('gluck_gold_holdings', rp.goldHoldings);
+        }
+
+        bumpExternalDataVersion();
 
         setRestoreSuccessMsg(t('auto_rollback_successful_restore'));
 

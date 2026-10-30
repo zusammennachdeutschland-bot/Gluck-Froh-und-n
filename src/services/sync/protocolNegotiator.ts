@@ -5,7 +5,8 @@ import {
   DEFAULT_CAPABILITIES, 
   ProtocolHeader, 
   SyncCapability,
-  SyncDeltaPayload
+  SyncDeltaPayload,
+  PairedPeer
 } from '../../types';
 
 export interface NegotiationResult {
@@ -124,3 +125,15 @@ export function adaptOutboundPayloadForPeer(
 
   return adaptedPayload;
 }
+
+/**
+ * Strictly authenticates a paired peer by its non-empty pairingToken (no deviceId fallback).
+ */
+export function findAuthenticatedPeer(
+  pairedPeers: PairedPeer[] | undefined,
+  token: string | undefined
+): PairedPeer | undefined {
+  if (!token || typeof token !== 'string' || !token.trim()) return undefined;
+  return (pairedPeers || []).find(p => Boolean(p.pairingToken) && p.pairingToken === token);
+}
+

@@ -14,6 +14,7 @@ import {
 } from '../utils/termVisitPrintUtils';
 import { PlannedVisitRecord, VisitPlannerStatus, TermVisitRequirement } from '../types';
 import { calculatePeriodsTimings } from '../utils/schoolUtils';
+import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
 
 export const TermVisitPlannerView: React.FC = () => {
   const { profile, updateProfile, lessons, _t, language } = useApp();
@@ -127,8 +128,8 @@ export const TermVisitPlannerView: React.FC = () => {
         const weekNum = Math.ceil((((curr.getTime() - jan1.getTime()) / 86400000) + jan1.getDay() + 1) / 7);
         const weekKey = `${_t('الأسبوع', 'Week', 'Woche')} ${weekNum}`;
 
-        const firstDateStr = weekStartDate.toISOString().split('T')[0];
-        const lastDateStr = weekEndDate.toISOString().split('T')[0];
+        const firstDateStr = formatLocalDate(weekStartDate);
+        const lastDateStr = formatLocalDate(weekEndDate);
 
         // Find visits falling in this calendar week
         const weekVisits = planResult.plannedVisits.filter(v => v.date >= firstDateStr && v.date <= lastDateStr);
@@ -155,7 +156,7 @@ export const TermVisitPlannerView: React.FC = () => {
   // Current Week Info - ACCURATE matching against today's date
   const currentWeekInfo = useMemo(() => {
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = formatLocalDate(today);
 
     // 1. Try exact date range containment
     let matched = availableWeeksList.find(w => w.firstDate <= todayStr && todayStr <= w.lastDate);
@@ -199,11 +200,11 @@ export const TermVisitPlannerView: React.FC = () => {
   }, [availableWeeksList, manualTargetWeekKey, currentWeekInfo]);
 
   const manualTargetDayDateStr = useMemo(() => {
-    if (!manualTargetWeekObj || !manualTargetWeekObj.firstDate) return new Date().toISOString().split('T')[0];
-    const base = new Date(manualTargetWeekObj.firstDate);
-    if (isNaN(base.getTime())) return new Date().toISOString().split('T')[0];
+    if (!manualTargetWeekObj || !manualTargetWeekObj.firstDate) return formatLocalDate();
+    const base = parseLocalDate(manualTargetWeekObj.firstDate);
+    if (isNaN(base.getTime())) return formatLocalDate();
     base.setDate(base.getDate() + Number(manualSelectedDayKey));
-    return base.toISOString().split('T')[0];
+    return formatLocalDate(base);
   }, [manualTargetWeekObj, manualSelectedDayKey]);
 
   const periodTimings = useMemo(() => calculatePeriodsTimings(schoolSettings.periodSettings), [schoolSettings.periodSettings]);

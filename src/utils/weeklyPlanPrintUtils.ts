@@ -5,6 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { getReportSchoolLogoHtml, getEffectiveSchoolName } from './alsunLogoData';
+import { escapeHtml } from './securityUtils';
 
 export interface WeeklyPlanGradeItem {
   gradeName: string;
@@ -185,7 +186,7 @@ export function getWeeklySecretaryAppreciationText(weekNum: number | string, sec
   const numericWeek = Math.max(1, parseInt(String(weekNum).replace(/\D/g, ''), 10) || 1);
   const index = (numericWeek - 1) % WEEKLY_SECRETARY_APPRECIATIONS.length;
   const template = WEEKLY_SECRETARY_APPRECIATIONS[index];
-  const cleanName = cleanSecretaryName(secName);
+  const cleanName = escapeHtml(cleanSecretaryName(secName));
   return {
     de: template.de(cleanName),
     en: template.en(cleanName),
@@ -202,16 +203,17 @@ export function generateSingleWeeklyPlanHtml(
   weekNum: number
 ): string {
   const sec = getSecretaryForGradeBand(plan.gradeBand, settings, plan.secretaryName, plan.secretaryPhone);
-  const secName = cleanSecretaryName(sec.name);
-  const hodName = cleanHodName(settings.hodName, 'Fachleiter');
+  const rawSecName = cleanSecretaryName(sec.name);
+  const secName = escapeHtml(rawSecName);
+  const hodName = escapeHtml(cleanHodName(settings.hodName, 'Fachleiter'));
   const grades = (plan.gradesContent && plan.gradesContent.length > 0)
     ? plan.gradesContent
     : [];
 
-  const stageDe = getGermanGradeBandLabel(plan.gradeBand);
-  const stageAr = getArabicGradeBandLabel(plan.gradeBand);
-  const appreciation = getWeeklySecretaryAppreciationText(weekNum, secName);
-  const schoolName = getEffectiveSchoolName(settings, true);
+  const stageDe = escapeHtml(getGermanGradeBandLabel(plan.gradeBand));
+  const stageAr = escapeHtml(getArabicGradeBandLabel(plan.gradeBand));
+  const appreciation = getWeeklySecretaryAppreciationText(weekNum, rawSecName);
+  const schoolName = escapeHtml(getEffectiveSchoolName(settings, true));
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 48 });
 
   return `<!DOCTYPE html>
@@ -488,7 +490,7 @@ export function generateSingleWeeklyPlanHtml(
       </div>
       <div class="meta-item">
         <span class="meta-label">Stufe / المرحلة</span>
-        <span class="meta-val">${plan.gradeBand}</span>
+        <span class="meta-val">${escapeHtml(plan.gradeBand)}</span>
       </div>
       <div class="meta-item">
         <span class="meta-label">Sekretärin / السكرتيرة</span>
@@ -512,7 +514,7 @@ export function generateSingleWeeklyPlanHtml(
       </thead>
       <tbody>
         ${grades.map((g, idx) => {
-          const gName = getGermanGradeName(g.gradeName, plan.gradeBand, idx);
+          const gName = escapeHtml(getGermanGradeName(g.gradeName, plan.gradeBand, idx));
           const note = g.quiz || g.hinweis;
           const hasNote = note && note !== 'Kein Quiz / Hinweis' && note !== 'Kein Quiz' && note.trim() !== '';
 
@@ -523,19 +525,19 @@ export function generateSingleWeeklyPlanHtml(
             </td>
             <td>
               <div class="content-box">
-                ${g.s1 ? g.s1.replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
+                ${g.s1 ? escapeHtml(g.s1).replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
               </div>
             </td>
             <td>
               <div class="content-box">
-                ${g.s2 ? g.s2.replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
+                ${g.s2 ? escapeHtml(g.s2).replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
               </div>
             </td>
             <td>
-              ${g.ha ? `<span class="ha-badge">${g.ha}</span>` : '<span style="color:#94a3b8;">—</span>'}
+              ${g.ha ? `<span class="ha-badge">${escapeHtml(g.ha)}</span>` : '<span style="color:#94a3b8;">—</span>'}
             </td>
             <td>
-              ${hasNote ? `<span class="quiz-badge">${note}</span>` : '<span style="color:#94a3b8;">Kein Quiz</span>'}
+              ${hasNote ? `<span class="quiz-badge">${escapeHtml(note)}</span>` : '<span style="color:#94a3b8;">Kein Quiz</span>'}
             </td>
           </tr>
           `;
@@ -581,8 +583,8 @@ export function generateAllWeeklyPlansCombinedTableHtml(
   settings: SchoolSettings,
   weekNum: number
 ): string {
-  const hodName = cleanHodName(settings.hodName, 'Fachleiter');
-  const schoolName = getEffectiveSchoolName(settings, true);
+  const hodName = escapeHtml(cleanHodName(settings.hodName, 'Fachleiter'));
+  const schoolName = escapeHtml(getEffectiveSchoolName(settings, true));
   const logoHtml = getReportSchoolLogoHtml(settings, { height: 44 });
 
   // Order stage bands logically: 1-3, 4-6, 7-9, 10-12
@@ -810,7 +812,7 @@ export function generateAllWeeklyPlansCombinedTableHtml(
         </div>
         <div class="header-title">
           <h1>📌 Gesamter Wochenplan - Deutschabteilung (Alle Klassen 1–12)</h1>
-          <p><span style="font-family: 'Cairo', 'Tajawal', sans-serif !important; direction: rtl; unicode-bidi: isolate; display: inline-block;">${schoolName}</span> | Schuljahr: ${settings.academicYear || '2025/2026'}</p>
+          <p><span style="font-family: 'Cairo', 'Tajawal', sans-serif !important; direction: rtl; unicode-bidi: isolate; display: inline-block;">${schoolName}</span> | Schuljahr: ${escapeHtml(settings.academicYear || '2025/2026')}</p>
         </div>
       </div>
       <div style="text-align: right;">
@@ -841,8 +843,8 @@ export function generateAllWeeklyPlansCombinedTableHtml(
       <tbody>
         ${sortedPlans.map(plan => {
           const sec = getSecretaryForGradeBand(plan.gradeBand, settings, plan.secretaryName, plan.secretaryPhone);
-          const secName = cleanSecretaryName(sec.name);
-          const stageDe = getGermanGradeBandLabel(plan.gradeBand);
+          const secName = escapeHtml(cleanSecretaryName(sec.name));
+          const stageDe = escapeHtml(getGermanGradeBandLabel(plan.gradeBand));
           const grades = (plan.gradesContent && plan.gradesContent.length > 0)
             ? plan.gradesContent
             : [];
@@ -855,33 +857,33 @@ export function generateAllWeeklyPlansCombinedTableHtml(
               </td>
             </tr>
             ${grades.map((g, idx) => {
-              const gName = getGermanGradeName(g.gradeName, plan.gradeBand, idx);
+              const gName = escapeHtml(getGermanGradeName(g.gradeName, plan.gradeBand, idx));
               const note = g.quiz || g.hinweis;
               const hasNote = note && note !== 'Kein Quiz / Hinweis' && note !== 'Kein Quiz' && note.trim() !== '';
 
               return `
                 <tr>
                   <td style="color: #64748b; font-size: 7.5pt; font-weight: 600;">
-                    ${plan.gradeBand}
+                    ${escapeHtml(plan.gradeBand)}
                   </td>
                   <td class="grade-title-cell">
                     📚 ${gName}
                   </td>
                   <td>
                     <div class="lesson-content">
-                      ${g.s1 ? g.s1.replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
+                      ${g.s1 ? escapeHtml(g.s1).replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
                     </div>
                   </td>
                   <td>
                     <div class="lesson-content">
-                      ${g.s2 ? g.s2.replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
+                      ${g.s2 ? escapeHtml(g.s2).replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
                     </div>
                   </td>
                   <td>
-                    ${g.ha ? `<span class="ha-tag">${g.ha}</span>` : '<span style="color:#94a3b8;">—</span>'}
+                    ${g.ha ? `<span class="ha-tag">${escapeHtml(g.ha)}</span>` : '<span style="color:#94a3b8;">—</span>'}
                   </td>
                   <td>
-                    ${hasNote ? `<span class="quiz-tag">${note}</span>` : '<span style="color:#94a3b8; font-size:7.5pt;">—</span>'}
+                    ${hasNote ? `<span class="quiz-tag">${escapeHtml(note)}</span>` : '<span style="color:#94a3b8; font-size:7.5pt;">—</span>'}
                   </td>
                 </tr>
               `;
@@ -1014,16 +1016,17 @@ export async function downloadSingleWeeklyPlanPdf(
 ): Promise<{ success: boolean; filename?: string; error?: string }> {
   try {
     const sec = getSecretaryForGradeBand(plan.gradeBand, settings, plan.secretaryName, plan.secretaryPhone);
-    const secName = cleanSecretaryName(sec.name);
-    const hodName = cleanHodName(settings.hodName, 'Fachleiter');
+    const rawSecName = cleanSecretaryName(sec.name);
+    const secName = escapeHtml(rawSecName);
+    const hodName = escapeHtml(cleanHodName(settings.hodName, 'Fachleiter'));
     const grades = (plan.gradesContent && plan.gradesContent.length > 0)
       ? plan.gradesContent
       : [];
 
-    const stageDe = getGermanGradeBandLabel(plan.gradeBand);
-    const stageAr = getArabicGradeBandLabel(plan.gradeBand);
-    const appreciation = getWeeklySecretaryAppreciationText(weekNum, secName);
-    const schoolName = getEffectiveSchoolName(settings, true);
+    const stageDe = escapeHtml(getGermanGradeBandLabel(plan.gradeBand));
+    const stageAr = escapeHtml(getArabicGradeBandLabel(plan.gradeBand));
+    const appreciation = getWeeklySecretaryAppreciationText(weekNum, rawSecName);
+    const schoolName = escapeHtml(getEffectiveSchoolName(settings, true));
     const logoHtml = getReportSchoolLogoHtml(settings, { height: 48 });
 
     const container = document.createElement('div');
@@ -1064,7 +1067,7 @@ export async function downloadSingleWeeklyPlanPdf(
         </div>
         <div>
           <div style="font-size: 7.5pt; color: #64748b; font-weight: bold; text-transform: uppercase; margin-bottom: 2px;">Stufe / المرحلة</div>
-          <div style="font-weight: 700; color: #0f172a;">${plan.gradeBand}</div>
+          <div style="font-weight: 700; color: #0f172a;">${escapeHtml(plan.gradeBand)}</div>
         </div>
         <div>
           <div style="font-size: 7.5pt; color: #64748b; font-weight: bold; text-transform: uppercase; margin-bottom: 2px;">Sekretärin / السكرتيرة</div>
@@ -1088,7 +1091,7 @@ export async function downloadSingleWeeklyPlanPdf(
         </thead>
         <tbody>
           ${grades.map((g, idx) => {
-            const gName = getGermanGradeName(g.gradeName, plan.gradeBand, idx);
+            const gName = escapeHtml(getGermanGradeName(g.gradeName, plan.gradeBand, idx));
             const note = g.quiz || g.hinweis;
             const hasNote = note && note !== 'Kein Quiz / Hinweis' && note !== 'Kein Quiz' && note.trim() !== '';
             const bgRow = idx % 2 === 1 ? 'background-color: #f8fafc;' : 'background-color: #ffffff;';
@@ -1099,16 +1102,16 @@ export async function downloadSingleWeeklyPlanPdf(
                 <span style="display: inline-block; background: #e0f2fe; color: #0369a1; font-weight: 800; padding: 2px 8px; border-radius: 4px; border: 1px solid #bae6fd; font-size: 9pt;">📚 ${gName}</span>
               </td>
               <td style="border: 1px solid #e2e8f0; padding: 8px 10px; vertical-align: top; font-size: 8.5pt; color: #1e293b; line-height: 1.35;">
-                ${g.s1 ? g.s1.replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
+                ${g.s1 ? escapeHtml(g.s1).replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
               </td>
               <td style="border: 1px solid #e2e8f0; padding: 8px 10px; vertical-align: top; font-size: 8.5pt; color: #1e293b; line-height: 1.35;">
-                ${g.s2 ? g.s2.replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
+                ${g.s2 ? escapeHtml(g.s2).replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
               </td>
               <td style="border: 1px solid #e2e8f0; padding: 8px 10px; vertical-align: top;">
-                ${g.ha ? `<span style="color: #0f766e; font-weight: 600; background: #ccfbf1; padding: 2px 6px; border-radius: 4px; display: inline-block;">${g.ha}</span>` : '<span style="color:#94a3b8;">—</span>'}
+                ${g.ha ? `<span style="color: #0f766e; font-weight: 600; background: #ccfbf1; padding: 2px 6px; border-radius: 4px; display: inline-block;">${escapeHtml(g.ha)}</span>` : '<span style="color:#94a3b8;">—</span>'}
               </td>
               <td style="border: 1px solid #e2e8f0; padding: 8px 10px; vertical-align: top;">
-                ${hasNote ? `<span style="color: #6b21a8; font-weight: 700; background: #f3e8ff; border: 1px solid #e9d5ff; padding: 2px 6px; border-radius: 4px; display: inline-block;">${note}</span>` : '<span style="color:#94a3b8;">Kein Quiz</span>'}
+                ${hasNote ? `<span style="color: #6b21a8; font-weight: 700; background: #f3e8ff; border: 1px solid #e9d5ff; padding: 2px 6px; border-radius: 4px; display: inline-block;">${escapeHtml(note)}</span>` : '<span style="color:#94a3b8;">Kein Quiz</span>'}
               </td>
             </tr>
             `;
@@ -1215,8 +1218,8 @@ export async function downloadAllWeeklyPlansCombinedPdf(
   weekNum: number
 ): Promise<{ success: boolean; filename?: string; error?: string }> {
   try {
-    const hodName = cleanHodName(settings.hodName, 'Fachleiter');
-    const schoolName = getEffectiveSchoolName(settings, true);
+    const hodName = escapeHtml(cleanHodName(settings.hodName, 'Fachleiter'));
+    const schoolName = escapeHtml(getEffectiveSchoolName(settings, true));
     const logoHtml = getReportSchoolLogoHtml(settings, { height: 44 });
 
     const sortedPlans = [...plans].sort((a, b) => {
@@ -1253,7 +1256,7 @@ export async function downloadAllWeeklyPlansCombinedPdf(
           </div>
           <div>
             <h1 style="margin: 0; font-size: 14pt; color: #0369a1; font-weight: 800; letter-spacing: -0.3px;">📌 Gesamter Wochenplan - Deutschabteilung (Alle Klassen 1–12)</h1>
-            <p style="margin: 1px 0 0; font-size: 9pt; color: #475569; font-weight: 600;"><span style="font-family: 'Cairo', 'Tajawal', sans-serif !important; direction: rtl; unicode-bidi: isolate; display: inline-block;">${schoolName}</span> | Schuljahr: ${settings.academicYear || '2025/2026'}</p>
+            <p style="margin: 1px 0 0; font-size: 9pt; color: #475569; font-weight: 600;"><span style="font-family: 'Cairo', 'Tajawal', sans-serif !important; direction: rtl; unicode-bidi: isolate; display: inline-block;">${schoolName}</span> | Schuljahr: ${escapeHtml(settings.academicYear || '2025/2026')}</p>
           </div>
         </div>
         <div style="text-align: right;">
@@ -1284,8 +1287,8 @@ export async function downloadAllWeeklyPlansCombinedPdf(
         <tbody>
           ${sortedPlans.map(p => {
             const sec = getSecretaryForGradeBand(p.gradeBand, settings, p.secretaryName, p.secretaryPhone);
-            const secName = cleanSecretaryName(sec.name);
-            const stageDe = getGermanGradeBandLabel(p.gradeBand);
+            const secName = escapeHtml(cleanSecretaryName(sec.name));
+            const stageDe = escapeHtml(getGermanGradeBandLabel(p.gradeBand));
             const grades = (p.gradesContent && p.gradesContent.length > 0)
               ? p.gradesContent
               : [];
@@ -1298,29 +1301,29 @@ export async function downloadAllWeeklyPlansCombinedPdf(
                 </td>
               </tr>
               ${grades.map((g, idx) => {
-                const gName = getGermanGradeName(g.gradeName, p.gradeBand, idx);
+                const gName = escapeHtml(getGermanGradeName(g.gradeName, p.gradeBand, idx));
                 const note = g.quiz || g.hinweis;
                 const hasNote = note && note !== 'Kein Quiz / Hinweis' && note !== 'Kein Quiz' && note.trim() !== '';
 
                 return `
                   <tr>
                     <td style="color: #64748b; font-size: 7.5pt; font-weight: 600; border: 1px solid #cbd5e1; padding: 5px 7px; vertical-align: top;">
-                      ${p.gradeBand}
+                      ${escapeHtml(p.gradeBand)}
                     </td>
                     <td style="font-weight: 700; color: #0369a1; white-space: nowrap; background: #f8fafc; border: 1px solid #cbd5e1; padding: 5px 7px; vertical-align: top;">
                       📚 ${gName}
                     </td>
                     <td style="border: 1px solid #cbd5e1; padding: 5px 7px; vertical-align: top; line-height: 1.3; color: #0f172a; font-size: 8pt;">
-                      ${g.s1 ? g.s1.replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
+                      ${g.s1 ? escapeHtml(g.s1).replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
                     </td>
                     <td style="border: 1px solid #cbd5e1; padding: 5px 7px; vertical-align: top; line-height: 1.3; color: #0f172a; font-size: 8pt;">
-                      ${g.s2 ? g.s2.replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
+                      ${g.s2 ? escapeHtml(g.s2).replace(/\n/g, '<br/>') : '<span style="color:#94a3b8;">—</span>'}
                     </td>
                     <td style="border: 1px solid #cbd5e1; padding: 5px 7px; vertical-align: top;">
-                      ${g.ha ? `<span style="color: #0f766e; font-weight: 600; background: #f0fdfa; padding: 1px 4px; border-radius: 3px; display: inline-block; font-size: 8pt;">${g.ha}</span>` : '<span style="color:#94a3b8;">—</span>'}
+                      ${g.ha ? `<span style="color: #0f766e; font-weight: 600; background: #f0fdfa; padding: 1px 4px; border-radius: 3px; display: inline-block; font-size: 8pt;">${escapeHtml(g.ha)}</span>` : '<span style="color:#94a3b8;">—</span>'}
                     </td>
                     <td style="border: 1px solid #cbd5e1; padding: 5px 7px; vertical-align: top;">
-                      ${hasNote ? `<span style="color: #7e22ce; font-weight: 700; background: #faf5ff; padding: 1px 4px; border-radius: 3px; display: inline-block; font-size: 8pt;">${note}</span>` : '<span style="color:#94a3b8; font-size:7.5pt;">—</span>'}
+                      ${hasNote ? `<span style="color: #7e22ce; font-weight: 700; background: #faf5ff; padding: 1px 4px; border-radius: 3px; display: inline-block; font-size: 8pt;">${escapeHtml(note)}</span>` : '<span style="color:#94a3b8; font-size:7.5pt;">—</span>'}
                     </td>
                   </tr>
                 `;

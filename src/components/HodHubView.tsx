@@ -35,6 +35,7 @@ import { DetailedStaffAttendanceModal } from './DetailedStaffAttendanceModal';
 import { TermVisitPlannerView } from './TermVisitPlannerView';
 import { calculateStaffAttendanceMetrics } from '../utils/staffAttendanceUtils';
 import { normalizeClassCode, generateUnifiedScheduleImportPrompt } from '../utils/classNormalizer';
+import { formatLocalDate } from '../utils/timeUtils';
 
 const QUICK_TEACHER_NOTE_TAGS = [
   { ar: '📝 واجب', en: '📝 Homework', de: '📝 Hausaufgabe', color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' },
@@ -64,7 +65,8 @@ export const HodHubView: React.FC = () => {
     t, 
     addAppNotification,
     reportLanguage,
-    reportT
+    reportT,
+    externalDataVersion
   } = useApp();
   const schoolSettings = profile?.schoolSettings || {} as any;
 
@@ -218,23 +220,21 @@ export const HodHubView: React.FC = () => {
       const totalStudents = stages.reduce((sum, stage) => sum + stage.total, 0);
       const studentData = { totalStudents, stages };
 
-      // Fetch timetable from the mock API or fallback to mock data if it fails
-      let timetableData = null;
-      try {
-        const timetableRes = await fetch('/api/hod/dashboard/timetable');
-        if (timetableRes.ok) {
-          timetableData = await timetableRes.json();
-        }
-      } catch (e) {
-        timetableData = {
-          dayKey: new Date().getDay().toString(),
-          periodsCount: 8,
-          teachers: (schoolSettings.teachers && schoolSettings.teachers.length > 0)
-            ? schoolSettings.teachers.map((t: any) => ({ id: t.id, name: t.name, periods: {} }))
-            : [],
-          lastUpdated: new Date().toISOString()
-        };
-      }
+      // Build timetable directly from real schoolSettings.teachers
+      const activeTeachersList = (schoolSettings.teachers && schoolSettings.teachers.length > 0)
+        ? schoolSettings.teachers
+        : [];
+      
+      const timetableData = {
+        dayKey: new Date().getDay().toString(),
+        periodsCount: 8,
+        teachers: activeTeachersList.map((t: any) => ({
+          id: t.id || t.name,
+          name: t.name,
+          periods: t.periods || {}
+        })),
+        lastUpdated: new Date().toISOString()
+      };
 
       setLiveKpis(kpiData);
       setLiveTimetable(timetableData);
@@ -277,15 +277,7 @@ export const HodHubView: React.FC = () => {
       triggerToast(_t('تم إنشاء خطة الدعم بنجاح (تحديث فوري)', 'Support plan created instantly (optimistic)', 'Förderplan sofort erstellt'));
     }
 
-    try {
-      await fetch('/api/hod/dashboard/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actionType, payload })
-      });
-    } catch (err) {
-      console.error('Action sync error:', err);
-    }
+    // Action completed and updated locally
   };
 
   // State for Staff Management
@@ -303,6 +295,17 @@ export const HodHubView: React.FC = () => {
   const [selectedTeacherDetails, setSelectedTeacherDetails] = useState<any | null>(null);
   const [parentComplaints, setParentComplaints] = useState<any[]>(schoolSettings.parentComplaints || []);
   const [activePlans, setActivePlans] = useState<any[]>(schoolSettings.actionPlans || []);
+
+  useEffect(() => {
+    if (!externalDataVersion) return;
+    const nextHodName = schoolSettings.hodName || profile?.displayName || '';
+    const nextTeachers = (schoolSettings.teachers && schoolSettings.teachers.length > 0)
+      ? schoolSettings.teachers
+      : (nextHodName ? [{ id: 'hod', name: nextHodName, phone: profile?.phone || '', isActive: true, isHod: true }] : []);
+    setTeachers(nextTeachers);
+    setParentComplaints(schoolSettings.parentComplaints || []);
+    setActivePlans(schoolSettings.actionPlans || []);
+  }, [externalDataVersion]);
   const [isComplaintModalOpen, setIsComplaintModalOpen] = useState(false);
   const [complaintForm, setComplaintForm] = useState({
     teacherId: '',
@@ -340,7 +343,7 @@ export const HodHubView: React.FC = () => {
     studentId: '',
     studentName: '',
     periodNumber: 1,
-    date: new Date().toISOString().split('T')[0],
+    date: formatLocalDate(),
     tags: [],
     pinned: false,
     text: ''
@@ -398,7 +401,7 @@ export const HodHubView: React.FC = () => {
         stageName: recordData.stageName,
         stageSecretaryName: recordData.stageSecretaryName,
         type: recordData.type || 'absence',
-        date: recordData.date || new Date().toISOString().split('T')[0],
+        date: recordData.date || formatLocalDate(),
         absenceScope: recordData.absenceScope,
         absenceStatus: recordData.absenceStatus,
         periodNumber: recordData.periodNumber,
@@ -1459,7 +1462,7 @@ export const HodHubView: React.FC = () => {
   const [visitForm, setVisitForm] = useState({
     teacherId: '',
     className: '',
-    visitedDate: new Date().toISOString().split('T')[0],
+    visitedDate: formatLocalDate(),
     periodNumber: '',
     lessonTopic: '',
     positivePoints: '',
@@ -1996,7 +1999,7 @@ export const HodHubView: React.FC = () => {
       gradeBand: (selectedStageManager.assignedGradeGroups || []).join(', ') || 'عام',
       periodType: followUpPeriodType,
       weekNumber: followUpWeekNumber,
-      date: new Date().toISOString().split('T')[0],
+      date: formatLocalDate(),
       timestamp: Date.now(),
       teachersData: Object.values(followUpTeachersData),
       overallStageNotes
@@ -2091,7 +2094,7 @@ export const HodHubView: React.FC = () => {
     setVisitForm({
       teacherId: '',
       className: '',
-      visitedDate: new Date().toISOString().split('T')[0],
+      visitedDate: formatLocalDate(),
       periodNumber: '',
       lessonTopic: '',
       positivePoints: '',
@@ -2157,7 +2160,7 @@ export const HodHubView: React.FC = () => {
     const band = targetPlan.gradeBand;
     const currentStatus = targetPlan.status || 'not_sent';
     const nextStatus = currentStatus === 'sent' ? 'not_sent' : 'sent';
-    const freshSentAt = nextStatus === 'sent' ? new Date().toISOString().split('T')[0] : undefined;
+    const freshSentAt = nextStatus === 'sent' ? formatLocalDate() : undefined;
 
     const targetId = `${band}_w${weekNum}`;
     const existingIdx = weeklyPlans.findIndex(p => p.gradeBand === band && Number(p.weekNumber || 1) === Number(weekNum));
@@ -2210,7 +2213,7 @@ export const HodHubView: React.FC = () => {
     const cleanPhone = (sec.phone || targetPlan.secretaryPhone || '').replace(/[^0-9]/g, '');
     const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
     
-    const freshSentAt = new Date().toISOString().split('T')[0];
+    const freshSentAt = formatLocalDate();
     const targetId = `${band}_w${weekNum}`;
     const existingIdx = weeklyPlans.findIndex(p => p.gradeBand === band && Number(p.weekNumber || 1) === Number(weekNum));
 
@@ -2600,12 +2603,12 @@ export const HodHubView: React.FC = () => {
                         onClick={() => {
                           const updated = weeklyPlans.map(p => {
                             if (p.gradeBand === band && Number(p.weekNumber || 1) === Number(selectedPlanWeekNumber)) {
-                              return { ...p, status: isSent ? 'not_sent' : 'sent', sentAt: isSent ? undefined : new Date().toISOString().split('T')[0] };
+                              return { ...p, status: isSent ? 'not_sent' : 'sent', sentAt: isSent ? undefined : formatLocalDate() };
                             }
                             return p;
                           });
                           if (!weeklyPlans.some(p => p.gradeBand === band && Number(p.weekNumber || 1) === Number(selectedPlanWeekNumber))) {
-                            updated.push({ ...plan, status: 'sent', sentAt: new Date().toISOString().split('T')[0] });
+                            updated.push({ ...plan, status: 'sent', sentAt: formatLocalDate() });
                           }
                           setWeeklyPlans(updated);
                           persistHodData({ weeklyPlanStatuses: updated });
@@ -5036,7 +5039,7 @@ export const HodHubView: React.FC = () => {
                         studentId: '',
                         studentName: '',
                         periodNumber: 1,
-                        date: new Date().toISOString().split('T')[0],
+                        date: formatLocalDate(),
                         tags: [],
                         pinned: false,
                         text: ''
@@ -5051,7 +5054,7 @@ export const HodHubView: React.FC = () => {
                         studentId: note.studentId || '',
                         studentName: note.studentName || '',
                         periodNumber: note.periodNumber || 1,
-                        date: note.date || new Date().toISOString().split('T')[0],
+                        date: note.date || formatLocalDate(),
                         tags: note.tags || [],
                         pinned: !!note.pinned,
                         text: note.text
@@ -5095,7 +5098,7 @@ export const HodHubView: React.FC = () => {
                                   studentId: '',
                                   studentName: '',
                                   periodNumber: 1,
-                                  date: new Date().toISOString().split('T')[0],
+                                  date: formatLocalDate(),
                                   tags: [],
                                   pinned: false,
                                   text: ''

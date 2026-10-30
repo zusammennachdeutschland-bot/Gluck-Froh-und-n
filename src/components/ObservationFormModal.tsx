@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Check } from 'lucide-react';
 import { Teacher, VisitRecord, ObservationRating, SchoolSettings } from '../types';
+import { formatLocalDate } from '../utils/timeUtils';
 
 interface ObservationFormModalProps {
   isOpen: boolean;
@@ -32,7 +33,7 @@ export const ObservationFormModal: React.FC<ObservationFormModalProps> = ({
   const [form, setForm] = useState<Partial<VisitRecord>>({
     teacherId: '',
     className: '',
-    visitedDate: new Date().toISOString().split('T')[0],
+    visitedDate: formatLocalDate(),
     periodNumber: '',
     lessonTopic: '',
     consolidatedNotes: '',

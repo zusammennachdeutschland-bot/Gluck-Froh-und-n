@@ -6,6 +6,7 @@ import {
   SyncCycleReport, 
   SyncEntityDiff, 
   SyncConflictRecord,
+  SyncTriggerSource,
   FinanceAccount,
   FinanceTransaction
 } from '../../types';
@@ -28,9 +29,14 @@ export interface SyncDataSource {
 /**
  * Saves a sync cycle report to the persistent history log.
  */
-async function recordSyncHistory(report: SyncCycleReport): Promise<void> {
+async function recordSyncHistory(
+  report: SyncCycleReport,
+  trigger: SyncTriggerSource = 'Manual Sync',
+  uploadedCount: number = 0,
+  downloadedCount: number = 0
+): Promise<void> {
   try {
-    await syncHistoryService.addEntry(report, 'Manual Sync', report.totalRecordsTransferred, report.totalRecordsTransferred);
+    await syncHistoryService.addEntry(report, trigger, uploadedCount, downloadedCount);
   } catch (err) {
     console.warn('Failed to record sync history:', err);
   }
@@ -38,15 +44,19 @@ async function recordSyncHistory(report: SyncCycleReport): Promise<void> {
 
 export async function runSyncCycle(
   peerId: string, 
-  dataSource: SyncDataSource
+  dataSource: SyncDataSource,
+  trigger: SyncTriggerSource = 'Manual Sync'
 ): Promise<{ success: boolean; report: SyncCycleReport }> {
   const startTime = Date.now();
+  const cycleId = 'sync_' + startTime + '_' + Math.random().toString(36).slice(2, 7);
   const entityDiffs: Record<string, SyncEntityDiff> = {};
   const allConflicts: SyncConflictRecord[] = [];
   let totalTransferred = 0;
+  let sentCount = 0;
+  let receivedCount = 0;
 
   const emptyReport: SyncCycleReport = {
-    id: 'sync_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    id: cycleId,
     timestamp: startTime,
     peerId,
     peerName: 'Unknown Peer',
@@ -67,7 +77,7 @@ export async function runSyncCycle(
     if (peerIndex === -1) {
       console.warn(`Sync aborted: PairedPeer ${peerId} not found.`);
       emptyReport.errorMessage = `Paired peer ${peerId} not found.`;
-      await recordSyncHistory(emptyReport);
+      await recordSyncHistory(emptyReport, trigger, 0, 0);
       return { success: false, report: emptyReport };
     }
 
@@ -78,7 +88,7 @@ export async function runSyncCycle(
     const currentIp = await resolvePeerIp(peer);
     if (!currentIp) {
       emptyReport.errorMessage = `Device is currently offline or unreachable.`;
-      await recordSyncHistory(emptyReport);
+      await recordSyncHistory(emptyReport, trigger, 0, 0);
       return { success: false, report: emptyReport };
     }
 
@@ -101,14 +111,14 @@ export async function runSyncCycle(
     const negotiatedVersion = peer.protocolVersion || 1;
     const outboundDelta = adaptOutboundPayloadForPeer(rawOutboundDelta, negotiatedVersion, agreedCapabilities);
 
-    const sentCount = Object.values(outboundDelta.records).reduce((acc, curr) => acc + (curr ? curr.length : 0), 0);
+    sentCount = Object.values(outboundDelta.records).reduce((acc, curr) => acc + (curr ? curr.length : 0), 0);
     totalTransferred += sentCount;
 
     // 4. Exchange deltas with the peer
     const inboundDelta = await exchangeDeltas(currentIp, peer.port, peer.pairingToken, outboundDelta);
     if (!inboundDelta || !inboundDelta.records) {
       emptyReport.errorMessage = `Peer rejected or failed to answer exchange request.`;
-      await recordSyncHistory(emptyReport);
+      await recordSyncHistory(emptyReport, trigger, sentCount, 0);
       return { success: false, report: emptyReport };
     }
 
@@ -147,6 +157,7 @@ export async function runSyncCycle(
     // 5. Ingestion Phase: Merge received records into local storage with diff tracking
     for (const [key, incomingRecords] of Object.entries(inboundDelta.records)) {
       if (Array.isArray(incomingRecords) && incomingRecords.length > 0) {
+        receivedCount += incomingRecords.length;
         totalTransferred += incomingRecords.length;
         const currentLocalRecords = localData[key] || [];
         const mergeResult = mergeEntities(currentLocalRecords, incomingRecords, key);
@@ -187,7 +198,7 @@ export async function runSyncCycle(
     });
 
     const finalReport: SyncCycleReport = {
-      id: 'sync_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      id: cycleId,
       timestamp: Date.now(),
       peerId,
       peerName: peer.deviceName,
@@ -200,13 +211,13 @@ export async function runSyncCycle(
       durationMs: Date.now() - startTime
     };
 
-    await recordSyncHistory(finalReport);
+    await recordSyncHistory(finalReport, trigger, sentCount, receivedCount);
     return { success: true, report: finalReport };
   } catch (error: any) {
     console.error(`Sync cycle failed for peer ${peerId}:`, error);
     emptyReport.errorMessage = error?.message || 'Unexpected sync error.';
     emptyReport.durationMs = Date.now() - startTime;
-    await recordSyncHistory(emptyReport);
+    await recordSyncHistory(emptyReport, trigger, sentCount, receivedCount);
     return { success: false, report: emptyReport };
   }
 }
@@ -307,7 +318,8 @@ export async function handleInboundExchange(inboundDelta: SyncDeltaPayload, data
  */
 export async function forceFullSync(
   peerId: string, 
-  dataSource: SyncDataSource
+  dataSource: SyncDataSource,
+  trigger: SyncTriggerSource = 'Force Full Sync'
 ): Promise<{ success: boolean; report: SyncCycleReport }> {
   const syncState = dataSource.getSyncState();
   const updatedWatermarks = resetWatermarksForPeer(syncState.peerWatermarkTable, peerId);
@@ -317,5 +329,5 @@ export async function forceFullSync(
     peerWatermarkTable: updatedWatermarks
   });
 
-  return runSyncCycle(peerId, dataSource);
+  return runSyncCycle(peerId, dataSource, trigger);
 }

@@ -1,6 +1,7 @@
 import { Complaint, SchoolSettings, VisitRecord } from '../types';
 import { getReportSchoolLogoHtml, getReportSchoolNameHtml } from './alsunLogoData';
 import { generateObservationReportContentHtml } from './printObservationUtils';
+import { escapeHtml } from './securityUtils';
 
 export interface StageManagerReportData {
   stageManagerName: string;
@@ -42,8 +43,8 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
   const titleText = reportType === 'weekly' 
     ? 'تقرير الشكاوى والمتابعة الأسبوعية لمدير المرحلة' 
     : reportType === 'monthly'
-    ? `تقرير الشكاوى المتبادلة الشهري - شهر ${month}`
-    : `التقرير التراكمي للشكاوى - ${term}`;
+    ? `تقرير الشكاوى المتبادلة الشهري - شهر ${escapeHtml(month)}`
+    : `التقرير التراكمي للشكاوى - ${escapeHtml(term)}`;
 
   const rowsHtml = complaints.map((c, index) => {
     const isTeacherToStudent = c.direction === 'TEACHER_TO_STUDENT';
@@ -66,17 +67,17 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
       <tr style="border-bottom: 1px solid #e2e8f0; font-size: 9pt;">
         <td style="padding: 6px 4px; text-align: center; font-weight: bold; color: #64748b;">${index + 1}</td>
         <td style="padding: 6px 4px; text-align: center;">${directionBadge}</td>
-        <td style="padding: 6px 4px; font-weight: bold; color: #1e293b;">${c.teacherName || 'غير محدد'}</td>
+        <td style="padding: 6px 4px; font-weight: bold; color: #1e293b;">${escapeHtml(c.teacherName || 'غير محدد')}</td>
         <td style="padding: 6px 4px;">
-          <div style="font-weight: bold; color: #0f172a;">${c.studentNameAr || c.studentNameEn}</div>
-          ${c.studentNameEn && c.studentNameAr ? `<div style="font-size: 8pt; color: #64748b; font-family: sans-serif;">${c.studentNameEn}</div>` : ''}
+          <div style="font-weight: bold; color: #0f172a;">${escapeHtml(c.studentNameAr || c.studentNameEn)}</div>
+          ${c.studentNameEn && c.studentNameAr ? `<div style="font-size: 8pt; color: #64748b; font-family: sans-serif;">${escapeHtml(c.studentNameEn)}</div>` : ''}
         </td>
-        <td style="padding: 6px 4px; text-align: center; font-weight: bold; color: #2563eb;">${c.gradeClass}</td>
+        <td style="padding: 6px 4px; text-align: center; font-weight: bold; color: #2563eb;">${escapeHtml(c.gradeClass)}</td>
         <td style="padding: 6px 4px; color: #334155; line-height: 1.4;">
-          <strong>${c.reason}</strong>
-          ${c.notes ? `<div style="font-size: 8pt; color: #64748b; margin-top: 2px;">📝 ${c.notes}</div>` : ''}
+          <strong>${escapeHtml(c.reason)}</strong>
+          ${c.notes ? `<div style="font-size: 8pt; color: #64748b; margin-top: 2px;">📝 ${escapeHtml(c.notes)}</div>` : ''}
         </td>
-        <td style="padding: 6px 4px; color: #047857; font-weight: bold;">${c.actionTaken}</td>
+        <td style="padding: 6px 4px; color: #047857; font-weight: bold;">${escapeHtml(c.actionTaken)}</td>
         <td style="padding: 6px 4px; text-align: center; font-size: 8.5pt; color: #475569;">
           <div>${formattedDate}</div>
           <div style="font-size: 7.5pt; margin-top: 2px;">${statusBadge}</div>
@@ -90,7 +91,7 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="UTF-8">
-      <title>${titleText} - ${stageManagerName}</title>
+      <title>${titleText} - ${escapeHtml(stageManagerName)}</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -498,11 +499,11 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
               ${schoolNameHtml}
               <div class="dept-badge">🇩🇪 قسم اللغة الألمانية (Deutschabteilung)</div>
               <div class="main-title">${titleText}</div>
-              <div class="sub-meta">المرحلة: ${stageName} | مدير المرحلة: <strong>..................................</strong></div>
+              <div class="sub-meta">المرحلة: ${escapeHtml(stageName)} | مدير المرحلة: <strong>..................................</strong></div>
             </div>
             <div style="text-align: left; font-size: 8.5pt; color: #475569;">
-              <div><strong>الفصل الدراسي:</strong> ${term}</div>
-              <div><strong>تاريخ التقرير:</strong> ${reportDate}</div>
+              <div><strong>الفصل الدراسي:</strong> ${escapeHtml(term)}</div>
+              <div><strong>تاريخ التقرير:</strong> ${escapeHtml(reportDate)}</div>
             </div>
           </div>
 
@@ -556,7 +557,7 @@ export const generateStageManagerReportPrint = (data: StageManagerReportData) =>
         <div class="footer-sig">
           <div class="sig-box">
             <div class="sig-title">رئيس قسم اللغة الألمانية (Fachleiter)</div>
-            <div class="sig-sub">أ/ ${hodName}</div>
+            <div class="sig-sub">أ/ ${escapeHtml(hodName)}</div>
             <div style="margin-top: 25px; font-size: 8.5pt; color: #64748b;">التوقيع: ................................</div>
           </div>
           <div class="sig-box">

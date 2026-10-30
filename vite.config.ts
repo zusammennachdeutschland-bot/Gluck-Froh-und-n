@@ -78,6 +78,9 @@ export default defineConfig(() => {
     optimizeDeps: {
       entries: ['index.html'],
     },
+    esbuild: {
+      pure: ['console.log'],
+    },
     build: {
       cssMinify: true,
       minify: 'esbuild' as const,

@@ -38,6 +38,7 @@ class PeerNetwork {
 
   private activeRouteHandler: ((route: string, data: any) => Promise<any>) | null = null;
   private reconnectTimer: any = null;
+  private pairingPinTimer: any = null;
   private isDestroyed = false;
 
   constructor() {
@@ -173,10 +174,21 @@ class PeerNetwork {
 
   /**
    * Activates an ephemeral listener for a 6-digit PIN to allow companion devices to discover and pair.
+   * Automatically expires after ttlMs (default: 3 minutes).
    */
-  async enablePairingPin(pin: string): Promise<void> {
+  async enablePairingPin(pin: string, ttlMs: number = 180000): Promise<void> {
     const pairingPeerId = formatPairingPinId(pin);
     this.currentPairingPin = pin;
+
+    if (this.pairingPinTimer) {
+      clearTimeout(this.pairingPinTimer);
+      this.pairingPinTimer = null;
+    }
+    if (ttlMs > 0) {
+      this.pairingPinTimer = setTimeout(() => {
+        this.disablePairingPin();
+      }, ttlMs);
+    }
 
     if (this.pairingPeer && !this.pairingPeer.destroyed && this.pairingPeer.open) {
       if (this.pairingPeer.id === pairingPeerId) return;
@@ -208,6 +220,10 @@ class PeerNetwork {
   }
 
   public disablePairingPin() {
+    if (this.pairingPinTimer) {
+      clearTimeout(this.pairingPinTimer);
+      this.pairingPinTimer = null;
+    }
     if (this.pairingPeer) {
       try { this.pairingPeer.destroy(); } catch (_) {}
       this.pairingPeer = null;

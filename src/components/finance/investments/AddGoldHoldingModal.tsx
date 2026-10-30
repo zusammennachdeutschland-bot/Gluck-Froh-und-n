@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../../../context/AppContext';
 import { X, Sparkles, AlertCircle, Calendar, Hash, Tag, FileText, Check } from 'lucide-react';
 import { GoldHolding, getPurityKaratNumber, getPurityFactor } from '../../../services/goldPrice/goldPriceTypes';
+import { formatLocalDate } from '../../../utils/timeUtils';
 
 interface AddGoldHoldingModalProps {
   onClose: () => void;
@@ -32,7 +33,7 @@ export const AddGoldHoldingModal: React.FC<AddGoldHoldingModalProps> = ({ onClos
     if (existingHolding?.purchaseDate) {
       return existingHolding.purchaseDate.split('T')[0];
     }
-    return new Date().toISOString().split('T')[0];
+    return formatLocalDate();
   });
 
   const [purchasePrice, setPurchasePrice] = useState(existingHolding?.purchasePrice?.toString() || '');

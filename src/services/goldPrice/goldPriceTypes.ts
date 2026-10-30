@@ -8,7 +8,8 @@ export type GoldPriceErrorCode =
   | 'PROVIDER_UNAVAILABLE'
   | 'RATE_LIMITED'
   | 'CORS_ERROR'
-  | 'NO_CACHED_PRICE';
+  | 'NO_CACHED_PRICE'
+  | 'NATIVE_PLATFORM';
 
 export interface GoldHolding {
   id: string;

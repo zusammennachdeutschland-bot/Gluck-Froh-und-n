@@ -24,6 +24,7 @@ import {
   dataUrlToBlob 
 } from '../utils/certificateExportUtils';
 import { generateRecurringSchoolScheduleIcs } from '../utils/schoolScheduleIcsUtils';
+import { escapeHtml } from '../utils/securityUtils';
 
 export type SchoolScheduleExportFormat = 'png' | 'jpeg' | 'pdf' | 'ics';
 export type SchoolScheduleExportTheme = 'clean_light' | 'brand_accent';
@@ -377,17 +378,17 @@ function createExportDomElement(
             <div style="display: table-cell; vertical-align: middle; text-align: center;">
               ${cell.className ? `
                 <div style="display: block; font-weight: 900; font-size: 34px; color: #000000; line-height: 1.1; margin: 0; letter-spacing: -0.5px; word-break: break-word;">
-                  ${cell.className}
+                  ${escapeHtml(cell.className)}
                 </div>
               ` : ''}
               ${cell.subjectName ? `
                 <div style="display: inline-block; font-weight: 900; font-size: 15px; color: #0f172a; line-height: 1.2; background: #f1f5f9; padding: 3px 10px; border-radius: 6px; border: 1.5px solid #94a3b8; margin-top: 4px; word-break: break-word;">
-                  ${cell.subjectName}
+                  ${escapeHtml(cell.subjectName)}
                 </div>
               ` : ''}
               ${cell.notes ? `
                 <div style="display: block; font-weight: 800; font-size: 13px; color: #334155; line-height: 1.15; margin-top: 3px;">
-                  ${cell.notes}
+                  ${escapeHtml(cell.notes)}
                 </div>
               ` : ''}
             </div>
@@ -400,10 +401,10 @@ function createExportDomElement(
       <tr>
         <td style="width: ${timeColWidth}; padding: 6px 4px; border: 2px solid ${tableBorder}; background: #f8fafc; text-align: center; vertical-align: middle;">
           <div style="display: block; font-weight: 900; font-size: 24px; color: #000000; line-height: 1.15; margin-bottom: 4px;">
-            ${periodNumberLabel}
+            ${escapeHtml(periodNumberLabel)}
           </div>
           <div style="display: inline-block; font-weight: 900; font-size: 18px; color: #000000; line-height: 1.2; font-family: 'Cairo', monospace, system-ui; margin: 0; background: #e2e8f0; padding: 3px 8px; border-radius: 6px; border: 1.5px solid #94a3b8; letter-spacing: 0.3px;">
-            ${period.startTime} - ${period.endTime}
+            ${escapeHtml(period.startTime)} - ${escapeHtml(period.endTime)}
           </div>
         </td>
         ${cellsHtml}
@@ -414,7 +415,7 @@ function createExportDomElement(
   // Table header days (اليوم) - HUGE, BOLD, HIGH-CONTRAST FOR PRINTING
   const headerDaysHtml = model.days.map(day => `
     <th style="width: ${dayColWidth}; padding: 14px 6px; border: 2px solid ${tableBorder}; background: #0f172a; text-align: center; font-size: 30px; font-weight: 900; color: #ffffff; letter-spacing: -0.2px;">
-      <div>${day.label}</div>
+      <div>${escapeHtml(day.label)}</div>
     </th>
   `).join('');
 
@@ -427,17 +428,17 @@ function createExportDomElement(
             📖
           </div>
           <h1 style="margin: 0; font-size: 32px; font-weight: 900; color: #000000; letter-spacing: -0.5px;">
-            ${model.title}
+            ${escapeHtml(model.title)}
           </h1>
         </div>
         <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 16px; font-weight: 800; color: #000000;">
           ${model.teacherName ? `
             <span style="background: #f8fafc; padding: 6px 16px; border-radius: 8px; border: 2.5px solid #000000; color: #000000; font-size: 22px; font-weight: 900;">
-              ${teacherLabel} <strong>${model.teacherName}</strong>
+              ${escapeHtml(teacherLabel)} <strong>${escapeHtml(model.teacherName)}</strong>
             </span>
           ` : ''}
           <span style="background: #f1f5f9; padding: 6px 14px; border-radius: 8px; border: 1.5px solid #94a3b8; font-weight: 900; font-size: 16px; color: #0f172a;">
-            ${model.stats.summaryLine}
+            ${escapeHtml(model.stats.summaryLine)}
           </span>
         </div>
       </div>
@@ -447,7 +448,7 @@ function createExportDomElement(
           GLÜCK
         </div>
         <div style="font-size: 14px; font-weight: 800; color: #334155; margin-top: 2px;">
-          ${exportedLabel} ${model.exportDateFormatted}
+          ${escapeHtml(exportedLabel)} ${escapeHtml(model.exportDateFormatted)}
         </div>
       </div>
     </div>
@@ -458,7 +459,7 @@ function createExportDomElement(
         <thead>
           <tr>
             <th style="width: ${timeColWidth}; padding: 14px 6px; border: 2px solid ${tableBorder}; background: #0f172a; text-align: center; font-size: 20px; font-weight: 900; color: #ffffff;">
-              ${timeLabel}
+              ${escapeHtml(timeLabel)}
             </th>
             ${headerDaysHtml}
           </tr>
@@ -475,7 +476,7 @@ function createExportDomElement(
         Glück Teacher Assistant • ${model.stats.totalWeeklyLessons} ${model.language === 'ar' ? 'حصة أسبوعية' : (model.language === 'de' ? 'Wochenstunden' : 'Weekly Lessons')}
       </div>
       <div>
-        A4 Landscape Format • ${model.exportDateFormatted}
+        A4 Landscape Format • ${escapeHtml(model.exportDateFormatted)}
       </div>
     </div>
   `;
@@ -847,7 +848,7 @@ export function printSchoolScheduleNative(
       <html dir="${model.isRtl ? 'rtl' : 'ltr'}" lang="${model.language}">
       <head>
         <meta charset="utf-8">
-        <title>${model.title} - ${model.teacherName || 'Glück'}</title>
+        <title>${escapeHtml(model.title)} - ${escapeHtml(model.teacherName || 'Glück')}</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@700;800;900&display=swap" rel="stylesheet">

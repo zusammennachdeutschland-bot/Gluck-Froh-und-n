@@ -8,6 +8,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { sanitizeModernCssColors, dataUrlToBlob } from '../utils/certificateExportUtils';
 import { SchoolScheduleExportOptions } from './schoolScheduleExportService';
+import { escapeHtml } from '../utils/securityUtils';
 
 export async function exportMasterSchedule(
   settings: SchoolSettings,
@@ -192,8 +193,8 @@ function createMasterExportDomElement(
       const tr = document.createElement('tr');
       const tdTime = document.createElement('td');
       tdTime.innerHTML = `
-        <div style="font-weight: 900; font-size: 20px; color: #000000; margin-bottom: 3px; line-height: 1;">${isRtl ? 'حصة ' : 'P'}${p.periodNumber}</div>
-        <div style="font-weight: 900; font-size: 13px; color: #000000; font-family: 'Cairo', monospace, sans-serif; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; border: 1.5px solid #94a3b8; display: inline-block; white-space: nowrap;">${p.startTime} - ${p.endTime}</div>
+        <div style="font-weight: 900; font-size: 20px; color: #000000; margin-bottom: 3px; line-height: 1;">${isRtl ? 'حصة ' : 'P'}${escapeHtml(p.periodNumber)}</div>
+        <div style="font-weight: 900; font-size: 13px; color: #000000; font-family: 'Cairo', monospace, sans-serif; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; border: 1.5px solid #94a3b8; display: inline-block; white-space: nowrap;">${escapeHtml(p.startTime)} - ${escapeHtml(p.endTime)}</div>
       `;
       tdTime.style.border = '2px solid #000000';
       tdTime.style.backgroundColor = '#f8fafc';
@@ -220,17 +221,17 @@ function createMasterExportDomElement(
 
         if (lesson) {
           cellContentHtml += `
-            <div style="font-weight: 900; font-size: 24px; color: #000000; line-height: 1.1; margin: 0; letter-spacing: -0.3px;">${lesson.className || ''}</div>
-            ${lesson.subjectName ? `<div style="font-weight: 900; font-size: 13px; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #cbd5e1; margin-top: 3px; display: inline-block;">${lesson.subjectName}</div>` : ''}
+            <div style="font-weight: 900; font-size: 24px; color: #000000; line-height: 1.1; margin: 0; letter-spacing: -0.3px;">${escapeHtml(lesson.className || '')}</div>
+            ${lesson.subjectName ? `<div style="font-weight: 900; font-size: 13px; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #cbd5e1; margin-top: 3px; display: inline-block;">${escapeHtml(lesson.subjectName)}</div>` : ''}
           `;
         }
 
         matchingCustoms.forEach((cs: CustomTimedSession) => {
           cellContentHtml += `
             <div style="margin-top: ${lesson ? '4px' : '0'}; padding: 3px 2px; background: #e0e7ff; border: 1.5px solid #818cf8; border-radius: 5px;">
-              <div style="font-weight: 900; font-size: 20px; color: #1e1b4b; line-height: 1.1; margin: 0;">${cs.className || ''}</div>
-              <div style="font-weight: 900; font-size: 12px; color: #3730a3; font-family: monospace; margin-top: 2px; display: inline-block;">⏱️ ${cs.startTime}-${cs.endTime}</div>
-              ${cs.subjectName ? `<div style="font-weight: 900; font-size: 12px; color: #312e81; background: #ffffff; padding: 1px 5px; border-radius: 3px; border: 1px solid #c7d2fe; margin-top: 2px; display: inline-block;">${cs.subjectName}</div>` : ''}
+              <div style="font-weight: 900; font-size: 20px; color: #1e1b4b; line-height: 1.1; margin: 0;">${escapeHtml(cs.className || '')}</div>
+              <div style="font-weight: 900; font-size: 12px; color: #3730a3; font-family: monospace; margin-top: 2px; display: inline-block;">⏱️ ${escapeHtml(cs.startTime)}-${escapeHtml(cs.endTime)}</div>
+              ${cs.subjectName ? `<div style="font-weight: 900; font-size: 12px; color: #312e81; background: #ffffff; padding: 1px 5px; border-radius: 3px; border: 1px solid #c7d2fe; margin-top: 2px; display: inline-block;">${escapeHtml(cs.subjectName)}</div>` : ''}
             </div>
           `;
         });
@@ -270,9 +271,9 @@ function createMasterExportDomElement(
         teacherUnmatched.forEach((cs: CustomTimedSession) => {
           customCellHtml += `
             <div style="padding: 3px 2px; background: #e0e7ff; border: 1.5px solid #818cf8; border-radius: 5px; margin-bottom: 3px;">
-              <div style="font-weight: 900; font-size: 20px; color: #1e1b4b; line-height: 1.1; margin: 0;">${cs.className || ''}</div>
-              <div style="font-weight: 900; font-size: 12px; color: #3730a3; font-family: monospace; margin-top: 2px; display: inline-block;">⏱️ ${cs.startTime}-${cs.endTime}</div>
-              ${cs.subjectName ? `<div style="font-weight: 900; font-size: 12px; color: #312e81; background: #ffffff; padding: 1px 5px; border-radius: 3px; border: 1px solid #c7d2fe; margin-top: 2px; display: inline-block;">${cs.subjectName}</div>` : ''}
+              <div style="font-weight: 900; font-size: 20px; color: #1e1b4b; line-height: 1.1; margin: 0;">${escapeHtml(cs.className || '')}</div>
+              <div style="font-weight: 900; font-size: 12px; color: #3730a3; font-family: monospace; margin-top: 2px; display: inline-block;">⏱️ ${escapeHtml(cs.startTime)}-${escapeHtml(cs.endTime)}</div>
+              ${cs.subjectName ? `<div style="font-weight: 900; font-size: 12px; color: #312e81; background: #ffffff; padding: 1px 5px; border-radius: 3px; border: 1px solid #c7d2fe; margin-top: 2px; display: inline-block;">${escapeHtml(cs.subjectName)}</div>` : ''}
             </div>
           `;
         });

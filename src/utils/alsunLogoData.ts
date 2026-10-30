@@ -1,4 +1,5 @@
 import { SchoolSettings } from '../types';
+import { escapeHtml } from './securityUtils';
 
 export const AL_ALSON_SHIELD_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 460" width="100%" height="100%">
   <defs>
@@ -67,7 +68,7 @@ export function getReportSchoolNameHtml(
   options: { isRtl?: boolean; fontSize?: string; color?: string; extraStyles?: string; tag?: string } = {}
 ): string {
   const isRtl = options.isRtl !== false;
-  const name = getEffectiveSchoolName(settings, isRtl);
+  const name = escapeHtml(getEffectiveSchoolName(settings, isRtl));
   const fontSize = options.fontSize || '14pt';
   const color = options.color || '#0f172a';
   const extraStyles = options.extraStyles || '';
@@ -83,7 +84,7 @@ export function getReportSchoolLogoHtml(
   settings?: SchoolSettings,
   options: { height?: number; className?: string; extraStyles?: string } = {}
 ): string {
-  const logoSrc = getEffectiveSchoolLogo(settings);
+  const logoSrc = escapeHtml(getEffectiveSchoolLogo(settings));
   const height = options.height || 52;
   const extraStyles = options.extraStyles || '';
   return `<img src="${logoSrc}" alt="School Logo" style="height: ${height}px; max-height: ${height}px; width: auto; object-fit: contain; display: inline-block; vertical-align: middle; ${extraStyles}" />`;

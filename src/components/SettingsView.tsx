@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { AppLanguage } from '../types';
+import { AppLanguage, Lesson } from '../types';
 import { 
   Settings, Search, User, Globe, Moon, Sun, Clock, DollarSign, Check, CheckCircle2,
   HardDrive, Download, Upload, Trash2, AlertTriangle, MessageSquare, ChevronRight,
@@ -17,6 +17,7 @@ import { getEffectiveSchoolEndForDay, formatTime } from '../utils/timeUtils';
 import { COLOR_FAMILIES, getContrastTextColor } from '../utils/colorUtils';
 import { CustomColorPickerModal } from './CustomColorPickerModal';
 import { ContactsUnificationModal } from './ContactsUnificationModal';
+import { isBackupFileSizeValid } from '../utils/backupEngine';
 
 type SettingsCategory = 
   | 'language'
@@ -48,12 +49,47 @@ export const SettingsView: React.FC = () => {
     addInspirationMessage, updateInspirationMessage, deleteInspirationMessage,
     toggleFavoriteInspirationMessage, restoreDefaultInspirationMessages,
     checkAndTriggerInspirationReminder, accentColor, setAccentColor,
-    notificationSettings, triggerToast
+    notificationSettings, triggerToast,
+    previewInvalidBiweeklyAutoLessons, cleanupInvalidBiweeklyAutoLessons
   } = useApp();
 
   const [activeCategory, setActiveCategory] = useState<SettingsCategory | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isContactsModalOpen, setIsContactsModalOpen] = useState(false);
+  const [biweeklyCleanupPreview, setBiweeklyCleanupPreview] = useState<Lesson[] | null>(null);
+  const [isBiweeklyCleanupLoading, setIsBiweeklyCleanupLoading] = useState(false);
+
+  const handleOpenBiweeklyCleanupPreview = async () => {
+    setIsBiweeklyCleanupLoading(true);
+    try {
+      const items = await previewInvalidBiweeklyAutoLessons();
+      setBiweeklyCleanupPreview(items);
+    } finally {
+      setIsBiweeklyCleanupLoading(false);
+    }
+  };
+
+  const handleConfirmBiweeklyCleanup = async () => {
+    if (!biweeklyCleanupPreview || biweeklyCleanupPreview.length === 0) {
+      setBiweeklyCleanupPreview(null);
+      return;
+    }
+    setIsBiweeklyCleanupLoading(true);
+    try {
+      const ids = biweeklyCleanupPreview.map(l => l.id);
+      const count = await cleanupInvalidBiweeklyAutoLessons(ids);
+      setBiweeklyCleanupPreview(null);
+      triggerToast(
+        _t(
+          `تم تنظيف ${count} حصة تلقائية مخالفة للتكرار بنجاح (نُقلت إلى المحذوفات)`,
+          `Cleaned up ${count} invalid recurring auto-lessons`,
+          `${count} ungültige automatische Lektionen bereinigt`
+        )
+      );
+    } finally {
+      setIsBiweeklyCleanupLoading(false);
+    }
+  };
 
   // Live Theme Accent Preview Interactive Demo States
   const [previewSwitchOn, setPreviewSwitchOn] = useState(true);
@@ -150,6 +186,18 @@ export const SettingsView: React.FC = () => {
   const handleRestoreFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      if (!isBackupFileSizeValid(file.size)) {
+        setRestoreStatusMsg(
+          _t(
+            'حجم ملف النسخة الاحتياطية يتجاوز الحد الأقصى (25 ميجابايت).',
+            'Backup file exceeds the 25 MB limit.',
+            'Backup-Datei überschreitet das 25-MB-Limit.'
+          )
+        );
+        setTimeout(() => setRestoreStatusMsg(null), 4000);
+        e.target.value = '';
+        return;
+      }
       const reader = new FileReader();
       reader.onload = async (event) => {
         const content = event.target?.result as string;
@@ -1427,6 +1475,23 @@ export const SettingsView: React.FC = () => {
             <span>{t('auto_smart_data_validation_health')}</span>
           </button>
 
+          {/* Manual Biweekly Auto-Lesson Cleanup Button (#7) */}
+          <button
+            type="button"
+            onClick={handleOpenBiweeklyCleanupPreview}
+            disabled={isBiweeklyCleanupLoading}
+            className="w-full bg-surface hover:bg-surface-hover text-text-main border border-surface-border font-bold text-xs py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs disabled:opacity-60"
+          >
+            <Calendar className="w-4 h-4 text-amber-500" />
+            <span>
+              {_t(
+                'معاينة وتنظيف الحصص التلقائية المخالفة للتكرار (أسبوع وأسبوع)',
+                'Preview & Clean Invalid Biweekly Auto-Lessons',
+                'Ungültige zweiwöchentliche Auto-Lektionen prüfen & bereinigen'
+              )}
+            </span>
+          </button>
+
           {/* Danger Zone Button */}
           <button
             type="button"
@@ -1721,6 +1786,105 @@ export const SettingsView: React.FC = () => {
       ========================================== */}
       {isContactsModalOpen && (
         <ContactsUnificationModal onClose={() => setIsContactsModalOpen(false)} />
+      )}
+
+      {/* ==========================================
+          BIWEEKLY AUTO-LESSONS CLEANUP PREVIEW MODAL (#7)
+      ========================================== */}
+      {biweeklyCleanupPreview !== null && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-surface rounded-t-[20px] sm:rounded-xl max-w-md w-full p-4 border border-surface-border shadow-xl space-y-3 animate-scale-up font-sans">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
+                <Calendar className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-text-main">
+                  {_t(
+                    'معاينة تنظيف الحصص التلقائية المخالفة للتكرار',
+                    'Biweekly Auto-Lessons Cleanup Preview',
+                    'Vorschau: Bereinigung zweiwöchentlicher Lektionen'
+                  )}
+                </h3>
+                <p className="text-[11px] text-text-muted">
+                  {_t(
+                    'يشمل فقط حصص l_auto_ المجدولة بدون حضور أو دفع أو ملاحظات',
+                    'Only scheduled l_auto_ lessons with no attendance, payment, or notes',
+                    'Nur geplante l_auto_-Lektionen ohne Anwesenheit, Zahlung oder Notizen'
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {biweeklyCleanupPreview.length === 0 ? (
+              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold text-center">
+                {_t(
+                  '✅ لا توجد أي حصص تلقائية مخالفة لنظام التكرار (أسبوع وأسبوع).',
+                  '✅ No invalid biweekly auto-lessons found.',
+                  '✅ Keine ungültigen zweiwöchentlichen Auto-Lektionen gefunden.'
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs font-bold text-text-main flex items-center justify-between">
+                  <span>{_t('إجمالي الحصص المطابقة:', 'Total matching lessons:', 'Gefundene Lektionen:')}</span>
+                  <span className="px-2 py-0.5 rounded-md bg-amber-500 text-white font-black">
+                    {biweeklyCleanupPreview.length}
+                  </span>
+                </div>
+
+                <div className="text-[11px] font-bold text-text-muted">
+                  {_t('أمثلة من الحصص التي سيتم نقلها للمحذوفات (deleted: true):', 'Sample lessons to be soft-deleted:', 'Beispiele:')}
+                </div>
+
+                <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                  {biweeklyCleanupPreview.slice(0, 8).map(item => (
+                    <div
+                      key={item.id}
+                      className="p-2 rounded-lg bg-surface-hover border border-surface-border text-xs flex items-center justify-between gap-2"
+                    >
+                      <div className="truncate font-bold text-text-main">
+                        {item.groupName || item.title || item.id}
+                      </div>
+                      <div className="text-[11px] font-mono text-text-muted shrink-0">
+                        {item.date} • {item.time}
+                      </div>
+                    </div>
+                  ))}
+                  {biweeklyCleanupPreview.length > 8 && (
+                    <div className="text-[11px] text-center text-text-muted pt-1">
+                      {_t(
+                        `+ ${biweeklyCleanupPreview.length - 8} حصة أخرى...`,
+                        `+ ${biweeklyCleanupPreview.length - 8} more lessons...`,
+                        `+ ${biweeklyCleanupPreview.length - 8} weitere Lektionen...`
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setBiweeklyCleanupPreview(null)}
+                className="flex-1 py-2 bg-surface-hover text-text-main rounded-lg font-bold text-xs cursor-pointer"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              {biweeklyCleanupPreview.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleConfirmBiweeklyCleanup}
+                  disabled={isBiweeklyCleanupLoading}
+                  className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-xs cursor-pointer shadow-2xs disabled:opacity-60"
+                >
+                  {_t('تأكيد', 'Confirm', 'Bestätigen')}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

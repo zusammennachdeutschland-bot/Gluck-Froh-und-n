@@ -11,6 +11,7 @@ import { AppLanguage, AccentColor, NotificationSound, SchoolSettings, SchoolPeri
 import { AvatarImage } from './AvatarImage';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSchoolSettings, DEFAULT_SCHOOL_SETTINGS } from '../utils/schoolUtils';
+import { isBackupFileSizeValid } from '../utils/backupEngine';
 
 const PRESET_AVATARS = [
   { id: 'av_man_teacher', label: 'Herr (Teacher)', icon: '👨‍🏫' },
@@ -179,6 +180,11 @@ export const SetupWizard: React.FC = () => {
   const handleRestoreBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!isBackupFileSizeValid(file.size)) {
+      console.error('SetupWizard restore rejected: file exceeds 25MB limit.');
+      e.target.value = '';
+      return;
+    }
     setIsRestoring(true);
     try {
       const text = await file.text();

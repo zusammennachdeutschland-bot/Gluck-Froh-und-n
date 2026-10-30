@@ -34,8 +34,8 @@ export const AddQuickLessonModal: React.FC<AddQuickLessonModalProps> = ({ onClos
   }, [amountDue, paymentStatus]);
 
   const [grade, setGrade] = useState<GradeLevel>('Grade 9');
-  const [locationAddress, setLocationAddress] = useState('Kairo Schulungsraum');
-  const [meetingLink, setMeetingLink] = useState(profile.defaultZoomLink || 'https://zoom.us/j/123456789');
+  const [locationAddress, setLocationAddress] = useState(profile.defaultLocation || '');
+  const [meetingLink, setMeetingLink] = useState(profile.defaultZoomLink || '');
 
   
   const findConflict = (checkTime: string) => {

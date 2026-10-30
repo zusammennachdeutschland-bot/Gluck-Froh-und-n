@@ -7,6 +7,7 @@ import {
 import { SyncHistoryEntry } from '../../types';
 import { CopyableBlock } from './CopyableBlock';
 import { useApp } from '../../context/AppContext';
+import { formatLocalDate } from '../../utils/timeUtils';
 
 interface SyncHistoryTimelineProps {
   history: SyncHistoryEntry[];
@@ -40,7 +41,7 @@ export const SyncHistoryTimeline: React.FC<SyncHistoryTimelineProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `sync_history_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `sync_history_${formatLocalDate()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -67,7 +68,7 @@ export const SyncHistoryTimeline: React.FC<SyncHistoryTimelineProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `sync_history_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `sync_history_${formatLocalDate()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };

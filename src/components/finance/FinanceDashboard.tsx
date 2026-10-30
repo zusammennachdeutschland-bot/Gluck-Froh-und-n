@@ -13,7 +13,7 @@ import { AddFinanceTransactionModal } from './modals/AddFinanceTransactionModal'
 import { BalanceAdjustmentModal } from './modals/BalanceAdjustmentModal';
 import { FinanceAccount } from '../../types';
 import { FinanceCategoryManagerModal } from './modals/FinanceCategoryManagerModal';
-import { calculateTodaysIncome } from '../../services/financeService';
+import { calculateTodaysIncome, calculateStudentDueBannerTotals } from '../../services/financeService';
 import { calculateDuePaymentCycles } from '../../utils/paymentUtils';
 import { calculateHoldingMetrics } from '../../services/goldPrice/goldPriceTypes';
 import { BankCard } from './BankCard';
@@ -58,16 +58,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
     return calculateDuePaymentCycles(students, groups, lessons, payments);
   }, [students, groups, lessons, payments]);
 
-  const pendingPaymentsList = useMemo(() => {
-    return payments.filter(p => !p.deleted && (p.status === 'not_paid' || p.status === 'partial'));
-  }, [payments]);
-
-  const totalStudentsNeedingPayment = dueCycles.length + pendingPaymentsList.length;
-  const totalAmountDueFromStudents = useMemo(() => {
-    const cycleTotal = dueCycles.reduce((sum, c) => sum + (c.amountDue || 0), 0);
-    const pendingTotal = pendingPaymentsList.reduce((sum, p) => sum + (p.amount - (p.paidAmount || 0)), 0);
-    return cycleTotal + pendingTotal;
-  }, [dueCycles, pendingPaymentsList]);
+  const { totalStudentsNeedingPayment, totalAmountDueFromStudents } = useMemo(() => {
+    return calculateStudentDueBannerTotals(dueCycles, payments);
+  }, [dueCycles, payments]);
 
   // --------------------------------------------------------------------------
   // FINANCIAL CALCULATIONS (THIS MONTH)

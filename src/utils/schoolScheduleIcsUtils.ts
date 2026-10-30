@@ -1,5 +1,6 @@
 import { SchoolSettings, TeacherProfile, SchoolPeriodRecord } from '../types';
 import { getSchoolSettings, calculatePeriodsTimings, CalculatedPeriod } from './schoolUtils';
+import { formatLocalDate } from './timeUtils';
 
 export interface SchoolIcsEventItem {
   uid: string;
@@ -377,7 +378,7 @@ export function generateRecurringSchoolScheduleIcs(
   icsLines.push('END:VCALENDAR');
 
   const icsContent = icsLines.join('\r\n');
-  const filename = `school_schedule_${now.toISOString().slice(0, 10)}.ics`;
+  const filename = `school_schedule_${formatLocalDate(now)}.ics`;
 
   return {
     icsContent,

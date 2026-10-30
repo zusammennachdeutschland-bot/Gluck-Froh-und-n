@@ -7,6 +7,8 @@ import { SchoolSettings } from '../types';
 import { GenerationResult } from '../services/termVisitPlannerService';
 import { getEffectiveSchoolLogo, getEffectiveSchoolName, getReportSchoolNameHtml } from './alsunLogoData';
 import { renderContainerToCanvas, prepareClonedDocForHtml2Canvas, saveReportAsOfflineHtml } from './printObservationUtils';
+import { escapeHtml } from './securityUtils';
+import { formatLocalDate } from './timeUtils';
 
 export interface TermVisitReportExportOptions {
   weekFilter?: string; // 'all' or specific week key like 'الأسبوع 41'
@@ -53,8 +55,8 @@ export function extractWeeksFromVisits(
         if (!map.has(wNum)) {
           const wEnd = new Date(curr);
           wEnd.setDate(wEnd.getDate() + 6);
-          const firstStr = curr.toISOString().split('T')[0];
-          const lastStr = wEnd.toISOString().split('T')[0];
+          const firstStr = formatLocalDate(curr);
+          const lastStr = formatLocalDate(wEnd);
           map.set(wNum, { weekNum: wNum, visits: [], dates: [firstStr, lastStr] });
         }
         curr.setDate(curr.getDate() + 7);
@@ -129,12 +131,12 @@ export function buildTermVisitReportHtmlContainer(
   container.style.padding = '14px 18px';
   container.style.boxSizing = 'border-box';
 
-  const logoUrl = getEffectiveSchoolLogo(settings);
+  const logoUrl = escapeHtml(getEffectiveSchoolLogo(settings));
   const schoolName = getEffectiveSchoolName(settings, isRtl);
   const schoolNameHtml = getReportSchoolNameHtml(settings, { isRtl, tag: 'h1', fontSize: '16px', color: '#1e3a8a' });
-  const departmentName = settings?.departmentName || (isRtl ? 'قسم اللغة الألمانية' : 'German Department');
-  const hodName = settings?.hodName || 'Abdelrahman Ghareeb';
-  const academicYear = settings?.academicYear || '2025/2026';
+  const departmentName = escapeHtml(settings?.departmentName || (isRtl ? 'قسم اللغة الألمانية' : 'German Department'));
+  const hodName = escapeHtml(settings?.hodName || 'Abdelrahman Ghareeb');
+  const academicYear = escapeHtml(settings?.academicYear || '2025/2026');
   const genDate = new Date().toLocaleDateString(isRtl ? 'ar-EG' : 'en-US', {
     year: 'numeric', month: 'long', day: 'numeric'
   });
@@ -199,8 +201,8 @@ export function buildTermVisitReportHtmlContainer(
           </div>
         </div>
         <div style="text-align: ${isRtl ? 'left' : 'right'}; font-size: 9.5px; line-height: 1.35; color: #334155;">
-          <p style="margin: 0;"><strong>${isRtl ? 'العام الدراسي:' : 'Academic Year:'}</strong> ${academicYear} | <strong>${isRtl ? 'الفصل:' : 'Term:'}</strong> ${pSettings.term}</p>
-          <p style="margin: 1px 0;"><strong>${isRtl ? 'الفترة:' : 'Period:'}</strong> ${pSettings.startDate} ${isRtl ? 'إلى' : 'to'} ${pSettings.endDate}</p>
+          <p style="margin: 0;"><strong>${isRtl ? 'العام الدراسي:' : 'Academic Year:'}</strong> ${academicYear} | <strong>${isRtl ? 'الفصل:' : 'Term:'}</strong> ${escapeHtml(pSettings.term)}</p>
+          <p style="margin: 1px 0;"><strong>${isRtl ? 'الفترة:' : 'Period:'}</strong> ${escapeHtml(pSettings.startDate)} ${isRtl ? 'إلى' : 'to'} ${escapeHtml(pSettings.endDate)}</p>
           <p style="margin: 1px 0;"><strong>${isRtl ? 'رئيس القسم:' : 'HOD:'}</strong> ${hodName} | <span style="color: #64748b;">${genDate}</span></p>
         </div>
       </div>
@@ -209,13 +211,13 @@ export function buildTermVisitReportHtmlContainer(
       <div style="background: linear-gradient(135deg, #1e40af, #2563eb); color: #ffffff; padding: 6px 12px; text-align: center; margin-bottom: 8px; border-radius: 6px;">
         <h2 style="margin: 0; font-size: 13px; font-weight: 900; letter-spacing: 0.3px;">
           ${isWeeklyScope
-            ? (isRtl ? `التقرير المعتمد لخطة الزيارات الصفية - ${targetWeek}` : `Classroom Visit Plan Report - ${targetWeek}`)
+            ? (isRtl ? `التقرير المعتمد لخطة الزيارات الصفية - ${escapeHtml(targetWeek)}` : `Classroom Visit Plan Report - ${escapeHtml(targetWeek)}`)
             : (isRtl ? 'التقرير المعتمد لخطة الزيارات الصفية للمعلمين' : 'Official Term Classroom Visit Plan Report')
           }
         </h2>
         ${options?.weekDateRange ? `
           <p style="margin: 2px 0 0 0; font-size: 9.5px; opacity: 0.95; font-weight: 700;">
-            ${options.weekDateRange}
+            ${escapeHtml(options.weekDateRange)}
           </p>
         ` : ''}
       </div>
@@ -248,7 +250,7 @@ export function buildTermVisitReportHtmlContainer(
       <div style="margin-bottom: 8px;">
         <h3 style="margin: 0 0 4px 0; font-size: 11px; font-weight: 800; color: #1e293b; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 3px;">
           📅 ${isWeeklyScope 
-            ? (isRtl ? `جدول الزيارات الصفية المجدولة خلال ${targetWeek}` : `Classroom Visit Schedule for ${targetWeek}`)
+            ? (isRtl ? `جدول الزيارات الصفية المجدولة خلال ${escapeHtml(targetWeek)}` : `Classroom Visit Schedule for ${escapeHtml(targetWeek)}`)
             : (isRtl ? 'جدول الزيارات الصفية المجدولة والمنفذة خلال الفصل الدراسي' : 'Detailed Chronological Visit Schedule')
           }
         </h3>
@@ -268,7 +270,7 @@ export function buildTermVisitReportHtmlContainer(
             ${visitsToRender.length === 0 ? `
               <tr>
                 <td colspan="6" style="padding: 10px; text-align: center; color: #64748b; border: 1px solid #e2e8f0;">
-                  ${isRtl ? `لا توجد زيارات مجدولة في ${targetWeek || 'هذا الفصل'}` : 'No planned visits found.'}
+                  ${isRtl ? `لا توجد زيارات مجدولة في ${escapeHtml(targetWeek || 'هذا الفصل')}` : 'No planned visits found.'}
                 </td>
               </tr>
             ` : visitsToRender.map((v, idx) => {
@@ -283,19 +285,19 @@ export function buildTermVisitReportHtmlContainer(
               } else if (v.status === 'cancelled') {
                 statusTag = `<span style="background: #ffe4e6; color: #be123c; border: 1px solid #fca5a5; padding: 1px 4px; border-radius: 3px; font-weight: 800; font-size: 8.5px;">✕ ${isRtl ? 'ملغاة' : 'Cancelled'}</span>`;
               } else {
-                statusTag = `<span style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; font-weight: 800; font-size: 8.5px;">${v.status}</span>`;
+                statusTag = `<span style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; font-weight: 800; font-size: 8.5px;">${escapeHtml(v.status)}</span>`;
               }
 
-              const dayName = isRtl ? (v.weekdayNameAr || '') : (v.weekdayNameEn || '');
-              const timeRange = v.startTime ? `${v.startTime} - ${v.endTime || ''}` : '';
+              const dayName = escapeHtml(isRtl ? (v.weekdayNameAr || '') : (v.weekdayNameEn || ''));
+              const timeRange = v.startTime ? escapeHtml(`${v.startTime} - ${v.endTime || ''}`) : '';
 
               return `
                 <tr style="background: ${bg};">
                   <td style="padding: 3.5px 5px; border: 1px solid #e2e8f0; font-weight: 700; text-align: center;">${idx + 1}</td>
-                  <td style="padding: 3.5px 5px; border: 1px solid #e2e8f0; font-weight: 700;">${v.date} <span style="color: #64748b; font-weight: 400; font-size: 8.5px;">(${dayName})</span></td>
-                  <td style="padding: 3.5px 5px; border: 1px solid #e2e8f0; font-weight: 700; text-align: center;">${isRtl ? 'ح' : 'P'}${v.periodNumber} ${timeRange ? `<span style="font-size: 8px; color: #64748b;">(${timeRange})</span>` : ''}</td>
-                  <td style="padding: 3.5px 5px; border: 1px solid #e2e8f0; font-weight: 800; color: #1e3a8a;">${v.teacherName}</td>
-                  <td style="padding: 3.5px 5px; border: 1px solid #e2e8f0; font-weight: 700; text-align: center;">${v.gradeClass}</td>
+                  <td style="padding: 3.5px 5px; border: 1px solid #e2e8f0; font-weight: 700;">${escapeHtml(v.date)} <span style="color: #64748b; font-weight: 400; font-size: 8.5px;">(${dayName})</span></td>
+                  <td style="padding: 3.5px 5px; border: 1px solid #e2e8f0; font-weight: 700; text-align: center;">${isRtl ? 'ح' : 'P'}${escapeHtml(v.periodNumber)} ${timeRange ? `<span style="font-size: 8px; color: #64748b;">(${timeRange})</span>` : ''}</td>
+                  <td style="padding: 3.5px 5px; border: 1px solid #e2e8f0; font-weight: 800; color: #1e3a8a;">${escapeHtml(v.teacherName)}</td>
+                  <td style="padding: 3.5px 5px; border: 1px solid #e2e8f0; font-weight: 700; text-align: center;">${escapeHtml(v.gradeClass)}</td>
                   <td style="padding: 3.5px 5px; border: 1px solid #e2e8f0; text-align: center;">${statusTag}</td>
                 </tr>
               `;
@@ -308,7 +310,7 @@ export function buildTermVisitReportHtmlContainer(
       <div style="margin-bottom: 6px;">
         <h3 style="margin: 0 0 4px 0; font-size: 11px; font-weight: 800; color: #1e293b; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 3px;">
           📊 ${isWeeklyScope
-            ? (isRtl ? `ملخص زيارات المعلمين خلال ${targetWeek}` : `Teacher Visits Summary for ${targetWeek}`)
+            ? (isRtl ? `ملخص زيارات المعلمين خلال ${escapeHtml(targetWeek)}` : `Teacher Visits Summary for ${escapeHtml(targetWeek)}`)
             : (isRtl ? 'ملخص تغطية الزيارات الصفية حسب المعلمين والفصول' : 'Teacher & Class Coverage Summary')
           }
         </h3>
@@ -331,8 +333,8 @@ export function buildTermVisitReportHtmlContainer(
               const cov = req.requiredVisitsCount > 0 ? Math.round((req.completedVisitsCount / req.requiredVisitsCount) * 100) : 100;
               return `
                 <tr style="background: ${bg};">
-                  <td style="padding: 3px 5px; border: 1px solid #e2e8f0; font-weight: 700;">${req.teacherName}</td>
-                  <td style="padding: 3px 5px; border: 1px solid #e2e8f0;">${req.gradeClass}</td>
+                  <td style="padding: 3px 5px; border: 1px solid #e2e8f0; font-weight: 700;">${escapeHtml(req.teacherName)}</td>
+                  <td style="padding: 3px 5px; border: 1px solid #e2e8f0;">${escapeHtml(req.gradeClass)}</td>
                   <td style="padding: 3px 5px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">${req.requiredVisitsCount}</td>
                   <td style="padding: 3px 5px; border: 1px solid #e2e8f0; text-align: center; font-weight: 800; color: ${req.completedVisitsCount > 0 ? '#166534' : '#be123c'};">${req.completedVisitsCount}</td>
                   <td style="padding: 3px 5px; border: 1px solid #e2e8f0; text-align: center; font-weight: 800; color: ${cov >= 100 ? '#166534' : '#b45309'};">${cov}%</td>
@@ -352,7 +354,7 @@ export function buildTermVisitReportHtmlContainer(
           <ul style="margin: 0; padding-${isRtl ? 'right' : 'left'}: 16px; font-size: 9px; color: #9f1239;">
             ${conflicts.map(c => `
               <li style="margin-bottom: 2px;">
-                <strong>${c.teacherName}</strong> (${c.className}): ${c.reason}
+                <strong>${escapeHtml(c.teacherName)}</strong> (${escapeHtml(c.className)}): ${escapeHtml(c.reason)}
               </li>
             `).join('')}
           </ul>
@@ -391,13 +393,13 @@ export function build2WeeksSheetHtmlContainer(
   container.style.padding = '22px 26px';
   container.style.boxSizing = 'border-box';
 
-  const logoUrl = getEffectiveSchoolLogo(settings);
+  const logoUrl = escapeHtml(getEffectiveSchoolLogo(settings));
   const schoolNameHtml = getReportSchoolNameHtml(settings, { isRtl, tag: 'h1', fontSize: '18px', color: '#1e3a8a' });
-  const departmentName = settings?.departmentName || (isRtl ? 'قسم اللغة الألمانية' : 'German Department');
-  const academicYear = settings?.academicYear || '2025/2026';
+  const departmentName = escapeHtml(settings?.departmentName || (isRtl ? 'قسم اللغة الألمانية' : 'German Department'));
+  const academicYear = escapeHtml(settings?.academicYear || '2025/2026');
   const startWKey = weeksChunk[0]?.weekKey || '';
   const endWKey = weeksChunk[weeksChunk.length - 1]?.weekKey || '';
-  const rangeHeader = startWKey === endWKey ? startWKey : `${startWKey} إلى ${endWKey}`;
+  const rangeHeader = escapeHtml(startWKey === endWKey ? startWKey : `${startWKey} إلى ${endWKey}`);
 
   const renderWeekBox = (w?: WeekItemData) => {
     if (!w) {
@@ -410,10 +412,10 @@ export function build2WeeksSheetHtmlContainer(
           <!-- Week Header Bar -->
           <div style="background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #ffffff; padding: 8px 14px; border-radius: 10px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
             <div style="font-size: 17px; font-weight: 900; letter-spacing: 0.3px;">
-              📅 ${w.weekKey}
+              📅 ${escapeHtml(w.weekKey)}
             </div>
             <div style="font-size: 12px; font-weight: 800; opacity: 0.95; background: rgba(255,255,255,0.2); padding: 3px 8px; border-radius: 6px;">
-              ${w.dateRangeStr || ''}
+              ${escapeHtml(w.dateRangeStr || '')}
             </div>
           </div>
 
@@ -436,21 +438,21 @@ export function build2WeeksSheetHtmlContainer(
                 </tr>
               ` : w.visits.map((v, vIdx) => {
                 const bg = vIdx % 2 === 0 ? '#ffffff' : '#f8fafc';
-                const dayName = isRtl ? (v.weekdayNameAr || '') : (v.weekdayNameEn || '');
+                const dayName = escapeHtml(isRtl ? (v.weekdayNameAr || '') : (v.weekdayNameEn || ''));
                 return `
                   <tr style="background: ${bg}; border-bottom: 1px solid #cbd5e1;">
                     <td style="padding: 8px 8px; border: 1px solid #cbd5e1; font-weight: 800; font-size: 13px; color: #1e293b;">
                       ${dayName}
-                      <div style="font-size: 11px; color: #64748b; font-weight: 600; margin-top: 2px;">${v.date}</div>
+                      <div style="font-size: 11px; color: #64748b; font-weight: 600; margin-top: 2px;">${escapeHtml(v.date)}</div>
                     </td>
                     <td style="padding: 8px 8px; border: 1px solid #cbd5e1; font-weight: 900; font-size: 16px; color: #1e3a8a;">
-                      ${v.teacherName}
+                      ${escapeHtml(v.teacherName)}
                     </td>
                     <td style="padding: 8px 8px; border: 1px solid #cbd5e1; font-weight: 900; font-size: 15px; color: #0f172a; text-align: center; background: #f1f5f9;">
-                      ${v.gradeClass}
+                      ${escapeHtml(v.gradeClass)}
                     </td>
                     <td style="padding: 8px 8px; border: 1px solid #cbd5e1; font-weight: 900; font-size: 13.5px; text-align: center; color: #2563eb;">
-                      ${isRtl ? 'حصة' : 'P.'} ${v.periodNumber}
+                      ${isRtl ? 'حصة' : 'P.'} ${escapeHtml(v.periodNumber)}
                     </td>
                   </tr>
                 `;
@@ -537,13 +539,13 @@ export function build4WeeksSheetHtmlContainer(
   container.style.padding = '20px 24px';
   container.style.boxSizing = 'border-box';
 
-  const logoUrl = getEffectiveSchoolLogo(settings);
+  const logoUrl = escapeHtml(getEffectiveSchoolLogo(settings));
   const schoolNameHtml = getReportSchoolNameHtml(settings, { isRtl, tag: 'h1', fontSize: '18px', color: '#1e3a8a' });
-  const departmentName = settings?.departmentName || (isRtl ? 'قسم اللغة الألمانية' : 'German Department');
-  const academicYear = settings?.academicYear || '2025/2026';
+  const departmentName = escapeHtml(settings?.departmentName || (isRtl ? 'قسم اللغة الألمانية' : 'German Department'));
+  const academicYear = escapeHtml(settings?.academicYear || '2025/2026');
   const startWKey = weeksChunk[0]?.weekKey || '';
   const endWKey = weeksChunk[weeksChunk.length - 1]?.weekKey || '';
-  const rangeHeader = startWKey === endWKey ? startWKey : `${startWKey} إلى ${endWKey}`;
+  const rangeHeader = escapeHtml(startWKey === endWKey ? startWKey : `${startWKey} إلى ${endWKey}`);
 
   const renderWeekBox = (w?: WeekItemData) => {
     if (!w) {
@@ -556,10 +558,10 @@ export function build4WeeksSheetHtmlContainer(
           <!-- Week Header Bar -->
           <div style="background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #ffffff; padding: 6px 10px; border-radius: 8px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
             <div style="font-size: 15px; font-weight: 900; letter-spacing: 0.3px;">
-              📅 ${w.weekKey}
+              📅 ${escapeHtml(w.weekKey)}
             </div>
             <div style="font-size: 11px; font-weight: 700; opacity: 0.95; background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 5px;">
-              ${w.dateRangeStr || ''}
+              ${escapeHtml(w.dateRangeStr || '')}
             </div>
           </div>
 
@@ -582,21 +584,21 @@ export function build4WeeksSheetHtmlContainer(
                 </tr>
               ` : w.visits.map((v, vIdx) => {
                 const bg = vIdx % 2 === 0 ? '#ffffff' : '#f8fafc';
-                const dayName = isRtl ? (v.weekdayNameAr || '') : (v.weekdayNameEn || '');
+                const dayName = escapeHtml(isRtl ? (v.weekdayNameAr || '') : (v.weekdayNameEn || ''));
                 return `
                   <tr style="background: ${bg}; border-bottom: 1px solid #cbd5e1;">
                     <td style="padding: 6px 5px; border: 1px solid #cbd5e1; font-weight: 800; font-size: 12px; color: #1e293b;">
                       ${dayName}
-                      <div style="font-size: 10px; color: #64748b; font-weight: 600;">${v.date}</div>
+                      <div style="font-size: 10px; color: #64748b; font-weight: 600;">${escapeHtml(v.date)}</div>
                     </td>
                     <td style="padding: 6px 5px; border: 1px solid #cbd5e1; font-weight: 900; font-size: 14px; color: #1e3a8a;">
-                      ${v.teacherName}
+                      ${escapeHtml(v.teacherName)}
                     </td>
                     <td style="padding: 6px 5px; border: 1px solid #cbd5e1; font-weight: 900; font-size: 13.5px; color: #0f172a; text-align: center; background: #f1f5f9;">
-                      ${v.gradeClass}
+                      ${escapeHtml(v.gradeClass)}
                     </td>
                     <td style="padding: 6px 5px; border: 1px solid #cbd5e1; font-weight: 800; font-size: 12px; text-align: center; color: #2563eb;">
-                      ${isRtl ? 'حصة' : 'P.'} ${v.periodNumber}
+                      ${isRtl ? 'حصة' : 'P.'} ${escapeHtml(v.periodNumber)}
                     </td>
                   </tr>
                 `;
@@ -683,10 +685,10 @@ export function buildSingleWeekSheetHtmlContainer(
   container.style.padding = '24px 28px';
   container.style.boxSizing = 'border-box';
 
-  const logoUrl = getEffectiveSchoolLogo(settings);
+  const logoUrl = escapeHtml(getEffectiveSchoolLogo(settings));
   const schoolNameHtml = getReportSchoolNameHtml(settings, { isRtl, tag: 'h1', fontSize: '20px', color: '#1e3a8a' });
-  const departmentName = settings?.departmentName || (isRtl ? 'قسم اللغة الألمانية' : 'German Department');
-  const academicYear = settings?.academicYear || '2025/2026';
+  const departmentName = escapeHtml(settings?.departmentName || (isRtl ? 'قسم اللغة الألمانية' : 'German Department'));
+  const academicYear = escapeHtml(settings?.academicYear || '2025/2026');
 
   container.innerHTML = `
     <div style="border: 2.5px solid #1e3a8a; border-radius: 14px; padding: 20px; background: #ffffff; min-height: 1420px; display: flex; flex-direction: column; justify-content: space-between;">
@@ -709,10 +711,10 @@ export function buildSingleWeekSheetHtmlContainer(
         <!-- Title Banner -->
         <div style="background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #ffffff; padding: 12px 20px; text-align: center; border-radius: 10px; margin-bottom: 18px; box-shadow: 0 4px 10px rgba(37,99,235,0.15);">
           <h2 style="margin: 0; font-size: 21px; font-weight: 900; letter-spacing: 0.5px;">
-            📌 ${isRtl ? `جدول خطة الزيارات الصفية - ${targetWeekData.weekKey}` : `Classroom Visit Schedule - ${targetWeekData.weekKey}`}
+            📌 ${isRtl ? `جدول خطة الزيارات الصفية - ${escapeHtml(targetWeekData.weekKey)}` : `Classroom Visit Schedule - ${escapeHtml(targetWeekData.weekKey)}`}
           </h2>
           <p style="margin: 4px 0 0 0; font-size: 13.5px; font-weight: 800; color: #dbeafe;">
-            ${targetWeekData.dateRangeStr || ''} | ${isRtl ? `إجمالي زيارات الأسبوع: ${targetWeekData.visits.length}` : `Total Visits: ${targetWeekData.visits.length}`}
+            ${escapeHtml(targetWeekData.dateRangeStr || '')} | ${isRtl ? `إجمالي زيارات الأسبوع: ${targetWeekData.visits.length}` : `Total Visits: ${targetWeekData.visits.length}`}
           </p>
         </div>
 
@@ -736,22 +738,22 @@ export function buildSingleWeekSheetHtmlContainer(
               </tr>
             ` : targetWeekData.visits.map((v, idx) => {
               const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
-              const dayName = isRtl ? (v.weekdayNameAr || '') : (v.weekdayNameEn || '');
+              const dayName = escapeHtml(isRtl ? (v.weekdayNameAr || '') : (v.weekdayNameEn || ''));
               return `
                 <tr style="background: ${bg}; border-bottom: 1.5px solid #cbd5e1;">
                   <td style="padding: 12px 10px; border: 1px solid #cbd5e1; font-weight: 800; text-align: center; font-size: 14px;">${idx + 1}</td>
                   <td style="padding: 12px 10px; border: 1px solid #cbd5e1; font-weight: 800; font-size: 14px; color: #0f172a;">
                     ${dayName}
-                    <div style="font-size: 12px; color: #64748b; font-weight: 700;">${v.date}</div>
+                    <div style="font-size: 12px; color: #64748b; font-weight: 700;">${escapeHtml(v.date)}</div>
                   </td>
                   <td style="padding: 12px 10px; border: 1px solid #cbd5e1; font-weight: 900; font-size: 18px; color: #1e3a8a;">
-                    ${v.teacherName}
+                    ${escapeHtml(v.teacherName)}
                   </td>
                   <td style="padding: 12px 10px; border: 1px solid #cbd5e1; font-weight: 900; font-size: 17px; color: #0f172a; text-align: center; background: #f1f5f9;">
-                    ${v.gradeClass}
+                    ${escapeHtml(v.gradeClass)}
                   </td>
                   <td style="padding: 12px 10px; border: 1px solid #cbd5e1; font-weight: 800; font-size: 15px; text-align: center; color: #2563eb;">
-                    ${isRtl ? 'حصة' : 'P.'} ${v.periodNumber}
+                    ${isRtl ? 'حصة' : 'P.'} ${escapeHtml(v.periodNumber)}
                   </td>
                 </tr>
               `;

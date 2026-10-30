@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { GroupProfileModal } from './GroupProfileModal';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
+import { escapeHtml } from '../utils/securityUtils';
 
 export { isLikelyFemaleStudent } from '../utils/genderUtils';
 
@@ -1119,7 +1120,7 @@ ${nextHomework}${recordingSection}${prevHwSection}${dictationSection}${examSecti
           <body>
             <div class="card">
               <h2>تقرير ولي الأمر 📊</h2>
-              <pre>${finalGeneratedText}</pre>
+              <pre>${escapeHtml(finalGeneratedText)}</pre>
             </div>
             <script>window.print();</script>
           </body>

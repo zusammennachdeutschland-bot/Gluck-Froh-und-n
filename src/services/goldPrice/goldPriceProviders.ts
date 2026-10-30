@@ -1,5 +1,6 @@
 import { GoldPriceProvider, GoldPriceResult, GoldPriceErrorCode } from './goldPriceTypes';
 import { goldPriceStorage } from './goldPriceStorage';
+import { Capacitor } from '@capacitor/core';
 
 const TROY_OUNCE_TO_GRAMS = 31.1034768;
 const DEFAULT_TIMEOUT_MS = 6500;
@@ -48,6 +49,20 @@ export class BackendProxyProvider implements GoldPriceProvider {
   description = 'استعلام محمي عبر خادم التطبيق المحلي لتفادي قيود CORS';
 
   async getGoldPrice(): Promise<GoldPriceResult> {
+    if (Capacitor.isNativePlatform()) {
+      return {
+        pricePerGram24K: 0,
+        currency: 'EGP',
+        source: 'Native APK Bypass',
+        fetchedAt: new Date().toISOString(),
+        success: false,
+        status: 'error',
+        errorCode: 'NATIVE_PLATFORM',
+        error: 'Local backend proxy not available on native APK',
+        providerId: this.id,
+      };
+    }
+
     try {
       const response = await fetchWithTimeout('/api/gold-price', {
         headers: { 'Accept': 'application/json' },

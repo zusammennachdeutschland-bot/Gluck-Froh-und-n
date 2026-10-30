@@ -14,6 +14,7 @@ import {
 } from '../../utils/aiBackgroundUtils';
 import { CertificateRenderer } from './templates/CertificateRenderer';
 import { getTeacherEnglishName, getTeacherArabicName } from '../../utils/teacherUtils';
+import { formatLocalDate } from '../../utils/timeUtils';
 import { 
   Sparkles, Copy, Check, Upload, Trash2, Edit2, Eye, ShieldCheck, 
   AlertTriangle, Image as ImageIcon, Plus, Info, RefreshCw, X, Award, 
@@ -172,7 +173,7 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
       ? 'In Anerkennung herausragender Leistungen, kontinuierlichen Engagements und vorbildlicher Fortschritte.'
       : 'In recognition of exceptional dedication, continuous commitment, and remarkable accomplishments.',
     language: previewSampleLang,
-    issueDate: new Date().toISOString().split('T')[0],
+    issueDate: formatLocalDate(),
     teacherName: previewSampleLang === 'ar' ? getTeacherArabicName(profile, 'أ. عمر حسن') : getTeacherEnglishName(profile, 'Herr Omar Hassan'),
     instructorName: previewSampleLang === 'ar' ? getTeacherArabicName(profile, 'أ. عمر حسن') : getTeacherEnglishName(profile, 'Herr Omar Hassan'),
     centerOrSchoolName: previewSampleLang === 'ar' ? 'أكاديمية التميز للغات' : previewSampleLang === 'de' ? 'Glück Sprachenzentrum' : 'Glück Language Academy',

@@ -7,6 +7,7 @@ import {
 } from '../types';
 import { formatLocalDate } from '../utils/timeUtils';
 import { getSchoolSettings, calculatePeriodsTimings } from '../utils/schoolUtils';
+import { safeLocalStorageSetItem } from './storageService';
 
 // Helper to construct Date object for Africa/Cairo wall clock times
 export function getCairoDateWithTime(dateStr: string, timeStr: string): Date {
@@ -330,6 +331,30 @@ export const clearActiveLessonNotification = async () => {
 /**
  * System notification helpers for alerts and reminders
  */
+export const computeSystemNotificationIdentity = (
+  tag: string = 'general',
+  title: string = '',
+  body: string = '',
+  extra?: Record<string, any>
+): { notifId: number; uniqueTag: string } => {
+  const baseTag = (tag || 'general').trim() || 'general';
+  const entityId =
+    extra?.lessonId ||
+    extra?.paymentId ||
+    extra?.studentId ||
+    extra?.id ||
+    '';
+  const discriminator = entityId
+    ? String(entityId)
+    : `${title.trim()}|${body.trim()}`;
+  const compositeKey = discriminator ? `${baseTag}::${discriminator}` : baseTag;
+  const notifId = generateDeterministicId(compositeKey, 5000);
+  const uniqueTag = entityId
+    ? `${baseTag}_${String(entityId)}`
+    : `${baseTag}_${notifId}`;
+  return { notifId, uniqueTag };
+};
+
 export const sendSystemNotification = async (
   title: string, 
   body: string, 
@@ -337,10 +362,11 @@ export const sendSystemNotification = async (
   extra?: Record<string, any>,
   actionTypeId?: string
 ) => {
+  const { notifId, uniqueTag } = computeSystemNotificationIdentity(tag, title, body, extra);
+
   if (Capacitor.isNativePlatform()) {
     try {
       await initNotificationChannels();
-      const notifId = Math.floor(Math.random() * 100000);
       
       let channelId = 'lessons_reminders';
       if (tag === 'payment') channelId = 'payment_due';
@@ -386,14 +412,14 @@ export const sendSystemNotification = async (
             const isAlarm = tag.startsWith('upcoming-') || tag === 'lesson_alarm';
             const swOptions: any = {
               body,
-              tag: tag || 'lesson_alarm',
+              tag: uniqueTag,
               icon: '/icon.png',
               badge: '/icon.png',
               requireInteraction: true, // Crucial: forces notification to stay on screen outside browser
               silent: false,
               renotify: true,
               vibrate: [500, 200, 500, 200, 500, 200, 800],
-              data: { ...extra, lessonId: extra?.lessonId, url: window.location.href, tag },
+              data: { ...extra, lessonId: extra?.lessonId, url: window.location.href, tag, uniqueTag },
               actions: isAlarm ? [
                 { action: 'start', title: '▶️ بدء الحصة' },
                 { action: 'snooze', title: '⏰ غفوة 5 دقائق' },
@@ -412,7 +438,7 @@ export const sendSystemNotification = async (
         try {
           const notif = new Notification(title, {
             body,
-            tag,
+            tag: uniqueTag,
             icon: '/icon.png',
             badge: '/icon.png',
             requireInteraction: true
@@ -562,7 +588,7 @@ export const cancelScheduledNotification = async (id: number): Promise<boolean> 
     if (raw) {
       const items: ScheduledNotificationItem[] = JSON.parse(raw);
       const filtered = items.filter(item => item.id !== id);
-      localStorage.setItem(WEB_SCHEDULED_NOTIFS_KEY, JSON.stringify(filtered));
+      safeLocalStorageSetItem(WEB_SCHEDULED_NOTIFS_KEY, JSON.stringify(filtered));
     }
     return true;
   } catch {
@@ -598,7 +624,79 @@ export const cancelAllScheduledNotifications = async (): Promise<boolean> => {
  * Rebuilds all notification schedules based on current notification settings and app data.
  * Guarantees no duplicates, persists schedules across reboots/restarts, and respects all toggles.
  */
-export const rebuildAllNotificationSchedules = async (
+export const MAX_SCHEDULED_NOTIFICATIONS = 100;
+export const LESSON_NOTIFICATION_WINDOW_DAYS = 14;
+export const RESERVED_DAILY_SUMMARY_SLOTS = 2;
+export const RESERVED_PAYMENT_DUE_SLOTS = 10;
+
+/**
+ * Selects up to `maxLimit` notifications while guaranteeing reserved slots
+ * for `dailySummary` and `paymentDue` so lesson notifications never crowd them out.
+ */
+export const selectPrioritizedNotificationBatch = <T>(
+  items: T[],
+  getEpoch: (item: T) => number,
+  getCategory: (item: T) => string | undefined,
+  maxLimit: number = MAX_SCHEDULED_NOTIFICATIONS
+): T[] => {
+  const sortedAll = [...items].sort((a, b) => getEpoch(a) - getEpoch(b));
+  if (sortedAll.length <= maxLimit) {
+    return sortedAll;
+  }
+
+  const dailySummaryItems = sortedAll
+    .filter(item => getCategory(item) === 'dailySummary')
+    .slice(0, RESERVED_DAILY_SUMMARY_SLOTS);
+  const paymentDueItems = sortedAll
+    .filter(item => getCategory(item) === 'paymentDue')
+    .slice(0, RESERVED_PAYMENT_DUE_SLOTS);
+
+  const reservedSet = new Set<T>([...dailySummaryItems, ...paymentDueItems]);
+  const remainingSlots = Math.max(0, maxLimit - reservedSet.size);
+  const otherItems = sortedAll
+    .filter(item => !reservedSet.has(item))
+    .slice(0, remainingSlots);
+
+  return [...reservedSet, ...otherItems].sort((a, b) => getEpoch(a) - getEpoch(b));
+};
+
+let rebuildScheduleQueue: Promise<{ count: number; nextScheduledTime: string | null }> = Promise.resolve({
+  count: 0,
+  nextScheduledTime: null
+});
+
+/**
+ * Rebuilds all notification schedules based on current notification settings and app data.
+ * Guarantees no duplicates, serializes concurrent calls, uses a 14-day rolling window,
+ * and caps scheduled alarms at MAX_SCHEDULED_NOTIFICATIONS (100).
+ */
+export const rebuildAllNotificationSchedules = (
+  settings: NotificationSettings,
+  lessons: Lesson[],
+  groups: Group[],
+  students: Student[],
+  payments: PaymentRecord[],
+  profile?: any,
+  language?: string
+): Promise<{ count: number; nextScheduledTime: string | null }> => {
+  const nextTask = rebuildScheduleQueue
+    .catch(() => ({ count: 0, nextScheduledTime: null }))
+    .then(() =>
+      rebuildAllNotificationSchedulesInternal(
+        settings,
+        lessons,
+        groups,
+        students,
+        payments,
+        profile,
+        language
+      )
+    );
+  rebuildScheduleQueue = nextTask;
+  return nextTask;
+};
+
+const rebuildAllNotificationSchedulesInternal = async (
   settings: NotificationSettings,
   lessons: Lesson[],
   groups: Group[],
@@ -622,6 +720,7 @@ export const rebuildAllNotificationSchedules = async (
   const webNotifsStore: ScheduledNotificationItem[] = [];
   const scheduledIds = new Set<number>();
   const now = Date.now();
+  const maxHorizonEpoch = now + LESSON_NOTIFICATION_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   let earliestEpoch: number | null = null;
 
   // Helper to register a notification
@@ -683,6 +782,7 @@ export const rebuildAllNotificationSchedules = async (
   // A. LESSON REMINDERS, LESSON START & ATTENDANCE REMINDERS
   // -------------------------------------------------------------
   const upcomingLessons = lessons.filter(l => (l.status === 'scheduled' || l.status === 'in_progress') && !l.deleted);
+  const seenLessonSlotKeys = new Set<string>();
 
   for (const lesson of upcomingLessons) {
     if (!lesson.date || !lesson.time) continue;
@@ -692,6 +792,14 @@ export const rebuildAllNotificationSchedules = async (
     const lessonStartEpoch = new Date(`${lesson.date}T${cleanTime.padStart(5, '0')}:00`).getTime();
 
     if (isNaN(lessonStartEpoch)) continue;
+    // Rolling 14-day window check so 365-day lessons don't flood storage or exceed OS alarm limits (#11)
+    if (lessonStartEpoch > maxHorizonEpoch || lessonStartEpoch < now - 4 * 60 * 60 * 1000) continue;
+
+    // Deduplicate lessons occupying the exact same target + date + time (#10)
+    const slotTarget = lesson.groupId || lesson.studentId || lesson.studentName || lesson.id;
+    const lessonSlotKey = `${slotTarget}_${lesson.date}_${cleanTime.padStart(5, '0')}`;
+    if (seenLessonSlotKeys.has(lessonSlotKey)) continue;
+    seenLessonSlotKeys.add(lessonSlotKey);
 
     const lessonDisplayName = lesson.studentName || (lesson.groupName && lesson.groupName !== 'Quick Lesson' ? lesson.groupName : '') || lesson.title || (isAr ? 'الحصّة' : isDe ? 'Lektion' : 'Lesson');
 
@@ -914,25 +1022,36 @@ export const rebuildAllNotificationSchedules = async (
   }
 
   // -------------------------------------------------------------
-  // SCHEDULE NATIVELY OR SAVE TO WEB STORAGE
+  // SCHEDULE NATIVELY OR SAVE TO WEB STORAGE (WITH RESERVED SLOTS)
   // -------------------------------------------------------------
-  if (Capacitor.isNativePlatform() && nativeNotifsToSchedule.length > 0) {
+  const sortedNativeBatch = selectPrioritizedNotificationBatch(
+    nativeNotifsToSchedule,
+    item => (item.schedule?.at ? new Date(item.schedule.at).getTime() : 0),
+    item => item.extra?.category,
+    MAX_SCHEDULED_NOTIFICATIONS
+  );
+
+  const sortedWebBatch = selectPrioritizedNotificationBatch(
+    webNotifsStore,
+    item => item.extra?.atEpoch || 0,
+    item => item.category,
+    MAX_SCHEDULED_NOTIFICATIONS
+  );
+
+  if (Capacitor.isNativePlatform() && sortedNativeBatch.length > 0) {
     try {
-      const safeBatch = [...nativeNotifsToSchedule]
-        .sort((a, b) => {
-          const tA = a.schedule?.at ? new Date(a.schedule.at).getTime() : 0;
-          const tB = b.schedule?.at ? new Date(b.schedule.at).getTime() : 0;
-          return tA - tB;
-        })
-        .slice(0, 25);
-      await LocalNotifications.schedule({ notifications: safeBatch });
+      await LocalNotifications.schedule({ notifications: sortedNativeBatch });
     } catch (err) {
       console.warn('Native LocalNotifications.schedule error:', err);
     }
   }
 
-  // Save web fallback queue
-  localStorage.setItem(WEB_SCHEDULED_NOTIFS_KEY, JSON.stringify(webNotifsStore));
+  // Save web fallback queue safely without crashing on QuotaExceededError (#25)
+  try {
+    safeLocalStorageSetItem(WEB_SCHEDULED_NOTIFS_KEY, JSON.stringify(sortedWebBatch));
+  } catch (err) {
+    console.warn('Failed to save web scheduled notifications:', err);
+  }
 
   const nextScheduledTimeStr = earliestEpoch
     ? new Date(earliestEpoch).toLocaleString('ar-EG', {
@@ -945,7 +1064,7 @@ export const rebuildAllNotificationSchedules = async (
     : null;
 
   return {
-    count: webNotifsStore.length,
+    count: sortedWebBatch.length,
     nextScheduledTime: nextScheduledTimeStr
   };
 };

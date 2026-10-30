@@ -1,5 +1,6 @@
-import { Group, Lesson } from '../types';
+import { Group, Lesson, PaymentRecord, Student } from '../types';
 import { normalizeDateToISO } from './timeUtils';
+import { isDateMatchingGroupRecurrence } from './scheduleUtils';
 
 export interface GroupCycleInfo {
   sessionCount: number;
@@ -679,3 +680,226 @@ export const calculateOverallAttendance = (lessons: any[], students: any[]) => {
   return { presentCount, lateCount, absentCount };
 };
 
+/**
+ * Determines whether a lesson should be kept in the active RAM window:
+ * - Always keeps non-deleted lessons within the 60-day cutoff or in scheduled/pending status.
+ * - For completed lessons older than 60 days, keeps them ONLY if:
+ *   1. They are at most 365 days old (date >= maxCutoffStr),
+ *   2. The lesson itself is not paid or exempted, AND
+ *   3. It belongs to at least one paying student (not exempted, not zero-fee) who has not yet paid for this lesson.
+ */
+export const shouldRetainLessonInActiveWindow = (
+  lesson: Lesson,
+  cutoffStr: string,
+  maxCutoffStr: string,
+  students: Student[] = [],
+  groups: Group[] = []
+): boolean => {
+  if (!lesson || lesson.deleted) return false;
+  if (!lesson.date || typeof lesson.date !== 'string') return true;
+  if (lesson.date >= cutoffStr) return true;
+  if (lesson.status === 'scheduled' || isPendingStatus(lesson.status)) return true;
+
+  if (lesson.status !== 'completed') return false;
+  if (lesson.date < maxCutoffStr) return false;
+
+  const lessonPayStatus = String(lesson.paymentStatus || '');
+  const reportPayStatus = String(lesson.report?.paymentStatus || '');
+  if (
+    lessonPayStatus === 'paid' ||
+    lessonPayStatus === 'exempted' ||
+    reportPayStatus === 'paid' ||
+    reportPayStatus === 'exempted'
+  ) {
+    return false;
+  }
+
+  const grp = (groups || []).find(
+    g => !g.deleted && g.status !== 'archived' && g.id === lesson.groupId
+  );
+
+  const matchedStudents = (students || []).filter(s => {
+    if (!s || s.deleted || s.status === 'archived') return false;
+    if (lesson.studentId && s.id === lesson.studentId) return true;
+    if (!lesson.studentId && lesson.studentName && s.name === lesson.studentName) return true;
+    if (lesson.groupId && lesson.groupId !== 'quick_group' && s.groupId === lesson.groupId) return true;
+    return false;
+  });
+
+  if (matchedStudents.length > 0) {
+    return matchedStudents.some(st => {
+      // 1. Exclude exempted students
+      if (String(st.paymentStatus || '') === 'exempted' || Boolean((st as any).isExempt)) {
+        return false;
+      }
+
+      // 2. Exclude students/groups with zero payment obligation
+      const hasCustomZero = st.customBundlePrice !== undefined && st.customBundlePrice !== null && st.customBundlePrice <= 0;
+      const hasPerLessonZero = st.pricePerLesson !== undefined && st.pricePerLesson !== null && st.pricePerLesson <= 0;
+      const hasMonthlyZero = st.monthlyFee !== undefined && st.monthlyFee !== null && st.monthlyFee <= 0;
+      if (hasCustomZero || (!grp && (hasPerLessonZero || hasMonthlyZero))) {
+        return false;
+      }
+      if (grp) {
+        const grpPkg = grp.monthlyPackagePrice ?? 0;
+        const grpSess = grp.pricePerSession ?? 0;
+        const stCustomPos = (st.customBundlePrice ?? 0) > 0;
+        if (grpPkg <= 0 && grpSess <= 0 && !stCustomPos) {
+          return false;
+        }
+      }
+
+      // 3. Exclude if student was absent in this lesson
+      const att = lesson.report?.studentAttendance?.[st.id] || lesson.report?.attendanceStatus || 'present';
+      if (att === 'absent') return false;
+
+      // 4. Exclude if student already paid or was exempted for this specific lesson
+      const spObj = lesson.studentPayments?.[st.id] as any;
+      const repSpObj = lesson.report?.studentPayments?.[st.id] as any;
+      const stLessonPayStatus = String(
+        spObj?.paymentStatus || spObj?.status || repSpObj?.paymentStatus || repSpObj?.status || ''
+      );
+      if (stLessonPayStatus === 'paid' || stLessonPayStatus === 'exempted') {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  // Fallback when no student record is linked: require a positive unpaid lesson amountDue
+  const due = lesson.amountDue ?? 0;
+  const paid = lesson.amountPaid ?? 0;
+  return due > 0 && paid < due;
+};
+
+/**
+ * O(1) slot key builder for 365-day lesson generation loops (#27)
+ */
+export const makeLessonSlotKey = (groupId: string, date: string, time: string): string =>
+  `${groupId}_${date}_${time}`;
+
+export const buildLessonSlotSet = (lessons: Lesson[]): Set<string> => {
+  const slotSet = new Set<string>();
+  for (const l of lessons) {
+    if (!l || l.deleted || l.status === 'cancelled' || !l.groupId || !l.date || !l.time) continue;
+    slotSet.add(makeLessonSlotKey(l.groupId, l.date, l.time));
+  }
+  return slotSet;
+};
+
+/**
+ * Finds future/scheduled auto-generated lessons (l_auto_*) that violate their group's
+ * biweekly recurrence (biweekly_a / biweekly_b) and have NO attendance, payment, or notes (#7).
+ */
+export const findInvalidBiweeklyAutoLessons = (
+  lessons: Lesson[],
+  groups: Group[],
+  fromDateStr?: string
+): Lesson[] => {
+  const groupsMap = new Map<string, Group>();
+  for (const g of groups || []) {
+    if (g && g.id) groupsMap.set(g.id, g);
+  }
+
+  return (lessons || []).filter(l => {
+    if (!l || l.deleted) return false;
+    if (!String(l.id || '').startsWith('l_auto_')) return false;
+    if (l.status !== 'scheduled') return false;
+    if (!l.date) return false;
+    if (fromDateStr && l.date < fromDateStr) return false;
+
+    const grp = l.groupId ? groupsMap.get(l.groupId) : undefined;
+    const effectiveRecurrence =
+      grp?.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly'
+        ? grp.scheduleRecurrence
+        : l.scheduleRecurrence || 'weekly';
+
+    if (effectiveRecurrence !== 'biweekly_a' && effectiveRecurrence !== 'biweekly_b') {
+      return false;
+    }
+
+    if (isDateMatchingGroupRecurrence(effectiveRecurrence, l.date)) {
+      return false;
+    }
+
+    // Must NOT have any attendance, payment, or notes/homework/scores
+    const hasAttendance = Boolean(
+      l.report?.attendanceStatus ||
+      (l.report?.studentAttendance && Object.keys(l.report.studentAttendance).length > 0)
+    );
+    const hasPayment = Boolean(
+      (l.amountPaid && l.amountPaid > 0) ||
+      l.paymentStatus === 'paid' ||
+      l.paymentStatus === 'exempted' ||
+      l.report?.paymentStatus === 'paid' ||
+      l.report?.paymentStatus === 'exempted' ||
+      (l.studentPayments && Object.keys(l.studentPayments).length > 0) ||
+      (l.report?.studentPayments && Object.keys(l.report.studentPayments).length > 0)
+    );
+    const hasNotesOrWork = Boolean(
+      (l.quickNotes && l.quickNotes.trim().length > 0) ||
+      (l.report?.teacherNotes && l.report.teacherNotes.trim().length > 0) ||
+      (l.report?.homeworkTitle && l.report.homeworkTitle.trim().length > 0) ||
+      (l.report?.homeworkDescription && l.report.homeworkDescription.trim().length > 0) ||
+      l.report?.quizScore !== undefined ||
+      l.report?.examScore !== undefined
+    );
+
+    return !hasAttendance && !hasPayment && !hasNotesOrWork;
+  });
+};
+
+/**
+ * Filters lessons for ReportsView (#4): excludes soft-deleted lessons, exempted lessons,
+ * and lessons belonging to exempted students.
+ */
+const isStudentExempt = (s?: Student | null): boolean => {
+  if (!s) return false;
+  return Boolean(
+    s.paymentStatus === 'exempted' ||
+    (s as any).isExempted ||
+    (s as any).isExemptFromPayment ||
+    (s.paymentPlan as string) === 'exempt'
+  );
+};
+
+export const filterBillableReportLessons = (
+  lessons: Lesson[],
+  students: Student[] = []
+): Lesson[] => {
+  const exemptStudentIds = new Set<string>(
+    (students || [])
+      .filter(s => s && !s.deleted && isStudentExempt(s))
+      .map(s => s.id)
+  );
+
+  return (lessons || []).filter(l => {
+    if (!l || l.deleted) return false;
+    if ((l as any).isExempted || l.paymentStatus === 'exempted' || l.report?.paymentStatus === 'exempted') return false;
+    if (l.studentId && exemptStudentIds.has(l.studentId)) return false;
+    return true;
+  });
+};
+
+/**
+ * Filters payments for ReportsView (#4): excludes soft-deleted payments, exempted payments,
+ * and payments belonging to exempted students.
+ */
+export const filterBillableReportPayments = (
+  payments: PaymentRecord[],
+  students: Student[] = []
+): PaymentRecord[] => {
+  const exemptStudentIds = new Set<string>(
+    (students || [])
+      .filter(s => s && !s.deleted && isStudentExempt(s))
+      .map(s => s.id)
+  );
+
+  return (payments || []).filter(p => {
+    if (!p || p.deleted) return false;
+    if ((p as any).isExempted || p.status === 'exempted') return false;
+    if (p.studentId && exemptStudentIds.has(p.studentId)) return false;
+    return true;
+  });
+};

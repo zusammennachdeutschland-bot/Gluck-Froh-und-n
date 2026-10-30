@@ -140,28 +140,6 @@ export function sanitizeInitialData(rawData: Record<string, any>): Record<string
 
   sanitized['dl_lessons'] = rawLessons
     .filter(l => l && typeof l === 'object')
-    .filter(l => {
-      // Filter out stale future scheduled lessons on wrong alternating week if group has biweekly schedule
-      if (l.groupId && l.date && l.date >= todayStr && l.status === 'scheduled') {
-        const grp = groupsMap.get(l.groupId);
-        const effectiveRecurrence = (grp?.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly')
-          ? grp.scheduleRecurrence
-          : (l.scheduleRecurrence || 'weekly');
-        if (effectiveRecurrence !== 'weekly') {
-          const hasEngagement = Boolean(
-            l.report?.attendanceStatus ||
-            l.report?.teacherNotes ||
-            (l.amountPaid && l.amountPaid > 0) ||
-            (l.studentPayments && Object.keys(l.studentPayments).length > 0)
-          );
-          if (!hasEngagement && !isDateMatchingGroupRecurrence(effectiveRecurrence, l.date)) {
-            needsPersistCleaned = true;
-            return false;
-          }
-        }
-      }
-      return true;
-    })
     .map((l, idx) => {
       const grp = groupsMap.get(l.groupId || '');
       const rec = (grp?.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly')

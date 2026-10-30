@@ -1,7 +1,9 @@
 import { peerNetwork } from './peerNetwork';
 import { SyncStateMetadata, PairedPeer } from '../../types';
 import { SyncDataSource, handleInboundExchange } from './syncOrchestrator';
-import { createProtocolHeader, negotiateProtocol, adaptOutboundPayloadForPeer } from './protocolNegotiator';
+import { createProtocolHeader, negotiateProtocol, adaptOutboundPayloadForPeer, findAuthenticatedPeer } from './protocolNegotiator';
+
+export { findAuthenticatedPeer };
 
 export async function startLocalServer(
   deviceName: string, 
@@ -14,9 +16,9 @@ export async function startLocalServer(
   console.log(`[LocalServer] Starting WebRTC host node for ${deviceName} (${deviceId})`);
   await peerNetwork.startHost(deviceId);
 
-  // Generate an ephemeral 6-digit PIN for pairing handshake
+  // Generate an ephemeral 6-digit PIN for pairing handshake (expires in 3 minutes or after 1 successful pairing)
   const mockPin = Math.floor(100000 + Math.random() * 900000).toString();
-  await peerNetwork.enablePairingPin(mockPin);
+  await peerNetwork.enablePairingPin(mockPin, 180000);
 
   peerNetwork.setRouteHandler(async (route: string, data: any) => {
     if (route === '/api/sync/ping') {
@@ -33,8 +35,9 @@ export async function startLocalServer(
     
     if (route === '/api/sync/pair') {
       const { pin, deviceId: incomingId, deviceName: incomingName, header: incomingHeader } = data;
-      if (pin !== mockPin && pin !== peerNetwork.currentPairingPin) {
-        throw new Error('Invalid PIN');
+      const activePin = peerNetwork.currentPairingPin;
+      if (!pin || !activePin || pin !== activePin) {
+        throw new Error('Invalid or expired PIN');
       }
       
       const negotiation = negotiateProtocol(incomingHeader);
@@ -67,6 +70,9 @@ export async function startLocalServer(
         pairedPeers: updatedPeers
       });
 
+      // Invalidate ephemeral PIN immediately after successful pairing (single-use)
+      peerNetwork.disablePairingPin();
+
       return { 
         pairingToken, 
         peerId: deviceId, 
@@ -81,7 +87,7 @@ export async function startLocalServer(
     if (route === '/api/sync/exchange') {
       const { token, payload } = data;
       const currentState = dataSource.getSyncState();
-      const matchedPeer = (currentState.pairedPeers || []).find(p => p.pairingToken === token || p.deviceId === payload?.senderDeviceId);
+      const matchedPeer = findAuthenticatedPeer(currentState.pairedPeers, token);
 
       if (!matchedPeer) {
         throw new Error('Invalid pairing token. Device not paired.');

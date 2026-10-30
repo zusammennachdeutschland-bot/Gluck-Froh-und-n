@@ -222,18 +222,10 @@ class AutoSyncEngine {
     try {
       let result: { success: boolean; report: SyncCycleReport };
       if (isForceFull) {
-        result = await forceFullSync(peerId, this.dataSource);
+        result = await forceFullSync(peerId, this.dataSource, trigger);
       } else {
-        result = await runSyncCycle(peerId, this.dataSource);
+        result = await runSyncCycle(peerId, this.dataSource, trigger);
       }
-
-      // Record to persistent history
-      await syncHistoryService.addEntry(
-        result.report,
-        trigger,
-        result.report.totalRecordsTransferred,
-        result.report.totalRecordsTransferred
-      );
 
       if (result.success) {
         this.recordSuccess(peerId);

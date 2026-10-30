@@ -88,7 +88,7 @@ export const FinanceView: React.FC = () => {
         
         if (needsUpdate) {
           updates.totalContributions = newContributions;
-          updates.nextContributionDate = nextDate.toISOString().split('T')[0];
+          updates.nextContributionDate = formatLocalDate(nextDate);
         }
       }
       

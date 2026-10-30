@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts';
 import { Lesson, PaymentRecord } from '../types';
-import { calculateOverallAttendance } from '../utils/lessonUtils';
+import { calculateOverallAttendance, filterBillableReportLessons, filterBillableReportPayments } from '../utils/lessonUtils';
 import { formatLocalDate } from '../utils/timeUtils';
 import { Pagination } from './common/Pagination';
 
@@ -71,10 +71,19 @@ export const ReportsView: React.FC = () => {
     return `Woche ${formatShort(monday)} – ${formatShort(sunday)} (${monday.getFullYear()})`;
   };
 
+  // Filter out deleted and exempted lessons/payments (#4)
+  const validLessons = useMemo(() => {
+    return filterBillableReportLessons(lessons, students);
+  }, [lessons, students]);
+
+  const validPayments = useMemo(() => {
+    return filterBillableReportPayments(payments, students);
+  }, [payments, students]);
+
   // Group lessons by week (memoized)
   const sortedLessons = useMemo(() => {
-    return [...lessons].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [lessons]);
+    return [...validLessons].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [validLessons]);
 
   // Filter lessons (memoized)
   const filteredLessons = useMemo(() => {
@@ -144,8 +153,8 @@ export const ReportsView: React.FC = () => {
 
       let rev = 0;
       let unp = 0;
-      for (let i = 0; i < payments.length; i++) {
-        const p = payments[i];
+      for (let i = 0; i < validPayments.length; i++) {
+        const p = validPayments[i];
         if (p.status === 'paid') {
           const d = (p.paidDate || p.dueDate || '').substring(0, 10);
           if (d >= wStartStr && d <= wEndStr) {
@@ -161,24 +170,24 @@ export const ReportsView: React.FC = () => {
       result[weekTitle] = { weekRevenue: rev, weekUnpaid: unp };
     });
     return result;
-  }, [weekEntries, payments]);
+  }, [weekEntries, validPayments]);
 
   // Overall Financial & Session Metrics (memoized)
   const totalCollectedRevenue = useMemo(() => {
-    return payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
-  }, [payments]);
+    return validPayments.filter(p => p.status === 'paid').reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
+  }, [validPayments]);
 
   const totalUnpaidAmount = useMemo(() => {
-    return payments.filter(p => p.status !== 'paid').reduce((sum, p) => sum + p.amountDue, 0);
-  }, [payments]);
+    return validPayments.filter(p => p.status !== 'paid').reduce((sum, p) => sum + p.amountDue, 0);
+  }, [validPayments]);
 
-  const completedSessionsCount = useMemo(() => lessons.filter(l => l.status === 'completed').length, [lessons]);
+  const completedSessionsCount = useMemo(() => validLessons.filter(l => l.status === 'completed').length, [validLessons]);
 
   const unpaidLastSessionsCount = useMemo(() => {
-    return lessons.filter(
+    return validLessons.filter(
       l => l.status !== 'cancelled' && l.paymentStatus !== 'paid' && l.sessionNumber === l.totalSessionsInPackage
     ).length;
-  }, [lessons]);
+  }, [validLessons]);
 
   // Mark as paid quick handler
   const handleMarkAsPaid = (e: React.MouseEvent, lesson: Lesson) => {
@@ -206,7 +215,7 @@ export const ReportsView: React.FC = () => {
   }, [weekEntries, weekFinancialsMap]);
 
   // Attendance breakdown
-  const { presentCount, lateCount, absentCount } = calculateOverallAttendance(lessons, students);
+  const { presentCount, lateCount, absentCount } = calculateOverallAttendance(validLessons, students);
   const attendanceData = [
     { name: reportT('حاضر', 'Present', 'Anwesend'), value: presentCount, color: '#10B981' },
     { name: reportT('متأخر', 'Late', 'Verspätet'), value: lateCount, color: '#F59E0B' },

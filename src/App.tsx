@@ -120,9 +120,11 @@ function MainApp() {
     if (!url) return;
     console.log('Handling deep link URL:', url);
 
-    // 1. Handle Lesson Deep Links: ags19://lesson/{id}
-    if (url.includes('ags19://lesson/')) {
-      const rawId = url.split('ags19://lesson/')[1];
+    // 1. Handle Lesson Deep Links: ags19://lesson/{id} or glueck://lesson/{id}
+    if (url.includes('ags19://lesson/') || url.includes('glueck://lesson/')) {
+      const rawId = url.includes('ags19://lesson/')
+        ? url.split('ags19://lesson/')[1]
+        : url.split('glueck://lesson/')[1];
       const lessonId = rawId ? rawId.split('?')[0].split('/')[0] : '';
       if (lessonId && lessonId !== 'null') {
         const targetLesson = lessons.find(l => l.id === lessonId);
@@ -133,13 +135,17 @@ function MainApp() {
         }
       }
     } 
-    // 2. Handle Action Deep Links: ags19://action/{action} or ags19://{action}
+    // 2. Handle Action Deep Links: ags19://action/{action}, glueck://action/{action}, ags19://{action}, or glueck://{action}
     else {
       let action = '';
       if (url.includes('ags19://action/')) {
         action = url.split('ags19://action/')[1]?.split('?')[0]?.split('/')[0]?.toLowerCase();
+      } else if (url.includes('glueck://action/')) {
+        action = url.split('glueck://action/')[1]?.split('?')[0]?.split('/')[0]?.toLowerCase();
       } else if (url.includes('ags19://')) {
         action = url.split('ags19://')[1]?.split('?')[0]?.split('/')[0]?.toLowerCase();
+      } else if (url.includes('glueck://')) {
+        action = url.split('glueck://')[1]?.split('?')[0]?.split('/')[0]?.toLowerCase();
       }
 
       if (action) {
