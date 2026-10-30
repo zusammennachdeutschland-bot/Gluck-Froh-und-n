@@ -22,6 +22,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
   const [level, setLevel] = useState<LernstudioLevel>('A1');
   const [difficulty, setDifficulty] = useState<LernstudioDifficulty>('medium');
   const [itemCount, setItemCount] = useState<number | 'auto'>('auto');
+  const [includeVerbConjugation, setIncludeVerbConjugation] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 
   // Importer Config
@@ -47,7 +48,8 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
     grade: grade.trim() || undefined,
     level,
     difficulty,
-    itemCount
+    itemCount,
+    includeVerbConjugation
   });
 
   const handleCopyPrompt = () => {
@@ -230,6 +232,35 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
                     <option value="26">26 {language === 'ar' ? 'كلمة (الأبجدية كاملة)' : 'words (full alphabet)'}</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Verb Conjugation Focus Toggle */}
+              <div className="p-3.5 bg-surface-hover/80 border border-surface-border rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-2 rounded-xl transition-colors ${includeVerbConjugation ? 'bg-primary/20 text-primary' : 'bg-surface-border/50 text-text-muted'}`}>
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-text-main flex items-center gap-1.5">
+                      <span>{language === 'ar' ? 'تركيز على تصريف الأفعال (Präsens) ⏱️' : 'Verb Conjugation Focus (Präsens) ⏱️'}</span>
+                    </h4>
+                    <p className="text-[11px] font-medium text-text-muted mt-0.5">
+                      {language === 'ar' 
+                        ? 'استخراج الأفعال من الدرس وإنشاء تمارين اختيارات مع تنويع الفاعل (أحمد، أحمد ومونا، أنت وأنا)' 
+                        : 'Extract verbs from source text & generate sentence completion exercises with varied subjects'}
+                    </p>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={includeVerbConjugation}
+                    onChange={(e) => setIncludeVerbConjugation(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-surface-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                </label>
               </div>
 
               {/* Prompt Output Box */}

@@ -8,6 +8,7 @@ export interface PromptGenConfig {
   itemCount: number | 'auto';
   includeSentences?: boolean;
   includeExercises?: boolean;
+  includeVerbConjugation?: boolean;
 }
 
 export function generateLernstudioPrompt(config: PromptGenConfig): string {
@@ -15,6 +16,32 @@ export function generateLernstudioPrompt(config: PromptGenConfig): string {
   const countInstruction = isAuto
     ? 'Der KI-Assistent wählt automatisch die optimale Anzahl an Begriffen (z.B. 6, 8, 10, 12 oder 15 Wörter) basierend auf der hochgeladenen Lektion oder dem bereitgestellten Bild.'
     : `Erstelle genau ${config.itemCount} Wortschatz-Einträge.`;
+
+  const verbInstructionBlock = config.includeVerbConjugation
+    ? `
+WICHTIGE ANWEISUNG ZUR VERB-KONJUGATION (PRÄSENS SCHWERPUNKT):
+DIESES SET SIND VERB-KONJUGATIONS-ÜBUNGEN IM PRÄSENS!
+1. STRENGE EXTRAKTION: Identifiziere und extrahiere AUSSCHLIESSLICH Verben, die im bereitgestellten Lehrbuchtext, Arbeitsblatt oder Bild vorkommen (z.B. fahren, lesen, spielen, sprechen, lernen, essen, trinken, sein, haben, kochen). Erfinde KEINE unpassenden Verben!
+2. AUSSCHLIESSLICH PRÄSENS: Teste ausschließlich die Gegenwart (Präsens), einschließlich regelmäßiger Verben, unregelmäßiger Verben und Verben mit Vokalwechsel (z.B. fahren -> du fährst, lesen -> er liest, sprechen -> du sprichst, sehen -> er sieht, sein -> ich bin/du bist/er ist, haben -> du hast/er hat).
+3. VARIATION DER SUBJEKTE (SEHR WICHTIG):
+   Verwende NICHT nur einfache Pronomen (ich, du, er/sie/es, wir, ihr, sie/Sie). Mische abwechslungsreich:
+   - Personalpronomen: "Ich", "du", "wir", "ihr", "er", "sie"
+   - Einzelnamen: z.B. "Ahmed", "Mona", "Lukas"
+   - Mehrere Namen: z.B. "Ahmed und Mona", "Sara und Lisa"
+   - Kombinierte Subjekte: z.B. "du und ich" (= wir -> spielen), "Ahmed und ich" (= wir -> lernen)
+   - Nomen aus der Lektion: z.B. "Die Kinder", "Der Lehrer", "Die Katze"
+4. FORMAT DER VERBKONJUGATIONS-ÜBUNGEN (customExercises):
+   Erstelle in "customExercises" Satz-Vervollständigungsaufgaben (type: "multiple_choice") mit Lücke "______ (Verb in Grundform)" und genau 4 grammatikalisch plausiblen Antwortoptionen (verschiedene Konjugationsformen) mit korrekter Subjekt-Verb-Kongruenz.
+   Beispiele:
+   - Question: "Ahmed ______ (fahren) jeden Morgen zur Schule." -> options: ["fährt", "fahre", "fährst", "fahren"], correctAnswer: "fährt"
+   - Question: "Mona und Sara ______ (lesen) ein spannendes Buch." -> options: ["lesen", "liest", "lese", "lest"], correctAnswer: "lesen"
+   - Question: "Du und ich ______ (spielen) heute zusammen Fußball." -> options: ["spielen", "spielst", "spiele", "spielt"], correctAnswer: "spielen"
+   - Question: "Du ______ (sprechen) sehr gut Deutsch." -> options: ["sprichst", "spricht", "spreche", "sprechen"], correctAnswer: "sprichst"
+`
+    : `
+WICHTIGE ANWEISUNG ZUR VERB-KONJUGATION (PRÄSENS):
+Falls die Lektion Verben enthält, erstelle auch Übungen zur Verbkonjugation im Präsens (mit variierten Subjekten wie Einzelnamen "Ahmed", mehreren Namen "Ahmed und Mona", kombinierten Subjekten "du und ich" und Pronomen).
+`;
 
   return `Du bist ein pädagogischer Deutschlehrer, Spieledesigner und Ersteller von interaktivem Lehrmaterial für Lernstudio (Glueck Teacher).
 Erstelle ein extrem reichhaltiges, vollständiges Lern- und Spiel-Set im JSON-Format, das alle interaktiven Spielmodi (Satzbau/ترتيب الجمل, Glücksrad/Spin Wheel, Team-Rennen/Team Race, Memory-Karten/Memory Flip, Artikel-Sortierboxen/der-die-das Bins, und Jeopardy-Klassenzimmer) optimal antreibt.
@@ -32,8 +59,8 @@ WICHTIGE ANWEISUNG ZUR KLASSE (GRADE 1 - GRADE 12):
 STRENGSTE REGEL - KEINE ZUFÄLLIGEN INHALTE:
 1. Verwende AUSSCHLIESSLICH die Begriffe und Texte aus dem vom Benutzer bereitgestellten BILD (oder dem gesendeten Lektionstext)!
 2. Füge KEINE zufälligen, erfundenen oder externen Wörter hinzu, die nicht im gesendeten Bild/Material vorkommen!
-3. Wenn der Benutzer ein Bild oder Foto einer Buchseite sendet, extrahiere streng nur die Vokabeln aus diesem Bild.
-
+3. Wenn der Benutzer ein Bild oder Foto einer Buchseite sendet, extrahiere streng nur die Vokabeln und Verben aus diesem Bild.
+${verbInstructionBlock}
 WICHTIGE PRÜFUNG ZUR SPIEL-KOMPATIBILITÄT:
 1. "hasArticles" (Boolean):
    - Prüfe streng: Enthält dieses Set deutsche Nomen mit bestimmtem Artikel (der/die/das)?
@@ -66,8 +93,8 @@ ANFORDERUNGEN AN JEDEN EINZELNEN BEGRIFF (items):
    - "sentence4Elements": Ein Array mit GENAU 4 Elementen/Wortblöcken, die zusammen einen korrekten Satz ergeben (z.B. ["Die Katze", "schläft", "auf dem", "Sofa."]).
 
 3. ZUSÄTZLICHE ÜBUNGSFRAGEN (customExercises):
-   Erstelle mindestens 4-6 abwechslungsreiche Übungsfragen passend zu den Begriffen und zur Grammatik des Themas:
-   - multiple_choice: 4 Antwortoptionen, eine richtig.
+   Erstelle mindestens 4-6 abwechslungsreiche Übungsfragen passend zu den Begriffen und zur Grammatik/Verbkonjugation des Themas:
+   - multiple_choice: 4 Antwortoptionen, eine richtig (z.B. Verbkonjugation: "Ahmed ______ (fahren) zur Schule.", options: ["fährt", "fahre", "fährst", "fahren"], correctAnswer: "fährt").
    - sentence_builder: Satz zum Ordnen mit Zielübersetzung.
    - der_die_das: Frage nach dem richtigen Artikel (nur falls Nomen im Set).
    - missing_letter: Wort mit Buchstabe zum Ergänzen.
@@ -94,37 +121,36 @@ JSON-STRUKTUR:
   "description": "Lern-Set zum Thema ${config.topic} (${config.level})",
   "items": [
     {
-      "german": "die Katze",
-      "article": "die",
-      "arabic": "القطة",
-      "english": "the cat",
-      "plural": "die Katzen",
-      "exampleSentenceGerman": "Die Katze schläft auf dem Sofa.",
-      "exampleSentenceArabic": "القطة تنام على الأريكة.",
-      "emoji": "🐱",
-      "missingLetterWord": "K_tze",
-      "sentence4Elements": ["Die Katze", "schläft", "auf dem", "Sofa."]
+      "german": "fahren",
+      "arabic": "يركب / يسافر",
+      "english": "to drive / to travel",
+      "exampleSentenceGerman": "Ahmed fährt morgen nach Berlin.",
+      "exampleSentenceArabic": "أحمد يسافر غداً إلى برلين.",
+      "emoji": "🚗",
+      "missingLetterWord": "f_hren",
+      "sentence4Elements": ["Ahmed", "fährt", "mit dem Bus", "zur Schule."]
     }
   ],
   "customExercises": [
+    {
+      "type": "multiple_choice",
+      "question": "Ahmed ______ (fahren) jeden Morgen zur Schule.",
+      "options": ["fährt", "fahre", "fährst", "fahren"],
+      "correctAnswer": "fährt",
+      "explanation": "Ahmed = er (3. Person Singular) -> fährt (Vokalwechsel a -> ä)."
+    },
+    {
+      "type": "multiple_choice",
+      "question": "Du und ich ______ (spielen) heute zusammen Fußball.",
+      "options": ["spielen", "spielst", "spiele", "spielt"],
+      "correctAnswer": "spielen",
+      "explanation": "Du und ich = wir (1. Person Plural) -> spielen."
+    },
     {
       "type": "sentence_builder",
       "question": "رتب الكلمات التالية لتكوين جملة ألمانية صحيحة:",
       "correctAnswer": "Die Katze schläft auf dem Sofa.",
       "explanation": "في اللغة الألمانية يأتي الفعل (schläft) في المركز الثاني."
-    },
-    {
-      "type": "der_die_das",
-      "question": "Welcher Artikel passt zu 'Katze'?",
-      "options": ["der", "die", "das"],
-      "correctAnswer": "die",
-      "explanation": "Katze ist feminin: die Katze."
-    },
-    {
-      "type": "multiple_choice",
-      "question": "Was bedeutet 'القطة' auf Deutsch?",
-      "options": ["die Katze", "der Hund", "das Pferd", "der Vogel"],
-      "correctAnswer": "die Katze"
     }
   ]
 }`;
@@ -312,17 +338,27 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
       return { success: false, error: 'الكلمات المدخلة تفتقر إلى الألفاظ الألمانية أو الترجمات العربية الصحيحة.' };
     }
 
-    // Process custom exercises for Jeopardy and Race games
+    // Process custom exercises for Jeopardy, Race, and Verb Conjugation games
     const sanitizedExercises: LernstudioExercise[] = [];
     if (Array.isArray(parsed.customExercises) && parsed.customExercises.length > 0) {
       parsed.customExercises.forEach((ex: any, idx: number) => {
         if (!ex || !ex.question || !ex.correctAnswer) return;
+        const correctAns = String(ex.correctAnswer).trim();
+        let opts: string[] | undefined = Array.isArray(ex.options)
+          ? ex.options.map((opt: any) => String(opt).trim()).filter(Boolean)
+          : undefined;
+
+        // Ensure correctAnswer is present inside options array if provided
+        if (opts && opts.length > 0 && !opts.includes(correctAns)) {
+          opts.unshift(correctAns);
+        }
+
         sanitizedExercises.push({
           id: `ex_${Date.now()}_${idx}`,
           type: ex.type || 'multiple_choice',
           question: String(ex.question).trim(),
-          options: Array.isArray(ex.options) ? ex.options.map((opt) => String(opt).trim()) : undefined,
-          correctAnswer: String(ex.correctAnswer).trim(),
+          options: opts,
+          correctAnswer: correctAns,
           explanation: ex.explanation ? String(ex.explanation).trim() : undefined
         });
       });
