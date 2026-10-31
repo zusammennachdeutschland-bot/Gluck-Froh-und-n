@@ -1,4 +1,18 @@
-import { LernstudioSet, LernstudioItem, LernstudioLevel, LernstudioDifficulty, LernstudioExercise } from '../types/lernstudio';
+import {
+  LernstudioSet,
+  LernstudioItem,
+  LernstudioLevel,
+  LernstudioDifficulty,
+  LernstudioExercise,
+  LernstudioWordType,
+  VerbConjugationForms
+} from '../types/lernstudio';
+import {
+  rebuildSentence4Elements,
+  isSentence4ElementsValid,
+  conjugateGermanVerb,
+  detectWordType
+} from './lernstudioWorksheetBuilder';
 
 export interface PromptGenConfig {
   topic: string;
@@ -32,11 +46,6 @@ DIESES SET SIND VERB-KONJUGATIONS-ÜBUNGEN IM PRÄSENS!
    - Nomen aus der Lektion: z.B. "Die Kinder", "Der Lehrer", "Die Katze"
 4. FORMAT DER VERBKONJUGATIONS-ÜBUNGEN (customExercises):
    Erstelle in "customExercises" Satz-Vervollständigungsaufgaben (type: "multiple_choice") mit Lücke "______ (Verb in Grundform)" und genau 4 grammatikalisch plausiblen Antwortoptionen (verschiedene Konjugationsformen) mit korrekter Subjekt-Verb-Kongruenz.
-   Beispiele:
-   - Question: "Ahmed ______ (fahren) jeden Morgen zur Schule." -> options: ["fährt", "fahre", "fährst", "fahren"], correctAnswer: "fährt"
-   - Question: "Mona und Sara ______ (lesen) ein spannendes Buch." -> options: ["lesen", "liest", "lese", "lest"], correctAnswer: "lesen"
-   - Question: "Du und ich ______ (spielen) heute zusammen Fußball." -> options: ["spielen", "spielst", "spiele", "spielt"], correctAnswer: "spielen"
-   - Question: "Du ______ (sprechen) sehr gut Deutsch." -> options: ["sprichst", "spricht", "spreche", "sprechen"], correctAnswer: "sprichst"
 `
     : `
 WICHTIGE ANWEISUNG ZUR VERB-KONJUGATION (PRÄSENS):
@@ -61,22 +70,15 @@ STRENGSTE REGEL - KEINE ZUFÄLLIGEN INHALTE:
 2. Füge KEINE zufälligen, erfundenen oder externen Wörter hinzu, die nicht im gesendeten Bild/Material vorkommen!
 3. Wenn der Benutzer ein Bild oder Foto einer Buchseite sendet, extrahiere streng nur die Vokabeln und Verben aus diesem Bild.
 ${verbInstructionBlock}
-WICHTIGE PRÜFUNG ZUR SPIEL-KOMPATIBILITÄT:
-1. "hasArticles" (Boolean):
-   - Prüfe streng: Enthält dieses Set deutsche Nomen mit bestimmtem Artikel (der/die/das)?
-   - Wenn JA (z.B. Tiere, Gegenstände, Kleidung, Essen): Setze "hasArticles": true.
-   - Wenn NEIN (z.B. Verben wie 'laufen/spielen', Adjektive wie 'groß/schnell', Begrüßungen wie 'Hallo/Guten Tag', Zahlen oder Redewendungen): Setze ZWINGEND "hasArticles": false! (Das System schaltet das Spiel der/die/das dann automatisch für dieses Set ab, um grammatikalische Fehler zu vermeiden).
-2. "sentenceBuilderSupported" (Boolean):
-   - Setze immer "sentenceBuilderSupported": true, und stelle für JEDEN Begriff Beispielsätze zur Verfügung, damit das neue Spiel 'ترتيب الجمل (Satzbau Challenge)' funktioniert.
+WICHTIGE SATZBAU- UND TRANSLATION-REGEL (STRENG BINDEND):
+1. "sentence4Elements" MUSS EXAKT der Satz aus "exampleSentenceGerman" sein, aufgeteilt in genau 4 Wortblöcke in der korrekten Reihenfolge.
+2. Die 4 Blöcke von "sentence4Elements" zusammengefügt mit Leerzeichen MÜSSEN IDENTISCH mit "exampleSentenceGerman" sein.
+3. "exampleSentenceArabic" MUSS die Übersetzung genau dieses Satzes sein. Der Satz muss das Wort/die Vokabel der Karte enthalten.
 
-WICHTIGES LERN- UND SPIELZIEL:
-Das Set soll sofort in allen Spielmodi des Systems spielbar sein:
-- Spiel 1 (ترتيب الجمل / Satzbau): Wörter in die grammatikalisch korrekte deutsche Reihenfolge bringen (Verb auf Position 2).
-- Spiel 2 (Glücksrad): Fragen zu Vokabeln, Grammatik, Übersetzung und schnellen Herausforderungen.
-- Spiel 3 (Team-Rennen): Schnelle Quizfragen für Teams auf der Rennstrecke.
-- Spiel 4 (Memory Match): Paare aus deutschem Wort und Bedeutung/Emoji.
-- Spiel 5 (Artikel-Sortierboxen): der / die / das Sortierung (NUR falls hasArticles = true).
-- Spiel 6 (Klassenzimmer Jeopardy): Team-Board für Whiteboard und Beamer.
+ZUSÄTZLICHE OPTIONALE FELDER IN JEDEM ITEM:
+- "wordType": "noun" | "verb" | "adjective" | "phrase" | "other"
+- "conjugation": für Verben {"ich","du","er_sie_es","wir","ihr","sie_Sie"} im Präsens (korrekt mit Vokalwechsel z.B. fahren: fahre, fährst, fährt, fahren, fahrt, fahren)
+- "category": ein kurzes englisches Wort für die semantische Gruppe (z.B. "animal", "food", "greeting", "family", "school", "color")
 
 ANFORDERUNGEN AN JEDEN EINZELNEN BEGRIFF (items):
 1. ${countInstruction}
@@ -90,15 +92,7 @@ ANFORDERUNGEN AN JEDEN EINZELNEN BEGRIFF (items):
    - "exampleSentenceArabic": Die arabische Übersetzung des Beispielsatzes.
    - "emoji": Ein passendes Emoji (z.B. "🐱", "📖").
    - "missingLetterWord": Das Wort mit genau einer Lücke "_" für das Buchstabenspiel (z.B. "K_tze" oder "B_ch").
-   - "sentence4Elements": Ein Array mit GENAU 4 Elementen/Wortblöcken, die zusammen einen korrekten Satz ergeben (z.B. ["Die Katze", "schläft", "auf dem", "Sofa."]).
-
-3. ZUSÄTZLICHE ÜBUNGSFRAGEN (customExercises):
-   Erstelle mindestens 4-6 abwechslungsreiche Übungsfragen passend zu den Begriffen und zur Grammatik/Verbkonjugation des Themas:
-   - multiple_choice: 4 Antwortoptionen, eine richtig (z.B. Verbkonjugation: "Ahmed ______ (fahren) zur Schule.", options: ["fährt", "fahre", "fährst", "fahren"], correctAnswer: "fährt").
-   - sentence_builder: Satz zum Ordnen mit Zielübersetzung.
-   - der_die_das: Frage nach dem richtigen Artikel (nur falls Nomen im Set).
-   - missing_letter: Wort mit Buchstabe zum Ergänzen.
-   - plural_match: Frage nach der Pluralform.
+   - "sentence4Elements": EXAKT der Satz von "exampleSentenceGerman" aufgeteilt in 4 Wortblöcke (z.B. ["Die Katze", "schläft", "auf dem", "Sofa."]).
 
 Gib AUSSCHLIESSLICH ein valides, reines JSON-Objekt zurück.
 
@@ -123,12 +117,21 @@ JSON-STRUKTUR:
     {
       "german": "fahren",
       "arabic": "يركب / يسافر",
-      "english": "to drive / to travel",
+      "wordType": "verb",
+      "category": "transport",
+      "conjugation": {
+        "ich": "fahre",
+        "du": "fährst",
+        "er_sie_es": "fährt",
+        "wir": "fahren",
+        "ihr": "fahrt",
+        "sie_Sie": "fahren"
+      },
       "exampleSentenceGerman": "Ahmed fährt morgen nach Berlin.",
       "exampleSentenceArabic": "أحمد يسافر غداً إلى برلين.",
       "emoji": "🚗",
       "missingLetterWord": "f_hren",
-      "sentence4Elements": ["Ahmed", "fährt", "mit dem Bus", "zur Schule."]
+      "sentence4Elements": ["Ahmed", "fährt", "morgen", "nach Berlin."]
     }
   ],
   "customExercises": [
@@ -137,48 +140,26 @@ JSON-STRUKTUR:
       "question": "Ahmed ______ (fahren) jeden Morgen zur Schule.",
       "options": ["fährt", "fahre", "fährst", "fahren"],
       "correctAnswer": "fährt",
-      "explanation": "Ahmed = er (3. Person Singular) -> fährt (Vokalwechsel a -> ä)."
-    },
-    {
-      "type": "multiple_choice",
-      "question": "Du und ich ______ (spielen) heute zusammen Fußball.",
-      "options": ["spielen", "spielst", "spiele", "spielt"],
-      "correctAnswer": "spielen",
-      "explanation": "Du und ich = wir (1. Person Plural) -> spielen."
-    },
-    {
-      "type": "sentence_builder",
-      "question": "رتب الكلمات التالية لتكوين جملة ألمانية صحيحة:",
-      "correctAnswer": "Die Katze schläft auf dem Sofa.",
-      "explanation": "في اللغة الألمانية يأتي الفعل (schläft) في المركز الثاني."
+      "explanation": "Ahmed = er -> fährt (Vokalwechsel a -> ä)."
     }
   ]
 }`;
 }
 
-/**
- * Safely parses JSON string produced by AI models, repairing common formatting flaws
- * like incorrectly escaped brackets (\[ \]), braces (\{ \}), smart quotes, markdown code fences,
- * conversational preambles/postambles, comments, and trailing commas without corrupting valid data.
- */
 export function safeParseLernstudioJsonString(rawText: string): any {
   if (!rawText || !rawText.trim()) {
     throw new Error('النص المدخل فارغ. يرجى لصق كود JSON الناتج من الذكاء الاصطناعي.');
   }
 
   let text = rawText.trim();
-
-  // Strip Markdown code block wrappers if present (e.g. ```json ... ```)
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
-  // 1. Direct parse attempt: Fast path with zero mutations for already valid JSON
   try {
     return JSON.parse(text);
   } catch {
-    // Continue to repair pipeline
+    // Continue
   }
 
-  // 2. Extract outermost JSON object if conversational text surrounds it
   const firstBrace = text.indexOf('{');
   const lastBrace = text.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -186,17 +167,14 @@ export function safeParseLernstudioJsonString(rawText: string): any {
     try {
       return JSON.parse(text);
     } catch {
-      // Continue to repair pipeline
+      // Continue
     }
   }
 
-  // 3. Normalize smart/curly quotes to standard straight quotes
   let repaired = text
     .replace(/[\u201C\u201D\u201E\u201F\u00AB\u00BB]/g, '"')
     .replace(/[\u2018\u2019\u201A\u201B]/g, "'");
 
-  // 4. Fix escaped brackets and braces (e.g. \[ \] \{ \})
-  // If an odd number of backslashes immediately precedes a bracket/brace, the trailing slash was an illegal JSON escape.
   repaired = repaired.replace(/(\\+)([\[\]{}])/g, (match, slashes, bracket) => {
     if (slashes.length % 2 === 1) {
       return slashes.slice(0, -1) + bracket;
@@ -204,29 +182,23 @@ export function safeParseLernstudioJsonString(rawText: string): any {
     return match;
   });
 
-  // 5. Fix invalid escaped single quotes (\' -> ')
   repaired = repaired.replace(/\\'/g, "'");
 
-  // Try parsing after fixing brackets and quotes
   try {
     return JSON.parse(repaired);
   } catch {
-    // Continue to strip comments & trailing commas
+    // Continue
   }
 
-  // 6. Remove JS/C-style comments (// and /* ... */)
   repaired = repaired.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
-
-  // 7. Remove trailing commas before closing braces or brackets
   repaired = repaired.replace(/,\s*([\]}])/g, '$1');
 
   try {
     return JSON.parse(repaired);
   } catch {
-    // Continue to clean invalid non-standard escapes
+    // Continue
   }
 
-  // 8. Handle any remaining non-standard escape characters inside strings (e.g. \( \) \-)
   repaired = repaired.replace(/(\\+)([^"\\\/bfnrtu])/g, (match, slashes, char) => {
     if (slashes.length % 2 === 1) {
       return slashes.slice(0, -1) + char;
@@ -237,7 +209,9 @@ export function safeParseLernstudioJsonString(rawText: string): any {
   return JSON.parse(repaired);
 }
 
-export function validateAndParseLernstudioJson(jsonText: string): { success: boolean; data?: Partial<LernstudioSet>; error?: string } {
+export function validateAndParseLernstudioJson(
+  jsonText: string
+): { success: boolean; data?: Partial<LernstudioSet>; error?: string } {
   try {
     const parsed = safeParseLernstudioJsonString(jsonText);
 
@@ -260,7 +234,6 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
 
       if (!german || !arabic) continue;
 
-      // Extract article if present or explicitly supplied
       let article: 'der' | 'die' | 'das' | undefined = undefined;
       const rawArticle = String(it.article || '').toLowerCase().trim();
       if (['der', 'die', 'das'].includes(rawArticle)) {
@@ -272,42 +245,55 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
         }
       }
 
-      // 4-element sentence structure for Satzbau (Sentence Builder) game
+      // WordType validation
+      let wordType: LernstudioWordType | undefined = undefined;
+      const validWordTypes = ['noun', 'verb', 'adjective', 'phrase', 'other'];
+      if (it.wordType && validWordTypes.includes(String(it.wordType).toLowerCase())) {
+        wordType = String(it.wordType).toLowerCase() as LernstudioWordType;
+      }
+
+      // Conjugation validation
+      let conjugation: VerbConjugationForms | undefined = undefined;
+      if (it.conjugation && typeof it.conjugation === 'object') {
+        const c = it.conjugation;
+        if (c.ich && c.du && c.er_sie_es && c.wir && c.ihr && c.sie_Sie) {
+          conjugation = {
+            ich: String(c.ich).trim(),
+            du: String(c.du).trim(),
+            er_sie_es: String(c.er_sie_es).trim(),
+            wir: String(c.wir).trim(),
+            ihr: String(c.ihr).trim(),
+            sie_Sie: String(c.sie_Sie).trim()
+          };
+        }
+      }
+
+      // 4-element sentence structure
       let sentence4: [string, string, string, string] | undefined = undefined;
+      const exGerman = it.exampleSentenceGerman ? String(it.exampleSentenceGerman).trim() : undefined;
+
       if (Array.isArray(it.sentence4Elements) && it.sentence4Elements.length === 4) {
-        sentence4 = [
+        const rawBlocks: [string, string, string, string] = [
           String(it.sentence4Elements[0]).trim(),
           String(it.sentence4Elements[1]).trim(),
           String(it.sentence4Elements[2]).trim(),
           String(it.sentence4Elements[3]).trim()
         ];
-      } else if (it.exampleSentenceGerman) {
-        // Auto-split sentence into 4 elements if not explicitly provided
-        const words = String(it.exampleSentenceGerman).split(' ').filter(Boolean);
-        if (words.length >= 4) {
-          const chunk = Math.ceil(words.length / 4);
-          sentence4 = [
-            words.slice(0, chunk).join(' '),
-            words.slice(chunk, chunk * 2).join(' '),
-            words.slice(chunk * 2, chunk * 3).join(' '),
-            words.slice(chunk * 3).join(' ')
-          ];
-        } else if (words.length > 0) {
-          sentence4 = [
-            words[0] || 'Das',
-            words[1] || 'ist',
-            words[2] || 'ein',
-            words.slice(3).join(' ') || german
-          ];
+        if (exGerman && isSentence4ElementsValid(exGerman, rawBlocks)) {
+          sentence4 = rawBlocks;
+        } else if (exGerman) {
+          sentence4 = rebuildSentence4Elements(exGerman) || rawBlocks;
+        } else {
+          sentence4 = rawBlocks;
         }
+      } else if (exGerman) {
+        sentence4 = rebuildSentence4Elements(exGerman) || undefined;
       }
 
-      // Guarantee 4 valid non-empty elements for sentence builder game
-      if (!sentence4 || sentence4.some((chunk) => !chunk)) {
+      if (!sentence4 || sentence4.some((c) => !c)) {
         sentence4 = ['Das', 'Wort', 'heißt', german];
       }
 
-      // Generate missing letter word if absent for Glücksrad (Spin Wheel)
       let missingLetterWord = String(it.missingLetterWord || '').trim();
       if (!missingLetterWord && german) {
         const cleanWord = german.replace(/^(der|die|das)\s+/i, '');
@@ -326,11 +312,14 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
         arabic,
         english: it.english ? String(it.english).trim() : undefined,
         plural: it.plural ? String(it.plural).trim() : undefined,
-        exampleSentenceGerman: it.exampleSentenceGerman ? String(it.exampleSentenceGerman).trim() : undefined,
+        exampleSentenceGerman: exGerman,
         exampleSentenceArabic: it.exampleSentenceArabic ? String(it.exampleSentenceArabic).trim() : undefined,
         emoji: it.emoji ? String(it.emoji).trim() : '📚',
         missingLetterWord,
-        sentence4Elements: sentence4
+        sentence4Elements: sentence4,
+        wordType,
+        conjugation,
+        category: it.category ? String(it.category).trim() : undefined
       });
     }
 
@@ -338,7 +327,6 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
       return { success: false, error: 'الكلمات المدخلة تفتقر إلى الألفاظ الألمانية أو الترجمات العربية الصحيحة.' };
     }
 
-    // Process custom exercises for Jeopardy, Race, and Verb Conjugation games
     const sanitizedExercises: LernstudioExercise[] = [];
     if (Array.isArray(parsed.customExercises) && parsed.customExercises.length > 0) {
       parsed.customExercises.forEach((ex: any, idx: number) => {
@@ -348,7 +336,6 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
           ? ex.options.map((opt: any) => String(opt).trim()).filter(Boolean)
           : undefined;
 
-        // Ensure correctAnswer is present inside options array if provided
         if (opts && opts.length > 0 && !opts.includes(correctAns)) {
           opts.unshift(correctAns);
         }
@@ -369,17 +356,12 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
     const level: LernstudioLevel = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].includes(parsed.level) ? parsed.level : 'A1';
     const difficulty: LernstudioDifficulty = ['easy', 'medium', 'hard'].includes(parsed.difficulty) ? parsed.difficulty : 'medium';
 
-    // Detect if this set truly contains German nouns with articles
     const itemsWithRealArticles = sanitizedItems.filter(
       (it) => it.article && ['der', 'die', 'das'].includes(String(it.article).toLowerCase())
     );
     const hasArticles = parsed.hasArticles !== undefined
       ? Boolean(parsed.hasArticles) && itemsWithRealArticles.length >= 1
       : itemsWithRealArticles.length >= 2;
-
-    const sentenceBuilderSupported = parsed.sentenceBuilderSupported !== undefined
-      ? Boolean(parsed.sentenceBuilderSupported)
-      : true;
 
     const newSet: Partial<LernstudioSet> = {
       title,
@@ -388,7 +370,7 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
       level,
       difficulty,
       hasArticles,
-      sentenceBuilderSupported,
+      sentenceBuilderSupported: true,
       description: parsed.description ? String(parsed.description).trim() : `مجموعة ${topic} (${level})`,
       items: sanitizedItems,
       customExercises: sanitizedExercises.length > 0 ? sanitizedExercises : undefined
@@ -398,4 +380,74 @@ export function validateAndParseLernstudioJson(jsonText: string): { success: boo
   } catch (err: any) {
     return { success: false, error: `خطأ في تحليل كود JSON: ${err?.message || 'تنسيق غير صالح'}` };
   }
+}
+
+// ==========================================
+// WORKSHEET SET VALIDATION & AUTO-REPAIR
+// ==========================================
+
+export interface WorksheetValidationResult {
+  warnings: string[];
+  repairedCount: number;
+  repairedSet: Partial<LernstudioSet>;
+}
+
+export function validateLernstudioSetForWorksheet(
+  set: Partial<LernstudioSet>
+): WorksheetValidationResult {
+  const warnings: string[] = [];
+  let repairedCount = 0;
+
+  if (!set || !Array.isArray(set.items) || set.items.length === 0) {
+    return {
+      warnings: ['المجموعة لا تحتوي على كلمات كافية.'],
+      repairedCount: 0,
+      repairedSet: set || {}
+    };
+  }
+
+  const repairedItems = set.items.map((item) => {
+    const newItem = { ...item };
+
+    // Check sentence4Elements vs exampleSentenceGerman mismatch
+    if (newItem.exampleSentenceGerman && newItem.sentence4Elements) {
+      if (!isSentence4ElementsValid(newItem.exampleSentenceGerman, newItem.sentence4Elements)) {
+        const rebuilt = rebuildSentence4Elements(newItem.exampleSentenceGerman);
+        if (rebuilt) {
+          newItem.sentence4Elements = rebuilt;
+          repairedCount++;
+        }
+      }
+    }
+
+    // Warnings checks
+    const wType = detectWordType(newItem);
+    if (wType === 'noun') {
+      if (!newItem.article) {
+        warnings.push(`الكلمة الاسمية "${newItem.german}" تفتقر إلى الأرتيكل (der / die / das).`);
+      }
+      if (!newItem.plural) {
+        warnings.push(`الكلمة الاسمية "${newItem.german}" تفتقر إلى صيغة الجمع.`);
+      }
+    } else if (wType === 'verb') {
+      if (!newItem.conjugation && !conjugateGermanVerb(newItem.german)) {
+        warnings.push(`الفعل "${newItem.german}" يفتقر إلى تصريف الأفعال.`);
+      }
+    }
+
+    return newItem;
+  });
+
+  if (repairedItems.length < 3) {
+    warnings.push('تحذير: عدد العناصر الصالحة أقل من 3، قد يتم تخطي بعض التمارين في ورقة العمل.');
+  }
+
+  return {
+    warnings: Array.from(new Set(warnings)),
+    repairedCount,
+    repairedSet: {
+      ...set,
+      items: repairedItems
+    }
+  };
 }

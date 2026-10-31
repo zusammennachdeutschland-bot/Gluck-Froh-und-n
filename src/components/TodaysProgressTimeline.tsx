@@ -1,15 +1,17 @@
 import { isPendingStatus, isGroupPerLesson, calculateSequentialSessionNumber } from "../utils/lessonUtils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Lesson, Group, LessonReport, AttendanceStatus, PaymentStatus } from '../types';
+import { Lesson, Group, Student, LessonReport, AttendanceStatus, PaymentStatus } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
 import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
 import { storage } from '../services/storageService';
 import { 
-  CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check
+  CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check, MessageCircle, Phone
 } from 'lucide-react';
+import { buildWhatsAppUrl, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { motion, AnimatePresence } from 'motion/react';
 import { GroupProfileModal } from './GroupProfileModal';
+import { SelectParentCallModal } from './SelectParentCallModal';
 
 const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string => {
   if (!timeStr) return '';
@@ -27,6 +29,59 @@ export const TodaysProgressTimeline: React.FC = () => {
   const [isPastPendingExpanded, setIsPastPendingExpanded] = useState(false);
   const [showAllPastPending, setShowAllPastPending] = useState(false);
   const [selectedGroupForModal, setSelectedGroupForModal] = useState<Group | null>(null);
+  const [expandedLessonIds, setExpandedLessonIds] = useState<string[]>([]);
+  const [collapsedLessonIds, setCollapsedLessonIds] = useState<string[]>([]);
+  const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [selectParentModalData, setSelectParentModalData] = useState<{
+    isOpen: boolean;
+    title: string;
+    students: Student[];
+  }>({
+    isOpen: false,
+    title: '',
+    students: [],
+  });
+
+  const isLessonExpanded = (lessonId: string, isLiveActive: boolean) => {
+    if (collapsedLessonIds.includes(lessonId)) return false;
+    if (expandedLessonIds.includes(lessonId)) return true;
+    return isLiveActive;
+  };
+
+  const handleCardTouchStart = (e: React.TouchEvent, lessonId: string) => {
+    if (e.touches.length === 1) {
+      setTouchStartPos({
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+        id: lessonId
+      });
+    }
+  };
+
+  const handleCardTouchEnd = (e: React.TouchEvent, lessonId: string) => {
+    if (!touchStartPos || touchStartPos.id !== lessonId || e.changedTouches.length === 0) {
+      setTouchStartPos(null);
+      return;
+    }
+
+    const deltaX = e.changedTouches[0].clientX - touchStartPos.x;
+    const deltaY = e.changedTouches[0].clientY - touchStartPos.y;
+
+    // Detect horizontal swipe gesture (horizontal delta > 35px & vertical delta < 45px)
+    if (Math.abs(deltaX) > 35 && Math.abs(deltaY) < 45) {
+      if (deltaX > 35) {
+        // Swipe Right -> Expand Card!
+        setCollapsedLessonIds(prev => prev.filter(id => id !== lessonId));
+        setExpandedLessonIds(prev => prev.includes(lessonId) ? prev : [...prev, lessonId]);
+      } else if (deltaX < -35) {
+        // Swipe Left -> Collapse Card!
+        setExpandedLessonIds(prev => prev.filter(id => id !== lessonId));
+        setCollapsedLessonIds(prev => prev.includes(lessonId) ? prev : [...prev, lessonId]);
+      }
+    }
+
+    setTouchStartPos(null);
+  };
 
   const handleQuickCompleteLesson = (e: React.MouseEvent, targetLesson: Lesson) => {
     e.stopPropagation();
@@ -133,6 +188,137 @@ export const TodaysProgressTimeline: React.FC = () => {
     e.stopPropagation();
     cancelLesson(targetLesson.id);
     storage.removeItem(`dl_draft_report_${targetLesson.id}`);
+  };
+
+  const getIsMultiStudent = (targetLesson: Lesson) => {
+    const tg = targetLesson.groupId
+      ? (groups.find(g => g.id === targetLesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()))
+      : (targetLesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupName!.trim().toLowerCase()) : undefined);
+
+    const groupSts = tg
+      ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === tg.id)
+      : [];
+
+    const targetStudent = students.find(s =>
+      !s.deleted && s.status !== 'archived' && (
+        (targetLesson.studentId && s.id === targetLesson.studentId) ||
+        (targetLesson.studentName && s.name.trim().toLowerCase() === targetLesson.studentName.trim().toLowerCase())
+      )
+    );
+
+    return (tg ? groupSts.length : (targetStudent ? 1 : 1)) > 1;
+  };
+
+  const handleOpenCall = (e: React.MouseEvent, targetLesson: Lesson) => {
+    e.stopPropagation();
+    const targetGroup = targetLesson.groupId
+      ? (groups.find(g => g.id === targetLesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()))
+      : (targetLesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupName!.trim().toLowerCase()) : undefined);
+
+    const groupSts = targetGroup
+      ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id)
+      : [];
+
+    const targetStudent = students.find(s =>
+      !s.deleted && s.status !== 'archived' && (
+        (targetLesson.studentId && s.id === targetLesson.studentId) ||
+        (targetLesson.studentName && s.name.trim().toLowerCase() === targetLesson.studentName.trim().toLowerCase())
+      )
+    );
+
+    const effectiveStudents = groupSts.length > 0 ? groupSts : (targetStudent ? [targetStudent] : []);
+
+    if (effectiveStudents.length > 1) {
+      setSelectParentModalData({
+        isOpen: true,
+        title: targetGroup?.name || targetLesson.title || _t('اختيار ولي الأمر للاتصال', 'Select Parent to Call', 'Elternteil anrufen'),
+        students: effectiveStudents,
+      });
+    } else if (effectiveStudents.length === 1) {
+      const st = effectiveStudents[0];
+      const phone = st.parentPhone || st.phone;
+      if (phone) {
+        const clean = cleanPhoneNumberForTel(phone);
+        if (clean) {
+          window.open(`tel:${clean}`, '_self');
+          return;
+        }
+      }
+      setSelectParentModalData({
+        isOpen: true,
+        title: st.name,
+        students: effectiveStudents,
+      });
+    }
+  };
+
+  const handleOpenWhatsApp = (e: React.MouseEvent, targetLesson: Lesson) => {
+    e.stopPropagation();
+    const targetGroup = targetLesson.groupId
+      ? (groups.find(g => g.id === targetLesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()))
+      : (targetLesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupName!.trim().toLowerCase()) : undefined);
+
+    const groupSts = targetGroup
+      ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id)
+      : [];
+
+    const targetStudent = students.find(s =>
+      !s.deleted && s.status !== 'archived' && (
+        (targetLesson.studentId && s.id === targetLesson.studentId) ||
+        (targetLesson.studentName && s.name.trim().toLowerCase() === targetLesson.studentName.trim().toLowerCase())
+      )
+    );
+
+    const effectiveStudents = groupSts.length > 0 ? groupSts : (targetStudent ? [targetStudent] : []);
+
+    if (effectiveStudents.length > 1) {
+      if (targetGroup?.whatsAppGroupLink?.trim()) {
+        window.open(targetGroup.whatsAppGroupLink.trim(), '_blank');
+      } else {
+        setSelectParentModalData({
+          isOpen: true,
+          title: targetGroup?.name || targetLesson.title || _t('اختيار ولي الأمر', 'Select Parent', 'Elternteil auswählen'),
+          students: effectiveStudents,
+        });
+      }
+    } else if (effectiveStudents.length === 1) {
+      const st = effectiveStudents[0];
+      const contact = resolveStudentWhatsAppContact(st);
+      const rawPhone = contact.cleanForUrl || st.parentPhone || st.studentPhone;
+      if (rawPhone) {
+        window.open(buildWhatsAppUrl(rawPhone), '_blank');
+      } else {
+        window.open('https://wa.me/', '_blank');
+      }
+    } else {
+      window.open('https://wa.me/', '_blank');
+    }
+  };
+
+  const handleOpenMaps = (e: React.MouseEvent, targetLesson: Lesson) => {
+    e.stopPropagation();
+    const targetGroup = targetLesson.groupId
+      ? (groups.find(g => g.id === targetLesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()))
+      : (targetLesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupName!.trim().toLowerCase()) : undefined);
+
+    if (targetGroup?.coordinates?.lat && targetGroup?.coordinates?.lng) {
+      window.open(`https://www.google.com/maps?q=${targetGroup.coordinates.lat},${targetGroup.coordinates.lng}`, '_blank');
+      return;
+    }
+
+    const rawAddress = (targetGroup?.address || targetLesson.location || '').trim();
+    if (rawAddress && rawAddress !== 'center' && rawAddress !== 'home') {
+      window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(rawAddress)}`, '_blank');
+      return;
+    }
+
+    const nameToSearch = targetGroup?.name || targetLesson.studentName || targetLesson.title || '';
+    const searchString = `${nameToSearch} ${rawAddress || ''}`.trim();
+    if (searchString) {
+      window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchString)}`, '_blank');
+    } else {
+      window.open('https://www.google.com/maps', '_blank');
+    }
   };
 
   useEffect(() => {
@@ -343,68 +529,124 @@ export const TodaysProgressTimeline: React.FC = () => {
               >
                 <div className="px-2 sm:px-2.5 pb-2 pt-0.5 border-t border-primary-border/60 dark:border-primary-border/60">
                   <div className="max-h-60 overflow-y-auto divide-y divide-primary-border/60 dark:divide-primary-border/60 pr-1">
-                    {(showAllPastPending ? pendingPastLessons : pendingPastLessons.slice(0, 3)).map((pLesson) => (
-                      <div
-                        key={pLesson.id}
-                        onClick={() => openLessonControl(pLesson)}
-                        className="py-1 flex items-center justify-between gap-1.5 cursor-pointer group transition-colors first:pt-0.5 last:pb-0"
-                      >
-                        <div className="space-y-0.5 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.2 rounded">
-                              {pLesson.date}
-                            </span>
-                            <span className="text-[11px] font-mono font-bold text-text-main">
-                              {pLesson.time}
-                            </span>
+                    {(showAllPastPending ? pendingPastLessons : pendingPastLessons.slice(0, 3)).map((pLesson) => {
+                      const pGroup = pLesson.groupId ? groups.find(g => g.id === pLesson.groupId) : undefined;
+                      const isPExpanded = isLessonExpanded(pLesson.id, false);
+
+                      if (isPExpanded) {
+                        return (
+                          <div
+                            key={pLesson.id}
+                            onClick={() => openLessonControl(pLesson)}
+                            onTouchStart={(e) => handleCardTouchStart(e, pLesson.id)}
+                            onTouchEnd={(e) => handleCardTouchEnd(e, pLesson.id)}
+                            className="p-2 sm:p-2.5 my-1.5 rounded-xl border border-primary-border/80 bg-surface shadow-2xs cursor-pointer space-y-1.5 transition-all hover:border-primary"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[9.5px] font-bold text-primary bg-primary/10 px-1.5 py-0.2 rounded border border-primary/20">
+                                  {pLesson.date}
+                                </span>
+                                {pGroup && (
+                                  <span className="text-[9.5px] font-bold px-1.5 py-0.2 rounded bg-primary-soft text-primary border border-primary-border/40">
+                                    {_t('مجموعة', 'Group', 'Gruppe')}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-xs font-black font-mono text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20 flex items-center gap-1">
+                                <span>{pLesson.time}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2">
+                              <h4 className="text-xs sm:text-sm font-black text-text-main truncate leading-snug">
+                                {pGroup ? pGroup.name : (pLesson.studentName || pLesson.groupName || pLesson.title)}
+                              </h4>
+
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleQuickCompleteLesson(e, pLesson)}
+                                  className="w-7 h-7 rounded-lg bg-primary text-white hover:bg-primary-hover flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                                  title={_t('تمت الحصة (wiederholen + بدون واجب)', 'Mark Completed (wiederholen + no HW)', 'Erledigt (wiederholen + keine HA)')}
+                                  aria-label="Mark completed with wiederholen and no homework"
+                                >
+                                  <Check className="w-4 h-4 stroke-[2.75]" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleQuickCancelLesson(e, pLesson)}
+                                  className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                                  title={_t('إلغاء الحصة', 'Cancel Lesson', 'Lektion absagen')}
+                                  aria-label="Cancel lesson"
+                                >
+                                  <X className="w-4 h-4 stroke-[2.75]" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedLessonIds(prev => prev.filter(id => id !== pLesson.id));
+                                    setCollapsedLessonIds(prev => prev.includes(pLesson.id) ? prev : [...prev, pLesson.id]);
+                                  }}
+                                  className="p-1 rounded bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border transition-colors cursor-pointer"
+                                  title={_t('طي الكارت', 'Collapse Card', 'Einklappen')}
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
                           </div>
-                          {pLesson.groupId && groups.find(g => g.id === pLesson.groupId) ? (
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={pLesson.id}
+                          onClick={() => openLessonControl(pLesson)}
+                          onTouchStart={(e) => handleCardTouchStart(e, pLesson.id)}
+                          onTouchEnd={(e) => handleCardTouchEnd(e, pLesson.id)}
+                          className="py-1 flex items-center justify-between gap-1.5 cursor-pointer group transition-colors first:pt-0.5 last:pb-0 hover:bg-primary/5 rounded px-1"
+                        >
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[9px] font-bold text-primary dark:text-primary bg-primary-soft dark:bg-primary-soft px-1.5 py-0.2 rounded">
+                                {pLesson.date}
+                              </span>
+                              <span className="text-[11px] font-mono font-bold text-primary">
+                                {pLesson.time}
+                              </span>
+                            </div>
+
+                            <h4 className="text-xs font-bold text-text-main group-hover:text-primary dark:group-hover:text-primary truncate leading-snug">
+                              {pGroup ? pGroup.name : (pLesson.studentName || pLesson.groupName || pLesson.title)}
+                            </h4>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
                             <button
                               type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedGroupForModal(groups.find(g => g.id === pLesson.groupId) || null);
-                              }}
-                              className="text-xs font-bold text-text-main hover:text-primary dark:hover:text-primary hover:underline truncate text-start cursor-pointer inline-flex items-center gap-1 leading-snug"
-                              title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                              onClick={(e) => handleQuickCompleteLesson(e, pLesson)}
+                              className="w-7 h-7 rounded-lg bg-primary/15 hover:bg-primary text-primary hover:text-white border border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                              title={_t('تمت الحصة (wiederholen + بدون واجب)', 'Mark Completed (wiederholen + no HW)', 'Erledigt (wiederholen + keine HA)')}
+                              aria-label="Mark completed with wiederholen and no homework"
                             >
-                              <span className="truncate">{groups.find(g => g.id === pLesson.groupId)?.name}</span>
-                              <span className="text-[9px] font-bold px-1 rounded bg-primary-soft text-primary">
-                                {_t('مجموعة', 'Group', 'Gruppe')}
-                              </span>
+                              <Check className="w-4 h-4 stroke-[2.5]" />
                             </button>
-                          ) : (
-                            <h4 className="text-xs font-bold text-text-main group-hover:text-primary dark:group-hover:text-primary truncate leading-snug">
-                              {pLesson.studentName || pLesson.groupName || pLesson.title}
-                            </h4>
-                          )}
+                            <button
+                              type="button"
+                              onClick={(e) => handleQuickCancelLesson(e, pLesson)}
+                              className="w-7 h-7 rounded-lg bg-surface/80 hover:bg-primary/15 text-text-muted hover:text-primary border border-primary-border/60 flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                              title={_t('إلغاء الحصة', 'Cancel Lesson', 'Lektion absagen')}
+                              aria-label="Cancel lesson"
+                            >
+                              <X className="w-4 h-4 stroke-[2.5]" />
+                            </button>
+                          </div>
                         </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={(e) => handleQuickCompleteLesson(e, pLesson)}
-                            className="w-7 h-7 rounded-lg bg-primary/15 hover:bg-primary text-primary hover:text-white border border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
-                            title={_t('تمت الحصة (wiederholen + بدون واجب)', 'Mark Completed (wiederholen + no HW)', 'Erledigt (wiederholen + keine HA)')}
-                            aria-label="Mark completed with wiederholen and no homework"
-                          >
-                            <Check className="w-4 h-4 stroke-[2.5]" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => handleQuickCancelLesson(e, pLesson)}
-                            className="w-7 h-7 rounded-lg bg-surface/80 hover:bg-primary/15 text-text-muted hover:text-primary border border-primary-border/60 flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
-                            title={_t('إلغاء الحصة', 'Cancel Lesson', 'Lektion absagen')}
-                            aria-label="Cancel lesson"
-                          >
-                            <X className="w-4 h-4 stroke-[2.5]" />
-                          </button>
-                          <ChevronRight className={`w-3.5 h-3.5 text-primary dark:text-primary shrink-0 transition-transform ${
-                            language === 'ar' ? 'rotate-180 group-hover:-translate-x-0.5' : 'group-hover:translate-x-0.5'
-                          }`} />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {pendingPastLessons.length > 3 && (
@@ -585,91 +827,217 @@ export const TodaysProgressTimeline: React.FC = () => {
               }
 
               const isLiveActive = state === 'active' && !isCompletedState && !isCancelledState;
+              const isExpanded = isLessonExpanded(lesson.id, isLiveActive);
 
-              if (isLiveActive) {
+              if (isExpanded) {
+                const cardStyle = isLiveActive
+                  ? 'border-2 border-primary/50 bg-gradient-to-br from-primary/[0.06] via-surface to-primary/[0.02] dark:from-primary/15 dark:to-surface shadow-md shadow-primary/10 ring-1 ring-primary/30'
+                  : isCompletedState
+                  ? 'border-2 border-emerald-500/35 bg-gradient-to-br from-emerald-500/[0.04] via-surface to-emerald-500/[0.01] dark:from-emerald-950/20 dark:to-surface shadow-xs'
+                  : isCancelledState
+                  ? 'border-2 border-rose-500/35 bg-gradient-to-br from-rose-500/[0.04] via-surface to-rose-500/[0.01] dark:from-rose-950/20 dark:to-surface opacity-90 shadow-xs'
+                  : 'border-2 border-primary-border bg-surface hover:border-primary/50 shadow-xs';
+
                 return (
                   <div 
                     key={lesson.id}
                     onClick={() => openLessonControl(lesson)}
-                    className="group relative flex flex-col p-2.5 sm:p-3 my-1.5 rounded-2xl border-2 border-primary-border bg-surface bg-primary-soft shadow-xs cursor-pointer transition-all hover:shadow-md hover:border-primary/50 space-y-1.5"
+                    onTouchStart={(e) => handleCardTouchStart(e, lesson.id)}
+                    onTouchEnd={(e) => handleCardTouchEnd(e, lesson.id)}
+                    className={`group relative flex flex-col p-3 sm:p-3.5 my-2 rounded-2xl cursor-pointer transition-all hover:shadow-md space-y-2 overflow-hidden ${cardStyle}`}
                   >
-                    {/* 1. Header: Live & Session Badges + Clean Single-Line Time Range */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-primary text-white shadow-2xs shrink-0">
-                          <span>{_t('بث مباشر الآن', 'Live Now', 'Jetzt live')}</span>
-                        </span>
+                    {/* 1. Header: Time Pill & Status/Session Badges */}
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 w-full">
+                      {/* Time Range, Live/Status Badges & Session count */}
+                      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                        {/* Time Range Pill */}
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-primary/10 text-primary border border-primary/25 text-xs sm:text-sm font-black font-mono tracking-tight shrink-0 shadow-2xs">
+                          <Clock className="w-3.5 h-3.5 text-primary stroke-[2.25]" />
+                          <span>{lesson.time} – {endTime || `${lesson.durationMinutes || 60}m`}</span>
+                        </div>
+
+                        {isLiveActive ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] sm:text-[10.5px] font-black tracking-wide uppercase bg-primary/10 text-primary border border-primary/25 shadow-2xs shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0"></span>
+                            <span>{_t('live', 'live', 'live')}</span>
+                          </span>
+                        ) : isCompletedState ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shrink-0">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[2.5]" />
+                            <span>{_t('تمت الحصة ✓', 'Completed ✓', 'Abgeschlossen ✓')}</span>
+                          </span>
+                        ) : isCancelledState ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30 shrink-0">
+                            <XCircle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 stroke-[2.5]" />
+                            <span>{_t('ملغاة ✕', 'Cancelled ✕', 'Abgesagt ✕')}</span>
+                          </span>
+                        ) : null}
+
                         {lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 && !isGroupPerLesson(targetGroup) && (
-                          <span className="text-[10px] sm:text-[11px] font-mono font-bold text-primary bg-primary/15 dark:bg-primary/25 px-1.5 py-0.5 rounded-md shrink-0">
+                          <span className="text-[10px] sm:text-[11px] font-mono font-bold text-primary bg-primary/15 dark:bg-primary/25 px-2 py-0.5 rounded-md border border-primary/20 shrink-0">
                             {_t('حصة', 'Session', 'Std.')} {lesson.sessionNumber}/{lesson.totalSessionsInPackage}
                           </span>
                         )}
                       </div>
-
-                      <div className="text-sm sm:text-base font-black font-mono tracking-tight text-primary whitespace-nowrap shrink-0">
-                        {lesson.time} – {endTime || `${lesson.durationMinutes || 60}m`}
-                      </div>
                     </div>
 
-                    {/* 2. Middle Row: Student / Group Title & Action Controls */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        {targetGroup ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedGroupForModal(targetGroup);
-                            }}
-                            className="text-sm sm:text-base font-black text-text-main dark:text-white text-start truncate block hover:text-primary hover:underline leading-snug"
-                            title={_t('انقر لفتح ملف المجموعة', 'Click to open group profile', 'Klicken für Gruppenprofil')}
-                          >
-                            {targetGroup.name}
-                          </button>
+                    {/* 2. Group / Student Main Title */}
+                    <div className="pt-0.5">
+                      <h4 className="text-base sm:text-lg font-black text-text-main dark:text-white leading-snug truncate">
+                        {targetGroup ? targetGroup.name : (lesson.studentName || lesson.groupName || lesson.title)}
+                      </h4>
+                    </div>
+
+                    {/* 3. Unboxed Metadata Strip (Grade · Location/Mode · Student Count & Names) */}
+                    <div className="flex items-center gap-1.5 text-xs text-text-muted dark:text-slate-300 font-medium flex-wrap pt-0.5 border-t border-primary-border/40">
+                      {lesson.grade && (
+                        <span>{lesson.grade}</span>
+                      )}
+                      
+                      {lesson.grade && <span className="opacity-40 select-none">·</span>}
+                      
+                      <span className="inline-flex items-center gap-1">
+                        {lesson.type === 'online' ? (
+                          <>
+                            <Video className="w-3 h-3 text-primary shrink-0 stroke-[2.25]" />
+                            <span>{t('next_action_online')}</span>
+                          </>
                         ) : (
-                          <h4 className="text-sm sm:text-base font-black text-text-main dark:text-white truncate leading-snug">
-                            {lesson.studentName || lesson.groupName || lesson.title}
-                          </h4>
+                          <>
+                            <MapPin className="w-3 h-3 text-primary shrink-0 stroke-[2.25]" />
+                            <span>{lesson.location && lesson.location !== 'center' && lesson.location !== 'home' ? lesson.location : t('next_action_offline')}</span>
+                          </>
                         )}
-                      </div>
+                      </span>
 
-                      {/* Action Controls */}
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={(e) => handleQuickCompleteLesson(e, lesson)}
-                          className="w-7 h-7 rounded-lg bg-primary text-white hover:bg-primary-hover flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
-                          title={_t('تمت الحصة (wiederholen + بدون واجب)', 'Mark Completed (wiederholen + no HW)', 'Erledigt (wiederholen + keine HA)')}
-                          aria-label="Mark completed with wiederholen and no homework"
-                        >
-                          <Check className="w-4 h-4 stroke-[2.75]" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => handleQuickCancelLesson(e, lesson)}
-                          className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
-                          title={_t('إلغاء الحصة', 'Cancel Lesson', 'Lektion absagen')}
-                          aria-label="Cancel lesson"
-                        >
-                          <X className="w-4 h-4 stroke-[2.75]" />
-                        </button>
-                        <div className="w-6 h-6 rounded-lg bg-primary/15 dark:bg-primary/25 flex items-center justify-center text-primary">
-                          <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isRtl ? 'rotate-180' : ''}`} />
-                        </div>
-                      </div>
+                      {(scheduledStudents.length > 0 || groupStudents.length > 0) && (
+                        <>
+                          <span className="opacity-40 select-none">·</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Users className="w-3 h-3 text-primary shrink-0 stroke-[2.25]" />
+                            <span>{scheduledStudents.length > 0 ? scheduledStudents.length : groupStudents.length} {_t('طلاب', 'students', 'Schüler')}</span>
+                          </span>
+                        </>
+                      )}
+
+                      {/* Group student names preview if available */}
+                      {groupStudents.length > 0 && (
+                        <>
+                          <span className="opacity-40 select-none">·</span>
+                          <span className="truncate max-w-[220px] text-text-muted/80">
+                            ({groupStudents.map(s => s.name.split(' ')[0]).join('، ')})
+                          </span>
+                        </>
+                      )}
                     </div>
 
-                    {/* 3. Bottom Row: Full-width Metadata with clean visibility */}
-                    {metaParts.length > 0 && (
-                      <div className="flex items-center gap-1.5 text-[11px] sm:text-xs text-text-muted dark:text-slate-300 font-medium flex-wrap pt-0.5 border-t border-primary-border/40">
-                        {metaParts.map((part, idx) => (
-                          <React.Fragment key={idx}>
-                            {idx > 0 && <span className="opacity-40 select-none">·</span>}
-                            <span>{part}</span>
-                          </React.Fragment>
-                        ))}
+                    {/* 4. Notes / Topic Preview if available */}
+                    {(lesson.notes || lesson.report?.teacherNotes || lesson.report?.homeworkTitle) && (
+                      <div className="text-xs text-text-muted bg-surface/80 dark:bg-slate-900/50 p-2 rounded-xl border border-surface-border/80 flex items-start gap-1.5 line-clamp-2">
+                        <span className="font-bold text-primary shrink-0">{_t('ملاحظة:', 'Note:', 'Hinweis:')}</span>
+                        <span className="truncate">{lesson.notes || lesson.report?.teacherNotes || lesson.report?.homeworkTitle}</span>
                       </div>
                     )}
+
+                    {/* 6. Bottom Action Controls Bar */}
+                    <div className="pt-2 border-t border-primary-border/20 flex items-center justify-end gap-1.5 w-full">
+                      {/* Join Online Video Meeting OR Open Google Maps Location Button */}
+                      {(() => {
+                        const isOfflineLesson = lesson.type === 'offline' || targetGroup?.type === 'offline';
+                        const meetingUrl = lesson.meetingLink || targetGroup?.zoomLink || targetGroup?.meetLink;
+
+                        if (!isOfflineLesson && meetingUrl) {
+                          return (
+                            <a
+                              href={meetingUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                              title={_t('الانضمام للاجتماع أونلاين', 'Join Online Meeting', 'Online-Meeting beitreten')}
+                              aria-label="Join Online Meeting"
+                            >
+                              <Video className="w-3.5 h-3.5 stroke-[2]" />
+                            </a>
+                          );
+                        }
+
+                        return (
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenMaps(e, lesson)}
+                            className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                            title={_t('فتح الخرائط لعنوان البيت / المكان', 'Open Google Maps for Home Address', 'In Google Maps öffnen')}
+                            aria-label="Open Location in Google Maps"
+                          >
+                            <MapPin className="w-3.5 h-3.5 stroke-[2]" />
+                          </button>
+                        );
+                      })()}
+
+                      {/* Call Parent Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenCall(e, lesson)}
+                        className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                        title={_t('اتصال بولي الأمر', 'Call Parent', 'Elternteil anrufen')}
+                        aria-label="Call Parent"
+                      >
+                        <Phone className="w-3.5 h-3.5 stroke-[2]" />
+                      </button>
+
+                      {/* WhatsApp Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenWhatsApp(e, lesson)}
+                        className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                        title={
+                          getIsMultiStudent(lesson)
+                            ? _t('فتح مجموعة الواتساب / اختيار ولي الأمر', 'Open WhatsApp Group / Select Parent', 'WhatsApp-Gruppe / Elternteil auswählen')
+                            : _t('إرسال واتساب لولي الأمر', 'Send WhatsApp to Parent', 'WhatsApp an Eltern senden')
+                        }
+                        aria-label="Open WhatsApp"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5 stroke-[2]" />
+                      </button>
+
+                      {!isCompletedState && !isCancelledState && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => handleQuickCompleteLesson(e, lesson)}
+                            className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                            title={_t('تمت الحصة (wiederholen + بدون واجب)', 'Mark Completed (wiederholen + no HW)', 'Erledigt (wiederholen + keine HA)')}
+                            aria-label="Mark completed with wiederholen and no homework"
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[2]" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleQuickCancelLesson(e, lesson)}
+                            className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                            title={_t('إلغاء الحصة', 'Cancel Lesson', 'Lektion absagen')}
+                            aria-label="Cancel lesson"
+                          >
+                            <X className="w-3.5 h-3.5 stroke-[2]" />
+                          </button>
+                        </>
+                      )}
+                      {(isCompletedState || isCancelledState) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            dismissLessonFromDashboard(lesson.id);
+                          }}
+                          className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                          title={t('dismiss_from_dashboard')}
+                          aria-label="Hide from dashboard"
+                        >
+                          <X className="w-3.5 h-3.5 stroke-[2]" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               }
@@ -678,6 +1046,8 @@ export const TodaysProgressTimeline: React.FC = () => {
                 <div 
                   key={lesson.id}
                   onClick={() => openLessonControl(lesson)}
+                  onTouchStart={(e) => handleCardTouchStart(e, lesson.id)}
+                  onTouchEnd={(e) => handleCardTouchEnd(e, lesson.id)}
                   className={`group relative flex items-center gap-1.5 sm:gap-2 px-2 py-1 rounded-lg border transition-all cursor-pointer ${
                     isCompletedState
                       ? 'bg-slate-50/50 dark:bg-slate-900/30 border-slate-200/50 dark:border-slate-800/50 opacity-75 hover:opacity-100'
@@ -686,21 +1056,12 @@ export const TodaysProgressTimeline: React.FC = () => {
                       : 'bg-white dark:bg-slate-900/70 border-slate-200/70 dark:border-surface-border/70 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-2xs'
                   }`}
                 >
-                  {/* Leading Event Accent Stripe (Material 3 Event Bar - sleek height) */}
-                  <div 
-                    className={`w-1 h-6 sm:h-7 rounded-full shrink-0 transition-colors self-center ${
-                      isCompletedState
-                        ? 'bg-emerald-500/70'
-                        : isCancelledState
-                        ? 'bg-rose-400/70 dark:bg-rose-500/70'
-                        : state === 'active'
-                        ? 'bg-primary animate-pulse'
-                        : 'bg-primary/70'
-                    }`}
-                  />
 
-                  {/* 1. Time Column (Crisp Tabular Typography) */}
-                  <div className="flex flex-col justify-center shrink-0 min-w-[38px] sm:min-w-[42px] text-start tabular-nums select-none">
+
+                  {/* 1. Time Column */}
+                  <div
+                    className="flex flex-col justify-center shrink-0 min-w-[42px] sm:min-w-[46px] text-start tabular-nums select-none p-1 rounded-md"
+                  >
                     <span className={`text-[11px] sm:text-xs font-bold tracking-tight leading-none ${
                       isCompletedState 
                         ? 'text-text-muted line-through opacity-80' 
@@ -708,68 +1069,39 @@ export const TodaysProgressTimeline: React.FC = () => {
                         ? 'text-rose-600/80 dark:text-rose-400/80 line-through' 
                         : state === 'active'
                         ? 'text-primary dark:text-primary-hover font-extrabold'
-                        : 'text-text-main'
+                        : 'text-primary font-black'
                     }`}>
                       {lesson.time}
                     </span>
-                    <span className={`text-[9px] sm:text-[9.5px] font-medium leading-none mt-0.5 ${
+                    <span className={`text-[9px] sm:text-[9.5px] font-medium leading-none mt-0.5 flex items-center gap-0.5 ${
                       state === 'active' ? 'text-primary/80 dark:text-primary/80 font-semibold' : 'text-text-muted/70'
                     }`}>
-                      {endTime || `${lesson.durationMinutes || 60}m`}
+                      <span>{endTime || `${lesson.durationMinutes || 60}m`}</span>
                     </span>
                   </div>
 
-                  {/* Hairline Divider between time & details (Compact height) */}
+                  {/* Hairline Divider between time & details */}
                   <div className="w-px h-6 bg-slate-200/60 dark:bg-slate-800 shrink-0 self-center" />
 
-                  {/* 2. Main Content (Clean Editorial Hierarchy, Compact & Full Visibility) */}
-                  <div className="flex-1 min-w-0 py-0.5 space-y-0.5">
-                    {/* Title Row */}
+                  {/* 2. Simple Main Content (Name + Time only when collapsed) */}
+                  <div className="flex-1 min-w-0 py-0.5">
                     <div className="flex items-center justify-between gap-1.5 min-w-0">
                       <div className="min-w-0 flex-1 truncate">
-                        {targetGroup ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedGroupForModal(targetGroup);
-                            }}
-                            className={`text-xs sm:text-[12.5px] font-bold text-start cursor-pointer hover:underline hover:text-primary transition-colors truncate block leading-tight ${
-                              isCompletedState
-                                ? 'line-through text-text-muted/80'
-                                : isCancelledState
-                                ? 'line-through text-rose-600/80 dark:text-rose-400/80'
-                                : state === 'active'
-                                ? 'text-slate-950 dark:text-white font-extrabold'
-                                : 'text-text-main'
-                            }`}
-                            title={_t('انقر لفتح ملف المجموعة', 'Click to open group profile', 'Klicken für Gruppenprofil')}
-                          >
-                            {targetGroup.name}
-                          </button>
-                        ) : (
-                          <h4 className={`text-xs sm:text-[12.5px] font-bold truncate leading-tight ${
-                            isCompletedState
-                              ? 'line-through text-text-muted/80'
-                              : isCancelledState
-                              ? 'line-through text-rose-600/80 dark:text-rose-400/80'
-                              : state === 'active'
-                              ? 'text-slate-950 dark:text-white font-extrabold'
-                              : 'text-text-main'
-                          }`}>
-                            {lesson.studentName || lesson.groupName || lesson.title}
-                          </h4>
-                        )}
+                        <h4 className={`text-xs sm:text-[12.5px] font-bold truncate leading-tight ${
+                          isCompletedState
+                            ? 'line-through text-text-muted/80'
+                            : isCancelledState
+                            ? 'line-through text-rose-600/80 dark:text-rose-400/80'
+                            : state === 'active'
+                            ? 'text-slate-950 dark:text-white font-extrabold'
+                            : 'text-text-main'
+                        }`}>
+                          {targetGroup ? targetGroup.name : (lesson.studentName || lesson.groupName || lesson.title)}
+                        </h4>
                       </div>
 
-                      {/* Quiet Status / Session Count in Title Row (Preserves single-line metadata) */}
+                      {/* Quiet Status Badge */}
                       <div className="flex items-center gap-1 shrink-0">
-                        {lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 && !isGroupPerLesson(targetGroup) && (
-                          <span className="text-[9.5px] sm:text-[10px] font-mono font-bold text-primary bg-primary/10 dark:bg-primary/20 px-1.5 py-0.2 rounded shrink-0">
-                            {_t('حصة', 'Session', 'Std.')} {lesson.sessionNumber}/{lesson.totalSessionsInPackage}
-                          </span>
-                        )}
-
                         {state === 'active' && !isCompletedState && !isCancelledState && (
                           <span className="inline-flex items-center text-[9px] sm:text-[9.5px] font-bold text-primary dark:text-primary-hover bg-primary/10 dark:bg-primary/20 px-2 py-0.5 rounded-full shrink-0">
                             <span>{t('timeline_live_now')}</span>
@@ -777,7 +1109,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                         )}
 
                         {isCompletedState && (
-                          <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0 opacity-80" />
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 opacity-80" />
                         )}
 
                         {isCancelledState && (
@@ -787,59 +1119,6 @@ export const TodaysProgressTimeline: React.FC = () => {
                         )}
                       </div>
                     </div>
-
-                    {/* Metadata Row: Pure typographic elegance with middots, NO PILLS, single compact line */}
-                    <div className="flex items-center gap-1.5 text-[10px] sm:text-[10.5px] text-text-muted font-normal leading-tight truncate">
-                      {metaParts.map((part, idx) => (
-                        <React.Fragment key={idx}>
-                          {idx > 0 && <span className="text-slate-300 dark:text-slate-600 text-[8px] select-none shrink-0">·</span>}
-                          <span className="truncate">{part}</span>
-                        </React.Fragment>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 3. Trailing Action Controls */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    {!isCompletedState && !isCancelledState && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={(e) => handleQuickCompleteLesson(e, lesson)}
-                          className="w-6 h-6 rounded-md bg-primary-soft hover:bg-primary text-primary hover:text-white border border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95"
-                          title={_t('تمت الحصة (wiederholen + بدون واجب)', 'Mark Completed (wiederholen + no HW)', 'Erledigt (wiederholen + keine HA)')}
-                          aria-label="Mark completed with wiederholen and no homework"
-                        >
-                          <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => handleQuickCancelLesson(e, lesson)}
-                          className="w-6 h-6 rounded-md bg-surface-hover/70 hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95"
-                          title={_t('إلغاء الحصة', 'Cancel Lesson', 'Lektion absagen')}
-                          aria-label="Cancel lesson"
-                        >
-                          <X className="w-3.5 h-3.5 stroke-[2.5]" />
-                        </button>
-                      </>
-                    )}
-                    {(isCompletedState || isCancelledState) && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          dismissLessonFromDashboard(lesson.id);
-                        }}
-                        className="p-0.5 rounded text-text-muted/50 hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                        title={t('dismiss_from_dashboard')}
-                        aria-label="Hide from dashboard"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                    <ChevronRight className={`w-3.5 h-3.5 text-text-muted/40 group-hover:text-text-muted transition-transform ${
-                      isRtl ? 'rotate-180 group-hover:-translate-x-0.5' : 'group-hover:translate-x-0.5'
-                    }`} />
                   </div>
                 </div>
               );
@@ -853,6 +1132,13 @@ export const TodaysProgressTimeline: React.FC = () => {
           onClose={() => setSelectedGroupForModal(null)}
         />
       )}
+      <SelectParentCallModal
+        isOpen={selectParentModalData.isOpen}
+        onClose={() => setSelectParentModalData({ isOpen: false, title: '', students: [] })}
+        title={selectParentModalData.title}
+        students={selectParentModalData.students}
+        _t={_t}
+      />
     </div>
   );
 };

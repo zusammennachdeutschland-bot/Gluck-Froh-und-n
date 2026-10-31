@@ -11,6 +11,7 @@ import { useApp } from '../context/AppContext';
 import { HodGermanStudent, Complaint, StudentActionPlan } from '../types';
 import { storage } from '../services/storageService';
 import { ActionPlansView } from './ActionPlansView';
+import { HodFamiliesView, findSiblingGroups, SiblingGroup } from './HodFamiliesView';
 import { 
   normalizeClassCode, 
   extractGradeFromClass, 
@@ -26,6 +27,10 @@ export const HodStudentsView: React.FC = () => {
   // Roster State
   const [students, setStudents] = useState<HodGermanStudent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Families / Siblings Page State
+  const [isFamiliesViewOpen, setIsFamiliesViewOpen] = useState(false);
+  const [familiesInitialSearch, setFamiliesInitialSearch] = useState('');
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -459,6 +464,21 @@ export const HodStudentsView: React.FC = () => {
     return { totalGerman, boysCount, girlsCount, busRidersCount, classesCount };
   }, [students, uniqueClasses]);
 
+  // Sibling Groups & Per-Student Sibling Lookup
+  const siblingGroups = useMemo(() => {
+    return findSiblingGroups(students);
+  }, [students]);
+
+  const studentFamilyMap = useMemo(() => {
+    const map = new Map<string, SiblingGroup>();
+    siblingGroups.forEach(group => {
+      group.students.forEach(st => {
+        map.set(st.id, group);
+      });
+    });
+    return map;
+  }, [siblingGroups]);
+
   const classStudentCountMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const s of students) {
@@ -814,6 +834,25 @@ export const HodStudentsView: React.FC = () => {
       setPasteError(err.message || _t('فشل تحليل كود הـ JSON الملصق. تأكد من صحة التنسيق.', 'Failed to parse JSON. Please verify format.', 'JSON-Analyse fehlgeschlagen.'));
     }
   };
+
+  if (isFamiliesViewOpen) {
+    return (
+      <HodFamiliesView
+        students={students}
+        initialSearch={familiesInitialSearch}
+        onBack={() => {
+          setIsFamiliesViewOpen(false);
+          setFamiliesInitialSearch('');
+        }}
+        onSelectClass={(cls) => {
+          setIsFamiliesViewOpen(false);
+          setFamiliesInitialSearch('');
+          applyGradeClassFilter(cls);
+        }}
+        _t={_t}
+      />
+    );
+  }
 
   return (
     <div className="space-y-3.5 max-w-7xl mx-auto pb-12 animate-fade-in">
@@ -1227,7 +1266,21 @@ export const HodStudentsView: React.FC = () => {
             )}
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Families & Siblings Finder Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setFamiliesInitialSearch('');
+                setIsFamiliesViewOpen(true);
+              }}
+              className="px-2.5 py-1 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-[11px] font-black border border-violet-500 shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              title="فتح صفحة العائلات والبحث عن أسماء الإخوة والأشقاء"
+            >
+              <span>👨‍👩‍👧‍👦</span>
+              <span>العائلات ({siblingGroups.length})</span>
+            </button>
+
             <button
               onClick={handleCopyFullRosterText}
               disabled={!isAnyFilterActive || filteredStudents.length === 0}
@@ -1527,6 +1580,26 @@ export const HodStudentsView: React.FC = () => {
                           </div>
 
                           <div className="flex items-center gap-1 shrink-0">
+                            {(() => {
+                              const fam = studentFamilyMap.get(s.id);
+                              if (!fam || fam.students.length < 2) return null;
+                              const otherSiblings = fam.students.filter(st => st.id !== s.id);
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFamiliesInitialSearch(fam.familyNameAr);
+                                    setIsFamiliesViewOpen(true);
+                                  }}
+                                  className="px-1.5 py-0.5 bg-violet-500/10 hover:bg-violet-500/20 text-violet-700 dark:text-violet-300 rounded text-[10px] font-black border border-violet-500/25 flex items-center gap-1 cursor-pointer transition-all"
+                                  title={`إخوة الطالب: ${otherSiblings.map(x => `${x.nameAr} (${x.gradeClass})`).join(' ، ')}`}
+                                >
+                                  <span>👨‍👩‍👧‍👦</span>
+                                  <span>إخوة ({otherSiblings.length})</span>
+                                </button>
+                              );
+                            })()}
                             {(() => {
                               const studentPlans = actionPlans.filter(p => 
                                 p.studentId === s.id || 

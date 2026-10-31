@@ -1,19 +1,21 @@
 import { checkOverlap } from "../utils/lessonUtils";
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Lesson, Group } from '../types';
+import { Lesson, Group, Student } from '../types';
 import { parseLocalDate, formatLocalDate } from '../utils/timeUtils';
 import { getProjectedLessonsForRange, getCurrentAlternatingWeek, getAlternatingWeek, getRecurrenceLabel } from '../utils/scheduleUtils';
 import { 
   Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, ChevronDown,
   Video, MapPin, CheckCircle2, AlertTriangle, Trash2, ArrowLeftRight, 
-  Download, X, Check, Zap, RefreshCw, Play, Send, BookOpen, Plus, Repeat
+  Download, X, Check, Zap, RefreshCw, Play, Send, BookOpen, Plus, Repeat, MessageCircle, Phone
 } from 'lucide-react';
+import { buildWhatsAppUrl, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { StartLessonNowModal } from './StartLessonNowModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { ExportMonthlyCalendarModal } from './ExportMonthlyCalendarModal';
 import { DeleteSessionConfirmModal } from './DeleteSessionConfirmModal';
 import { GroupProfileModal } from './GroupProfileModal';
+import { SelectParentCallModal } from './SelectParentCallModal';
 import { getSchoolSettings, calculatePeriodsTimings } from '../utils/schoolUtils';
 import { DAY_KEY_TO_RRULE_BYDAY, getUpcomingDateForDayKey, formatIcsEventBlock, SchoolIcsEventItem } from '../utils/schoolScheduleIcsUtils';
 import { Capacitor } from '@capacitor/core';
@@ -33,6 +35,50 @@ export const ScheduleView: React.FC = () => {
   const [reminderLesson, setReminderLesson] = useState<Lesson | null>(null);
   const [lessonToDelete, setLessonToDelete] = useState<Lesson | null>(null);
   const [selectedGroupForModal, setSelectedGroupForModal] = useState<Group | null>(null);
+  const [expandedLessonIds, setExpandedLessonIds] = useState<string[]>([]);
+  const [collapsedLessonIds, setCollapsedLessonIds] = useState<string[]>([]);
+  const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [selectParentModalData, setSelectParentModalData] = useState<{
+    isOpen: boolean;
+    title: string;
+    students: Student[];
+  }>({
+    isOpen: false,
+    title: '',
+    students: [],
+  });
+
+  const handleCardTouchStart = (e: React.TouchEvent, lessonId: string) => {
+    if (e.touches.length === 1) {
+      setTouchStartPos({
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+        id: lessonId
+      });
+    }
+  };
+
+  const handleCardTouchEnd = (e: React.TouchEvent, lessonId: string) => {
+    if (!touchStartPos || touchStartPos.id !== lessonId || e.changedTouches.length === 0) {
+      setTouchStartPos(null);
+      return;
+    }
+
+    const deltaX = e.changedTouches[0].clientX - touchStartPos.x;
+    const deltaY = e.changedTouches[0].clientY - touchStartPos.y;
+
+    if (Math.abs(deltaX) > 35 && Math.abs(deltaY) < 45) {
+      if (deltaX > 35) {
+        setCollapsedLessonIds(prev => prev.filter(id => id !== lessonId));
+        setExpandedLessonIds(prev => prev.includes(lessonId) ? prev : [...prev, lessonId]);
+      } else if (deltaX < -35) {
+        setExpandedLessonIds(prev => prev.filter(id => id !== lessonId));
+        setCollapsedLessonIds(prev => prev.includes(lessonId) ? prev : [...prev, lessonId]);
+      }
+    }
+
+    setTouchStartPos(null);
+  };
 
   // Unified Menu States
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
@@ -263,6 +309,92 @@ export const ScheduleView: React.FC = () => {
       setRescheduleLesson(null);
       setRescheduleSuccess('');
     }, 1200);
+  };
+
+  const handleOpenCall = (e: React.MouseEvent, targetLesson: Lesson) => {
+    e.stopPropagation();
+    const targetGroup = targetLesson.groupId
+      ? (groups.find(g => g.id === targetLesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()))
+      : (targetLesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupName!.trim().toLowerCase()) : undefined);
+
+    const groupSts = targetGroup
+      ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id)
+      : [];
+
+    const targetStudent = students.find(s =>
+      !s.deleted && s.status !== 'archived' && (
+        (targetLesson.studentId && s.id === targetLesson.studentId) ||
+        (targetLesson.studentName && s.name.trim().toLowerCase() === targetLesson.studentName.trim().toLowerCase())
+      )
+    );
+
+    const effectiveStudents = groupSts.length > 0 ? groupSts : (targetStudent ? [targetStudent] : []);
+
+    if (effectiveStudents.length > 1) {
+      setSelectParentModalData({
+        isOpen: true,
+        title: targetGroup?.name || targetLesson.title || _t('اختيار ولي الأمر للاتصال', 'Select Parent to Call', 'Elternteil anrufen'),
+        students: effectiveStudents,
+      });
+    } else if (effectiveStudents.length === 1) {
+      const st = effectiveStudents[0];
+      const phone = st.parentPhone || st.phone;
+      if (phone) {
+        const clean = cleanPhoneNumberForTel(phone);
+        if (clean) {
+          window.open(`tel:${clean}`, '_self');
+          return;
+        }
+      }
+      setSelectParentModalData({
+        isOpen: true,
+        title: st.name,
+        students: effectiveStudents,
+      });
+    }
+  };
+
+  const handleOpenWhatsApp = (e: React.MouseEvent, targetLesson: Lesson) => {
+    e.stopPropagation();
+    const targetGroup = targetLesson.groupId
+      ? (groups.find(g => g.id === targetLesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()))
+      : (targetLesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupName!.trim().toLowerCase()) : undefined);
+
+    const groupSts = targetGroup
+      ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id)
+      : [];
+
+    const targetStudent = students.find(s =>
+      !s.deleted && s.status !== 'archived' && (
+        (targetLesson.studentId && s.id === targetLesson.studentId) ||
+        (targetLesson.studentName && s.name.trim().toLowerCase() === targetLesson.studentName.trim().toLowerCase())
+      )
+    );
+
+    const effectiveStudents = groupSts.length > 0 ? groupSts : (targetStudent ? [targetStudent] : []);
+
+    if (effectiveStudents.length > 1) {
+      if (targetGroup?.whatsAppGroupLink?.trim()) {
+        window.open(targetGroup.whatsAppGroupLink.trim(), '_blank');
+      } else {
+        setSelectParentModalData({
+          isOpen: true,
+          title: targetGroup?.name || targetLesson.title || _t('اختيار ولي الأمر', 'Select Parent', 'Elternteil auswählen'),
+          students: effectiveStudents,
+        });
+      }
+    } else if (effectiveStudents.length === 1) {
+      const st = effectiveStudents[0];
+      const contact = resolveStudentWhatsAppContact(st);
+      const rawPhone = contact.cleanForUrl || st.parentPhone || st.studentPhone;
+      if (rawPhone) {
+        window.open(buildWhatsAppUrl(rawPhone), '_blank');
+      } else {
+        window.open('https://wa.me/', '_blank');
+      }
+    } else {
+      window.open('https://wa.me/', '_blank');
+    }
   };
 
   // GOOGLE CALENDAR ICS EXPORT (TUTORING LESSONS + SCHOOL SCHEDULE)
@@ -916,10 +1048,12 @@ export const ScheduleView: React.FC = () => {
                     className="flex items-start gap-2 sm:gap-3 relative group"
                   >
                     {/* Time Column on Timeline */}
-                    <div className={`w-11 sm:w-12 text-end text-xs font-bold font-mono shrink-0 pt-2 ${
-                      isCompleted ? 'text-text-muted line-through' : 'text-text-main'
-                    }`}>
-                      {lesson.time}
+                    <div
+                      className={`w-11 sm:w-12 text-end text-xs font-black font-mono shrink-0 pt-2 ${
+                        isCompleted ? 'text-text-muted line-through' : 'text-primary'
+                      }`}
+                    >
+                      <span className="block">{lesson.time}</span>
                     </div>
 
                     {/* Timeline Rail: Dot + Connecting Line */}
@@ -937,7 +1071,10 @@ export const ScheduleView: React.FC = () => {
                     </div>
 
                     {/* Compact Session Card (72-80px Height) */}
-                    <div className={`flex-1 min-w-0 border rounded-xl p-2 sm:p-2.5 transition-all shadow-2xs ${
+                    <div 
+                      onTouchStart={(e) => handleCardTouchStart(e, lesson.id)}
+                      onTouchEnd={(e) => handleCardTouchEnd(e, lesson.id)}
+                      className={`flex-1 min-w-0 border rounded-xl p-2 sm:p-2.5 transition-all shadow-2xs ${
                       conflict
                         ? 'border-primary/40 bg-primary-soft/30'
                         : isCompleted
@@ -953,26 +1090,7 @@ export const ScheduleView: React.FC = () => {
                             onClick={() => openLessonControl(lesson)}
                             className="min-w-0 flex-1 cursor-pointer"
                           >
-                            {lesson.groupId && groups.find(g => g.id === lesson.groupId) ? (
-                              <div className="flex items-baseline gap-1.5 min-w-0">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedGroupForModal(groups.find(g => g.id === lesson.groupId) || null);
-                                  }}
-                                  className="text-sm sm:text-[15px] font-black hover:text-primary hover:underline transition-colors truncate cursor-pointer text-start block max-w-full"
-                                  title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
-                                >
-                                  {groups.find(g => g.id === lesson.groupId)?.name}
-                                </button>
-                                {lesson.studentName && lesson.studentName !== groups.find(g => g.id === lesson.groupId)?.name && (
-                                  <span className="text-xs text-text-muted truncate shrink-0">
-                                    ({lesson.studentName})
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
+                            <div className="flex items-baseline gap-1.5 min-w-0">
                               <h4 className={`text-sm sm:text-[15px] font-black truncate transition-colors ${
                                 isCompleted
                                   ? 'line-through text-text-muted/70'
@@ -980,13 +1098,44 @@ export const ScheduleView: React.FC = () => {
                                   ? 'line-through text-text-muted'
                                   : 'text-text-main group-hover:text-primary'
                               }`}>
-                                {lesson.studentName || lesson.groupName || lesson.title}
+                                {groups.find(g => g.id === lesson.groupId)?.name || lesson.studentName || lesson.groupName || lesson.title}
                               </h4>
-                            )}
+                              {lesson.groupId && groups.find(g => g.id === lesson.groupId) && lesson.studentName && lesson.studentName !== groups.find(g => g.id === lesson.groupId)?.name && (
+                                <span className="text-xs text-text-muted truncate shrink-0">
+                                  ({lesson.studentName})
+                                </span>
+                              )}
+                            </div>
                           </div>
 
-                          {/* Action Buttons (Quiet Calm Colors) */}
+                          {/* Action Buttons (Quiet Calm Theme Colors) */}
                           <div className="flex items-center gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenCall(e, lesson)}
+                              title={_t('اتصال بولي الأمر', 'Call Parent', 'Elternteil anrufen')}
+                              className="p-1.5 text-text-muted hover:text-primary hover:bg-primary-soft rounded-lg transition-all cursor-pointer"
+                              aria-label="Call Parent"
+                            >
+                              <Phone className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenWhatsApp(e, lesson)}
+                              title={
+                                (() => {
+                                  const targetGroup = lesson.groupId ? (groups.find(g => g.id === lesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === lesson.groupId.trim().toLowerCase())) : undefined;
+                                  const groupSts = targetGroup ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id) : [];
+                                  return groupSts.length > 1 ? _t('فتح مجموعة الواتساب / اختيار ولي الأمر', 'Open WhatsApp Group / Select Parent', 'WhatsApp-Gruppe / Elternteil auswählen') : _t('إرسال واتساب لولي الأمر', 'Send WhatsApp to Parent', 'WhatsApp an Eltern senden');
+                                })()
+                              }
+                              className="p-1.5 text-text-muted hover:text-primary hover:bg-primary-soft rounded-lg transition-all cursor-pointer"
+                              aria-label="Open WhatsApp"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            </button>
+
                             <button
                               type="button"
                               onClick={() => setReminderLesson(lesson)}
@@ -1484,6 +1633,15 @@ export const ScheduleView: React.FC = () => {
           onClose={() => setSelectedGroupForModal(null)}
         />
       )}
+
+      {/* SELECT PARENT CALL/WHATSAPP MODAL */}
+      <SelectParentCallModal
+        isOpen={selectParentModalData.isOpen}
+        onClose={() => setSelectParentModalData({ isOpen: false, title: '', students: [] })}
+        title={selectParentModalData.title}
+        students={selectParentModalData.students}
+        _t={_t}
+      />
     </div>
   );
 };

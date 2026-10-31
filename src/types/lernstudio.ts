@@ -4,6 +4,17 @@ export type LernstudioDifficulty = 'easy' | 'medium' | 'hard';
 
 export type LernstudioThemeId = 'pastel' | 'space' | 'dino' | 'neutral';
 
+export type LernstudioWordType = 'noun' | 'verb' | 'adjective' | 'phrase' | 'other';
+
+export interface VerbConjugationForms {
+  ich: string;
+  du: string;
+  er_sie_es: string;
+  wir: string;
+  ihr: string;
+  sie_Sie: string;
+}
+
 export interface LernstudioItem {
   id: string;
   german: string;               // German word or term e.g. "die Katze"
@@ -17,6 +28,9 @@ export interface LernstudioItem {
   emoji?: string;                // Emoji e.g. "🐱"
   missingLetterWord?: string;    // Word with missing letter e.g. "K_tze"
   sentence4Elements?: [string, string, string, string]; // Exactly 4 elements for Sentence Builder game
+  wordType?: LernstudioWordType;
+  conjugation?: VerbConjugationForms;
+  category?: string;
 }
 
 export type LernstudioExerciseType = 

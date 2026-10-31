@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { LernstudioSet, LernstudioLevel, LernstudioDifficulty } from '../../types/lernstudio';
-import { generateLernstudioPrompt, validateAndParseLernstudioJson } from '../../utils/lernstudioAiUtils';
+import { generateLernstudioPrompt, validateAndParseLernstudioJson, validateLernstudioSetForWorksheet } from '../../utils/lernstudioAiUtils';
 import { CHILDREN_TOPICS_PRESETS, CHILDREN_LEVEL_CATEGORIES } from '../../data/childrenTopicsPreset';
 import { PROGRAM_GRADES } from '../../utils/lernstudioTranslations';
 import { X, Copy, Check, Sparkles, Download, AlertCircle, FileText, BookOpen } from 'lucide-react';
@@ -52,6 +52,8 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
     includeVerbConjugation
   });
 
+  const [validationInfo, setValidationInfo] = useState<{ warnings: string[]; repairedCount: number } | null>(null);
+
   const handleCopyPrompt = () => {
     navigator.clipboard.writeText(generatedPrompt);
     setCopiedPrompt(true);
@@ -60,9 +62,15 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
 
   const handleParseJson = () => {
     setImportError(null);
+    setValidationInfo(null);
     const result = validateAndParseLernstudioJson(pastedJson);
     if (result.success && result.data) {
-      setParsedPreview(result.data);
+      const valRes = validateLernstudioSetForWorksheet(result.data);
+      setParsedPreview(valRes.repairedSet);
+      setValidationInfo({
+        warnings: valRes.warnings,
+        repairedCount: valRes.repairedCount
+      });
     } else {
       setParsedPreview(null);
       setImportError(result.error || (language === 'ar' ? 'تنسيق JSON غير صالح.' : 'Invalid JSON format.'));
@@ -349,11 +357,27 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
               {/* Preview Cards */}
               {parsedPreview && parsedPreview.items && (
                 <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
                     <span className="text-xs font-black text-emerald-700 dark:text-emerald-300">
                       ✓ التنسيق صحيح! تم العثور على {parsedPreview.items.length} مفردات في مجموعة ({parsedPreview.title}):
                     </span>
+                    {validationInfo && validationInfo.repairedCount > 0 && (
+                      <span className="text-[11px] font-bold bg-amber-500/20 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded-lg border border-amber-500/30">
+                        ⚡ تم إصلاح {validationInfo.repairedCount} جملة ترتيب تلقائياً لتطابق الجملة الألمانية.
+                      </span>
+                    )}
                   </div>
+
+                  {validationInfo && validationInfo.warnings.length > 0 && (
+                    <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-800 dark:text-amber-300 space-y-1">
+                      <span className="font-bold block">ملاحظات التحقق من جودة ورقة العمل:</span>
+                      <ul className="list-disc list-inside space-y-0.5">
+                        {validationInfo.warnings.map((w, idx) => (
+                          <li key={idx}>{w}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
                     {parsedPreview.items.map((item, idx) => (

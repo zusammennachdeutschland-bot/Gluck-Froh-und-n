@@ -284,7 +284,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const [copiedCodeInModal, setCopiedCodeInModal] = useState<boolean>(false);
   const [finalGeneratedText, setFinalGeneratedText] = useState<string>('');
   const [isManualEdited, setIsManualEdited] = useState<boolean>(false);
-  const [reportStyle, setReportStyle] = useState<'egyptian' | 'standard' | 'concise'>('egyptian');
+  const [reportStyle, setReportStyle] = useState<'egyptian' | 'standard' | 'concise' | 'student'>('egyptian');
   const [styleSeed, setStyleSeed] = useState<number>(0);
   const [recordingLink, setRecordingLink] = useState<string>(
     lesson.report?.recordingLink || lesson.recordingLink || ''
@@ -684,12 +684,57 @@ ${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
     return text;
   };
 
+  // Streamlined Student Report (اليوم والتاريخ + اللي اتشرح + الهومورك اللي جاي بس)
+  const getStudentCleanReportText = () => {
+    const taughtToday = taughtTodayInfo.text;
+    const nextHomework = homeworkInfo.text;
+    const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
+    const dateFormatted = formatArabicDate(lesson.date);
+
+    if (reportLanguage === 'en') {
+      const parts: string[] = [];
+      if (dateFormatted) parts.push(`📅 Date: ${dateFormatted}`);
+      if (taughtToday) parts.push(`📖 Covered in Class:\n${taughtToday}`);
+      if (nextHomework) parts.push(`📝 Next Homework:\n${nextHomework}`);
+      return parts.join('\n\n');
+    }
+
+    if (reportLanguage === 'de') {
+      const parts: string[] = [];
+      if (dateFormatted) parts.push(`📅 Datum: ${dateFormatted}`);
+      if (taughtToday) parts.push(`📖 Im Unterricht behandelt:\n${taughtToday}`);
+      if (nextHomework) parts.push(`📝 Hausaufgabe:\n${nextHomework}`);
+      return parts.join('\n\n');
+    }
+
+    const dayDateLine =
+      dayName && dateFormatted
+        ? `📅 اليوم والتاريخ: ${dayName} (${dateFormatted})`
+        : dayName
+          ? `📅 اليوم: ${dayName}`
+          : dateFormatted
+            ? `📅 التاريخ: ${dateFormatted}`
+            : '';
+
+    const parts: string[] = [];
+    if (dayDateLine) parts.push(dayDateLine);
+    if (taughtToday) parts.push(`📖 اللي اتشرح:\n${taughtToday}`);
+    if (nextHomework) parts.push(`📝 الهومورك الجاي:\n${nextHomework}`);
+
+    return parts.join('\n\n');
+  };
+
   // Auto-generate report based on student data or bulk mode
   useEffect(() => {
     if (isManualEdited) return;
 
     if (activeTab === 'bulk') {
       setFinalGeneratedText(getBulkReportText());
+      return;
+    }
+
+    if (reportStyle === 'student') {
+      setFinalGeneratedText(getStudentCleanReportText());
       return;
     }
 
@@ -1120,17 +1165,25 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
     persistRecordings(undefined, undefined, finalGeneratedText);
 
     if (target === 'student') {
-      const studentContact = resolveStudentWhatsAppContact(activeStudent, { quickStudentPhone: activeStudent?.studentPhone });
-      if (!studentContact.hasContact) {
-        alert(_t('رقم تليفون الطالب غير مسجل.', 'Student phone number is not registered.', 'Telefonnummer des Schülers ist nicht hinterlegt.'));
-        return;
-      }
+      const studentReportText =
+        reportStyle === 'student' && isManualEdited
+          ? finalGeneratedText
+          : getStudentCleanReportText();
+
       try {
-        await navigator.clipboard.writeText(finalGeneratedText);
+        await navigator.clipboard.writeText(studentReportText);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       } catch {}
-      const url = buildWhatsAppUrl(studentContact.contact, finalGeneratedText);
+
+      const studentContact = hasStudentDirectPhone
+        ? resolveStudentWhatsAppContact(activeStudent, { quickStudentPhone: studentPhoneVal })
+        : { hasContact: false, contact: '' };
+
+      const url = buildWhatsAppUrl(
+        studentContact.hasContact ? studentContact.contact : '',
+        studentReportText
+      );
       window.open(url, '_blank');
       return;
     }
@@ -1781,6 +1834,21 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
                   >
                     ⚡ مختصر
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportStyle('student');
+                      setIsManualEdited(false);
+                    }}
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${
+                      reportStyle === 'student'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                    title="نسخة منقحة للطالب: اليوم والتاريخ واللي اتشرح والهومورك الجاي بس"
+                  >
+                    🎓 للطالب
+                  </button>
                 </div>
 
 
@@ -1871,8 +1939,8 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
               </button>
             )}
 
-            {/* Direct Student WhatsApp Button (Conditional: registered student phone && different from parent phone) */}
-            {hasStudentDirectPhone && (
+            {/* Direct Student WhatsApp Button (Always available in individual mode; sends streamlined student version) */}
+            {activeTab === 'individual' && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -1880,7 +1948,7 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
                   handleWhatsAppSend('student');
                 }}
                 className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[40px] whitespace-nowrap shrink-0"
-                title={_t('إرسال الواجب والتقرير للطالب مباشرة على الواتساب', 'Send homework & report to student directly on WhatsApp', 'Hausaufgabe an Schüler direkt senden')}
+                title={_t('إرسال نسخة الطالب المنقحة (اليوم والتاريخ + اللي اتشرح + الهومورك الجاي بس)', 'Send clean student version (Date, Topic & Next Homework only)', 'Kurzversion an Schüler senden')}
               >
                 <Send className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{_t('للطالب نفسه', 'To Student', 'An Schüler')}</span>

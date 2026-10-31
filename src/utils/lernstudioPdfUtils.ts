@@ -1,9 +1,20 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { LernstudioSet } from '../types/lernstudio';
-import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { escapeHtml } from './securityUtils';
+import {
+  A4_PAGE_HEIGHT_PX,
+  A4_PAGE_WIDTH_PX,
+  DEFAULT_PAGE_CONTENT_HEIGHT_PX,
+  PAGE_CONTENT_WIDTH_PX,
+  RUNNING_HEADER_HEIGHT_PX,
+  WORKSHEET_BUILD_ID,
+  WorksheetBlock,
+  buildWorksheetBlocks,
+  buildWorksheetHtml,
+  getWorksheetCss,
+  paginateBlocks,
+  renderPaginatedWorksheetHtml
+} from './lernstudioWorksheetBuilder';
 
 export interface WorksheetOptions {
   schoolName?: string;
@@ -13,340 +24,292 @@ export interface WorksheetOptions {
   dateStr?: string;
   includeAnswerKey?: boolean;
   includeVocabularyTable?: boolean;
+  includeMatching?: boolean;
   includeMissingLetters?: boolean;
+  includeOddOneOut?: boolean;
+  includeGrammar?: boolean;
+  includePictures?: boolean;
   includeSentenceBuilder?: boolean;
   includeMultipleChoice?: boolean;
+  questionsPerExercise?: number;
+  variant?: number;
 }
 
-export async function generateLernstudioWorksheetPdf(
-  set: LernstudioSet,
-  options: WorksheetOptions = {}
-): Promise<jsPDF> {
-  const isTeacher = Boolean(options.includeAnswerKey);
+export interface WorksheetValidationReport {
+  isValid: boolean;
+  issues: string[];
+  smallestFontSizePx: number;
+  pageDimensions: { page: number; scrollHeight: number; clientHeight: number; canvasWidth?: number; canvasHeight?: number }[];
+}
 
-  // 1. Create a visible-to-layout off-screen container for crisp A4 DOM rendering
-  const container = document.createElement('div');
-  container.style.position = 'absolute';
-  container.style.left = '-9999px';
-  container.style.top = '0';
-  container.style.zIndex = '99999';
-  container.style.opacity = '1';
-  container.style.width = '794px'; // A4 width at 96 DPI
-  container.style.backgroundColor = '#ffffff';
-  container.style.color = '#000000';
-  container.style.padding = '32px';
-  container.style.boxSizing = 'border-box';
-  container.style.lineHeight = '1.5';
+export interface WorksheetRenderResult {
+  pdf: jsPDF;
+  pageDataUrls: string[];
+  pageCount: number;
+  buildId: string;
+  warnings: string[];
+  usedFallback: boolean;
+  repackCount: number;
+  validation: WorksheetValidationReport;
+}
 
-  const school = escapeHtml(options.schoolName || 'Glück Lernstudio');
-  const teacher = escapeHtml(options.teacherName || 'الأستاذ المعلم');
-  const grade = escapeHtml(options.gradeName || set.grade || 'جميع الصفوف');
-  const subject = escapeHtml(options.subjectName || 'اللغة الألمانية');
-  const dateStr = escapeHtml(options.dateStr || new Date().toLocaleDateString('de-DE'));
-
-  // Build HTML Content with embedded Cairo Google Font & strict Arabic/German Bidi isolation
-  let html = `
-    <style>
-      @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
-      
-      * {
-        box-sizing: border-box !important;
-      }
-      
-      .worksheet-root {
-        font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif !important;
-        background: #ffffff !important;
-        color: #000000 !important;
-        font-size: 13px !important;
-        width: 100% !important;
-      }
-
-      .ar-text {
-        direction: rtl !important;
-        text-align: right !important;
-        font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif !important;
-        unicode-bidi: isolate !important;
-      }
-
-      .de-text {
-        direction: ltr !important;
-        text-align: left !important;
-        font-family: 'Segoe UI', Arial, sans-serif !important;
-      }
-
-      .header-table {
-        width: 100%;
-        border-collapse: collapse;
-        border: 2px solid #000000;
-        margin-bottom: 20px;
-      }
-
-      .header-table td {
-        padding: 10px 14px;
-        vertical-align: top;
-      }
-
-      .section-title {
-        font-size: 14px !important;
-        font-weight: 800 !important;
-        border-bottom: 2px solid #000000;
-        padding-bottom: 4px;
-        margin-top: 0;
-        margin-bottom: 12px;
-      }
-
-      .data-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-bottom: 20px;
-      }
-
-      .data-table th, .data-table td {
-        border: 1px solid #000000;
-        padding: 8px 10px;
-        font-size: 12px;
-      }
-
-      .data-table th {
-        background-color: #f2f2f2;
-        font-weight: 700;
-      }
-    </style>
-
-    <div class="worksheet-root">
-      <!-- HEADER BOX -->
-      <table class="header-table">
-        <tr>
-          <td style="width: 55%; border-right: 1px solid #000000;" class="de-text">
-            <div style="font-size: 16px; font-weight: 800; margin-bottom: 4px;">${school}</div>
-            <div><strong>Fach:</strong> ${subject} (${escapeHtml(set.level)})</div>
-            <div><strong>Thema:</strong> ${escapeHtml(set.title || set.topic)}</div>
-            <div><strong>Datum:</strong> ${dateStr}</div>
-          </td>
-          <td style="width: 45%;" class="ar-text" dir="rtl">
-            <div style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">الاسم: ________________________</div>
-            <div><strong>الصف الدراسية:</strong> ${grade}</div>
-            <div><strong>المعلم:</strong> ${teacher}</div>
-          </td>
-        </tr>
-      </table>
-
-      <!-- WORKSHEET TITLE BANNER -->
-      <div style="text-align: center; margin-bottom: 24px; border-bottom: 2px solid #000; padding-bottom: 10px;">
-        <h1 style="margin: 0; font-size: 18px; font-weight: 800; text-transform: uppercase;">
-          ${isTeacher ? 'ARBEITSBLATT - LÖSUNGSSCHLÜSSEL (نموذج إجابة المدرس)' : `ARBEITSBLATT: ${escapeHtml((set.title || set.topic).toUpperCase())}`}
-        </h1>
-      </div>
-  `;
-
-  // SECTION 1: Wortschatz-Übersicht (Vocabulary List)
-  if (options.includeVocabularyTable !== false && set.items.length > 0) {
-    html += `
-      <div style="margin-bottom: 24px;">
-        <div class="section-title ar-text" dir="rtl">
-          1. Wortschatz-Übersicht / جدول المفردات والمعاني:
-        </div>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th style="width: 25%; text-align: left;" class="de-text">Deutsch (Wort)</th>
-              <th style="width: 20%; text-align: left;" class="de-text">Plural</th>
-              <th style="width: 30%; text-align: left;" class="de-text">Beispielsatz</th>
-              <th style="width: 25%; text-align: right;" class="ar-text" dir="rtl">الترجمة العربية</th>
-            </tr>
-          </thead>
-          <tbody>
-    `;
-
-    set.items.forEach((item) => {
-      html += `
-        <tr>
-          <td class="de-text" style="font-weight: 700;">${item.emoji ? escapeHtml(item.emoji) + ' ' : ''}${escapeHtml(item.german)}</td>
-          <td class="de-text">${escapeHtml(item.plural || '-')}</td>
-          <td class="de-text">${escapeHtml(item.exampleSentenceGerman || '-')}</td>
-          <td class="ar-text" dir="rtl" style="font-weight: 600;">${escapeHtml(item.arabic)}</td>
-        </tr>
-      `;
-    });
-
-    html += `
-          </tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  // SECTION 2: Ergänze die fehlenden Buchstaben (Missing Letters)
-  if (options.includeMissingLetters !== false && set.items.length > 0) {
-    html += `
-      <div style="margin-bottom: 24px;">
-        <div class="section-title ar-text" dir="rtl">
-          2. Ergänze die fehlenden Buchstaben / أكمل الحرف الناقص:
-        </div>
-        <div style="font-size: 13px; line-height: 1.8;">
-    `;
-
-    set.items.forEach((item, idx) => {
-      const missingPrompt = escapeHtml(item.missingLetterWord || item.german.replace(/[aeiouAEIOU]/g, '_'));
-      if (isTeacher) {
-        html += `
-          <div style="margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
-            <div class="de-text">
-              <strong>${idx + 1}) ${escapeHtml(item.german)}</strong>
-              <span style="color: #008000; font-weight: bold; margin-left: 12px;">[Lösung: ${missingPrompt}]</span>
-            </div>
-            <div class="ar-text" dir="rtl" style="color: #555;">(${escapeHtml(item.arabic)})</div>
-          </div>
-        `;
-      } else {
-        html += `
-          <div style="margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 4px;">
-            <div class="de-text">
-              <strong>${idx + 1})</strong> <span style="font-family: monospace; font-size: 15px; letter-spacing: 2px; font-weight: bold;">${missingPrompt}</span>
-              <span style="margin-left: 16px; color: #888;">_____________________</span>
-            </div>
-            <div class="ar-text" dir="rtl" style="color: #444; font-weight: 600;">(${escapeHtml(item.arabic)})</div>
-          </div>
-        `;
-      }
-    });
-
-    html += `
-        </div>
-      </div>
-    `;
-  }
-
-  // SECTION 3: Bringe die Satzteile in die richtige Reihenfolge (Sentence Builder)
-  if (options.includeSentenceBuilder !== false) {
-    const itemsWithSentence = set.items.filter((i) => i.sentence4Elements || i.exampleSentenceGerman);
-    if (itemsWithSentence.length > 0) {
-      html += `
-        <div style="margin-bottom: 24px;">
-          <div class="section-title ar-text" dir="rtl">
-            3. Bringe die Satzteile in die richtige Reihenfolge / رتب أجزاء الجملة لتكوين جملة مفيدة:
-          </div>
-          <div style="font-size: 13px; line-height: 1.8;">
-      `;
-
-      itemsWithSentence.forEach((item, idx) => {
-        const elements = item.sentence4Elements || [item.german, 'ist', 'sehr', 'gut'];
-        const shuffled = [...elements].sort((a, b) => a.localeCompare(b));
-
-        html += `
-          <div style="margin-bottom: 14px; padding: 6px; background-color: #fafafa; border: 1px solid #ddd; border-radius: 6px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <div class="de-text">
-                <strong>${idx + 1}) Satzbausteine:</strong> 
-                <span style="background-color: #fff; border: 1px solid #999; padding: 2px 8px; border-radius: 4px; font-weight: bold;">
-                  [ ${shuffled.map(s => escapeHtml(s)).join('   /   ')} ]
-                </span>
-              </div>
-              <div class="ar-text" dir="rtl" style="font-size: 11px; color: #666;">
-                (${escapeHtml(item.exampleSentenceArabic || item.arabic)})
-              </div>
-            </div>
-        `;
-
-        if (isTeacher) {
-          html += `
-            <div class="de-text" style="color: #008000; font-weight: bold; margin-top: 4px;">
-              LÖSUNG: ${escapeHtml(item.exampleSentenceGerman || elements.join(' '))}
-            </div>
-          `;
-        } else {
-          html += `
-            <div class="de-text" style="margin-top: 6px; color: #555;">
-              Antwort: ____________________________________________________________________
-            </div>
-          `;
-        }
-
-        html += `</div>`;
-      });
-
-      html += `
-          </div>
-        </div>
-      `;
-    }
-  }
-
-  // Footer
-  html += `
-      <div style="margin-top: 30px; text-align: center; font-size: 10px; color: #777; border-top: 1px solid #ddd; padding-top: 8px;">
-        Glück Lernstudio - Deutsch Arbeitsblatt • Generiert am ${dateStr}
-      </div>
-    </div>
-  `;
-
-  container.innerHTML = html;
-  document.body.appendChild(container);
-
-  // Guarantee web fonts (Cairo, Segoe UI) are fully loaded in memory before html2canvas capture
+async function waitForFontsAndImages(root: HTMLElement): Promise<void> {
   if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
     try {
       await document.fonts.ready;
     } catch {
-      // continue
+      // ignore font readiness error
     }
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  const images = Array.from(root.querySelectorAll<HTMLImageElement>('img'));
+  await Promise.all(
+    images.map(async (img) => {
+      if (img.complete) return;
+      try {
+        if (typeof img.decode === 'function') {
+          await img.decode();
+        } else {
+          await new Promise<void>((resolve) => {
+            img.onload = () => resolve();
+            img.onerror = () => resolve();
+          });
+        }
+      } catch {
+        // ignore image decode error
+      }
+    })
+  );
+
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, 60));
+}
+
+export function validateRenderedPages(
+  pages: HTMLElement[],
+  canvases: HTMLCanvasElement[] = []
+): WorksheetValidationReport {
+  const issues: string[] = [];
+  let smallestFontSizePx = 999;
+  const pageDimensions: WorksheetValidationReport['pageDimensions'] = [];
+
+  if (pages.length === 0) {
+    issues.push('No pages were rendered (0 pages).');
+  }
+
+  const targetRatio = 210 / 297;
+
+  pages.forEach((pageEl, idx) => {
+    const pageNum = idx + 1;
+    const scrollH = pageEl.scrollHeight;
+    const clientH = pageEl.clientHeight;
+    const canvas = canvases[idx];
+
+    pageDimensions.push({
+      page: pageNum,
+      scrollHeight: scrollH,
+      clientHeight: clientH,
+      canvasWidth: canvas?.width,
+      canvasHeight: canvas?.height
+    });
+
+    if (scrollH > clientH + 2) {
+      issues.push(`Page ${pageNum} overflows vertically (scrollHeight=${scrollH}px > clientHeight=${clientH}px).`);
+    }
+
+    const contentEl = pageEl.querySelector<HTMLElement>('.page-content');
+    if (contentEl && contentEl.scrollHeight > contentEl.clientHeight + 2) {
+      issues.push(
+        `Page ${pageNum} content area overflows (scrollHeight=${contentEl.scrollHeight}px > clientHeight=${contentEl.clientHeight}px).`
+      );
+    }
+
+    const blocksInPage = pageEl.querySelectorAll<HTMLElement>('.ws-block');
+    if (blocksInPage.length === 0) {
+      issues.push(`Page ${pageNum} is empty (contains 0 blocks).`);
+    }
+
+    blocksInPage.forEach((blk) => {
+      if (blk.clientHeight > 0 && blk.scrollHeight > blk.clientHeight + 4) {
+        const blkId = blk.getAttribute('data-block-id') || 'unknown';
+        issues.push(`Block "${blkId}" on page ${pageNum} is clipped (${blk.scrollHeight}px > ${blk.clientHeight}px).`);
+      }
+    });
+
+    if (canvas) {
+      const actualRatio = canvas.width / Math.max(1, canvas.height);
+      const ratioDiff = Math.abs(actualRatio - targetRatio) / targetRatio;
+      if (ratioDiff > 0.005) {
+        issues.push(
+          `Page ${pageNum} canvas aspect ratio (${canvas.width}x${canvas.height}) deviates from A4 by ${(ratioDiff * 100).toFixed(2)}%.`
+        );
+      }
+    }
+
+    if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+      const allEls = pageEl.querySelectorAll<HTMLElement>('*');
+      allEls.forEach((el) => {
+        if (el.textContent && el.textContent.trim().length > 0) {
+          const fs = parseFloat(window.getComputedStyle(el).fontSize || '13');
+          if (!isNaN(fs) && fs > 0 && fs < smallestFontSizePx) {
+            smallestFontSizePx = fs;
+          }
+        }
+      });
+    }
+  });
+
+  if (smallestFontSizePx === 999) {
+    smallestFontSizePx = 12;
+  }
+
+  if (smallestFontSizePx < 12) {
+    issues.push(`Smallest computed font-size (${smallestFontSizePx}px) is below the 12px minimum.`);
+  }
+
+  return {
+    isValid: issues.length === 0,
+    issues,
+    smallestFontSizePx,
+    pageDimensions
+  };
+}
+
+async function renderFallbackSlicedWorksheet(
+  set: LernstudioSet,
+  options: WorksheetOptions
+): Promise<{ pdf: jsPDF; pageDataUrls: string[]; pageCount: number }> {
+  const { data, blocks } = buildWorksheetBlocks(set, options);
+
+  const container = document.createElement('div');
+  container.className = 'ws-root';
+  container.dir = 'ltr';
+  container.style.direction = 'ltr';
+  container.style.position = 'fixed';
+  container.style.left = '0';
+  container.style.top = '0';
+  container.style.zIndex = '-9999';
+  container.style.pointerEvents = 'none';
+  container.style.width = `${A4_PAGE_WIDTH_PX}px`;
+  container.style.backgroundColor = '#ffffff';
+  container.style.color = '#111827';
+  container.style.padding = `28px 36px`;
+  container.style.boxSizing = 'border-box';
+
+  container.innerHTML = `<style>${getWorksheetCss()}</style>` + blocks.map((b) => b.html).join('\n');
+  document.body.appendChild(container);
 
   try {
-    const canvas = await html2canvas(container, {
-      scale: 2,
+    await waitForFontsAndImages(container);
+
+    const blockEls = Array.from(container.querySelectorAll<HTMLElement>('.ws-block'));
+    const containerTop = container.getBoundingClientRect().top;
+    const blockBounds = blockEls.map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        top: Math.max(0, r.top - containerTop),
+        bottom: Math.max(0, r.bottom - containerTop)
+      };
+    });
+
+    const scale = 2;
+    const fullCanvas = await html2canvas(container, {
+      scale,
       useCORS: true,
       allowTaint: true,
       logging: false,
       backgroundColor: '#ffffff',
-      width: 794,
-      windowWidth: 794,
+      x: 0,
+      y: 0,
+      scrollX: 0,
+      scrollY: 0,
+      width: A4_PAGE_WIDTH_PX,
+      windowWidth: A4_PAGE_WIDTH_PX,
       onclone: (clonedDoc) => {
-        // Remove style blocks containing unparseable CSS v4 variables (oklch) that crash html2canvas
-        try {
-          const styles = clonedDoc.querySelectorAll('style');
-          styles.forEach((s) => {
-            if (s.textContent && (s.textContent.includes('oklch') || s.textContent.includes('@import'))) {
-              if (!s.textContent.includes('Cairo')) {
-                s.remove();
-              }
-            }
-          });
-        } catch {
-          // ignore
-        }
+        clonedDoc.documentElement.setAttribute('dir', 'ltr');
+        clonedDoc.documentElement.style.direction = 'ltr';
+        clonedDoc.body.setAttribute('dir', 'ltr');
+        clonedDoc.body.style.direction = 'ltr';
+        clonedDoc.body.style.margin = '0';
+        clonedDoc.body.style.padding = '0';
       }
     });
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.98);
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
+    const targetPageCanvasWidth = A4_PAGE_WIDTH_PX * scale;
+    const targetPageCanvasHeight = A4_PAGE_HEIGHT_PX * scale;
+    const usableSliceHeightCss = A4_PAGE_HEIGHT_PX - 84;
 
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
+    const sliceRangesCss: { startY: number; endY: number }[] = [];
+    let currentY = 0;
+    const totalHeightCss = fullCanvas.height / scale;
 
-    const imgWidth = pageWidth;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    while (currentY < totalHeightCss - 10) {
+      const maxEndY = currentY + usableSliceHeightCss;
+      if (maxEndY >= totalHeightCss) {
+        sliceRangesCss.push({ startY: currentY, endY: totalHeightCss });
+        break;
+      }
 
-    let heightLeft = imgHeight;
-    let position = 0;
-
-    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
-    heightLeft -= pageHeight;
-
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
-      heightLeft -= pageHeight;
+      let cutY = maxEndY;
+      for (const b of blockBounds) {
+        if (b.top > currentY + 20 && b.bottom > maxEndY && b.top < maxEndY) {
+          cutY = b.top - 4;
+          break;
+        }
+      }
+      if (cutY <= currentY + 20) {
+        cutY = maxEndY;
+      }
+      sliceRangesCss.push({ startY: currentY, endY: cutY });
+      currentY = cutY;
     }
 
-    return pdf;
+    const totalPages = Math.max(1, sliceRangesCss.length);
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageDataUrls: string[] = [];
+
+    sliceRangesCss.forEach((range, idx) => {
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = targetPageCanvasWidth;
+      pageCanvas.height = targetPageCanvasHeight;
+      const ctx = pageCanvas.getContext('2d')!;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, targetPageCanvasWidth, targetPageCanvasHeight);
+
+      const srcY = Math.floor(range.startY * scale);
+      const srcH = Math.min(fullCanvas.height - srcY, Math.floor((range.endY - range.startY) * scale));
+
+      if (srcH > 0) {
+        ctx.drawImage(
+          fullCanvas,
+          0,
+          srcY,
+          targetPageCanvasWidth,
+          srcH,
+          0,
+          28 * scale,
+          targetPageCanvasWidth,
+          srcH
+        );
+      }
+
+      ctx.fillStyle = '#4b5563';
+      ctx.font = `bold ${12 * scale}px sans-serif`;
+      ctx.fillText(
+        `${data.schoolName} • Seite ${idx + 1}/${totalPages} • ${WORKSHEET_BUILD_ID}`,
+        36 * scale,
+        (A4_PAGE_HEIGHT_PX - 18) * scale
+      );
+
+      const imgData = pageCanvas.toDataURL('image/jpeg', 0.98);
+      pageDataUrls.push(imgData);
+      if (idx > 0) pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
+    });
+
+    return { pdf, pageDataUrls, pageCount: totalPages };
   } finally {
     if (document.body.contains(container)) {
       document.body.removeChild(container);
@@ -354,146 +317,258 @@ export async function generateLernstudioWorksheetPdf(
   }
 }
 
-export async function downloadOrSaveLernstudioWorksheet(
+export async function renderWorksheetWithDiagnostics(
   set: LernstudioSet,
   options: WorksheetOptions = {}
-): Promise<void> {
+): Promise<WorksheetRenderResult> {
+  console.log(`[LernstudioWorksheet] Starting PDF generation • Build ID: ${WORKSHEET_BUILD_ID}`);
+
+  const { data, blocks } = buildWorksheetBlocks(set, options);
+
+  // Step 1: Measure real DOM heights of every atomic block in a 722px LTR container
+  const measureContainer = document.createElement('div');
+  measureContainer.className = 'ws-root';
+  measureContainer.dir = 'ltr';
+  measureContainer.style.direction = 'ltr';
+  measureContainer.style.position = 'fixed';
+  measureContainer.style.left = '0';
+  measureContainer.style.top = '0';
+  measureContainer.style.zIndex = '-9999';
+  measureContainer.style.pointerEvents = 'none';
+  measureContainer.style.width = `${PAGE_CONTENT_WIDTH_PX}px`;
+  measureContainer.style.backgroundColor = '#ffffff';
+  measureContainer.style.color = '#111827';
+  measureContainer.style.boxSizing = 'border-box';
+  measureContainer.innerHTML =
+    `<style>${getWorksheetCss()}</style>` + blocks.map((b) => b.html).join('\n');
+
+  document.body.appendChild(measureContainer);
+
+  let measuredBlocks: WorksheetBlock[] = blocks;
   try {
-    const pdf = await generateLernstudioWorksheetPdf(set, options);
-    const isTeacher = Boolean(options.includeAnswerKey);
-    const cleanTitle = (set.title || set.topic || 'Worksheet').replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
-    const fileName = `Glueck_Worksheet_${cleanTitle}_${isTeacher ? 'TeacherKey' : 'Student'}.pdf`;
-    pdf.save(fileName);
-  } catch (err) {
-    console.error('PDF download error:', err);
-    printLernstudioWorksheetDirectly(set, options);
+    await waitForFontsAndImages(measureContainer);
+
+    const domBlockEls = measureContainer.querySelectorAll<HTMLElement>('.ws-block');
+    if (domBlockEls.length === blocks.length) {
+      measuredBlocks = blocks.map((b, idx) => {
+        const el = domBlockEls[idx];
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        const marginTop = parseFloat(style.marginTop || '0') || 0;
+        const marginBottom = parseFloat(style.marginBottom || '0') || 0;
+        const realHeight = Math.ceil(rect.height + marginTop + marginBottom);
+        return {
+          ...b,
+          height: realHeight > 10 ? realHeight : b.height
+        };
+      });
+    }
+  } finally {
+    if (document.body.contains(measureContainer)) {
+      document.body.removeChild(measureContainer);
+    }
+  }
+
+  // Step 2: Paginate and verify no page overflows (repack up to 5 times with 3% smaller content height)
+  const pageContainer = document.createElement('div');
+  pageContainer.className = 'ws-root';
+  pageContainer.dir = 'ltr';
+  pageContainer.style.direction = 'ltr';
+  pageContainer.style.position = 'fixed';
+  pageContainer.style.left = '0';
+  pageContainer.style.top = '0';
+  pageContainer.style.zIndex = '-9999';
+  pageContainer.style.pointerEvents = 'none';
+  pageContainer.style.width = `${A4_PAGE_WIDTH_PX}px`;
+  pageContainer.style.backgroundColor = '#ffffff';
+  pageContainer.style.color = '#111827';
+  pageContainer.style.boxSizing = 'border-box';
+  document.body.appendChild(pageContainer);
+
+  let repackCount = 0;
+  let currentContentHeight = DEFAULT_PAGE_CONTENT_HEIGHT_PX;
+  let paginatedPages = paginateBlocks(measuredBlocks, currentContentHeight, RUNNING_HEADER_HEIGHT_PX);
+
+  try {
+    for (let attempt = 0; attempt <= 5; attempt++) {
+      paginatedPages = paginateBlocks(measuredBlocks, currentContentHeight, RUNNING_HEADER_HEIGHT_PX);
+      const fullHtml = renderPaginatedWorksheetHtml(data, paginatedPages);
+      pageContainer.innerHTML = fullHtml;
+
+      await waitForFontsAndImages(pageContainer);
+
+      const pageEls = Array.from(pageContainer.querySelectorAll<HTMLElement>('.page'));
+      const hasOverflow = pageEls.some((pEl) => {
+        const cEl = pEl.querySelector<HTMLElement>('.page-content');
+        return (
+          pEl.scrollHeight > pEl.clientHeight + 2 ||
+          (cEl ? cEl.scrollHeight > cEl.clientHeight + 2 : false)
+        );
+      });
+
+      if (!hasOverflow) {
+        break;
+      }
+
+      if (attempt < 5) {
+        repackCount++;
+        currentContentHeight = Math.floor(currentContentHeight * 0.97);
+      }
+    }
+
+    const pageEls = Array.from(pageContainer.querySelectorAll<HTMLElement>('.page'));
+    const canvases: HTMLCanvasElement[] = [];
+
+    for (let i = 0; i < pageEls.length; i++) {
+      const pageEl = pageEls[i];
+      const canvas = await html2canvas(pageEl, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        x: 0,
+        y: 0,
+        scrollX: 0,
+        scrollY: 0,
+        width: A4_PAGE_WIDTH_PX,
+        height: A4_PAGE_HEIGHT_PX,
+        windowWidth: A4_PAGE_WIDTH_PX,
+        windowHeight: A4_PAGE_HEIGHT_PX,
+        onclone: (clonedDoc) => {
+          clonedDoc.documentElement.setAttribute('dir', 'ltr');
+          clonedDoc.documentElement.style.direction = 'ltr';
+          clonedDoc.body.setAttribute('dir', 'ltr');
+          clonedDoc.body.style.direction = 'ltr';
+          clonedDoc.body.style.margin = '0';
+          clonedDoc.body.style.padding = '0';
+        }
+      });
+      canvases.push(canvas);
+    }
+
+    const validation = validateRenderedPages(pageEls, canvases);
+
+    if (!validation.isValid) {
+      console.error('[LernstudioWorksheet] Validation issues detected:', validation.issues);
+    }
+
+    const hasSevereIssue = validation.issues.some(
+      (iss) => iss.includes('overflows') || iss.includes('aspect ratio') || iss.includes('empty')
+    );
+
+    if (hasSevereIssue) {
+      console.warn('[LernstudioWorksheet] Triggering uniform-scaling fallback slicer...');
+      const fb = await renderFallbackSlicedWorksheet(set, options);
+      return {
+        pdf: fb.pdf,
+        pageDataUrls: fb.pageDataUrls,
+        pageCount: fb.pageCount,
+        buildId: WORKSHEET_BUILD_ID,
+        warnings: [
+          ...validation.issues,
+          `تم استخدام وضع التقسيم الاحتياطي المتساوي (Fallback Layout) لضمان عدم مطّ الصفحة.`
+        ],
+        usedFallback: true,
+        repackCount,
+        validation
+      };
+    }
+
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const pageWidthMm = pdf.internal.pageSize.getWidth();
+    const pageHeightMm = pdf.internal.pageSize.getHeight();
+    const pageDataUrls: string[] = [];
+
+    canvases.forEach((canvas, idx) => {
+      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+      pageDataUrls.push(imgData);
+      if (idx > 0) {
+        pdf.addPage();
+      }
+      pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, pageHeightMm, undefined, 'FAST');
+    });
+
+    return {
+      pdf,
+      pageDataUrls,
+      pageCount: canvases.length,
+      buildId: WORKSHEET_BUILD_ID,
+      warnings: validation.issues,
+      usedFallback: false,
+      repackCount,
+      validation
+    };
+  } finally {
+    if (document.body.contains(pageContainer)) {
+      document.body.removeChild(pageContainer);
+    }
   }
 }
 
-/**
- * Direct Print Option: opens a new window with formatted worksheet and print trigger
- */
+export async function generateLernstudioWorksheetPdf(
+  set: LernstudioSet,
+  options: WorksheetOptions = {}
+): Promise<jsPDF> {
+  const res = await renderWorksheetWithDiagnostics(set, options);
+  return res.pdf;
+}
+
+export async function downloadOrSaveLernstudioWorksheet(
+  set: LernstudioSet,
+  options: WorksheetOptions = {},
+  preRendered?: WorksheetRenderResult
+): Promise<WorksheetRenderResult> {
+  const result = preRendered || (await renderWorksheetWithDiagnostics(set, options));
+  const isTeacher = Boolean(options.includeAnswerKey);
+  const cleanTitle = (set.title || set.topic || 'Worksheet')
+    .replace(/\s*\((Copy|Kopie|نسخة)\)/gi, '')
+    .replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
+  const fileName = `Glueck_Worksheet_${cleanTitle}_${isTeacher ? 'TeacherKey' : 'Student'}_${WORKSHEET_BUILD_ID}.pdf`;
+  result.pdf.save(fileName);
+  return result;
+}
+
 export function printLernstudioWorksheetDirectly(
   set: LernstudioSet,
   options: WorksheetOptions = {}
 ): void {
-  const isTeacher = Boolean(options.includeAnswerKey);
-  const school = escapeHtml(options.schoolName || 'Glück Lernstudio');
-  const teacher = escapeHtml(options.teacherName || 'الأستاذ المعلم');
-  const grade = escapeHtml(options.gradeName || set.grade || 'جميع الصفوف');
-  const subject = escapeHtml(options.subjectName || 'اللغة الألمانية');
-  const dateStr = escapeHtml(options.dateStr || new Date().toLocaleDateString('de-DE'));
+  console.log(`[LernstudioWorksheet] Direct Print • Build ID: ${WORKSHEET_BUILD_ID}`);
+  const fullHtml = buildWorksheetHtml(set, options);
 
-  const win = window.open('', '_blank');
-  if (!win) {
-    alert('يرجى السماح بفتح النوافذ المنبثقة (Popups) للطباعة والتحميل');
-    return;
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow?.document;
+  if (doc && iframe.contentWindow) {
+    doc.open();
+    doc.write(fullHtml);
+    doc.close();
+
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch {
+        // Fallback if iframe print fails
+      } finally {
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 2000);
+      }
+    }, 450);
   }
-
-  let html = `
-    <!DOCTYPE html>
-    <html dir="rtl">
-    <head>
-      <meta charset="utf-8">
-      <title>Arbeitsblatt - ${escapeHtml(set.title)}</title>
-      <style>
-        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
-        @page { size: A4 portrait; margin: 15mm; }
-        body { font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif; font-size: 13px; color: #000; margin: 0; padding: 20px; background: #fff; }
-        .de-text { direction: ltr; text-align: left; font-family: 'Segoe UI', Arial, sans-serif; }
-        .ar-text { direction: rtl; text-align: right; font-family: 'Cairo', sans-serif; }
-        .header-table { width: 100%; border-collapse: collapse; border: 2px solid #000; margin-bottom: 20px; }
-        .header-table td { padding: 10px; vertical-align: top; }
-        .section-title { font-size: 14px; font-weight: 800; border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 12px; }
-        .data-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        .data-table th, .data-table td { border: 1px solid #000; padding: 8px; font-size: 12px; }
-        .data-table th { background: #f2f2f2; }
-      </style>
-    </head>
-    <body>
-      <table class="header-table">
-        <tr>
-          <td style="width: 55%; border-left: 1px solid #000;" class="de-text">
-            <div style="font-size: 16px; font-weight: 800;">${school}</div>
-            <div>Fach: ${subject} (${escapeHtml(set.level)})</div>
-            <div>Thema: ${escapeHtml(set.title || set.topic)}</div>
-            <div>Datum: ${dateStr}</div>
-          </td>
-          <td style="width: 45%;" class="ar-text">
-            <div>الاسم: ________________________</div>
-            <div>الصف الدراسية: ${grade}</div>
-            <div>المعلم: ${teacher}</div>
-          </td>
-        </tr>
-      </table>
-
-      <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 8px;">
-        <h1 style="font-size: 18px; margin: 0;">
-          ${isTeacher ? 'ARBEITSBLATT - LÖSUNGSSCHLÜSSEL (نموذج إجابة المدرس)' : `ARBEITSBLATT: ${escapeHtml((set.title || set.topic).toUpperCase())}`}
-        </h1>
-      </div>
-  `;
-
-  if (options.includeVocabularyTable !== false && set.items.length > 0) {
-    html += `
-      <div class="section-title">1. Wortschatz-Übersicht / جدول المفردات والمعاني:</div>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th class="de-text">Deutsch</th>
-            <th class="de-text">Plural</th>
-            <th class="de-text">Beispielsatz</th>
-            <th class="ar-text">الترجمة العربية</th>
-          </tr>
-        </thead>
-        <tbody>
-    `;
-    set.items.forEach((item) => {
-      html += `
-        <tr>
-          <td class="de-text" style="font-weight: bold;">${item.emoji ? escapeHtml(item.emoji) + ' ' : ''}${escapeHtml(item.german)}</td>
-          <td class="de-text">${escapeHtml(item.plural || '-')}</td>
-          <td class="de-text">${escapeHtml(item.exampleSentenceGerman || '-')}</td>
-          <td class="ar-text" style="font-weight: bold;">${escapeHtml(item.arabic)}</td>
-        </tr>
-      `;
-    });
-    html += `</tbody></table>`;
-  }
-
-  if (options.includeMissingLetters !== false && set.items.length > 0) {
-    html += `<div class="section-title">2. Ergänze die fehlenden Buchstaben / أكمل الحرف الناقص:</div>`;
-    set.items.forEach((item, idx) => {
-      const missingPrompt = escapeHtml(item.missingLetterWord || item.german.replace(/[aeiouAEIOU]/g, '_'));
-      html += `
-        <div style="margin-bottom: 8px; display: flex; justify-content: space-between;">
-          <div class="de-text"><strong>${idx + 1})</strong> <span style="font-family: monospace; letter-spacing: 2px;">${missingPrompt}</span> ${isTeacher ? `<span style="color: green; font-weight: bold;">[${escapeHtml(item.german)}]</span>` : '___________'}</div>
-          <div class="ar-text">(${escapeHtml(item.arabic)})</div>
-        </div>
-      `;
-    });
-  }
-
-  html += `
-    <div style="margin-top: 40px; text-align: center;" class="no-print">
-      <button onclick="window.print()" style="padding: 12px 28px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-        🖨️ طباعة / حفظ كملف PDF
-      </button>
-    </div>
-    </body>
-    </html>
-  `;
-
-  win.document.open();
-  win.document.write(html);
-  win.document.close();
-
-  setTimeout(() => {
-    try {
-      win.focus();
-      win.print();
-    } catch {
-      // ignore
-    }
-  }, 600);
 }

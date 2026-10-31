@@ -1258,10 +1258,25 @@ export const LessonControlModal: React.FC = () => {
                 {/* Stopwatch Display */}
                 <div className="py-0.5 sm:py-1 relative z-10">
                   <div className="flex justify-center">
-                    <div className="relative flex flex-col items-center">
+                    <div className="relative flex flex-col items-center w-full max-w-xs">
                       <span className={`text-3xl sm:text-4xl font-black font-mono tracking-tight transition-all duration-300 ${isTimerRunning ? 'text-primary drop-shadow-[0_0_15px_rgba(var(--color-primary-rgb),0.4)]' : 'text-slate-700 dark:text-slate-300'}`}>
                         {formatTimer(timerSeconds)}
                       </span>
+                      
+                      {/* Sleek Minimal Progress Bar (No text, strictly visual progress) */}
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden mt-1.5">
+                        <div 
+                          className={`h-full transition-all duration-500 rounded-full ${
+                            (timerSeconds / ((selectedLesson.durationMinutes || 60) * 60)) >= 1
+                              ? 'bg-amber-500'
+                              : 'bg-primary'
+                          }`}
+                          style={{ 
+                            width: `${Math.min(100, Math.max(0, (timerSeconds / ((selectedLesson.durationMinutes || 60) * 60)) * 100))}%` 
+                          }}
+                        />
+                      </div>
+
                       {timerSeconds > 0 && (
                         <span className="text-[9px] text-text-muted mt-0.5 font-bold">
                           {t('auto_elapsed_time')}
