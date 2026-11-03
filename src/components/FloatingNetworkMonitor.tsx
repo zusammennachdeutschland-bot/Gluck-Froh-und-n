@@ -64,10 +64,8 @@ export const FloatingNetworkMonitor: React.FC = () => {
     };
   }, [showPopover]);
 
-  // If no active lesson, render nothing (completely unmounted & zero overhead)
-  if (!isSessionActive) {
-    return null;
-  }
+  // Clean UI: Do not display floating telemetry/ping badges on screen
+  return null;
 
   // Quality Text & Color mapping
   const qualityMap: Record<ConnectionQuality, { label: string; dotClass: string; badgeClass: string }> = {

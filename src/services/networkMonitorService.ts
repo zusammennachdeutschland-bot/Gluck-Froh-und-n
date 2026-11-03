@@ -142,17 +142,7 @@ class NetworkMonitorService {
    * to non-existent Linux root filesystem files (file:///api/health).
    */
   private getCandidateEndpoints(): string[] {
-    const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:';
-    const isHttpProtocol = typeof window !== 'undefined' && (window.location.protocol === 'http:' || window.location.protocol === 'https:');
-
-    const endpoints = [...GLOBAL_PING_ENDPOINTS];
-
-    // If served via HTTP/HTTPS (e.g. web dev/prod server), include local health check as a secondary fallback
-    if (isHttpProtocol && !isFileProtocol) {
-      endpoints.push(`${window.location.origin}/api/health`);
-    }
-
-    return endpoints;
+    return [...GLOBAL_PING_ENDPOINTS];
   }
 
   /**
