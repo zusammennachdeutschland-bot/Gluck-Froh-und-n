@@ -6,6 +6,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { getReportSchoolLogoHtml, getEffectiveSchoolName } from './alsunLogoData';
 import { escapeHtml } from './securityUtils';
+import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
 
 export interface WeeklyPlanGradeItem {
   gradeName: string;
@@ -923,6 +924,15 @@ export function printSingleWeeklyPlan(
   weekNum: number
 ) {
   const html = generateSingleWeeklyPlanHtml(plan, settings, weekNum);
+  void saveToPhoneSubfolderAndRegister({
+    title: `طباعة الخطة الأسبوعية (${plan.gradeBand} - الأسبوع ${weekNum})`,
+    fileName: `Wochenplan_Woche_${weekNum}_${plan.gradeBand}.html`,
+    category: 'school_plans',
+    actionType: 'print',
+    format: 'html',
+    textContent: html,
+    groupName: plan.gradeBand
+  });
   const printWindow = window.open('', '_blank');
   if (printWindow) {
     printWindow.document.open();
@@ -969,6 +979,14 @@ export function printAllWeeklyPlansCombinedTable(
   weekNum: number
 ) {
   const html = generateAllWeeklyPlansCombinedTableHtml(plans, settings, weekNum);
+  void saveToPhoneSubfolderAndRegister({
+    title: `طباعة الخطة الأسبوعية المجمعة (الأسبوع ${weekNum})`,
+    fileName: `Gesamter_Wochenplan_Woche_${weekNum}.html`,
+    category: 'school_plans',
+    actionType: 'print',
+    format: 'html',
+    textContent: html
+  });
   const printWindow = window.open('', '_blank');
   if (printWindow) {
     printWindow.document.open();
@@ -1170,19 +1188,18 @@ export async function downloadSingleWeeklyPlanPdf(
     pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, finalHeight, undefined, 'FAST');
     const safeStage = plan.gradeBand.replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
     const filename = `Wochenplan_Woche_${weekNum}_${safeStage}.pdf`;
+    const pdfDataUri = pdf.output('datauristring');
 
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const pdfBase64 = pdf.output('datauristring').split(',')[1];
-        await Filesystem.writeFile({
-          path: filename,
-          data: pdfBase64,
-          directory: Directory.Documents
-        });
-      } catch (nativeErr) {
-        console.warn('Native Filesystem save warning:', nativeErr);
-      }
-    }
+    await saveToPhoneSubfolderAndRegister({
+      title: `خطة أسبوعية (PDF): ${plan.gradeBand} - الأسبوع ${weekNum}`,
+      fileName: filename,
+      category: 'school_plans',
+      actionType: 'download_pdf',
+      format: 'pdf',
+      base64OrDataUrl: pdfDataUri,
+      groupName: plan.gradeBand,
+      showNativeToast: true
+    });
 
     try {
       const blob = pdf.output('blob');
@@ -1375,19 +1392,17 @@ export async function downloadAllWeeklyPlansCombinedPdf(
 
     pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, finalHeight, undefined, 'FAST');
     const filename = `Gesamter_Wochenplan_Woche_${weekNum}.pdf`;
+    const pdfDataUri = pdf.output('datauristring');
 
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const pdfBase64 = pdf.output('datauristring').split(',')[1];
-        await Filesystem.writeFile({
-          path: filename,
-          data: pdfBase64,
-          directory: Directory.Documents
-        });
-      } catch (nativeErr) {
-        console.warn('Native Filesystem save warning:', nativeErr);
-      }
-    }
+    await saveToPhoneSubfolderAndRegister({
+      title: `الخطة الأسبوعية الشاملة لجميع المراحل (PDF): الأسبوع ${weekNum}`,
+      fileName: filename,
+      category: 'school_plans',
+      actionType: 'download_pdf',
+      format: 'pdf',
+      base64OrDataUrl: pdfDataUri,
+      showNativeToast: true
+    });
 
     try {
       const blob = pdf.output('blob');

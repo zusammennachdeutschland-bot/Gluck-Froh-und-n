@@ -25,6 +25,7 @@ import {
 } from '../utils/certificateExportUtils';
 import { generateRecurringSchoolScheduleIcs } from '../utils/schoolScheduleIcsUtils';
 import { escapeHtml } from '../utils/securityUtils';
+import { saveToPhoneSubfolderAndRegister } from './downloadedFilesService';
 
 export type SchoolScheduleExportFormat = 'png' | 'jpeg' | 'pdf' | 'ics';
 export type SchoolScheduleExportTheme = 'clean_light' | 'brand_accent';
@@ -568,22 +569,21 @@ export async function exportSchoolScheduleAsImage(
     const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
     const quality = options.quality || 0.98;
     const dataUrl = canvas.toDataURL(mimeType, quality);
-    const filename = `${model.filenameBase}.${format === 'jpeg' ? 'jpg' : 'png'}`;
+    const ext = format === 'jpeg' ? 'jpg' : 'png';
+    const filename = `${model.filenameBase}.${ext}`;
 
-    // 1. Android / iOS Native Platform (Capacitor)
+    await saveToPhoneSubfolderAndRegister({
+      title: `جدول المدرسة (صورة): ${model.title}`,
+      fileName: filename,
+      category: 'schedules',
+      actionType: 'download_image',
+      format: ext,
+      base64OrDataUrl: dataUrl,
+      showNativeToast: true
+    });
+
     if (Capacitor.isNativePlatform()) {
-      try {
-        const base64Data = dataUrl.split(',')[1];
-        await Filesystem.writeFile({
-          path: filename,
-          data: base64Data,
-          directory: Directory.Documents
-        });
-
-        return { success: true, filename };
-      } catch (nativeErr: any) {
-        console.warn('Capacitor native save warning:', nativeErr);
-      }
+      return { success: true, filename };
     }
 
     // 2. Web / Desktop Fallback: Trigger direct browser download
@@ -652,21 +652,20 @@ export async function exportSchoolScheduleAsPdf(
     });
 
     const filename = `${model.filenameBase}.pdf`;
+    const pdfDataUri = pdf.output('datauristring');
 
-    // 1. Capacitor Native Android / iOS
+    await saveToPhoneSubfolderAndRegister({
+      title: `جدول المدرسة (PDF): ${model.title}`,
+      fileName: filename,
+      category: 'schedules',
+      actionType: 'download_pdf',
+      format: 'pdf',
+      base64OrDataUrl: pdfDataUri,
+      showNativeToast: true
+    });
+
     if (Capacitor.isNativePlatform()) {
-      try {
-        const pdfBase64 = pdf.output('datauristring').split(',')[1];
-        await Filesystem.writeFile({
-          path: filename,
-          data: pdfBase64,
-          directory: Directory.Documents
-        });
-
-        return { success: true, filename };
-      } catch (nativeErr: any) {
-        console.warn('Capacitor native PDF save warning:', nativeErr);
-      }
+      return { success: true, filename };
     }
 
     // 2. Web / Desktop Fallback: Trigger PDF Blob Download
@@ -710,21 +709,26 @@ export async function exportSchoolScheduleAsIcs(
       includePresence: options.includeSchoolTimes ?? false
     });
 
+    const reg = await saveToPhoneSubfolderAndRegister({
+      title: `تقويم الجدول المدرسي (.ics)`,
+      fileName: filename,
+      category: 'schedules',
+      actionType: 'export_data',
+      format: 'ics',
+      textContent: icsContent,
+      showNativeToast: true
+    });
+
     if (Capacitor.isNativePlatform()) {
       try {
-        const savedFile = await Filesystem.writeFile({
-          path: filename,
-          data: icsContent,
-          directory: Directory.Cache
-        });
-
-        await Share.share({
-          title: 'School Schedule Calendar Export',
-          text: `Glück School Schedule - ${filename}`,
-          url: savedFile.uri,
-          dialogTitle: options.language === 'ar' ? 'حفظ / استيراد ملف التقويم' : 'Save / Import Calendar (.ics)'
-        });
-
+        if (reg.nativeUri) {
+          await Share.share({
+            title: 'School Schedule Calendar Export',
+            text: `Glück School Schedule - ${filename}`,
+            url: reg.nativeUri,
+            dialogTitle: options.language === 'ar' ? 'حفظ / استيراد ملف التقويم' : 'Save / Import Calendar (.ics)'
+          });
+        }
         return { success: true, filename, icsContent };
       } catch (nativeErr: any) {
         console.warn('Capacitor native ICS share warning:', nativeErr);
@@ -780,20 +784,25 @@ export async function shareSchoolSchedule(
     const canvas = await renderScheduleToCanvas(model, options);
     const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
     const dataUrl = canvas.toDataURL(mimeType, 0.98);
-    const filename = `${model.filenameBase}.${format === 'jpeg' ? 'jpg' : 'png'}`;
+    const ext = format === 'jpeg' ? 'jpg' : 'png';
+    const filename = `${model.filenameBase}.${ext}`;
+
+    // Always save to phone internal folder (Documents/Gluck_Lernstudio/Schedules) BEFORE sharing!
+    const reg = await saveToPhoneSubfolderAndRegister({
+      title: `مشاركة جدول المدرسة: ${model.title}`,
+      fileName: filename,
+      category: 'schedules',
+      actionType: 'whatsapp',
+      format: ext,
+      base64OrDataUrl: dataUrl,
+      showNativeToast: true
+    });
 
     // 1. Native Capacitor Share
-    if (Capacitor.isNativePlatform()) {
-      const base64Data = dataUrl.split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: filename,
-        data: base64Data,
-        directory: Directory.Documents
-      });
-
+    if (Capacitor.isNativePlatform() && reg.nativeUri) {
       await Share.share({
         title: filename,
-        url: savedFile.uri,
+        url: reg.nativeUri,
         dialogTitle: model.language === 'ar' ? 'مشاركة جدول المدرسة' : 'Share School Schedule'
       });
       return { success: true };
@@ -836,6 +845,15 @@ export function printSchoolScheduleNative(
     const model = buildSchoolScheduleExportModel(settings, profile, options);
     const element = createExportDomElement(model, options);
     
+    void saveToPhoneSubfolderAndRegister({
+      title: `طباعة جدول المدرسة: ${model.title}`,
+      fileName: `${model.filenameBase}.html`,
+      category: 'schedules',
+      actionType: 'print',
+      format: 'html',
+      textContent: element.outerHTML
+    });
+
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       // Fallback: If popup blocked, print current page after isolating or report error

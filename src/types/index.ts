@@ -907,6 +907,7 @@ export interface Lesson extends SyncableRecord {
   locationAddress?: string;
   location?: string;
   report?: LessonReport;
+  whatsAppDispatchedStudents?: Record<string, string>;
   studentPayments?: Record<string, StudentPaymentDetail>;
   offlinePaymentAction?: 'paid_now' | 'will_pay_next' | 'partially_paid' | 'not_paid';
   notes?: string;

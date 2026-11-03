@@ -155,9 +155,18 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
     }
   };
 
-  const handleDirectPrint = (isTeacherKey: boolean) => {
-    const opts = getOptions(isTeacherKey);
-    printLernstudioWorksheetDirectly(set, opts);
+  const handleDirectPrint = async (isTeacherKey: boolean) => {
+    setIsGenerating(true);
+    try {
+      const opts = getOptions(isTeacherKey);
+      const preRendered =
+        previewResult && previewIsTeacher === isTeacherKey ? previewResult : undefined;
+      await printLernstudioWorksheetDirectly(set, opts, preRendered);
+    } catch (err) {
+      console.error('Worksheet Print error:', err);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -494,13 +503,23 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
 
           <button
             type="button"
+            disabled={isGenerating}
             onClick={() => handleDirectPrint(false)}
-            className="w-full py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center justify-center gap-1.5"
+            className="w-full py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <Printer className="w-4 h-4 text-primary" />
-            <span>
-              {t.printBtn} ({WORKSHEET_BUILD_ID})
-            </span>
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span>جاري التجهيز...</span>
+              </>
+            ) : (
+              <>
+                <Printer className="w-4 h-4 text-primary" />
+                <span>
+                  {t.printBtn} ({WORKSHEET_BUILD_ID})
+                </span>
+              </>
+            )}
           </button>
         </div>
       </div>

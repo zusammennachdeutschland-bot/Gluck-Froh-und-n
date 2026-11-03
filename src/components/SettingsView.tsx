@@ -17,9 +17,12 @@ import { getEffectiveSchoolEndForDay, formatTime } from '../utils/timeUtils';
 import { COLOR_FAMILIES, getContrastTextColor } from '../utils/colorUtils';
 import { CustomColorPickerModal } from './CustomColorPickerModal';
 import { ContactsUnificationModal } from './ContactsUnificationModal';
+import { DownloadedFilesSection } from './DownloadedFilesSection';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
+import { FolderOpen } from 'lucide-react';
 
 type SettingsCategory = 
+  | 'downloaded_files'
   | 'language'
   | 'notifications'
   | 'profile'
@@ -294,6 +297,14 @@ export const SettingsView: React.FC = () => {
 
   const categoryCards = [
     {
+      id: 'downloaded_files' as SettingsCategory,
+      title: _t('الملفات المحملة', 'Downloaded Files', 'Heruntergeladene Dateien'),
+      description: _t('أرشيف جميع الملفات والشهادات والتقارير وأوراق العمل المحفوظة والمطبوعة والمرسلة واتساب مع فلترة ذكية', 'All generated, printed, and WhatsApp-shared files & certificates with filtering', 'Alle erstellten, gedruckten und geteilten Dateien mit Filter'),
+      icon: FolderOpen,
+      color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 dark:border-emerald-500/30',
+      badge: 'Gluck_Lernstudio'
+    },
+    {
       id: 'profile' as SettingsCategory,
       title: t('auto_profile_work_schedule'),
       description: t('auto_personal_information_contact'),
@@ -505,6 +516,20 @@ export const SettingsView: React.FC = () => {
           </div>
         ) : (
           <div className="animate-fade-in bg-surface rounded-xl border border-surface-border shadow-2xs p-3.5 sm:p-4 min-h-[50vh]">
+            {/* ==========================================
+                SUBPAGE: DOWNLOADED FILES (الملفات المحملة)
+            ========================================== */}
+            {activeCategory === 'downloaded_files' && (
+              <div className="space-y-3.5 animate-scale-up">
+                {renderSubPageHeader(
+                  _t('الملفات المحملة 📁', 'Downloaded Files 📁', 'Heruntergeladene Dateien 📁'),
+                  _t('أرشيف شامل لكل الملفات والشهادات وأوراق العمل والتقارير المحفوظة في هاتفك مع فلترة ذكية', 'Complete archive of all generated, printed, and WhatsApp-shared files saved in your phone storage', 'Vollständiges Archiv aller erstellten, gedruckten und geteilten Dateien'),
+                  FolderOpen
+                )}
+                <DownloadedFilesSection />
+              </div>
+            )}
+
             {/* ==========================================
                 SUBPAGE: CONTACTS UNIFICATION
             ========================================== */}

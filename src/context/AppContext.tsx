@@ -61,6 +61,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { validateAndSanitizeBackupPayload, hasBackupSection, MAX_BACKUP_FILE_SIZE_BYTES, isBackupFileSizeValid } from '../utils/backupEngine';
 import { syncAllWidgetsToNative } from '../services/widgetService';
+import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
 
 export const DEFAULT_BOTTOM_NAV_ORDER = [
   'home',
@@ -6303,6 +6304,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const jsonStr = JSON.stringify(backupObj, null, 2);
     const fileName = `znd_backup_${formatLocalDate()}.json`;
 
+    const reg = await saveToPhoneSubfolderAndRegister({
+      title: `نسخة احتياطية شاملة للبرنامج (${formatLocalDate()})`,
+      fileName,
+      category: 'backups',
+      actionType: 'export_data',
+      format: 'json',
+      textContent: jsonStr.slice(0, 12000),
+      showNativeToast: true
+    });
+
     if (Capacitor.isNativePlatform()) {
       try {
         const savedFile = await Filesystem.writeFile({
@@ -6313,7 +6324,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
         await Share.share({
           title: 'Glück Backup',
-          files: [savedFile.uri],
+          files: [reg.nativeUri || savedFile.uri],
           dialogTitle: 'Export Backup JSON'
         });
         return;

@@ -172,7 +172,7 @@ export function runLernstudioWorksheetTests(): { passed: number; failed: number;
   // -------------------------------------------------------------
   // 1. Build Stamp & CSS Layout Regression Verification
   // -------------------------------------------------------------
-  assert(WORKSHEET_BUILD_ID === 'ws-7', 'WORKSHEET_BUILD_ID is ws-7');
+  assert(WORKSHEET_BUILD_ID === 'ws-8', 'WORKSHEET_BUILD_ID is ws-8');
   const cssCheck = getWorksheetCss();
   assert(
     !cssCheck.includes('.ws-block {\n      display: block !important;'),

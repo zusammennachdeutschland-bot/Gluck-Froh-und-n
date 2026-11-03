@@ -10,8 +10,9 @@ import { Dialog } from '@capacitor/dialog';
 import { CertificateRecord } from '../types';
 import { CertificateRenderer } from '../components/certificates/templates/CertificateRenderer';
 import { buildWhatsAppUrl } from './phoneUtils';
+import { saveToPhoneSubfolderAndRegister, APP_ROOT_FOLDER } from '../services/downloadedFilesService';
 
-export const CERTIFICATES_FOLDER_NAME = 'AGS_Certificates';
+export const CERTIFICATES_FOLDER_NAME = `${APP_ROOT_FOLDER}/Certificates`;
 
 export interface ExportCertificateOptions {
   filename?: string;
@@ -794,29 +795,35 @@ export async function exportCertificateAsImage(
     const canvas = await renderCertificateToCanvas(target, undefined, options.elementId);
     const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
     const dataUrl = canvas.toDataURL(mimeType, 0.98);
-    const safeFilename = `${filename.replace(/[/\\?%*:|"<>]/g, '_')}.${format === 'jpeg' ? 'jpg' : 'png'}`;
+    const ext = format === 'jpeg' ? 'jpg' : 'png';
+    const safeFilename = `${filename.replace(/[/\\?%*:|"<>]/g, '_')}.${ext}`;
+
+    const studentName = typeof target === 'object' && !(target instanceof HTMLElement)
+      ? (target.recipientName || target.studentName || '')
+      : '';
+    const certTitle = typeof target === 'object' && !(target instanceof HTMLElement)
+      ? (target.courseOrLevelTitle || target.title || filename)
+      : filename;
+
+    const reg = await saveToPhoneSubfolderAndRegister({
+      title: `شهادة: ${certTitle}${studentName ? ` - ${studentName}` : ''}`,
+      fileName: safeFilename,
+      category: 'certificates',
+      actionType: 'download_image',
+      format: ext,
+      base64OrDataUrl: dataUrl,
+      studentName,
+      showNativeToast: options.notifyOnSuccess !== false
+    });
 
     if (Capacitor.isNativePlatform()) {
-      const saveRes = await saveFileToNativeFolder(safeFilename, dataUrl, mimeType);
-
-      if (options.notifyOnSuccess !== false) {
-        try {
-          await Toast.show({
-            text: `✅ تم حفظ الصورة بنجاح في:\n${saveRes.path}`,
-            duration: 'long'
-          });
-        } catch {
-          // ignore
-        }
-      }
-
-      return { success: true, path: saveRes.path };
+      return { success: true, path: reg.fullStoragePath };
     }
 
     // Web Fallback using Blob URL
     const blob = dataUrlToBlob(dataUrl);
     triggerWebDownload(blob, safeFilename);
-    return { success: true, path: safeFilename };
+    return { success: true, path: reg.fullStoragePath };
   } catch (error) {
     console.error('Error exporting certificate as image:', error);
     throw error;
@@ -825,7 +832,7 @@ export async function exportCertificateAsImage(
 
 /**
  * Exports / Saves a certificate as a high quality vector-embedded PDF (A4 Landscape).
- * On Native Android: Saves directly into phone Documents/AGS_Certificates folder without opening Share.
+ * On Native Android: Saves directly into phone Documents/Gluck_Lernstudio/Certificates folder.
  * On Web: Downloads directly to browser Downloads.
  */
 export async function exportCertificateAsPdf(
@@ -848,29 +855,34 @@ export async function exportCertificateAsPdf(
     pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight, undefined, 'FAST');
 
     const safeFilename = `${filename.replace(/[/\\?%*:|"<>]/g, '_')}.pdf`;
+    const pdfBase64 = pdf.output('datauristring');
+
+    const studentName = typeof target === 'object' && !(target instanceof HTMLElement)
+      ? (target.recipientName || target.studentName || '')
+      : '';
+    const certTitle = typeof target === 'object' && !(target instanceof HTMLElement)
+      ? (target.courseOrLevelTitle || target.title || filename)
+      : filename;
+
+    const reg = await saveToPhoneSubfolderAndRegister({
+      title: `شهادة PDF: ${certTitle}${studentName ? ` - ${studentName}` : ''}`,
+      fileName: safeFilename,
+      category: 'certificates',
+      actionType: 'download_pdf',
+      format: 'pdf',
+      base64OrDataUrl: pdfBase64,
+      studentName,
+      showNativeToast: options.notifyOnSuccess !== false
+    });
 
     if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring');
-      const saveRes = await saveFileToNativeFolder(safeFilename, pdfBase64, 'application/pdf');
-
-      if (options.notifyOnSuccess !== false) {
-        try {
-          await Toast.show({
-            text: `✅ تم حفظ ملف PDF بنجاح في:\n${saveRes.path}`,
-            duration: 'long'
-          });
-        } catch {
-          // ignore
-        }
-      }
-
-      return { success: true, path: saveRes.path };
+      return { success: true, path: reg.fullStoragePath };
     }
 
     // Web fallback using Blob URL
     const pdfBlob = pdf.output('blob');
     triggerWebDownload(pdfBlob, safeFilename);
-    return { success: true, path: safeFilename };
+    return { success: true, path: reg.fullStoragePath };
   } catch (error) {
     console.error('Error exporting certificate as PDF:', error);
     throw error;
@@ -905,7 +917,7 @@ export async function saveCertificateToPhoneFolder(
     }
 
     const successMessage = Capacitor.isNativePlatform()
-      ? `تم حفظ الشهادة بنجاح في مجلد الهاتف:\n📁 ${resultPath}\n\nيمكنك العثور عليها بسهولة في تطبيق "الملفات" (Files) بهاتفك.`
+      ? `تم حفظ الشهادة بنجاح في مجلد الهاتف:\n📁 ${resultPath}\n\nيمكنك العثور عليها بسهولة في تطبيق "الملفات" (Files) أو من صفحة "الملفات المحملة" بالإعدادات.`
       : `تم تحميل الشهادة بنجاح إلى مجلد التنزيلات بجهازك (${resultPath})`;
 
     if (Capacitor.isNativePlatform()) {
@@ -1018,7 +1030,7 @@ export async function downloadCertificateImage(
 }
 
 /**
- * Dedicated Share function: Opens native Android Share sheet or Web Share dialog.
+ * Dedicated Share function: Always saves into Gluck_Lernstudio/Certificates BEFORE opening native Share sheet.
  */
 export async function shareCertificate(
   target: HTMLElement | string | Partial<CertificateRecord>,
@@ -1036,18 +1048,23 @@ export async function shareCertificate(
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       pdf.addImage(imgData, 'JPEG', 0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight(), undefined, 'FAST');
       const safeFilename = `${safeBase}.pdf`;
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      const pdfDataUri = pdf.output('datauristring');
 
-      if (Capacitor.isNativePlatform()) {
-        const savedFile = await Filesystem.writeFile({
-          path: safeFilename,
-          data: pdfBase64,
-          directory: Directory.Documents
-        });
+      const reg = await saveToPhoneSubfolderAndRegister({
+        title: `شهادة PDF: ${title} - ${recipientName}`,
+        fileName: safeFilename,
+        category: 'certificates',
+        actionType: 'whatsapp',
+        format: 'pdf',
+        base64OrDataUrl: pdfDataUri,
+        studentName: recipientName,
+        showNativeToast: true
+      });
 
+      if (Capacitor.isNativePlatform() && reg.nativeUri) {
         await Share.share({
           title: safeFilename,
-          url: savedFile.uri,
+          url: reg.nativeUri,
           dialogTitle: 'مشاركة شهادة PDF'
         });
         return true;
@@ -1060,18 +1077,22 @@ export async function shareCertificate(
       const canvas = await renderCertificateToCanvas(target, undefined, elementId);
       const dataUrl = canvas.toDataURL('image/png', 0.95);
       const safeFilename = `${safeBase}.png`;
-      const base64Data = dataUrl.split(',')[1];
 
-      if (Capacitor.isNativePlatform()) {
-        const savedFile = await Filesystem.writeFile({
-          path: safeFilename,
-          data: base64Data,
-          directory: Directory.Documents
-        });
+      const reg = await saveToPhoneSubfolderAndRegister({
+        title: `شهادة: ${title} - ${recipientName}`,
+        fileName: safeFilename,
+        category: 'certificates',
+        actionType: 'whatsapp',
+        format: 'png',
+        base64OrDataUrl: dataUrl,
+        studentName: recipientName,
+        showNativeToast: true
+      });
 
+      if (Capacitor.isNativePlatform() && reg.nativeUri) {
         await Share.share({
           title: safeFilename,
-          url: savedFile.uri,
+          url: reg.nativeUri,
           dialogTitle: 'مشاركة صورة الشهادة'
         });
         return true;
@@ -1091,7 +1112,8 @@ export async function shareCertificate(
 }
 
 /**
- * Sends certificate with image and formatted congratulatory text to WhatsApp
+ * Sends certificate with image and formatted congratulatory text to WhatsApp.
+ * Always saves the certificate file into Documents/Gluck_Lernstudio/Certificates BEFORE sharing on WhatsApp!
  */
 export async function sendCertificateWhatsApp(
   firstArg: string | Partial<CertificateRecord>,
@@ -1143,27 +1165,34 @@ export async function sendCertificateWhatsApp(
     };
     const canvas = await renderCertificateToCanvas(target);
     const dataUrl = canvas.toDataURL('image/png', 0.95);
-    const base64Data = dataUrl.split(',')[1];
     const blob = dataUrlToBlob(dataUrl);
 
-    // 2. Native Mobile Platform (Android / iOS via Capacitor)
-    if (Capacitor.isNativePlatform()) {
-      const savedFile = await Filesystem.writeFile({
-        path: safeFilename,
-        data: base64Data,
-        directory: Directory.Cache
-      });
+    // 2. ALWAYS save to phone internal storage folder (Documents/Gluck_Lernstudio/Certificates) and register BEFORE sharing!
+    const reg = await saveToPhoneSubfolderAndRegister({
+      title: `شهادة واتساب: ${title} - ${recipientName}`,
+      fileName: safeFilename,
+      category: 'certificates',
+      actionType: 'whatsapp',
+      format: 'png',
+      base64OrDataUrl: dataUrl,
+      studentName: recipientName,
+      recipientPhone: phoneNumber,
+      textContent: message,
+      showNativeToast: true
+    });
 
+    // 3. Native Mobile Platform (Android / iOS via Capacitor)
+    if (Capacitor.isNativePlatform() && reg.nativeUri) {
       await Share.share({
         title: `شهادة ${recipientName}`,
         text: message,
-        url: savedFile.uri,
+        url: reg.nativeUri,
         dialogTitle: 'إرسال الشهادة عبر واتساب'
       });
       return true;
     }
 
-    // 3. Web Share API with File (Mobile Chrome on Android, iOS Safari, etc.)
+    // 4. Web Share API with File (Mobile Chrome on Android, iOS Safari, etc.)
     if (typeof navigator !== 'undefined' && navigator.share && typeof navigator.canShare === 'function') {
       try {
         const file = new File([blob], safeFilename, { type: 'image/png' });
@@ -1189,8 +1218,7 @@ export async function sendCertificateWhatsApp(
       }
     }
 
-    // 4. Desktop Web Browser Fallback:
-    // Copy image to clipboard so user can press Ctrl+V directly in WhatsApp Web
+    // 5. Desktop Web Browser Fallback:
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
         await navigator.clipboard.write([

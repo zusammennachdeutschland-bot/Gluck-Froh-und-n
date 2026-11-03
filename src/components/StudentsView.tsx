@@ -7,7 +7,7 @@ import {
   FolderCheck, X, Trash2, Edit3, Archive, RotateCcw, MoreVertical, User, 
   FileText, Award, DollarSign, Bot, ChevronDown, Filter, Sparkles, AtSign, 
   Mars, Venus, CircleHelp, Copy, Check, ArrowRightLeft, UserX, CheckSquare, Square, AlertTriangle,
-  BarChart3, GraduationCap, Smartphone, UserCheck, Dices
+  BarChart3, GraduationCap, Smartphone, UserCheck, Dices, Flame
 } from 'lucide-react';
 import { StudentProfileModal } from './StudentProfileModal';
 import { GroupProfileModal } from './GroupProfileModal';
@@ -20,6 +20,7 @@ import { ContactsUnificationModal } from './ContactsUnificationModal';
 import { BulkCertificateModal } from './certificates/BulkCertificateModal';
 import { GroupAnalyticsModal } from './GroupAnalyticsModal';
 import { RandomStudentPickerModal } from './RandomStudentPickerModal';
+import { WhatsAppDispatchQueueModal } from './WhatsAppDispatchQueueModal';
 import { formatGroupScheduleDisplay, getDayNumber } from '../utils/scheduleUtils';
 import { buildWhatsAppUrl, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
@@ -69,6 +70,8 @@ export const StudentsView: React.FC = () => {
   const [isBulkCertificatesModalOpen, setIsBulkCertificatesModalOpen] = useState(false);
   const [isGroupAnalyticsModalOpen, setIsGroupAnalyticsModalOpen] = useState(false);
   const [isRandomPickerModalOpen, setIsRandomPickerModalOpen] = useState(false);
+  const [isWhatsAppQueueOpen, setIsWhatsAppQueueOpen] = useState(false);
+  const [isBulkWhatsAppQueueOpen, setIsBulkWhatsAppQueueOpen] = useState(false);
 
   // Student transfer & group clear states
   const [studentToMove, setStudentToMove] = useState<Student | null>(null);
@@ -521,6 +524,17 @@ export const StudentsView: React.FC = () => {
             <Sparkles className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
           </button>
 
+          {/* 6.5. WhatsApp Dispatch Queue */}
+          <button
+            type="button"
+            onClick={() => setIsWhatsAppQueueOpen(true)}
+            className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 active:scale-95 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+            title={_t('طابور إرسال رسائل وتقارير الواتساب', 'WhatsApp Dispatch Queue', 'WhatsApp-Warteschlange')}
+            aria-label={_t('طابور إرسال رسائل وتقارير الواتساب', 'WhatsApp Dispatch Queue', 'WhatsApp-Warteschlange')}
+          >
+            <Flame className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          </button>
+
           {/* 7. Certificates (Unified Theme) */}
           <button
             type="button"
@@ -748,6 +762,15 @@ export const StudentsView: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setIsBulkWhatsAppQueueOpen(true)}
+              className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-lg text-xs font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            >
+              <Flame className="w-3.5 h-3.5 text-amber-300" />
+              <span>{_t('طابور إرسال واتساب ⚡', 'WhatsApp Queue ⚡', 'WhatsApp-Warteschlange ⚡')}</span>
+            </button>
+
             <button
               type="button"
               onClick={() => {
@@ -2093,6 +2116,26 @@ export const StudentsView: React.FC = () => {
         students={students}
         groups={groups}
       />
+
+      {/* WhatsApp Dispatch Queue Modal (Filtered Students) */}
+      {isWhatsAppQueueOpen && (
+        <WhatsAppDispatchQueueModal
+          isOpen={isWhatsAppQueueOpen}
+          onClose={() => setIsWhatsAppQueueOpen(false)}
+          initialStudents={sortedStudents}
+          title={selectedGroup ? selectedGroup.name : _t('طلاب اللغة الألمانية', 'German Students', 'Deutsch-Schüler')}
+        />
+      )}
+
+      {/* WhatsApp Dispatch Queue Modal (Bulk Selected Students) */}
+      {isBulkWhatsAppQueueOpen && (
+        <WhatsAppDispatchQueueModal
+          isOpen={isBulkWhatsAppQueueOpen}
+          onClose={() => setIsBulkWhatsAppQueueOpen(false)}
+          initialStudents={students.filter(s => selectedStudentIds.includes(s.id))}
+          title={_t(`الطلاب المحددين (${selectedStudentIds.length})`, `Selected Students (${selectedStudentIds.length})`, `Ausgewählte Schüler (${selectedStudentIds.length})`)}
+        />
+      )}
     </div>
   );
 };

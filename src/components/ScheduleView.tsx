@@ -7,7 +7,7 @@ import { getProjectedLessonsForRange, getCurrentAlternatingWeek, getAlternatingW
 import { 
   Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, ChevronDown,
   Video, MapPin, CheckCircle2, AlertTriangle, Trash2, ArrowLeftRight, 
-  Download, X, Check, Zap, RefreshCw, Play, Send, BookOpen, Plus, Repeat, MessageCircle, Phone
+  Download, X, Check, Zap, RefreshCw, Play, Send, BookOpen, Plus, Repeat, MessageCircle, Phone, Flame
 } from 'lucide-react';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
 import { StartLessonNowModal } from './StartLessonNowModal';
@@ -16,6 +16,7 @@ import { ExportMonthlyCalendarModal } from './ExportMonthlyCalendarModal';
 import { DeleteSessionConfirmModal } from './DeleteSessionConfirmModal';
 import { GroupProfileModal } from './GroupProfileModal';
 import { SelectParentCallModal } from './SelectParentCallModal';
+import { WhatsAppDispatchQueueModal } from './WhatsAppDispatchQueueModal';
 import { getSchoolSettings, calculatePeriodsTimings } from '../utils/schoolUtils';
 import { DAY_KEY_TO_RRULE_BYDAY, getUpcomingDateForDayKey, formatIcsEventBlock, SchoolIcsEventItem } from '../utils/schoolScheduleIcsUtils';
 import { Capacitor } from '@capacitor/core';
@@ -38,10 +39,12 @@ export const ScheduleView: React.FC = () => {
   const [expandedLessonIds, setExpandedLessonIds] = useState<string[]>([]);
   const [collapsedLessonIds, setCollapsedLessonIds] = useState<string[]>([]);
   const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [queueLesson, setQueueLesson] = useState<Lesson | null>(null);
   const [selectParentModalData, setSelectParentModalData] = useState<{
     isOpen: boolean;
     title: string;
     students: Student[];
+    lesson?: Lesson;
   }>({
     isOpen: false,
     title: '',
@@ -381,6 +384,7 @@ export const ScheduleView: React.FC = () => {
           isOpen: true,
           title: targetGroup?.name || targetLesson.title || _t('اختيار ولي الأمر', 'Select Parent', 'Elternteil auswählen'),
           students: effectiveStudents,
+          lesson: targetLesson,
         });
       }
     } else if (effectiveStudents.length === 1) {
@@ -1136,6 +1140,28 @@ export const ScheduleView: React.FC = () => {
                               <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             </button>
 
+                            {(() => {
+                              const targetGroup = lesson.groupId ? (groups.find(g => g.id === lesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === lesson.groupId.trim().toLowerCase())) : undefined;
+                              const groupSts = targetGroup ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id) : [];
+                              if (groupSts.length > 1) {
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setQueueLesson(lesson);
+                                    }}
+                                    title={_t(`طابور إرسال الواتساب السريع (${groupSts.length} طلاب)`, `WhatsApp Dispatch Queue (${groupSts.length} students)`, `WhatsApp-Warteschlange (${groupSts.length} Schüler)`)}
+                                    className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition-all cursor-pointer"
+                                    aria-label="WhatsApp Queue"
+                                  >
+                                    <Flame className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                                  </button>
+                                );
+                              }
+                              return null;
+                            })()}
+
                             <button
                               type="button"
                               onClick={() => setReminderLesson(lesson)}
@@ -1641,7 +1667,17 @@ export const ScheduleView: React.FC = () => {
         title={selectParentModalData.title}
         students={selectParentModalData.students}
         _t={_t}
+        onStartWhatsAppQueue={() => setQueueLesson(selectParentModalData.lesson || null)}
       />
+
+      {/* WHATSAPP DISPATCH QUEUE MODAL */}
+      {queueLesson && (
+        <WhatsAppDispatchQueueModal
+          isOpen={Boolean(queueLesson)}
+          onClose={() => setQueueLesson(null)}
+          lesson={queueLesson}
+        />
+      )}
     </div>
   );
 };

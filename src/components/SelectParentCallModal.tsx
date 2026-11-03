@@ -1,6 +1,6 @@
 import React from 'react';
 import { Student } from '../types';
-import { Phone, MessageCircle, X, User } from 'lucide-react';
+import { Phone, MessageCircle, X, User, Flame } from 'lucide-react';
 import { buildWhatsAppUrl, cleanPhoneNumberForTel, formatContactDisplay } from '../utils/phoneUtils';
 
 interface SelectParentCallModalProps {
@@ -9,6 +9,7 @@ interface SelectParentCallModalProps {
   title: string;
   students: Student[];
   _t: (ar: string, en: string, de: string) => string;
+  onStartWhatsAppQueue?: () => void;
 }
 
 export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
@@ -16,7 +17,8 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
   onClose,
   title,
   students,
-  _t
+  _t,
+  onStartWhatsAppQueue
 }) => {
   if (!isOpen) return null;
 
@@ -56,6 +58,25 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {onStartWhatsAppQueue && students.length > 1 && (
+          <div className="px-3.5 py-2 bg-emerald-500/10 border-b border-emerald-500/20 flex items-center justify-between gap-2 shrink-0">
+            <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
+              {_t(`إرسال تقارير ورسائل للجميع (${students.length})؟`, `Dispatch to all (${students.length})?`, `An alle senden?`)}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onStartWhatsAppQueue();
+              }}
+              className="px-3 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-lg text-xs font-black shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            >
+              <Flame className="w-3.5 h-3.5 text-amber-300" />
+              <span>{_t('طابور الإرسال ⚡', 'WhatsApp Queue ⚡', 'Warteschlange ⚡')}</span>
+            </button>
+          </div>
+        )}
 
         {/* Modal Content - Student Contacts List */}
         <div className="p-3 overflow-y-auto space-y-2 divide-y divide-surface-border/50">

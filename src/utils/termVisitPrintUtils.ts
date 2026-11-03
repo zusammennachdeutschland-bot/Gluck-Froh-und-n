@@ -9,6 +9,7 @@ import { getEffectiveSchoolLogo, getEffectiveSchoolName, getReportSchoolNameHtml
 import { renderContainerToCanvas, prepareClonedDocForHtml2Canvas, saveReportAsOfflineHtml } from './printObservationUtils';
 import { escapeHtml } from './securityUtils';
 import { formatLocalDate } from './timeUtils';
+import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
 
 export interface TermVisitReportExportOptions {
   weekFilter?: string; // 'all' or specific week key like 'الأسبوع 41'
@@ -937,20 +938,17 @@ export async function downloadTermVisitPlanPdf(
   try {
     const pdf = await generateTermVisitPlanPdfInstance(result, settings, isRtl, lang, options);
     const blob = pdf.output('blob');
+    const pdfDataUri = pdf.output('datauristring');
 
-    // 1. Native Capacitor platform support (Save directly to Documents folder)
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const pdfBase64 = pdf.output('datauristring').split(',')[1];
-        await Filesystem.writeFile({
-          path: fileName,
-          data: pdfBase64,
-          directory: Directory.Documents
-        });
-      } catch (nativeErr) {
-        console.warn('Native Capacitor save to Documents warning:', nativeErr);
-      }
-    }
+    await saveToPhoneSubfolderAndRegister({
+      title: `خطة الزيارات الصفية (PDF): ${options?.weekFilter && options.weekFilter !== 'all' ? options.weekFilter : result.settings.term}`,
+      fileName,
+      category: 'school_plans',
+      actionType: 'download_pdf',
+      format: 'pdf',
+      base64OrDataUrl: pdfDataUri,
+      showNativeToast: true
+    });
 
     // 2. Browser anchor download - Saves binary file directly to Internal Storage / Downloads folder
     const blobUrl = URL.createObjectURL(blob);
@@ -978,6 +976,14 @@ export async function downloadTermVisitPlanPdf(
 
   try {
     const container = buildTermVisitReportHtmlContainer(result, settings, isRtl, lang, options);
+    await saveToPhoneSubfolderAndRegister({
+      title: `خطة الزيارات الصفية (HTML): ${result.settings.term}`,
+      fileName: htmlFileName,
+      category: 'school_plans',
+      actionType: 'export_data',
+      format: 'html',
+      textContent: container.outerHTML
+    });
     saveReportAsOfflineHtml(container.outerHTML, htmlFileName);
     return { success: true, filename: htmlFileName, method: 'html' };
   } catch (htmlErr: any) {
@@ -1003,26 +1009,17 @@ export async function saveTermVisitPlanToPhoneStorage(
   try {
     const pdf = await generateTermVisitPlanPdfInstance(result, settings, isRtl, lang, options);
     const blob = pdf.output('blob');
-    const pdfBase64 = pdf.output('datauristring').split(',')[1];
+    const pdfDataUri = pdf.output('datauristring');
 
-    // 1. Capacitor Native Storage
-    if (Capacitor.isNativePlatform()) {
-      try {
-        await Filesystem.writeFile({
-          path: fileName,
-          data: pdfBase64,
-          directory: Directory.Documents
-        });
-      } catch {
-        try {
-          await Filesystem.writeFile({
-            path: fileName,
-            data: pdfBase64,
-            directory: Directory.Cache
-          });
-        } catch (_) {}
-      }
-    }
+    await saveToPhoneSubfolderAndRegister({
+      title: `حفظ خطة الزيارات الصفية: ${result.settings.term}`,
+      fileName,
+      category: 'school_plans',
+      actionType: 'download_pdf',
+      format: 'pdf',
+      base64OrDataUrl: pdfDataUri,
+      showNativeToast: true
+    });
 
     // 2. Direct Anchor Download - Direct binary file download into Android Phone Internal Downloads folder
     const blobUrl = URL.createObjectURL(blob);
@@ -1119,6 +1116,15 @@ export async function printTermVisitPlanReport(
     c.style.width = '100%';
     wrapper.appendChild(c);
   }
+
+  void saveToPhoneSubfolderAndRegister({
+    title: `طباعة خطة الزيارات الصفية: ${result.settings.term}`,
+    fileName: `Term_Visits_Print_${Date.now()}.html`,
+    category: 'school_plans',
+    actionType: 'print',
+    format: 'html',
+    textContent: wrapper.innerHTML
+  });
 
   document.body.appendChild(wrapper);
   window.print();

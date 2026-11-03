@@ -8,6 +8,7 @@ import { Share } from '@capacitor/share';
 import { sanitizeModernCssColors } from './certificateExportUtils';
 import { getReportSchoolLogoHtml, getEffectiveSchoolName, getReportSchoolNameHtml } from './alsunLogoData';
 import { formatLocalDate } from './timeUtils';
+import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
 
 export function getVisitsForStageReport(
   record: StageFollowUpRecord,
@@ -678,17 +679,22 @@ export async function shareStageFollowUpViaWhatsApp(
 
   try {
     const pdf = await generateStageFollowUpPdfInstance(record, settings, isRtl, lang);
+    const pdfDataUri = pdf.output('datauristring');
 
-    if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: fileName,
-        data: pdfBase64,
-        directory: Directory.Cache
-      });
+    const reg = await saveToPhoneSubfolderAndRegister({
+      title: `تقرير متابعة مرحلة (واتساب): ${record.stageManagerName || ''}`,
+      fileName,
+      category: 'school_plans',
+      actionType: 'whatsapp',
+      format: 'pdf',
+      base64OrDataUrl: pdfDataUri,
+      showNativeToast: true
+    });
+
+    if (Capacitor.isNativePlatform() && reg.nativeUri) {
       await Share.share({
         title: fileName,
-        url: savedFile.uri
+        url: reg.nativeUri
       });
       return;
     }
@@ -1136,19 +1142,17 @@ export async function generateCombinedObservationReportsPdfInstance(
 
 async function savePdfFileCrossPlatform(pdf: jsPDF, fileName: string, shareTitle?: string): Promise<void> {
   const blob = pdf.output('blob');
+  const pdfDataUri = pdf.output('datauristring');
 
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      await Filesystem.writeFile({
-        path: fileName,
-        data: pdfBase64,
-        directory: Directory.Documents
-      });
-    } catch (nativeErr) {
-      console.warn('Native Filesystem save to Documents error:', nativeErr);
-    }
-  }
+  await saveToPhoneSubfolderAndRegister({
+    title: shareTitle || fileName,
+    fileName,
+    category: 'school_plans',
+    actionType: 'download_pdf',
+    format: 'pdf',
+    base64OrDataUrl: pdfDataUri,
+    showNativeToast: true
+  });
 
   // Cross-browser reliable download (jsPDF save + HTML anchor fallback)
   try {
@@ -1211,13 +1215,22 @@ export async function printObservationReport(
   isRtl: boolean,
   lang: string
 ): Promise<void> {
+  const htmlContent = generateObservationReportHtml(visit, settings, isRtl, lang, true);
+  void saveToPhoneSubfolderAndRegister({
+    title: `طباعة تقرير زيارة صفية: ${visit.teacherName}`,
+    fileName: `Observation_${visit.teacherName}_${visit.className}.html`,
+    category: 'school_plans',
+    actionType: 'print',
+    format: 'html',
+    textContent: htmlContent
+  });
+
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
     await downloadObservationReportPdf(visit, settings, isRtl, lang);
     return;
   }
 
-  const htmlContent = generateObservationReportHtml(visit, settings, isRtl, lang, true);
   printWindow.document.open();
   printWindow.document.write(htmlContent);
   printWindow.document.close();
@@ -1345,6 +1358,7 @@ export async function downloadObservationReportPdf(
 
 /**
  * Shares observation report via Web Share API (native file share) or WhatsApp URL fallback.
+ * Always saves to phone internal subfolder BEFORE sharing!
  */
 export async function shareObservationReportViaWhatsApp(
   visit: VisitRecord,
@@ -1368,18 +1382,25 @@ export async function shareObservationReportViaWhatsApp(
 
   try {
     const pdf = await generateObservationReportPdfInstance(visit, settings, isRtl, lang);
+    const pdfDataUri = pdf.output('datauristring');
 
-    if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: fileName,
-        data: pdfBase64,
-        directory: Directory.Cache
-      });
+    const reg = await saveToPhoneSubfolderAndRegister({
+      title: `تقرير زيارة صفية (واتساب): ${visit.teacherName} (${visit.className})`,
+      fileName,
+      category: 'school_plans',
+      actionType: 'whatsapp',
+      format: 'pdf',
+      base64OrDataUrl: pdfDataUri,
+      textContent: textSummary,
+      groupName: visit.className,
+      showNativeToast: true
+    });
+
+    if (Capacitor.isNativePlatform() && reg.nativeUri) {
       await Share.share({
         title: fileName,
         text: textSummary,
-        url: savedFile.uri
+        url: reg.nativeUri
       });
       return;
     }
@@ -1387,7 +1408,6 @@ export async function shareObservationReportViaWhatsApp(
     const blob = pdf.output('blob');
     const pdfFile = new File([blob], fileName, { type: 'application/pdf' });
 
-    // Check if browser/OS supports file sharing (Web Share API level 2)
     if (
       typeof navigator !== 'undefined' &&
       navigator.share &&
@@ -1415,6 +1435,7 @@ export async function shareObservationReportViaWhatsApp(
 
 /**
  * Shares multiple observation reports in a single merged PDF file via WhatsApp or Web Share.
+ * Always saves to phone internal subfolder BEFORE sharing!
  */
 export async function shareCombinedObservationReportsViaWhatsApp(
   visits: VisitRecord[],
@@ -1439,18 +1460,24 @@ export async function shareCombinedObservationReportsViaWhatsApp(
 
   try {
     const pdf = await generateCombinedObservationReportsPdfInstance(visits, settings, isRtl, lang, onProgress);
+    const pdfDataUri = pdf.output('datauristring');
 
-    if (Capacitor.isNativePlatform()) {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      const savedFile = await Filesystem.writeFile({
-        path: fileName,
-        data: pdfBase64,
-        directory: Directory.Cache
-      });
+    const reg = await saveToPhoneSubfolderAndRegister({
+      title: `تقارير زيارات صفية مجمعة (واتساب): ${visits.length} تقرير`,
+      fileName,
+      category: 'school_plans',
+      actionType: 'whatsapp',
+      format: 'pdf',
+      base64OrDataUrl: pdfDataUri,
+      textContent: textSummary,
+      showNativeToast: true
+    });
+
+    if (Capacitor.isNativePlatform() && reg.nativeUri) {
       await Share.share({
         title: fileName,
         text: textSummary,
-        url: savedFile.uri
+        url: reg.nativeUri
       });
       return;
     }

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Pagination } from '../common/Pagination';
 import { GroupProfileModal } from '../GroupProfileModal';
+import { saveToPhoneSubfolderAndRegister } from '../../services/downloadedFilesService';
 
 export const FinanceStudentPayments: React.FC = () => {
   const { 
@@ -724,7 +725,22 @@ export const FinanceStudentPayments: React.FC = () => {
     setTimeout(() => setCopiedSuccess(false), 2500);
   };
 
-  const handleOpenWhatsApp = (phone: string, msg: string) => {
+  const handleOpenWhatsApp = async (phone: string, msg: string) => {
+    const stName = selectedCycleForWhatsApp?.studentName || 'طالب';
+    await saveToPhoneSubfolderAndRegister({
+      title: `إشعار استحقاق سداد (واتساب): ${stName}`,
+      fileName: `Payment_Notice_${stName}_${formatLocalDate()}.txt`,
+      category: 'finance',
+      actionType: 'whatsapp',
+      format: 'txt',
+      textContent: msg,
+      studentId: selectedCycleForWhatsApp?.studentId,
+      studentName: stName,
+      groupId: selectedCycleForWhatsApp?.groupId,
+      groupName: selectedCycleForWhatsApp?.groupName,
+      recipientPhone: phone,
+      showNativeToast: true
+    });
     const url = buildWhatsAppUrl(phone, msg);
     window.open(url, '_blank');
   };

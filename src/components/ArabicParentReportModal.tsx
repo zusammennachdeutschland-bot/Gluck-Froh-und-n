@@ -10,11 +10,14 @@ import { calculateSequentialSessionNumber, resolveTaughtTodayTopic, resolveStude
 import { getTimeBasedGreeting, getCairoHour } from '../utils/greetingUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { 
-  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen, Globe, Sun, Moon
+  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen, Globe, Sun, Moon, Flame
 } from 'lucide-react';
 import { GroupProfileModal } from './GroupProfileModal';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { escapeHtml } from '../utils/securityUtils';
+import { WhatsAppDispatchQueueModal } from './WhatsAppDispatchQueueModal';
+import { recordStudentReportDispatched, isStudentReportDispatched } from '../utils/whatsappQueueUtils';
+import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
 
 export { isLikelyFemaleStudent } from '../utils/genderUtils';
 export { resolveTaughtTodayTopic, resolveStudentReportAttendance, resolveReportHomework, resolvePreviousHomeworkStatusText } from '../utils/lessonUtils';
@@ -104,6 +107,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const { students, groups, lessons, updateLesson, saveLessonReport, _t, language, t, reportLanguage, reportT } = useApp();
   const [copied, setCopied] = useState(false);
   const [showGroupProfile, setShowGroupProfile] = useState(false);
+  const [showDispatchQueueModal, setShowDispatchQueueModal] = useState(false);
 
   // Check if this lesson is scheduled for today
   const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
@@ -1163,8 +1167,21 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
 
   const handleWhatsAppSend = async (target?: 'parent' | 'group' | 'student') => {
     persistRecordings(undefined, undefined, finalGeneratedText);
+    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     if (target === 'student') {
+      if (activeStudent) {
+        recordStudentReportDispatched(lesson.id, activeStudent.id, lesson.date, 'student', 'session_modal', nowTime);
+        if (lesson.id && updateLesson) {
+          updateLesson(lesson.id, {
+            whatsAppDispatchedStudents: {
+              ...(lesson.whatsAppDispatchedStudents || {}),
+              [activeStudent.id]: nowTime
+            }
+          });
+        }
+      }
+
       const studentReportText =
         reportStyle === 'student' && isManualEdited
           ? finalGeneratedText
@@ -1180,6 +1197,21 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
         ? resolveStudentWhatsAppContact(activeStudent, { quickStudentPhone: studentPhoneVal })
         : { hasContact: false, contact: '' };
 
+      // Save report to phone internal folder (Documents/Gluck_Lernstudio/Parent_Reports) BEFORE sharing to WhatsApp
+      await saveToPhoneSubfolderAndRegister({
+        title: `تقرير طالب (واتساب): ${activeStudent?.name || 'طالب'}`,
+        fileName: `Student_Report_${activeStudent?.name || 'Student'}_${lesson.date || getLocalDateStr()}.txt`,
+        category: 'parent_reports',
+        actionType: 'whatsapp',
+        format: 'txt',
+        textContent: studentReportText,
+        studentId: activeStudent?.id,
+        studentName: activeStudent?.name,
+        groupId: lesson.groupId,
+        groupName: lesson.groupName || lesson.title,
+        recipientPhone: studentContact.hasContact ? studentContact.contact : ''
+      });
+
       const url = buildWhatsAppUrl(
         studentContact.hasContact ? studentContact.contact : '',
         studentReportText
@@ -1190,6 +1222,17 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
 
     if (target === 'group' || (activeTab === 'bulk' && target !== 'parent')) {
       const groupText = activeTab === 'bulk' ? finalGeneratedText : getBulkReportText();
+      const updatedDispatched = { ...(lesson.whatsAppDispatchedStudents || {}) };
+      groupStudents.forEach((st) => {
+        recordStudentReportDispatched(lesson.id, st.id, lesson.date, 'group', 'session_modal', nowTime);
+        updatedDispatched[st.id] = nowTime;
+      });
+      if (lesson.id && updateLesson) {
+        updateLesson(lesson.id, {
+          whatsAppDispatchedStudents: updatedDispatched
+        });
+      }
+
       try {
         await navigator.clipboard.writeText(groupText);
         setCopied(true);
@@ -1197,6 +1240,18 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
       } catch (err) {
         console.warn('Clipboard write failed:', err);
       }
+
+      // Save group report to phone internal folder BEFORE sharing on WhatsApp
+      await saveToPhoneSubfolderAndRegister({
+        title: `تقرير مجموعة مجمع (واتساب): ${lesson.groupName || lesson.title || 'مجموعة'}`,
+        fileName: `Group_Report_${lesson.groupName || lesson.title || 'Group'}_${lesson.date || getLocalDateStr()}.txt`,
+        category: 'parent_reports',
+        actionType: 'whatsapp',
+        format: 'txt',
+        textContent: groupText,
+        groupId: lesson.groupId,
+        groupName: lesson.groupName || lesson.title
+      });
 
       if (groupWhatsAppLink) {
         let link = groupWhatsAppLink.trim();
@@ -1216,11 +1271,38 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
     }
 
     // Send to student's parent
+    if (activeStudent) {
+      recordStudentReportDispatched(lesson.id, activeStudent.id, lesson.date, 'parent', 'session_modal', nowTime);
+      if (lesson.id && updateLesson) {
+        updateLesson(lesson.id, {
+          whatsAppDispatchedStudents: {
+            ...(lesson.whatsAppDispatchedStudents || {}),
+            [activeStudent.id]: nowTime
+          }
+        });
+      }
+    }
+
     try {
       await navigator.clipboard.writeText(finalGeneratedText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {}
+
+    // Save parent report to phone internal folder BEFORE sharing on WhatsApp
+    await saveToPhoneSubfolderAndRegister({
+      title: `تقرير ولي أمر (واتساب): ${activeStudent?.name || lesson.groupName || 'طالب'}`,
+      fileName: `Parent_Report_${activeStudent?.name || 'Student'}_${lesson.date || getLocalDateStr()}.txt`,
+      category: 'parent_reports',
+      actionType: 'whatsapp',
+      format: 'txt',
+      textContent: finalGeneratedText,
+      studentId: activeStudent?.id,
+      studentName: activeStudent?.name,
+      groupId: lesson.groupId,
+      groupName: lesson.groupName || lesson.title,
+      recipientPhone: parentPhone
+    });
 
     const fallbackUrl = buildWhatsAppUrl(parentPhone, finalGeneratedText);
     window.open(fallbackUrl, '_blank');
@@ -1229,7 +1311,20 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
     } catch (e) {}
   };
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
+    await saveToPhoneSubfolderAndRegister({
+      title: `طباعة تقرير حصة: ${activeStudent?.name || lesson.groupName || 'طالب'}`,
+      fileName: `Printed_Report_${activeStudent?.name || 'Student'}_${lesson.date || getLocalDateStr()}.txt`,
+      category: 'parent_reports',
+      actionType: 'print',
+      format: 'txt',
+      textContent: finalGeneratedText,
+      studentId: activeStudent?.id,
+      studentName: activeStudent?.name,
+      groupId: lesson.groupId,
+      groupName: lesson.groupName || lesson.title
+    });
+
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(`
@@ -1349,7 +1444,7 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
           
           {/* Group Toggle Tab (Only if multiple students in the group) */}
           {isGroupLesson && (
-            <div className="grid grid-cols-2 gap-2 bg-slate-100/80 dark:bg-slate-900/40 p-1 rounded-xl border border-surface-border">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 bg-slate-100/80 dark:bg-slate-900/40 p-1 rounded-xl border border-surface-border">
               <button
                 type="button"
                 onClick={(e) => {
@@ -1366,9 +1461,9 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
                 <Users className="w-4 h-4 text-emerald-500 shrink-0" />
                 <span className="truncate">
                   {_t(
-                    `📊 تقرير مجمع (${groupStudents.length} طلاب)`,
-                    `📊 Bulk Group Report (${groupStudents.length} students)`,
-                    `📊 Sammelbericht (${groupStudents.length} Schüler)`
+                    `📊 تقرير مجمع`,
+                    `📊 Bulk Report`,
+                    `📊 Sammelbericht`
                   )}
                 </span>
               </button>
@@ -1387,7 +1482,22 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
                 }`}
               >
                 <User className="w-4 h-4 text-primary shrink-0" />
-                <span className="truncate">{t('auto_individual_student_report')}</span>
+                <span className="truncate">{_t('👤 تقرير فردي', '👤 Individual', '👤 Einzelbericht')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDispatchQueueModal(true);
+                }}
+                className="py-2 px-2.5 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer min-w-0 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-xs hover:from-emerald-700 hover:to-teal-700 active:scale-95"
+                title={_t('إرسال تقارير الطلاب متتالية عبر واتساب مع مؤشر إنجاز', 'Sequential WhatsApp Dispatch Queue', 'WhatsApp-Warteschlange')}
+              >
+                <Flame className="w-4 h-4 text-amber-300 shrink-0" />
+                <span className="truncate">
+                  {_t(`⚡ طابور الإرسال (${groupStudents.length})`, `⚡ Queue (${groupStudents.length})`, `⚡ Warteschlange (${groupStudents.length})`)}
+                </span>
               </button>
             </div>
           )}
@@ -1409,6 +1519,11 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
                 {groupStudents.map(st => {
                   const isSelected = selectedStudentId === st.id;
                   const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
+                  const dispatchedStatus = isStudentReportDispatched(st.id, {
+                    lessonId: lesson.id,
+                    dateStr: lesson.date,
+                    lessonDispatchedStudents: lesson.whatsAppDispatchedStudents
+                  });
                   return (
                     <button
                       key={st.id}
@@ -1435,6 +1550,17 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
                       }`}>
                         {stAtt === 'present' ? '✓' : stAtt === 'late' ? '!' : stAtt === 'absent' ? '✕' : '؟'}
                       </span>
+                      {dispatchedStatus.isSent && (
+                        <span
+                          className={`text-[9px] px-1 rounded-md font-bold flex items-center gap-0.5 ${
+                            isSelected ? 'bg-emerald-300 text-emerald-950' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                          }`}
+                          title={`تم إرسال التقرير ${dispatchedStatus.time ? `(${dispatchedStatus.time})` : ''}`}
+                        >
+                          <Check className="w-2.5 h-2.5" />
+                          <span>أُرسل</span>
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -1955,6 +2081,22 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
               </button>
             )}
 
+            {/* Quick WhatsApp Dispatch Queue Button */}
+            {groupStudents.length > 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDispatchQueueModal(true);
+                }}
+                className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-95 text-white font-black text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[40px] whitespace-nowrap shrink-0"
+                title={_t('فتح طابور إرسال رسائل الواتساب المتتالية لجميع الطلاب مع مؤشر إنجاز', 'Open WhatsApp Dispatch Queue for all students', 'WhatsApp-Warteschlange starten')}
+              >
+                <Flame className="w-4 h-4 shrink-0 text-amber-300" />
+                <span className="truncate">{_t('طابور الإرسال ⚡', 'Dispatch Queue ⚡', 'Warteschlange ⚡')}</span>
+              </button>
+            )}
+
             {/* Print Button */}
             <button
               type="button"
@@ -2010,6 +2152,17 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
         <GroupProfileModal
           group={associatedGroup}
           onClose={() => setShowGroupProfile(false)}
+        />
+      )}
+
+      {showDispatchQueueModal && (
+        <WhatsAppDispatchQueueModal
+          isOpen={showDispatchQueueModal}
+          onClose={() => setShowDispatchQueueModal(false)}
+          lesson={lesson}
+          initialStudents={groupStudents}
+          initialGroup={associatedGroup}
+          title={associatedGroup?.name || lesson.title}
         />
       )}
     </div>

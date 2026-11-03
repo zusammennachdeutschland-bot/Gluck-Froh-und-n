@@ -15,6 +15,7 @@ import {
 } from '../utils/contactsStandardizer';
 import { isWhatsAppUsername } from '../utils/phoneUtils';
 import { storage } from './storageService';
+import { saveToPhoneSubfolderAndRegister } from './downloadedFilesService';
 
 export interface RawDeviceContact {
   id: string;
@@ -602,11 +603,21 @@ export const contactsSyncService = {
    */
   downloadVcf(filename: string, contacts: Array<{ displayName: string; phoneNumber: string; note?: string }>): void {
     const vcfContent = this.generateVcf(contacts);
+    const safeFilename = filename.endsWith('.vcf') ? filename : `${filename}.vcf`;
+    void saveToPhoneSubfolderAndRegister({
+      title: `ملف جهات اتصال الطلاب وأولياء الأمور (${contacts.length} جهة اتصال)`,
+      fileName: safeFilename,
+      category: 'backups',
+      actionType: 'export_data',
+      format: 'vcf',
+      textContent: vcfContent,
+      showNativeToast: true
+    });
     const blob = new Blob([vcfContent], { type: 'text/vcard;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename.endsWith('.vcf') ? filename : `${filename}.vcf`;
+    a.download = safeFilename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

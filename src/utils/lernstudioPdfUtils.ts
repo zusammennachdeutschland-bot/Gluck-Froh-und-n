@@ -1,6 +1,11 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Toast } from '@capacitor/toast';
 import { LernstudioSet } from '../types/lernstudio';
+import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
 import {
   A4_PAGE_HEIGHT_PX,
   A4_PAGE_WIDTH_PX,
@@ -54,16 +59,18 @@ export interface WorksheetRenderResult {
 }
 
 async function waitForFontsAndImages(root: HTMLElement): Promise<void> {
-  if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
-    try {
-      await document.fonts.ready;
-    } catch {
-      // ignore font readiness error
+  const fontPromise = (async () => {
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+      try {
+        await document.fonts.ready;
+      } catch {
+        // ignore font readiness error
+      }
     }
-  }
+  })();
 
   const images = Array.from(root.querySelectorAll<HTMLImageElement>('img'));
-  await Promise.all(
+  const imagePromise = Promise.all(
     images.map(async (img) => {
       if (img.complete) return;
       try {
@@ -73,6 +80,7 @@ async function waitForFontsAndImages(root: HTMLElement): Promise<void> {
           await new Promise<void>((resolve) => {
             img.onload = () => resolve();
             img.onerror = () => resolve();
+            setTimeout(resolve, 500);
           });
         }
       } catch {
@@ -81,10 +89,16 @@ async function waitForFontsAndImages(root: HTMLElement): Promise<void> {
     })
   );
 
+  // Hard safety limit of 700ms so mobile WebView never freezes waiting on network assets
+  await Promise.race([
+    Promise.all([fontPromise, imagePromise]),
+    new Promise<void>((resolve) => setTimeout(resolve, 700))
+  ]);
+
   if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
   }
-  await new Promise<void>((resolve) => setTimeout(resolve, 60));
+  await new Promise<void>((resolve) => setTimeout(resolve, 40));
 }
 
 export function validateRenderedPages(
@@ -115,12 +129,13 @@ export function validateRenderedPages(
       canvasHeight: canvas?.height
     });
 
-    if (scrollH > clientH + 2) {
+    // 6px tolerance accommodates fractional subpixel layout variations on mobile WebViews
+    if (scrollH > clientH + 6) {
       issues.push(`Page ${pageNum} overflows vertically (scrollHeight=${scrollH}px > clientHeight=${clientH}px).`);
     }
 
     const contentEl = pageEl.querySelector<HTMLElement>('.page-content');
-    if (contentEl && contentEl.scrollHeight > contentEl.clientHeight + 2) {
+    if (contentEl && contentEl.scrollHeight > contentEl.clientHeight + 6) {
       issues.push(
         `Page ${pageNum} content area overflows (scrollHeight=${contentEl.scrollHeight}px > clientHeight=${contentEl.clientHeight}px).`
       );
@@ -214,7 +229,8 @@ async function renderFallbackSlicedWorksheet(
       };
     });
 
-    const scale = 2;
+    const isMobile = Capacitor.isNativePlatform() || (typeof window !== 'undefined' && window.innerWidth < 768);
+    const scale = isMobile ? 1.5 : 2;
     const fullCanvas = await html2canvas(container, {
       scale,
       useCORS: true,
@@ -401,8 +417,8 @@ export async function renderWorksheetWithDiagnostics(
       const hasOverflow = pageEls.some((pEl) => {
         const cEl = pEl.querySelector<HTMLElement>('.page-content');
         return (
-          pEl.scrollHeight > pEl.clientHeight + 2 ||
-          (cEl ? cEl.scrollHeight > cEl.clientHeight + 2 : false)
+          pEl.scrollHeight > pEl.clientHeight + 6 ||
+          (cEl ? cEl.scrollHeight > cEl.clientHeight + 6 : false)
         );
       });
 
@@ -418,11 +434,13 @@ export async function renderWorksheetWithDiagnostics(
 
     const pageEls = Array.from(pageContainer.querySelectorAll<HTMLElement>('.page'));
     const canvases: HTMLCanvasElement[] = [];
+    const isMobile = Capacitor.isNativePlatform() || (typeof window !== 'undefined' && window.innerWidth < 768);
+    const scale = isMobile ? 1.5 : 2;
 
     for (let i = 0; i < pageEls.length; i++) {
       const pageEl = pageEls[i];
       const canvas = await html2canvas(pageEl, {
-        scale: 2,
+        scale,
         useCORS: true,
         allowTaint: true,
         logging: false,
@@ -530,16 +548,83 @@ export async function downloadOrSaveLernstudioWorksheet(
     .replace(/\s*\((Copy|Kopie|نسخة)\)/gi, '')
     .replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
   const fileName = `Glueck_Worksheet_${cleanTitle}_${isTeacher ? 'TeacherKey' : 'Student'}_${WORKSHEET_BUILD_ID}.pdf`;
-  result.pdf.save(fileName);
+  const dataUri = result.pdf.output('datauristring');
+
+  // Always save to phone internal storage subfolder (Documents/Gluck_Lernstudio/Worksheets) and register in Downloaded Files
+  const reg = await saveToPhoneSubfolderAndRegister({
+    title: `ورقة عمل: ${set.title || set.topic || 'Worksheet'} (${isTeacher ? 'نموذج المعلم' : 'نسخة الطالب'})`,
+    fileName,
+    category: 'worksheets',
+    actionType: 'download_pdf',
+    format: 'pdf',
+    base64OrDataUrl: dataUri,
+    groupName: options.gradeName || set.grade,
+    previewDataUrl: result.pageDataUrls?.[0],
+    showNativeToast: true
+  });
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      if (reg.nativeUri) {
+        await Share.share({
+          title: fileName,
+          text: `ورقة عمل: ${set.title || 'Worksheet'} (${isTeacher ? 'نموذج المعلم' : 'نسخة الطالب'})`,
+          url: reg.nativeUri,
+          dialogTitle: 'حفظ أو مشاركة أو طباعة ورقة العمل'
+        });
+      }
+    } catch (saveErr) {
+      console.error('Failed to share PDF on native platform:', saveErr);
+      result.pdf.save(fileName);
+    }
+  } else {
+    result.pdf.save(fileName);
+  }
+
   return result;
 }
 
-export function printLernstudioWorksheetDirectly(
+export async function printLernstudioWorksheetDirectly(
   set: LernstudioSet,
-  options: WorksheetOptions = {}
-): void {
+  options: WorksheetOptions = {},
+  preRendered?: WorksheetRenderResult
+): Promise<void> {
   console.log(`[LernstudioWorksheet] Direct Print • Build ID: ${WORKSHEET_BUILD_ID}`);
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      try {
+        await Toast.show({
+          text: `جاري تجهيز ورقة العمل للطباعة... (${WORKSHEET_BUILD_ID})`,
+          duration: 'short'
+        });
+      } catch {
+        // ignore toast error
+      }
+
+      await downloadOrSaveLernstudioWorksheet(set, options, preRendered);
+    } catch (err) {
+      console.error('Direct print failed on native platform:', err);
+    }
+    return;
+  }
+
+  // Desktop / Web browser iframe print
   const fullHtml = buildWorksheetHtml(set, options);
+  const isTeacher = Boolean(options.includeAnswerKey);
+  const cleanTitle = (set.title || set.topic || 'Worksheet')
+    .replace(/\s*\((Copy|Kopie|نسخة)\)/gi, '')
+    .replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
+
+  await saveToPhoneSubfolderAndRegister({
+    title: `طباعة ورقة عمل: ${set.title || set.topic || 'Worksheet'} (${isTeacher ? 'نموذج المعلم' : 'نسخة الطالب'})`,
+    fileName: `Glueck_Worksheet_${cleanTitle}_${isTeacher ? 'TeacherKey' : 'Student'}.html`,
+    category: 'worksheets',
+    actionType: 'print',
+    format: 'html',
+    textContent: fullHtml,
+    groupName: options.gradeName || set.grade
+  });
 
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';

@@ -9,6 +9,7 @@ import { Share } from '@capacitor/share';
 import { sanitizeModernCssColors, dataUrlToBlob } from '../utils/certificateExportUtils';
 import { SchoolScheduleExportOptions } from './schoolScheduleExportService';
 import { escapeHtml } from '../utils/securityUtils';
+import { saveToPhoneSubfolderAndRegister } from './downloadedFilesService';
 
 export async function exportMasterSchedule(
   settings: SchoolSettings,
@@ -57,15 +58,20 @@ export async function exportMasterSchedule(
       const pageHeight = pdf.internal.pageSize.getHeight();
       pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight, undefined, 'FAST');
       const filename = `${filenameBase}.pdf`;
+      const pdfDataUri = pdf.output('datauristring');
+
+      const reg = await saveToPhoneSubfolderAndRegister({
+        title: `الجدول الموحد الشامل (PDF): ${title}`,
+        fileName: filename,
+        category: 'schedules',
+        actionType: 'download_pdf',
+        format: 'pdf',
+        base64OrDataUrl: pdfDataUri,
+        showNativeToast: true
+      });
       
-      if (Capacitor.isNativePlatform()) {
-        const pdfBase64 = pdf.output('datauristring').split(',')[1];
-        const savedFile = await Filesystem.writeFile({
-          path: filename,
-          data: pdfBase64,
-          directory: Directory.Documents
-        });
-        await Share.share({ title: filename, url: savedFile.uri });
+      if (Capacitor.isNativePlatform() && reg.nativeUri) {
+        await Share.share({ title: filename, url: reg.nativeUri });
       } else {
         pdf.save(filename);
       }
@@ -74,16 +80,21 @@ export async function exportMasterSchedule(
       const format = options.format === 'jpeg' ? 'jpeg' : 'png';
       const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
       const dataUrl = canvas.toDataURL(mimeType, 0.98);
-      const filename = `${filenameBase}.${format === 'jpeg' ? 'jpg' : 'png'}`;
+      const ext = format === 'jpeg' ? 'jpg' : 'png';
+      const filename = `${filenameBase}.${ext}`;
 
-      if (Capacitor.isNativePlatform()) {
-        const base64Data = dataUrl.split(',')[1];
-        const savedFile = await Filesystem.writeFile({
-          path: filename,
-          data: base64Data,
-          directory: Directory.Documents
-        });
-        await Share.share({ title: filename, url: savedFile.uri });
+      const reg = await saveToPhoneSubfolderAndRegister({
+        title: `الجدول الموحد الشامل (صورة): ${title}`,
+        fileName: filename,
+        category: 'schedules',
+        actionType: 'download_image',
+        format: ext,
+        base64OrDataUrl: dataUrl,
+        showNativeToast: true
+      });
+
+      if (Capacitor.isNativePlatform() && reg.nativeUri) {
+        await Share.share({ title: filename, url: reg.nativeUri });
       } else {
         const blob = dataUrlToBlob(dataUrl);
         const objectUrl = URL.createObjectURL(blob);

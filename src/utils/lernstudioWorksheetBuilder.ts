@@ -14,7 +14,7 @@ import {
 // 0. BUILD STAMP & PAGE CONSTANTS
 // ==========================================
 
-export const WORKSHEET_BUILD_ID = 'ws-7';
+export const WORKSHEET_BUILD_ID = 'ws-8';
 
 export const A4_PAGE_WIDTH_PX = 794;
 export const A4_PAGE_HEIGHT_PX = 1123;
@@ -1352,8 +1352,7 @@ export function getWorksheetCss(): string {
 
     .page-content {
       width: 722px !important;
-      height: 1035px !important;
-      max-height: 1035px !important;
+      max-height: 1043px !important;
       display: block !important;
       overflow: hidden !important;
       box-sizing: border-box !important;
