@@ -22,11 +22,16 @@ export const FloatingNetworkMonitor: React.FC = () => {
   const pillRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // 1. Session Lifecycle Control: Start on active session, stop when session ends
+  // 1. Session Lifecycle Control: Start ONLY during an active ONLINE session
   const isSessionActive = Boolean(activeLessonSession);
+  const isOnlineSession = isSessionActive && (
+    !activeLessonSession?.type ||
+    activeLessonSession.type === 'online' ||
+    String(activeLessonSession.type).toLowerCase().includes('online')
+  );
 
   useEffect(() => {
-    if (isSessionActive) {
+    if (isOnlineSession) {
       networkMonitorService.start();
       const unsubscribe = networkMonitorService.subscribe((latest) => {
         setMetrics(latest);
@@ -38,7 +43,7 @@ export const FloatingNetworkMonitor: React.FC = () => {
       networkMonitorService.stop();
       setShowPopover(false);
     }
-  }, [isSessionActive, activeLessonSession?.lessonId]);
+  }, [isOnlineSession, activeLessonSession?.lessonId]);
 
   // Click outside listener to dismiss Popover
   useEffect(() => {
@@ -64,8 +69,10 @@ export const FloatingNetworkMonitor: React.FC = () => {
     };
   }, [showPopover]);
 
-  // Clean UI: Do not display floating telemetry/ping badges on screen
-  return null;
+  // Only show the floating ping badge when an ONLINE lesson session is currently active/started
+  if (!isOnlineSession) {
+    return null;
+  }
 
   // Quality Text & Color mapping
   const qualityMap: Record<ConnectionQuality, { label: string; dotClass: string; badgeClass: string }> = {

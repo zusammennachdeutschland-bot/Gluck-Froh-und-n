@@ -11,6 +11,7 @@ import { LernstudioSortingGame } from './games/LernstudioSortingGame';
 import { LernstudioSentenceGame } from './games/LernstudioSentenceGame';
 import { LernstudioBalloonPopGame } from './games/LernstudioBalloonPopGame';
 import { LernstudioTicTacToeGame } from './games/LernstudioTicTacToeGame';
+import { LernstudioUltimateTicTacToeGame } from './games/LernstudioUltimateTicTacToeGame';
 import { LernstudioBasketCatchGame } from './games/LernstudioBasketCatchGame';
 import { LernstudioSpaceDefenseGame } from './games/LernstudioSpaceDefenseGame';
 import { LernstudioWordDetectiveGame } from './games/LernstudioWordDetectiveGame';
@@ -36,11 +37,13 @@ import { LernstudioWhatsInTheBoxGame } from './games/LernstudioWhatsInTheBoxGame
 import { LernstudioWordRhythmGame } from './games/LernstudioWordRhythmGame';
 import { LernstudioWordWashGame } from './games/LernstudioWordWashGame';
 import { LernstudioGamesPortalView } from './LernstudioGamesPortalView';
+import { LernstudioGameSetupScreen, GameSetupConfig } from './LernstudioGameSetupScreen';
 import { LernstudioSetEditorModal } from './LernstudioSetEditorModal';
 import { LernstudioAiModal } from './LernstudioAiModal';
 import { LernstudioWorksheetModal } from './LernstudioWorksheetModal';
 import { LernstudioTeachModal } from './LernstudioTeachModal';
 import { LernstudioWordsModal } from './LernstudioWordsModal';
+import { LernstudioHomeworkModal } from './LernstudioHomeworkModal';
 import { GameEffectsProvider } from './effects/GameEffectsOverlay';
 import { getLernstudioTranslations, getLocalizedSetTitle, getLocalizedSetTopic, getLocalizedGrade, getLocalizedSetDescription, PROGRAM_GRADES, matchesGradeFilter } from '../../utils/lernstudioTranslations';
 import { DEFAULT_LERNSTUDIO_SETS } from '../../data/defaultLernstudioSets';
@@ -78,7 +81,8 @@ import {
   BookOpen,
   Eye,
   Share2,
-  Dices
+  Dices,
+  Send
 } from 'lucide-react';
 
 interface Props {
@@ -110,6 +114,7 @@ export const LernstudioView: React.FC<Props> = ({
   // Mode View State
   const [activeMode, setActiveMode] = useState<LernstudioGameMode>('hub');
   const [selectedSetForMode, setSelectedSetForMode] = useState<LernstudioSet | null>(null);
+  const [gameSetupConfig, setGameSetupConfig] = useState<GameSetupConfig | null>(null);
 
   // Modals
   const [isSetEditorOpen, setIsSetEditorOpen] = useState(false);
@@ -126,6 +131,9 @@ export const LernstudioView: React.FC<Props> = ({
 
   const [isWordsModalOpen, setIsWordsModalOpen] = useState(false);
   const [selectedSetForWordsModal, setSelectedSetForWordsModal] = useState<LernstudioSet | null>(null);
+
+  const [isHomeworkModalOpen, setIsHomeworkModalOpen] = useState(false);
+  const [selectedSetForHomework, setSelectedSetForHomework] = useState<LernstudioSet | null>(null);
 
   // Copy Set Code State
   const [copiedSetId, setCopiedSetId] = useState<string | null>(null);
@@ -299,8 +307,40 @@ export const LernstudioView: React.FC<Props> = ({
           set={selectedSetForMode}
           activeTheme={activeTheme}
           language={language}
-          onBack={() => setActiveMode('hub')}
-          onSelectGame={(gMode) => setActiveMode(gMode)}
+          onBack={() => {
+            setActiveMode('hub');
+            setGameSetupConfig(null);
+          }}
+          onSelectGame={(gMode) => {
+            setActiveMode(gMode);
+            setGameSetupConfig(null);
+          }}
+        />
+      );
+    }
+
+    // GAME SETUP SCREEN INTERCEPTOR: Show Game Setup Screen for any selected game before starting
+    // (ultimate_tictactoe has its own dedicated interactive Start Screen with 2P/AI Easy-Medium-Hard & Starter X/O/Random)
+    if (
+      activeMode !== 'hub' &&
+      activeMode !== 'games_portal' &&
+      activeMode !== 'ultimate_tictactoe' &&
+      selectedSetForMode &&
+      !gameSetupConfig
+    ) {
+      return (
+        <LernstudioGameSetupScreen
+          set={selectedSetForMode}
+          gameModeId={activeMode}
+          activeTheme={activeTheme}
+          language={language}
+          groups={groups}
+          students={students}
+          onStart={(config) => setGameSetupConfig(config)}
+          onBack={() => {
+            setActiveMode('games_portal');
+            setGameSetupConfig(null);
+          }}
         />
       );
     }
@@ -346,6 +386,7 @@ export const LernstudioView: React.FC<Props> = ({
           set={selectedSetForMode}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -409,6 +450,17 @@ export const LernstudioView: React.FC<Props> = ({
     if (activeMode === 'tictactoe' && selectedSetForMode) {
       return (
         <LernstudioTicTacToeGame
+          set={selectedSetForMode}
+          activeTheme={activeTheme}
+          language={language}
+          onBack={() => setActiveMode('games_portal')}
+        />
+      );
+    }
+
+    if (activeMode === 'ultimate_tictactoe' && selectedSetForMode) {
+      return (
+        <LernstudioUltimateTicTacToeGame
           set={selectedSetForMode}
           activeTheme={activeTheme}
           language={language}
@@ -654,7 +706,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={selectedSetForMode}
           activeTheme={activeTheme}
           language={language}
-          onBack={() => setActiveMode('games_portal')}
+          gameConfig={gameSetupConfig || undefined}
+          onBack={() => setGameSetupConfig(null)}
         />
       );
     }
@@ -744,6 +797,20 @@ export const LernstudioView: React.FC<Props> = ({
             >
               <Plus className="w-4 h-4" />
               <span>{t.createSet}</span>
+            </button>
+
+            {/* Homework / Hausaufgaben Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedSetForHomework(null);
+                setIsHomeworkModalOpen(true);
+              }}
+              className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black rounded-xl text-xs shadow-md cursor-pointer inline-flex items-center gap-1.5 shrink-0 transform hover:scale-105 transition-all"
+              title={language === 'ar' ? 'إنشاء رابط واجب منزلي للطلاب' : 'Hausaufgabe & Schülerlink erstellen'}
+            >
+              <Send className="w-4 h-4" />
+              <span>{language === 'ar' ? 'واجبات الطلاب 📝' : 'Hausaufgaben 📝'}</span>
             </button>
           </div>
         </div>
@@ -1026,6 +1093,18 @@ export const LernstudioView: React.FC<Props> = ({
                         <div className="flex items-center gap-0.5 shrink-0">
                           <button
                             type="button"
+                            onClick={() => {
+                              setSelectedSetForHomework(set);
+                              setIsHomeworkModalOpen(true);
+                            }}
+                            className="p-1.5 text-text-muted hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-colors cursor-pointer"
+                            title={language === 'ar' ? 'إنشاء رابط واجب لهذه المجموعة' : 'Hausaufgabe für dieses Set erstellen'}
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => handleShareWhatsApp(set)}
                             className="p-1.5 text-text-muted hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
                             title={t.shareWhatsApp}
@@ -1203,6 +1282,17 @@ export const LernstudioView: React.FC<Props> = ({
           onClose={() => setIsRandomPickerOpen(false)}
           students={students}
           groups={groups}
+        />
+
+        <LernstudioHomeworkModal
+          isOpen={isHomeworkModalOpen}
+          onClose={() => {
+            setIsHomeworkModalOpen(false);
+            setSelectedSetForHomework(null);
+          }}
+          sets={sets}
+          defaultSet={selectedSetForHomework}
+          language={language}
         />
 
         {/* Toast Notification Banner for Copied Set Code */}

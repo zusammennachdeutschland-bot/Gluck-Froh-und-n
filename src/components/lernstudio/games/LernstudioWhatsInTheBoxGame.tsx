@@ -8,10 +8,13 @@ import { ArrowLeft, Volume2, RotateCcw, Eye } from 'lucide-react';
 import { GameStageBanner, SharedVictoryTrophyArt, SharedMysteryChestArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
+
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
   onBack: () => void;
 }
 
@@ -19,13 +22,19 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
   set,
   activeTheme,
   language = 'ar',
+  gameConfig,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
-  const vocabItems = getSetVocabularyItems(set, language);
+  const rawVocabItems = getSetVocabularyItems(set, language);
+  const vocabItems = gameConfig?.questionCount ? rawVocabItems.slice(0, gameConfig.questionCount) : rawVocabItems;
+
+  const team1Name = gameConfig?.teamNames?.[0] || (isRtl ? 'الفريق 1 (🔴)' : 'Team 1 (🔴)');
+  const team2Name = gameConfig?.teamNames?.[1] || (isRtl ? 'الفريق 2 (🔵)' : 'Team 2 (🔵)');
+
   const [currentIndex, setCurrentIndex] = useState(0);
   const [activeTeam, setActiveTeam] = useState<0 | 1>(0);
   const [teamScores, setTeamScores] = useState<[number, number]>([0, 0]);
@@ -146,10 +155,10 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
         <div className="flex items-center gap-2 flex-wrap">
           <SettingsBar />
           <div className={`px-3 py-1.5 rounded-xl border font-black text-xs ${activeTeam === 0 ? 'bg-red-500 text-white border-red-500 shadow-md ring-2 ring-red-400' : 'bg-surface text-text-muted border-surface-border'}`}>
-            🔴 فريق 1: {teamScores[0]} ن
+            {team1Name}: {teamScores[0]} ن
           </div>
           <div className={`px-3 py-1.5 rounded-xl border font-black text-xs ${activeTeam === 1 ? 'bg-blue-500 text-white border-blue-500 shadow-md ring-2 ring-blue-400' : 'bg-surface text-text-muted border-surface-border'}`}>
-            🔵 فريق 2: {teamScores[1]} ن
+            {team2Name}: {teamScores[1]} ن
           </div>
         </div>
       </div>

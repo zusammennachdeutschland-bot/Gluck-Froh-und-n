@@ -31,6 +31,7 @@ export interface LernstudioItem {
   wordType?: LernstudioWordType;
   conjugation?: VerbConjugationForms;
   category?: string;
+  syllables?: string[];           // Syllables / word parts e.g. ["Flei", "sch"] or ["Schu", "le"]
 }
 
 export type LernstudioExerciseType = 
@@ -54,6 +55,7 @@ export type LernstudioGameMode =
   | 'sentence_builder'
   | 'balloon_pop'
   | 'tictactoe'
+  | 'ultimate_tictactoe'
   | 'basket_catch'
   | 'space_defense'
   | 'word_detective'

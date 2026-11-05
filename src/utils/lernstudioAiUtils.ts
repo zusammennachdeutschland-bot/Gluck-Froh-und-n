@@ -53,7 +53,7 @@ Falls die Lektion Verben enthält, erstelle auch Übungen zur Verbkonjugation im
 `;
 
   return `Du bist ein pädagogischer Deutschlehrer, Spieledesigner und Ersteller von interaktivem Lehrmaterial für Lernstudio (Glueck Teacher).
-Erstelle ein extrem reichhaltiges, vollständiges Lern- und Spiel-Set im JSON-Format, das alle interaktiven Spielmodi (Satzbau/ترتيب الجمل, Glücksrad/Spin Wheel, Team-Rennen/Team Race, Memory-Karten/Memory Flip, Artikel-Sortierboxen/der-die-das Bins, und Jeopardy-Klassenzimmer) optimal antreibt.
+Erstelle ein extrem reichhaltiges, vollständiges Lern- und Spiel-Set im JSON-Format, das alle 8 interaktiven Lernstufen (1. Lernen, 2. Richtig/Falsch, 3. Zwei Optionen, 4. Alle Wörter, 5. Fehlender Buchstabe, 6. Buchstabenfolge, 7. Wort vervollständigen, 8. Spiele) sowie alle Spielmodi (Satzbau/ترتيب الجمل, Glücksrad/Spin Wheel, Team-Rennen/Team Race, Memory-Karten, Artikel-Sortierboxen der-die-das, und Quiz-Spiele) optimal antreibt.
 
 Thema: ${config.topic}
 Ziel-Klasse/الصف الدراسي: ${config.grade || 'غير حدد (اسأل المستخدم: دا جريد كام؟ / Grade 1 - 12)'}
@@ -72,13 +72,23 @@ STRENGSTE REGEL - KEINE ZUFÄLLIGEN INHALTE:
 ${verbInstructionBlock}
 WICHTIGE SATZBAU- UND TRANSLATION-REGEL (STRENG BINDEND):
 1. "sentence4Elements" MUSS EXAKT der Satz aus "exampleSentenceGerman" sein, aufgeteilt in genau 4 Wortblöcke in der korrekten Reihenfolge.
-2. Die 4 Blöcke von "sentence4Elements" zusammengefügt mit Leerzeichen MÜSSEN IDENTISCH mit "exampleSentenceGerman" sein.
+2. Die 4 Blöcke von "sentence4Elements" zusammengefügt mit Leerzeichen MÜSSEN IDENTISCH mit "exampleSentenceGerman" sein (z.B. ["Die Katze", "schläft", "auf dem", "Sofa."]).
 3. "exampleSentenceArabic" MUSS die Übersetzung genau dieses Satzes sein. Der Satz muss das Wort/die Vokabel der Karte enthalten.
 
-ZUSÄTZLICHE OPTIONALE FELDER IN JEDEM ITEM:
-- "wordType": "noun" | "verb" | "adjective" | "phrase" | "other"
-- "conjugation": für Verben {"ich","du","er_sie_es","wir","ihr","sie_Sie"} im Präsens (korrekt mit Vokalwechsel z.B. fahren: fahre, fährst, fährt, fahren, fahrt, fahren)
-- "category": ein kurzes englisches Wort für die semantische Gruppe (z.B. "animal", "food", "greeting", "family", "school", "color")
+WICHTIGE SILBEN-AUFTEILUNGS-REGEL (STRENG BINDEND FOR SYLLABLE PUZZLE):
+1. Jeder Begriff in "items" MUSS zwingend das Feld "syllables" enthalten.
+2. "syllables" ist ein Array aus 2 oder mehr deutschen Silben bzw. Lautblöcken des reinen Wortes (ohne Artikel), die zusammengesetzt exakt das Wort ergeben.
+3. BEISPIELE FÜR SILBEN-AUFTEILUNG ("syllables"):
+   - "Fleisch" -> ["Flei", "sch"]
+   - "Schule" -> ["Schu", "le"]
+   - "Banane" -> ["Ba", "na", "ne"]
+   - "Brot" -> ["Bro", "t"]
+   - "Krankenhaus" -> ["Kran", "ken", "haus"]
+
+WICHTIGE REGEL FÜR ARTIKEL UND WORTARTEN:
+1. Für alle Nomen MUSS der bestimmte Artikel im Feld "article" angegeben werden ("der", "die" oder "das") UND im Feld "german" vorangestellt werden (z.B. german: "das Fleisch", article: "das").
+2. Für Verben und Adjektive lasse "article" null oder weglassen (z.B. german: "fahren", article: null).
+3. Für Nomen MUSS auch der Plural mit Artikel angegeben werden (z.B. plural: "die Katzen").
 
 ANFORDERUNGEN AN JEDEN EINZELNEN BEGRIFF (items):
 1. ${countInstruction}
@@ -86,20 +96,31 @@ ANFORDERUNGEN AN JEDEN EINZELNEN BEGRIFF (items):
    - "german": Der deutsche Begriff inkl. bestimmtem Artikel falls Nomen (z.B. "die Katze", "das Buch", "der Tisch", "spielen", "schnell").
    - "article": Exakt "der", "die" oder "das" falls es ein Nomen ist (oder null/weglassen falls Verb/Adjektiv).
    - "arabic": Die genaue arabische Übersetzung (z.B. "القطة", "الكتاب", "يلعب").
+   - "syllables": Array aus 2+ deutschen Silben/Lautblöcken des reinen Wortes (z.B. ["Flei", "sch"] oder ["Schu", "le"]).
    - "english": Optionale englische Übersetzung (z.B. "the cat").
    - "plural": Der Plural mit Artikel falls Nomen (z.B. "die Katzen", "die Bücher").
+   - "wordType": "noun" | "verb" | "adjective" | "phrase" | "other"
+   - "conjugation": für Verben {"ich","du","er_sie_es","wir","ihr","sie_Sie"} im Präsens (korrekt mit Vokalwechsel z.B. fahren: fahre, fährst, fährt, fahren, fahrt, fahren)
    - "exampleSentenceGerman": Ein klarer, grammatikalisch korrekter deutscher Beispielsatz (z.B. "Die Katze schläft auf dem Sofa.").
    - "exampleSentenceArabic": Die arabische Übersetzung des Beispielsatzes.
    - "emoji": Ein passendes Emoji (z.B. "🐱", "📖").
    - "missingLetterWord": Das Wort mit genau einer Lücke "_" für das Buchstabenspiel (z.B. "K_tze" oder "B_ch").
    - "sentence4Elements": EXAKT der Satz von "exampleSentenceGerman" aufgeteilt in 4 Wortblöcke (z.B. ["Die Katze", "schläft", "auf dem", "Sofa."]).
 
+ANFORDERUNGEN AN ZUSÄTZLICHE ÜBUNGEN (customExercises):
+Erstelle 3 bis 6 abwechslungsreiche Übungen (Interaktive Multiple-Choice Fragen) zur Grammatik, Wortschatz oder Satzbau der Lektion:
+- "type": "multiple_choice"
+- "question": Fragetext mit Lücke "______"
+- "options": Genau 4 Antwortoptionen
+- "correctAnswer": Die korrekte Antwort aus den Options
+- "explanation": Kurze Erklärung auf Arabisch/Deutsch
+
 Gib AUSSCHLIESSLICH ein valides, reines JSON-Objekt zurück.
 
 STRENGE REGELN ZUR JSON-SYNTAX (WICHTIG):
 1. Gib AUSSCHLIESSLICH ein valides, reines JSON-Objekt zurück ohne Markdown-Formatierung (KEINE Code-Blöcke wie \`\`\`json oder \`\`\`).
 2. Escape NIEMALS eckige Klammern [ oder ] mit Backslashes (schreibe IMMER [ und ], NIEMALS \\[ oder \\]).
-3. Escape NIEMALS geschweifte Klammern { oder } mit Backslashes (schreibe IMMER { und }, NIEMALS \\{ oder \\}).
+3. Escape NIEMALS geschweifte Klammern { oder } com Backslashes (schreibe IMMER { und }, NIEMALS \\{ oder \\}).
 4. Verwende ausschließlich standardmäßige gerade doppelte Anführungszeichen (") für Keys und Strings, niemals geschwungene Anführungszeichen.
 5. Keine Kommentare (kein // oder /* */) und keine abschließenden Kommas (keine Trailing Commas vor ] oder }).
 
@@ -115,8 +136,23 @@ JSON-STRUKTUR:
   "description": "Lern-Set zum Thema ${config.topic} (${config.level})",
   "items": [
     {
+      "german": "das Fleisch",
+      "article": "das",
+      "arabic": "اللحم",
+      "syllables": ["Flei", "sch"],
+      "plural": "die Fleische",
+      "wordType": "noun",
+      "category": "food",
+      "exampleSentenceGerman": "Mona isst gern Fleisch.",
+      "exampleSentenceArabic": "منى تحب أكل اللحم.",
+      "emoji": "🥩",
+      "missingLetterWord": "Fl_isch",
+      "sentence4Elements": ["Mona", "isst", "gern", "Fleisch."]
+    },
+    {
       "german": "fahren",
       "arabic": "يركب / يسافر",
+      "syllables": ["fah", "ren"],
       "wordType": "verb",
       "category": "transport",
       "conjugation": {
@@ -137,10 +173,10 @@ JSON-STRUKTUR:
   "customExercises": [
     {
       "type": "multiple_choice",
-      "question": "Ahmed ______ (fahren) jeden Morgen zur Schule.",
-      "options": ["fährt", "fahre", "fährst", "fahren"],
-      "correctAnswer": "fährt",
-      "explanation": "Ahmed = er -> fährt (Vokalwechsel a -> ä)."
+      "question": "Mona ______ (essen) gern Fleisch.",
+      "options": ["isst", "esse", "esst", "essen"],
+      "correctAnswer": "isst",
+      "explanation": "Mona = sie -> isst (Vokalwechsel e -> i)."
     }
   ]
 }`;
@@ -305,6 +341,15 @@ export function validateAndParseLernstudioJson(
         }
       }
 
+      let syllables: string[] | undefined = undefined;
+      const rawSyl = it.syllables || it.syllableParts || it.silben;
+      if (Array.isArray(rawSyl) && rawSyl.length >= 2) {
+        const cleanedSyl = rawSyl.map((s: any) => String(s).trim()).filter(Boolean);
+        if (cleanedSyl.length >= 2) {
+          syllables = cleanedSyl;
+        }
+      }
+
       sanitizedItems.push({
         id: `item_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
         german,
@@ -319,7 +364,8 @@ export function validateAndParseLernstudioJson(
         sentence4Elements: sentence4,
         wordType,
         conjugation,
-        category: it.category ? String(it.category).trim() : undefined
+        category: it.category ? String(it.category).trim() : undefined,
+        syllables
       });
     }
 

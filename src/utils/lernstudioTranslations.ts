@@ -191,6 +191,8 @@ export interface LernstudioTranslations {
   balloonPopCategory: string;
   tictactoeTitle: string;
   tictactoeCategory: string;
+  ultimateTictactoeTitle: string;
+  ultimateTictactoeCategory: string;
   basketCatchTitle: string;
   basketCatchCategory: string;
   spaceDefenseTitle: string;
@@ -352,6 +354,8 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     balloonPopCategory: 'تحدي السرعة الفردي',
     tictactoeTitle: 'لعبة X-O الكلمات ❌⭕',
     tictactoeCategory: 'مواجهة فرق أو ضد الحاسوب',
+    ultimateTictactoeTitle: 'Ultimate XO – إكس أو الاستراتيجية (9×9) 👑',
+    ultimateTictactoeCategory: '٩ لوحات متداخلة • لاعبان أو ضد الذكاء الاصطناعي (٣ مستويات)',
     basketCatchTitle: 'التقاط المفردات بالسلة 🧺',
     basketCatchCategory: 'التقاط المطر الصوتي الفردي',
     spaceDefenseTitle: 'معركة الدفاع الفضائي 🚀',
@@ -629,6 +633,8 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     balloonPopCategory: 'Solo Speed Challenge',
     tictactoeTitle: 'Word Tic-Tac-Toe ❌⭕',
     tictactoeCategory: 'Team Duel or vs AI',
+    ultimateTictactoeTitle: 'Ultimate XO – Das ultimative Tic-Tac-Toe 👑',
+    ultimateTictactoeCategory: '9x9 Strategic Grid • 2 Players or vs Smart AI',
     basketCatchTitle: 'Vocab Basket Catch 🧺',
     basketCatchCategory: 'Solo Falling Words',
     spaceDefenseTitle: 'Space Defender 🚀',
@@ -906,6 +912,8 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     balloonPopCategory: 'Einzelschnelligkeit',
     tictactoeTitle: 'Wort-Tic-Tac-Toe ❌⭕',
     tictactoeCategory: 'Teamduell oder gegen KI',
+    ultimateTictactoeTitle: 'Ultimate XO – Das ultimative Tic-Tac-Toe 👑',
+    ultimateTictactoeCategory: '9×9 Strategie-Arena • 2 Spieler oder gegen KI',
     basketCatchTitle: 'Wort-Korb Fangen 🧺',
     basketCatchCategory: 'Einzel-Regen-Spiel',
     spaceDefenseTitle: 'Weltraum-Verteidiger 🚀',

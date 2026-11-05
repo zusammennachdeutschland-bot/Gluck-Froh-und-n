@@ -47,9 +47,115 @@ interface Choice2Question {
   choices: LernstudioItem[];
 }
 
-interface ChoiceAllQuestion {
+interface ChoiceFullSetQuestion {
   targetItem: LernstudioItem;
   choices: LernstudioItem[];
+}
+
+export function splitGermanIntoSyllables(wordOnly: string): string[] {
+  const trimmed = (wordOnly || '').trim();
+  if (trimmed.length <= 3) {
+    if (trimmed.length <= 1) return [trimmed];
+    return [trimmed.slice(0, 1), trimmed.slice(1)];
+  }
+
+  const vowelsRegex = /(ei|ai|au|äu|eu|ie|[aeiouäöüyAEIOUÄÖÜY])/gi;
+  const vowelMatches: { index: number; text: string }[] = [];
+  let match;
+  while ((match = vowelsRegex.exec(trimmed)) !== null) {
+    vowelMatches.push({ index: match.index, text: match[0] });
+  }
+
+  if (vowelMatches.length <= 1) {
+    const mid = Math.max(2, Math.floor(trimmed.length / 2));
+    return [trimmed.slice(0, mid), trimmed.slice(mid)];
+  }
+
+  const splitPoints: number[] = [0];
+  for (let k = 0; k < vowelMatches.length - 1; k++) {
+    const currVowelEnd = vowelMatches[k].index + vowelMatches[k].text.length;
+    const nextVowelStart = vowelMatches[k + 1].index;
+    const consLen = nextVowelStart - currVowelEnd;
+
+    if (consLen <= 1) {
+      splitPoints.push(currVowelEnd);
+    } else {
+      const splitPos = currVowelEnd + Math.floor(consLen / 2);
+      splitPoints.push(splitPos);
+    }
+  }
+  splitPoints.push(trimmed.length);
+
+  const syllables: string[] = [];
+  for (let i = 0; i < splitPoints.length - 1; i++) {
+    const chunk = trimmed.slice(splitPoints[i], splitPoints[i + 1]);
+    if (chunk) syllables.push(chunk);
+  }
+  return syllables.length > 0 ? syllables : [trimmed];
+}
+
+interface SyllableChoice {
+  id: string;
+  syllable: string;
+}
+
+interface SyllablePuzzleQuestion {
+  targetItem: LernstudioItem;
+  article: string;
+  wordOnly: string;
+  expectedSyllables: string[];
+  choices: SyllableChoice[];
+}
+
+export function splitGermanArticleAndWord(german: string): { article: string; wordOnly: string } {
+  const trimmed = (german || '').trim();
+  const match = trimmed.match(/^(der|die|das)\s+(.+)$/i);
+  if (match) {
+    return { article: match[1], wordOnly: match[2] };
+  }
+  return { article: '', wordOnly: trimmed };
+}
+
+const GERMAN_DISTRACTOR_LETTERS = [
+  'A', 'B', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'W', 'Z', 'Ä', 'Ö', 'Ü', 'ß'
+];
+
+interface MissingLetterQuestion {
+  targetItem: LernstudioItem;
+  article: string;
+  wordOnly: string;
+  chars: string[];
+  missingIndex: number;
+  missingChar: string;
+  choices: string[];
+}
+
+interface MissingSeqChoice {
+  id: string;
+  char: string;
+}
+
+interface MissingSeqQuestion {
+  targetItem: LernstudioItem;
+  article: string;
+  wordOnly: string;
+  chars: string[];
+  missingIndices: number[];
+  expectedChars: string[];
+  choices: MissingSeqChoice[];
+}
+
+interface WordCompleteChoice {
+  id: string;
+  char: string;
+}
+
+interface WordCompleteQuestion {
+  targetItem: LernstudioItem;
+  article: string;
+  wordOnly: string;
+  targetChars: string[];
+  choices: WordCompleteChoice[];
 }
 
 export const LernstudioTeachModal: React.FC<Props> = ({
@@ -202,14 +308,166 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     });
   }, [items, shuffleKey]);
 
-  // Generate Questions for Stage 4 (Full Set Choice) - Randomized question order and choices
-  const stage4Questions = useMemo<ChoiceAllQuestion[]>(() => {
+  // Generate Questions for Stage 4 (Full Set Choice)
+  const stage4Questions = useMemo<ChoiceFullSetQuestion[]>(() => {
     const shuffledTargets = shuffleArray<LernstudioItem>(items);
     return shuffledTargets.map((target: LernstudioItem) => {
       const choices = shuffleArray<LernstudioItem>(items);
       return { targetItem: target, choices };
     });
   }, [items, shuffleKey]);
+
+  // Generate Questions for Stage 5 (Silben zusammensetzen - Syllable Puzzle)
+  const syllableQuestions = useMemo<SyllablePuzzleQuestion[]>(() => {
+    const shuffledTargets = shuffleArray<LernstudioItem>(items);
+    return shuffledTargets.map((target: LernstudioItem) => {
+      const { article, wordOnly } = splitGermanArticleAndWord(target.german);
+      const expectedSyllables = (target.syllables && Array.isArray(target.syllables) && target.syllables.length >= 2)
+        ? target.syllables
+        : splitGermanIntoSyllables(wordOnly);
+
+      const choices: SyllableChoice[] = shuffleArray(
+        expectedSyllables.map((syl, idx) => ({
+          id: `syl_${idx}_${syl}_${Math.random().toString(36).substring(2, 6)}`,
+          syllable: syl
+        }))
+      );
+
+      return {
+        targetItem: target,
+        article,
+        wordOnly,
+        expectedSyllables,
+        choices
+      };
+    });
+  }, [items, shuffleKey]);
+
+  // Generate Questions for Stage 6 (Fehlender Buchstabe - One Missing Letter)
+  const stage5Questions = useMemo<MissingLetterQuestion[]>(() => {
+    const shuffledTargets = shuffleArray<LernstudioItem>(items);
+    return shuffledTargets.map((target: LernstudioItem) => {
+      const { article, wordOnly } = splitGermanArticleAndWord(target.german);
+      const letters = wordOnly.split('');
+      const validIndices: number[] = [];
+      for (let i = 0; i < letters.length; i++) {
+        if (/[a-zA-ZäöüÄÖÜß]/.test(letters[i])) {
+          validIndices.push(i);
+        }
+      }
+      const missingIndex = validIndices.length > 0
+        ? validIndices[Math.floor(Math.random() * validIndices.length)]
+        : 0;
+      const missingChar = wordOnly[missingIndex] || 'A';
+
+      const correctUpper = missingChar.toUpperCase();
+      const distractorPool = GERMAN_DISTRACTOR_LETTERS.filter((c) => c !== correctUpper);
+      const distractors = shuffleArray(distractorPool).slice(0, 4);
+      const choices = shuffleArray([correctUpper, ...distractors]);
+
+      return {
+        targetItem: target,
+        article,
+        wordOnly,
+        chars: letters,
+        missingIndex,
+        missingChar,
+        choices
+      };
+    });
+  }, [items, shuffleKey]);
+
+  // Generate Questions for Stage 7 (Buchstabenfolge - Consecutive Missing Letters)
+  const stage6Questions = useMemo<MissingSeqQuestion[]>(() => {
+    const shuffledTargets = shuffleArray<LernstudioItem>(items);
+    return shuffledTargets.map((target: LernstudioItem) => {
+      const { article, wordOnly } = splitGermanArticleAndWord(target.german);
+      const len = wordOnly.length;
+      let seqLen = 2;
+      if (len >= 6) {
+        seqLen = 3;
+      } else if (len <= 2) {
+        seqLen = Math.max(1, len);
+      }
+
+      const maxStart = Math.max(0, len - seqLen);
+      const startIdx = Math.floor(Math.random() * (maxStart + 1));
+      const missingIndices: number[] = [];
+      for (let i = 0; i < seqLen; i++) {
+        if (startIdx + i < len) {
+          missingIndices.push(startIdx + i);
+        }
+      }
+
+      const expectedChars = missingIndices.map((idx) => wordOnly[idx]);
+
+      const expectedChoices: MissingSeqChoice[] = expectedChars.map((ch, idx) => ({
+        id: `exp_${idx}_${ch.toUpperCase()}_${Math.random().toString(36).substr(2, 4)}`,
+        char: ch.toUpperCase()
+      }));
+
+      const expCharSet = new Set(expectedChars.map((c) => c.toUpperCase()));
+      const distractorPool = GERMAN_DISTRACTOR_LETTERS.filter((c) => !expCharSet.has(c));
+      const distractorChars = shuffleArray(distractorPool).slice(0, 3);
+      const distractorChoices: MissingSeqChoice[] = distractorChars.map((ch, idx) => ({
+        id: `dist_${idx}_${ch}_${Math.random().toString(36).substr(2, 4)}`,
+        char: ch
+      }));
+
+      const choices = shuffleArray([...expectedChoices, ...distractorChoices]);
+
+      return {
+        targetItem: target,
+        article,
+        wordOnly,
+        chars: wordOnly.split(''),
+        missingIndices,
+        expectedChars,
+        choices
+      };
+    });
+  }, [items, shuffleKey]);
+
+  // Generate Questions for Stage 8 (Wort vervollständigen - Complete the Word)
+  const stage7Questions = useMemo<WordCompleteQuestion[]>(() => {
+    const shuffledTargets = shuffleArray<LernstudioItem>(items);
+    return shuffledTargets.map((target: LernstudioItem) => {
+      const { article, wordOnly } = splitGermanArticleAndWord(target.german);
+      const targetChars = wordOnly.split('');
+      const choices: WordCompleteChoice[] = shuffleArray(
+        targetChars.map((ch, idx) => ({
+          id: `w7_${idx}_${ch.toUpperCase()}_${Math.random().toString(36).substr(2, 4)}`,
+          char: ch.toUpperCase()
+        }))
+      );
+
+      return {
+        targetItem: target,
+        article,
+        wordOnly,
+        targetChars,
+        choices
+      };
+    });
+  }, [items, shuffleKey]);
+
+  // Stage 5 (Silben zusammensetzen) interactive state
+  const [syllableStepIndex, setSyllableStepIndex] = useState<number>(0);
+  const [filledSyllables, setFilledSyllables] = useState<string[]>([]);
+  const [usedSyllableChoiceIds, setUsedSyllableChoiceIds] = useState<string[]>([]);
+  const [errorSyllableChoiceId, setErrorSyllableChoiceId] = useState<string | null>(null);
+
+  // Stage 7 interactive state
+  const [stage6StepIndex, setStage6StepIndex] = useState<number>(0);
+  const [stage6FilledChars, setStage6FilledChars] = useState<Record<number, string>>({});
+  const [stage6UsedChoiceIds, setStage6UsedChoiceIds] = useState<string[]>([]);
+  const [stage6ErrorChoiceId, setStage6ErrorChoiceId] = useState<string | null>(null);
+
+  // Stage 8 interactive state
+  const [stage7CurrentSlotIndex, setStage7CurrentSlotIndex] = useState<number>(0);
+  const [stage7FilledChars, setStage7FilledChars] = useState<string[]>([]);
+  const [stage7UsedChoiceIds, setStage7UsedChoiceIds] = useState<string[]>([]);
+  const [stage7ErrorChoiceId, setStage7ErrorChoiceId] = useState<string | null>(null);
 
   // Auto-speak word whenever item or question changes across teach stages
   useEffect(() => {
@@ -224,6 +482,14 @@ export const LernstudioTeachModal: React.FC<Props> = ({
       textToSpeak = stage3Questions[stageQuestionIndex].targetItem.german;
     } else if (currentStage === 4 && stage4Questions[stageQuestionIndex]) {
       textToSpeak = stage4Questions[stageQuestionIndex].targetItem.german;
+    } else if (currentStage === 5 && syllableQuestions[stageQuestionIndex]) {
+      textToSpeak = syllableQuestions[stageQuestionIndex].targetItem.german;
+    } else if (currentStage === 6 && stage5Questions[stageQuestionIndex]) {
+      textToSpeak = stage5Questions[stageQuestionIndex].targetItem.german;
+    } else if (currentStage === 7 && stage6Questions[stageQuestionIndex]) {
+      textToSpeak = stage6Questions[stageQuestionIndex].targetItem.german;
+    } else if (currentStage === 8 && stage7Questions[stageQuestionIndex]) {
+      textToSpeak = stage7Questions[stageQuestionIndex].targetItem.german;
     }
 
     if (textToSpeak) {
@@ -235,7 +501,20 @@ export const LernstudioTeachModal: React.FC<Props> = ({
         stopGermanSpeech();
       };
     }
-  }, [currentStage, stageQuestionIndex, items, isOpen, soundEnabled, stage2Questions, stage3Questions, stage4Questions]);
+  }, [
+    currentStage,
+    stageQuestionIndex,
+    items,
+    isOpen,
+    soundEnabled,
+    stage2Questions,
+    stage3Questions,
+    stage4Questions,
+    syllableQuestions,
+    stage5Questions,
+    stage6Questions,
+    stage7Questions
+  ]);
 
   // Reset answer state when question index or stage changes
   const resetAnswerState = () => {
@@ -245,6 +524,18 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     setIsCorrectAnswer(null);
     setFeedbackMessage('');
     setIsSpeakingFeedback(false);
+    setSyllableStepIndex(0);
+    setFilledSyllables([]);
+    setUsedSyllableChoiceIds([]);
+    setErrorSyllableChoiceId(null);
+    setStage6StepIndex(0);
+    setStage6FilledChars({});
+    setStage6UsedChoiceIds([]);
+    setStage6ErrorChoiceId(null);
+    setStage7CurrentSlotIndex(0);
+    setStage7FilledChars([]);
+    setStage7UsedChoiceIds([]);
+    setStage7ErrorChoiceId(null);
   };
 
   // Plays success chime, shows progress, and advances to the next question without repeating pronunciation
@@ -384,7 +675,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
       resetAnswerState();
       saveProgress(4, nextIdx, completedStages, stars);
     } else {
-      // Finished Stage 4 -> move to Stage 5
+      // Finished Stage 4 -> move to Stage 5 (Silben zusammensetzen)
       handleNextStage(5);
     }
   };
@@ -414,6 +705,212 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     }
   };
 
+  // --- Handlers for Stage 5 (Silben zusammensetzen - Syllable Puzzle) ---
+  const handleSyllableNextQuestion = () => {
+    clearAutoAdvanceTimer();
+    if (stageQuestionIndex + 1 < syllableQuestions.length) {
+      const nextIdx = stageQuestionIndex + 1;
+      setStageQuestionIndex(nextIdx);
+      resetAnswerState();
+      saveProgress(5, nextIdx, completedStages, stars);
+    } else {
+      // Finished Stage 5 -> move to Stage 6 (Fehlender Buchstabe)
+      handleNextStage(6);
+    }
+  };
+
+  const handleSyllableChoiceClick = (choice: SyllableChoice) => {
+    if (usedSyllableChoiceIds.includes(choice.id) || (isAnswerSubmitted && isCorrectAnswer)) return;
+    const currentQ = syllableQuestions[stageQuestionIndex];
+    if (!currentQ) return;
+
+    const expectedSyllable = currentQ.expectedSyllables[syllableStepIndex];
+    if (!expectedSyllable) return;
+
+    const isMatch = choice.syllable === expectedSyllable;
+
+    if (isMatch) {
+      const nextStepIndex = syllableStepIndex + 1;
+      const nextUsedIds = [...usedSyllableChoiceIds, choice.id];
+      const nextFilled = [...filledSyllables, choice.syllable];
+
+      setUsedSyllableChoiceIds(nextUsedIds);
+      setFilledSyllables(nextFilled);
+      setSyllableStepIndex(nextStepIndex);
+      setErrorSyllableChoiceId(null);
+
+      if (nextStepIndex >= currentQ.expectedSyllables.length) {
+        // Completed all syllables!
+        setIsAnswerSubmitted(true);
+        setIsCorrectAnswer(true);
+        setStars((prev) => prev + 1);
+        setFeedbackMessage('ممتاز! تم تركيب المقاطع الصوتية للكلمة بنجاح 🧩🌟');
+        handleCorrectAnswerAdvance(handleSyllableNextQuestion);
+      } else {
+        if (soundEnabled) {
+          playLernstudioSound('correct');
+        }
+      }
+    } else {
+      // Incorrect choice
+      if (soundEnabled) {
+        playLernstudioSound('wrong');
+      }
+      setErrorSyllableChoiceId(choice.id);
+      setTimeout(() => setErrorSyllableChoiceId(null), 600);
+      setFeedbackMessage(`مقطع غير مطابق، اختر المقطع التالي بالترتيب!`);
+    }
+  };
+
+  // --- Handlers for Stage 6 (One Missing Letter) ---
+  const handleStage5NextQuestion = () => {
+    clearAutoAdvanceTimer();
+    if (stageQuestionIndex + 1 < stage5Questions.length) {
+      const nextIdx = stageQuestionIndex + 1;
+      setStageQuestionIndex(nextIdx);
+      resetAnswerState();
+      saveProgress(6, nextIdx, completedStages, stars);
+    } else {
+      // Finished Stage 6 -> move to Stage 7 (Buchstabenfolge)
+      handleNextStage(7);
+    }
+  };
+
+  const handleStage5Answer = (selectedChar: string) => {
+    if (isAnswerSubmitted && isCorrectAnswer) return;
+    const currentQ = stage5Questions[stageQuestionIndex];
+    const isCorrect = selectedChar.toUpperCase() === currentQ.missingChar.toUpperCase();
+
+    setSelectedAnswer(selectedChar);
+    setIsAnswerSubmitted(true);
+    setIsCorrectAnswer(isCorrect);
+
+    if (isCorrect) {
+      setStars((prev) => prev + 1);
+      setFeedbackMessage('ممتاز! تم إكمال الحرف الناقص بنجاح 🌟');
+      handleCorrectAnswerAdvance(handleStage5NextQuestion);
+    } else {
+      if (soundEnabled) {
+        playLernstudioSound('wrong');
+        handleSpeakGerman(currentQ.targetItem.german);
+      }
+      setFeedbackMessage(`حاول مرة أخرى! الحرف الصحيح هو: "${currentQ.missingChar.toUpperCase()}"`);
+    }
+  };
+
+  // --- Handlers for Stage 7 (Consecutive Missing Letters) ---
+  const handleStage6NextQuestion = () => {
+    clearAutoAdvanceTimer();
+    if (stageQuestionIndex + 1 < stage6Questions.length) {
+      const nextIdx = stageQuestionIndex + 1;
+      setStageQuestionIndex(nextIdx);
+      resetAnswerState();
+      saveProgress(7, nextIdx, completedStages, stars);
+    } else {
+      // Finished Stage 7 -> move to Stage 8 (Wort vervollständigen)
+      handleNextStage(8);
+    }
+  };
+
+  const handleStage6ChoiceClick = (choice: MissingSeqChoice) => {
+    if (stage6UsedChoiceIds.includes(choice.id) || (isAnswerSubmitted && isCorrectAnswer)) return;
+    const currentQ = stage6Questions[stageQuestionIndex];
+    const expectedChar = currentQ.expectedChars[stage6StepIndex];
+
+    if (!expectedChar) return;
+
+    const isMatch = choice.char.toUpperCase() === expectedChar.toUpperCase();
+
+    if (isMatch) {
+      const nextStepIndex = stage6StepIndex + 1;
+      const nextUsedIds = [...stage6UsedChoiceIds, choice.id];
+      const targetMissingIndex = currentQ.missingIndices[stage6StepIndex];
+      const nextFilled = { ...stage6FilledChars, [targetMissingIndex]: expectedChar };
+
+      setStage6UsedChoiceIds(nextUsedIds);
+      setStage6FilledChars(nextFilled);
+      setStage6StepIndex(nextStepIndex);
+      setStage6ErrorChoiceId(null);
+
+      if (nextStepIndex >= currentQ.expectedChars.length) {
+        // Completed sequence!
+        setIsAnswerSubmitted(true);
+        setIsCorrectAnswer(true);
+        setStars((prev) => prev + 1);
+        setFeedbackMessage('رائع جدًا! اكتملت الحروف المتتالية بنجاح 🧩');
+        handleCorrectAnswerAdvance(handleStage6NextQuestion);
+      } else {
+        if (soundEnabled) {
+          playLernstudioSound('correct');
+        }
+      }
+    } else {
+      // Incorrect choice
+      if (soundEnabled) {
+        playLernstudioSound('wrong');
+      }
+      setStage6ErrorChoiceId(choice.id);
+      setTimeout(() => setStage6ErrorChoiceId(null), 600);
+      setFeedbackMessage(`حرف غير مطابق، ابحث عن الحرف التالي في الترتيب!`);
+    }
+  };
+
+  // --- Handlers for Stage 8 (Complete the Word) ---
+  const handleStage7NextQuestion = () => {
+    clearAutoAdvanceTimer();
+    if (stageQuestionIndex + 1 < stage7Questions.length) {
+      const nextIdx = stageQuestionIndex + 1;
+      setStageQuestionIndex(nextIdx);
+      resetAnswerState();
+      saveProgress(8, nextIdx, completedStages, stars);
+    } else {
+      // Finished Stage 8 -> move to Stage 9 (Spiele)
+      handleNextStage(9);
+    }
+  };
+
+  const handleStage7ChoiceClick = (choice: WordCompleteChoice) => {
+    if (stage7UsedChoiceIds.includes(choice.id) || (isAnswerSubmitted && isCorrectAnswer)) return;
+    const currentQ = stage7Questions[stageQuestionIndex];
+    const expectedChar = currentQ.targetChars[stage7CurrentSlotIndex];
+
+    if (!expectedChar) return;
+
+    const isMatch = choice.char.toUpperCase() === expectedChar.toUpperCase();
+
+    if (isMatch) {
+      const nextSlotIndex = stage7CurrentSlotIndex + 1;
+      const nextUsedIds = [...stage7UsedChoiceIds, choice.id];
+      const nextFilled = [...stage7FilledChars, expectedChar];
+
+      setStage7UsedChoiceIds(nextUsedIds);
+      setStage7FilledChars(nextFilled);
+      setStage7CurrentSlotIndex(nextSlotIndex);
+      setStage7ErrorChoiceId(null);
+
+      if (nextSlotIndex >= currentQ.targetChars.length) {
+        // Completed full word!
+        setIsAnswerSubmitted(true);
+        setIsCorrectAnswer(true);
+        setStars((prev) => prev + 2);
+        setFeedbackMessage('عبقري! تم كِتابة الكلمة كاملة بالترتيب الصحيح ✍️🌟');
+        handleCorrectAnswerAdvance(handleStage7NextQuestion);
+      } else {
+        if (soundEnabled) {
+          playLernstudioSound('correct');
+        }
+      }
+    } else {
+      // Incorrect choice
+      if (soundEnabled) {
+        playLernstudioSound('wrong');
+      }
+      setStage7ErrorChoiceId(choice.id);
+      setTimeout(() => setStage7ErrorChoiceId(null), 600);
+      setFeedbackMessage(`اختر الحرف التالي في الموضع المضيء!`);
+    }
+  };
+
   // Stage Stepper Configuration
   const stagesList = useMemo(() => {
     if (language === 'de') {
@@ -422,7 +919,11 @@ export const LernstudioTeachModal: React.FC<Props> = ({
         { num: 2, title: '2. Richtig / Falsch', icon: '✔️', desc: 'Einfaches Zuordnen' },
         { num: 3, title: '3. Zwei Optionen', icon: '✌️', desc: 'Auswahl aus zwei Optionen' },
         { num: 4, title: '4. Alle Wörter', icon: '🎯', desc: 'Gesamten Wortschatz üben' },
-        { num: 5, title: '5. Spiele', icon: '🏆', desc: 'Glückwunsch & Spiele' }
+        { num: 5, title: '5. Silben zusammensetzen', icon: '🧩', desc: 'Silben in richtiger Reihenfolge' },
+        { num: 6, title: '6. Fehlender Buchstabe', icon: '🔤', desc: 'Ein fehlender Buchstabe' },
+        { num: 7, title: '7. Buchstabenfolge', icon: '🧩', desc: 'Aufeinanderfolgende Buchstaben' },
+        { num: 8, title: '8. Wort vervollständigen', icon: '✍️', desc: 'Ganzes Wort vervollständigen' },
+        { num: 9, title: '9. Spiele', icon: '🏆', desc: 'Glückwunsch & Spiele' }
       ];
     } else if (language === 'en') {
       return [
@@ -430,7 +931,11 @@ export const LernstudioTeachModal: React.FC<Props> = ({
         { num: 2, title: '2. True / False', icon: '✔️', desc: 'Simple matching practice' },
         { num: 3, title: '3. Two Options', icon: '✌️', desc: 'Choose from two choices' },
         { num: 4, title: '4. All Words', icon: '🎯', desc: 'Practice all vocabulary' },
-        { num: 5, title: '5. Games', icon: '🏆', desc: 'Congratulations & games' }
+        { num: 5, title: '5. Syllable Puzzle', icon: '🧩', desc: 'Assemble syllables in order' },
+        { num: 6, title: '6. One Missing Letter', icon: '🔤', desc: 'Find 1 missing letter' },
+        { num: 7, title: '7. Missing Sequence', icon: '🧩', desc: 'Find consecutive letters' },
+        { num: 8, title: '8. Complete Word', icon: '✍️', desc: 'Spell full word' },
+        { num: 9, title: '9. Games', icon: '🏆', desc: 'Congratulations & games' }
       ];
     }
     return [
@@ -438,7 +943,11 @@ export const LernstudioTeachModal: React.FC<Props> = ({
       { num: 2, title: '٢. صح أم غلط', icon: '✔️', desc: 'تمرين المطابقة البسيط' },
       { num: 3, title: '٣. إجابتين', icon: '✌️', desc: 'الاختيار من إجابتين' },
       { num: 4, title: '٤. كل الكلمات', icon: '🎯', desc: 'الاختيار من كل المجموعة' },
-      { num: 5, title: '٥. الألعاب', icon: '🏆', desc: 'تهانينا واختيار اللعبة' }
+      { num: 5, title: '٥. تركيب المقاطع', icon: '🧩', desc: 'تركيب المقاطع الصوتية بالترتيب' },
+      { num: 6, title: '٦. حرف ناقص', icon: '🔤', desc: 'تحديد الحرف الناقص الواحد' },
+      { num: 7, title: '٧. حروف متتالية', icon: '🧩', desc: 'تحديد الحروف المتتالية الناقصة' },
+      { num: 8, title: '٨. إكمال الكلمة', icon: '✍️', desc: 'تركيب الكلمة كاملة بالترتيب' },
+      { num: 9, title: '٩. الألعاب', icon: '🏆', desc: 'تهانينا واختيار اللعبة' }
     ];
   }, [language]);
 
@@ -521,9 +1030,9 @@ export const LernstudioTeachModal: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Stages Stepper Nav */}
+        {/* Stages Stepper Nav - Horizontally Scrollable compact pills */}
         <div className="bg-surface-hover/60 border-b border-surface-border px-2 py-2 shrink-0 overflow-x-auto scrollbar-none">
-          <div className="grid grid-cols-5 gap-1 sm:gap-1.5 w-full min-w-[340px]">
+          <div className="flex items-center gap-1.5 min-w-max">
             {stagesList.map((stg) => {
               const isActive = currentStage === stg.num;
               const isDone = completedStages.includes(stg.num);
@@ -538,17 +1047,17 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                     resetAnswerState();
                     setShuffleKey((k) => k + 1);
                   }}
-                  className={`flex items-center justify-center gap-1 px-1 sm:px-2 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all cursor-pointer border truncate min-w-0 ${
+                  className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
                     isActive
                       ? 'bg-primary text-white border-primary shadow-xs scale-[1.02]'
                       : isDone
                       ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
                       : 'bg-surface/80 text-text-muted hover:bg-surface border-surface-border'
                   }`}
-                  title={stg.title}
+                  title={stg.desc}
                 >
                   <span className="text-xs sm:text-sm shrink-0">{isDone ? '✔️' : stg.icon}</span>
-                  <span className="truncate text-[10px] sm:text-xs">{stg.title}</span>
+                  <span className="text-xs">{stg.title}</span>
                 </button>
               );
             })}
@@ -936,8 +1445,466 @@ export const LernstudioTeachModal: React.FC<Props> = ({
             </div>
           )}
 
-          {/* ================= STAGE 5: Game Suggestions & Victory ================= */}
-          {currentStage === 5 && (
+          {/* ================= STAGE 5: Silben zusammensetzen (Syllable Puzzle) ================= */}
+          {currentStage === 5 && syllableQuestions.length > 0 && (
+            <div className="w-full space-y-4 flex-1 flex flex-col items-center justify-center">
+              <div className="w-full bg-surface border border-surface-border rounded-3xl p-5 sm:p-6 space-y-4 shadow-sm relative">
+                <div className="flex items-center justify-between text-xs font-bold text-text-muted">
+                  <span>المرحلة الخامسة: 🧩 Silben zusammensetzen (تركيب المقاطع)</span>
+                  <span className="px-2.5 py-1 rounded-full bg-primary/10 text-primary font-mono font-black">
+                    {stageQuestionIndex + 1} / {syllableQuestions.length}
+                  </span>
+                </div>
+
+                {/* Question Info */}
+                <div className="space-y-2 py-1 text-center">
+                  <div className="text-5xl sm:text-6xl select-none">
+                    {syllableQuestions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-black text-text-main">
+                    {getItemTranslation(syllableQuestions[stageQuestionIndex].targetItem, language)}
+                  </h3>
+                  <p className="text-xs text-text-muted font-bold">
+                    اختر المقاطع الصوتية بالترتيب الصحيح لتكوين الكلمة ({syllableStepIndex + 1} من {syllableQuestions[stageQuestionIndex].expectedSyllables.length}):
+                  </p>
+
+                  {/* Syllables Slot Display */}
+                  <div className="pt-3 pb-1 flex items-center justify-center gap-2 font-mono text-xl sm:text-2xl font-black tracking-wider flex-wrap" dir="ltr">
+                    {syllableQuestions[stageQuestionIndex].article && (
+                      <span className="text-primary font-serif font-semibold text-xl sm:text-2xl mr-2">
+                        {syllableQuestions[stageQuestionIndex].article}
+                      </span>
+                    )}
+                    {syllableQuestions[stageQuestionIndex].expectedSyllables.map((syl, i) => {
+                      const filledSyl = filledSyllables[i];
+                      const isCurrentStepTarget = i === syllableStepIndex;
+
+                      return (
+                        <span
+                          key={i}
+                          className={`inline-flex items-center justify-center px-3.5 h-11 sm:h-13 min-w-[3.5rem] rounded-xl border-2 font-black transition-all ${
+                            filledSyl
+                              ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs scale-105'
+                              : isCurrentStepTarget
+                              ? 'bg-amber-500/10 border-amber-500 border-dashed text-amber-500 animate-pulse scale-105'
+                              : 'bg-surface-hover/50 border-dashed border-surface-border text-text-muted'
+                          }`}
+                        >
+                          {filledSyl || '...'}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Syllable Choice Buttons */}
+                <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-md mx-auto pt-2">
+                  {syllableQuestions[stageQuestionIndex].choices.map((choice) => {
+                    const isUsed = usedSyllableChoiceIds.includes(choice.id);
+                    const isError = errorSyllableChoiceId === choice.id;
+
+                    return (
+                      <button
+                        key={choice.id}
+                        type="button"
+                        disabled={isUsed || (isAnswerSubmitted && isCorrectAnswer)}
+                        onClick={() => handleSyllableChoiceClick(choice)}
+                        className={`px-4 h-12 sm:h-14 rounded-2xl text-lg sm:text-xl font-black font-mono border transition-all cursor-pointer flex items-center justify-center shadow-xs ${
+                          isUsed
+                            ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 opacity-40 cursor-not-allowed'
+                            : isError
+                            ? 'bg-red-500 text-white border-red-500 animate-bounce'
+                            : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border hover:border-primary/40 active:scale-95'
+                        }`}
+                      >
+                        {choice.syllable}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Feedback Message */}
+                {isAnswerSubmitted && (
+                  <div
+                    className={`p-3.5 rounded-2xl border text-xs sm:text-sm font-bold animate-fade-in ${
+                      isCorrectAnswer
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span>{feedbackMessage}</span>
+                      {isCorrectAnswer && (
+                        <span className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-500/30 shadow-2xs">
+                          <span>{language === 'ar' ? 'الانتقال للسؤال التالي...' : language === 'de' ? 'Nächste Frage...' : 'Next question...'}</span>
+                          <span className="inline-flex items-center gap-0.5 mr-1">
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                            <span className="w-1 h-3.5 bg-emerald-500 rounded-full animate-pulse [animation-delay:150ms]" />
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse [animation-delay:300ms]" />
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ================= STAGE 6: Fehlender Buchstabe (One Missing Letter) ================= */}
+          {currentStage === 6 && stage5Questions.length > 0 && (
+            <div className="w-full space-y-4 flex-1 flex flex-col items-center justify-center">
+              <div className="w-full bg-surface border border-surface-border rounded-3xl p-5 sm:p-6 space-y-4 shadow-sm relative">
+                <div className="flex items-center justify-between text-xs font-bold text-text-muted">
+                  <span>المرحلة السادسة: 🔤 Fehlender Buchstabe (حرف ناقص واحد)</span>
+                  <span className="px-2.5 py-1 rounded-full bg-primary/10 text-primary font-mono font-black">
+                    {stageQuestionIndex + 1} / {stage5Questions.length}
+                  </span>
+                </div>
+
+                {/* Question Info */}
+                <div className="space-y-2 py-1 text-center">
+                  <div className="text-5xl sm:text-6xl select-none">
+                    {stage5Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-black text-text-main">
+                    {getItemTranslation(stage5Questions[stageQuestionIndex].targetItem, language)}
+                  </h3>
+                  <p className="text-xs text-text-muted font-bold">
+                    اختر الحرف المناسب لإكمال الكلمة بشكل صحيح:
+                  </p>
+
+                  {/* Word Slot Display */}
+                  <div className="pt-3 pb-1 flex items-center justify-center gap-1.5 font-mono text-2xl sm:text-3xl font-black tracking-wider flex-wrap" dir="ltr">
+                    {stage5Questions[stageQuestionIndex].article && (
+                      <span className="text-primary font-serif font-semibold text-xl sm:text-2xl mr-2">
+                        {stage5Questions[stageQuestionIndex].article}
+                      </span>
+                    )}
+                    {stage5Questions[stageQuestionIndex].chars.map((char, i) => {
+                      const isMissingSlot = i === stage5Questions[stageQuestionIndex].missingIndex;
+                      if (isMissingSlot) {
+                        return (
+                          <span
+                            key={i}
+                            className={`inline-flex items-center justify-center w-9 h-11 sm:w-11 sm:h-13 rounded-xl border-2 border-dashed font-black transition-all ${
+                              isAnswerSubmitted
+                                ? isCorrectAnswer
+                                  ? 'bg-emerald-500 text-white border-emerald-500 scale-105 shadow-md'
+                                  : 'bg-red-500 text-white border-red-500'
+                                : 'bg-primary/10 border-primary text-primary animate-pulse'
+                            }`}
+                          >
+                            {isAnswerSubmitted ? (selectedAnswer || '?') : '_'}
+                          </span>
+                        );
+                      }
+                      return (
+                        <span
+                          key={i}
+                          className="inline-flex items-center justify-center w-8 h-10 sm:w-10 sm:h-12 bg-surface-hover/80 text-text-main rounded-xl border border-surface-border"
+                        >
+                          {char}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Letter Choice Buttons */}
+                <div className="flex flex-wrap items-center justify-center gap-2 max-w-md mx-auto pt-2">
+                  {stage5Questions[stageQuestionIndex].choices.map((choiceChar, idx) => {
+                    const isSelected = selectedAnswer === choiceChar;
+                    const isTargetChar = choiceChar.toUpperCase() === stage5Questions[stageQuestionIndex].missingChar.toUpperCase();
+
+                    let btnClass = 'bg-surface hover:bg-surface-hover text-text-main border-surface-border hover:border-primary/40';
+
+                    if (isAnswerSubmitted) {
+                      if (isTargetChar) {
+                        btnClass = 'bg-emerald-500 text-white border-emerald-500 scale-105 shadow-md';
+                      } else if (isSelected && !isCorrectAnswer) {
+                        btnClass = 'bg-red-500 text-white border-red-500';
+                      } else {
+                        btnClass = 'bg-surface/40 text-text-muted border-surface-border opacity-40';
+                      }
+                    }
+
+                    return (
+                      <button
+                        key={`${choiceChar}-${idx}`}
+                        type="button"
+                        disabled={isAnswerSubmitted}
+                        onClick={() => handleStage5Answer(choiceChar)}
+                        className={`w-11 h-12 sm:w-13 sm:h-14 rounded-2xl text-xl sm:text-2xl font-black font-mono border transition-all cursor-pointer flex items-center justify-center shadow-xs active:scale-95 ${btnClass}`}
+                      >
+                        {choiceChar}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Feedback Message */}
+                {isAnswerSubmitted && (
+                  <div
+                    className={`p-3.5 rounded-2xl border text-xs sm:text-sm font-bold animate-fade-in ${
+                      isCorrectAnswer
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span>{feedbackMessage}</span>
+                      {isCorrectAnswer ? (
+                        <span className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-500/30 shadow-2xs">
+                          <span>{language === 'ar' ? 'الانتقال للسؤال التالي...' : language === 'de' ? 'Nächste Frage...' : 'Next question...'}</span>
+                          <span className="inline-flex items-center gap-0.5 mr-1">
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                            <span className="w-1 h-3.5 bg-emerald-500 rounded-full animate-pulse [animation-delay:150ms]" />
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse [animation-delay:300ms]" />
+                          </span>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleSpeakGerman(stage5Questions[stageQuestionIndex].targetItem.german)}
+                          className="flex items-center gap-1.5 text-xs text-red-700 dark:text-red-300 font-bold bg-red-500/20 hover:bg-red-500/30 px-3 py-1 rounded-full border border-red-500/30 cursor-pointer transition-colors shadow-2xs"
+                        >
+                          <Volume2 className="w-3.5 h-3.5 text-red-500" />
+                          <span>{language === 'ar' ? 'استمع لنطق الكلمة' : language === 'de' ? 'Aussprache anhören' : 'Listen to word'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ================= STAGE 7: Buchstabenfolge (Consecutive Missing Letters) ================= */}
+          {currentStage === 7 && stage6Questions.length > 0 && (
+            <div className="w-full space-y-4 flex-1 flex flex-col items-center justify-center">
+              <div className="w-full bg-surface border border-surface-border rounded-3xl p-5 sm:p-6 space-y-4 shadow-sm relative">
+                <div className="flex items-center justify-between text-xs font-bold text-text-muted">
+                  <span>المرحلة السابعة: 🧩 Buchstabenfolge (حروف متتالية)</span>
+                  <span className="px-2.5 py-1 rounded-full bg-primary/10 text-primary font-mono font-black">
+                    {stageQuestionIndex + 1} / {stage6Questions.length}
+                  </span>
+                </div>
+
+                {/* Question Info */}
+                <div className="space-y-2 py-1 text-center">
+                  <div className="text-5xl sm:text-6xl select-none">
+                    {stage6Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-black text-text-main">
+                    {getItemTranslation(stage6Questions[stageQuestionIndex].targetItem, language)}
+                  </h3>
+                  <p className="text-xs text-text-muted font-bold">
+                    اختر الحروف المتتالية الناقصة بالتسلسل الصحيح ({stage6StepIndex + 1} من {stage6Questions[stageQuestionIndex].expectedChars.length}):
+                  </p>
+
+                  {/* Word Slot Display */}
+                  <div className="pt-3 pb-1 flex items-center justify-center gap-1.5 font-mono text-2xl sm:text-3xl font-black tracking-wider flex-wrap" dir="ltr">
+                    {stage6Questions[stageQuestionIndex].article && (
+                      <span className="text-primary font-serif font-semibold text-xl sm:text-2xl mr-2">
+                        {stage6Questions[stageQuestionIndex].article}
+                      </span>
+                    )}
+                    {stage6Questions[stageQuestionIndex].chars.map((char, i) => {
+                      const isMissingSlot = stage6Questions[stageQuestionIndex].missingIndices.includes(i);
+                      const filledChar = stage6FilledChars[i];
+                      const isCurrentStepTarget = stage6Questions[stageQuestionIndex].missingIndices[stage6StepIndex] === i;
+
+                      if (isMissingSlot) {
+                        return (
+                          <span
+                            key={i}
+                            className={`inline-flex items-center justify-center w-9 h-11 sm:w-11 sm:h-13 rounded-xl border-2 font-black transition-all ${
+                              filledChar
+                                ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs'
+                                : isCurrentStepTarget
+                                ? 'bg-amber-500/10 border-amber-500 border-dashed text-amber-500 animate-pulse scale-105'
+                                : 'bg-surface-hover/50 border-dashed border-surface-border text-text-muted'
+                            }`}
+                          >
+                            {filledChar || '_'}
+                          </span>
+                        );
+                      }
+                      return (
+                        <span
+                          key={i}
+                          className="inline-flex items-center justify-center w-8 h-10 sm:w-10 sm:h-12 bg-surface-hover/80 text-text-main rounded-xl border border-surface-border"
+                        >
+                          {char}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Letter Choice Buttons */}
+                <div className="flex flex-wrap items-center justify-center gap-2 max-w-md mx-auto pt-2">
+                  {stage6Questions[stageQuestionIndex].choices.map((choice) => {
+                    const isUsed = stage6UsedChoiceIds.includes(choice.id);
+                    const isError = stage6ErrorChoiceId === choice.id;
+
+                    return (
+                      <button
+                        key={choice.id}
+                        type="button"
+                        disabled={isUsed || (isAnswerSubmitted && isCorrectAnswer)}
+                        onClick={() => handleStage6ChoiceClick(choice)}
+                        className={`w-11 h-12 sm:w-13 sm:h-14 rounded-2xl text-xl sm:text-2xl font-black font-mono border transition-all cursor-pointer flex items-center justify-center shadow-xs ${
+                          isUsed
+                            ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 opacity-40 cursor-not-allowed'
+                            : isError
+                            ? 'bg-red-500 text-white border-red-500 animate-bounce'
+                            : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border hover:border-primary/40 active:scale-95'
+                        }`}
+                      >
+                        {choice.char}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Feedback Message */}
+                {isAnswerSubmitted && (
+                  <div
+                    className={`p-3.5 rounded-2xl border text-xs sm:text-sm font-bold animate-fade-in ${
+                      isCorrectAnswer
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span>{feedbackMessage}</span>
+                      {isCorrectAnswer && (
+                        <span className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-500/30 shadow-2xs">
+                          <span>{language === 'ar' ? 'الانتقال للسؤال التالي...' : language === 'de' ? 'Nächste Frage...' : 'Next question...'}</span>
+                          <span className="inline-flex items-center gap-0.5 mr-1">
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                            <span className="w-1 h-3.5 bg-emerald-500 rounded-full animate-pulse [animation-delay:150ms]" />
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse [animation-delay:300ms]" />
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ================= STAGE 8: Wort vervollständigen (Complete the Word) ================= */}
+          {currentStage === 8 && stage7Questions.length > 0 && (
+            <div className="w-full space-y-4 flex-1 flex flex-col items-center justify-center">
+              <div className="w-full bg-surface border border-surface-border rounded-3xl p-5 sm:p-6 space-y-4 shadow-sm relative">
+                <div className="flex items-center justify-between text-xs font-bold text-text-muted">
+                  <span>المرحلة الثامنة: ✍️ Wort vervollständigen (تركيب الكلمة كاملة)</span>
+                  <span className="px-2.5 py-1 rounded-full bg-primary/10 text-primary font-mono font-black">
+                    {stageQuestionIndex + 1} / {stage7Questions.length}
+                  </span>
+                </div>
+
+                {/* Question Info */}
+                <div className="space-y-2 py-1 text-center">
+                  <div className="text-5xl sm:text-6xl select-none">
+                    {stage7Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-black text-text-main">
+                    {getItemTranslation(stage7Questions[stageQuestionIndex].targetItem, language)}
+                  </h3>
+                  <p className="text-xs text-text-muted font-bold">
+                    اختر حروف الكلمة بالترتيب من البداية وحتى النهاية:
+                  </p>
+
+                  {/* Word Slots for entire word */}
+                  <div className="pt-3 pb-1 flex items-center justify-center gap-1.5 font-mono text-2xl sm:text-3xl font-black tracking-wider flex-wrap" dir="ltr">
+                    {stage7Questions[stageQuestionIndex].article && (
+                      <span className="text-primary font-serif font-semibold text-xl sm:text-2xl mr-2">
+                        {stage7Questions[stageQuestionIndex].article}
+                      </span>
+                    )}
+                    {stage7Questions[stageQuestionIndex].targetChars.map((_, slotIdx) => {
+                      const filledChar = stage7FilledChars[slotIdx];
+                      const isCurrentActive = stage7CurrentSlotIndex === slotIdx;
+
+                      return (
+                        <span
+                          key={slotIdx}
+                          className={`inline-flex items-center justify-center w-9 h-11 sm:w-11 sm:h-13 rounded-xl border-2 font-black transition-all ${
+                            filledChar
+                              ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs'
+                              : isCurrentActive
+                              ? 'bg-primary/10 border-primary border-dashed text-primary animate-pulse scale-105'
+                              : 'bg-surface-hover/40 border-dashed border-surface-border text-text-muted'
+                          }`}
+                        >
+                          {filledChar || '_'}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Letter Choice Buttons (No Distractors, exact set of letters) */}
+                <div className="flex flex-wrap items-center justify-center gap-2 max-w-md mx-auto pt-2">
+                  {stage7Questions[stageQuestionIndex].choices.map((choice) => {
+                    const isUsed = stage7UsedChoiceIds.includes(choice.id);
+                    const isError = stage7ErrorChoiceId === choice.id;
+
+                    return (
+                      <button
+                        key={choice.id}
+                        type="button"
+                        disabled={isUsed || (isAnswerSubmitted && isCorrectAnswer)}
+                        onClick={() => handleStage7ChoiceClick(choice)}
+                        className={`w-11 h-12 sm:w-13 sm:h-14 rounded-2xl text-xl sm:text-2xl font-black font-mono border transition-all cursor-pointer flex items-center justify-center shadow-xs ${
+                          isUsed
+                            ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 opacity-40 cursor-not-allowed'
+                            : isError
+                            ? 'bg-red-500 text-white border-red-500 animate-bounce'
+                            : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border hover:border-primary/40 active:scale-95'
+                        }`}
+                      >
+                        {choice.char}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Feedback Message */}
+                {isAnswerSubmitted && (
+                  <div
+                    className={`p-3.5 rounded-2xl border text-xs sm:text-sm font-bold animate-fade-in ${
+                      isCorrectAnswer
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span>{feedbackMessage}</span>
+                      {isCorrectAnswer && (
+                        <span className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-500/30 shadow-2xs">
+                          <span>{language === 'ar' ? 'الانتقال لتهانينا والألعاب...' : language === 'de' ? 'Weiter zu Spielen...' : 'Proceed to Games...'}</span>
+                          <span className="inline-flex items-center gap-0.5 mr-1">
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                            <span className="w-1 h-3.5 bg-emerald-500 rounded-full animate-pulse [animation-delay:150ms]" />
+                            <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse [animation-delay:300ms]" />
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ================= STAGE 9: Game Suggestions & Victory ================= */}
+          {currentStage === 9 && (
             <div className="w-full space-y-5 flex-1 flex flex-col items-center justify-center py-2 animate-scale-up">
               <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-3xl text-center space-y-3 max-w-lg w-full">
                 <div className="inline-flex p-3 bg-amber-500 text-white rounded-2xl shadow-lg">
@@ -1028,6 +1995,16 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                     <div className="text-2xl mb-1">❌⭕</div>
                     <div className="text-xs font-black text-text-main">لعبة X-O الكلمات</div>
                     <div className="text-[10px] text-text-muted font-bold truncate">مواجهة فرق أو ضد الحاسوب</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onLaunchGame && onLaunchGame('ultimate_tictactoe')}
+                    className="p-3 bg-surface hover:bg-surface-hover border border-amber-500/40 rounded-2xl text-right transition-all hover:scale-[1.02] shadow-2xs group cursor-pointer"
+                  >
+                    <div className="text-2xl mb-1">👑</div>
+                    <div className="text-xs font-black text-text-main">Ultimate XO (9×9)</div>
+                    <div className="text-[10px] text-text-muted font-bold truncate">٩ لوحات استراتيجية متداخلة</div>
                   </button>
 
                   <button
@@ -1187,7 +2164,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                 className="px-5 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer inline-flex items-center gap-1.5"
               >
                 <span>
-                  {stageQuestionIndex + 1 < stage4Questions.length ? 'السؤال التالي' : 'إكمال التعلم والألعاب 🏆'}
+                  {stageQuestionIndex + 1 < stage4Questions.length ? 'السؤال التالي' : 'الانتقال للمرحلة الخامسة 🚀'}
                 </span>
                 <ChevronLeft className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
               </button>
@@ -1195,6 +2172,86 @@ export const LernstudioTeachModal: React.FC<Props> = ({
           )}
 
           {currentStage === 5 && (
+            <>
+              <div className="text-xs font-bold text-text-muted">
+                {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'اختر المقطع التالي بالترتيب') : 'تركيب المقاطع الصوتية'}
+              </div>
+
+              <button
+                type="button"
+                disabled={!isAnswerSubmitted}
+                onClick={handleSyllableNextQuestion}
+                className="px-5 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <span>
+                  {stageQuestionIndex + 1 < syllableQuestions.length ? 'السؤال التالي' : 'الانتقال للمرحلة السادسة 🚀'}
+                </span>
+                <ChevronLeft className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+              </button>
+            </>
+          )}
+
+          {currentStage === 6 && (
+            <>
+              <div className="text-xs font-bold text-text-muted">
+                {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'اختر الحرف الناقص الصحيح') : 'حدد الحرف الناقص'}
+              </div>
+
+              <button
+                type="button"
+                disabled={!isAnswerSubmitted}
+                onClick={handleStage5NextQuestion}
+                className="px-5 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <span>
+                  {stageQuestionIndex + 1 < stage5Questions.length ? 'السؤال التالي' : 'الانتقال للمرحلة السابعة 🚀'}
+                </span>
+                <ChevronLeft className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+              </button>
+            </>
+          )}
+
+          {currentStage === 7 && (
+            <>
+              <div className="text-xs font-bold text-text-muted">
+                {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'اكتملت الحروف المتتالية') : 'حدد الحروف المتتالية بالترتيب'}
+              </div>
+
+              <button
+                type="button"
+                disabled={!isAnswerSubmitted}
+                onClick={handleStage6NextQuestion}
+                className="px-5 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <span>
+                  {stageQuestionIndex + 1 < stage6Questions.length ? 'السؤال التالي' : 'الانتقال للمرحلة الثامنة 🚀'}
+                </span>
+                <ChevronLeft className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+              </button>
+            </>
+          )}
+
+          {currentStage === 8 && (
+            <>
+              <div className="text-xs font-bold text-text-muted">
+                {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'تم تركيب الكلمة كاملاً') : 'ركّب الكلمة كاملاً بالترتيب'}
+              </div>
+
+              <button
+                type="button"
+                disabled={!isAnswerSubmitted}
+                onClick={handleStage7NextQuestion}
+                className="px-5 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <span>
+                  {stageQuestionIndex + 1 < stage7Questions.length ? 'السؤال التالي' : 'الانتقال لتهانينا والألعاب 🏆'}
+                </span>
+                <ChevronLeft className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+              </button>
+            </>
+          )}
+
+          {currentStage === 9 && (
             <div className="w-full flex items-center justify-between">
               <button
                 type="button"

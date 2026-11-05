@@ -201,6 +201,35 @@ const GameVectorFallbackArt: React.FC<{ gameId: string; className?: string }> = 
             <path d="M124 94 L136 106 M136 94 L124 106" stroke="#F43F5E" strokeWidth="4" strokeLinecap="round" />
           </g>
         );
+      case 'ultimate_tictactoe':
+        return (
+          <g>
+            <rect x="44" y="16" width="112" height="112" rx="14" fill="#1E1B4B" stroke="#FBBF24" strokeWidth="3.5" />
+            {/* Macro 3x3 lines */}
+            <line x1="81" y1="22" x2="81" y2="122" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="119" y1="22" x2="119" y2="122" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="50" y1="53" x2="150" y2="53" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="50" y1="91" x2="150" y2="91" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" />
+            {/* Glowing active center mini-board */}
+            <rect x="84" y="56" width="32" height="32" rx="5" fill="#F59E0B" fillOpacity="0.22" stroke="#FDE047" strokeWidth="2" />
+            <line x1="95" y1="59" x2="95" y2="85" stroke="#FDE047" strokeWidth="1" />
+            <line x1="105" y1="59" x2="105" y2="85" stroke="#FDE047" strokeWidth="1" />
+            <line x1="87" y1="67" x2="113" y2="67" stroke="#FDE047" strokeWidth="1" />
+            <line x1="87" y1="77" x2="113" y2="77" stroke="#FDE047" strokeWidth="1" />
+            {/* Conquered Top-Left X Sub-board */}
+            <rect x="49" y="21" width="29" height="29" rx="5" fill="#F43F5E" fillOpacity="0.25" />
+            <path d="M56 28 L71 43 M71 28 L56 43" stroke="#F43F5E" strokeWidth="4" strokeLinecap="round" />
+            {/* Conquered Top-Right O Sub-board */}
+            <rect x="122" y="21" width="29" height="29" rx="5" fill="#38BDF8" fillOpacity="0.25" />
+            <circle cx="136.5" cy="35.5" r="8.5" stroke="#38BDF8" strokeWidth="4" fill="none" />
+            {/* Conquered Bottom-Right X Sub-board */}
+            <rect x="122" y="94" width="29" height="29" rx="5" fill="#F43F5E" fillOpacity="0.25" />
+            <path d="M129 101 L144 116 M144 101 L129 116" stroke="#F43F5E" strokeWidth="4" strokeLinecap="round" />
+            {/* Conquered Bottom-Left O Sub-board */}
+            <rect x="49" y="94" width="29" height="29" rx="5" fill="#38BDF8" fillOpacity="0.25" />
+            <circle cx="63.5" cy="108.5" r="8.5" stroke="#38BDF8" strokeWidth="4" fill="none" />
+          </g>
+        );
       case 'sentence_builder':
       case 'solo_sentence':
         return (

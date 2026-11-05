@@ -21,18 +21,17 @@ import { DesktopTopBar } from './components/desktop/DesktopTopBar';
 import { DesktopDashboard } from './components/desktop/DesktopDashboard';
 import { useDesktopShortcuts } from './hooks/useDesktopShortcuts';
 
-// Lazy loaded heavy tab views and components for fast desktop cold start
-const FinanceView = React.lazy(() => import('./components/finance/FinanceView').then(m => ({ default: m.FinanceView })));
-const ReportsView = React.lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
-const SessionHistoryView = React.lazy(() => import('./components/SessionHistoryView').then(m => ({ default: m.SessionHistoryView })));
-const SettingsView = React.lazy(() => import('./components/SettingsView').then(m => ({ default: m.SettingsView })));
-const FreeTimeSlotsView = React.lazy(() => import('./components/FreeTimeSlotsView').then(m => ({ default: m.FreeTimeSlotsView })));
-const CertificateCenter = React.lazy(() => import('./components/certificates/CertificateCenter').then(m => ({ default: m.CertificateCenter })));
-const SchoolScheduleView = React.lazy(() => import('./components/SchoolScheduleView').then(m => ({ default: m.SchoolScheduleView })));
-const HodHubView = React.lazy(() => import('./components/HodHubView').then(m => ({ default: m.HodHubView })));
-const LernstudioView = React.lazy(() => import('./components/lernstudio/LernstudioView').then(m => ({ default: m.LernstudioView })));
-const BackupModal = React.lazy(() => import('./components/BackupModal').then(m => ({ default: m.BackupModal })));
-const AddFinanceTransactionModal = React.lazy(() => import('./components/finance/modals/AddFinanceTransactionModal').then(m => ({ default: m.AddFinanceTransactionModal })));
+import { FinanceView } from './components/finance/FinanceView';
+import { ReportsView } from './components/ReportsView';
+import { SessionHistoryView } from './components/SessionHistoryView';
+import { SettingsView } from './components/SettingsView';
+import { FreeTimeSlotsView } from './components/FreeTimeSlotsView';
+import { CertificateCenter } from './components/certificates/CertificateCenter';
+import { SchoolScheduleView } from './components/SchoolScheduleView';
+import { HodHubView } from './components/HodHubView';
+import { LernstudioView } from './components/lernstudio/LernstudioView';
+import { BackupModal } from './components/BackupModal';
+import { AddFinanceTransactionModal } from './components/finance/modals/AddFinanceTransactionModal';
 
 import { AnimatePresence, motion } from 'motion/react';
 import { BottomNav } from './components/BottomNav';
@@ -812,7 +811,7 @@ export default function App() {
   }
 
   if (!initialData) {
-    return <LoadingScreen message="Lade Daten..." />;
+    return <LoadingScreen message="Lade Daten..." fullScreen />;
   }
 
   return (

@@ -272,6 +272,25 @@ export const NANO_BANANA_GAME_ART_MANIFEST: Record<string, NanoBananaGameArtSpec
     animationOpportunities: ['3D X/O token pop-in', 'Winning line golden beam', 'Cell challenge modal flip'],
     palette: { topColor: '#312E81', midColor: '#4338CA', bottomColor: '#1E1B4B', accentColor: '#F43F5E', glowColor: '#38BDF8' }
   },
+  ultimate_tictactoe: {
+    gameId: 'ultimate_tictactoe',
+    gameNumber: 35,
+    category: 'team',
+    batchId: 'batch_1_team_arena_quiz',
+    titleAr: 'إكس أو العملاقة (Ultimate XO)',
+    titleDe: 'Das ultimative Tic-Tac-Toe (Ultimate XO)',
+    titleEn: 'Ultimate XO – 9x9 Strategy',
+    componentFile: 'src/components/lernstudio/games/LernstudioUltimateTicTacToeGame.tsx',
+    localStageAssetPath: '/assets/games/ultimate_tictactoe_stage.webp',
+    aspectRatio: '16:9',
+    targetDimensions: { width: 1280, height: 720 },
+    transparentForegroundRequired: true,
+    nanoBananaStagePrompt: `3D cartoon glowing magical 9x9 Ultimate Tic-Tac-Toe championship arena board with 9 nested mini grids, neon golden borders, ruby X and sapphire O emblems, ${NANO_BANANA_STYLE_CONSTITUTION}`,
+    nanoBananaMascotOrPropPrompt: `3D cartoon glowing golden crown over a giant ruby X and sapphire O crystal trophy, ${NANO_BANANA_STYLE_CONSTITUTION}`,
+    intendedInGameUsage: 'Strategic 9-board Ultimate XO championship arena with glowing active sub-board indicators.',
+    animationOpportunities: ['Active mini-board neon pulse', 'Conquered sub-board 3D crest slam', 'Grand 3-in-a-row laser beam'],
+    palette: { topColor: '#4C1D95', midColor: '#6D28D9', bottomColor: '#1E1B4B', accentColor: '#F59E0B', glowColor: '#38BDF8' }
+  },
   sentence_builder: {
     gameId: 'sentence_builder',
     gameNumber: 11,

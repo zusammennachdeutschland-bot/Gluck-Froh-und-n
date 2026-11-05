@@ -114,6 +114,13 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
       categoryKey: 'tictactoeCategory'
     },
     {
+      id: 'ultimate_tictactoe',
+      titleKey: 'ultimateTictactoeTitle',
+      emoji: '👑',
+      category: 'team',
+      categoryKey: 'ultimateTictactoeCategory'
+    },
+    {
       id: 'sentence_builder',
       titleKey: 'teamSentenceTitle',
       emoji: '✍️',
