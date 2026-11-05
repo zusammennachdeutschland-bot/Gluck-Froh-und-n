@@ -54,7 +54,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         setSnapshot: {
           id: currentSet.id,
           title: currentSet.title,
-          category: currentSet.category,
+          category: (currentSet as any).category || currentSet.topic || '',
           items: currentSet.items
         },
         targetQuestionCount: Math.min(targetQuestionCount, currentSet.items.length),

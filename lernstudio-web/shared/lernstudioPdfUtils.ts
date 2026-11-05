@@ -5,7 +5,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { Toast } from '@capacitor/toast';
 import { LernstudioSet } from '../types/lernstudio';
-import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
+import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesStub';
 import {
   A4_PAGE_HEIGHT_PX,
   A4_PAGE_WIDTH_PX,

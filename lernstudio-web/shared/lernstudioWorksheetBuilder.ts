@@ -764,10 +764,10 @@ export function buildWorksheetData(
     safeGrade = '____________';
   }
 
-  const validItems = (set.items || []).filter((item) => item && item.german && item.arabic);
+  const validItems: LernstudioItem[] = ((set.items || []) as LernstudioItem[]).filter((item: any) => item && typeof item === 'object' && item.german && item.arabic);
   const setDomainsSet = detectSetDomains(set);
   const isNumberSet = setDomainsSet.has('numbers');
-  const isNounSet = !isNumberSet && validItems.filter((i) => detectWordType(i) === 'noun').length >= 3;
+  const isNounSet = !isNumberSet && validItems.filter((i: any) => detectWordType(i) === 'noun').length >= 3;
 
   const result: WorksheetData = {
     buildId: WORKSHEET_BUILD_ID,
@@ -983,9 +983,9 @@ export function buildWorksheetData(
           const selected3Verbs = seededShuffle(verbsToUse, randomFn).slice(0, 3);
           const odd1Infinitive = seededShuffle(availableOutside, randomFn)[0];
 
-          const conj1 = conjugateGermanVerb(selected3Verbs[0]);
-          const conj2 = conjugateGermanVerb(selected3Verbs[1]);
-          const conj3 = conjugateGermanVerb(selected3Verbs[2]);
+          const conj1 = conjugateGermanVerb(selected3Verbs[0] as string);
+          const conj2 = conjugateGermanVerb(selected3Verbs[1] as string);
+          const conj3 = conjugateGermanVerb(selected3Verbs[2] as string);
 
           if (conj1 && conj2 && conj3) {
             const pronounForms = [
@@ -1064,9 +1064,9 @@ export function buildWorksheetData(
             const shuffledOpts = seededShuffle(optsRaw, randomFn);
             const letterCodes = ['A', 'B', 'C', 'D'];
 
-            const formattedOpts = shuffledOpts.map((opt, idx) => ({
-              letter: letterCodes[idx],
-              text: opt.text,
+            const formattedOpts: { letter: string; text: string; isCorrect: boolean; }[] = shuffledOpts.map((opt, idx) => ({
+              letter: letterCodes[idx] || 'A',
+              text: opt.text as string,
               isCorrect: opt.isCorrect
             }));
 

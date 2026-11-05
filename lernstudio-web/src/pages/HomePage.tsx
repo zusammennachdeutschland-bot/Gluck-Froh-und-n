@@ -87,7 +87,13 @@ export const HomePage: React.FC = () => {
 
         {/* Main Lernstudio Experience */}
         <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6">
-          <LernstudioView />
+          <LernstudioView
+            sets={sets}
+            groups={[]}
+            onSaveSet={handleSaveSet}
+            onDeleteSet={handleDeleteSet}
+            language={language}
+          />
         </main>
       </div>
     </LernstudioSharedProvider>

@@ -43,7 +43,8 @@ export const LernstudioWordsModal: React.FC<Props> = ({
     return (
       it.german.toLowerCase().includes(q) ||
       it.arabic.toLowerCase().includes(q) ||
-      (it.example && it.example.toLowerCase().includes(q))
+      ((it as any).example && (it as any).example.toLowerCase().includes(q)) ||
+      (it.exampleSentenceGerman && it.exampleSentenceGerman.toLowerCase().includes(q))
     );
   });
 
@@ -135,9 +136,9 @@ export const LernstudioWordsModal: React.FC<Props> = ({
                     {item.arabic}
                   </p>
 
-                  {item.example && (
+                  {item.exampleSentenceGerman && (
                     <p className="text-[11px] text-text-muted/80 italic font-normal pt-0.5 line-clamp-1" dir="ltr">
-                      "{item.example}"
+                      "{item.exampleSentenceGerman}"
                     </p>
                   )}
                 </div>

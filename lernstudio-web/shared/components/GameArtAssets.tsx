@@ -480,7 +480,7 @@ export const GameThumbnailArt: React.FC<GameIllustrationProps> = ({ gameId, clas
  * paired with the title, live counters, and global Audio/Animation settings.
  */
 export interface GameStageBannerProps {
-  gameId: string;
+  gameId?: string;
   title: string;
   subtitle?: string;
   emoji?: string;
@@ -488,6 +488,8 @@ export interface GameStageBannerProps {
   backLabel?: string;
   isRtl?: boolean;
   rightContent?: React.ReactNode;
+  mode?: string;
+  badgeText?: string;
 }
 
 export const GameStageBanner: React.FC<GameStageBannerProps> = ({

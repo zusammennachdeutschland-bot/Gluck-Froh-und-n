@@ -24,6 +24,7 @@ export interface LernstudioItem {
   plural?: string;               // Plural form e.g. "die Katzen"
   exampleSentenceGerman?: string;// Example sentence in German
   exampleSentenceArabic?: string;// Example sentence translation
+  example?: string;
   imageUrl?: string;             // Optional image URL or Base64
   emoji?: string;                // Emoji e.g. "🐱"
   missingLetterWord?: string;    // Word with missing letter e.g. "K_tze"
@@ -101,6 +102,7 @@ export interface LernstudioSet {
   grade?: string;                // e.g. "الصف الأول", "Grade 1", etc.
   level: LernstudioLevel;
   topic: string;
+  category?: string;
   topicTranslations?: { ar?: string; de?: string; en?: string };
   difficulty: LernstudioDifficulty;
   hasArticles?: boolean;         // Whether this set contains German nouns with der/die/das articles
@@ -156,18 +158,33 @@ export interface LernstudioTheme {
   decorationIcons: string[];
 }
 
+export interface GroupScheduleSlot {
+  day: string;
+  time: string;
+}
+
 export interface Group {
   id: string;
   name: string;
   schoolName?: string;
   teacherName?: string;
+  grade?: string;
   studentIds?: string[];
+  scheduleDays?: string[];
+  scheduleTime?: string;
+  scheduleDayTimes?: Record<string, string>;
+  schedules?: GroupScheduleSlot[];
+  lessonDurationMinutes?: number;
+  status?: 'active' | 'archived';
 }
 
 export interface Student {
   id: string;
   name: string;
   avatar?: string;
+  avatarUrl?: string;
   groupId?: string;
+  status?: 'active' | 'archived';
 }
+
 

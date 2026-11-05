@@ -683,7 +683,7 @@ export const TeacherDashboardPage: React.FC = () => {
                           <BookOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                           <span className="truncate">{item.setSnapshot.title}</span>
                           <span className="text-slate-600">•</span>
-                          <span>{item.targetQuestionCount} Fragen</span>
+                          <span>{item.questionCount} Fragen</span>
                         </p>
 
                         {/* Stats Box */}

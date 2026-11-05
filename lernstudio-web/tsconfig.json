@@ -18,7 +18,18 @@
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["shared/*"],
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "../../types/lernstudio": ["shared/types.ts"],
+      "../types/lernstudio": ["shared/types.ts"],
+      "../../../types/lernstudio": ["shared/types.ts"],
+      "./types/lernstudio": ["shared/types.ts"],
+      "../../utils/*": ["shared/*"],
+      "../../../utils/*": ["shared/*"],
+      "../utils/*": ["shared/*"],
+      "./utils/*": ["shared/*"],
+      "../../data_curriculum/*": ["shared/data_curriculum/*"],
+      "./curriculum": ["shared/data_curriculum/index.ts"],
+      "../services/downloadedFilesService": ["src/platform/downloadedFilesStub.ts"]
     }
   },
   "include": ["src", "shared", "api"]
