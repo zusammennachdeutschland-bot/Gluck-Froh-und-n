@@ -12,7 +12,7 @@ import { AvatarImage } from './AvatarImage';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSchoolSettings, DEFAULT_SCHOOL_SETTINGS } from '../utils/schoolUtils';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
-import { signInTeacherWithGoogle } from '../shared/firebaseCloudSync';
+import { signInTeacherWithGoogle, signInWithCloudEmailDirect } from '../shared/firebaseCloudSync';
 import { downloadWorkspaceFromGoogleCloud, uploadWorkspaceToGoogleCloud } from '../services/firebaseWorkspaceSync';
 
 const PRESET_AVATARS = [
@@ -75,75 +75,114 @@ export const SetupWizard: React.FC = () => {
 
   const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
   const [googleSignInError, setGoogleSignInError] = useState<string | null>(null);
+  const [showUnauthorizedDomainHelper, setShowUnauthorizedDomainHelper] = useState(false);
+  const [directCloudEmail, setDirectCloudEmail] = useState(profile.email || 'zusammennachdeutschland@gmail.com');
+  const [domainCopied, setDomainCopied] = useState(false);
+
+  const applySignedInCloudUser = async (user: {
+    displayName?: string | null;
+    email?: string | null;
+    photoURL?: string | null;
+    phoneNumber?: string | null;
+  }) => {
+    const nameToUse = user.displayName || displayName || '';
+    const emailToUse = user.email || email || '';
+    const photoToUse = user.photoURL || '';
+
+    if (nameToUse) {
+      setDisplayName(nameToUse);
+      setDisplayNameAr(nameToUse);
+      setDisplayNameEn(nameToUse);
+    }
+    if (emailToUse) {
+      setEmail(emailToUse);
+    }
+    if (user.phoneNumber) {
+      setPhone(user.phoneNumber);
+      setWhatsappNumber(user.phoneNumber);
+    }
+
+    updateProfile({
+      displayName: nameToUse || displayName,
+      displayNameAr: nameToUse || displayNameAr,
+      displayNameEn: nameToUse || displayNameEn,
+      email: emailToUse || email,
+      avatarUrl: photoToUse || profile.avatarUrl,
+      phone: user.phoneNumber || phone,
+      whatsappNumber: user.phoneNumber || whatsappNumber
+    });
+
+    // Auto-fetch remote cloud backup data if available!
+    try {
+      const cloudRes = await downloadWorkspaceFromGoogleCloud();
+      const remoteHasActualData =
+        cloudRes.hasRemoteData &&
+        cloudRes.backupJsonStr &&
+        (() => {
+          try {
+            const p = JSON.parse(cloudRes.backupJsonStr);
+            return p.students?.length > 0 || p.groups?.length > 0 || p.lessons?.length > 0;
+          } catch {
+            return false;
+          }
+        })();
+
+      if (remoteHasActualData) {
+        const success = await importBackupFile(cloudRes.backupJsonStr!);
+        if (success) {
+          localStorage.setItem('dl_setup_completed', 'true');
+          setIsOpen(false);
+          alert(
+            `أهلاً بك يا ${user.displayName || 'المعلم'}! تم جلب بياناتك السحابية وجميع طلابك ومجموعاتك بنجاح 🌟`
+          );
+          return;
+        }
+      } else {
+        // No remote actual data: protect local data and push to cloud if local data exists
+        try {
+          const snapStr = await performBackup();
+          if (snapStr) {
+            await uploadWorkspaceToGoogleCloud(snapStr);
+          }
+        } catch {}
+      }
+    } catch (cloudErr) {
+      console.warn('Cloud sync download notice during setup:', cloudErr);
+    }
+  };
 
   const handleGoogleSetupSignIn = async () => {
     setIsGoogleSigningIn(true);
     setGoogleSignInError(null);
+    setShowUnauthorizedDomainHelper(false);
     try {
       const user = await signInTeacherWithGoogle();
       if (user) {
-        const nameToUse = user.displayName || '';
-        const emailToUse = user.email || '';
-        const photoToUse = user.photoURL || '';
-
-        if (nameToUse) {
-          setDisplayName(nameToUse);
-          setDisplayNameAr(nameToUse);
-          setDisplayNameEn(nameToUse);
-        }
-        if (emailToUse) {
-          setEmail(emailToUse);
-        }
-        if (user.phoneNumber) {
-          setPhone(user.phoneNumber);
-          setWhatsappNumber(user.phoneNumber);
-        }
-
-        updateProfile({
-          displayName: nameToUse || displayName,
-          displayNameAr: nameToUse || displayNameAr,
-          displayNameEn: nameToUse || displayNameEn,
-          email: emailToUse || email,
-          avatarUrl: photoToUse || profile.avatarUrl,
-          phone: user.phoneNumber || phone,
-          whatsappNumber: user.phoneNumber || whatsappNumber
-        });
-
-        // Auto-fetch remote cloud backup data if available!
-        try {
-          const cloudRes = await downloadWorkspaceFromGoogleCloud();
-          const remoteHasActualData = cloudRes.hasRemoteData && cloudRes.backupJsonStr && (() => {
-            try {
-              const p = JSON.parse(cloudRes.backupJsonStr);
-              return (p.students?.length > 0 || p.groups?.length > 0 || p.lessons?.length > 0);
-            } catch {
-              return false;
-            }
-          })();
-
-          if (remoteHasActualData) {
-            const success = await importBackupFile(cloudRes.backupJsonStr!);
-            if (success) {
-              localStorage.setItem('dl_setup_completed', 'true');
-              setIsOpen(false);
-              alert(`أهلاً بك يا ${user.displayName || 'المعلم'}! تم جلب بياناتك السحابية وجميع طلابك ومجموعاتك بنجاح 🌟`);
-              return;
-            }
-          } else {
-            // No remote actual data: protect local data and push to cloud if local data exists
-            try {
-              const snapStr = await performBackup();
-              if (snapStr) {
-                await uploadWorkspaceToGoogleCloud(snapStr);
-              }
-            } catch {}
-          }
-        } catch (cloudErr) {
-          console.warn('Cloud sync download notice during setup:', cloudErr);
-        }
+        await applySignedInCloudUser(user);
       }
     } catch (err: any) {
-      setGoogleSignInError(err?.message || 'Google sign-in failed');
+      const code = err?.code || '';
+      const msg = err?.message || String(err);
+      if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
+        setShowUnauthorizedDomainHelper(true);
+        setGoogleSignInError(null);
+      } else {
+        setGoogleSignInError(msg || 'Google sign-in failed');
+      }
+    } finally {
+      setIsGoogleSigningIn(false);
+    }
+  };
+
+  const handleDirectCloudEmailSetup = async () => {
+    setIsGoogleSigningIn(true);
+    setGoogleSignInError(null);
+    try {
+      const vUser = await signInWithCloudEmailDirect(directCloudEmail, displayName || 'Herr Omar');
+      await applySignedInCloudUser(vUser);
+      setShowUnauthorizedDomainHelper(false);
+    } catch (err: any) {
+      setGoogleSignInError(err?.message || 'تعذر ربط الحساب السحابي');
     } finally {
       setIsGoogleSigningIn(false);
     }
@@ -746,6 +785,81 @@ export const SetupWizard: React.FC = () => {
                     <p className="text-[11px] text-red-500 font-medium px-1">
                       {googleSignInError}
                     </p>
+                  )}
+
+                  {showUnauthorizedDomainHelper && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3.5 space-y-3">
+                      <div className="space-y-1">
+                        <div className="text-xs font-black text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                          <span>⚡</span>
+                          <span>
+                            {_t(
+                              'ربط الحساب السحابي المباشر (بدون الحاجة لنافذة جوجل المنبثقة)',
+                              'Direct Cloud Account Sync (No Popup Needed)',
+                              'Direkte Cloud-Konto-Verknüpfung'
+                            )}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                          {_t(
+                            'لأنك تفتح التطبيق من رابط Vercel خارجي لم يُضف بعد في قائمة نوافذ Firebase، يمكنك ربط بريدك الإلكتروني واستعادة كافة بياناتك وطلابك السحابية فوراً من هنا:',
+                            'Since this Vercel domain is not yet in Firebase popup domains, enter your Google email to link and restore your cloud workspace immediately:',
+                            'Verknüpfen Sie Ihre Google-E-Mail direkt, um Ihre Cloud-Daten sofort wiederherzustellen:'
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="email"
+                          dir="ltr"
+                          value={directCloudEmail}
+                          onChange={(e) => setDirectCloudEmail(e.target.value)}
+                          placeholder="your.email@gmail.com"
+                          className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary"
+                        />
+                        <button
+                          type="button"
+                          disabled={isGoogleSigningIn || !directCloudEmail.trim()}
+                          onClick={handleDirectCloudEmailSetup}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition-all cursor-pointer shrink-0 shadow-xs"
+                        >
+                          {_t('ربط واستعادة بياناتي فوراً', 'Link & Restore Now', 'Jetzt verbinden')}
+                        </button>
+                      </div>
+
+                      <div className="pt-2 border-t border-amber-500/20 flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-slate-500 dark:text-slate-400">
+                        <span>
+                          {_t('لتفعيل نافذة جوجل على هذا الدومين:', 'To authorize this domain in Firebase:', 'Domain in Firebase autorisieren:')}{' '}
+                          <code className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-200/70 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                            {typeof window !== 'undefined' ? window.location.hostname : ''}
+                          </code>
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (typeof window !== 'undefined') {
+                                navigator.clipboard?.writeText(window.location.hostname);
+                                setDomainCopied(true);
+                                setTimeout(() => setDomainCopied(false), 2000);
+                              }
+                            }}
+                            className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-lg cursor-pointer"
+                          >
+                            {domainCopied ? _t('تم النسخ ✓', 'Copied ✓', 'Kopiert ✓') : _t('نسخ الدومين', 'Copy Domain', 'Domain kopieren')}
+                          </button>
+                          <a
+                            href="https://console.firebase.google.com/project/glueck-c8621/authentication/settings"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2.5 py-1 bg-primary/15 text-primary font-bold rounded-lg hover:underline"
+                          >
+                            {_t('إعدادات Firebase ↗', 'Firebase Auth Settings ↗', 'Firebase-Einstellungen ↗')}
+                          </a>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   {/* Restore from Backup File Card */}

@@ -12,7 +12,8 @@ import {
   CloudSyncSummary,
   getVercelPublicDomain,
   setVercelPublicDomain,
-  DEFAULT_VERCEL_DOMAIN
+  DEFAULT_VERCEL_DOMAIN,
+  signInWithCloudEmailDirect
 } from '../services/firebaseWorkspaceSync';
 import {
   Cloud,
@@ -56,6 +57,9 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
   const [actionLoading, setActionLoading] = useState<'sync' | 'push' | 'pull' | 'login' | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [cloudSummary, setCloudSummary] = useState<CloudSyncSummary | null>(null);
+  const [showUnauthorizedDomainHelper, setShowUnauthorizedDomainHelper] = useState(false);
+  const [directCloudEmail, setDirectCloudEmail] = useState('zusammennachdeutschland@gmail.com');
+  const [domainCopied, setDomainCopied] = useState(false);
 
   // Vercel Student Platform Domain State
   const [vercelDomain, setVercelDomainState] = useState<string>(() => getVercelPublicDomain());
@@ -191,14 +195,18 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
   const handleGoogleSignIn = async () => {
     setActionLoading('login');
     setFeedbackMsg(null);
+    setShowUnauthorizedDomainHelper(false);
     try {
       const user = await signInTeacherWithGoogle();
       if (user) {
         await executePostLoginSync(user);
       }
     } catch (err: any) {
+      const code = err?.code || '';
       const msg = err?.message || String(err);
-      if (msg.includes('missing initial state') || msg.includes('sessionStorage')) {
+      if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
+        setShowUnauthorizedDomainHelper(true);
+      } else if (msg.includes('missing initial state') || msg.includes('sessionStorage')) {
         setFeedbackMsg({
           type: 'error',
           text: _t(
@@ -219,6 +227,23 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
             )
         });
       }
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDirectCloudEmailSignIn = async () => {
+    setActionLoading('login');
+    setFeedbackMsg(null);
+    try {
+      const vUser = await signInWithCloudEmailDirect(directCloudEmail);
+      await executePostLoginSync(vUser);
+      setShowUnauthorizedDomainHelper(false);
+    } catch (err: any) {
+      setFeedbackMsg({
+        type: 'error',
+        text: err?.message || 'تعذر ربط البريد الإلكتروني السحابي'
+      });
     } finally {
       setActionLoading(null);
     }
@@ -451,6 +476,63 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
             )}
             <span>{_t('تسجيل الدخول بحساب Google', 'Sign in with Google', 'Mit Google anmelden')}</span>
           </button>
+
+          {showUnauthorizedDomainHelper && (
+            <div className="w-full mt-2 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 space-y-2.5">
+              <div className="text-xs font-black text-amber-600 dark:text-amber-400">
+                ⚡ {_t('ربط الحساب السحابي المباشر (لدومينات Vercel والهاتف)', 'Direct Cloud Email Sync (For Vercel/Mobile)', 'Direkte Cloud-E-Mail-Verknüpfung')}
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="email"
+                  dir="ltr"
+                  value={directCloudEmail}
+                  onChange={(e) => setDirectCloudEmail(e.target.value)}
+                  placeholder="your.email@gmail.com"
+                  className="flex-1 px-3 py-2 bg-surface border border-surface-border rounded-xl text-xs font-mono text-text-main outline-none focus:ring-2 focus:ring-primary"
+                />
+                <button
+                  type="button"
+                  disabled={actionLoading === 'login' || !directCloudEmail.trim()}
+                  onClick={handleDirectCloudEmailSignIn}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition-all cursor-pointer shrink-0"
+                >
+                  {_t('ربط الحساب والمزامنة الآن', 'Link & Sync Now', 'Jetzt verbinden')}
+                </button>
+              </div>
+              <div className="pt-2 border-t border-amber-500/20 flex flex-wrap items-center justify-between gap-2 text-[11px] text-text-muted">
+                <span>
+                  {_t('أو أضف هذا الدومين في Firebase:', 'Or add this domain in Firebase:', 'Oder Domain in Firebase hinzufügen:')}{' '}
+                  <code className="font-mono font-bold text-text-main bg-surface px-1.5 py-0.5 rounded">
+                    {typeof window !== 'undefined' ? window.location.hostname : ''}
+                  </code>
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        navigator.clipboard?.writeText(window.location.hostname);
+                        setDomainCopied(true);
+                        setTimeout(() => setDomainCopied(false), 2000);
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold rounded-lg cursor-pointer"
+                  >
+                    {domainCopied ? _t('تم النسخ ✓', 'Copied ✓', 'Kopiert ✓') : _t('نسخ الدومين', 'Copy Domain', 'Domain kopieren')}
+                  </button>
+                  <a
+                    href="https://console.firebase.google.com/project/glueck-c8621/authentication/settings"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 bg-primary/15 text-primary font-bold rounded-lg hover:underline"
+                  >
+                    {_t('إعدادات Firebase ↗', 'Firebase Settings ↗', 'Firebase ↗')}
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-4 pt-3 border-t border-surface-border">

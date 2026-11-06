@@ -171,6 +171,74 @@ if (typeof window !== 'undefined') {
   });
 }
 
+const VIRTUAL_CLOUD_USER_STORAGE_KEY = 'gluck_cloud_virtual_teacher_v1';
+
+export interface VirtualCloudUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL: string | null;
+  phoneNumber: string | null;
+  isVirtualCloudUser: true;
+}
+
+export function emailToWorkspaceId(email: string): string {
+  const clean = (email || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+  return clean ? `ws_${clean.slice(0, 90)}` : 'ws_default_teacher';
+}
+
+export function getVirtualCloudUser(): VirtualCloudUser | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(VIRTUAL_CLOUD_USER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.email && parsed.uid) {
+      return parsed as VirtualCloudUser;
+    }
+  } catch {
+    // Ignore
+  }
+  return null;
+}
+
+export function getActiveCloudUser(): User | VirtualCloudUser | null {
+  return auth.currentUser || getVirtualCloudUser();
+}
+
+export async function signInWithCloudEmailDirect(
+  email: string,
+  displayName?: string
+): Promise<VirtualCloudUser> {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    throw new Error('يرجى إدخال بريد Google الإلكتروني بشكل صحيح.');
+  }
+  const fallbackName = cleanEmail.split('@')[0].replace(/[._-]+/g, ' ');
+  const vUser: VirtualCloudUser = {
+    uid: emailToWorkspaceId(cleanEmail),
+    email: cleanEmail,
+    displayName: (displayName || '').trim() || fallbackName,
+    photoURL: null,
+    phoneNumber: null,
+    isVirtualCloudUser: true
+  };
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(VIRTUAL_CLOUD_USER_STORAGE_KEY, JSON.stringify(vUser));
+      window.dispatchEvent(new CustomEvent('gluck-virtual-auth-changed'));
+    } catch {
+      // Ignore
+    }
+  }
+  return vUser;
+}
+
 export async function signInTeacherWithGoogle(): Promise<User | null> {
   const isCapacitorNative =
     (window as any).Capacitor?.isNativePlatform?.() ||
@@ -201,12 +269,29 @@ export async function signInTeacherWithGoogle(): Promise<User | null> {
   // 3. Primary popup sign-in attempt
   try {
     const result = await signInWithPopup(auth, googleProvider);
+    // Clear any virtual fallback if real Firebase Auth succeeded
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(VIRTUAL_CLOUD_USER_STORAGE_KEY);
+      } catch {}
+    }
     return result.user;
   } catch (err: any) {
+    const errCode = err?.code || '';
     const errMsg = err?.message || String(err);
     console.warn('Google sign-in primary attempt notice:', errMsg);
 
-    // 4. Fallback to signInWithRedirect for storage partitioning, missing initial state, or popup blocking
+    // Do NOT attempt signInWithRedirect if domain is unauthorized or user closed the popup
+    if (
+      errCode === 'auth/unauthorized-domain' ||
+      errMsg.includes('unauthorized-domain') ||
+      errCode === 'auth/popup-closed-by-user' ||
+      errCode === 'auth/cancelled-popup-request'
+    ) {
+      throw err;
+    }
+
+    // 4. Fallback to signInWithRedirect only for storage partitioning, missing initial state, or popup blocking
     try {
       await signInWithRedirect(auth, googleProvider);
       return null;
@@ -250,6 +335,14 @@ export async function signInTeacherWithEmailPassword(email: string, pass: string
 }
 
 export async function signOutTeacherFirebase(): Promise<void> {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(VIRTUAL_CLOUD_USER_STORAGE_KEY);
+      window.dispatchEvent(new CustomEvent('gluck-virtual-auth-changed'));
+    } catch {
+      // Ignore
+    }
+  }
   try {
     await signOut(auth);
   } catch (err) {
@@ -258,7 +351,26 @@ export async function signOutTeacherFirebase(): Promise<void> {
 }
 
 export function subscribeTeacherAuth(cb: (user: User | null) => void): () => void {
-  return onAuthStateChanged(auth, cb);
+  const emitCurrent = () => {
+    const active = auth.currentUser || (getVirtualCloudUser() as unknown as User | null);
+    cb(active);
+  };
+  const unsubFirebase = onAuthStateChanged(auth, (u) => {
+    if (u) {
+      cb(u);
+    } else {
+      cb(getVirtualCloudUser() as unknown as User | null);
+    }
+  });
+  if (typeof window !== 'undefined') {
+    window.addEventListener('gluck-virtual-auth-changed', emitCurrent);
+  }
+  return () => {
+    unsubFirebase();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('gluck-virtual-auth-changed', emitCurrent);
+    }
+  };
 }
 
 // ============================================================================

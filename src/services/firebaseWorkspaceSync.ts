@@ -22,7 +22,11 @@ import {
   setVercelPublicDomain,
   DEFAULT_VERCEL_DOMAIN,
   signInTeacherWithEmailPassword,
-  signInWithGoogleIdToken
+  signInWithGoogleIdToken,
+  emailToWorkspaceId,
+  getActiveCloudUser,
+  signInWithCloudEmailDirect,
+  VirtualCloudUser
 } from '../shared/firebaseCloudSync';
 
 export {
@@ -33,8 +37,19 @@ export {
   subscribeTeacherAuth,
   getVercelPublicDomain,
   setVercelPublicDomain,
-  DEFAULT_VERCEL_DOMAIN
+  DEFAULT_VERCEL_DOMAIN,
+  emailToWorkspaceId,
+  getActiveCloudUser,
+  signInWithCloudEmailDirect
 };
+export type { VirtualCloudUser };
+
+export function getPrimaryWorkspaceId(user: { uid: string; email?: string | null }): string {
+  if (user.email) {
+    return emailToWorkspaceId(user.email);
+  }
+  return user.uid;
+}
 
 const AUTO_SYNC_KEY = 'gluck_google_auto_sync_enabled';
 const LAST_SYNC_TIME_KEY = 'gluck_google_last_sync_time';
@@ -182,7 +197,7 @@ function partitionBackupPayload(fullData: any): Record<WorkspaceCategoryKey, any
 export async function uploadWorkspaceToGoogleCloud(
   backupJsonStr: string
 ): Promise<{ success: boolean; syncedAtIso: string; error?: string }> {
-  const user: User | null = auth.currentUser;
+  const user = getActiveCloudUser();
   if (!user) {
     return {
       success: false,
@@ -191,7 +206,7 @@ export async function uploadWorkspaceToGoogleCloud(
     };
   }
 
-  const uid = user.uid;
+  const uid = getPrimaryWorkspaceId(user);
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
   const deviceId = getCloudDeviceId();
@@ -264,7 +279,7 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
   summary: CloudSyncSummary | null;
   error?: string;
 }> {
-  const user: User | null = auth.currentUser;
+  const user = getActiveCloudUser();
   if (!user) {
     return {
       hasRemoteData: false,
@@ -276,12 +291,16 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
     };
   }
 
-  const uid = user.uid;
-  const path = `user_workspaces/${uid}/categories`;
+  const primaryId = getPrimaryWorkspaceId(user);
+  const path = `user_workspaces/${primaryId}/categories`;
 
   try {
-    const q = query(collection(db, 'user_workspaces', uid, 'categories'), where('id', '>=', ''));
-    const snap = await getDocs(q);
+    const q = query(collection(db, 'user_workspaces', primaryId, 'categories'), where('id', '>=', ''));
+    let snap = await getDocs(q);
+    if (snap.empty && user.uid && user.uid !== primaryId) {
+      const fallbackQ = query(collection(db, 'user_workspaces', user.uid, 'categories'), where('id', '>=', ''));
+      snap = await getDocs(fallbackQ);
+    }
     if (snap.empty) {
       return {
         hasRemoteData: false,
@@ -380,8 +399,10 @@ export function subscribeToRemoteWorkspaceChanges(
   const deviceId = getCloudDeviceId();
   let debounceTimer: any = null;
   let lastAppliedRemoteMs = 0;
+  const activeUser = getActiveCloudUser();
+  const targetWorkspaceId = activeUser ? getPrimaryWorkspaceId(activeUser) : uid;
 
-  const q = query(collection(db, 'user_workspaces', uid, 'categories'), where('id', '>=', ''));
+  const q = query(collection(db, 'user_workspaces', targetWorkspaceId, 'categories'), where('id', '>=', ''));
   const unsub = onSnapshot(
     q,
     (snap) => {

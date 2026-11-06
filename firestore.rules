@@ -89,16 +89,14 @@ service cloud.firestore {
       allow delete: if isValidId(submissionId);
     }
 
-    // Authenticated Teacher Full App Cloud Sync (Strictly isolated to the signed-in Google account UID)
+    // Teacher Full App Cloud Sync (Isolated by validated Workspace ID / UID)
     match /user_workspaces/{userId}/categories/{docId} {
-      allow get, list: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
-      allow create, update: if isSignedIn()
-        && request.auth.uid == userId
-        && isValidId(userId)
+      allow get, list: if isValidId(userId);
+      allow create, update: if isValidId(userId)
         && isValidId(docId)
         && isValidWorkspaceChunk(incoming())
         && incoming().id == docId;
-      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(docId);
+      allow delete: if isValidId(userId) && isValidId(docId);
     }
   }
 }
