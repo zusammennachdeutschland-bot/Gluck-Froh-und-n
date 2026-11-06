@@ -611,8 +611,7 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
 export async function fetchAllSubmissionsFromFirestore(): Promise<HomeworkSubmission[]> {
   const path = 'homework_submissions';
   try {
-    const q = query(collection(db, 'homework_submissions'), where('assignmentId', '>=', ''));
-    const snap = await getDocs(q);
+    const snap = await getDocs(collection(db, 'homework_submissions'));
     const list: HomeworkSubmission[] = [];
     snap.forEach((docSnap) => {
       try {
@@ -637,7 +636,7 @@ export function subscribeSubmissionsFromFirestore(
 ): () => void {
   const q = assignmentId
     ? query(collection(db, 'homework_submissions'), where('assignmentId', '==', sanitizeDocId(assignmentId)))
-    : query(collection(db, 'homework_submissions'), where('assignmentId', '>=', ''));
+    : collection(db, 'homework_submissions');
 
   return onSnapshot(
     q,

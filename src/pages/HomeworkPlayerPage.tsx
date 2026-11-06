@@ -493,6 +493,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   const handleStartHomework = (e: React.FormEvent) => {
     e.preventDefault();
     if (!studentName.trim()) return;
+    activeSubmissionIdRef.current = 'sub_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
     setStartTime(new Date().toISOString());
     playLernstudioSound('powerup_star');
 
@@ -1133,6 +1134,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               <div className="pt-2">
                 <button
                   onClick={() => {
+                    activeSubmissionIdRef.current = 'sub_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
                     setCurrentIdx(0);
                     setStudyIndex(0);
                     setResponses([]);
