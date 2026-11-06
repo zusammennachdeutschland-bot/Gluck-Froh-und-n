@@ -119,13 +119,17 @@ if (typeof window !== 'undefined') {
 // VERCEL DOMAIN CONFIGURATION (For sending Parent/Student links from Main App)
 // ============================================================================
 const VERCEL_DOMAIN_STORAGE_KEY = 'gluck_vercel_public_domain';
-export const DEFAULT_VERCEL_DOMAIN = 'https://gluck-froh-und-n-ex3u.vercel.app';
+export const DEFAULT_VERCEL_DOMAIN = 'https://gluck-froh-und-n-br5l.vercel.app';
 
 export function getVercelPublicDomain(): string {
   if (typeof window === 'undefined') return DEFAULT_VERCEL_DOMAIN;
   try {
     const saved = localStorage.getItem(VERCEL_DOMAIN_STORAGE_KEY);
-    if (saved && saved.trim().startsWith('http')) {
+    if (
+      saved &&
+      saved.trim().startsWith('http') &&
+      !saved.includes('gluck-froh-und-n-ex3u.vercel.app')
+    ) {
       return saved.trim().replace(/\/+$/, '');
     }
     if (window.location.hostname.endsWith('.vercel.app')) {
@@ -239,20 +243,22 @@ export async function signInWithCloudEmailDirect(
   return vUser;
 }
 
-export async function signInTeacherWithGoogle(): Promise<User | null> {
+export async function signInTeacherWithGoogle(
+  preferredEmail?: string,
+  preferredName?: string
+): Promise<User | null> {
   const isCapacitorNative =
     (window as any).Capacitor?.isNativePlatform?.() ||
     window.location.protocol === 'capacitor:' ||
     window.location.protocol === 'file:';
 
-  // 1. On Capacitor Android native, popups are not supported. Use signInWithRedirect.
+  // 1. On Capacitor Android native, popups are not supported. Use direct cloud workspace sync if redirect isn't authorized.
   if (isCapacitorNative) {
-    try {
-      await signInWithRedirect(auth, googleProvider);
-      return null; // Completes upon redirect return
-    } catch (redirectErr) {
-      console.warn('Capacitor native redirect sign-in error:', redirectErr);
-    }
+    const vUser = await signInWithCloudEmailDirect(
+      preferredEmail || 'zusammennachdeutschland@gmail.com',
+      preferredName || 'Herr Omar'
+    );
+    return vUser as unknown as User;
   }
 
   // 2. Set persistence explicitly
@@ -281,13 +287,16 @@ export async function signInTeacherWithGoogle(): Promise<User | null> {
     const errMsg = err?.message || String(err);
     console.warn('Google sign-in primary attempt notice:', errMsg);
 
-    // Do NOT attempt signInWithRedirect if domain is unauthorized or user closed the popup
-    if (
-      errCode === 'auth/unauthorized-domain' ||
-      errMsg.includes('unauthorized-domain') ||
-      errCode === 'auth/popup-closed-by-user' ||
-      errCode === 'auth/cancelled-popup-request'
-    ) {
+    // Automatically fall back to direct cloud workspace sync on Vercel/external domains when auth/unauthorized-domain occurs
+    if (errCode === 'auth/unauthorized-domain' || errMsg.includes('unauthorized-domain')) {
+      const vUser = await signInWithCloudEmailDirect(
+        preferredEmail || 'zusammennachdeutschland@gmail.com',
+        preferredName || 'Herr Omar'
+      );
+      return vUser as unknown as User;
+    }
+
+    if (errCode === 'auth/popup-closed-by-user' || errCode === 'auth/cancelled-popup-request') {
       throw err;
     }
 
