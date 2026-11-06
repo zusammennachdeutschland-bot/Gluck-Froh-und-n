@@ -96,8 +96,7 @@ export async function executeSafeFirestoreWrite<T>(writePromise: Promise<T>, tim
   let timer: any = null;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      markFirestoreWriteQuotaExhaustedToday();
-      reject(new Error('Quota limit exceeded (Firestore write backoff timeout).'));
+      reject(new Error('Firestore write timeout.'));
     }, timeoutMs);
   });
   try {
@@ -195,6 +194,9 @@ export const DEFAULT_VERCEL_DOMAIN = 'https://gluck-froh-und-n-br5l.vercel.app';
 export function getVercelPublicDomain(): string {
   if (typeof window === 'undefined') return DEFAULT_VERCEL_DOMAIN;
   try {
+    if (window.location.hostname.endsWith('.vercel.app')) {
+      return window.location.origin.replace(/\/+$/, '');
+    }
     const saved = localStorage.getItem(VERCEL_DOMAIN_STORAGE_KEY);
     if (
       saved &&
@@ -202,9 +204,6 @@ export function getVercelPublicDomain(): string {
       !saved.includes('gluck-froh-und-n-ex3u.vercel.app')
     ) {
       return saved.trim().replace(/\/+$/, '');
-    }
-    if (window.location.hostname.endsWith('.vercel.app')) {
-      return window.location.origin.replace(/\/+$/, '');
     }
   } catch {
     // Ignore storage errors
@@ -240,6 +239,10 @@ if (typeof window !== 'undefined') {
   getRedirectResult(auth).then((res) => {
     if (res?.user) {
       console.log('Redirect sign-in success:', res.user.email);
+      try {
+        localStorage.removeItem(VIRTUAL_CLOUD_USER_STORAGE_KEY);
+      } catch {}
+      window.dispatchEvent(new CustomEvent('gluck-virtual-auth-changed'));
     }
   }).catch((e) => {
     console.warn('Redirect result notice:', e);
@@ -431,6 +434,7 @@ export function subscribeTeacherAuth(cb: (user: User | null) => void): () => voi
     const active = auth.currentUser || (getVirtualCloudUser() as unknown as User | null);
     cb(active);
   };
+  emitCurrent();
   const unsubFirebase = onAuthStateChanged(auth, (u) => {
     if (u) {
       cb(u);

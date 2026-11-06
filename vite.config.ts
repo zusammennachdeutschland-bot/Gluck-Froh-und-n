@@ -8,7 +8,7 @@ export default defineConfig(() => {
   const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
 
   return {
-    base: './',
+    base: '/',
     plugins: [
       react(), 
       tailwindcss(),

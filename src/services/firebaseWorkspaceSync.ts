@@ -326,13 +326,28 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
   const path = `user_workspaces/${primaryId}/categories`;
 
   try {
-    const q = query(collection(db, 'user_workspaces', primaryId, 'categories'), where('id', '>=', ''));
-    let snap = await getDocs(q);
-    if (snap.empty && user.uid && user.uid !== primaryId) {
-      const fallbackQ = query(collection(db, 'user_workspaces', user.uid, 'categories'), where('id', '>=', ''));
-      snap = await getDocs(fallbackQ);
+    const candidateIds: string[] = [];
+    if (primaryId) candidateIds.push(primaryId);
+    if (user.uid && !candidateIds.includes(user.uid)) candidateIds.push(user.uid);
+    if (user.email) {
+      const emailWs = emailToWorkspaceId(user.email);
+      if (!candidateIds.includes(emailWs)) candidateIds.push(emailWs);
     }
-    if (snap.empty) {
+
+    let snap: any = null;
+    for (const cId of candidateIds) {
+      try {
+        const s = await getDocs(collection(db, 'user_workspaces', cId, 'categories'));
+        if (!s.empty) {
+          snap = s;
+          break;
+        }
+      } catch {
+        // try next candidate
+      }
+    }
+
+    if (!snap || snap.empty) {
       return {
         hasRemoteData: false,
         backupJsonStr: null,
@@ -433,9 +448,9 @@ export function subscribeToRemoteWorkspaceChanges(
   const activeUser = getActiveCloudUser();
   const targetWorkspaceId = activeUser ? getPrimaryWorkspaceId(activeUser) : uid;
 
-  const q = query(collection(db, 'user_workspaces', targetWorkspaceId, 'categories'), where('id', '>=', ''));
+  const colRef = collection(db, 'user_workspaces', targetWorkspaceId, 'categories');
   const unsub = onSnapshot(
-    q,
+    colRef,
     (snap) => {
       if (snap.empty || !isAutoCloudSyncEnabled()) return;
 

@@ -12,8 +12,14 @@ import { AvatarImage } from './AvatarImage';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSchoolSettings, DEFAULT_SCHOOL_SETTINGS } from '../utils/schoolUtils';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
-import { signInTeacherWithGoogle, signInWithCloudEmailDirect } from '../shared/firebaseCloudSync';
-import { downloadWorkspaceFromGoogleCloud, uploadWorkspaceToGoogleCloud } from '../services/firebaseWorkspaceSync';
+import {
+  signInTeacherWithGoogle,
+  signInWithCloudEmailDirect,
+  subscribeTeacherAuth,
+  getActiveCloudUser,
+  downloadWorkspaceFromGoogleCloud,
+  uploadWorkspaceToGoogleCloud
+} from '../services/firebaseWorkspaceSync';
 
 const PRESET_AVATARS = [
   { id: 'av_man_teacher', label: 'Herr (Teacher)', icon: '👨‍🏫' },
@@ -79,15 +85,37 @@ export const SetupWizard: React.FC = () => {
   const [directCloudEmail, setDirectCloudEmail] = useState(profile.email || 'zusammennachdeutschland@gmail.com');
   const [domainCopied, setDomainCopied] = useState(false);
 
+  const [connectedGoogleUser, setConnectedGoogleUser] = useState<{
+    displayName?: string | null;
+    email?: string | null;
+    photoURL?: string | null;
+  } | null>(() => {
+    const active = getActiveCloudUser();
+    if (active) {
+      return {
+        displayName: active.displayName,
+        email: active.email,
+        photoURL: active.photoURL || null
+      };
+    }
+    return null;
+  });
+
   const applySignedInCloudUser = async (user: {
     displayName?: string | null;
     email?: string | null;
     photoURL?: string | null;
     phoneNumber?: string | null;
   }) => {
-    const nameToUse = user.displayName || displayName || '';
-    const emailToUse = user.email || email || '';
+    const nameToUse = (user.displayName || displayName || '').trim();
+    const emailToUse = (user.email || email || '').trim();
     const photoToUse = user.photoURL || '';
+
+    setConnectedGoogleUser({
+      displayName: nameToUse,
+      email: emailToUse,
+      photoURL: photoToUse || null
+    });
 
     if (nameToUse) {
       setDisplayName(nameToUse);
@@ -103,7 +131,7 @@ export const SetupWizard: React.FC = () => {
     }
 
     updateProfile({
-      displayName: nameToUse || displayName,
+      displayName: nameToUse || displayName || 'Teacher',
       displayNameAr: nameToUse || displayNameAr,
       displayNameEn: nameToUse || displayNameEn,
       email: emailToUse || email,
@@ -115,25 +143,28 @@ export const SetupWizard: React.FC = () => {
     // Auto-fetch remote cloud backup data if available!
     try {
       const cloudRes = await downloadWorkspaceFromGoogleCloud();
-      const remoteHasActualData =
-        cloudRes.hasRemoteData &&
-        cloudRes.backupJsonStr &&
-        (() => {
-          try {
-            const p = JSON.parse(cloudRes.backupJsonStr);
-            return p.students?.length > 0 || p.groups?.length > 0 || p.lessons?.length > 0;
-          } catch {
-            return false;
-          }
-        })();
+      let remoteHasActualData = false;
+      if (cloudRes.hasRemoteData && cloudRes.backupJsonStr) {
+        try {
+          const p = JSON.parse(cloudRes.backupJsonStr);
+          remoteHasActualData = (
+            (Array.isArray(p.students) && p.students.length > 0) ||
+            (Array.isArray(p.groups) && p.groups.length > 0) ||
+            (Array.isArray(p.lessons) && p.lessons.length > 0) ||
+            (Array.isArray(p.financeTransactions) && p.financeTransactions.length > 0)
+          );
+        } catch {
+          remoteHasActualData = false;
+        }
+      }
 
-      if (remoteHasActualData) {
-        const success = await importBackupFile(cloudRes.backupJsonStr!);
+      if (remoteHasActualData && cloudRes.backupJsonStr) {
+        const success = await importBackupFile(cloudRes.backupJsonStr);
         if (success) {
           localStorage.setItem('dl_setup_completed', 'true');
           setIsOpen(false);
           alert(
-            `أهلاً بك يا ${user.displayName || 'المعلم'}! تم جلب بياناتك السحابية وجميع طلابك ومجموعاتك بنجاح 🌟`
+            `أهلاً بك يا ${nameToUse || 'المعلم'}! تم جلب بياناتك السحابية وجميع طلابك ومجموعاتك بنجاح 🌟`
           );
           return;
         }
@@ -236,12 +267,42 @@ export const SetupWizard: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isRestoring, setIsRestoring] = useState(false);
 
-  // Check if wizard should be open on initial load
+  // Check if wizard should be open on initial load & subscribe to auth
   useEffect(() => {
     const isCompleted = localStorage.getItem('dl_setup_completed') === 'true';
     if (!isCompleted || !profile.displayName || profile.displayName.trim() === '' || profile.displayName === 'Teacher' || profile.displayName === 'أ. أحمد محمود') {
       setIsOpen(true);
     }
+
+    const unsubAuth = subscribeTeacherAuth(async (u) => {
+      if (u) {
+        setConnectedGoogleUser({
+          displayName: u.displayName,
+          email: u.email,
+          photoURL: u.photoURL || null
+        });
+        if (u.displayName && (!displayName || displayName === 'Teacher' || displayName === 'أ. أحمد محمود')) {
+          setDisplayName(u.displayName);
+          setDisplayNameAr(u.displayName);
+          setDisplayNameEn(u.displayName);
+        }
+        if (u.email && !email) {
+          setEmail(u.email);
+        }
+      } else {
+        setConnectedGoogleUser(null);
+      }
+    });
+
+    const handleCloseSetup = () => {
+      setIsOpen(false);
+    };
+    window.addEventListener('close-setup-wizard', handleCloseSetup);
+
+    return () => {
+      unsubAuth();
+      window.removeEventListener('close-setup-wizard', handleCloseSetup);
+    };
   }, []);
 
   // Listen to manual open trigger from settings
@@ -751,36 +812,95 @@ export const SetupWizard: React.FC = () => {
                     </p>
                   </div>
 
-                  {/* Google Auto-Fill Banner */}
-                  <div className="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-primary/10 border border-primary/30 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-2xs">
-                    <div className="space-y-0.5 min-w-0">
-                      <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5 truncate">
-                        <span>🌐</span>
-                        <span>{_t('تسجيل الدخول وجلب البيانات من جوجل', 'Sign in & Auto-fill from Google', 'Mit Google anmelden')}</span>
+                  {/* Google Connected Status or Sign-In Banner */}
+                  {connectedGoogleUser ? (
+                    <div className="bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-500/30 rounded-2xl p-3.5 space-y-3 shadow-2xs">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {connectedGoogleUser.photoURL ? (
+                            <img
+                              src={connectedGoogleUser.photoURL}
+                              alt={connectedGoogleUser.displayName || 'Google'}
+                              className="w-11 h-11 rounded-full border-2 border-emerald-500 shadow-xs object-cover shrink-0"
+                            />
+                          ) : (
+                            <div className="w-11 h-11 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-base shrink-0">
+                              ✓
+                            </div>
+                          )}
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-black text-emerald-700 dark:text-emerald-300">
+                                {_t('تم تسجيل الدخول وربط الحساب السحابي بنجاح ✓', 'Connected to Google Account ✓', 'Mit Google verbunden ✓')}
+                              </span>
+                              <span className="px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                                نشط
+                              </span>
+                            </div>
+                            <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                              {connectedGoogleUser.displayName || displayName || 'معلم Glück'}
+                            </p>
+                            <p className="text-[10.5px] text-slate-500 dark:text-slate-400 font-mono truncate">
+                              {connectedGoogleUser.email || email}
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleGoogleSetupSignIn}
+                          disabled={isGoogleSigningIn}
+                          className="px-2.5 py-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer shrink-0"
+                          title={_t('تغيير الحساب', 'Change Account', 'Konto wechseln')}
+                        >
+                          {isGoogleSigningIn ? '...' : _t('تغيير', 'Change', 'Wechseln')}
+                        </button>
                       </div>
-                      <p className="text-[10.5px] text-slate-600 dark:text-slate-400">
-                        {_t('استورد اسمك، صورتك، وبريدك الإلكتروني فورياً بضغطة زر واحدة.', 'Instantly import your name, photo, and email with 1 click.', 'Importieren Sie Ihr Profil direkt.')}
-                      </p>
+
+                      <div className="pt-2 border-t border-emerald-500/20 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                        <span className="text-[11px] text-emerald-800 dark:text-emerald-300 font-medium">
+                          {_t('تم استيراد بياناتك بنجاح! يمكنك الدخول مباشرة للبرنامج أو المتابعة لتعديل باقي البيانات.', 'Profile loaded! Enter directly or proceed to adjust settings.', 'Profil geladen! Treten Sie direkt ein oder passen Sie die Einstellungen an.')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleFinish}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
+                        >
+                          <span>دخول البرنامج والمتابعة فوراً 🚀</span>
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      disabled={isGoogleSigningIn}
-                      onClick={handleGoogleSetupSignIn}
-                      className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-950 text-white font-black text-xs rounded-xl transition-all flex items-center gap-2 shrink-0 cursor-pointer shadow-xs active:scale-95"
-                    >
-                      {isGoogleSigningIn ? (
-                        <div className="w-4 h-4 border-2 border-white dark:border-slate-950 border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                        </svg>
-                      )}
-                      <span>{_t('تسجيل بـ Google', 'Google Login', 'Google-Login')}</span>
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-primary/10 border border-primary/30 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5 truncate">
+                          <span>🌐</span>
+                          <span>{_t('تسجيل الدخول وجلب البيانات من جوجل', 'Sign in & Auto-fill from Google', 'Mit Google anmelden')}</span>
+                        </div>
+                        <p className="text-[10.5px] text-slate-600 dark:text-slate-400">
+                          {_t('استورد اسمك، صورتك، وبريدك الإلكتروني فورياً بضغطة زر واحدة.', 'Instantly import your name, photo, and email with 1 click.', 'Importieren Sie Ihr Profil direkt.')}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isGoogleSigningIn}
+                        onClick={handleGoogleSetupSignIn}
+                        className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-950 text-white font-black text-xs rounded-xl transition-all flex items-center gap-2 shrink-0 cursor-pointer shadow-xs active:scale-95"
+                      >
+                        {isGoogleSigningIn ? (
+                          <div className="w-4 h-4 border-2 border-white dark:border-slate-950 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                          </svg>
+                        )}
+                        <span>{_t('تسجيل بـ Google', 'Google Login', 'Google-Login')}</span>
+                      </button>
+                    </div>
+                  )}
                   {googleSignInError && (
                     <p className="text-[11px] text-red-500 font-medium px-1">
                       {googleSignInError}

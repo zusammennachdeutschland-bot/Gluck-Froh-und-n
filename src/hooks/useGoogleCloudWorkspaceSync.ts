@@ -97,6 +97,10 @@ export function useGoogleCloudWorkspaceSync(): void {
             // Fresh device / browser: automatically pull everything from Google Cloud!
             isApplyingRemoteRef.current = true;
             await importBackupFile(cloudRes.backupJsonStr);
+            try {
+              localStorage.setItem('dl_setup_completed', 'true');
+              window.dispatchEvent(new CustomEvent('close-setup-wizard'));
+            } catch {}
             setTimeout(() => {
               isApplyingRemoteRef.current = false;
             }, 2500);
