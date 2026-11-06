@@ -1,6 +1,6 @@
 {
-  "summary": "Architecture and implementation plan for extracting the Glück Lernstudio into a standalone, publicly accessible Vercel-ready web application under lernstudio-web with an integrated Blooket-style Homework assignment and Teacher Dashboard system.",
-  "updatedAt": "2026-11-05T18:32:49.651467685Z",
+  "summary": "Implementation plan for comprehensive Google Account & Firebase Cloud synchronization across all app data (students, groups, lessons, payments, finance, certificates, HOD records, school notes, settings, and Lernstudio) located in Settings and Smart Backup Center.",
+  "updatedAt": "2026-11-06T06:38:09.949811341Z",
   "requestFeedback": true,
   "userFacing": true
 }

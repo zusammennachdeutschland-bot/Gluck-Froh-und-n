@@ -33,7 +33,11 @@ import { DEFAULT_LERNSTUDIO_SETS } from '../../shared/defaultLernstudioSets';
 import {
   getLocalAssignments,
   saveLocalSubmission,
-  QUESTION_TYPE_META
+  QUESTION_TYPE_META,
+  fetchAssignmentFromFirestore,
+  saveAssignmentToFirestore,
+  saveSubmissionToFirestore,
+  subscribeSubmissionsFromFirestore
 } from '../../shared/homeworkStorageSync';
 
 interface Props {
@@ -116,34 +120,74 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   const [finalScore, setFinalScore] = useState<any | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
 
-  // Load Assignment
+  // Subscribe to live Firestore class leaderboard for this assignment
+  useEffect(() => {
+    if (!assignmentId) return;
+    const unsub = subscribeSubmissionsFromFirestore(assignmentId, (subs) => {
+      if (subs.length > 0) {
+        const sorted = [...subs]
+          .sort(
+            (a, b) =>
+              (b.goldEarned || 0) - (a.goldEarned || 0) ||
+              (b.scorePercentage || b.accuracyPercent || 0) - (a.scorePercentage || a.accuracyPercent || 0)
+          )
+          .slice(0, 15)
+          .map((s) => ({
+            studentName: s.studentName,
+            scorePercentage: s.scorePercentage ?? s.accuracyPercent ?? s.accuracy ?? 0,
+            correctAnswersCount: s.correctAnswersCount ?? s.score ?? 0,
+            totalQuestions: s.totalQuestions || 10,
+            timeSpentSeconds: s.timeSpentSeconds || 0,
+            goldEarned: s.goldEarned ?? (s.correctAnswersCount || s.score || 0) * 100
+          }));
+        setLeaderboard(sorted);
+      }
+    });
+    return () => unsub();
+  }, [assignmentId]);
+
+  // Load Assignment (Primary: Firebase Firestore -> Secondary: API -> Fallback: Local/URL)
   useEffect(() => {
     async function loadHomework() {
       try {
         setLoading(true);
-        const res = await fetch(`/api/homework/info?id=${encodeURIComponent(assignmentId)}`);
-        const text = await res.text();
-        let data: any = {};
-        try {
-          data = text ? JSON.parse(text) : {};
-        } catch {
-          data = {};
-        }
 
-        if (res.ok && data && data.setSnapshot) {
-          setAssignment(data);
-          setLeaderboard(Array.isArray(data.leaderboard) ? data.leaderboard : []);
+        // 1. Check Firebase Firestore first (works seamlessly between Main App & Vercel!)
+        const cloudHw = await fetchAssignmentFromFirestore(assignmentId).catch(() => null);
+        if (cloudHw && cloudHw.setSnapshot) {
+          setAssignment(cloudHw);
           return;
         }
 
-        // Check local assignments cache first
+        // 2. Check /api/homework/info
+        const res = await fetch(`/api/homework/info?id=${encodeURIComponent(assignmentId)}`).catch(() => null);
+        let data: any = {};
+        if (res) {
+          const text = await res.text();
+          try {
+            data = text ? JSON.parse(text) : {};
+          } catch {
+            data = {};
+          }
+          if (res.ok && data && data.setSnapshot) {
+            setAssignment(data);
+            if (Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
+              setLeaderboard(data.leaderboard);
+            }
+            saveAssignmentToFirestore(data).catch(() => {});
+            return;
+          }
+        }
+
+        // 3. Check local assignments cache
         const localFound = getLocalAssignments().find((a) => a.id === assignmentId);
         if (localFound && localFound.setSnapshot) {
           setAssignment(localFound);
+          saveAssignmentToFirestore(localFound).catch(() => {});
           return;
         }
 
-        // Reconstruct from URL query parameters if serverless container cold-started
+        // 4. Reconstruct from URL query parameters if needed
         const params = new URLSearchParams(window.location.search);
         const setId = params.get('s');
         const fm = (params.get('fm') as HomeworkFlowMode) || 'teacher_then_quiz';
@@ -160,15 +204,17 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           (setId && DEFAULT_LERNSTUDIO_SETS.find((s) => s.id === setId)) ||
           DEFAULT_LERNSTUDIO_SETS[0];
 
-        if (matchedSet && !res.ok && res.status !== 410 && res.status !== 403) {
+        if (matchedSet) {
           const filteredItems =
             selectedIds && selectedIds.length > 0
               ? matchedSet.items.filter((it) => selectedIds.includes(it.id))
               : matchedSet.items;
 
-          setAssignment({
+          const reconstructed = {
             id: assignmentId,
             title: customTitle || `واجب: ${matchedSet.title}`,
+            createdAt: new Date().toISOString(),
+            isActive: true,
             flowMode: fm,
             questionTypes: qtList,
             blooketMode: bm,
@@ -180,7 +226,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             },
             maxAttempts: 0,
             allowReplay: true
-          });
+          };
+          setAssignment(reconstructed);
+          saveAssignmentToFirestore(reconstructed as any).catch(() => {});
         } else {
           setError(data.error || 'تعذر تحميل الواجب المنزلي');
         }
@@ -577,6 +625,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       totalQuestions: totalQ,
       correctAnswersCount: correctCount,
       scorePercentage: localScorePct,
+      accuracyPercent: localScorePct,
       score: correctCount,
       accuracy: localScorePct,
       goldEarned: finalGoldValue,
@@ -585,8 +634,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       responses: allResponses
     };
 
-    // Always save to browser localStorage immediately so teacher on same device also sees it even offline
-    saveLocalSubmission(localSubmissionObj);
+    // 1. Save immediately to localStorage AND Firebase Firestore so the teacher sees it in real time in the Main App & Vercel!
+    saveLocalSubmission(localSubmissionObj, false);
+    await saveSubmissionToFirestore(localSubmissionObj as any).catch(() => {});
+    setFinalScore(localSubmissionObj);
 
     try {
       const res = await fetch('/api/homework/submit', {
@@ -614,11 +665,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       }
 
       if (res.ok && data.submission) {
-        saveLocalSubmission(data.submission);
+        saveLocalSubmission(data.submission, false);
         setFinalScore(data.submission);
-        if (Array.isArray(data.leaderboard)) {
-          setLeaderboard(data.leaderboard);
-        }
         playLernstudioSound('fanfare_victory');
       } else {
         setFinalScore(localSubmissionObj);

@@ -39,6 +39,7 @@ export interface HomeworkSubmission {
   scorePercentage: number;
   score?: number;
   accuracy?: number;
+  accuracyPercent?: number;
   goldEarned?: number;
   maxStreak?: number;
   completedStudyPhase?: boolean;

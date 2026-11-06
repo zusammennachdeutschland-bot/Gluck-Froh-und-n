@@ -1,10 +1,41 @@
 import {
   HomeworkAssignment,
   HomeworkSubmission,
-  HomeworkFlowMode,
-  HomeworkQuestionType,
-  HomeworkBlooketMode
+  HomeworkQuestionType
 } from './homeworkTypes';
+import {
+  getVercelPublicDomain,
+  setVercelPublicDomain,
+  DEFAULT_VERCEL_DOMAIN,
+  saveAssignmentToFirestore,
+  fetchAssignmentFromFirestore,
+  fetchAllAssignmentsFromFirestore,
+  subscribeAssignmentsFromFirestore,
+  saveSubmissionToFirestore,
+  fetchSubmissionsForAssignmentFromFirestore,
+  fetchAllSubmissionsFromFirestore,
+  subscribeSubmissionsFromFirestore,
+  signInTeacherWithGoogle,
+  signOutTeacherFirebase,
+  subscribeTeacherAuth
+} from './firebaseCloudSync';
+
+export {
+  getVercelPublicDomain,
+  setVercelPublicDomain,
+  DEFAULT_VERCEL_DOMAIN,
+  saveAssignmentToFirestore,
+  fetchAssignmentFromFirestore,
+  fetchAllAssignmentsFromFirestore,
+  subscribeAssignmentsFromFirestore,
+  saveSubmissionToFirestore,
+  fetchSubmissionsForAssignmentFromFirestore,
+  fetchAllSubmissionsFromFirestore,
+  subscribeSubmissionsFromFirestore,
+  signInTeacherWithGoogle,
+  signOutTeacherFirebase,
+  subscribeTeacherAuth
+};
 
 const LOCAL_ASSIGNMENTS_KEY = 'glueck_hw_assignments_v2';
 const LOCAL_SUBMISSIONS_KEY = 'glueck_hw_submissions_v2';
@@ -70,7 +101,7 @@ export function getLocalAssignments(): HomeworkAssignment[] {
   }
 }
 
-export function saveLocalAssignment(hw: HomeworkAssignment): void {
+export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): void {
   if (typeof window === 'undefined') return;
   try {
     const current = getLocalAssignments().filter((a) => a.id !== hw.id);
@@ -78,6 +109,9 @@ export function saveLocalAssignment(hw: HomeworkAssignment): void {
     localStorage.setItem(LOCAL_ASSIGNMENTS_KEY, JSON.stringify(current.slice(0, 100)));
   } catch {
     // Ignore storage quota errors
+  }
+  if (syncCloud) {
+    saveAssignmentToFirestore(hw).catch(() => {});
   }
 }
 
@@ -91,7 +125,7 @@ export function getLocalSubmissions(): HomeworkSubmission[] {
   }
 }
 
-export function saveLocalSubmission(sub: HomeworkSubmission): void {
+export function saveLocalSubmission(sub: HomeworkSubmission, syncCloud = true): void {
   if (typeof window === 'undefined') return;
   try {
     const current = getLocalSubmissions().filter((s) => s.id !== sub.id);
@@ -100,10 +134,18 @@ export function saveLocalSubmission(sub: HomeworkSubmission): void {
   } catch {
     // Ignore storage quota errors
   }
+  if (syncCloud) {
+    saveSubmissionToFirestore(sub).catch(() => {});
+  }
 }
 
-export function buildHomeworkShareUrl(hw: HomeworkAssignment): string {
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+/**
+ * Generates the student/parent homework link using the Vercel public domain
+ * (e.g. https://gluck-froh-und-n-ex3u.vercel.app/homework/...) so links created
+ * inside the Main Program open directly for parents/students on Vercel!
+ */
+export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: string): string {
+  const baseDomain = (overrideDomain || getVercelPublicDomain()).replace(/\/+$/, '');
   const params = new URLSearchParams();
   if (hw.setSnapshot?.id) params.set('s', hw.setSnapshot.id);
   if (hw.flowMode) params.set('fm', hw.flowMode);
@@ -115,38 +157,68 @@ export function buildHomeworkShareUrl(hw: HomeworkAssignment): string {
   if (hw.selectedItemIds && hw.selectedItemIds.length > 0) {
     params.set('ids', hw.selectedItemIds.join(','));
   }
-  return `${origin}/homework/${hw.id}?${params.toString()}`;
+  return `${baseDomain}/homework/${hw.id}?${params.toString()}`;
 }
 
 export async function syncAndFetchTeacherAssignments(): Promise<any[]> {
+  // 1. Fetch from Firebase Firestore (Primary Cloud Source of Truth across Main App & Vercel)
+  const [cloudAssignments, cloudSubmissions] = await Promise.all([
+    fetchAllAssignmentsFromFirestore().catch(() => [] as HomeworkAssignment[]),
+    fetchAllSubmissionsFromFirestore().catch(() => [] as HomeworkSubmission[])
+  ]);
+
+  cloudAssignments.forEach((hw) => saveLocalAssignment(hw, false));
+  cloudSubmissions.forEach((sub) => saveLocalSubmission(sub, false));
+
+  // Push any local-only assignments/submissions to Firestore
   const localAssignments = getLocalAssignments();
   const localSubmissions = getLocalSubmissions();
 
+  const cloudAssignmentIds = new Set(cloudAssignments.map((a) => a.id));
+  for (const localHw of localAssignments) {
+    if (!cloudAssignmentIds.has(localHw.id)) {
+      saveAssignmentToFirestore(localHw).catch(() => {});
+    }
+  }
+
+  const cloudSubmissionIds = new Set(cloudSubmissions.map((s) => s.id));
+  for (const localSub of localSubmissions) {
+    if (!cloudSubmissionIds.has(localSub.id)) {
+      saveSubmissionToFirestore(localSub).catch(() => {});
+    }
+  }
+
+  // Also sync with /api/teacher/sync as secondary backup
   try {
     const res = await fetch('/api/teacher/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
-        assignments: localAssignments,
-        submissions: localSubmissions
+        assignments: getLocalAssignments(),
+        submissions: getLocalSubmissions()
       })
     });
     const text = await res.text();
     const data = text ? JSON.parse(text) : {};
     if (res.ok && Array.isArray(data.assignments)) {
-      data.assignments.forEach((hw: HomeworkAssignment) => saveLocalAssignment(hw));
-      return data.assignments;
+      data.assignments.forEach((hw: HomeworkAssignment) => saveLocalAssignment(hw, false));
     }
   } catch {
-    // Fallback to local
+    // Ignore API fallback error
   }
 
-  return localAssignments.map((hw) => {
-    const subs = localSubmissions.filter((s) => s.assignmentId === hw.id);
+  const mergedAssignments = getLocalAssignments();
+  const mergedSubmissions = getLocalSubmissions();
+
+  return mergedAssignments.map((hw) => {
+    const subs = mergedSubmissions.filter((s) => s.assignmentId === hw.id);
     const avgScore =
       subs.length > 0
-        ? Math.round(subs.reduce((acc, c) => acc + (c.scorePercentage ?? c.accuracy ?? 0), 0) / subs.length)
+        ? Math.round(
+            subs.reduce((acc, c) => acc + (c.scorePercentage ?? c.accuracyPercent ?? c.accuracy ?? 0), 0) /
+              subs.length
+          )
         : 0;
     return {
       ...hw,
@@ -160,45 +232,48 @@ export async function syncAndFetchTeacherAssignments(): Promise<any[]> {
 }
 
 export async function fetchAssignmentDetailsWithSync(id: string): Promise<any | null> {
-  const localAssignments = getLocalAssignments();
-  const localSubmissions = getLocalSubmissions();
+  // 1. Fetch assignment + submissions from Firebase Firestore
+  const [cloudHw, cloudSubs] = await Promise.all([
+    fetchAssignmentFromFirestore(id).catch(() => null),
+    fetchSubmissionsForAssignmentFromFirestore(id).catch(() => [] as HomeworkSubmission[])
+  ]);
 
+  if (cloudHw) {
+    saveLocalAssignment(cloudHw, false);
+  }
+  cloudSubs.forEach((sub) => saveLocalSubmission(sub, false));
+
+  // Secondary API sync
   try {
-    await fetch('/api/teacher/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        assignments: localAssignments,
-        submissions: localSubmissions
-      })
-    });
-
     const res = await fetch(`/api/teacher/assignment-details?id=${encodeURIComponent(id)}&direct=1`, {
       credentials: 'include'
     });
     const text = await res.text();
     const data = text ? JSON.parse(text) : null;
     if (res.ok && data && data.assignment) {
+      saveLocalAssignment(data.assignment, false);
       if (Array.isArray(data.submissions)) {
-        data.submissions.forEach((s: HomeworkSubmission) => saveLocalSubmission(s));
+        data.submissions.forEach((s: HomeworkSubmission) => {
+          saveLocalSubmission(s, true);
+        });
       }
-      return data;
     }
   } catch {
-    // Fallback to local computation
+    // Ignore API fallback error
   }
 
-  const hw = localAssignments.find((a) => a.id === id);
+  const hw = cloudHw || getLocalAssignments().find((a) => a.id === id);
   if (!hw) return null;
-  const subs = localSubmissions
+
+  const subs = getLocalSubmissions()
     .filter((s) => s.assignmentId === id)
     .map((s) => ({
       ...s,
       score: s.score ?? s.correctAnswersCount ?? 0,
-      accuracy: s.accuracy ?? s.scorePercentage ?? 0,
-      goldEarned: s.goldEarned ?? (s.correctAnswersCount || 0) * 100
-    }));
+      accuracy: s.accuracy ?? s.scorePercentage ?? s.accuracyPercent ?? 0,
+      goldEarned: s.goldEarned ?? (s.correctAnswersCount || s.score || 0) * 100
+    }))
+    .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
 
   const questionMap = new Map<
     string,

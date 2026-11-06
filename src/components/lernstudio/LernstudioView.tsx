@@ -44,6 +44,11 @@ import { LernstudioWorksheetModal } from './LernstudioWorksheetModal';
 import { LernstudioTeachModal } from './LernstudioTeachModal';
 import { LernstudioWordsModal } from './LernstudioWordsModal';
 import { LernstudioHomeworkModal } from './LernstudioHomeworkModal';
+import {
+  saveLernstudioSetToFirestore,
+  deleteLernstudioSetFromFirestore,
+  subscribeLernstudioSetsFromFirestore
+} from '../../../lernstudio-web/shared/firebaseCloudSync';
 import { GameEffectsProvider } from './effects/GameEffectsOverlay';
 import { getLernstudioTranslations, getLocalizedSetTitle, getLocalizedSetTopic, getLocalizedGrade, getLocalizedSetDescription, PROGRAM_GRADES, matchesGradeFilter } from '../../utils/lernstudioTranslations';
 import { DEFAULT_LERNSTUDIO_SETS } from '../../data/defaultLernstudioSets';
@@ -106,6 +111,30 @@ export const LernstudioView: React.FC<Props> = ({
 }) => {
   const { students } = useApp();
   const t = getLernstudioTranslations(language);
+
+  const handleSaveSetWithCloud = (s: LernstudioSet) => {
+    onSaveSet(s);
+    saveLernstudioSetToFirestore(s).catch(() => {});
+  };
+
+  const handleDeleteSetWithCloud = (setId: string) => {
+    onDeleteSet(setId);
+    deleteLernstudioSetFromFirestore(setId).catch(() => {});
+  };
+
+  React.useEffect(() => {
+    const unsub = subscribeLernstudioSetsFromFirestore((cloudSets) => {
+      if (cloudSets.length > 0) {
+        const existingIds = new Set(sets.map((s) => s.id));
+        cloudSets.forEach((cs) => {
+          if (!existingIds.has(cs.id)) {
+            onSaveSet(cs);
+          }
+        });
+      }
+    });
+    return () => unsub();
+  }, [sets.length]);
 
   // Theme State
   const [currentThemeId, setCurrentThemeId] = useState<LernstudioThemeId>('pastel');
@@ -1150,7 +1179,7 @@ export const LernstudioView: React.FC<Props> = ({
                             type="button"
                             onClick={() => {
                               if (window.confirm(language === 'ar' ? `هل أنت متأكد من حذف مجموعة (${set.title})؟` : `Delete set (${set.title})?`)) {
-                                onDeleteSet(set.id);
+                                handleDeleteSetWithCloud(set.id);
                               }
                             }}
                             className="p-1.5 text-text-muted hover:text-red-500 hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
@@ -1207,7 +1236,7 @@ export const LernstudioView: React.FC<Props> = ({
             setToEdit={setToEdit}
             groups={groups}
             onClose={() => setIsSetEditorOpen(false)}
-            onSaveSet={onSaveSet}
+            onSaveSet={handleSaveSetWithCloud}
           />
         )}
 
@@ -1216,7 +1245,7 @@ export const LernstudioView: React.FC<Props> = ({
             isOpen={isAiModalOpen}
             language={language}
             onClose={() => setIsAiModalOpen(false)}
-            onImportSet={onSaveSet}
+            onImportSet={handleSaveSetWithCloud}
           />
         )}
 

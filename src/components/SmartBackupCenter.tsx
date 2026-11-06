@@ -26,6 +26,7 @@ import {
   Eye, Sliders, ArrowRight, ShieldAlert, FileCode, Check, Building, School,
   GraduationCap, Trophy
 } from 'lucide-react';
+import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
 
 interface SmartBackupCenterProps {
   onBack?: () => void;
@@ -1615,6 +1616,9 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
 
   return (
     <div className="space-y-3.5" id="smart-backup-center-root">
+      {/* Google Account Full Cloud Sync Panel */}
+      <GoogleCloudSyncCard />
+
       {/* Action / Tab Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
         {/* Tab Switcher */}

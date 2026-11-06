@@ -7,9 +7,98 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Private Collections (System Only - Zero Client Access)
-    match /{document=**} {
-      allow read, write: if false;
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidLernstudioSet(data) {
+      return data.keys().hasAll(['id', 'title', 'payloadJson', 'updatedAtIso'])
+        && data.keys().hasOnly(['id', 'title', 'category', 'payloadJson', 'updatedAtIso', 'ownerEmail'])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 300
+        && data.payloadJson is string && data.payloadJson.size() >= 2 && data.payloadJson.size() <= 500000
+        && data.updatedAtIso is string && data.updatedAtIso.size() >= 1 && data.updatedAtIso.size() <= 64;
+    }
+
+    function isValidHomeworkAssignment(data) {
+      return data.keys().hasAll(['id', 'title', 'createdAt', 'isActive', 'payloadJson'])
+        && data.keys().hasOnly(['id', 'title', 'createdAt', 'isActive', 'payloadJson', 'ownerEmail'])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 300
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && data.isActive is bool
+        && data.payloadJson is string && data.payloadJson.size() >= 2 && data.payloadJson.size() <= 500000;
+    }
+
+    function isValidHomeworkSubmission(data) {
+      return data.keys().hasAll(['id', 'assignmentId', 'studentName', 'score', 'accuracyPercent', 'completedAt', 'payloadJson'])
+        && data.keys().hasOnly(['id', 'assignmentId', 'studentName', 'score', 'accuracyPercent', 'completedAt', 'payloadJson'])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
+        && data.assignmentId is string && data.assignmentId.size() >= 1 && data.assignmentId.size() <= 128
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 150
+        && data.score is number && data.score >= 0 && data.score <= 100000
+        && data.accuracyPercent is number && data.accuracyPercent >= 0 && data.accuracyPercent <= 100
+        && data.completedAt is string && data.completedAt.size() >= 1 && data.completedAt.size() <= 64
+        && data.payloadJson is string && data.payloadJson.size() >= 2 && data.payloadJson.size() <= 500000;
+    }
+
+    function isValidWorkspaceChunk(data) {
+      return data.keys().hasAll(['id', 'categoryKey', 'chunkIndex', 'totalChunks', 'updatedAtMs', 'updatedAtIso', 'deviceId', 'payloadChunk'])
+        && data.keys().hasOnly(['id', 'categoryKey', 'chunkIndex', 'totalChunks', 'updatedAtMs', 'updatedAtIso', 'deviceId', 'payloadChunk', 'ownerEmail'])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
+        && data.categoryKey is string && data.categoryKey.size() >= 1 && data.categoryKey.size() <= 100
+        && data.chunkIndex is number && data.chunkIndex >= 0 && data.chunkIndex <= 200
+        && data.totalChunks is number && data.totalChunks >= 1 && data.totalChunks <= 200
+        && data.updatedAtMs is number && data.updatedAtMs >= 0
+        && data.updatedAtIso is string && data.updatedAtIso.size() >= 1 && data.updatedAtIso.size() <= 64
+        && data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 100
+        && data.payloadChunk is string && data.payloadChunk.size() <= 750000;
+    }
+
+    // Connection test doc
+    match /test/{docId} {
+      allow get: if isValidId(docId);
+    }
+
+    // Shared Lernstudio Vocabulary Sets
+    match /lernstudio_sets/{setId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(setId) && isValidLernstudioSet(incoming()) && incoming().id == setId;
+      allow delete: if isValidId(setId);
+    }
+
+    // Homework Assignments (Teacher creates in Main App or Vercel; Student reads on Vercel)
+    match /homework_assignments/{assignmentId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(assignmentId) && isValidHomeworkAssignment(incoming()) && incoming().id == assignmentId;
+      allow delete: if isValidId(assignmentId);
+    }
+
+    // Student Submissions (Student submits on Vercel without needing Google account; Teacher views in Main App & Vercel)
+    match /homework_submissions/{submissionId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(submissionId) && isValidHomeworkSubmission(incoming()) && incoming().id == submissionId;
+      allow delete: if isValidId(submissionId);
+    }
+
+    // Authenticated Teacher Full App Cloud Sync (Strictly isolated to the signed-in Google account UID)
+    match /user_workspaces/{userId}/categories/{docId} {
+      allow get, list: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow create, update: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidId(userId)
+        && isValidId(docId)
+        && isValidWorkspaceChunk(incoming())
+        && incoming().id == docId;
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(docId);
     }
   }
 }

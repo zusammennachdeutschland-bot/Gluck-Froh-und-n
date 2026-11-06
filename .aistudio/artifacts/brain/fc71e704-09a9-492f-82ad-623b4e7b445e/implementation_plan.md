@@ -1,223 +1,113 @@
-# Glück Lernstudio Web + Homework System
+# المزامنة السحابية الشاملة بحساب جوجل (Full Google Cloud Sync via Firebase)
 
-A standalone, Vercel-deployable web application for Glück Lernstudio combined with a Blooket-style Homework assignment system and protected Teacher Dashboard, while maintaining a single shared source of truth with the existing Glück desktop/mobile application.
+تهدف هذه الخطة إلى ربط حساب المعلم في **Google (Firebase Auth + Firestore)** بجميع بيانات البرنامج (الطلاب، المجموعات، الجدول والحصص، المدفوعات، النظام المالي، الشهادات، ملاحظات المدرسة، قسم رئيس القسم HOD، المهام السريعة، الإعدادات، ومجموعات وواجبات الليرن ستوديو)، مع مزامنة لحظية تلقائية في الخلفية وزر مزامنة فوري داخل **صفحة الإعدادات (حسابي)** و**مركز النسخ الاحتياطي الذكي**.
 
 ---
 
-## User Review & Critical Decisions
+### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> Based on your confirmed choices in Phase 1:
-> 1. **Code Sharing & Single Source of Truth**: `lernstudio-web/shared` will be the authoritative, platform-independent source containing all game engines, components, assets, curriculum batches, and utilities. A reliable automated build-sync script + npm script (`sync:shared`) ensures zero duplication and continuous synchronization on local builds and GitHub CI / Vercel deployments.
-> 2. **Student Gameplay Experience**: When a student opens a homework link (`/homework/:id`), they enter a **Dedicated Student Homework Mode** (clean solo questions, gamified streak combos, timer settings, immediate feedback) without confusing classroom team-split rosters, tailored specifically for frictionless independent mobile/desktop completion.
-> 3. **Teacher Management Workflow**: The Homework management suite will be accessible **both inside the existing Glück app** (via a dedicated Homework button in Lernstudio) and via the standalone web protected Teacher Dashboard at `/teacher`.
+> تم بناء هذه الخطة بناءً على اختياراتك المؤكدة في المرحلة الأولى:
+
+- **نطاق البيانات المشمولة بالمزامنة (مؤكد):** مزامنة شاملة لكل بيانات البرنامج تلقائياً (الطلاب، المجموعات، الحصص، المدفوعات، الحسابات والمعاملات المالية، الشهادات، سجلات HOD، الملاحظات، المهام، الملف الشخصي، الإعدادات، والليرن ستوديو).
+- **آلية عمل المزامنة بين الأجهزة (مؤكد):** مزامنة لحظية تلقائية بالخلفية (`onSnapshot` + Auto-Push عند التعديل) مع توفير زر **«مزامنة الآن (رفع / استرجاع فوري)»**.
+- **أماكن ظهور خيارات حساب جوجل والمزامنة (مؤكد):** داخل **صفحة الإعدادات (قسم الملف الشخصي والحساب + قسم النسخ الاحتياطي)** وداخل **مركز النسخ الاحتياطي الذكي (Smart Backup Center)** فقط، دون ازدحام الشريط العلوي الرئيسي.
 
 ---
 
-## 1. Overview & Core Concept
+### 1. Overview & Core Concept
 
-- **What It Does**:
-  - Provides a standalone web version of Glück Lernstudio hosted on Vercel at `https://your-project.vercel.app/`.
-  - Enables teachers to select any curriculum set (or custom set), configure game limits (attempts, deadline, question count, allowed modes), and generate a shareable homework link (e.g. `https://your-project.vercel.app/homework/abc123`).
-  - Allows students on any mobile, tablet, or desktop device to complete homework assignments with zero accounts or logins, storing verified progress and answers in **Vercel Blob**.
-  - Provides a protected `/teacher` dashboard to track student participation, analyze question-level accuracy, and export results to CSV.
-- **Target Audience**:
-  - German language learners (children and young students) completing fun, engaging vocabulary homework assignments.
-  - Teachers creating assignments and monitoring performance from the desktop app or the web dashboard.
-- **Key Value**:
-  - Zero deployment friction for students; no apps to install, no passwords to remember.
-  - Immutable assignment snapshots: future edits to vocabulary sets will never alter already-assigned homework.
+- **What It Does:** يوفر نظام سحابي متكامل يربط حساب جوجل الخاص بالمعلم بقاعدة بيانات **Firebase Firestore**، بحيث يتم حفظ واسترجاع ومزامنة كل تفصيلة في البرنامج بين جميع أجهزة المعلم (الكمبيوتر، الموبايل، التابلت، ونسخة الويب على Vercel) تلقائياً.
+- **Target Audience / Persona:** المعلم الذي يدير طلابه، حصصه، مالياته، وواجباته عبر أكثر من جهاز أو متصفح ويرغب في أمان سحابي فوري دون الحاجة لنقل ملفات النسخ الاحتياطي يدوياً في كل مرة.
+- **Key Value:** حماية البيانات من الضياع بنسبة 100%، وتوحيد البيانات بين جميع الأجهزة في الوقت الفعلي بمجرد تسجيل الدخول بحساب Google.
 
 ---
 
-## 2. User Experience & Visual Design
+### 2. User Experience & Visual Design
 
-### Key User Flows
+- **Key User Flows:**
+  1. **ربط حساب جوجل من الإعدادات (قسم الملف الشخصي / الحساب):**
+     - يفتح المعلم **الإعدادات ← الملف الشخصي والحساب**، فيجد بطاقة **«المزامنة السحابية بحساب Google»**.
+     - عند الضغط على **«تسجيل الدخول بحساب Google وتفعيل المزامنة الشاملة»**، يتم تسجيل الدخول عبر `signInWithPopup`، وتظهر صورة الحساب والبريد الإلكتروني وحالة الاتصال السحابي وتاريخ آخر مزامنة.
+  2. **مركز النسخ الاحتياطي الذكي (Smart Backup Center):**
+     - في أعلى **مركز النسخ الاحتياطي الذكي** (التبويب السريع)، تظهر لوحة **«سحابة جوجل التلقائية (Google Cloud Sync)»**.
+     - تعرض اللوحة حالة المزامنة اللحظية (`متصل ومُزامن تلقائياً`)، إحصائيات البيانات السحابية، مع 3 أزرار تحكم واضحة:
+       - **«مزامنة شاملة الآن 🔄»** (دمج ذكي ثنائي الاتجاه).
+       - **«رفع بيانات هذا الجهاز للسحابة ☁️⬆️»**.
+       - **«استرجاع البيانات من السحابة لهذا الجهاز ☁️⬇️»**.
+  3. **المزامنة التلقائية بالخلفية:**
+     - عند إضافة أو تعديل طالب، حصة، دفعة مالية، أو إعداد في البرنامج أثناء تسجيل الدخول بحساب Google، يقوم مراقب المزامنة الخلفي (`CloudWorkspaceSyncEngine`) برفع التحديث تلقائياً إلى Firestore، وعند فتح البرنامج من جهاز آخر بنفس الحساب يتم سحب التحديثات فوراً.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        TEACHER WORKFLOW                                │
-└────────────────────────────────────────────────────────────────────────┘
-  Glück Desktop/Web
-  └─► Lernstudio Hub
-       └─► "Homework & Assignments" (الواجبات المنزلية)
-            ├─► Select Vocabulary Set (Curriculum Batch or Custom Set)
-            ├─► Set Title, Question Count (e.g. 10/15/20), Deadline & Attempts
-            └─► Click "Create Assignment"
-                 └─► Generated Link: https://.../homework/hw_7x9k2
-                      └─► Share with Students via WhatsApp / School Portal
-
-┌────────────────────────────────────────────────────────────────────────┐
-│                        STUDENT WORKFLOW                                │
-└────────────────────────────────────────────────────────────────────────┘
-  Student opens https://.../homework/hw_7x9k2 on any smartphone/laptop
-  ├─► Screen 1: Welcome Banner + Assignment Details + Student Name Input
-  ├─► Screen 2: Dedicated Interactive Game Arena
-  │    ├─► German audio pronunciation (normal & slow speeds)
-  │    ├─► 4-choice interactive runes / missing letters / articles
-  │    └─► Real-time streak combo feedback
-  └─► Screen 3: Victory Podium & Score Summary
-       ├─► Score percentage, correct/incorrect summary
-       └─► Answers submitted safely to server (server-side verified score)
-```
-
-### Visual Identity & Theme
-- **Color Palette**:
-  - Dominant Neutral: Deep obsidian slate (`#0B0F19`) and clean daylight off-white (`#F8FAFC`).
-  - Brand Primary: Royal Indigo (`#4F46E5`) with Golden Amber accents (`#F59E0B`).
-  - Semantic: Emerald Green (`#10B981`) for correct answers, Rose Red (`#F43F5E`) for incorrect attempts.
-- **Typography**:
-  - Primary Display: *Plus Jakarta Sans* / *Outfit* with clean geometric proportions.
-  - Data & Metrics: *Tabular Numerals* (`tabular-nums`) for timers, question counts, and percentages.
-- **Child-Friendly Anti-Slop Discipline**:
-  - No generic AI pills or mechanical code comments.
-  - Tactile 3D cards, responsive buttons with tactile press physics, and resilient local WebP imagery.
+- **Visual Identity & Theme:**
+  - **Aesthetic Direction:** تصميم احترافي متناسق مع هوية التطبيق (`--surface`, `--primary`, `--text-main`) مع استخدام أرقام متساوية العرض (`tabular-nums`) للعدادات والتواريخ، وتجنب الشارات المزدحمة.
+  - **Color Palette & Mood:**
+    - حالة الاتصال النشط: أخضر زمردي هادئ (`#16A34A`) للنصوص والمؤشرات.
+    - حالة جاري المزامنة: كهرماني (`#D97706`) مع حركة دوران ناعمة للأيقونة.
+    - حالة الخطأ أو انقطاع الإنترنت: قرمزي واضح (`#DC2626`) مع رسالة سبب المشكلة وزر إعادة المحاولة.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+### 3. Key Product Decisions & Trade-Offs
 
-### Decision 1: Directory Structure & Vercel Root Isolation
-- **Approach**:
-  - `lernstudio-web/` is a self-contained, standalone Vite + React + TypeScript application with its own `package.json`, `vite.config.ts`, `tsconfig.json`, and Vercel Functions (`lernstudio-web/api/`).
-  - All shared Lernstudio components, utilities, types, curriculum sets, and public game assets live under `lernstudio-web/shared/`.
-  - The main Glück desktop application imports directly from `./lernstudio-web/shared/` (or via path alias `@lernstudio-shared/*`), ensuring **one single source of truth**.
-- **Why**:
-  - Vercel deployments configured with Root Directory `lernstudio-web` cannot resolve files outside their root folder. Housing the authoritative shared codebase inside `lernstudio-web/shared` satisfies both Vercel's build boundary and desktop Glück's architecture.
+- **Decision 1: تقسيم البيانات السحابية حسب الأقسام (`Chunked Category Documents`) بدلاً من وثيقة واحدة ضخمة**
+  - *Chosen Approach:* تخزين بيانات المعلم في Firestore داخل مجموعة `/user_workspaces/{uid}/categories/{categoryKey}` بحيث يُحفظ كل قسم رئيسي (`students`, `groups`, `lessons`, `payments`, `finance`, `hod`, `certificates`, `settings_profile`, `lernstudio`) في وثيقة مستقلة مع تجزئة تلقائية للبيانات الكبيرة (مثل سجل الحصص الكبير).
+  - *Why:* لأن Firestore يفرض حداً أقصى `1 MB` للوثيقة الواحدة؛ تقسيم البيانات إلى وثائق حسب القسم مع التجزئة التلقائية يمنع فشل المزامنة مهما كبر عدد الحصص أو المعاملات المالية، ويجعل المزامنة اللحظية أسرع بكثير لأن القسم الذي تغيّر فقط هو الذي يُرفع.
+  - *Alternatives Considered:* حفظ كل البرنامج في وثيقة واحدة — تم استبعاده لأنه يتجاوز حد 1MB مع نمو سجل الحصص والمدفوعات.
 
-### Decision 2: Storage Architecture & Concurrency Defense
-- **Approach**:
-  - Use **Vercel Blob** (`@vercel/blob`) with atomic separate JSON objects:
-    - `assignments/{assignmentId}.json`: Immutable assignment metadata and vocabulary snapshot.
-    - `submissions/{assignmentId}/{submissionId}.json`: Independent record for each student attempt.
-- **Why**:
-  - Prevents race conditions and overwritten student results when 20+ students submit answers simultaneously.
-  - Server-side scoring verifies all submitted answers against the assignment's vocabulary snapshot.
-
-### Decision 3: Server-Side Password Protection & Cookie Sessions
-- **Approach**:
-  - Teacher authentication for `/api/teacher/*` is handled via an HTTP-only secure cookie containing an HMAC-signed session token generated with `SESSION_SECRET` and validated against `TEACHER_PASSWORD`.
-- **Why**:
-  - Completely eliminates password exposure in client JavaScript while avoiding external auth dependencies (no Firebase, no Supabase, no external accounts).
+- **Decision 2: حماية البيانات بملكية حساب المعلم (`request.auth.uid == userId`)**
+  - *Chosen Approach:* تأمين مسار `/user_workspaces/{userId}/categories/{docId}` في `firestore.rules` بحيث لا يمكن قراءة أو كتابة بيانات البرنامج الشاملة إلا لصاحب حساب جوجل المسجل بنفسه (`request.auth != null && request.auth.uid == userId`)، مع بقاء مسارات واجبات الطلاب (`/homework_assignments` و `/homework_submissions`) متاحة لروابط الطلاب على فيرسيل.
+  - *Why:* لضمان الخصوصية التامة للبيانات المالية وبيانات الطلاب وأرقام الهواتف.
 
 ---
 
-## 4. Technical Architecture & Data Strategy
+### 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+- **Architecture & Component Diagram:**
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                      SYSTEM ARCHITECTURE DIAGRAM                       │
-└────────────────────────────────────────────────────────────────────────┘
-
- [ Glück Desktop / Mobile App ]            [ Vercel Web Deployment ]
-               │                                       │
-               │ (Imports shared source)               │ (Root: lernstudio-web)
-               ▼                                       ▼
- ┌─────────────────────────────────────────────────────────────────────┐
- │                lernstudio-web/shared (AUTHORITATIVE)                │
- │  ├─ components/ (LernstudioView, ClassroomBoard, SetupScreen, ...)  │
- │  ├─ games/      (All 35 games: UltimateXO, Race, Wheel, Memory, ...)│
- │  ├─ data/       (curriculum batches 1-10, default sets, manifest)   │
- │  ├─ utils/      (audio, vocabulary, translations, questionAdapter)  │
- │  └─ types/      (LernstudioSet, LernstudioItem, GameMode, ...)      │
- └─────────────────────────────────────────────────────────────────────┘
-                                  │
-         ┌────────────────────────┴────────────────────────┐
-         ▼                                                 ▼
- ┌──────────────────────────────┐        ┌─────────────────────────────┐
- │    lernstudio-web/src/       │        │     lernstudio-web/api/     │
- │  ├─ pages/Home.tsx           │        │  ├─ teacher/login.ts        │
- │  ├─ pages/HomeworkPlayer.tsx │        │  ├─ teacher/assignments.ts  │
- │  ├─ pages/TeacherDash.tsx    │        │  ├─ homework/[id].ts        │
- │  └─ platform/webAdapter.ts   │        │  └─ homework/[id]/submit.ts │
- └──────────────────────────────┘        └──────────────┬──────────────┘
-                                                        │
-                                                        ▼
-                                           ┌───────────────────────────┐
-                                           │   Vercel Blob Storage     │
-                                           │  - assignments/*.json     │
-                                           │  - submissions/*/*.json   │
-                                           └───────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│                         Firebase Auth (Google Login)                      │
+│                  user.uid  &  user.email (Teacher Account)                │
+└─────────────────────────────────────┬─────────────────────────────────────┘
+                                      │
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│                CloudWorkspaceSyncEngine (Background & Manual)             │
+│  ┌──────────────────────┐  ┌──────────────────────┐  ┌─────────────────┐  │
+│  │ Auto-Push Debouncer  │  │ Real-Time onSnapshot │  │ Manual Sync Now │  │
+│  │ (Watches Storage/App)│  │ (Pulls Remote Diffs) │  │ (Push/Pull/Sync)│  │
+│  └──────────┬───────────┘  └──────────┬───────────┘  └────────┬────────┘  │
+└─────────────┼─────────────────────────┼───────────────────────┼───────────┘
+              │                         │                       │
+              ▼                         ▼                       ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│      Firestore: /user_workspaces/{uid}/categories/{categoryDocId}         │
+│  • core_crm (students, groups, lessons, payments, certificates)           │
+│  • finance_gold (accounts, categories, transactions, recurring, gold)     │
+│  • school_hod (hod_students, complaints, action_plans, visits, notes)     │
+│  • profile_settings (profile, theme, language, notifications, todos)      │
+│  • lernstudio_data (custom sets & homework assignments)                   │
+└─────────────────────────────────────┬─────────────────────────────────────┘
+                                      │
+                    ┌─────────────────┴─────────────────┐
+                    ▼                                   ▼
+┌───────────────────────────────────────┐ ┌─────────────────────────────────┐
+│     SettingsView (قسم الملف الشخصي)    │ │       SmartBackupCenter         │
+│  • بطاقة حساب جوجل والمزامنة التلقائية │ │  • لوحة سحابة جوجل في التبويب    │
+│  • زر الدخول/الخروج وتفعيل المزامنة    │ │    الرئيسي (مزامنة الآن / رفع /  │
+│    اللحظية الشاملة                     │ │    استرجاع + وقت آخر مزامنة)     │
+└───────────────────────────────────────┘ └─────────────────────────────────┘
 ```
 
-### Data Models & Schemas
+- **Data Model & State:**
+  - **Storage Keys Synced Automatically (28 Keys):**
+    - *الطلاب والمجموعات والحصص:* `dl_students`, `dl_groups`, `dl_lessons`, `dl_payments`, `dl_certificates`, `dl_recently_deleted`
+    - *النظام المالي والذهب:* `dl_finance_accounts`, `dl_finance_categories`, `dl_finance_transactions`, `dl_finance_recurring`, `dl_finance_installments`, `dl_finance_notifications`, `gluck_gold_holdings`, `gluck_gold_settings`
+    - *المدرسة ورئيس القسم (HOD):* `hod_german_students`, `hod_complaints`, `hod_student_action_plans`, `hod_visit_records`, `dl_school_notes`
+    - *الإعدادات والملف الشخصي والمهام:* `dl_profile`, `dl_settings`, `dl_theme`, `dl_accent_color`, `dl_language`, `dl_quick_todos`, `dl_notification_settings`, `dl_inspiration_settings`, `dl_inspiration_messages`
+    - *الليرن ستوديو والواجبات:* `dl_lernstudio_sets`, `glueck_hw_assignments_v2`, `glueck_hw_submissions_v2`
 
-#### Assignment Record (`assignments/{assignmentId}.json`)
-```typescript
-export interface HomeworkAssignment {
-  id: string; // e.g. "hw_9a2b8c"
-  title: string;
-  setSnapshot: LernstudioSet; // Immutable copy of the vocabulary set
-  allowedGameModes: string[]; // e.g. ["solo_practice", "ultimate_tictactoe"]
-  questionCount: number; // e.g. 10, 15, 20
-  timeLimitMinutes?: number; // 0 = unlimited
-  maxAttempts: number; // e.g. 1, 2, 3, or 0 (unlimited)
-  allowReplay: boolean;
-  deadline?: string; // ISO 8601 string
-  isActive: boolean;
-  createdAt: string;
-  createdBy: string;
-}
-```
-
-#### Student Submission Record (`submissions/{assignmentId}/{submissionId}.json`)
-```typescript
-export interface HomeworkSubmission {
-  id: string; // e.g. "sub_5f1e2d"
-  assignmentId: string;
-  studentName: string;
-  attemptNumber: number;
-  startedAt: string;
-  completedAt: string;
-  timeSpentSeconds: number;
-  totalQuestions: number;
-  correctAnswersCount: number;
-  scorePercentage: number;
-  responses: {
-    questionId: string;
-    germanWord: string;
-    studentAnswer: string;
-    correctAnswer: string;
-    isCorrect: boolean;
-    timeSpentSeconds: number;
-  }[];
-}
-```
-
----
-
-## 5. Step-by-Step Implementation Strategy
-
-1. **Phase 1: Shared Core Extraction & Desktop Wiring**
-   - Create `lernstudio-web/shared` and move the platform-agnostic Lernstudio source (components, games, effects, utils, types, data, and curriculum) into it.
-   - Update imports in desktop Glück to consume `lernstudio-web/shared`.
-   - Verify `npm run build` and desktop application functionality (zero regression).
-
-2. **Phase 2: Standalone Web Application Scaffold (`lernstudio-web`)**
-   - Configure `lernstudio-web/package.json`, `vite.config.ts`, `tailwind.config`, `index.html`, and router.
-   - Copy or symlink game assets (`/public/assets/games/`) to `lernstudio-web/public/assets/games/`.
-   - Implement web platform audio and state adapter (Web Audio API / Web Speech API without Capacitor/Electron native dependencies).
-   - Verify `cd lernstudio-web && npm run build` compiles cleanly.
-
-3. **Phase 3: Blooket-Style Homework Engine & Server APIs**
-   - Implement Vercel serverless functions in `lernstudio-web/api/`:
-     - Teacher auth: `/api/teacher/login`, `/api/teacher/logout`, `/api/teacher/session`.
-     - Assignment management: `/api/teacher/assignments` (create, list, close, stats).
-     - Student endpoints: `/api/homework/[id]` (fetch assignment snapshot), `/api/homework/[id]/submit` (server-verified scoring and persistence).
-   - Integrate `@vercel/blob` with atomic key-space partitioning.
-
-4. **Phase 4: Student Gameplay Arena & Teacher Dashboard**
-   - Build `/homework/:id` Student Experience:
-     - Name entry screen with attempt check.
-     - Interactive solo question runner with normal and 0.6x slow German TTS.
-     - Celebration summary podium with question breakdown.
-   - Build `/teacher` Protected Dashboard:
-     - Assignment creation modal with Set snapshot preview.
-     - Live participation statistics (Started / Completed / Average Score).
-     - Question-level accuracy breakdown (identifying hardest vocabulary words).
-     - CSV export for student grades.
-
-5. **Phase 5: Vercel Deployment & Build Verification**
-   - Create `vercel.json` with route rewrites and function timeouts.
-   - Create comprehensive `README.md` and `.env.example` documenting deployment steps and required environment variables (`BLOB_READ_WRITE_TOKEN`, `TEACHER_PASSWORD`, `SESSION_SECRET`).
-   - Run end-to-end build tests for both the desktop app and the standalone web app.
+- **Interactive Component & State Mapping:**
+  - **مفتاح تفعيل المزامنة اللحظية (`autoCloudSyncEnabled`):** محفوظ في الإعدادات ومفعّل افتراضياً بمجرد تسجيل الدخول بحساب Google.
+  - **مراقب التغييرات الذكي:** عند تغيّر أي قسم في `AppContext` أو `storageService`، يتم عمل `debounce` لمدة ثانيتين ثم رفع القسم المعدّل إلى `/user_workspaces/{uid}/categories/{chunkId}` مع ختم زمني `updatedAtMs`.
+  - **مستمع التحديثات الفوري (`onSnapshot`):** يستمع لأي تحديث قادم من جهاز آخر بنفس حساب جوجل، وعند وجود بيانات أحدث (`remote.updatedAtMs > local.updatedAtMs`) يقوم بتحديث `storage` و `AppContext` فوراً دون إعادة تحميل الصفحة.

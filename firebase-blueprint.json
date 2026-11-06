@@ -1,4 +1,153 @@
 {
-  "entities": {},
-  "firestore": {}
+  "entities": {
+    "LernstudioSetDoc": {
+      "title": "LernstudioSetDoc",
+      "description": "Custom vocabulary set synced between the main teacher app and Vercel web app",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "payloadJson": {
+          "type": "string",
+          "maxLength": 500000
+        },
+        "updatedAtIso": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "title", "payloadJson", "updatedAtIso"]
+    },
+    "HomeworkAssignmentDoc": {
+      "title": "HomeworkAssignmentDoc",
+      "description": "Interactive Blooket-style homework assignment created by the teacher",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "payloadJson": {
+          "type": "string",
+          "maxLength": 500000
+        }
+      },
+      "required": ["id", "title", "createdAt", "isActive", "payloadJson"]
+    },
+    "HomeworkSubmissionDoc": {
+      "title": "HomeworkSubmissionDoc",
+      "description": "Student homework submission with score, Blooket gold, and per-question responses",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "assignmentId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentName": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "score": {
+          "type": "number"
+        },
+        "accuracyPercent": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "payloadJson": {
+          "type": "string",
+          "maxLength": 500000
+        }
+      },
+      "required": ["id", "assignmentId", "studentName", "score", "accuracyPercent", "completedAt", "payloadJson"]
+    },
+    "UserWorkspaceCategoryChunkDoc": {
+      "title": "UserWorkspaceCategoryChunkDoc",
+      "description": "Authenticated teacher workspace category chunk storing full app data synced via Google Account",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "categoryKey": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "chunkIndex": {
+          "type": "number"
+        },
+        "totalChunks": {
+          "type": "number"
+        },
+        "updatedAtMs": {
+          "type": "number"
+        },
+        "updatedAtIso": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "deviceId": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "payloadChunk": {
+          "type": "string",
+          "maxLength": 750000
+        }
+      },
+      "required": ["id", "categoryKey", "chunkIndex", "totalChunks", "updatedAtMs", "updatedAtIso", "deviceId", "payloadChunk"]
+    }
+  },
+  "firestore": {
+    "/lernstudio_sets/{setId}": {
+      "schema": { "$ref": "#/entities/LernstudioSetDoc" },
+      "description": "Shared Lernstudio sets synced across main app and Vercel"
+    },
+    "/homework_assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/HomeworkAssignmentDoc" },
+      "description": "Homework assignments created by teacher and played by students"
+    },
+    "/homework_submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/HomeworkSubmissionDoc" },
+      "description": "Student homework submissions synced in real time back to teacher"
+    },
+    "/user_workspaces/{userId}/categories/{docId}": {
+      "schema": { "$ref": "#/entities/UserWorkspaceCategoryChunkDoc" },
+      "description": "Private full-app workspace data chunks synced with the teacher's Google Account"
+    }
+  }
 }

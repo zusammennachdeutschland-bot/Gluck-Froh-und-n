@@ -11,9 +11,16 @@ import {
   QUESTION_TYPE_META,
   buildHomeworkShareUrl,
   saveLocalAssignment,
+  saveLocalSubmission,
   syncAndFetchTeacherAssignments,
-  fetchAssignmentDetailsWithSync
+  fetchAssignmentDetailsWithSync,
+  subscribeAssignmentsFromFirestore,
+  subscribeSubmissionsFromFirestore,
+  signInTeacherWithGoogle,
+  signOutTeacherFirebase,
+  subscribeTeacherAuth
 } from '../../shared/homeworkStorageSync';
+import { subscribeLernstudioSetsFromFirestore } from '../../shared/firebaseCloudSync';
 import {
   ShieldCheck,
   Lock,
@@ -92,10 +99,11 @@ export const TeacherDashboardPage: React.FC = () => {
   const [detailedData, setDetailedData] = useState<DetailedViewData | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [inspectingSubmission, setInspectingSubmission] = useState<HomeworkSubmission | null>(null);
+  const [allSets, setAllSets] = useState<any[]>(DEFAULT_LERNSTUDIO_SETS);
 
   const currentSet = useMemo(
-    () => DEFAULT_LERNSTUDIO_SETS.find((s) => s.id === selectedSetId) || DEFAULT_LERNSTUDIO_SETS[0],
-    [selectedSetId]
+    () => allSets.find((s) => s.id === selectedSetId) || allSets[0] || DEFAULT_LERNSTUDIO_SETS[0],
+    [allSets, selectedSetId]
   );
 
   useEffect(() => {
@@ -103,6 +111,53 @@ export const TeacherDashboardPage: React.FC = () => {
       setSelectedItemIds(currentSet.items.map((it) => it.id));
     }
   }, [currentSet?.id]);
+
+  // Subscribe to custom Lernstudio sets synced from Main Program via Firestore
+  useEffect(() => {
+    const unsubSets = subscribeLernstudioSetsFromFirestore((cloudSets) => {
+      if (cloudSets.length > 0) {
+        const map = new Map<string, any>();
+        cloudSets.forEach((s) => map.set(s.id, s));
+        DEFAULT_LERNSTUDIO_SETS.forEach((s) => {
+          if (!map.has(s.id)) map.set(s.id, s);
+        });
+        setAllSets(Array.from(map.values()));
+      }
+    });
+    return () => unsubSets();
+  }, []);
+
+  // Subscribe to Firebase Auth + Real-Time Firestore Assignments & Submissions
+  useEffect(() => {
+    const unsubAuth = subscribeTeacherAuth((user) => {
+      if (user) {
+        setIsAuthenticated(true);
+        syncAndFetchTeacherAssignments().then((list) => setAssignments(list as AssignmentWithStats[]));
+      }
+    });
+    return () => unsubAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const unsubAssignments = subscribeAssignmentsFromFirestore((cloudList) => {
+      cloudList.forEach((hw) => saveLocalAssignment(hw, false));
+      syncAndFetchTeacherAssignments().then((list) => setAssignments(list as AssignmentWithStats[]));
+    });
+    const unsubSubmissions = subscribeSubmissionsFromFirestore(null, (cloudSubs) => {
+      cloudSubs.forEach((sub) => saveLocalSubmission(sub, false));
+      syncAndFetchTeacherAssignments().then((list) => setAssignments(list as AssignmentWithStats[]));
+      if (selectedAssignmentId) {
+        fetchAssignmentDetailsWithSync(selectedAssignmentId).then((details) => {
+          if (details) setDetailedData(details);
+        });
+      }
+    });
+    return () => {
+      unsubAssignments();
+      unsubSubmissions();
+    };
+  }, [isAuthenticated, selectedAssignmentId]);
 
   const safeJson = async (res: Response): Promise<any> => {
     const text = await res.text();
@@ -165,6 +220,7 @@ export const TeacherDashboardPage: React.FC = () => {
 
   const handleLogout = async () => {
     try {
+      await signOutTeacherFirebase();
       await fetch('/api/teacher/logout', { method: 'POST', credentials: 'include' });
     } catch {}
     setIsAuthenticated(false);
@@ -368,8 +424,37 @@ export const TeacherDashboardPage: React.FC = () => {
                   <span>جاري التحقق...</span>
                 </>
               ) : (
-                <span>تسجيل الدخول للوحة المعلم</span>
+                <span>تسجيل الدخول بكلمة المرور</span>
               )}
+            </button>
+
+            <div className="relative py-2 flex items-center justify-center">
+              <div className="border-t border-slate-800 w-full"></div>
+              <span className="bg-slate-900 px-3 text-[11px] text-slate-400 font-bold">أو</span>
+              <div className="border-t border-slate-800 w-full"></div>
+            </div>
+
+            <button
+              type="button"
+              onClick={async () => {
+                setLoginError(null);
+                setIsLoggingIn(true);
+                try {
+                  const user = await signInTeacherWithGoogle();
+                  if (user) {
+                    setIsAuthenticated(true);
+                    const syncedList = await syncAndFetchTeacherAssignments();
+                    setAssignments(syncedList as AssignmentWithStats[]);
+                  }
+                } catch (err: any) {
+                  setLoginError('تعذر تسجيل الدخول عبر Google، يمكنك استخدام كلمة المرور gluck2025');
+                } finally {
+                  setIsLoggingIn(false);
+                }
+              }}
+              className="w-full py-3 bg-indigo-600/25 hover:bg-indigo-600/35 border border-indigo-500/40 text-indigo-200 font-black rounded-2xl transition-all flex items-center justify-center gap-2 cursor-pointer text-xs"
+            >
+              <span>☁️ تسجيل الدخول بحساب Google (المتصل بالبرنامج الرئيسي)</span>
             </button>
           </form>
 

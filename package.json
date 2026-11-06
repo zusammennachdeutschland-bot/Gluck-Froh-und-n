@@ -95,6 +95,7 @@
     "@capacitor/toast": "^8.0.1",
     "canvas-confetti": "^1.9.4",
     "express": "^4.21.2",
+    "firebase": "^13.2.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "localforage": "^1.10.0",

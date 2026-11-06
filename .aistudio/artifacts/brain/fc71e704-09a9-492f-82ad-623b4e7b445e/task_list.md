@@ -1,21 +1,24 @@
-# Task List — Downloaded Files Archive & Phone Subfolder Storage
+# Task List — Google Cloud Full Workspace Synchronization
 
-- [x] **1. Create `downloadedFilesService.ts`**
-  - [x] Define root phone folder (`Documents/Gluck_Lernstudio`) and category subfolders (`Worksheets`, `Certificates`, `Parent_Reports`, `Schedules`, `School_Plans_And_Visits`, `Finance_And_Receipts`, `Backups_And_Contacts`).
-  - [x] Implement `saveToPhoneSubfolderAndRegister()` to save files to Android/iOS internal storage (`Directory.Documents`) BEFORE sharing on WhatsApp, printing, or downloading, and log each record in `gluck_downloaded_files_registry_v1`.
-  - [x] Implement re-share to WhatsApp, re-print, re-download, preview, and delete functions.
-- [x] **2. Connect All Export, Print & WhatsApp Sharing Flows**
-  - [x] **Certificates** (`certificateExportUtils.ts`): Save to `Documents/Gluck_Lernstudio/Certificates` before WhatsApp/Share/Download.
-  - [x] **Worksheets / Sheets** (`lernstudioPdfUtils.ts`): Save to `Documents/Gluck_Lernstudio/Worksheets` before WhatsApp/Share/Print/Download.
-  - [x] **Parent & Student Reports** (`ArabicParentReportModal.tsx` & `WhatsAppDispatchQueueModal.tsx`): Save to `Documents/Gluck_Lernstudio/Parent_Reports` before opening WhatsApp or printing.
-  - [x] **Schedules** (`schoolScheduleExportService.ts` & `masterScheduleExportService.ts`): Save to `Documents/Gluck_Lernstudio/Schedules` on PDF, Image, ICS, Share, or Print.
-  - [x] **School Plans & Visits** (`weeklyPlanPrintUtils.ts`, `termVisitPrintUtils.ts`, `printObservationUtils.ts`): Save to `Documents/Gluck_Lernstudio/School_Plans_And_Visits` before WhatsApp share, PDF download, or print.
-  - [x] **Finance & Payment Notices** (`FinanceStudentPayments.tsx`): Save to `Documents/Gluck_Lernstudio/Finance_And_Receipts` before opening WhatsApp.
-  - [x] **Backups & Contacts** (`AppContext.tsx` & `contactsSyncService.ts`): Save `.json` backups and `.vcf` contacts to `Documents/Gluck_Lernstudio/Backups_And_Contacts`.
-- [x] **3. Build `DownloadedFilesSection.tsx` & Integrate into `SettingsView.tsx`**
-  - [x] Add **"الملفات المحملة"** as the top section in Settings (`SettingsView.tsx`).
-  - [x] Display phone storage hierarchy (`Documents/Gluck_Lernstudio/<SubFolder>`), smart category tabs with counts, action filter, date range filter, and instant search.
-  - [x] Provide preview modal, one-tap WhatsApp re-share, re-print, re-download, copy text, and delete actions.
-- [x] **4. Verification**
-  - [x] Run unit tests (`src/tests/downloadedFiles.test.ts`).
-  - [x] Run `lint_applet` (`tsc --noEmit`) and `compile_applet` (`npm run build`).
+- [x] **1. Schema & Security Rules Architecture**
+  - [x] Update `firebase-blueprint.json` with `UserWorkspaceCategoryChunkDoc` entity and `/user_workspaces/{userId}/categories/{docId}` path.
+  - [x] Update `firestore.rules` with strict ownership checks (`request.auth != null && request.auth.uid == userId`) and field validations (`isValidWorkspaceChunk`).
+  - [x] Deploy security rules to Firebase using `DeployRules`.
+
+- [x] **2. Engine & Sync Service Implementation**
+  - [x] Build `src/services/firebaseWorkspaceSync.ts` supporting chunking, bidirectional upload/download, and real-time listeners (`onSnapshot`).
+  - [x] Build `src/hooks/useGoogleCloudWorkspaceSync.ts` with debounced auto-push on mutation and background pull on remote changes.
+  - [x] Build `GoogleCloudSyncCard.tsx` with Google sign-in/sign-out, auto-sync toggle, unboxed tabular stats, and 1-tap manual sync/upload/download actions.
+
+- [x] **3. Application UI Integration**
+  - [x] Mount `useGoogleCloudWorkspaceSync` hook inside `MainApp` (`src/App.tsx`).
+  - [x] Add `GoogleCloudSyncCard` to **SettingsView** (mobile overview & desktop right panel).
+  - [x] Add `GoogleCloudSyncCard` inside **TeacherProfileSection** (Teacher Identity & Account).
+  - [x] Add `GoogleCloudSyncCard` to the top of **SmartBackupCenter** (Backup & Restore).
+
+- [x] **4. Verification & Fixes**
+  - [x] Verify standalone build (`lernstudio-web` via `tsc -b && vite build`).
+  - [x] Verify root app compilation and linting (`compile_applet` & `lint_applet`).
+  - [x] Fix Firestore Security Rules for `lernstudio_sets`, `homework_assignments`, and `homework_submissions` list permissions.
+  - [x] Deploy updated security rules via `fax.DeployRules`.
+  - [x] Verify dev server restarted and responsive.

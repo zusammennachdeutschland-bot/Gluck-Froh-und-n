@@ -4,6 +4,7 @@ import {
   User, Mail, DollarSign, Calendar, Clock, Target, 
   Save, CheckCircle2, ArrowLeft, ArrowRight, UserCheck, ShieldCheck
 } from 'lucide-react';
+import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
 
 interface Props {
   onBack?: () => void;
@@ -143,6 +144,9 @@ export const TeacherProfileSection: React.FC<Props> = ({ onBack }) => {
           <span>{_t('تم حفظ بيانات الملف التعريفي بنجاح', 'Profile updated successfully', 'Profil erfolgreich gespeichert')}</span>
         </div>
       )}
+
+      {/* Full Google Account Cloud Sync Card */}
+      <GoogleCloudSyncCard />
 
       {/* Top Identity Card - Clean & Coordinated without photo icons */}
       <div className="p-4 rounded-2xl bg-surface border border-surface-border shadow-xs space-y-4">

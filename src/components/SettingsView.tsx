@@ -18,6 +18,7 @@ import { COLOR_FAMILIES, getContrastTextColor } from '../utils/colorUtils';
 import { CustomColorPickerModal } from './CustomColorPickerModal';
 import { ContactsUnificationModal } from './ContactsUnificationModal';
 import { DownloadedFilesSection } from './DownloadedFilesSection';
+import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
 import { FolderOpen } from 'lucide-react';
 
@@ -449,6 +450,7 @@ export const SettingsView: React.FC = () => {
           </p>
         </div>
 
+
         {/* Search Bar */}
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -505,14 +507,16 @@ export const SettingsView: React.FC = () => {
       {/* Detail View */}
       <div className={`w-full lg:w-2/3 ${activeCategory === null ? 'hidden lg:block' : 'block'}`}>
         {activeCategory === null ? (
-          <div className="hidden lg:flex flex-col items-center justify-center h-[50vh] bg-surface rounded-xl border border-surface-border text-center p-6 animate-fade-in shadow-2xs">
-            <Settings className="w-12 h-12 text-slate-200 dark:text-slate-700 mb-3" />
-            <h3 className="text-base font-black text-slate-400 dark:text-slate-500">
-               {t('auto_select_a_category')}
-            </h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-xs">
-               {t('auto_choose_a_category_from_the_sid')}
-            </p>
+          <div className="hidden lg:flex flex-col gap-4 animate-fade-in">
+            <div className="flex flex-col items-center justify-center h-[42vh] bg-surface rounded-xl border border-surface-border text-center p-6 shadow-2xs">
+              <Settings className="w-12 h-12 text-slate-200 dark:text-slate-700 mb-3" />
+              <h3 className="text-base font-black text-slate-400 dark:text-slate-500">
+                 {t('auto_select_a_category')}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                 {t('auto_choose_a_category_from_the_sid')}
+              </p>
+            </div>
           </div>
         ) : (
           <div className="animate-fade-in bg-surface rounded-xl border border-surface-border shadow-2xs p-3.5 sm:p-4 min-h-[50vh]">

@@ -12,8 +12,17 @@ import {
   buildHomeworkShareUrl,
   getLocalAssignments,
   saveLocalAssignment,
+  saveLocalSubmission,
   syncAndFetchTeacherAssignments,
-  fetchAssignmentDetailsWithSync
+  fetchAssignmentDetailsWithSync,
+  getVercelPublicDomain,
+  setVercelPublicDomain,
+  saveAssignmentToFirestore,
+  subscribeAssignmentsFromFirestore,
+  subscribeSubmissionsFromFirestore,
+  signInTeacherWithGoogle,
+  signOutTeacherFirebase,
+  subscribeTeacherAuth
 } from '../homeworkStorageSync';
 import {
   Sparkles,
@@ -33,7 +42,12 @@ import {
   Coins,
   Eye,
   Plus,
-  ListChecks
+  ListChecks,
+  Globe,
+  Cloud,
+  LogIn,
+  LogOut,
+  Share2
 } from 'lucide-react';
 
 interface Props {
@@ -78,6 +92,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [inspectingSubmission, setInspectingSubmission] = useState<HomeworkSubmission | null>(null);
 
+  // Firebase Auth + Vercel Public Domain State
+  const [firebaseUser, setFirebaseUser] = useState<any | null>(null);
+  const [vercelDomain, setVercelDomainState] = useState<string>(() => getVercelPublicDomain());
+  const [editingDomain, setEditingDomain] = useState(false);
+
   const currentSet = useMemo(
     () => sets.find((s) => s.id === selectedSetId) || defaultSet || sets[0],
     [sets, selectedSetId, defaultSet]
@@ -96,6 +115,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
   }, [defaultSet?.id]);
 
+  useEffect(() => {
+    const unsubAuth = subscribeTeacherAuth((u) => setFirebaseUser(u));
+    return () => unsubAuth();
+  }, []);
+
   const loadAllAssignments = async () => {
     setLoadingResults(true);
     try {
@@ -106,11 +130,31 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
   };
 
+  // Real-time Firestore listener while modal is open so student submissions from Vercel appear live!
   useEffect(() => {
-    if (isOpen && activeTab === 'results') {
-      loadAllAssignments();
-    }
-  }, [isOpen, activeTab]);
+    if (!isOpen) return;
+    loadAllAssignments();
+
+    const unsubAssignments = subscribeAssignmentsFromFirestore((cloudHwList) => {
+      cloudHwList.forEach((hw) => saveLocalAssignment(hw, false));
+      syncAndFetchTeacherAssignments().then((list) => setAssignmentsList(list));
+    });
+
+    const unsubSubmissions = subscribeSubmissionsFromFirestore(null, (cloudSubs) => {
+      cloudSubs.forEach((sub) => saveLocalSubmission(sub, false));
+      syncAndFetchTeacherAssignments().then((list) => setAssignmentsList(list));
+      if (selectedDetails?.assignment?.id) {
+        fetchAssignmentDetailsWithSync(selectedDetails.assignment.id).then((d) => {
+          if (d) setSelectedDetails(d);
+        });
+      }
+    });
+
+    return () => {
+      unsubAssignments();
+      unsubSubmissions();
+    };
+  }, [isOpen, selectedDetails?.assignment?.id]);
 
   if (!isOpen) return null;
 
@@ -170,32 +214,36 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         createdBy: 'Teacher'
       };
 
-      // Save locally first so it is never lost
-      saveLocalAssignment(payload);
+      // Save locally and directly to Firebase Firestore so Vercel has it immediately!
+      saveLocalAssignment(payload, true);
+      await saveAssignmentToFirestore(payload).catch(() => {});
 
       const res = await fetch('/api/teacher/assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(payload)
-      });
+      }).catch(() => null);
 
-      const text = await res.text();
       let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = {};
+      if (res) {
+        const text = await res.text();
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          data = {};
+        }
       }
 
       const finalAssignment: HomeworkAssignment =
-        res.ok && data?.assignment ? { ...payload, ...data.assignment } : payload;
+        res && res.ok && data?.assignment ? { ...payload, ...data.assignment } : payload;
 
-      saveLocalAssignment(finalAssignment);
+      saveLocalAssignment(finalAssignment, true);
+      await saveAssignmentToFirestore(finalAssignment).catch(() => {});
       setCreatedAssignment(finalAssignment);
-      setCreatedShareLink(buildHomeworkShareUrl(finalAssignment));
+      setCreatedShareLink(buildHomeworkShareUrl(finalAssignment, vercelDomain));
     } catch {
-      // Fallback already saved locally
+      // Fallback already saved locally & Firestore
       if (currentSet) {
         const chosenItems = currentSet.items.filter((it) => selectedItemIds.includes(it.id));
         const finalItems = chosenItems.length > 0 ? chosenItems : currentSet.items;
@@ -217,9 +265,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           createdAt: new Date().toISOString(),
           createdBy: 'Teacher'
         };
-        saveLocalAssignment(fallbackHw);
+        saveLocalAssignment(fallbackHw, true);
+        await saveAssignmentToFirestore(fallbackHw).catch(() => {});
         setCreatedAssignment(fallbackHw);
-        setCreatedShareLink(buildHomeworkShareUrl(fallbackHw));
+        setCreatedShareLink(buildHomeworkShareUrl(fallbackHw, vercelDomain));
       }
     } finally {
       setIsCreating(false);
@@ -302,6 +351,76 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
             >
               <XCircle className="w-5 h-5" />
             </button>
+          </div>
+        </div>
+
+        {/* Cloud Sync + Vercel Domain Bar */}
+        <div className="px-4 sm:px-6 py-2.5 bg-slate-950/90 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[11px]">
+              <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+              <span>متصل بـ Firebase Cloud (تزامن لحظي بين البرنامج وفيرسيل)</span>
+            </span>
+
+            {firebaseUser ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[11px] font-bold">
+                <span>👤 {firebaseUser.email || firebaseUser.displayName}</span>
+                <button
+                  type="button"
+                  onClick={() => signOutTeacherFirebase()}
+                  className="text-rose-300 hover:text-rose-200 underline mr-1 cursor-pointer"
+                  title="تسجيل الخروج"
+                >
+                  <LogOut className="w-3 h-3" />
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => signInTeacherWithGoogle().catch(() => {})}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 font-bold text-[11px] cursor-pointer transition-colors"
+              >
+                <LogIn className="w-3 h-3" />
+                <span>ربط حساب Google للمعلم</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <Globe className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="text-[11px] text-slate-400 font-bold">دومين رابط ولي الأمر (Vercel):</span>
+            {editingDomain ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={vercelDomain}
+                  onChange={(e) => setVercelDomainState(e.target.value)}
+                  className="px-2 py-0.5 bg-slate-900 border border-amber-500/50 rounded-lg text-[11px] font-mono text-amber-300 w-56 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cleaned = setVercelPublicDomain(vercelDomain);
+                    setVercelDomainState(cleaned);
+                    setEditingDomain(false);
+                  }}
+                  className="px-2 py-0.5 bg-amber-400 text-slate-950 font-black rounded-lg text-[10px] cursor-pointer"
+                >
+                  حفظ
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditingDomain(true)}
+                dir="ltr"
+                className="text-[11px] font-mono text-amber-400 hover:underline cursor-pointer truncate max-w-[220px]"
+                title="اضغط لتعديل دومين فيرسيل"
+              >
+                {vercelDomain} ✎
+              </button>
+            )}
           </div>
         </div>
 
@@ -602,6 +721,24 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                 </div>
 
                 <div className="flex flex-wrap gap-2.5 justify-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const msg = `🇩🇪 *واجب الألماني التفاعلي (Glück Lernstudio)*\n📚 *${createdAssignment?.title || 'واجب جديد'}*\n\nيرجى الضغط على الرابط التالي لبدء حل الواجب:\n${createdShareLink}`;
+                      navigator.clipboard.writeText(msg);
+                      setCopiedId('whatsapp_msg');
+                      setTimeout(() => setCopiedId(null), 2500);
+                    }}
+                    className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black rounded-xl flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/20"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>
+                      {copiedId === 'whatsapp_msg'
+                        ? 'تم نسخ رسالة واتساب لولي الأمر! ✅'
+                        : 'نسخ رسالة واتساب جاهزة لولي الأمر 💬'}
+                    </span>
+                  </button>
+
                   <a
                     href={createdShareLink}
                     target="_blank"
