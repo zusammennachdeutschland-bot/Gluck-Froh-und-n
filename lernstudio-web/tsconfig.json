@@ -19,18 +19,12 @@
     "paths": {
       "@shared/*": ["shared/*"],
       "@/*": ["src/*"],
-      "../../types/lernstudio": ["shared/types.ts"],
-      "../types/lernstudio": ["shared/types.ts"],
-      "../../../types/lernstudio": ["shared/types.ts"],
-      "./types/lernstudio": ["shared/types.ts"],
-      "../../utils/*": ["shared/*"],
-      "../../../utils/*": ["shared/*"],
-      "../utils/*": ["shared/*"],
-      "./utils/*": ["shared/*"],
-      "../../data_curriculum/*": ["shared/data_curriculum/*"],
-      "./curriculum": ["shared/data_curriculum/index.ts"],
-      "../services/downloadedFilesService": ["src/platform/downloadedFilesStub.ts"]
+      "@capacitor/core": ["src/platform/capacitorStub.ts"],
+      "@capacitor/filesystem": ["src/platform/capacitorStub.ts"],
+      "@capacitor/share": ["src/platform/capacitorStub.ts"],
+      "@capacitor/toast": ["src/platform/capacitorStub.ts"],
+      "@capacitor-community/text-to-speech": ["src/platform/capacitorStub.ts"]
     }
   },
-  "include": ["src", "shared", "api"]
+  "include": ["src", "shared", "types", "utils", "data", "services", "context", "types.ts"]
 }

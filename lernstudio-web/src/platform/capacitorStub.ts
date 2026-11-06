@@ -10,9 +10,9 @@ export const Capacitor = {
 };
 
 export const Filesystem = {
-  writeFile: async () => ({ uri: '' }),
-  readFile: async () => ({ data: '' }),
-  getUri: async () => ({ uri: '' })
+  writeFile: async (_opts?: any) => ({ uri: '' }),
+  readFile: async (_opts?: any) => ({ data: '' }),
+  getUri: async (_opts?: any) => ({ uri: '' })
 };
 
 export const Directory = {
@@ -22,10 +22,10 @@ export const Directory = {
 };
 
 export const Share = {
-  share: async (opts: { title?: string; text?: string; url?: string }) => {
+  share: async (opts: { title?: string; text?: string; url?: string; dialogTitle?: string; files?: string[] }) => {
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
-        await navigator.share(opts);
+        await navigator.share({ title: opts.title, text: opts.text, url: opts.url });
         return { value: true };
       } catch {
         // Fallback
@@ -36,14 +36,13 @@ export const Share = {
 };
 
 export const Toast = {
-  show: async ({ text }: { text: string }) => {
-    // In web, fallback to simple console log or temporary overlay if needed
-    console.log(`[Toast]: ${text}`);
+  show: async (opts: { text: string; duration?: 'short' | 'long'; position?: 'top' | 'center' | 'bottom' }) => {
+    console.log(`[Toast]: ${opts.text}`);
   }
 };
 
 export const TextToSpeech = {
-  speak: async () => {},
+  speak: async (_opts?: any) => {},
   stop: async () => {},
-  getSupportedLanguages: async () => ({ languages: [] })
+  getSupportedLanguages: async () => ({ languages: [] as string[] })
 };
