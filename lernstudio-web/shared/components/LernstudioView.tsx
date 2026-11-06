@@ -43,6 +43,7 @@ import { LernstudioAiModal } from './LernstudioAiModal';
 import { LernstudioWorksheetModal } from './LernstudioWorksheetModal';
 import { LernstudioTeachModal } from './LernstudioTeachModal';
 import { LernstudioWordsModal } from './LernstudioWordsModal';
+import { LernstudioHomeworkModal } from './LernstudioHomeworkModal';
 import { GameEffectsProvider } from './effects/GameEffectsOverlay';
 import { getLernstudioTranslations, getLocalizedSetTitle, getLocalizedSetTopic, getLocalizedGrade, getLocalizedSetDescription, PROGRAM_GRADES, matchesGradeFilter } from '../../utils/lernstudioTranslations';
 import { DEFAULT_LERNSTUDIO_SETS } from '../../data/defaultLernstudioSets';
@@ -80,7 +81,8 @@ import {
   BookOpen,
   Eye,
   Share2,
-  Dices
+  Dices,
+  Send
 } from 'lucide-react';
 
 interface Props {
@@ -129,6 +131,9 @@ export const LernstudioView: React.FC<Props> = ({
 
   const [isWordsModalOpen, setIsWordsModalOpen] = useState(false);
   const [selectedSetForWordsModal, setSelectedSetForWordsModal] = useState<LernstudioSet | null>(null);
+
+  const [isHomeworkModalOpen, setIsHomeworkModalOpen] = useState(false);
+  const [selectedSetForHomework, setSelectedSetForHomework] = useState<LernstudioSet | null>(null);
 
   // Copy Set Code State
   const [copiedSetId, setCopiedSetId] = useState<string | null>(null);
@@ -793,6 +798,20 @@ export const LernstudioView: React.FC<Props> = ({
               <Plus className="w-4 h-4" />
               <span>{t.createSet}</span>
             </button>
+
+            {/* Homework / Blooket Hausaufgaben Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedSetForHomework(null);
+                setIsHomeworkModalOpen(true);
+              }}
+              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-amber-500/25 cursor-pointer inline-flex items-center gap-1.5 shrink-0 transform hover:scale-105 transition-all"
+              title={language === 'ar' ? 'إنشاء واجب تفاعلي للطلاب ومتابعة الإجابات (Blooket)' : 'Hausaufgabe & Schülerlink erstellen'}
+            >
+              <Send className="w-4 h-4" />
+              <span>{language === 'ar' ? '🎮 واجبات الطلاب (Blooket Homework)' : 'Hausaufgaben 📝'}</span>
+            </button>
           </div>
         </div>
 
@@ -1074,6 +1093,19 @@ export const LernstudioView: React.FC<Props> = ({
                         <div className="flex items-center gap-0.5 shrink-0">
                           <button
                             type="button"
+                            onClick={() => {
+                              setSelectedSetForHomework(set);
+                              setIsHomeworkModalOpen(true);
+                            }}
+                            className="px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-400 rounded-lg text-[11px] font-black transition-colors cursor-pointer inline-flex items-center gap-1"
+                            title={language === 'ar' ? 'إنشاء واجب تفاعلي لهذه المجموعة' : 'Hausaufgabe für dieses Set erstellen'}
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            <span>{language === 'ar' ? 'واجب' : 'HW'}</span>
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => handleShareWhatsApp(set)}
                             className="p-1.5 text-text-muted hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
                             title={t.shareWhatsApp}
@@ -1251,6 +1283,17 @@ export const LernstudioView: React.FC<Props> = ({
           onClose={() => setIsRandomPickerOpen(false)}
           students={students}
           groups={groups}
+        />
+
+        <LernstudioHomeworkModal
+          isOpen={isHomeworkModalOpen}
+          onClose={() => {
+            setIsHomeworkModalOpen(false);
+            setSelectedSetForHomework(null);
+          }}
+          sets={sets}
+          defaultSet={selectedSetForHomework}
+          language={language}
         />
 
         {/* Toast Notification Banner for Copied Set Code */}

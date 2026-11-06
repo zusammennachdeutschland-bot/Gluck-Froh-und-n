@@ -806,11 +806,11 @@ export const LernstudioView: React.FC<Props> = ({
                 setSelectedSetForHomework(null);
                 setIsHomeworkModalOpen(true);
               }}
-              className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black rounded-xl text-xs shadow-md cursor-pointer inline-flex items-center gap-1.5 shrink-0 transform hover:scale-105 transition-all"
-              title={language === 'ar' ? 'إنشاء رابط واجب منزلي للطلاب' : 'Hausaufgabe & Schülerlink erstellen'}
+              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-amber-500/25 cursor-pointer inline-flex items-center gap-1.5 shrink-0 transform hover:scale-105 transition-all"
+              title={language === 'ar' ? 'إنشاء رابط واجب تفاعلي للطلاب ومتابعة الإجابات (Blooket)' : 'Hausaufgabe & Schülerlink erstellen'}
             >
               <Send className="w-4 h-4" />
-              <span>{language === 'ar' ? 'واجبات الطلاب 📝' : 'Hausaufgaben 📝'}</span>
+              <span>{language === 'ar' ? '🎮 واجبات الطلاب (Blooket Homework)' : 'Hausaufgaben 📝'}</span>
             </button>
           </div>
         </div>
@@ -1097,10 +1097,11 @@ export const LernstudioView: React.FC<Props> = ({
                               setSelectedSetForHomework(set);
                               setIsHomeworkModalOpen(true);
                             }}
-                            className="p-1.5 text-text-muted hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-colors cursor-pointer"
-                            title={language === 'ar' ? 'إنشاء رابط واجب لهذه المجموعة' : 'Hausaufgabe für dieses Set erstellen'}
+                            className="px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-400 rounded-lg text-[11px] font-black transition-colors cursor-pointer inline-flex items-center gap-1"
+                            title={language === 'ar' ? 'إنشاء واجب تفاعلي لهذه المجموعة' : 'Hausaufgabe für dieses Set erstellen'}
                           >
                             <Send className="w-3.5 h-3.5" />
+                            <span>{language === 'ar' ? 'واجب' : 'HW'}</span>
                           </button>
 
                           <button
