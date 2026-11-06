@@ -161,10 +161,19 @@ export interface ResolvedWhatsAppContact {
   hasContact: boolean;   // true if any contact exists
 }
 
+export interface ResolveContactOptions {
+  quickParentPhone?: string | null;
+  quickStudentPhone?: string | null;
+  defaultPhone?: string | null;
+  preferStudent?: boolean;
+  targetRecipient?: 'parent' | 'student' | 'auto';
+}
+
 /**
  * Resolves the best WhatsApp contact for a student with smart fallback:
+ * Supports targetRecipient ('student' | 'parent') or preferStudent flag.
  * Parent Phone > Parent Username > Student Phone > Student Username > Quick Fallbacks.
- * Ensures if there is no phone number, it seamlessly uses the username!
+ * Ensures if student is targeted, student phone/username is used first!
  */
 export function resolveStudentWhatsAppContact(
   student?: {
@@ -175,11 +184,7 @@ export function resolveStudentWhatsAppContact(
     studentUsername?: string | null;
     studentContactType?: string | null;
   } | null,
-  fallback?: {
-    quickParentPhone?: string | null;
-    quickStudentPhone?: string | null;
-    defaultPhone?: string | null;
-  }
+  fallback?: ResolveContactOptions
 ): ResolvedWhatsAppContact {
   const isMeaningful = (val?: string | null): boolean => {
     if (!val) return false;
@@ -187,10 +192,44 @@ export function resolveStudentWhatsAppContact(
     return t !== '' && t !== '-' && t !== '—' && t.toLowerCase() !== 'null' && t.toLowerCase() !== 'undefined';
   };
 
-  // 1. Check parent phone
+  const shouldPreferStudent = Boolean(fallback?.preferStudent || fallback?.targetRecipient === 'student');
+
+  const sPhone = (student?.studentPhone && isMeaningful(student.studentPhone) ? student.studentPhone.trim() : '') ||
+    (fallback?.quickStudentPhone && isMeaningful(fallback.quickStudentPhone) ? fallback.quickStudentPhone.trim() : '');
+  const sUser = student?.studentUsername && isMeaningful(student.studentUsername) ? student.studentUsername.trim() : '';
+
   const pPhone = (student?.parentPhone && isMeaningful(student.parentPhone) ? student.parentPhone.trim() : '') ||
     (fallback?.quickParentPhone && isMeaningful(fallback.quickParentPhone) ? fallback.quickParentPhone.trim() : '');
-  
+  const pUser = student?.parentUsername && isMeaningful(student.parentUsername) ? student.parentUsername.trim() : '';
+
+  // 1. If student is explicitly preferred or targeted, check student contact first!
+  if (shouldPreferStudent) {
+    if (sPhone) {
+      const isUser = isWhatsAppUsername(sPhone) || student?.studentContactType === 'username';
+      const clean = formatWhatsAppPhone(sPhone);
+      return {
+        contact: sPhone,
+        cleanForUrl: clean,
+        isUsername: isUser,
+        display: formatContactDisplay(sPhone),
+        type: 'student',
+        hasContact: !!clean
+      };
+    }
+    if (sUser) {
+      const clean = cleanWhatsAppUsername(sUser);
+      return {
+        contact: `@${clean}`,
+        cleanForUrl: clean,
+        isUsername: true,
+        display: `@${clean}`,
+        type: 'student',
+        hasContact: !!clean
+      };
+    }
+  }
+
+  // 2. Check parent phone
   if (pPhone) {
     const isUser = isWhatsAppUsername(pPhone) || student?.parentContactType === 'username';
     const clean = formatWhatsAppPhone(pPhone);
@@ -204,8 +243,7 @@ export function resolveStudentWhatsAppContact(
     };
   }
 
-  // 2. Check parent username directly if parentPhone was empty
-  const pUser = student?.parentUsername && isMeaningful(student.parentUsername) ? student.parentUsername.trim() : '';
+  // 3. Check parent username
   if (pUser) {
     const clean = cleanWhatsAppUsername(pUser);
     return {
@@ -218,11 +256,8 @@ export function resolveStudentWhatsAppContact(
     };
   }
 
-  // 3. Check student phone
-  const sPhone = (student?.studentPhone && isMeaningful(student.studentPhone) ? student.studentPhone.trim() : '') ||
-    (fallback?.quickStudentPhone && isMeaningful(fallback.quickStudentPhone) ? fallback.quickStudentPhone.trim() : '');
-  
-  if (sPhone) {
+  // 4. Fallback to student phone if not checked yet
+  if (!shouldPreferStudent && sPhone) {
     const isUser = isWhatsAppUsername(sPhone) || student?.studentContactType === 'username';
     const clean = formatWhatsAppPhone(sPhone);
     return {
@@ -235,9 +270,8 @@ export function resolveStudentWhatsAppContact(
     };
   }
 
-  // 4. Check student username
-  const sUser = student?.studentUsername && isMeaningful(student.studentUsername) ? student.studentUsername.trim() : '';
-  if (sUser) {
+  // 5. Fallback to student username
+  if (!shouldPreferStudent && sUser) {
     const clean = cleanWhatsAppUsername(sUser);
     return {
       contact: `@${clean}`,
@@ -249,7 +283,7 @@ export function resolveStudentWhatsAppContact(
     };
   }
 
-  // 5. Default fallback
+  // 6. Default fallback
   const dPhone = fallback?.defaultPhone && isMeaningful(fallback.defaultPhone) ? fallback.defaultPhone.trim() : '';
   if (dPhone) {
     const isUser = isWhatsAppUsername(dPhone);

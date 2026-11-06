@@ -1193,9 +1193,11 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
         setTimeout(() => setCopied(false), 2000);
       } catch {}
 
-      const studentContact = hasStudentDirectPhone
-        ? resolveStudentWhatsAppContact(activeStudent, { quickStudentPhone: studentPhoneVal })
-        : { hasContact: false, contact: '' };
+      const studentContact = resolveStudentWhatsAppContact(activeStudent, {
+        quickStudentPhone: studentPhoneVal,
+        preferStudent: true,
+        targetRecipient: 'student'
+      });
 
       // Save report to phone internal folder (Documents/Gluck_Lernstudio/Parent_Reports) BEFORE sharing to WhatsApp
       await saveToPhoneSubfolderAndRegister({

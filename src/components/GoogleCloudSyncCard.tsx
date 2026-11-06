@@ -197,16 +197,28 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
         await executePostLoginSync(user);
       }
     } catch (err: any) {
-      setFeedbackMsg({
-        type: 'error',
-        text:
-          err?.message ||
-          _t(
-            'تعذر تسجيل الدخول بحساب Google. يرجى التأكد من السماح بالنوافذ المنبثقة.',
-            'Failed to sign in with Google. Please allow popups.',
-            'Google-Anmeldung fehlgeschlagen.'
+      const msg = err?.message || String(err);
+      if (msg.includes('missing initial state') || msg.includes('sessionStorage')) {
+        setFeedbackMsg({
+          type: 'error',
+          text: _t(
+            'تنبيه: المتصفح يمنع وصول الـ Session Storage. تم تفعيل التزامن الذكي، اضغط على زر تسجيل الدخول بجوجل مرة أخرى الآن.',
+            'Browser restricted sessionStorage. Adaptive mode enabled, click Google sign-in again.',
+            'Anmeldung fehlgeschlagen. Bitte erneut versuchen.'
           )
-      });
+        });
+      } else {
+        setFeedbackMsg({
+          type: 'error',
+          text:
+            err?.message ||
+            _t(
+              'تعذر تسجيل الدخول بحساب Google. يرجى التأكد من السماح بالنوافذ المنبثقة.',
+              'Failed to sign in with Google. Please allow popups.',
+              'Google-Anmeldung fehlgeschlagen.'
+            )
+        });
+      }
     } finally {
       setActionLoading(null);
     }

@@ -400,9 +400,11 @@ export const WhatsAppDispatchQueueModal: React.FC<WhatsAppDispatchQueueModalProp
     if (!activeStudent) return { contact: '', hasContact: false, isUsername: false, cleanForUrl: '' };
     if (recipientTarget === 'student') {
       const stPhone = (activeStudent.studentPhone || activeStudent.phone || '').trim();
-      if (stPhone) {
-        return resolveStudentWhatsAppContact(activeStudent, { quickStudentPhone: stPhone });
-      }
+      return resolveStudentWhatsAppContact(activeStudent, {
+        quickStudentPhone: stPhone,
+        preferStudent: true,
+        targetRecipient: 'student'
+      });
     }
     return resolveStudentWhatsAppContact(activeStudent);
   }, [activeStudent, recipientTarget]);

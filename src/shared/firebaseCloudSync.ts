@@ -8,6 +8,10 @@ import {
   signInWithCredential,
   signOut,
   onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence,
   User
 } from 'firebase/auth';
 import {
@@ -151,12 +155,51 @@ export function setVercelPublicDomain(domainUrl: string): string {
 // ============================================================================
 // FIREBASE AUTHENTICATION (Unified Teacher Login across Main App & Vercel)
 // ============================================================================
+// Initialize default persistence on load
+if (typeof window !== 'undefined') {
+  setPersistence(auth, browserLocalPersistence).catch(() => {
+    setPersistence(auth, inMemoryPersistence).catch(() => {});
+  });
+}
+
 export async function signInTeacherWithGoogle(): Promise<User | null> {
+  // 1. Set persistence explicitly to prevent missing initial state errors in partitioned browsers
+  try {
+    await setPersistence(auth, browserLocalPersistence).catch(() => {
+      return setPersistence(auth, browserSessionPersistence).catch(() => {
+        return setPersistence(auth, inMemoryPersistence).catch(() => {});
+      });
+    });
+  } catch {
+    // Ignore persistence setup notice
+  }
+
+  // 2. Primary popup sign-in attempt
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  } catch (err) {
-    console.warn('Google sign-in notice:', err);
+  } catch (err: any) {
+    const errMsg = err?.message || String(err);
+    console.warn('Google sign-in primary attempt notice:', errMsg);
+
+    // 3. Fallback for storage partitioning / missing initial state / popup blocking
+    if (
+      errMsg.includes('missing initial state') ||
+      errMsg.includes('sessionStorage') ||
+      errMsg.includes('auth/popup-blocked') ||
+      errMsg.includes('auth/internal-error') ||
+      errMsg.includes('storage') ||
+      err?.code === 'auth/internal-error'
+    ) {
+      try {
+        await setPersistence(auth, inMemoryPersistence);
+        const retryResult = await signInWithPopup(auth, googleProvider);
+        return retryResult.user;
+      } catch (retryErr: any) {
+        console.warn('Google sign-in fallback retry failed:', retryErr);
+      }
+    }
+
     throw err;
   }
 }
