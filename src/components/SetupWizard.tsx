@@ -156,7 +156,7 @@ export const SetupWizard: React.FC = () => {
     setGoogleSignInError(null);
     setShowUnauthorizedDomainHelper(false);
     try {
-      const user = await signInTeacherWithGoogle(email || directCloudEmail, displayName || 'Herr Omar');
+      const user = await signInTeacherWithGoogle();
       if (user) {
         await applySignedInCloudUser(user);
       }

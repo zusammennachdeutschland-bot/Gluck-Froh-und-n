@@ -26,6 +26,8 @@ import {
   emailToWorkspaceId,
   getActiveCloudUser,
   signInWithCloudEmailDirect,
+  isFirestoreWriteQuotaExhaustedToday,
+  executeSafeFirestoreWrite,
   VirtualCloudUser
 } from '../shared/firebaseCloudSync';
 
@@ -40,7 +42,8 @@ export {
   DEFAULT_VERCEL_DOMAIN,
   emailToWorkspaceId,
   getActiveCloudUser,
-  signInWithCloudEmailDirect
+  signInWithCloudEmailDirect,
+  isFirestoreWriteQuotaExhaustedToday
 };
 export type { VirtualCloudUser };
 
@@ -190,25 +193,36 @@ function partitionBackupPayload(fullData: any): Record<WorkspaceCategoryKey, any
   };
 }
 
+const lastUploadedChunkCache = new Map<string, string>();
+
 /**
- * Uploads the entire application state (all categories & chunks) to the signed-in
+ * Uploads the entire application state (only modified categories & chunks) to the signed-in
  * teacher's Google Cloud Firestore workspace (`/user_workspaces/{uid}/categories/{docId}`).
  */
 export async function uploadWorkspaceToGoogleCloud(
   backupJsonStr: string
 ): Promise<{ success: boolean; syncedAtIso: string; error?: string }> {
   const user = getActiveCloudUser();
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+
   if (!user) {
     return {
       success: false,
-      syncedAtIso: new Date().toISOString(),
+      syncedAtIso: nowIso,
       error: 'يرجى تسجيل الدخول بحساب Google أولاً لتفعيل المزامنة السحابية.'
     };
   }
 
+  if (isFirestoreWriteQuotaExhaustedToday()) {
+    return {
+      success: false,
+      syncedAtIso: nowIso,
+      error: 'Quota exceeded. تم الوصول للحد اليومي المجاني لكتابة Firestore اليوم؛ بياناتك محفوظة محلياً بأمان وستُستأنف المزامنة غداً.'
+    };
+  }
+
   const uid = getPrimaryWorkspaceId(user);
-  const nowMs = Date.now();
-  const nowIso = new Date(nowMs).toISOString();
   const deviceId = getCloudDeviceId();
   lastLocalPushTimestampMs = nowMs;
 
@@ -217,6 +231,7 @@ export async function uploadWorkspaceToGoogleCloud(
     const categories = partitionBackupPayload(parsed);
 
     const writePromises: Promise<any>[] = [];
+    let lernstudioChanged = false;
 
     for (const categoryKey of WORKSPACE_CATEGORY_KEYS) {
       const catPayloadStr = JSON.stringify(categories[categoryKey] || {});
@@ -224,34 +239,50 @@ export async function uploadWorkspaceToGoogleCloud(
 
       for (let idx = 0; idx < chunks.length; idx++) {
         const docId = `${categoryKey}_chunk_${idx}`;
+        const cacheKey = `${uid}:${docId}:${chunks.length}`;
+        if (lastUploadedChunkCache.get(cacheKey) === chunks[idx]) {
+          continue; // Unchanged chunk -> 0 Firestore write units used!
+        }
+        if (categoryKey === 'lernstudio_data') {
+          lernstudioChanged = true;
+        }
         const path = `user_workspaces/${uid}/categories/${docId}`;
+        const chunkData = chunks[idx];
         writePromises.push(
-          setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), {
-            id: docId,
-            categoryKey,
-            chunkIndex: idx,
-            totalChunks: chunks.length,
-            updatedAtMs: nowMs,
-            updatedAtIso: nowIso,
-            deviceId,
-            payloadChunk: chunks[idx],
-            ...(user.email ? { ownerEmail: user.email.slice(0, 120) } : {})
-          }).catch((err) => {
-            handleFirestoreError(err, OperationType.WRITE, path);
-            throw err;
-          })
+          executeSafeFirestoreWrite(
+            setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), {
+              id: docId,
+              categoryKey,
+              chunkIndex: idx,
+              totalChunks: chunks.length,
+              updatedAtMs: nowMs,
+              updatedAtIso: nowIso,
+              deviceId,
+              payloadChunk: chunkData,
+              ...(user.email ? { ownerEmail: user.email.slice(0, 120) } : {})
+            })
+          )
+            .then(() => {
+              lastUploadedChunkCache.set(cacheKey, chunkData);
+            })
+            .catch((err) => {
+              handleFirestoreError(err, OperationType.WRITE, path);
+              throw err;
+            })
         );
       }
     }
 
-    await Promise.all(writePromises);
+    if (writePromises.length > 0) {
+      await Promise.all(writePromises);
+    }
 
-    // Also sync custom Lernstudio sets to shared `/lernstudio_sets` so Vercel has them immediately
-    if (Array.isArray(parsed.lernstudioSets)) {
+    // Only sync custom Lernstudio sets if lernstudio_data actually changed
+    if (lernstudioChanged && Array.isArray(parsed.lernstudioSets) && !isFirestoreWriteQuotaExhaustedToday()) {
       const customSets = parsed.lernstudioSets.filter(
         (s: any) => s && s.id && !s.id.startsWith('curric_') && !s.id.startsWith('set_def_')
       );
-      for (const cs of customSets.slice(0, 30)) {
+      for (const cs of customSets.slice(0, 15)) {
         saveLernstudioSetToFirestore(cs).catch(() => {});
       }
     }

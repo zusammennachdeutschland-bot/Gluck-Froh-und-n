@@ -6,8 +6,13 @@ import {
   setAutoCloudSyncEnabled,
   uploadWorkspaceToGoogleCloud,
   downloadWorkspaceFromGoogleCloud,
-  subscribeToRemoteWorkspaceChanges
+  subscribeToRemoteWorkspaceChanges,
+  isFirestoreWriteQuotaExhaustedToday
 } from '../services/firebaseWorkspaceSync';
+
+function stripSnapshotTimestamp(jsonStr: string): string {
+  return (jsonStr || '').replace(/"timestamp":"[^"]*",?/, '');
+}
 
 export function useGoogleCloudWorkspaceSync(): void {
   const {
@@ -95,13 +100,17 @@ export function useGoogleCloudWorkspaceSync(): void {
             setTimeout(() => {
               isApplyingRemoteRef.current = false;
             }, 2500);
-          } else if (localHasData) {
-            // Local data exists: protect it and upload to cloud (never overwrite local data with empty cloud data)
+          } else if (!remoteHasActualData && localHasData && !isFirestoreWriteQuotaExhaustedToday()) {
+            // Cloud is completely empty and local has data: seed cloud once
             const snapStr = await performBackup();
             const res = await uploadWorkspaceToGoogleCloud(snapStr);
             if (res.success) {
-              lastUploadedSnapshotRef.current = snapStr;
+              lastUploadedSnapshotRef.current = stripSnapshotTimestamp(snapStr);
             }
+          } else if (localHasData) {
+            // Both local and cloud have data on boot: baseline snapshot so we only push when user actually edits data
+            const snapStr = await performBackup();
+            lastUploadedSnapshotRef.current = stripSnapshotTimestamp(snapStr);
           }
           window.dispatchEvent(
             new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'synced' } })
@@ -144,7 +153,13 @@ export function useGoogleCloudWorkspaceSync(): void {
 
   // 2. Debounced Auto-Push whenever any app data changes locally
   useEffect(() => {
-    if (!currentUserUidRef.current || !isAutoCloudSyncEnabled() || isApplyingRemoteRef.current || quotaExceededRef.current) {
+    if (
+      !currentUserUidRef.current ||
+      !isAutoCloudSyncEnabled() ||
+      isApplyingRemoteRef.current ||
+      quotaExceededRef.current ||
+      isFirestoreWriteQuotaExhaustedToday()
+    ) {
       return;
     }
 
@@ -153,13 +168,20 @@ export function useGoogleCloudWorkspaceSync(): void {
     }
 
     autoPushTimerRef.current = setTimeout(async () => {
-      if (!currentUserUidRef.current || !isAutoCloudSyncEnabled() || isApplyingRemoteRef.current || quotaExceededRef.current) {
+      if (
+        !currentUserUidRef.current ||
+        !isAutoCloudSyncEnabled() ||
+        isApplyingRemoteRef.current ||
+        quotaExceededRef.current ||
+        isFirestoreWriteQuotaExhaustedToday()
+      ) {
         return;
       }
       try {
         const snapStr = await performBackup();
+        const normalizedSnap = stripSnapshotTimestamp(snapStr);
         // Skip upload if snapshot content hasn't changed since last successful upload
-        if (snapStr === lastUploadedSnapshotRef.current) {
+        if (normalizedSnap === lastUploadedSnapshotRef.current) {
           return;
         }
 
@@ -168,7 +190,7 @@ export function useGoogleCloudWorkspaceSync(): void {
         );
         const res = await uploadWorkspaceToGoogleCloud(snapStr);
         if (res.success) {
-          lastUploadedSnapshotRef.current = snapStr;
+          lastUploadedSnapshotRef.current = normalizedSnap;
         } else if (res.error && (res.error.includes('resource-exhausted') || res.error.includes('Quota'))) {
           quotaExceededRef.current = true;
           setAutoCloudSyncEnabled(false);

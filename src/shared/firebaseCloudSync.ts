@@ -27,7 +27,8 @@ import {
   query,
   where,
   onSnapshot,
-  getDocFromServer
+  getDocFromServer,
+  setLogLevel
 } from 'firebase/firestore';
 import { HomeworkAssignment, HomeworkSubmission } from './homeworkTypes';
 import { LernstudioSet } from '../types/lernstudio';
@@ -45,8 +46,72 @@ export const FIREBASE_CONFIG = {
 
 const app = getApps().length > 0 ? getApp() : initializeApp(FIREBASE_CONFIG);
 export const db = getFirestore(app, FIREBASE_CONFIG.firestoreDatabaseId);
+try {
+  // Silence internal @firebase/firestore SDK backoff logs when free-tier daily quota is reached
+  setLogLevel('silent');
+} catch {
+  // Ignore
+}
 export const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+const QUOTA_EXHAUSTED_DATE_KEY = 'gluck_firestore_write_quota_date';
+
+function getTodayUtcDateStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function isFirestoreWriteQuotaExhaustedToday(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem(QUOTA_EXHAUSTED_DATE_KEY) === getTodayUtcDateStr();
+  } catch {
+    return false;
+  }
+}
+
+export function markFirestoreWriteQuotaExhaustedToday(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(QUOTA_EXHAUSTED_DATE_KEY, getTodayUtcDateStr());
+  } catch {
+    // Ignore
+  }
+}
+
+export function clearFirestoreWriteQuotaFlag(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(QUOTA_EXHAUSTED_DATE_KEY);
+  } catch {
+    // Ignore
+  }
+}
+
+export async function executeSafeFirestoreWrite<T>(writePromise: Promise<T>, timeoutMs = 4000): Promise<T> {
+  if (isFirestoreWriteQuotaExhaustedToday()) {
+    throw new Error('Quota limit exceeded (free tier daily write limit reached for today).');
+  }
+  let timer: any = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      markFirestoreWriteQuotaExhaustedToday();
+      reject(new Error('Quota limit exceeded (Firestore write backoff timeout).'));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([writePromise, timeoutPromise]);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (err?.code === 'resource-exhausted' || msg.includes('resource-exhausted') || msg.includes('Quota')) {
+      markFirestoreWriteQuotaExhaustedToday();
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -75,8 +140,14 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): void {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  if (errMsg.includes('resource-exhausted') || errMsg.includes('Quota')) {
+    markFirestoreWriteQuotaExhaustedToday();
+    console.warn('Firestore Free-Tier Daily Write Quota Notice:', path);
+    return;
+  }
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -92,7 +163,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  console.warn('Firestore Notice: ', JSON.stringify(errInfo));
 }
 
 // Validate connection on boot
@@ -243,22 +314,21 @@ export async function signInWithCloudEmailDirect(
   return vUser;
 }
 
-export async function signInTeacherWithGoogle(
-  preferredEmail?: string,
-  preferredName?: string
-): Promise<User | null> {
+export async function signInTeacherWithGoogle(): Promise<User | null> {
   const isCapacitorNative =
     (window as any).Capacitor?.isNativePlatform?.() ||
     window.location.protocol === 'capacitor:' ||
     window.location.protocol === 'file:';
 
-  // 1. On Capacitor Android native, popups are not supported. Use direct cloud workspace sync if redirect isn't authorized.
+  // 1. On Capacitor Android native, popups are not supported. Use signInWithRedirect.
   if (isCapacitorNative) {
-    const vUser = await signInWithCloudEmailDirect(
-      preferredEmail || 'zusammennachdeutschland@gmail.com',
-      preferredName || 'Herr Omar'
-    );
-    return vUser as unknown as User;
+    try {
+      await signInWithRedirect(auth, googleProvider);
+      return null; // Completes upon redirect return
+    } catch (redirectErr) {
+      console.warn('Capacitor native redirect sign-in error:', redirectErr);
+      throw redirectErr;
+    }
   }
 
   // 2. Set persistence explicitly
@@ -287,16 +357,13 @@ export async function signInTeacherWithGoogle(
     const errMsg = err?.message || String(err);
     console.warn('Google sign-in primary attempt notice:', errMsg);
 
-    // Automatically fall back to direct cloud workspace sync on Vercel/external domains when auth/unauthorized-domain occurs
-    if (errCode === 'auth/unauthorized-domain' || errMsg.includes('unauthorized-domain')) {
-      const vUser = await signInWithCloudEmailDirect(
-        preferredEmail || 'zusammennachdeutschland@gmail.com',
-        preferredName || 'Herr Omar'
-      );
-      return vUser as unknown as User;
-    }
-
-    if (errCode === 'auth/popup-closed-by-user' || errCode === 'auth/cancelled-popup-request') {
+    // Do NOT attempt signInWithRedirect if domain is unauthorized or user closed the popup
+    if (
+      errCode === 'auth/unauthorized-domain' ||
+      errMsg.includes('unauthorized-domain') ||
+      errCode === 'auth/popup-closed-by-user' ||
+      errCode === 'auth/cancelled-popup-request'
+    ) {
       throw err;
     }
 
@@ -390,18 +457,21 @@ function sanitizeDocId(rawId: string): string {
 }
 
 export async function saveAssignmentToFirestore(assignment: HomeworkAssignment): Promise<void> {
+  if (isFirestoreWriteQuotaExhaustedToday()) return;
   const safeId = sanitizeDocId(assignment.id);
   const path = `homework_assignments/${safeId}`;
   try {
     const payloadJson = JSON.stringify({ ...assignment, id: safeId }).slice(0, 490000);
-    await setDoc(doc(db, 'homework_assignments', safeId), {
-      id: safeId,
-      title: (assignment.title || 'Hausaufgabe').slice(0, 290),
-      createdAt: (assignment.createdAt || new Date().toISOString()).slice(0, 60),
-      isActive: assignment.isActive !== false,
-      payloadJson,
-      ...(auth.currentUser?.email ? { ownerEmail: auth.currentUser.email.slice(0, 120) } : {})
-    });
+    await executeSafeFirestoreWrite(
+      setDoc(doc(db, 'homework_assignments', safeId), {
+        id: safeId,
+        title: (assignment.title || 'Hausaufgabe').slice(0, 290),
+        createdAt: (assignment.createdAt || new Date().toISOString()).slice(0, 60),
+        isActive: assignment.isActive !== false,
+        payloadJson,
+        ...(auth.currentUser?.email ? { ownerEmail: auth.currentUser.email.slice(0, 120) } : {})
+      })
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -478,6 +548,7 @@ export function subscribeAssignmentsFromFirestore(
 // FIRESTORE STUDENT SUBMISSIONS
 // ============================================================================
 export async function saveSubmissionToFirestore(submission: HomeworkSubmission): Promise<void> {
+  if (isFirestoreWriteQuotaExhaustedToday()) return;
   const safeId = sanitizeDocId(submission.id);
   const safeAssignmentId = sanitizeDocId(submission.assignmentId);
   const path = `homework_submissions/${safeId}`;
@@ -488,15 +559,17 @@ export async function saveSubmissionToFirestore(submission: HomeworkSubmission):
       assignmentId: safeAssignmentId
     };
     const payloadJson = JSON.stringify(normalized).slice(0, 490000);
-    await setDoc(doc(db, 'homework_submissions', safeId), {
-      id: safeId,
-      assignmentId: safeAssignmentId,
-      studentName: (submission.studentName || 'طالب').slice(0, 140),
-      score: Math.max(0, Math.min(100000, Number(submission.score) || 0)),
-      accuracyPercent: Math.max(0, Math.min(100, Number(submission.accuracyPercent) || 0)),
-      completedAt: (submission.completedAt || new Date().toISOString()).slice(0, 60),
-      payloadJson
-    });
+    await executeSafeFirestoreWrite(
+      setDoc(doc(db, 'homework_submissions', safeId), {
+        id: safeId,
+        assignmentId: safeAssignmentId,
+        studentName: (submission.studentName || 'طالب').slice(0, 140),
+        score: Math.max(0, Math.min(100000, Number(submission.score) || 0)),
+        accuracyPercent: Math.max(0, Math.min(100, Number(submission.accuracyPercent) || 0)),
+        completedAt: (submission.completedAt || new Date().toISOString()).slice(0, 60),
+        payloadJson
+      })
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -589,29 +662,32 @@ export function subscribeSubmissionsFromFirestore(
 // FIRESTORE LERNSTUDIO SETS SYNC (Main App <-> Vercel)
 // ============================================================================
 export async function saveLernstudioSetToFirestore(setItem: LernstudioSet): Promise<void> {
-  if (!setItem || !setItem.id) return;
+  if (!setItem || !setItem.id || isFirestoreWriteQuotaExhaustedToday()) return;
   const safeId = sanitizeDocId(setItem.id);
   const path = `lernstudio_sets/${safeId}`;
   try {
     const payloadJson = JSON.stringify(setItem).slice(0, 490000);
-    await setDoc(doc(db, 'lernstudio_sets', safeId), {
-      id: safeId,
-      title: (setItem.title || 'Set').slice(0, 290),
-      category: ((setItem as any).category || (setItem as any).topic || 'general').slice(0, 110),
-      payloadJson,
-      updatedAtIso: new Date().toISOString(),
-      ...(auth.currentUser?.email ? { ownerEmail: auth.currentUser.email.slice(0, 120) } : {})
-    });
+    await executeSafeFirestoreWrite(
+      setDoc(doc(db, 'lernstudio_sets', safeId), {
+        id: safeId,
+        title: (setItem.title || 'Set').slice(0, 290),
+        category: ((setItem as any).category || (setItem as any).topic || 'general').slice(0, 110),
+        payloadJson,
+        updatedAtIso: new Date().toISOString(),
+        ...(auth.currentUser?.email ? { ownerEmail: auth.currentUser.email.slice(0, 120) } : {})
+      })
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
 export async function deleteLernstudioSetFromFirestore(setId: string): Promise<void> {
+  if (isFirestoreWriteQuotaExhaustedToday()) return;
   const safeId = sanitizeDocId(setId);
   const path = `lernstudio_sets/${safeId}`;
   try {
-    await deleteDoc(doc(db, 'lernstudio_sets', safeId));
+    await executeSafeFirestoreWrite(deleteDoc(doc(db, 'lernstudio_sets', safeId)));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
