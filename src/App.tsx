@@ -686,8 +686,8 @@ function MainApp() {
 import { migrateFromLocalStorageToIndexedDB } from './services/migrationService';
 import { storage } from './services/storageService';
 import { sanitizeInitialData, clearAllLocalDataAndReset } from './services/dataSanitizer';
-import { HomeworkPlayerPage } from '../lernstudio-web/src/pages/HomeworkPlayerPage';
-import { TeacherDashboardPage } from '../lernstudio-web/src/pages/TeacherDashboardPage';
+import { HomeworkPlayerPage } from './pages/HomeworkPlayerPage';
+import { TeacherDashboardPage } from './pages/TeacherDashboardPage';
 
 export default function App() {
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';

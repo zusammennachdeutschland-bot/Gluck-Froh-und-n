@@ -23,7 +23,7 @@ import {
   DEFAULT_VERCEL_DOMAIN,
   signInTeacherWithEmailPassword,
   signInWithGoogleIdToken
-} from '../../lernstudio-web/shared/firebaseCloudSync';
+} from '../shared/firebaseCloudSync';
 
 export {
   signInTeacherWithGoogle,

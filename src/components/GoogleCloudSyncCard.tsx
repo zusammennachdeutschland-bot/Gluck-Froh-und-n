@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   signInTeacherWithGoogle,
-  signInTeacherWithEmailPassword,
   signOutTeacherFirebase,
   subscribeTeacherAuth,
   isAutoCloudSyncEnabled,
@@ -27,12 +26,7 @@ import {
   Globe,
   ExternalLink,
   Edit3,
-  RotateCcw,
-  Sparkles,
-  KeyRound,
-  Lock,
-  Mail,
-  X
+  RotateCcw
 } from 'lucide-react';
 
 interface GoogleCloudSyncCardProps {
@@ -52,31 +46,16 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     performBackup,
     importBackupFile,
     triggerToast,
-    profile,
     _t
   } = useApp();
-
-  const teacherEmail = profile?.email || 'zusammennachdeutschland@gmail.com';
 
   const [firebaseUser, setFirebaseUser] = useState<any | null>(null);
   const [autoSync, setAutoSync] = useState<boolean>(() => isAutoCloudSyncEnabled());
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => getLastCloudSyncTime());
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
-  const [actionLoading, setActionLoading] = useState<'sync' | 'push' | 'pull' | 'login' | 'in_app_login' | null>(null);
+  const [actionLoading, setActionLoading] = useState<'sync' | 'push' | 'pull' | 'login' | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [cloudSummary, setCloudSummary] = useState<CloudSyncSummary | null>(null);
-
-  // In-App Sign-In Modal States
-  const [showInAppAuthModal, setShowInAppAuthModal] = useState(false);
-  const [authEmailInput, setAuthEmailInput] = useState(teacherEmail);
-  const [authPasswordInput, setAuthPasswordInput] = useState('gluck_teacher_2026!');
-  const [authTab, setAuthTab] = useState<'in_app' | 'google'>('in_app');
-
-  useEffect(() => {
-    if (profile?.email) {
-      setAuthEmailInput(profile.email);
-    }
-  }, [profile?.email]);
 
   // Vercel Student Platform Domain State
   const [vercelDomain, setVercelDomainState] = useState<string>(() => getVercelPublicDomain());
@@ -209,36 +188,12 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     }
   };
 
-  const handleInAppDirectSignIn = async (emailToUse: string, passToUse?: string) => {
-    setActionLoading('in_app_login');
-    setFeedbackMsg(null);
-    try {
-      const targetEmail = (emailToUse && emailToUse.trim()) || teacherEmail;
-      const targetPass = (passToUse && passToUse.trim()) || 'gluck_teacher_2026!';
-      const user = await signInTeacherWithEmailPassword(targetEmail, targetPass);
-      if (user) {
-        setShowInAppAuthModal(false);
-        await executePostLoginSync(user);
-      }
-    } catch (err: any) {
-      setFeedbackMsg({
-        type: 'error',
-        text:
-          err?.message ||
-          _t('تعذر تسجيل الدخول المباشر. يرجى التأكد من البريد والرمز السري.', 'Direct sign in failed.', 'Anmeldung fehlgeschlagen.')
-      });
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const handleGoogleSignIn = async () => {
     setActionLoading('login');
     setFeedbackMsg(null);
     try {
       const user = await signInTeacherWithGoogle();
       if (user) {
-        setShowInAppAuthModal(false);
         await executePostLoginSync(user);
       }
     } catch (err: any) {
@@ -247,9 +202,9 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
         text:
           err?.message ||
           _t(
-            'تعذر تسجيل الدخول عبر Google. يمكنك استخدام «دخول مباشر داخل البرنامج» لتسجيل الدخول فوراً دون مغادرة الصفحة.',
-            'Failed to sign in with Google. You can use In-App Direct Sign In instead.',
-            'Google-Anmeldung fehlgeschlagen. Nutzen Sie die direkte In-App-Anmeldung.'
+            'تعذر تسجيل الدخول بحساب Google. يرجى التأكد من السماح بالنوافذ المنبثقة.',
+            'Failed to sign in with Google. Please allow popups.',
+            'Google-Anmeldung fehlgeschlagen.'
           )
       });
     } finally {
@@ -457,72 +412,33 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
 
       {/* Signed-Out View vs Signed-In View */}
       {!firebaseUser ? (
-        <div className="pt-3 border-t border-surface-border space-y-3.5">
-          <div className="p-3.5 rounded-2xl bg-surface/60 border border-surface-border flex flex-col md:flex-row md:items-center justify-between gap-3.5">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                <span className="text-xs font-bold text-text-main">
-                  {_t('حساب المعلم للمزامنة:', 'Teacher Sync Account:', 'Lehrerkonto für Sync:')}
-                </span>
-                <code className="text-xs font-mono font-bold text-primary px-2 py-0.5 rounded-md bg-primary/10">
-                  {teacherEmail}
-                </code>
-              </div>
-              <p className="text-[11px] text-text-muted leading-relaxed">
-                {_t(
-                  'احفظ وزامن كل بياناتك السحابية فوراً بين الكمبيوتر والموبايل والطلاب بدون مغادرة البرنامج.',
-                  'Sync your full workspace across computer, phone, and students directly inside the app.',
-                  'Synchronisieren Sie alle Daten direkt in der App.'
-                )}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {/* Option 1: Direct in-app 1-click login without any popup */}
-              <button
-                type="button"
-                disabled={actionLoading !== null}
-                onClick={() => handleInAppDirectSignIn(teacherEmail)}
-                className="px-4 py-2.5 bg-primary hover:bg-primary-hover text-white font-black text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs whitespace-nowrap active:scale-98"
-                title={_t('دخول فوري مباشر وتفعيل المزامنة دون أي نوافذ خارجية', 'Instant in-app sync without leaving the app', 'Sofort in der App synchronisieren')}
-              >
-                {actionLoading === 'in_app_login' ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Sparkles className="w-4 h-4" />
-                )}
-                <span>{_t('دخول مباشر داخل البرنامج', 'In-App Direct Sign In', 'Direkt in App anmelden')}</span>
-              </button>
-
-              {/* Option 2: Google OAuth Popup */}
-              <button
-                type="button"
-                disabled={actionLoading !== null}
-                onClick={handleGoogleSignIn}
-                className="px-3.5 py-2.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap active:scale-98"
-                title={_t('تسجيل الدخول عبر نافذة حساب Google', 'Sign in with Google OAuth', 'Mit Google-Konto anmelden')}
-              >
-                {actionLoading === 'login' ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <LogIn className="w-4 h-4 text-primary" />
-                )}
-                <span>{_t('حساب Google', 'Google Account', 'Google-Konto')}</span>
-              </button>
-
-              {/* Option 3: Custom Login Details Sheet */}
-              <button
-                type="button"
-                disabled={actionLoading !== null}
-                onClick={() => setShowInAppAuthModal(true)}
-                className="p-2.5 text-text-muted hover:text-text-main border border-surface-border hover:border-primary/40 rounded-xl transition-colors cursor-pointer"
-                title={_t('تخصيص البريد والرمز السري', 'Customize Email / PIN', 'E-Mail & PIN anpassen')}
-              >
-                <KeyRound className="w-4 h-4" />
-              </button>
-            </div>
+        <div className="pt-3 border-t border-surface-border flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
+          <div className="text-xs text-text-muted leading-relaxed max-w-xl">
+            {_t(
+              'سجّل الدخول بحساب Google الخاص بك لتفعيل المزامنة السحابية الشاملة وحفظ ومزامنة كل بيانات البرنامج تلقائياً بين الكمبيوتر والموبايل.',
+              'Sign in with your Google account to automatically sync all app data across your computer, phone, and Vercel.',
+              'Melden Sie sich mit Ihrem Google-Konto an, um alle Daten automatisch zwischen Ihren Geräten zu synchronisieren.'
+            )}
           </div>
+
+          <button
+            type="button"
+            disabled={actionLoading === 'login'}
+            onClick={handleGoogleSignIn}
+            className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-950 text-white font-black text-xs rounded-xl transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-xs whitespace-nowrap active:scale-98 shrink-0"
+          >
+            {actionLoading === 'login' ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+              </svg>
+            )}
+            <span>{_t('تسجيل الدخول بحساب Google', 'Sign in with Google', 'Mit Google anmelden')}</span>
+          </button>
         </div>
       ) : (
         <div className="space-y-4 pt-3 border-t border-surface-border">
@@ -771,153 +687,6 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
           >
             ✕
           </button>
-        </div>
-      )}
-      {/* In-App Authentication & Account Picker Modal */}
-      {showInAppAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-md shadow-2xl p-5 space-y-4 animate-scaleUp">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-surface-border">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                  <Cloud className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-text-main">
-                    {_t('تسجيل الدخول والمزامنة السحابية', 'Sign In & Cloud Sync', 'Anmeldung & Cloud-Sync')}
-                  </h3>
-                  <p className="text-[10px] text-text-muted">
-                    {_t('مزامنة بيانات التطبيق بالكامل داخل البرنامج', 'Sync app data seamlessly in-app', 'Daten direkt in der App synchronisieren')}
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowInAppAuthModal(false)}
-                className="p-1.5 rounded-lg text-text-muted hover:text-text-main hover:bg-surface-hover cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Modal Tabs */}
-            <div className="flex rounded-xl bg-surface-hover/70 p-1 border border-surface-border text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => setAuthTab('in_app')}
-                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  authTab === 'in_app'
-                    ? 'bg-surface text-primary shadow-xs'
-                    : 'text-text-muted hover:text-text-main'
-                }`}
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{_t('دخول مباشر (داخل التطبيق)', 'Direct In-App', 'Direkt in App')}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setAuthTab('google')}
-                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  authTab === 'google'
-                    ? 'bg-surface text-primary shadow-xs'
-                    : 'text-text-muted hover:text-text-main'
-                }`}
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>{_t('حساب Google', 'Google Account', 'Google-Konto')}</span>
-              </button>
-            </div>
-
-            {/* Tab 1: In-App Direct Sign-In */}
-            {authTab === 'in_app' ? (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleInAppDirectSignIn(authEmailInput, authPasswordInput);
-                }}
-                className="space-y-3 pt-1 text-xs"
-              >
-                <div className="space-y-1">
-                  <label className="font-bold text-text-main flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5 text-primary" />
-                    <span>{_t('البريد الإلكتروني للمعلم', 'Teacher Email', 'Lehrer-E-Mail')}</span>
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    dir="ltr"
-                    value={authEmailInput}
-                    onChange={(e) => setAuthEmailInput(e.target.value)}
-                    placeholder="name@gmail.com"
-                    className="w-full px-3 py-2 rounded-xl bg-surface border border-surface-border text-text-main font-mono text-xs outline-none focus:border-primary"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-text-main flex items-center gap-1.5">
-                    <Lock className="w-3.5 h-3.5 text-primary" />
-                    <span>{_t('الرمز السري / كلمة المرور', 'PIN or Password', 'PIN oder Passwort')}</span>
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    dir="ltr"
-                    value={authPasswordInput}
-                    onChange={(e) => setAuthPasswordInput(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-surface border border-surface-border text-text-main font-mono text-xs outline-none focus:border-primary"
-                  />
-                  <p className="text-[10px] text-text-muted">
-                    {_t(
-                      'يتم حفظ ومزامنة بياناتك السحابية فوراً دون مغادرة التطبيق ودون فتح أي نوافذ خارجية.',
-                      'Your data syncs in-app without any external browser popups.',
-                      'Synchronisierung erfolgt direkt ohne externe Fenster.'
-                    )}
-                  </p>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={actionLoading !== null}
-                  className="w-full py-2.5 px-4 bg-primary hover:bg-primary-hover text-white font-black text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-98"
-                >
-                  {actionLoading === 'in_app_login' ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-4 h-4" />
-                  )}
-                  <span>{_t('تسجيل الدخول والمزامنة الفورية', 'Sign In & Sync Now', 'Jetzt anmelden & synchronisieren')}</span>
-                </button>
-              </form>
-            ) : (
-              /* Tab 2: Google OAuth */
-              <div className="space-y-3.5 pt-2 text-xs">
-                <p className="text-[11px] text-text-muted leading-relaxed">
-                  {_t(
-                    'تسجيل الدخول الرسمي بحساب Google. سيقوم المتصفح بطلب إذن الدخول بحسابك على جهازك، ثم يعود تلقائياً فور تأكيدك.',
-                    'Official Google Sign-In. Your device will prompt you to select your Google account, then return here immediately.',
-                    'Offizielle Google-Anmeldung.'
-                  )}
-                </p>
-
-                <button
-                  type="button"
-                  disabled={actionLoading !== null}
-                  onClick={handleGoogleSignIn}
-                  className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-950 text-white font-black text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-98"
-                >
-                  {actionLoading === 'login' ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <LogIn className="w-4 h-4 text-primary" />
-                  )}
-                  <span>{_t('المتابعة باختيار حساب Google', 'Continue with Google Account', 'Mit Google fortfahren')}</span>
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>

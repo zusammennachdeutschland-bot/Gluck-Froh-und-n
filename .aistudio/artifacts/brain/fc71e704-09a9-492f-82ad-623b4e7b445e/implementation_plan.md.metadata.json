@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for comprehensive Google Account & Firebase Cloud synchronization across all app data (students, groups, lessons, payments, finance, certificates, HOD records, school notes, settings, and Lernstudio) located in Settings and Smart Backup Center.",
-  "updatedAt": "2026-11-06T06:38:09.949811341Z",
+  "summary": "خطط العمل الموحدة لنشر التطبيق كاملاً على Vercel، وإلغاء وتجميد المجلد المزدوج lernstudio-web، وإتاحة مشاركة السيت والواجبات عبر رابط Vercel المباشر مع التعرف التلقائي والمزامنة عبر حساب جوجل.",
+  "updatedAt": "2026-11-06T08:05:49.418480558Z",
   "requestFeedback": true,
   "userFacing": true
 }

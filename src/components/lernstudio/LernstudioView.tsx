@@ -47,8 +47,9 @@ import { LernstudioHomeworkModal } from './LernstudioHomeworkModal';
 import {
   saveLernstudioSetToFirestore,
   deleteLernstudioSetFromFirestore,
-  subscribeLernstudioSetsFromFirestore
-} from '../../../lernstudio-web/shared/firebaseCloudSync';
+  subscribeLernstudioSetsFromFirestore,
+  getVercelPublicDomain
+} from '../../shared/firebaseCloudSync';
 import { GameEffectsProvider } from './effects/GameEffectsOverlay';
 import { getLernstudioTranslations, getLocalizedSetTitle, getLocalizedSetTopic, getLocalizedGrade, getLocalizedSetDescription, PROGRAM_GRADES, matchesGradeFilter } from '../../utils/lernstudioTranslations';
 import { DEFAULT_LERNSTUDIO_SETS } from '../../data/defaultLernstudioSets';
@@ -87,7 +88,8 @@ import {
   Eye,
   Share2,
   Dices,
-  Send
+  Send,
+  Link
 } from 'lucide-react';
 
 interface Props {
@@ -312,9 +314,12 @@ export const LernstudioView: React.FC<Props> = ({
     const displayTitle = getLocalizedSetTitle(set, language);
     const displayTopic = getLocalizedSetTopic(set, language);
     const items = set.items || [];
+    const vercelDomain = getVercelPublicDomain();
+    const setLink = `${vercelDomain}/homework/hw_set_${set.id}?s=${set.id}`;
 
     let text = `🇩🇪 *${displayTitle}*\n`;
     text += `📌 ${displayTopic}\n`;
+    text += `🔗 *رابط التدريب التفاعلي:* ${setLink}\n\n`;
     text += `📚 ${items.length} ${t.vocabularyCount}:\n\n`;
 
     items.slice(0, 15).forEach((it, idx) => {
@@ -1131,6 +1136,21 @@ export const LernstudioView: React.FC<Props> = ({
                           >
                             <Send className="w-3.5 h-3.5" />
                             <span>{language === 'ar' ? 'واجب' : 'HW'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const vercelDomain = getVercelPublicDomain();
+                              const setLink = `${vercelDomain}/homework/hw_set_${set.id}?s=${set.id}`;
+                              navigator.clipboard.writeText(setLink);
+                              setCopiedSetId(set.id);
+                              setTimeout(() => setCopiedSetId(null), 3000);
+                            }}
+                            className="p-1.5 text-text-muted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors cursor-pointer"
+                            title={language === 'ar' ? 'نسخ رابط السيت المباشر للطلاب (Vercel)' : 'Copy Vercel Set Link'}
+                          >
+                            <Link className="w-3.5 h-3.5 text-primary" />
                           </button>
 
                           <button
