@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import {
   subscribeTeacherAuth,
   isAutoCloudSyncEnabled,
+  setAutoCloudSyncEnabled,
   uploadWorkspaceToGoogleCloud,
   downloadWorkspaceFromGoogleCloud,
   subscribeToRemoteWorkspaceChanges
@@ -42,6 +43,8 @@ export function useGoogleCloudWorkspaceSync(): void {
   const isApplyingRemoteRef = useRef<boolean>(false);
   const hasCompletedInitialCheckRef = useRef<boolean>(false);
   const autoPushTimerRef = useRef<any>(null);
+  const lastUploadedSnapshotRef = useRef<string | null>(null);
+  const quotaExceededRef = useRef<boolean>(false);
 
   // 1. Auth listener + real-time remote changes listener (`onSnapshot`) + initial cloud bootstrap
   useEffect(() => {
@@ -95,7 +98,10 @@ export function useGoogleCloudWorkspaceSync(): void {
           } else if (localHasData) {
             // Local data exists: protect it and upload to cloud (never overwrite local data with empty cloud data)
             const snapStr = await performBackup();
-            await uploadWorkspaceToGoogleCloud(snapStr);
+            const res = await uploadWorkspaceToGoogleCloud(snapStr);
+            if (res.success) {
+              lastUploadedSnapshotRef.current = snapStr;
+            }
           }
           window.dispatchEvent(
             new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'synced' } })
@@ -138,7 +144,7 @@ export function useGoogleCloudWorkspaceSync(): void {
 
   // 2. Debounced Auto-Push whenever any app data changes locally
   useEffect(() => {
-    if (!currentUserUidRef.current || !isAutoCloudSyncEnabled() || isApplyingRemoteRef.current) {
+    if (!currentUserUidRef.current || !isAutoCloudSyncEnabled() || isApplyingRemoteRef.current || quotaExceededRef.current) {
       return;
     }
 
@@ -147,26 +153,43 @@ export function useGoogleCloudWorkspaceSync(): void {
     }
 
     autoPushTimerRef.current = setTimeout(async () => {
-      if (!currentUserUidRef.current || !isAutoCloudSyncEnabled() || isApplyingRemoteRef.current) {
+      if (!currentUserUidRef.current || !isAutoCloudSyncEnabled() || isApplyingRemoteRef.current || quotaExceededRef.current) {
         return;
       }
       try {
+        const snapStr = await performBackup();
+        // Skip upload if snapshot content hasn't changed since last successful upload
+        if (snapStr === lastUploadedSnapshotRef.current) {
+          return;
+        }
+
         window.dispatchEvent(
           new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
         );
-        const snapStr = await performBackup();
         const res = await uploadWorkspaceToGoogleCloud(snapStr);
+        if (res.success) {
+          lastUploadedSnapshotRef.current = snapStr;
+        } else if (res.error && (res.error.includes('resource-exhausted') || res.error.includes('Quota'))) {
+          quotaExceededRef.current = true;
+          setAutoCloudSyncEnabled(false);
+          console.warn('Firestore free tier quota exceeded. Auto-sync paused to protect quota.');
+        }
+
         window.dispatchEvent(
           new CustomEvent('gluck-cloud-sync-status', {
             detail: { status: res.success ? 'synced' : 'error', error: res.error }
           })
         );
-      } catch {
+      } catch (err: any) {
+        if (err?.message?.includes('resource-exhausted') || err?.message?.includes('Quota')) {
+          quotaExceededRef.current = true;
+          setAutoCloudSyncEnabled(false);
+        }
         window.dispatchEvent(
           new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'error' } })
         );
       }
-    }, 1200);
+    }, 45000);
 
     return () => {
       if (autoPushTimerRef.current) {
