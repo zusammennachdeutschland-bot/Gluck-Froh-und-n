@@ -232,34 +232,34 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
 
   return (
     <div
-      className="p-4 sm:p-6 rounded-3xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main relative overflow-hidden"
+      className="p-3 sm:p-5 rounded-2xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main relative overflow-hidden"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
       {/* 1. TOP HEADER BAR */}
-      <div className="bg-surface/90 backdrop-blur-md border border-surface-border p-4 rounded-3xl shadow-sm flex items-center justify-between gap-3 flex-wrap">
+      <div className="bg-surface border border-surface-border p-3.5 sm:p-4 rounded-xl shadow-xs flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onBack}
-            className="p-2.5 rounded-2xl bg-surface-hover text-text-muted hover:text-text-main cursor-pointer transition-all"
-            title={isRtl ? 'رجوع للقصور والألعاب' : 'Back to Games Hub'}
+            className="p-2 rounded-lg bg-surface-hover text-text-main hover:bg-surface border border-surface-border cursor-pointer transition-colors"
+            title={isRtl ? 'رجوع للألعاب' : 'Back to Games Hub'}
           >
-            <ArrowLeft className={`w-5 h-5 ${isRtl ? '' : 'rotate-180'}`} />
+            <ArrowLeft className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
           </button>
           <div>
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-black">
+              <span className="text-xs font-bold text-primary">
                 ⚙️ {isRtl ? 'إعدادات اللعبة' : 'Game Setup'}
               </span>
-              <span className="text-xs font-bold text-text-muted">
-                {displaySetTitle} ({totalItemsCount} {isRtl ? 'كلمة' : 'words'})
+              <span className="text-xs text-text-muted">
+                · {displaySetTitle} ({totalItemsCount} {isRtl ? 'كلمة' : 'words'})
               </span>
             </div>
-            <h1 className="text-lg sm:text-xl font-black text-text-main flex items-center gap-2 mt-0.5">
+            <h1 className="text-base sm:text-lg font-bold text-text-main flex items-center gap-2 mt-0.5">
               <span>{gameTitle}</span>
               {isSoloGame && (
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/20">
-                  👤 {isRtl ? 'لعبة فردية' : 'Solo Game'}
+                <span className="text-xs text-text-muted font-normal">
+                  ({isRtl ? 'لعبة فردية' : 'Solo Game'})
                 </span>
               )}
             </h1>
@@ -267,35 +267,31 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-2xl">{activeTheme.emoji}</span>
-          <span className="text-xs font-bold px-3 py-1 bg-surface-hover border border-surface-border rounded-xl">
+          <span className="text-xs font-bold text-text-muted">
             {activeTheme.name}
           </span>
         </div>
       </div>
 
       {/* 2. SETUP BODY CARDS */}
-      <div className="max-w-3xl w-full mx-auto my-6 space-y-6">
+      <div className="max-w-3xl w-full mx-auto my-4 space-y-4">
         {/* Banner Intro Card */}
-        <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 text-white rounded-3xl p-5 sm:p-6 shadow-lg relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="space-y-1 z-10 text-center sm:text-start">
-            <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-black inline-block mb-1">
-              🎮 {isRtl ? 'تخصيص المسابقة التفاعلية' : 'Custom Quiz Configuration'}
-            </span>
-            <h2 className="text-xl sm:text-2xl font-black">
-              {isRtl ? `جهّز إعدادات "${gameTitle}"` : `Configure "${gameTitle}"`}
+        <div className="bg-surface border border-surface-border text-text-main rounded-xl p-4 sm:p-5 shadow-xs flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-bold text-text-main">
+              {isRtl ? `تجهيز إعدادات "${gameTitle}"` : `Configure "${gameTitle}"`}
             </h2>
-            <p className="text-xs text-white/80 max-w-md leading-relaxed">
+            <p className="text-xs text-text-muted max-w-lg leading-relaxed">
               {isRtl
                 ? isSoloGame
                   ? 'اختر عدد الأسئلة، الفصل أو الطالب، والوقت المسموح قبل بدء التحدي الفردي.'
-                  : 'اختر عدد الأسئلة، المجموعات والطلاب من التطبيق، طريقة تقسيم الفرق، والوقت المسموح لكل سؤال.'
+                  : 'اختر عدد الأسئلة، المجموعات والطلاب، طريقة تقسيم الفرق، والوقت المسموح لكل سؤال.'
                 : isSoloGame
                 ? 'Select question count, student, and timer before starting solo challenge.'
-                : 'Select questions, app students & class roster, team mode, and timer before launching.'}
+                : 'Select questions, students, team mode, and timer before launching.'}
             </p>
           </div>
-          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center shrink-0 text-3xl shadow-inner">
+          <div className="w-12 h-12 rounded-xl bg-surface-hover border border-surface-border flex items-center justify-center shrink-0 text-2xl">
             {isSoloGame ? '🎯' : '🚀'}
           </div>
         </div>
@@ -789,11 +785,11 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
       </div>
 
       {/* 3. FOOTER START BUTTON */}
-      <div className="bg-surface/90 backdrop-blur-md border border-surface-border p-4 rounded-3xl shadow-lg flex items-center justify-between gap-3 max-w-3xl w-full mx-auto">
+      <div className="bg-surface border border-surface-border p-3.5 sm:p-4 rounded-xl shadow-xs flex items-center justify-between gap-3 max-w-3xl w-full mx-auto">
         <button
           type="button"
           onClick={onBack}
-          className="px-5 py-3 rounded-2xl bg-surface-hover text-text-muted hover:text-text-main text-xs font-bold border border-surface-border cursor-pointer transition-all"
+          className="px-4 py-2.5 rounded-xl bg-surface-hover text-text-muted hover:text-text-main text-xs font-bold border border-surface-border cursor-pointer transition-colors"
         >
           {isRtl ? 'إلغاء وعودة' : 'Cancel'}
         </button>
@@ -801,10 +797,10 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
         <button
           type="button"
           onClick={handleStartGame}
-          className="flex-1 max-w-md py-3.5 px-6 bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-700 hover:to-indigo-700 text-white rounded-2xl font-black text-sm sm:text-base shadow-lg shadow-emerald-600/30 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2"
+          className="flex-1 max-w-md py-2.5 px-6 bg-primary hover:bg-primary-hover text-white rounded-xl font-bold text-sm shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-2"
         >
-          <Play className="w-5 h-5 fill-current" />
-          <span>{isRtl ? 'ابدأ اللعبة الآن 🚀' : 'Start Game Now 🚀'}</span>
+          <Play className="w-4 h-4 fill-current" />
+          <span>{isRtl ? 'ابدأ اللعبة الآن' : 'Start Game Now'}</span>
         </button>
       </div>
     </div>

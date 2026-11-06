@@ -43,16 +43,17 @@ export const LernstudioWordsModal: React.FC<Props> = ({
     return (
       it.german.toLowerCase().includes(q) ||
       it.arabic.toLowerCase().includes(q) ||
-      (it.example && it.example.toLowerCase().includes(q))
+      ((it as any).example && (it as any).example.toLowerCase().includes(q)) ||
+      (it.exampleSentenceGerman && it.exampleSentenceGerman.toLowerCase().includes(q))
     );
   });
 
   return (
     <div
-      className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-hidden animate-fade-in"
+      className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-hidden"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
-      <div className="bg-surface border border-surface-border rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+      <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between bg-surface shrink-0">
           <div className="flex items-center gap-3 min-w-0">
@@ -103,11 +104,11 @@ export const LernstudioWordsModal: React.FC<Props> = ({
             filteredItems.map((item, idx) => (
               <div
                 key={idx}
-                className="p-3.5 rounded-2xl bg-surface-hover/60 border border-surface-border/60 hover:border-primary/40 transition-all flex items-center justify-between gap-3 group"
+                className="p-3 rounded-xl bg-surface-hover/70 border border-surface-border hover:border-primary/40 transition-all flex items-center justify-between gap-3 group"
               >
                 <div className="space-y-1 min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm sm:text-base font-black text-text-main tracking-wide" dir="ltr">
+                    <span className="text-sm sm:text-base font-bold text-text-main tracking-wide" dir="ltr">
                       {item.german}
                     </span>
                     <div className="inline-flex items-center gap-1">
@@ -122,7 +123,7 @@ export const LernstudioWordsModal: React.FC<Props> = ({
                       <button
                         type="button"
                         onClick={() => handleSpeakGerman(item.german, 0.6)}
-                        className="px-1.5 py-0.5 rounded-lg text-amber-600 hover:bg-amber-500/10 transition-colors cursor-pointer shrink-0 text-[10px] font-black border border-amber-500/30 inline-flex items-center gap-0.5"
+                        className="px-1.5 py-0.5 rounded-md text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer shrink-0 text-[10px] font-bold border border-amber-500/20 inline-flex items-center gap-0.5"
                         title="نطق بطيء (0.6x)"
                       >
                         <Snail className="w-3 h-3" />
@@ -131,13 +132,13 @@ export const LernstudioWordsModal: React.FC<Props> = ({
                     </div>
                   </div>
 
-                  <p className="text-xs text-text-muted font-bold">
+                  <p className="text-xs text-text-muted font-medium">
                     {item.arabic}
                   </p>
 
-                  {item.example && (
+                  {item.exampleSentenceGerman && (
                     <p className="text-[11px] text-text-muted/80 italic font-normal pt-0.5 line-clamp-1" dir="ltr">
-                      "{item.example}"
+                      "{item.exampleSentenceGerman}"
                     </p>
                   )}
                 </div>
@@ -146,7 +147,7 @@ export const LernstudioWordsModal: React.FC<Props> = ({
                   <img
                     src={item.imageUrl}
                     alt={item.german}
-                    className="w-12 h-12 object-cover rounded-xl border border-surface-border shrink-0"
+                    className="w-12 h-12 object-cover rounded-lg border border-surface-border shrink-0"
                   />
                 )}
               </div>
@@ -160,7 +161,7 @@ export const LernstudioWordsModal: React.FC<Props> = ({
             <button
               type="button"
               onClick={onStartGames}
-              className="py-2 px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+              className="py-2 px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
             >
               <Gamepad2 className="w-4 h-4" />
               <span>{t.playGame}</span>
@@ -169,16 +170,16 @@ export const LernstudioWordsModal: React.FC<Props> = ({
             <button
               type="button"
               onClick={onStartTeach}
-              className="py-2 px-3 rounded-xl bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-all"
+              className="py-2 px-3 rounded-xl bg-surface-hover hover:bg-surface text-text-main border border-surface-border text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
             >
-              <BookOpen className="w-4 h-4" />
+              <BookOpen className="w-4 h-4 text-primary" />
               <span>{t.teachMode}</span>
             </button>
 
             <button
               type="button"
               onClick={onStartWorksheet}
-              className="py-2 px-3 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-all"
+              className="py-2 px-3 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
             >
               <Printer className="w-4 h-4 text-primary" />
               <span>{t.printWorksheet}</span>
@@ -188,7 +189,7 @@ export const LernstudioWordsModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={onClose}
-            className="py-2 px-4 rounded-xl bg-surface-hover text-text-muted hover:text-text-main text-xs font-bold border border-surface-border cursor-pointer transition-all shrink-0"
+            className="py-2 px-4 rounded-xl bg-surface-hover hover:bg-surface text-text-muted hover:text-text-main text-xs font-bold border border-surface-border cursor-pointer transition-colors shrink-0"
           >
             {isRtl ? 'إغلاق' : 'Close'}
           </button>

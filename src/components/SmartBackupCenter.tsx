@@ -27,6 +27,7 @@ import {
   GraduationCap, Trophy
 } from 'lucide-react';
 import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
+import { SmartDataCleanupCard } from './SmartDataCleanupCard';
 
 interface SmartBackupCenterProps {
   onBack?: () => void;
@@ -1618,6 +1619,9 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
     <div className="space-y-3.5" id="smart-backup-center-root">
       {/* Google Account Full Cloud Sync Panel */}
       <GoogleCloudSyncCard />
+
+      {/* Smart Data Cleanup & Lesson Optimization */}
+      <SmartDataCleanupCard />
 
       {/* Action / Tab Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">

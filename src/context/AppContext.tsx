@@ -23,6 +23,7 @@ import { storage } from '../services/storageService';
 import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
+import { getPrunedLessonIds, executeLessonCleanup, analyzeLessonCleanup, formatLocalDateStr, LAST_CLEANUP_DATE_KEY } from '../services/lessonCleanupService';
 import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resequenceScheduledLessonsAfterChange, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, makeLessonSlotKey } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
@@ -134,6 +135,7 @@ interface AppContextType {
   importBackupFile: (customJson?: string) => Promise<boolean>;
   exportBackupFile: () => void;
   verifyBackupIntegrity: () => BackupIntegrityReport;
+  executeSmartLessonCleanup: (forceFull?: boolean) => Promise<{ prunedCount: number; remainingCount: number }>;
 
   // Groups
   groups: Group[];
@@ -841,7 +843,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const initialLessonDeduplication = useMemo(() => {
     const saved = initialData['dl_lessons'];
     const raw: Lesson[] = Array.isArray(saved) ? saved : [];
-    return deduplicateLessonList(raw, students);
+    const prunedIds = getPrunedLessonIds();
+    const filteredRaw = raw.filter(l => l && l.id && !prunedIds.has(l.id));
+    return deduplicateLessonList(filteredRaw, students);
   }, []);
 
   const initialPaymentDeduplication = useMemo(() => {
@@ -2126,8 +2130,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const activeMap = new Map<string, Lesson>(currentLessons.map(l => [l.id, l]));
         const fullIds = new Set(full.map(l => l.id));
 
+        const prunedIds = getPrunedLessonIds();
         const merged: Lesson[] = [];
         (full as Lesson[]).forEach((l: Lesson) => {
+          if (l && l.id && prunedIds.has(l.id)) return; // Skip pruned records
           if (activeMap.has(l.id)) {
             merged.push(activeMap.get(l.id)!);
           } else {
@@ -2137,6 +2143,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
 
         currentLessons.forEach(l => {
+          if (l && l.id && prunedIds.has(l.id)) return; // Skip pruned records
           if (!fullIds.has(l.id)) {
             merged.push(l);
           }
@@ -2450,7 +2457,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       let groupAddedCount = 0;
       const baseGroupCount = groupLessonCounts.get(group.id) || 0;
 
-      for (let dayOffset = 0; dayOffset < 365; dayOffset++) { // 1 full year ahead
+      // Maintain a rolling window of exactly 14 days of auto-generated future lessons
+      const ROLLING_FUTURE_WINDOW_DAYS = 14;
+      const prunedIds = getPrunedLessonIds();
+
+      for (let dayOffset = 0; dayOffset <= ROLLING_FUTURE_WINDOW_DAYS; dayOffset++) {
         const d = new Date();
         d.setDate(today.getDate() + dayOffset);
         if (!isDateMatchingGroupRecurrence(group.scheduleRecurrence, d)) continue;
@@ -2461,6 +2472,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const dateStr = formatLocalDate(d);
           const sessionTime = matchingSlot.time || '17:00';
           const slotKey = makeLessonSlotKey(group.id, dateStr, sessionTime);
+          const autoLessonId = `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`;
+
+          // If this slot was explicitly pruned or already completed on this date, do not auto-generate
+          if (prunedIds.has(autoLessonId)) continue;
 
           // If group already has a completed session on this date, do not auto-generate another scheduled session
           const existingForGroupOnDate = lessons.filter(l => l.groupId === group.id && l.date === dateStr && !l.deleted);
@@ -6424,6 +6439,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     };
   };
 
+  const executeSmartLessonCleanup = useCallback(async (forceFull = false): Promise<{ prunedCount: number; remainingCount: number }> => {
+    const currentLessons = fullLessonsRef.current || lessons || [];
+    const analysis = analyzeLessonCleanup(currentLessons, groups, students, payments, financeTransactions);
+
+    if (!analysis.financialInvarianceVerified && !forceFull) {
+      console.warn('Financial invariance check failed during smart lesson cleanup; aborting to preserve data integrity.');
+      return { prunedCount: 0, remainingCount: currentLessons.length };
+    }
+
+    if (analysis.totalToPrune === 0) {
+      return { prunedCount: 0, remainingCount: currentLessons.length };
+    }
+
+    const res = await executeLessonCleanup(currentLessons, analysis);
+    setLessons(res.cleanedLessons);
+    fullLessonsRef.current = res.cleanedLessons;
+    await storage.setItem('dl_lessons', res.cleanedLessons);
+
+    // Notify auto-sync engine of cleanup
+    autoSyncEngine.notifyMutation('lessons', 'cleanup_batch');
+    return { prunedCount: res.prunedCount, remainingCount: res.cleanedLessons.length };
+  }, [lessons, groups, students, payments, financeTransactions]);
+
+  // Automated Daily Maintenance: Rolling 14-day future window & settled historical cleanup (>30 days)
+  useEffect(() => {
+    if (!isInitializedRef.current || !lessons || lessons.length === 0) return;
+    const todayStr = formatLocalDateStr(new Date());
+    const lastCleanDate = localStorage.getItem(LAST_CLEANUP_DATE_KEY);
+    if (lastCleanDate !== todayStr) {
+      const timer = setTimeout(() => {
+        executeSmartLessonCleanup(false).catch(err => console.warn('Daily auto-cleanup error:', err));
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [isInitializedRef.current, lessons?.length, executeSmartLessonCleanup]);
+
   // Control modal open/close
   const openLessonControl = useCallback((lesson: Lesson) => {
     setSelectedLesson(lesson);
@@ -6995,6 +7046,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         importBackupFile,
         exportBackupFile,
         verifyBackupIntegrity,
+        executeSmartLessonCleanup,
         groups: activeGroups,
         addGroup,
         duplicateGroup,

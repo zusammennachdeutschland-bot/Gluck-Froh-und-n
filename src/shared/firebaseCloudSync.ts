@@ -89,27 +89,48 @@ export function clearFirestoreWriteQuotaFlag(): void {
   }
 }
 
-export async function executeSafeFirestoreWrite<T>(writePromise: Promise<T>, timeoutMs = 4000): Promise<T> {
+export async function executeSafeFirestoreWrite<T>(
+  writePromiseOrFn: Promise<T> | (() => Promise<T>),
+  timeoutMs = 15000,
+  maxRetries = 3
+): Promise<T> {
   if (isFirestoreWriteQuotaExhaustedToday()) {
     throw new Error('Quota limit exceeded (free tier daily write limit reached for today).');
   }
-  let timer: any = null;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error('Firestore write timeout.'));
-    }, timeoutMs);
-  });
-  try {
-    return await Promise.race([writePromise, timeoutPromise]);
-  } catch (err: any) {
-    const msg = err?.message || String(err);
-    if (err?.code === 'resource-exhausted' || msg.includes('resource-exhausted') || msg.includes('Quota')) {
-      markFirestoreWriteQuotaExhaustedToday();
+
+  let attempt = 0;
+  let lastError: any = null;
+
+  while (attempt <= maxRetries) {
+    let timer: any = null;
+    try {
+      const currentPromise =
+        typeof writePromiseOrFn === 'function' ? writePromiseOrFn() : writePromiseOrFn;
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('Firestore write timeout.'));
+        }, timeoutMs);
+      });
+
+      const res = await Promise.race([currentPromise, timeoutPromise]);
+      return res;
+    } catch (err: any) {
+      lastError = err;
+      const msg = err?.message || String(err);
+      if (err?.code === 'resource-exhausted' || msg.includes('resource-exhausted') || msg.includes('Quota')) {
+        markFirestoreWriteQuotaExhaustedToday();
+        throw err;
+      }
+      attempt++;
+      if (attempt <= maxRetries) {
+        await new Promise((r) => setTimeout(r, 800 * attempt));
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-    throw err;
-  } finally {
-    if (timer) clearTimeout(timer);
   }
+  throw lastError;
 }
 
 export enum OperationType {
@@ -467,14 +488,17 @@ export async function saveAssignmentToFirestore(assignment: HomeworkAssignment):
   try {
     const payloadJson = JSON.stringify({ ...assignment, id: safeId }).slice(0, 490000);
     await executeSafeFirestoreWrite(
-      setDoc(doc(db, 'homework_assignments', safeId), {
-        id: safeId,
-        title: (assignment.title || 'Hausaufgabe').slice(0, 290),
-        createdAt: (assignment.createdAt || new Date().toISOString()).slice(0, 60),
-        isActive: assignment.isActive !== false,
-        payloadJson,
-        ...(auth.currentUser?.email ? { ownerEmail: auth.currentUser.email.slice(0, 120) } : {})
-      })
+      () =>
+        setDoc(doc(db, 'homework_assignments', safeId), {
+          id: safeId,
+          title: (assignment.title || 'Hausaufgabe').slice(0, 290),
+          createdAt: (assignment.createdAt || new Date().toISOString()).slice(0, 60),
+          isActive: assignment.isActive !== false,
+          payloadJson,
+          ...(auth.currentUser?.email ? { ownerEmail: auth.currentUser.email.slice(0, 120) } : {})
+        }),
+      15000,
+      3
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -524,9 +548,8 @@ export async function fetchAllAssignmentsFromFirestore(): Promise<HomeworkAssign
 export function subscribeAssignmentsFromFirestore(
   onUpdate: (assignments: HomeworkAssignment[]) => void
 ): () => void {
-  const q = query(collection(db, 'homework_assignments'), where('id', '>=', ''));
   return onSnapshot(
-    q,
+    collection(db, 'homework_assignments'),
     (snap) => {
       const list: HomeworkAssignment[] = [];
       snap.forEach((docSnap) => {
@@ -548,6 +571,39 @@ export function subscribeAssignmentsFromFirestore(
   );
 }
 
+export async function deleteAssignmentFromFirestore(assignmentId: string): Promise<void> {
+  if (!assignmentId || isFirestoreWriteQuotaExhaustedToday()) return;
+  const safeId = sanitizeDocId(assignmentId);
+  const path = `homework_assignments/${safeId}`;
+  try {
+    await executeSafeFirestoreWrite(deleteDoc(doc(db, 'homework_assignments', safeId)));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function deleteSubmissionsForAssignmentFromFirestore(assignmentId: string): Promise<void> {
+  if (!assignmentId || isFirestoreWriteQuotaExhaustedToday()) return;
+  const safeAssignmentId = sanitizeDocId(assignmentId);
+  const path = 'homework_submissions';
+  try {
+    const q = query(
+      collection(db, 'homework_submissions'),
+      where('assignmentId', '==', safeAssignmentId)
+    );
+    const snap = await getDocs(q);
+    const deletePromises: Promise<any>[] = [];
+    snap.forEach((docSnap) => {
+      deletePromises.push(executeSafeFirestoreWrite(deleteDoc(docSnap.ref)));
+    });
+    if (deletePromises.length > 0) {
+      await Promise.all(deletePromises);
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
 // ============================================================================
 // FIRESTORE STUDENT SUBMISSIONS
 // ============================================================================
@@ -564,15 +620,18 @@ export async function saveSubmissionToFirestore(submission: HomeworkSubmission):
     };
     const payloadJson = JSON.stringify(normalized).slice(0, 490000);
     await executeSafeFirestoreWrite(
-      setDoc(doc(db, 'homework_submissions', safeId), {
-        id: safeId,
-        assignmentId: safeAssignmentId,
-        studentName: (submission.studentName || 'طالب').slice(0, 140),
-        score: Math.max(0, Math.min(100000, Number(submission.score) || 0)),
-        accuracyPercent: Math.max(0, Math.min(100, Number(submission.accuracyPercent) || 0)),
-        completedAt: (submission.completedAt || new Date().toISOString()).slice(0, 60),
-        payloadJson
-      })
+      () =>
+        setDoc(doc(db, 'homework_submissions', safeId), {
+          id: safeId,
+          assignmentId: safeAssignmentId,
+          studentName: (submission.studentName || 'طالب').slice(0, 140),
+          score: Math.max(0, Math.min(100000, Number(submission.score) || 0)),
+          accuracyPercent: Math.max(0, Math.min(100, Number(submission.accuracyPercent) || 0)),
+          completedAt: (submission.completedAt || new Date().toISOString()).slice(0, 60),
+          payloadJson
+        }),
+      15000,
+      3
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);

@@ -286,58 +286,57 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   }
 
   return (
-    <div className="p-4 sm:p-6 rounded-3xl space-y-5 transition-all bg-background text-text-main" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="p-3 sm:p-5 rounded-2xl space-y-4 transition-all bg-background text-text-main" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <GameStageBanner
         gameId="game"
         title={t.comprehensivePracticeTitle}
-        subtitle={`${getLocalizedSetTitle(set, language)} • ${items.length} ${t.vocabularyCount}`}
+        subtitle={`${getLocalizedSetTitle(set, language)} · ${items.length} ${t.vocabularyCount}`}
         emoji="🎯"
       />
 
       {/* Header Bar */}
-      <div className="flex items-center justify-between gap-3 flex-wrap bg-surface/80 backdrop-blur-md p-3 sm:p-4 rounded-2xl border border-surface-border shadow-xs">
+      <div className="flex items-center justify-between gap-3 flex-wrap bg-surface p-3 sm:p-3.5 rounded-xl border border-surface-border shadow-xs">
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={onBack}
-            className="p-2 text-text-muted hover:text-text-main bg-surface-hover rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1"
+            className="p-2 text-text-muted hover:text-text-main bg-surface-hover hover:bg-surface rounded-lg text-xs font-bold border border-surface-border transition-colors cursor-pointer inline-flex items-center gap-1"
           >
             <ArrowRight className={`w-4 h-4 ${language !== 'ar' ? 'rotate-180' : ''}`} />
             <span>{t.returnToSetsBtn}</span>
           </button>
 
           <div>
-            <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5">
-              <span>{activeTheme.emoji}</span>
+            <h2 className="text-sm sm:text-base font-bold text-text-main flex items-center gap-1.5">
               <span>{getLocalizedSetTitle(set, language)}</span>
             </h2>
-            <p className="text-[10px] text-text-muted">
-              {t.levelLabel} {set.level} • {items.length} {t.vocabularyCount}
+            <p className="text-xs text-text-muted">
+              {t.levelLabel} {set.level} · {items.length} {t.vocabularyCount}
             </p>
           </div>
         </div>
 
         {/* Score & Progress */}
-        <div className="flex items-center gap-3">
-          <div className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 font-extrabold text-xs flex items-center gap-1.5">
-            <Trophy className="w-4 h-4" />
+        <div className="flex items-center gap-2">
+          <div className="px-2.5 py-1 rounded-lg bg-surface-hover border border-surface-border text-amber-600 dark:text-amber-400 font-bold text-xs flex items-center gap-1.5">
+            <Trophy className="w-3.5 h-3.5" />
             <span>{t.pointsLabel} {score}</span>
           </div>
 
-          <div className="px-3 py-1.5 rounded-xl bg-primary-soft border border-primary-border/40 text-primary font-extrabold text-xs flex items-center gap-1">
-            <Award className="w-4 h-4" />
+          <div className="px-2.5 py-1 rounded-lg bg-surface-hover border border-surface-border text-primary font-bold text-xs flex items-center gap-1">
+            <Award className="w-3.5 h-3.5" />
             <span>{t.streakLabel} {streak} 🔥</span>
           </div>
         </div>
       </div>
 
       {/* Game Type Switcher Tabs */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 bg-surface/60 p-1.5 rounded-2xl border border-surface-border text-xs font-bold">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1 bg-surface-hover p-1 rounded-lg border border-surface-border text-xs font-bold">
         <button
           type="button"
           onClick={() => { setSelectedGameType('multiple_choice'); resetQuestionState(); }}
-          className={`py-2 px-3 rounded-xl transition-all cursor-pointer ${
-            selectedGameType === 'multiple_choice' ? activeTheme.primaryBg : 'hover:bg-surface-hover text-text-muted'
+          className={`py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+            selectedGameType === 'multiple_choice' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
           }`}
         >
           {t.tabMultipleChoice}
@@ -346,8 +345,8 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         <button
           type="button"
           onClick={() => { setSelectedGameType('missing_letter'); resetQuestionState(); }}
-          className={`py-2 px-3 rounded-xl transition-all cursor-pointer ${
-            selectedGameType === 'missing_letter' ? activeTheme.primaryBg : 'hover:bg-surface-hover text-text-muted'
+          className={`py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+            selectedGameType === 'missing_letter' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
           }`}
         >
           {t.tabMissingLetter}
@@ -356,8 +355,8 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         <button
           type="button"
           onClick={() => { setSelectedGameType('sentence_builder'); resetQuestionState(); }}
-          className={`py-2 px-3 rounded-xl transition-all cursor-pointer ${
-            selectedGameType === 'sentence_builder' ? activeTheme.primaryBg : 'hover:bg-surface-hover text-text-muted'
+          className={`py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+            selectedGameType === 'sentence_builder' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
           }`}
         >
           {t.tabSentenceBuilder}
@@ -366,8 +365,8 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         <button
           type="button"
           onClick={() => { setSelectedGameType('emoji_vocab'); resetQuestionState(); }}
-          className={`py-2 px-3 rounded-xl transition-all cursor-pointer ${
-            selectedGameType === 'emoji_vocab' ? activeTheme.primaryBg : 'hover:bg-surface-hover text-text-muted'
+          className={`py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+            selectedGameType === 'emoji_vocab' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
           }`}
         >
           {t.tabEmojiVocab}
@@ -376,8 +375,8 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         <button
           type="button"
           onClick={() => { setSelectedGameType('scrambled_letters'); resetQuestionState(); }}
-          className={`py-2 px-3 rounded-xl transition-all cursor-pointer col-span-2 sm:col-span-1 ${
-            selectedGameType === 'scrambled_letters' ? activeTheme.primaryBg : 'hover:bg-surface-hover text-text-muted'
+          className={`py-1.5 px-2.5 rounded-md transition-all cursor-pointer col-span-2 sm:col-span-1 ${
+            selectedGameType === 'scrambled_letters' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
           }`}
         >
           {t.tabScrambledLetters}

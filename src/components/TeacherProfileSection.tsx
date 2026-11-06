@@ -5,6 +5,7 @@ import {
   Save, CheckCircle2, ArrowLeft, ArrowRight, UserCheck, ShieldCheck
 } from 'lucide-react';
 import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
+import { SmartDataCleanupCard } from './SmartDataCleanupCard';
 
 interface Props {
   onBack?: () => void;
@@ -147,6 +148,9 @@ export const TeacherProfileSection: React.FC<Props> = ({ onBack }) => {
 
       {/* Full Google Account Cloud Sync Card */}
       <GoogleCloudSyncCard />
+
+      {/* Smart Data Cleanup & Lesson Optimization */}
+      <SmartDataCleanupCard />
 
       {/* Top Identity Card - Clean & Coordinated without photo icons */}
       <div className="p-4 rounded-2xl bg-surface border border-surface-border shadow-xs space-y-4">

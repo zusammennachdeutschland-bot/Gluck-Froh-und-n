@@ -29,8 +29,10 @@ export interface HomeworkQuestionResponse {
 export interface HomeworkSubmission {
   id: string; // e.g. "sub_abc123"
   assignmentId: string;
+  studentId?: string; // Real student ID from Glück roster
   studentName: string;
   attemptNumber: number;
+  status?: 'in_progress' | 'completed' | string;
   startedAt: string;
   completedAt: string;
   timeSpentSeconds: number;
@@ -63,6 +65,9 @@ export interface HomeworkAssignment {
   deadline?: string;
   isActive: boolean;
   status?: 'active' | 'closed';
+  groupId?: string;
+  groupName?: string;
+  assignedStudents?: { id: string; name: string }[]; // Selected students snapshot
   createdAt: string;
   createdBy: string;
 }

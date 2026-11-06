@@ -11,6 +11,8 @@ import {
   fetchAssignmentFromFirestore,
   fetchAllAssignmentsFromFirestore,
   subscribeAssignmentsFromFirestore,
+  deleteAssignmentFromFirestore,
+  deleteSubmissionsForAssignmentFromFirestore,
   saveSubmissionToFirestore,
   fetchSubmissionsForAssignmentFromFirestore,
   fetchAllSubmissionsFromFirestore,
@@ -28,6 +30,8 @@ export {
   fetchAssignmentFromFirestore,
   fetchAllAssignmentsFromFirestore,
   subscribeAssignmentsFromFirestore,
+  deleteAssignmentFromFirestore,
+  deleteSubmissionsForAssignmentFromFirestore,
   saveSubmissionToFirestore,
   fetchSubmissionsForAssignmentFromFirestore,
   fetchAllSubmissionsFromFirestore,
@@ -112,6 +116,23 @@ export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): v
   }
   if (syncCloud) {
     saveAssignmentToFirestore(hw).catch(() => {});
+  }
+}
+
+export function deleteLocalAssignment(assignmentId: string, syncCloud = true): void {
+  if (typeof window === 'undefined' || !assignmentId) return;
+  try {
+    const remainingAssignments = getLocalAssignments().filter((a) => a.id !== assignmentId);
+    localStorage.setItem(LOCAL_ASSIGNMENTS_KEY, JSON.stringify(remainingAssignments));
+
+    const remainingSubmissions = getLocalSubmissions().filter((s) => s.assignmentId !== assignmentId);
+    localStorage.setItem(LOCAL_SUBMISSIONS_KEY, JSON.stringify(remainingSubmissions));
+  } catch {
+    // Ignore storage errors
+  }
+  if (syncCloud) {
+    deleteAssignmentFromFirestore(assignmentId).catch(() => {});
+    deleteSubmissionsForAssignmentFromFirestore(assignmentId).catch(() => {});
   }
 }
 
@@ -273,7 +294,85 @@ export async function fetchAssignmentDetailsWithSync(id: string): Promise<any | 
       accuracy: s.accuracy ?? s.scorePercentage ?? s.accuracyPercent ?? 0,
       goldEarned: s.goldEarned ?? (s.correctAnswersCount || s.score || 0) * 100
     }))
-    .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+    .sort((a, b) => new Date(b.completedAt || b.startedAt).getTime() - new Date(a.completedAt || a.startedAt).getTime());
+
+  // Build student status summary & attempt history
+  const assignedStudents = hw.assignedStudents || [];
+  const rosterMap = new Map<string, { id: string; name: string }>();
+  assignedStudents.forEach((st: any) => rosterMap.set(st.id || st.name, st));
+
+  // Also include any students who submitted but weren't in assignedStudents
+  subs.forEach((s) => {
+    const key = s.studentId || s.studentName;
+    if (!rosterMap.has(key)) {
+      rosterMap.set(key, { id: s.studentId || s.studentName, name: s.studentName });
+    }
+  });
+
+  const studentStatusSummary: any[] = [];
+  const leaderboardMap = new Map<string, any>();
+
+  rosterMap.forEach((st) => {
+    const studentSubs = subs.filter(
+      (s) => (s.studentId && s.studentId === st.id) || s.studentName.trim().toLowerCase() === st.name.trim().toLowerCase()
+    );
+
+    const completedAttempts = studentSubs.filter((s) => s.status === 'completed' || s.completedAt);
+    const inProgressAttempts = studentSubs.filter((s) => s.status === 'in_progress' && completedAttempts.length === 0);
+
+    let status: 'not_started' | 'in_progress' | 'completed' = 'not_started';
+    if (completedAttempts.length > 0) {
+      status = 'completed';
+    } else if (inProgressAttempts.length > 0) {
+      status = 'in_progress';
+    }
+
+    const attemptsCount = studentSubs.length;
+    const sortedCompleted = [...completedAttempts].sort((a, b) => (b.scorePercentage || 0) - (a.scorePercentage || 0));
+    const bestAttempt = sortedCompleted[0] || null;
+    const latestAttempt = studentSubs[0] || null;
+
+    const bestScore = bestAttempt ? (bestAttempt.scorePercentage ?? bestAttempt.score ?? 0) : 0;
+    const latestScore = latestAttempt ? (latestAttempt.scorePercentage ?? latestAttempt.score ?? 0) : 0;
+    const bestAccuracy = bestAttempt ? (bestAttempt.accuracyPercent ?? bestAttempt.accuracy ?? 0) : 0;
+    const totalTimeSpent = studentSubs.reduce((acc, c) => acc + (c.timeSpentSeconds || 0), 0);
+    const lastActivity = latestAttempt ? latestAttempt.completedAt || latestAttempt.startedAt : null;
+
+    const studentRecord = {
+      studentId: st.id,
+      studentName: st.name,
+      status,
+      attemptsCount,
+      bestScore,
+      latestScore,
+      bestAccuracy,
+      totalTimeSpent,
+      lastActivity,
+      attempts: studentSubs
+    };
+
+    studentStatusSummary.push(studentRecord);
+
+    if (bestAttempt) {
+      leaderboardMap.set(st.id || st.name, {
+        studentId: st.id,
+        studentName: st.name,
+        bestScore: bestAttempt.scorePercentage ?? bestAttempt.score ?? 0,
+        bestAccuracy: bestAttempt.accuracyPercent ?? bestAttempt.accuracy ?? 0,
+        timeSpentSeconds: bestAttempt.timeSpentSeconds || 0,
+        goldEarned: bestAttempt.goldEarned || 0,
+        completedAt: bestAttempt.completedAt
+      });
+    }
+  });
+
+  // Official Leaderboard ranking: 1. Best score desc, 2. Best accuracy desc, 3. Shortest time asc
+  const officialLeaderboard = Array.from(leaderboardMap.values()).sort(
+    (a, b) =>
+      b.bestScore - a.bestScore ||
+      b.bestAccuracy - a.bestAccuracy ||
+      a.timeSpentSeconds - b.timeSpentSeconds
+  );
 
   const questionMap = new Map<
     string,
@@ -311,9 +410,25 @@ export async function fetchAssignmentDetailsWithSync(id: string): Promise<any | 
     }))
     .sort((a, b) => a.accuracyPercent - b.accuracyPercent);
 
+  // Status metrics counts
+  const totalAssigned = rosterMap.size;
+  const completedCount = studentStatusSummary.filter((s) => s.status === 'completed').length;
+  const inProgressCount = studentStatusSummary.filter((s) => s.status === 'in_progress').length;
+  const notStartedCount = studentStatusSummary.filter((s) => s.status === 'not_started').length;
+  const completionPercentage = totalAssigned > 0 ? Math.round((completedCount / totalAssigned) * 100) : 0;
+
   return {
     assignment: hw,
     submissions: subs,
-    questionAccuracy
+    studentStatusSummary,
+    officialLeaderboard,
+    questionAccuracy,
+    metrics: {
+      totalAssigned,
+      completedCount,
+      inProgressCount,
+      notStartedCount,
+      completionPercentage
+    }
   };
 }

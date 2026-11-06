@@ -1,6 +1,6 @@
 {
-  "summary": "خطط العمل الموحدة لنشر التطبيق كاملاً على Vercel، وإلغاء وتجميد المجلد المزدوج lernstudio-web، وإتاحة مشاركة السيت والواجبات عبر رابط Vercel المباشر مع التعرف التلقائي والمزامنة عبر حساب جوجل.",
-  "updatedAt": "2026-11-06T08:05:49.418480558Z",
+  "summary": "Implementation plan for Glück Smart Data Cleanup & Lesson Optimization: reduces database size by enforcing a rolling 14-day future window for auto-generated recurring lessons, cleans historical fully paid completed lessons older than 30 days while strictly preserving unpaid balances, financial transactions, and manual appointments, creates a downloadable pre-cleanup backup, and adds preview controls to Settings and Smart Backup Center.",
+  "updatedAt": "2026-11-06T16:59:51.839796221Z",
   "requestFeedback": true,
   "userFacing": true
 }

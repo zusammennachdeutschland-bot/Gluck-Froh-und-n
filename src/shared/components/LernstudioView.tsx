@@ -58,6 +58,11 @@ export function isBuiltinLernstudioSet(set: Partial<LernstudioSet> | null | unde
 export type SetSourceFilter = 'all' | 'custom' | 'builtin';
 import { CHILDREN_LEVEL_CATEGORIES } from '../../data/childrenTopicsPreset';
 import { useApp } from '../../context/AppContext';
+import {
+  saveLernstudioSetToFirestore,
+  deleteLernstudioSetFromFirestore,
+  subscribeLernstudioSetsFromFirestore,
+} from '../firebaseCloudSync';
 import { RandomStudentPickerModal } from '../RandomStudentPickerModal';
 
 import {
@@ -82,7 +87,9 @@ import {
   Eye,
   Share2,
   Dices,
-  Send
+  Send,
+  Bot,
+  GraduationCap
 } from 'lucide-react';
 
 interface Props {
@@ -107,8 +114,33 @@ export const LernstudioView: React.FC<Props> = ({
   const { students } = useApp();
   const t = getLernstudioTranslations(language);
 
+  // Cloud Firestore Real-time Sync
+  const handleSaveSetWithCloud = (set: LernstudioSet) => {
+    onSaveSet(set);
+    saveLernstudioSetToFirestore(set).catch(() => {});
+  };
+
+  const handleDeleteSetWithCloud = (setId: string) => {
+    onDeleteSet(setId);
+    deleteLernstudioSetFromFirestore(setId).catch(() => {});
+  };
+
+  React.useEffect(() => {
+    const unsub = subscribeLernstudioSetsFromFirestore((cloudSets) => {
+      if (cloudSets.length > 0) {
+        const existingIds = new Set(sets.map((s) => s.id));
+        cloudSets.forEach((cs) => {
+          if (!existingIds.has(cs.id)) {
+            onSaveSet(cs);
+          }
+        });
+      }
+    });
+    return () => unsub();
+  }, [sets.length]);
+
   // Theme State
-  const [currentThemeId, setCurrentThemeId] = useState<LernstudioThemeId>('pastel');
+  const [currentThemeId, setCurrentThemeId] = useState<LernstudioThemeId>('neutral');
   const activeTheme = LERNSTUDIO_THEMES[currentThemeId];
 
   // Mode View State
@@ -735,145 +767,115 @@ export const LernstudioView: React.FC<Props> = ({
     }
 
     return (
-      <div className={`p-4 sm:p-6 pb-32 sm:pb-40 rounded-3xl space-y-6 transition-all min-h-[85vh] ${activeTheme.bgGradient}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
-        {/* Top Banner & Title Bar */}
-        <div className="flex items-center justify-between gap-3 flex-wrap bg-surface/90 backdrop-blur-md p-3.5 sm:p-5 rounded-3xl border border-surface-border shadow-md overflow-hidden">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-2xl sm:text-3xl shrink-0">{activeTheme.emoji}</span>
-            <h1 className="text-lg sm:text-2xl font-black text-text-main truncate">
-              {t.hubTitle}
-            </h1>
-          </div>
+      <div className="space-y-3 sm:space-y-4 pb-24 sm:pb-32" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+        {/* Top Header & Compact Action Row (Glück Standard) */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
+          <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5 sm:gap-2">
+            <Gamepad2 className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+            <span>{t.hubTitle}</span>
+          </h2>
 
-          {/* Header Action Buttons */}
-          <div className="flex items-center gap-2 flex-wrap min-w-0">
-            {/* Theme Selector */}
-            <div className="flex items-center gap-1 bg-surface-hover/80 p-1 rounded-2xl border border-surface-border shrink-0">
-              <Palette className="w-3.5 h-3.5 text-primary ml-1 mr-1" />
-              {(Object.keys(LERNSTUDIO_THEMES) as LernstudioThemeId[]).map((tId) => (
-                <button
-                  key={tId}
-                  type="button"
-                  onClick={() => setCurrentThemeId(tId)}
-                  className={`px-2 py-0.5 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
-                    currentThemeId === tId ? activeTheme.primaryBg : 'text-text-muted hover:text-text-main'
-                  }`}
-                  title={language === 'ar' ? LERNSTUDIO_THEMES[tId].nameArabic : LERNSTUDIO_THEMES[tId].name}
-                >
-                  {LERNSTUDIO_THEMES[tId].emoji}
-                </button>
-              ))}
-            </div>
-
-            {/* Random Student Picker Roulette Button */}
-            <button
-              type="button"
-              onClick={() => setIsRandomPickerOpen(true)}
-              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-md cursor-pointer inline-flex items-center gap-1.5 shrink-0 transform hover:scale-105 transition-all"
-              title={language === 'ar' ? 'اختيار طالب عشوائي للحصة' : language === 'de' ? 'Zufallsauswahl für die Stunde' : 'Pick random student for lesson'}
-            >
-              <Dices className="w-4 h-4" />
-              <span>{language === 'ar' ? 'عجلة اختيار الطالب 🎲' : language === 'de' ? 'Zufallsauswahl 🎲' : 'Random Picker 🎲'}</span>
-            </button>
-
-            {/* AI Generator Button */}
-            <button
-              type="button"
-              onClick={() => setIsAiModalOpen(true)}
-              className="px-3.5 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-black shadow-md cursor-pointer inline-flex items-center gap-1.5 shrink-0 transform hover:scale-105 transition-all"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>{t.aiImport}</span>
-            </button>
-
-            {/* New Set Button */}
+          {/* Action Buttons in ONE Single Row - Icon-Only matching Glück's StudentsView / Dashboard */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 max-w-full">
+            {/* 1. Add New Set (Primary Theme) */}
             <button
               type="button"
               onClick={() => {
                 setSetToEdit(null);
                 setIsSetEditorOpen(true);
               }}
-              className={`px-3.5 py-2 rounded-xl text-xs font-black shadow-md cursor-pointer inline-flex items-center gap-1.5 shrink-0 ${activeTheme.primaryBg}`}
+              className="p-2.5 bg-primary hover:bg-primary-hover active:scale-95 text-white rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-xs shrink-0"
+              title={t.createSet}
+              aria-label={t.createSet}
             >
-              <Plus className="w-4 h-4" />
-              <span>{t.createSet}</span>
+              <Plus className="w-4 h-4 shrink-0 text-white" />
             </button>
 
-            {/* Homework / Blooket Hausaufgaben Button */}
+            {/* 2. Random Student Picker */}
+            <button
+              type="button"
+              onClick={() => setIsRandomPickerOpen(true)}
+              className="p-2.5 bg-surface-hover hover:bg-surface border border-surface-border active:scale-95 text-text-main rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+              title={language === 'ar' ? 'عجلة اختيار طالب عشوائي للحصة' : language === 'de' ? 'Zufallsauswahl für die Stunde' : 'Pick random student for lesson'}
+              aria-label={language === 'ar' ? 'عجلة اختيار طالب عشوائي للحصة' : 'Random Student Picker'}
+            >
+              <Dices className="w-4 h-4 shrink-0 text-primary" />
+            </button>
+
+            {/* 3. AI Import / Generator */}
+            <button
+              type="button"
+              onClick={() => setIsAiModalOpen(true)}
+              className="p-2.5 bg-surface-hover hover:bg-surface border border-surface-border active:scale-95 text-text-main rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+              title={t.aiImport}
+              aria-label={t.aiImport}
+            >
+              <Bot className="w-4 h-4 shrink-0 text-primary" />
+            </button>
+
+            {/* 4. Homework / Tasks */}
             <button
               type="button"
               onClick={() => {
                 setSelectedSetForHomework(null);
                 setIsHomeworkModalOpen(true);
               }}
-              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-amber-500/25 cursor-pointer inline-flex items-center gap-1.5 shrink-0 transform hover:scale-105 transition-all"
-              title={language === 'ar' ? 'إنشاء واجب تفاعلي للطلاب ومتابعة الإجابات (Blooket)' : 'Hausaufgabe & Schülerlink erstellen'}
+              className="p-2.5 bg-surface-hover hover:bg-surface border border-surface-border active:scale-95 text-text-main rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+              title={language === 'ar' ? 'واجبات وتدريبات الطلاب' : 'Hausaufgaben'}
+              aria-label={language === 'ar' ? 'واجبات وتدريبات الطلاب' : 'Hausaufgaben'}
             >
-              <Send className="w-4 h-4" />
-              <span>{language === 'ar' ? '🎮 واجبات الطلاب (Blooket Homework)' : 'Hausaufgaben 📝'}</span>
+              <Send className="w-4 h-4 shrink-0 text-primary" />
             </button>
           </div>
         </div>
 
-        {/* Source Filter Tabs: All / My Custom Sets / Ready-Made Curriculum */}
-        <div className="flex items-center gap-2 flex-wrap pb-1">
+        {/* Source Filter Segment Switcher Tabs (Glück Standard) */}
+        <div className="grid grid-cols-3 gap-1 bg-surface-hover p-1 rounded-lg text-[10.5px] sm:text-xs font-bold border border-surface-border">
           <button
             type="button"
             onClick={() => setSelectedSourceFilter('all')}
-            className={`px-3.5 py-2 rounded-2xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer border shadow-2xs ${
+            className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
               selectedSourceFilter === 'all'
-                ? 'bg-primary text-white border-primary shadow-xs scale-[1.02]'
-                : 'bg-surface/90 hover:bg-surface-hover text-text-muted hover:text-text-main border-surface-border'
+                ? 'bg-surface text-primary shadow-xs border border-surface-border'
+                : 'text-text-muted hover:text-text-main hover:bg-surface/50'
             }`}
           >
-            <span>📚</span>
+            <BookOpen className="w-3.5 h-3.5 shrink-0" />
             <span>{language === 'ar' ? 'الكل' : language === 'de' ? 'Alle Sets' : 'All Sets'}</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-              selectedSourceFilter === 'all' ? 'bg-white/20 text-white' : 'bg-surface-hover text-text-muted'
-            }`}>
-              {sets.length}
-            </span>
+            <span className="opacity-75 tabular-nums">({sets.length})</span>
           </button>
 
           <button
             type="button"
             onClick={() => setSelectedSourceFilter('custom')}
-            className={`px-3.5 py-2 rounded-2xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer border shadow-2xs ${
+            className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
               selectedSourceFilter === 'custom'
-                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white border-purple-600 shadow-xs scale-[1.02]'
-                : 'bg-surface/90 hover:bg-surface-hover text-text-muted hover:text-text-main border-surface-border'
+                ? 'bg-surface text-primary shadow-xs border border-surface-border'
+                : 'text-text-muted hover:text-text-main hover:bg-surface/50'
             }`}
           >
-            <span>✍️</span>
-            <span>{language === 'ar' ? 'مجموعاتي الخاصة (التي أنشأتها)' : language === 'de' ? 'Meine erstellten Sets' : 'My Custom Sets'}</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-              selectedSourceFilter === 'custom' ? 'bg-white/20 text-white' : 'bg-purple-500/15 text-purple-600 dark:text-purple-400'
-            }`}>
-              {customSetsCount}
-            </span>
+            <Layers className="w-3.5 h-3.5 shrink-0" />
+            <span>{language === 'ar' ? 'مجموعاتي الخاصة' : language === 'de' ? 'Meine Sets' : 'Custom'}</span>
+            <span className="opacity-75 tabular-nums">({customSetsCount})</span>
           </button>
 
           <button
             type="button"
             onClick={() => setSelectedSourceFilter('builtin')}
-            className={`px-3.5 py-2 rounded-2xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer border shadow-2xs ${
+            className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
               selectedSourceFilter === 'builtin'
-                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs scale-[1.02]'
-                : 'bg-surface/90 hover:bg-surface-hover text-text-muted hover:text-text-main border-surface-border'
+                ? 'bg-surface text-primary shadow-xs border border-surface-border'
+                : 'text-text-muted hover:text-text-main hover:bg-surface/50'
             }`}
           >
-            <span>🇩🇪</span>
-            <span>{language === 'ar' ? 'المناهج الجاهزة مع البرنامج' : language === 'de' ? 'Vorgefertigter Lehrplan' : 'Ready-made Curriculum'}</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-              selectedSourceFilter === 'builtin' ? 'bg-white/20 text-white' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-            }`}>
-              {builtinSetsCount}
-            </span>
+            <GraduationCap className="w-3.5 h-3.5 shrink-0" />
+            <span>{language === 'ar' ? 'المنهاج الجاهز' : language === 'de' ? 'Lehrplan' : 'Curriculum'}</span>
+            <span className="opacity-75 tabular-nums">({builtinSetsCount})</span>
           </button>
         </div>
 
-        {/* Filters Bar */}
-        <div className="p-3 sm:p-4 bg-surface/80 backdrop-blur-md rounded-2xl border border-surface-border space-y-2 sm:space-y-0 sm:flex sm:items-center sm:gap-3 overflow-hidden">
+        {/* Compact Filters Bar */}
+        <div className="p-3 bg-surface border border-surface-border rounded-xl space-y-2 sm:space-y-0 sm:flex sm:items-center sm:gap-2.5">
           <div className="relative flex-1 w-full min-w-0">
             <Search className={`w-4 h-4 absolute top-1/2 -translate-y-1/2 text-text-muted ${language === 'ar' ? 'right-3' : 'left-3'}`} />
             <input
@@ -881,7 +883,7 @@ export const LernstudioView: React.FC<Props> = ({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder={t.searchPlaceholder}
-              className={`w-full py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary truncate ${
+              className={`w-full py-2 bg-surface-hover/70 border border-surface-border rounded-lg text-xs font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-primary truncate ${
                 language === 'ar' ? 'pr-9 pl-3' : 'pl-9 pr-3'
               }`}
             />
@@ -891,7 +893,7 @@ export const LernstudioView: React.FC<Props> = ({
             <select
               value={selectedSourceFilter}
               onChange={(e) => setSelectedSourceFilter(e.target.value as SetSourceFilter)}
-              className="w-full sm:w-auto px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate cursor-pointer font-medium"
+              className="w-full sm:w-auto px-2.5 py-1.5 bg-surface-hover/70 border border-surface-border rounded-lg text-xs font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-primary min-w-0 truncate cursor-pointer"
             >
               <option value="all">🏷️ {language === 'ar' ? 'المصدر: الكل' : language === 'de' ? 'Quelle: Alle' : 'Source: All'} ({sets.length})</option>
               <option value="custom">✍️ {language === 'ar' ? 'مجموعاتي الخاصة' : language === 'de' ? 'Meine Sets' : 'My Sets'} ({customSetsCount})</option>
@@ -901,7 +903,7 @@ export const LernstudioView: React.FC<Props> = ({
             <select
               value={selectedGradeFilter}
               onChange={(e) => setSelectedGradeFilter(e.target.value)}
-              className="w-full sm:w-auto px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate cursor-pointer"
+              className="w-full sm:w-auto px-2.5 py-1.5 bg-surface-hover/70 border border-surface-border rounded-lg text-xs font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-primary min-w-0 truncate cursor-pointer"
             >
               <option value="all">🎓 {t.allEducationalLevels} ({sets.length})</option>
               {PROGRAM_GRADES.map((g) => (
@@ -914,7 +916,7 @@ export const LernstudioView: React.FC<Props> = ({
             <select
               value={selectedCategoryFilter}
               onChange={(e) => setSelectedCategoryFilter(e.target.value)}
-              className="w-full sm:w-auto px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate cursor-pointer"
+              className="w-full sm:w-auto px-2.5 py-1.5 bg-surface-hover/70 border border-surface-border rounded-lg text-xs font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-primary min-w-0 truncate cursor-pointer"
             >
               <option value="all">📁 {t.allTopicsAndCategories} ({availableCategories.length})</option>
               {availableCategories.map((item) => (
@@ -927,7 +929,7 @@ export const LernstudioView: React.FC<Props> = ({
             <select
               value={selectedGroupFilter}
               onChange={(e) => setSelectedGroupFilter(e.target.value)}
-              className="w-full sm:w-auto px-3 py-2 bg-surface-hover/60 border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:border-primary min-w-0 truncate cursor-pointer"
+              className="w-full sm:w-auto px-2.5 py-1.5 bg-surface-hover/70 border border-surface-border rounded-lg text-xs font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-primary min-w-0 truncate cursor-pointer"
             >
               <option value="all">👥 {t.allGroups}</option>
               {groups.map((g) => (
@@ -939,34 +941,41 @@ export const LernstudioView: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Curriculum Summary Badge / Counter */}
-        <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 bg-primary/10 text-primary border border-primary/20 rounded-full font-bold">
-              📚 {sets.length} {t.germanSetsForKids} ({sets.reduce((acc, s) => acc + (s.items?.length || 0), 0)} {t.vocabularyCount})
+        {/* Unboxed Metadata Line (Glück Zero-Pill Discipline) */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-0.5 text-xs text-text-muted tabular-nums">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span>
+              {language === 'ar' ? 'المجموعات:' : 'Sets:'}{' '}
+              <strong className="text-text-main font-bold">{sets.length}</strong>
             </span>
-            <span className="text-text-muted hidden sm:inline">
-              ✨ {t.curriculumSubtitle}
+            <span aria-hidden="true">·</span>
+            <span>
+              {language === 'ar' ? 'المفردات:' : 'Vocabulary:'}{' '}
+              <strong className="text-text-main font-bold">{sets.reduce((acc, s) => acc + (s.items?.length || 0), 0)}</strong>
             </span>
+            {filteredSets.length !== sets.length && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>
+                  {language === 'ar' ? 'المعروض:' : 'Filtered:'}{' '}
+                  <strong className="text-primary font-bold">{filteredSets.length}</strong>
+                </span>
+              </>
+            )}
           </div>
           {(selectedSourceFilter !== 'all' || selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
-            <div className="flex items-center gap-2">
-              <span className="text-text-muted font-medium">
-                {t.displayedResults} <strong className="text-text-main font-bold">{filteredSets.length}</strong> {t.setsUnit}
-              </span>
-              <button
-                onClick={() => {
-                  setSelectedSourceFilter('all');
-                  setSelectedGradeFilter('all');
-                  setSelectedCategoryFilter('all');
-                  setSelectedGroupFilter('all');
-                  setSearchTerm('');
-                }}
-                className="text-xs text-primary hover:underline font-bold cursor-pointer"
-              >
-                {t.resetFilters}
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                setSelectedSourceFilter('all');
+                setSelectedGradeFilter('all');
+                setSelectedCategoryFilter('all');
+                setSelectedGroupFilter('all');
+                setSearchTerm('');
+              }}
+              className="text-xs text-primary hover:underline font-bold cursor-pointer"
+            >
+              {t.resetFilters}
+            </button>
           )}
         </div>
 
@@ -996,39 +1005,34 @@ export const LernstudioView: React.FC<Props> = ({
                 return (
                   <div
                     key={set.id}
-                    className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-surface-border bg-surface shadow-2xs hover:shadow-md transition-all flex flex-col justify-between space-y-3.5 group max-w-full overflow-hidden"
+                    className="p-3.5 sm:p-4 rounded-xl border border-surface-border bg-surface hover:border-primary/40 shadow-xs hover:shadow-sm transition-all flex flex-col justify-between space-y-3 group max-w-full overflow-hidden"
                   >
-                    <div className="space-y-3 min-w-0 max-w-full">
-                      <div className="flex items-center justify-between gap-2 flex-wrap text-xs min-w-0 max-w-full overflow-hidden">
-                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted min-w-0 max-w-full flex-wrap overflow-hidden">
-                          <span className="font-bold text-primary shrink-0">{itemCount} {t.vocabularyCount}</span>
+                    <div className="space-y-2.5 min-w-0 max-w-full">
+                      {/* Zero-Pill Unboxed Metadata Header */}
+                      <div className="flex items-center justify-between gap-1.5 text-xs text-text-muted tabular-nums flex-wrap">
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium min-w-0 flex-wrap">
+                          <span className="font-bold text-primary">{itemCount} {t.vocabularyCount}</span>
                           {set.grade && (
                             <>
-                              <span aria-hidden="true" className="text-text-muted/40 shrink-0">·</span>
-                              <span className="truncate max-w-[140px] sm:max-w-none text-text-main font-semibold">{getLocalizedGrade(set.grade, language)}</span>
+                              <span aria-hidden="true">·</span>
+                              <span className="truncate max-w-[140px] sm:max-w-none text-text-main font-semibold">
+                                {getLocalizedGrade(set.grade, language)}
+                              </span>
                             </>
                           )}
+                          <span aria-hidden="true">·</span>
+                          <span className="font-medium text-text-muted">
+                            {isCustom
+                              ? (language === 'ar' ? 'مجموعتي الخاصة' : language === 'de' ? 'Mein Set' : 'Custom')
+                              : (language === 'ar' ? 'منهاج جاهز' : language === 'de' ? 'Lehrplan' : 'Curriculum')}
+                          </span>
                         </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                          {isCustom ? (
-                            <span className="px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold text-[10px] border border-purple-500/20 shrink-0 inline-flex items-center gap-1">
-                              <span>✍️</span>
-                              <span>{language === 'ar' ? 'مجموعتي الخاصة' : language === 'de' ? 'Mein Set' : 'Custom'}</span>
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[10px] border border-emerald-500/20 shrink-0 inline-flex items-center gap-1">
-                              <span>🇩🇪</span>
-                              <span>{language === 'ar' ? 'منهاج جاهز' : language === 'de' ? 'Lehrplan' : 'Curriculum'}</span>
-                            </span>
-                          )}
-
-                          {assignedGroup && (
-                            <span className="px-2 py-0.5 rounded-md bg-surface-hover text-text-muted font-bold text-[10px] shrink-0 border border-surface-border/40 truncate max-w-[120px]">
-                              👥 {assignedGroup.name}
-                            </span>
-                          )}
-                        </div>
+                        {assignedGroup && (
+                          <span className="text-[10px] font-bold text-text-muted truncate max-w-[120px]">
+                            {assignedGroup.name}
+                          </span>
+                        )}
                       </div>
 
                       <div
@@ -1036,11 +1040,11 @@ export const LernstudioView: React.FC<Props> = ({
                           setSelectedSetForWordsModal(set);
                           setIsWordsModalOpen(true);
                         }}
-                        className="space-y-1.5 cursor-pointer group/title p-1 -m-1 rounded-xl hover:bg-surface-hover/50 transition-colors min-w-0 max-w-full overflow-hidden"
+                        className="space-y-1 cursor-pointer group/title p-1 -m-1 rounded-lg hover:bg-surface-hover/50 transition-colors min-w-0 max-w-full overflow-hidden"
                       >
-                        <h3 className="text-base sm:text-lg font-bold text-text-main group-hover/title:text-primary transition-colors leading-snug flex items-start justify-between gap-2 min-w-0">
+                        <h3 className="text-sm sm:text-base font-bold text-text-main group-hover/title:text-primary transition-colors leading-snug flex items-start justify-between gap-2 min-w-0">
                           <span className="line-clamp-2 break-words flex-1 min-w-0">{getLocalizedSetTitle(set, language)}</span>
-                          <Eye className="w-4 h-4 text-text-muted opacity-40 group-hover/title:opacity-100 group-hover/title:text-primary transition-all shrink-0 mt-1" />
+                          <Eye className="w-3.5 h-3.5 text-text-muted opacity-40 group-hover/title:opacity-100 group-hover/title:text-primary transition-all shrink-0 mt-0.5" />
                         </h3>
                         {set.description && (
                           <p className="text-xs text-text-muted line-clamp-2 leading-relaxed break-words">
@@ -1050,20 +1054,20 @@ export const LernstudioView: React.FC<Props> = ({
                       </div>
                     </div>
 
-                    <div className="pt-3 border-t border-surface-border/60 space-y-2">
+                    <div className="pt-2.5 border-t border-surface-border space-y-2">
                       <button
                         type="button"
                         onClick={() => {
                           setSelectedSetForMode(set);
                           setActiveMode('games_portal');
                         }}
-                        className="w-full py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold shadow-2xs cursor-pointer inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-white transform active:scale-[0.98] transition-all"
+                        className="w-full py-2 px-3 rounded-lg text-xs font-bold shadow-xs cursor-pointer inline-flex items-center justify-center gap-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white transition-all"
                       >
-                        <Gamepad2 className="w-4 h-4 shrink-0" />
+                        <Gamepad2 className="w-3.5 h-3.5 shrink-0" />
                         <span>{t.playGame}</span>
                       </button>
 
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center justify-between gap-1.5">
                         <div className="flex items-center gap-1.5 flex-1 min-w-0">
                           <button
                             type="button"
@@ -1071,9 +1075,9 @@ export const LernstudioView: React.FC<Props> = ({
                               setSelectedSetForTeach(set);
                               setIsTeachModalOpen(true);
                             }}
-                            className="flex-1 py-1.5 px-2.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
+                            className="flex-1 py-1.5 px-2 bg-surface hover:bg-surface-hover text-text-main border border-surface-border rounded-lg text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
                           >
-                            <BookOpen className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
+                            <BookOpen className="w-3.5 h-3.5 shrink-0 text-primary" />
                             <span className="truncate">{t.teachMode}</span>
                           </button>
 
@@ -1083,9 +1087,9 @@ export const LernstudioView: React.FC<Props> = ({
                               setSelectedSetForWorksheet(set);
                               setIsWorksheetModalOpen(true);
                             }}
-                            className="flex-1 py-1.5 px-2.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
+                            className="flex-1 py-1.5 px-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-lg text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
                           >
-                            <Printer className="w-3.5 h-3.5 text-primary shrink-0" />
+                            <Printer className="w-3.5 h-3.5 text-text-muted shrink-0" />
                             <span className="truncate">{t.printWorksheet}</span>
                           </button>
                         </div>
@@ -1097,11 +1101,10 @@ export const LernstudioView: React.FC<Props> = ({
                               setSelectedSetForHomework(set);
                               setIsHomeworkModalOpen(true);
                             }}
-                            className="px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-400 rounded-lg text-[11px] font-black transition-colors cursor-pointer inline-flex items-center gap-1"
+                            className="p-1.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-main hover:text-primary rounded-lg transition-colors cursor-pointer shrink-0"
                             title={language === 'ar' ? 'إنشاء واجب تفاعلي لهذه المجموعة' : 'Hausaufgabe für dieses Set erstellen'}
                           >
                             <Send className="w-3.5 h-3.5" />
-                            <span>{language === 'ar' ? 'واجب' : 'HW'}</span>
                           </button>
 
                           <button
@@ -1150,7 +1153,7 @@ export const LernstudioView: React.FC<Props> = ({
                             type="button"
                             onClick={() => {
                               if (window.confirm(language === 'ar' ? `هل أنت متأكد من حذف مجموعة (${set.title})؟` : `Delete set (${set.title})?`)) {
-                                onDeleteSet(set.id);
+                                handleDeleteSetWithCloud(set.id);
                               }
                             }}
                             className="p-1.5 text-text-muted hover:text-red-500 hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
@@ -1207,7 +1210,7 @@ export const LernstudioView: React.FC<Props> = ({
             setToEdit={setToEdit}
             groups={groups}
             onClose={() => setIsSetEditorOpen(false)}
-            onSaveSet={onSaveSet}
+            onSaveSet={handleSaveSetWithCloud}
           />
         )}
 
@@ -1216,7 +1219,7 @@ export const LernstudioView: React.FC<Props> = ({
             isOpen={isAiModalOpen}
             language={language}
             onClose={() => setIsAiModalOpen(false)}
-            onImportSet={onSaveSet}
+            onImportSet={handleSaveSetWithCloud}
           />
         )}
 

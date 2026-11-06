@@ -7,6 +7,7 @@ import {
   isAutoCloudSyncEnabled,
   setAutoCloudSyncEnabled,
   getLastCloudSyncTime,
+  setLastCloudSyncTime,
   uploadWorkspaceToGoogleCloud,
   downloadWorkspaceFromGoogleCloud,
   CloudSyncSummary,
@@ -311,7 +312,9 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
       if (imported) {
         setSyncStatus('synced');
         if (res.summary) setCloudSummary(res.summary);
-        if (res.remoteTimestampIso) setLastSyncTime(res.remoteTimestampIso);
+        const nowIso = res.remoteTimestampIso || new Date().toISOString();
+        setLastSyncTime(nowIso);
+        setLastCloudSyncTime(nowIso);
         const msg = _t(
           'تم استرجاع وتحديث جميع بيانات البرنامج من سحابة Google بنجاح',
           'All app data restored from Google Cloud successfully',
@@ -365,8 +368,9 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
         const snapStr = await performBackup();
         const upRes = await uploadWorkspaceToGoogleCloud(snapStr);
         if (upRes.success) {
-          setSyncStatus('synced');
-          setLastSyncTime(upRes.syncedAtIso);
+          const nowIso = upRes.syncedAtIso || new Date().toISOString();
+          setLastSyncTime(nowIso);
+          setLastCloudSyncTime(nowIso);
           setCloudSummary({
             studentsCount: students.length,
             groupsCount: groups.length,

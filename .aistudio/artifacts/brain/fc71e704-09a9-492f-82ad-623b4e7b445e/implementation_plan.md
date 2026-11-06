@@ -1,99 +1,150 @@
-# Unified Vercel Deployment & Set Sharing Architecture Plan
+# Glück — Smart Data Cleanup & Lesson Optimization
 
-Simplify and unify the application architecture by hosting the entire Glück Lernstudio platform under a single Vercel deployment, integrating Vercel domain auto-detection and cloud synchronization into the Teacher Profile, removing the redundant standalone `lernstudio-web` subfolder, and enabling direct Vercel link generation for sharing vocabulary sets and interactive homework assignments with parents and students.
-
-## User Review & Critical Decisions
+An automated, safe data pruning and lesson lifecycle architecture for Glück. This reduces the database volume (from 2831+ lessons down to an optimal, lightweight footprint), speeds up multi-device synchronization, and enforces a strict rolling 14-day future window while guaranteeing 100% financial and student balance accuracy.
 
 > [!IMPORTANT]
-> The following decisions were confirmed by the user in Phase 1:
->
-> - **Unified Set & Homework Sharing**: Generating direct shareable links (`https://<vercel-domain>/set/<id>` or `https://<vercel-domain>/homework/<id>`) using the single Vercel domain configured or auto-detected in the Teacher Profile.
-> - **Cleanup & Codebase Consolidation**: Completely remove the redundant `lernstudio-web` subfolder and import references, consolidating all Lernstudio views, games, homework modals, and shared sync functions inside the primary application tree (`src/`).
-> - **Smart Vercel Domain Management**: Auto-detect `window.location.origin` when running on Vercel (`.vercel.app`), allow editing and saving in **Teacher Profile & Account Settings**, and automatically sync the saved domain across devices via the teacher's Google Cloud Account (Firestore).
+> **User Review & Confirmed Decisions**:
+> 1. **Location of Controls & Preview**: Dedicated Card in **Settings** (`SettingsView.tsx`) and **Smart Backup Center** (`SmartBackupCenter.tsx`).
+> 2. **Automatic Maintenance**: Runs automatically once per day in the background and on app startup.
+> 3. **Safety Backup**: Saved internally in the Smart Backup Center and instantly downloadable as a timestamped JSON file (`glueck-lessons-backup-YYYY-MM-DD.json`) before any destructive action.
+> 4. **Financial Invariance Guarantee**: No financial transaction (`financeTransactions`), student payment record (`payments`), or balance calculation is ever modified or deleted. Deleting an old fully settled lesson never decreases revenue or alters student ledger balances.
 
 ---
 
 ## 1. Overview & Core Concept
 
-### What It Does
-This update consolidates the dual-folder structure into a unified, production-grade application ready for single-click deployment on Vercel. Teachers can create vocabulary sets, start Blooket-style classroom games, assign homework, and share direct Vercel links with parents and students. All app data and settings—including the teacher's custom Vercel public domain—sync seamlessly across devices via Firebase Firestore and Google Sign-In.
+Currently, the auto-generator in `AppContext.tsx` projects recurring group schedules for **365 days into the future** (`dayOffset < 365`), generating over 2,400 unneeded future placeholder lessons. Simultaneously, historical completed lessons accumulate indefinitely.
 
-### Key Value
-- **Zero Architecture Friction**: Eliminates the maintenance overhead of managing two distinct sub-projects (`src/` vs `lernstudio-web/`).
-- **Seamless Sharing**: Parents and students open interactive sets and homework directly on the teacher's Vercel domain with real-time live submission tracking.
-- **Smart Auto-Detection**: The app automatically recognizes when it is running on a Vercel URL and saves that domain to the teacher's profile and cloud workspace.
-
----
-
-## 2. User Experience & Visual Design
-
-### Key User Flows
-
-1. **Vercel Deployment & Domain Configuration**:
-   - The teacher deploys the main repository directly to Vercel.
-   - Upon opening the app on Vercel (or entering their domain in **Settings > Profile & Work Schedule**), the app automatically detects `https://<app-name>.vercel.app`.
-   - The domain is saved to local storage and synced to the teacher's Google Cloud workspace.
-
-2. **Sharing Vocabulary Sets & Homework Assignments**:
-   - In **Glück Lernstudio**, clicking **Share Set (مشاركة السيت)** or **Create Homework (إنشاء واجب)** opens a clean modal with a generated direct Vercel URL.
-   - Teachers can copy the link with 1-click or share via WhatsApp/QR code to parents.
-   - Students open the link on Vercel to play or complete homework without registering. Submissions report back to the teacher's dashboard in real-time via Firestore.
-
-3. **Clean Codebase Footprint**:
-   - All shared components (`LernstudioHomeworkModal`, `firebaseCloudSync`, `homeworkTypes`, `data_curriculum`) reside natively in `src/`.
-   - The obsolete standalone `lernstudio-web` folder is cleanly removed.
+### Core Objectives:
+1. **14-Day Rolling Future Window**: Restrict automatic lesson generation from 365 days down to **14 days**. Each day, as time advances, automatically generate the next day's recurring lessons, maintaining exactly a 14-day horizon without duplicates.
+2. **30-Day Historical Retention**: Clean historical lessons completed more than 30 days ago, **provided they are fully paid and have zero outstanding student balances**.
+3. **Strict Financial & Debt Preservation**:
+   - Any lesson with `paymentStatus !== 'paid'` (e.g. `pending`, `partial`, `overdue`), or with any student having an unpaid attendance report, is **strictly preserved**.
+   - Individual 1-on-1 lessons (online or offline) are only pruned if 100% paid and older than 30 days.
+   - All financial ledgers (`dl_finance_transactions`, `dl_payments`, `dl_finance_accounts`) remain permanently untouched.
+4. **Pre-Cleanup Safety & Preview**:
+   - Provide an interactive preview modal showing exact counts of lessons to be removed vs preserved.
+   - Run an automated invariant audit verifying that `Total Revenue`, `Total Payments`, and `Student Unpaid Balances` are byte-for-byte identical before and after cleanup.
+   - Generate an automated backup archive before performing any deletion.
+5. **Sync Integrity Across Devices**:
+   - Ensure pruned lesson IDs are tracked in tombstones (`dl_pruned_lesson_ids`) so old Firestore chunks or device caches cannot re-resurrect deleted lessons during synchronization.
 
 ---
 
-## 3. Technical Architecture & Data Strategy
-
-### System Architecture Diagram
+## 2. Technical Architecture & Component Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Unified Glück App (Vercel)                         │
-├──────────────────────────────────────┬──────────────────────────────────────┤
-│ Main App Views (src/components)      │ Glück Lernstudio (src/components/...)│
-│  - Teacher Profile & Account          │  - Set Builder & Library             │
-│  - Smart Vercel Domain Input & Sync   │  - Interactive Games & Student View   │
-│  - Class CRM, Attendance, Finance    │  - Blooket-Style Homework Creator    │
-├──────────────────────────────────────┴──────────────────────────────────────┤
-│ Unified Services & Utilities (src/services / src/shared)                    │
-│  - firebaseWorkspaceSync.ts & firebaseCloudSync.ts                          │
-│  - Auto Vercel Domain Detection & Firestore Synchronization                 │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-                                       ▼
-                   ┌──────────────────────────────────────┐
-                   │    Google Cloud Firestore Database   │
-                   │  - user_workspaces/{uid}/categories  │
-                   │  - homework_assignments & submissions │
-                   │  - lernstudio_sets                    │
-                   └──────────────────────────────────────┘
+│                       Glück Storage & Sync Engine                           │
+│                                                                             │
+│  LocalStorage / Capacitor Storage            Google Cloud Firestore Sync    │
+│  ┌──────────────────────────────┐            ┌───────────────────────────┐  │
+│  │ dl_lessons (2831 -> ~350)    │◄──────────►│ /user_workspaces/{uid}/   │  │
+│  │ dl_payments (320 intact)     │            │   categories/lessons      │  │
+│  │ dl_finance_transactions (420)│            └───────────────────────────┘  │
+│  │ dl_pruned_lessons_archive    │                          ▲                │
+│  └──────────────────────────────┘                          │                │
+└─────────────────────────────────▲──────────────────────────┼────────────────┘
+                                  │                          │
+                   ┌──────────────┴──────────────────────────┴────────┐
+                   │                                                  │
+┌──────────────────┴──────────────────────┐  ┌────────────────────────┴──────────────┐
+│  Lesson Lifecycle & Maintenance Service │  │  UI Controls & Pre-Cleanup Preview    │
+│  (src/services/lessonCleanupService.ts) │  │  (src/components/SmartDataCleanupCard)│
+│                                         │  │                                       │
+│  • Rolling 14-day future generator      │  │  • Settings & Smart Backup Center view│
+│  • 30-day historical eligibility audit  │  │  • Breakdown: To Delete vs To Keep   │
+│  • Invariant balance & revenue checker  │  │  • One-click Download Backup (.json)  │
+│  • Automated daily startup maintenance  │  │  • Safe "Execute Cleanup" action      │
+└─────────────────────────────────────────┘  └───────────────────────────────────────┘
 ```
-
-### Data Model & State Strategy
-
-- **Vercel Public Domain**: Stored in `localStorage` under `gluck_vercel_public_domain` and included in the teacher's `core_crm` / profile cloud sync object (`profile.vercelPublicDomain`).
-- **Homework & Set Sharing URL Generator**: `buildHomeworkShareUrl(assignment, customDomain)` constructs URLs using `(customDomain || getVercelPublicDomain())`.
 
 ---
 
-## 4. Implementation Steps
+## 3. Data Strategy & Invariant Rules
 
-1. **Component & Module Migration**:
-   - Move all required shared files from `lernstudio-web/shared/` into native locations in `src/shared/` or `src/services/`.
-   - Update all import statements across `src/components/lernstudio/` and `src/services/` to target native `src/` paths.
+### A. The 14-Day Future Rolling Window
+In `src/context/AppContext.tsx`, update the auto-generator from:
+```ts
+// Old: 365 days
+for (let dayOffset = 0; dayOffset < 365; dayOffset++)
+```
+to:
+```ts
+// New: Exactly 14 rolling days
+const FUTURE_HORIZON_DAYS = 14;
+for (let dayOffset = 0; dayOffset <= FUTURE_HORIZON_DAYS; dayOffset++)
+```
+- Existing auto-generated lessons beyond `today + 14 days` that have not been started, completed, or manually edited are categorized as **Prunable Future Bloat**.
+- Manually created or confirmed lessons (those with custom titles, non-auto IDs, reports, or explicit teacher notes) are **never pruned**, regardless of date.
 
-2. **Clean Codebase Deletion**:
-   - Safely remove the redundant `/lernstudio-web` directory.
+### B. The 30-Day Historical Pruning Rules
+A historical lesson ($Date < Today - 30\text{ days}$) is **eligible for cleanup ONLY IF ALL of the following criteria are met**:
+1. **Status is Completed**: `lesson.status === 'completed'`.
+2. **Fully Settled Financially**:
+   - `lesson.paymentStatus === 'paid'`.
+   - AND every student in `lesson.studentPayments` (or `lesson.report.studentPayments`) has `status === 'paid'` or `paymentStatus === 'paid'`.
+   - AND no student attending this lesson has an unpaid charge tied to it.
+3. **No Active Disputes or Packages**: Not part of an unfinished multi-lesson package that is awaiting final billing.
+4. **Never Delete**:
+   - Any lesson with `paymentStatus === 'pending'`, `'partial'`, or `'unpaid'`.
+   - Any lesson where any student's payment is pending.
+   - Any lesson with an open report or unresolved attendance.
 
-3. **Vercel Domain Auto-Detection & Cloud Sync**:
-   - Implement `getVercelPublicDomain()` and `setVercelPublicDomain()` in `src/services/firebaseCloudSync.ts`.
-   - Integrate the Vercel Domain input and status badge inside `TeacherProfileSection.tsx` (الإعدادات > الملف التعريفي) with auto-detect from `window.location.origin` when running on Vercel.
+### C. Financial & Balance Invariant Check
+Before any batch deletion, the engine calculates:
+$$\text{Audit Pre-Check} = (\text{Total Revenue}_{\text{pre}}, \text{Unpaid Balances}_{\text{pre}}, \text{Student Payments}_{\text{pre}})$$
+$$\text{Audit Post-Check} = (\text{Total Revenue}_{\text{post}}, \text{Unpaid Balances}_{\text{post}}, \text{Student Payments}_{\text{post}})$$
+If $\text{Audit Pre-Check} \neq \text{Audit Post-Check}$, the operation is **aborted immediately** with an error banner, guaranteeing zero data or financial loss.
 
-4. **Set & Homework Sharing Modals**:
-   - Ensure `LernstudioHomeworkModal` and `LernstudioView` offer clean 1-click sharing of sets and assignments using the configured Vercel domain.
+---
 
-5. **Verification**:
-   - Run `compile_applet` and `lint_applet` to confirm zero broken imports and a clean build.
+## 4. User Experience & Interface Design
+
+### A. Smart Data Cleanup Card (`SmartDataCleanupCard.tsx`)
+- Displayed in:
+  1. `SettingsView.tsx`: Integrated cleanly under the Cloud Sync and Backup sections.
+  2. `SmartBackupCenter.tsx`: Highlighted at the top as the primary optimization tool.
+- Visuals (Glück Design Constitution compliant):
+  - Compact container: `bg-surface border border-surface-border rounded-xl p-4 shadow-xs`.
+  - Unboxed metric row with `·` separators:
+    `2831 Lektionen gesamt · ~2150 bereinigbar · ~680 aktiv & geschützt`.
+  - Action buttons:
+    - `Vorschau & Prüfung` (Preview & Audit).
+    - `Sicherung herunterladen` (Download Backup .json).
+    - `Automatische Wartung aktiv (14 Tage)` toggle/badge.
+
+### B. Interactive Pre-Cleanup Audit Modal
+- Opens before any deletion is executed.
+- Displays:
+  - **Prunable Historical** ($>30$ days, 100% paid): e.g. 180 lessons.
+  - **Prunable Future Bloat** ($>14$ days, unconfirmed recurring): e.g. 1970 lessons.
+  - **Protected Records** (unpaid, within 30 days, or manual): e.g. 681 lessons.
+  - **Financial Safety Verification**: A green check showing:
+    - *Gesamtumsatz unverändert* (Revenue unchanged).
+    - *Schülersalden 100% identisch* (Student balances 100% identical).
+    - *Zahlungshistorie vollständig gesichert* (320 payment records untouched).
+  - Prominent download button for the JSON backup archive.
+  - Red/Primary confirmation button: `Bereinigung jetzt sicher ausführen` (Execute Safe Cleanup).
+
+---
+
+## 5. Implementation Steps
+
+1. **Build `lessonCleanupService.ts`**:
+   - Create functions:
+     - `analyzeLessonPruning(lessons, groups, students, payments, financeTransactions)`
+     - `performLessonCleanup(...)`
+     - `exportPrunedLessonsBackup(...)`
+     - `runAutomatedDailyMaintenance(...)`
+2. **Update `AppContext.tsx` Auto-Generator**:
+   - Cap future generation window to `14 days`.
+   - Hook automated maintenance into daily startup routine.
+3. **Build `SmartDataCleanupCard.tsx` & Modal**:
+   - Render preview stats, financial verification, backup download, and manual trigger.
+4. **Integrate into `SettingsView.tsx` and `SmartBackupCenter.tsx`**:
+   - Mount the card in both locations.
+5. **Verify Synchronization (`firebaseWorkspaceSync.ts`)**:
+   - Ensure pruned lesson removals properly sync to Firestore without re-importing old chunks.
+6. **Compile & Lint Verification**:
+   - Run `compile_applet` and `lint_applet` to ensure zero regressions.

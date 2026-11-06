@@ -171,18 +171,18 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-hidden"
+      className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-hidden"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
-      <div className="bg-surface border border-surface-border rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-scale-up">
+      <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between bg-surface shrink-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <Printer className="w-5 h-5 text-primary" />
-            <h2 className="text-sm sm:text-base font-black text-text-main">
+            <Printer className="w-4 h-4 text-primary" />
+            <h2 className="text-sm sm:text-base font-bold text-text-main">
               {t.worksheetModalTitle} - ({cleanTitle})
             </h2>
-            <span className="px-2 py-0.5 rounded-md bg-primary/15 text-primary text-[11px] font-mono font-black">
+            <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[11px] font-mono font-bold">
               {WORKSHEET_BUILD_ID}
             </span>
           </div>
@@ -196,13 +196,13 @@ export const LernstudioWorksheetModal: React.FC<Props> = ({
         </div>
 
         {/* Body */}
-        <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
-          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-xs text-emerald-700 dark:text-emerald-300 font-bold flex items-center justify-between gap-2">
+        <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+          <div className="p-3 bg-surface-hover border border-surface-border rounded-xl text-xs text-text-main font-bold flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Check className="w-4 h-4 shrink-0 text-emerald-500" />
               <span>تصميم متعدد الصفحات A4 تلقائياً بدون ضغط أو تصغير للخطوط.</span>
             </div>
-            <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-emerald-500/20 shrink-0">
+            <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-surface border border-surface-border text-text-muted shrink-0">
               {WORKSHEET_BUILD_ID}
             </span>
           </div>

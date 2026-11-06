@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LernstudioSet } from '../../types/lernstudio';
+import { useApp } from '../../context/AppContext';
 import {
   HomeworkAssignment,
   HomeworkFlowMode,
@@ -12,6 +13,7 @@ import {
   buildHomeworkShareUrl,
   getLocalAssignments,
   saveLocalAssignment,
+  deleteLocalAssignment,
   saveLocalSubmission,
   syncAndFetchTeacherAssignments,
   fetchAssignmentDetailsWithSync,
@@ -27,6 +29,8 @@ import {
 import {
   Sparkles,
   XCircle,
+  X,
+  Send,
   Copy,
   Check,
   ExternalLink,
@@ -47,7 +51,13 @@ import {
   Cloud,
   LogIn,
   LogOut,
-  Share2
+  Share2,
+  Trash2,
+  Building2,
+  Filter,
+  Flame,
+  Zap,
+  Target
 } from 'lucide-react';
 
 interface Props {
@@ -64,10 +74,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   sets,
   defaultSet
 }) => {
+  const { groups, students = [] } = useApp();
   const [activeTab, setActiveTab] = useState<'create' | 'results'>('create');
 
   // Create Homework State
   const [selectedSetId, setSelectedSetId] = useState(defaultSet?.id || sets[0]?.id || '');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
   const [title, setTitle] = useState('');
   const [flowMode, setFlowMode] = useState<HomeworkFlowMode>('teacher_then_quiz');
   const [questionTypes, setQuestionTypes] = useState<HomeworkQuestionType[]>([
@@ -87,15 +99,17 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
   // Results Tab State
   const [assignmentsList, setAssignmentsList] = useState<any[]>([]);
+  const [filterGroup, setFilterGroup] = useState<string>('all');
   const [loadingResults, setLoadingResults] = useState(false);
   const [selectedDetails, setSelectedDetails] = useState<any | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [inspectingSubmission, setInspectingSubmission] = useState<HomeworkSubmission | null>(null);
+  const [deleteConfirmHw, setDeleteConfirmHw] = useState<HomeworkAssignment | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Firebase Auth + Vercel Public Domain State
   const [firebaseUser, setFirebaseUser] = useState<any | null>(null);
   const [vercelDomain, setVercelDomainState] = useState<string>(() => getVercelPublicDomain());
-  const [editingDomain, setEditingDomain] = useState(false);
 
   const currentSet = useMemo(
     () => sets.find((s) => s.id === selectedSetId) || defaultSet || sets[0],
@@ -130,7 +144,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
   };
 
-  // Real-time Firestore listener while modal is open so student submissions from Vercel appear live!
+  // Real-time Firestore listener while modal is open
   useEffect(() => {
     if (!isOpen) return;
     loadAllAssignments();
@@ -155,8 +169,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       unsubSubmissions();
     };
   }, [isOpen, selectedDetails?.assignment?.id]);
-
-  if (!isOpen) return null;
 
   const toggleQuestionType = (type: HomeworkQuestionType) => {
     setQuestionTypes((prev) => {
@@ -188,10 +200,16 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       const finalItems = chosenItems.length > 0 ? chosenItems : currentSet.items;
       const totalQ = finalItems.length * questionTypes.length;
       const generatedId = 'hw_' + Math.random().toString(36).substring(2, 8);
+      const targetGroup = groups.find((g) => g.id === selectedGroupId);
+      const assignedStudentsList = (
+        selectedGroupId !== 'all'
+          ? students.filter((s) => !s.deleted && s.status !== 'archived' && s.groupId === selectedGroupId)
+          : students.filter((s) => !s.deleted && s.status !== 'archived')
+      ).map((s) => ({ id: s.id, name: s.name }));
 
       const payload: HomeworkAssignment = {
         id: generatedId,
-        title: title.trim() || `واجب تفاعلي: ${currentSet.title}`,
+        title: title.trim() || `واجب: ${currentSet.title}`,
         setSnapshot: {
           id: currentSet.id,
           title: currentSet.title,
@@ -205,6 +223,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         allowedGameModes: [blooketMode],
         questionCount: totalQ,
         targetQuestionCount: totalQ,
+        groupId: selectedGroupId !== 'all' ? selectedGroupId : undefined,
+        groupName: targetGroup ? targetGroup.name : undefined,
+        assignedStudents: assignedStudentsList.length > 0 ? assignedStudentsList : undefined,
         deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : undefined,
         maxAttempts,
         allowReplay: true,
@@ -214,7 +235,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         createdBy: 'Teacher'
       };
 
-      // Save locally and directly to Firebase Firestore so Vercel has it immediately!
       saveLocalAssignment(payload, true);
       await saveAssignmentToFirestore(payload).catch(() => {});
 
@@ -243,13 +263,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       setCreatedAssignment(finalAssignment);
       setCreatedShareLink(buildHomeworkShareUrl(finalAssignment, vercelDomain));
     } catch {
-      // Fallback already saved locally & Firestore
       if (currentSet) {
         const chosenItems = currentSet.items.filter((it) => selectedItemIds.includes(it.id));
         const finalItems = chosenItems.length > 0 ? chosenItems : currentSet.items;
+        const targetGroup = groups.find((g) => g.id === selectedGroupId);
         const fallbackHw: HomeworkAssignment = {
           id: 'hw_' + Math.random().toString(36).substring(2, 8),
-          title: title.trim() || `واجب تفاعلي: ${currentSet.title}`,
+          title: title.trim() || `واجب: ${currentSet.title}`,
           setSnapshot: { ...currentSet, items: finalItems },
           selectedItemIds: finalItems.map((it) => it.id),
           flowMode,
@@ -258,6 +278,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           allowedGameModes: [blooketMode],
           questionCount: finalItems.length * questionTypes.length,
           targetQuestionCount: finalItems.length * questionTypes.length,
+          groupId: selectedGroupId !== 'all' ? selectedGroupId : undefined,
+          groupName: targetGroup ? targetGroup.name : undefined,
           maxAttempts,
           allowReplay: true,
           isActive: true,
@@ -292,245 +314,246 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
   };
 
+  const handleDeleteAssignment = async () => {
+    if (!deleteConfirmHw) return;
+    setIsDeleting(true);
+    try {
+      const targetId = deleteConfirmHw.id;
+      deleteLocalAssignment(targetId, true);
+      setAssignmentsList((prev) => prev.filter((a) => a.id !== targetId));
+      if (selectedDetails?.assignment?.id === targetId) {
+        setSelectedDetails(null);
+      }
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmHw(null);
+    }
+  };
+
+  const filteredAssignments = useMemo(() => {
+    if (filterGroup === 'all') return assignmentsList;
+    return assignmentsList.filter((a) => a.groupId === filterGroup);
+  }, [assignmentsList, filterGroup]);
+
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 font-sans" dir="rtl">
-      <div className="bg-slate-900 border-2 border-slate-800 rounded-3xl max-w-3xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
-        {/* Header + Tabs */}
-        <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-500/20 via-indigo-600/20 to-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center shadow-lg shadow-amber-500/25">
-              <Sparkles className="w-6 h-6" />
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4 font-sans" dir="rtl">
+      <div className="bg-surface border border-surface-border rounded-2xl max-w-3xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh] text-text-main">
+        
+        {/* Header (Glück Standard - Mobile Responsive) */}
+        <div className="px-4 py-3 sm:px-5 sm:py-3.5 border-b border-surface-border flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface">
+          <div className="flex items-center justify-between gap-2.5 w-full sm:w-auto">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
+                <Send className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-xs sm:text-base font-bold text-text-main truncate">
+                  واجبات وتدريبات الطلاب التفاعلية
+                </h2>
+                <p className="text-[10px] sm:text-[11px] text-text-muted hidden sm:block">
+                  إنشاء روابط التدريب، تحديد المستهدفين، ومتابعة النتائج والتقييمات
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-black text-white">
-                نظام الواجبات التفاعلي — Blooket Homework 🏆
-              </h2>
-              <p className="text-xs text-slate-400">
-                اختر الكلمات، المعلّم الناطق، أنواع الأسئلة، وتابع نتائج طلابك لحظة بلحظة
-              </p>
-            </div>
+            <button
+              onClick={onClose}
+              className="sm:hidden p-1.5 rounded-lg text-text-muted hover:text-text-main hover:bg-surface-hover transition-colors cursor-pointer shrink-0"
+              title="إغلاق"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="grid grid-cols-2 gap-1 bg-surface-hover p-1 rounded-lg border border-surface-border w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => {
                   setActiveTab('create');
                   setSelectedDetails(null);
+                  setCreatedShareLink(null);
                 }}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   activeTab === 'create'
-                    ? 'bg-amber-400 text-slate-950 shadow'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-surface text-primary shadow-xs'
+                    : 'text-text-muted hover:text-text-main'
                 }`}
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>إنشاء واجب</span>
               </button>
+
               <button
                 type="button"
                 onClick={() => {
                   setActiveTab('results');
                   loadAllAssignments();
                 }}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   activeTab === 'results'
-                    ? 'bg-amber-400 text-slate-950 shadow'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-surface text-primary shadow-xs'
+                    : 'text-text-muted hover:text-text-main'
                 }`}
               >
                 <BarChart3 className="w-3.5 h-3.5" />
-                <span>نتائج الطلاب ({assignmentsList.length || getLocalAssignments().length})</span>
+                <span className="truncate">إدارة الواجبات ({assignmentsList.length})</span>
               </button>
             </div>
 
             <button
               onClick={onClose}
-              className="p-2 rounded-xl bg-slate-800/80 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              className="hidden sm:flex p-1.5 rounded-lg text-text-muted hover:text-text-main hover:bg-surface-hover transition-colors cursor-pointer shrink-0"
+              title="إغلاق"
             >
-              <XCircle className="w-5 h-5" />
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Cloud Sync + Vercel Domain Bar */}
-        <div className="px-4 sm:px-6 py-2 bg-slate-950/90 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[11px]">
-              <Cloud className="w-3.5 h-3.5 text-emerald-400" />
-              <span>مزامنة سحابية مفعّلة (Vercel & Firebase)</span>
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <Globe className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="text-[11px] text-slate-400 font-bold">دومين فيرسيل:</span>
-            {editingDomain ? (
-              <div className="flex items-center gap-1">
-                <input
-                  type="text"
-                  dir="ltr"
-                  value={vercelDomain}
-                  onChange={(e) => setVercelDomainState(e.target.value)}
-                  className="px-2 py-0.5 bg-slate-900 border border-amber-500/50 rounded-lg text-[11px] font-mono text-amber-300 w-56 outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const cleaned = setVercelPublicDomain(vercelDomain);
-                    setVercelDomainState(cleaned);
-                    setEditingDomain(false);
-                  }}
-                  className="px-2 py-0.5 bg-amber-400 text-slate-950 font-black rounded-lg text-[10px] cursor-pointer"
-                >
-                  حفظ
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setEditingDomain(true)}
-                dir="ltr"
-                className="text-[11px] font-mono text-amber-400 hover:underline cursor-pointer truncate max-w-[220px]"
-                title="اضغط لتعديل دومين فيرسيل"
-              >
-                {vercelDomain} ✎
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Body Content */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
+        {/* Modal Body */}
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4">
+          
           {activeTab === 'create' ? (
             !createdShareLink ? (
-              <form onSubmit={handleCreate} className="space-y-5">
-                {/* 1. Set & Title */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-black text-slate-300 mb-1.5 flex items-center gap-1.5">
-                      <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-                      <span>1. اختر المجموعة / الدرس:</span>
+              /* ================= CREATE HOMEWORK FORM ================= */
+              <form onSubmit={handleCreate} className="space-y-4">
+                
+                {/* 1. Vocabulary Set & Group Selection Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Select Vocabulary Set */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                      <span>📚</span>
+                      <span>مجموعة الكلمات المفتاحية:</span>
                     </label>
                     <select
                       value={selectedSetId}
                       onChange={(e) => setSelectedSetId(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-2xl text-white text-sm font-bold outline-none focus:border-amber-500"
+                      className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
                     >
                       {sets.map((s) => (
                         <option key={s.id} value={s.id}>
-                          {s.title} ({s.items.length} كلمة)
+                          {s.title} ({s.items?.length || 0} كلمة)
                         </option>
                       ))}
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-black text-slate-300 mb-1.5">
-                      عنوان الواجب (اختياري):
+                  {/* Select Target Student Group */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-primary" />
+                      <span>المجموعة المستهدفة (من طلابك):</span>
                     </label>
-                    <input
-                      type="text"
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      placeholder={currentSet ? `واجب تفاعلي: ${currentSet.title}` : 'عنوان الواجب...'}
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-2xl text-white text-sm font-bold outline-none focus:border-amber-500"
-                    />
+                    <select
+                      value={selectedGroupId}
+                      onChange={(e) => setSelectedGroupId(e.target.value)}
+                      className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="all">🌍 جميع المجموعات (عام لمجموعة مفتوحة)</option>
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          🏫 {g.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
-                {/* 2. Student Flow Mode: Start with Teacher Pronunciation vs Start with Questions Directly */}
-                <div className="space-y-2">
-                  <label className="block text-xs font-black text-amber-400 flex items-center gap-1.5">
-                    <GraduationCap className="w-4 h-4" />
-                    <span>2. كيف يبدأ الطالب الواجب؟</span>
+                {/* 2. Custom Title Input */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                    <span>✏️</span>
+                    <span>عنوان الواجب (اختياري):</span>
                   </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setFlowMode('teacher_then_quiz')}
-                      className={`p-3.5 rounded-2xl border-2 text-right transition-all cursor-pointer ${
-                        flowMode === 'teacher_then_quiz'
-                          ? 'bg-emerald-500/15 border-emerald-400 text-white shadow-lg shadow-emerald-500/10'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="font-black text-sm text-emerald-300 flex items-center justify-between">
-                        <span>👨‍🏫 يبدأ بالمعلّم الناطق ثم الأسئلة</span>
-                        {flowMode === 'teacher_then_quiz' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-                      </div>
-                      <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
-                        يستمع الطالب لنطق كل كلمة بالسرعة العادية والبطيئة ويتعلم معناها أولاً، ثم ينتقل للأسئلة المتدرجة فالتقييم النهائي.
-                      </p>
-                    </button>
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder={`مثال: واجب ${currentSet?.title || 'الألماني'}`}
+                    className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setFlowMode('quiz_only')}
-                      className={`p-3.5 rounded-2xl border-2 text-right transition-all cursor-pointer ${
-                        flowMode === 'quiz_only'
-                          ? 'bg-amber-500/15 border-amber-400 text-white shadow-lg shadow-amber-500/10'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                      }`}
+                {/* 3. Flow Mode & Reward Mode */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-text-main">نمط العرض والشرح:</label>
+                    <div className="grid grid-cols-2 gap-1 p-1 bg-surface-hover rounded-xl border border-surface-border">
+                      <button
+                        type="button"
+                        onClick={() => setFlowMode('teacher_then_quiz')}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer text-center ${
+                          flowMode === 'teacher_then_quiz'
+                            ? 'bg-surface text-primary shadow-xs'
+                            : 'text-text-muted hover:text-text-main'
+                        }`}
+                      >
+                        👨‍🏫 شرح + اختبار
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFlowMode('quiz_only')}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer text-center ${
+                          flowMode === 'quiz_only'
+                            ? 'bg-surface text-primary shadow-xs'
+                            : 'text-text-muted hover:text-text-main'
+                        }`}
+                      >
+                        🎯 اختبار مباشر
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-text-main">طابع المكافآت والألعاب:</label>
+                    <select
+                      value={blooketMode}
+                      onChange={(e) => setBlooketMode(e.target.value as HomeworkBlooketMode)}
+                      className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
                     >
-                      <div className="font-black text-sm text-amber-300 flex items-center justify-between">
-                        <span>🎯 يبدأ بالأسئلة على طول ثم التقييم</span>
-                        {flowMode === 'quiz_only' && <CheckCircle2 className="w-4 h-4 text-amber-400" />}
-                      </div>
-                      <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
-                        يدخل الطالب على مراحل الأسئلة المختارة مباشرة بدون مرحلة الشرح الأولي، وفي النهاية يظهر التقييم الكامل.
-                      </p>
-                    </button>
+                      <option value="gold_quest">🎁 صناديق الذهب (Gold Quest — 3 صناديق بعد الإجابة)</option>
+                      <option value="classic_quiz">🎯 اختبار سريع مع نقاط وسلسلة انتصارات</option>
+                    </select>
                   </div>
                 </div>
 
-                {/* 3. Question Types Selection & Sequence */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-black text-amber-400 flex items-center gap-1.5">
-                      <ListChecks className="w-4 h-4" />
-                      <span>3. اختر أنواع الأسئلة وترتيبها في الواجب ({questionTypes.length} مراحل):</span>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setQuestionTypes(QUESTION_TYPE_META.map((m) => m.id))}
-                      className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 cursor-pointer"
-                    >
-                      تفعيل جميع الأنواع
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {QUESTION_TYPE_META.map((qMeta) => {
-                      const orderIdx = questionTypes.indexOf(qMeta.id);
-                      const isSelected = orderIdx !== -1;
+                {/* 4. Question Types Grid */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-text-main flex items-center justify-between">
+                    <span>مراحل وأنواع الأسئلة المطلوب تضمينها:</span>
+                    <span className="text-[10px] text-text-muted font-bold tabular-nums">
+                      محدد: {questionTypes.length} من {QUESTION_TYPE_META.length}
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {QUESTION_TYPE_META.map((meta) => {
+                      const active = questionTypes.includes(meta.id);
                       return (
                         <button
-                          key={qMeta.id}
+                          key={meta.id}
                           type="button"
-                          onClick={() => toggleQuestionType(qMeta.id)}
-                          className={`p-3 rounded-2xl border text-right transition-all flex items-start gap-2.5 cursor-pointer ${
-                            isSelected
-                              ? 'bg-indigo-500/15 border-indigo-400 text-white'
-                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                          onClick={() => toggleQuestionType(meta.id)}
+                          className={`p-2.5 rounded-xl border text-right transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                            active
+                              ? 'bg-primary/10 border-primary text-primary'
+                              : 'bg-surface-hover border-surface-border text-text-muted hover:text-text-main'
                           }`}
                         >
-                          <div
-                            className={`w-6 h-6 rounded-lg font-black text-xs flex items-center justify-center shrink-0 mt-0.5 ${
-                              isSelected
-                                ? 'bg-indigo-500 text-white'
-                                : 'bg-slate-800 text-slate-500'
-                            }`}
-                          >
-                            {isSelected ? orderIdx + 1 : '+'}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-black flex items-center gap-1">
-                              <span>{qMeta.badgeEmoji}</span>
-                              <span className="truncate">{qMeta.labelAr}</span>
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold truncate">
+                              {meta.badgeEmoji} {meta.labelAr.split('(')[0]}
                             </div>
-                            <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">{qMeta.descAr}</p>
+                            <div className="text-[10px] text-text-muted truncate">
+                              {meta.descAr.slice(0, 30)}...
+                            </div>
+                          </div>
+                          <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
+                            active ? 'bg-primary text-white' : 'border border-surface-border'
+                          }`}>
+                            {active ? '✓' : ''}
                           </div>
                         </button>
                       );
@@ -538,58 +561,43 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 </div>
 
-                {/* 4. Select Specific Words/Questions from the Set */}
-                {currentSet && currentSet.items.length > 0 && (
-                  <div className="space-y-2 bg-slate-950/80 border border-slate-800 rounded-2xl p-3.5">
+                {/* 5. Words Selector Pills */}
+                {currentSet?.items && currentSet.items.length > 0 && (
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-black text-slate-200">
-                        4. تحديد الكلمات المشمولة في الواجب ({selectedItemIds.length} من {currentSet.items.length} كلمة):
-                      </span>
-                      <div className="flex items-center gap-2 text-[11px] font-bold">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedItemIds(currentSet.items.map((it) => it.id))}
-                          className="text-amber-400 hover:underline cursor-pointer"
-                        >
-                          تحديد الكل
-                        </button>
-                        <span className="text-slate-600">|</span>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedItemIds([currentSet.items[0].id])}
-                          className="text-slate-400 hover:text-white cursor-pointer"
-                        >
-                          إلغاء التحديد
-                        </button>
-                      </div>
+                      <label className="text-xs font-bold text-text-main">
+                        الكلمات المتضمنة بالواجب ({selectedItemIds.length} من {currentSet.items.length}):
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (selectedItemIds.length === currentSet.items.length) {
+                            setSelectedItemIds([currentSet.items[0].id]);
+                          } else {
+                            setSelectedItemIds(currentSet.items.map((i) => i.id));
+                          }
+                        }}
+                        className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+                      >
+                        {selectedItemIds.length === currentSet.items.length ? 'إلغاء التحديد' : 'تحديد الكل'}
+                      </button>
                     </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto pt-1 pr-1">
-                      {currentSet.items.map((item) => {
-                        const checked = selectedItemIds.includes(item.id);
+                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-2 bg-surface-hover rounded-xl border border-surface-border">
+                      {currentSet.items.map((it) => {
+                        const active = selectedItemIds.includes(it.id);
                         return (
                           <button
-                            key={item.id}
+                            key={it.id}
                             type="button"
-                            onClick={() => toggleWordItem(item.id)}
-                            className={`px-2.5 py-2 rounded-xl border text-right text-xs flex items-center justify-between gap-1.5 transition-all cursor-pointer ${
-                              checked
-                                ? 'bg-amber-400/15 border-amber-400/60 text-white font-bold'
-                                : 'bg-slate-900 border-slate-800 text-slate-500'
+                            onClick={() => toggleWordItem(it.id)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                              active
+                                ? 'bg-primary text-white'
+                                : 'bg-surface text-text-muted border border-surface-border'
                             }`}
                           >
-                            <div className="truncate">
-                              <span className="ml-1">{item.emoji || '📘'}</span>
-                              <span dir="ltr">{item.german}</span>
-                              <span className="text-[10px] text-slate-400 block truncate">{item.arabic}</span>
-                            </div>
-                            <div
-                              className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${
-                                checked ? 'bg-amber-400 text-slate-950' : 'border border-slate-700'
-                              }`}
-                            >
-                              {checked && <Check className="w-3 h-3 stroke-[3]" />}
-                            </div>
+                            <span>{it.german}</span>
+                            <span className="text-[10px] opacity-75">({it.arabic})</span>
                           </button>
                         );
                       })}
@@ -597,93 +605,61 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 )}
 
-                {/* 5. Blooket Mode & Attempts */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-black text-slate-300 mb-1.5">
-                      5. طابع مكافآت Blooket للطالب:
-                    </label>
-                    <select
-                      value={blooketMode}
-                      onChange={(e) => setBlooketMode(e.target.value as HomeworkBlooketMode)}
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-2xl text-white text-xs font-bold outline-none focus:border-amber-500"
-                    >
-                      <option value="gold_quest">🎁 صناديق الذهب (Blooket Gold Quest — 3 صناديق كنز بعد كل إجابة)</option>
-                      <option value="classic_quiz">🎯 اختبار قياسي سريع مع نقاط وسلسلة انتصارات</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-black text-slate-300 mb-1.5">
-                      عدد المحاولات المسموحة للطالب:
-                    </label>
-                    <select
-                      value={maxAttempts}
-                      onChange={(e) => setMaxAttempts(Number(e.target.value))}
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-2xl text-white text-xs font-bold outline-none focus:border-amber-500"
-                    >
-                      <option value={0}>غير محدود (مفتوح للتدريب)</option>
-                      <option value={1}>محاولة واحدة فقط (اختبار رسمي)</option>
-                      <option value={2}>محاولتان (2)</option>
-                      <option value={3}>3 محاولات</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Summary & Submit Button */}
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-xs font-bold text-slate-300">
-                    إجمالي الأسئلة في هذا الواجب:{' '}
-                    <span className="text-amber-400 font-black">
+                {/* Submit Action Banner */}
+                <div className="bg-surface-hover border border-surface-border rounded-xl p-3 flex flex-wrap items-center justify-between gap-2.5">
+                  <div className="text-xs font-bold text-text-main">
+                    الأسئلة الإجمالية:{' '}
+                    <span className="text-primary font-black">
                       {selectedItemIds.length * questionTypes.length} سؤال
                     </span>{' '}
-                    ({selectedItemIds.length} كلمات × {questionTypes.length} مراحل)
+                    ({selectedItemIds.length} كلمة × {questionTypes.length} مراحل)
                   </div>
 
                   <button
                     type="submit"
                     disabled={isCreating}
-                    className="px-6 py-3 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black rounded-2xl shadow-lg shadow-amber-500/20 flex items-center gap-2 text-sm cursor-pointer active:scale-95 transition-all"
+                    className="px-5 py-2.5 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold rounded-xl shadow-xs flex items-center gap-2 text-xs cursor-pointer transition-all"
                   >
                     {isCreating ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>جاري إنشاء الواجب...</span>
+                        <span>جاري تجهيز الواجب...</span>
                       </>
                     ) : (
                       <>
                         <Sparkles className="w-4 h-4" />
-                        <span>إنشاء رابط الواجب الآن</span>
+                        <span>إنشاء الواجب ورابط الطلاب</span>
                       </>
                     )}
                   </button>
                 </div>
+
               </form>
             ) : (
-              /* Created Link Screen */
-              <div className="space-y-5 text-center py-4">
-                <div className="w-16 h-16 rounded-3xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
-                  <CheckCircle2 className="w-9 h-9" />
+              /* ================= CREATED SHARE SCREEN ================= */
+              <div className="space-y-4 text-center py-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/20">
+                  <CheckCircle2 className="w-6 h-6" />
                 </div>
 
                 <div>
-                  <h4 className="text-xl font-black text-white">تم تجهيز الواجب التفاعلي بنجاح! 🎉</h4>
-                  <p className="text-xs text-slate-400 mt-1">
-                    انسخ الرابط وأرسله لطلابك على واتساب أو التليجرام — كل طالب يحل الواجب ستظهر نتيجته فوراً في تبويب «نتائج الطلاب»
+                  <h4 className="text-base sm:text-lg font-black text-text-main">تم تجهيز الواجب بنجاح</h4>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    انسخ الرابط وأرسله للطلاب — ستظهر نتائج كل طالب فورياً في جدول الإدارة
                   </p>
                 </div>
 
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 flex items-center gap-2">
+                <div className="bg-surface-hover border border-surface-border rounded-xl p-2.5 flex items-center gap-2 max-w-xl mx-auto">
                   <input
                     type="text"
                     readOnly
                     dir="ltr"
                     value={createdShareLink}
-                    className="bg-transparent text-amber-400 font-mono text-xs flex-1 outline-none truncate"
+                    className="bg-transparent text-text-main font-mono text-xs flex-1 outline-none truncate"
                   />
                   <button
                     onClick={() => handleCopy(createdShareLink, 'created')}
-                    className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1.5 shrink-0 cursor-pointer"
+                    className="px-3 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
                   >
                     {copiedId === 'created' ? (
                       <>
@@ -697,22 +673,23 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </button>
                 </div>
 
-                <div className="flex flex-wrap gap-2.5 justify-center pt-2">
+                <div className="flex flex-wrap gap-2 justify-center pt-2">
                   <button
                     type="button"
                     onClick={() => {
-                      const msg = `🇩🇪 *واجب الألماني التفاعلي (Glück Lernstudio)*\n📚 *${createdAssignment?.title || 'واجب جديد'}*\n\nيرجى الضغط على الرابط التالي لبدء حل الواجب:\n${createdShareLink}`;
+                      const groupLabel = createdAssignment?.groupName ? ` [${createdAssignment.groupName}]` : '';
+                      const msg = `🇩🇪 *واجب الألماني التفاعلي (Glück Lernstudio)*${groupLabel}\n📚 *${createdAssignment?.title || 'واجب جديد'}*\n\nيرجى الضغط على الرابط التالي لبدء حل الواجب:\n${createdShareLink}`;
                       navigator.clipboard.writeText(msg);
                       setCopiedId('whatsapp_msg');
                       setTimeout(() => setCopiedId(null), 2500);
                     }}
-                    className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black rounded-xl flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/20"
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs"
                   >
                     <Share2 className="w-3.5 h-3.5" />
                     <span>
                       {copiedId === 'whatsapp_msg'
-                        ? 'تم نسخ رسالة واتساب لولي الأمر! ✅'
-                        : 'نسخ رسالة واتساب جاهزة لولي الأمر 💬'}
+                        ? 'تم نسخ رسالة واتساب! ✓'
+                        : 'نسخ رسالة واتساب لولي الأمر'}
                     </span>
                   </button>
 
@@ -720,9 +697,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                     href={createdShareLink}
                     target="_blank"
                     rel="noreferrer"
-                    className="px-4 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-black rounded-xl flex items-center gap-1.5"
+                    className="px-3.5 py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold rounded-xl flex items-center gap-1.5"
                   >
-                    <ExternalLink className="w-3.5 h-3.5" /> تجربة فتح الواجب كطالب
+                    <ExternalLink className="w-3.5 h-3.5 text-primary" /> فتح الواجب تجريبياً
                   </a>
 
                   <button
@@ -735,9 +712,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                         loadAllAssignments();
                       }
                     }}
-                    className="px-4 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 text-xs font-black rounded-xl flex items-center gap-1.5 cursor-pointer"
+                    className="px-3.5 py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer"
                   >
-                    <BarChart3 className="w-3.5 h-3.5" /> متابعة نتائج الطلاب لهذا الواجب
+                    <BarChart3 className="w-3.5 h-3.5 text-primary" /> إدارة نتائج الطلاب
                   </button>
 
                   <button
@@ -746,41 +723,41 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       setCreatedShareLink(null);
                       setCreatedAssignment(null);
                     }}
-                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
+                    className="px-3 py-2 text-text-muted hover:text-text-main hover:bg-surface-hover text-xs font-medium rounded-xl cursor-pointer"
                   >
-                    إنشاء واجب آخر
+                    + إنشاء واجب آخر
                   </button>
                 </div>
               </div>
             )
           ) : (
-            /* ============================================================================
-             * TAB 2: LIVE STUDENT SUBMISSIONS & BLOOKET ANALYTICS FOR TEACHER
-             * ============================================================================ */
+            /* ================= TAB 2: HOMEWORK MANAGEMENT ================= */
             <div className="space-y-4">
+              
               {selectedDetails ? (
-                <div className="space-y-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                /* Detail Inspection View */
+                <div className="space-y-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-surface-border">
                     <button
                       type="button"
                       onClick={() => {
                         setSelectedDetails(null);
                         setInspectingSubmission(null);
                       }}
-                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                     >
                       <ArrowRight className="w-3.5 h-3.5" />
-                      <span>العودة لقائمة الواجبات</span>
+                      <span>العودة لكل الواجبات</span>
                     </button>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => handleOpenDetails(selectedDetails.assignment.id)}
-                        className="px-3 py-1.5 rounded-xl bg-amber-400/20 border border-amber-400/40 text-amber-300 text-xs font-black flex items-center gap-1.5 cursor-pointer"
+                        className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${loadingDetails ? 'animate-spin' : ''}`} />
-                        <span>تحديث نتائج الطلاب</span>
+                        <span>تحديث</span>
                       </button>
 
                       <button
@@ -788,42 +765,58 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                         onClick={() =>
                           handleCopy(buildHomeworkShareUrl(selectedDetails.assignment), selectedDetails.assignment.id)
                         }
-                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                       >
                         {copiedId === selectedDetails.assignment.id ? (
                           <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400" /> تم النسخ
+                            <Check className="w-3.5 h-3.5 text-emerald-500" /> تم نسخ الرابط
                           </>
                         ) : (
                           <>
-                            <Copy className="w-3.5 h-3.5" /> نسخ رابط الطالب
+                            <Copy className="w-3.5 h-3.5" /> نسخ الرابط
                           </>
                         )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmHw(selectedDetails.assignment)}
+                        className="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف</span>
                       </button>
                     </div>
                   </div>
 
-                  {/* Assignment Summary Card */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+                  {/* Summary Card */}
+                  <div className="bg-surface-hover border border-surface-border rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-lg font-black text-white">{selectedDetails.assignment.title}</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        {selectedDetails.assignment.setSnapshot?.title} •{' '}
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm sm:text-base font-black text-text-main">{selectedDetails.assignment.title}</h3>
+                        {selectedDetails.assignment.groupName && (
+                          <span className="text-[11px] font-bold text-text-muted">
+                            · 🏫 {selectedDetails.assignment.groupName}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        {selectedDetails.assignment.setSnapshot?.title} ·{' '}
                         {selectedDetails.assignment.flowMode === 'quiz_only'
-                          ? '🎯 يبدأ بالأسئلة مباشرة'
-                          : '👨‍🏫 يبدأ بالمعلّم الناطق ثم الأسئلة'}
+                          ? '🎯 أسئلة مباشرة'
+                          : '👨‍🏫 شرح معلّم + أسئلة'}
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 tabular-nums">
                       <div className="text-center">
-                        <div className="text-xl font-black text-amber-400">
+                        <div className="text-base sm:text-lg font-black text-text-main">
                           {selectedDetails.submissions?.length || 0}
                         </div>
-                        <div className="text-[10px] font-bold text-slate-400">إجابات الطلاب</div>
+                        <div className="text-[10px] text-text-muted">إجابات الطلاب</div>
                       </div>
-                      <div className="text-center border-r border-slate-800 pr-4">
-                        <div className="text-xl font-black text-emerald-400">
+                      <div className="text-center border-r border-surface-border pr-4">
+                        <div className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400">
                           {selectedDetails.submissions?.length > 0
                             ? `${Math.round(
                                 selectedDetails.submissions.reduce(
@@ -833,28 +826,28 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                               )}%`
                             : '—'}
                         </div>
-                        <div className="text-[10px] font-bold text-slate-400">متوسط التقييم</div>
+                        <div className="text-[10px] text-text-muted">متوسط الدقة</div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Inspecting single student's answers */}
+                  {/* Inspecting Student Answers Modal / Card */}
                   {inspectingSubmission ? (
-                    <div className="bg-slate-950 border-2 border-indigo-500/40 rounded-2xl p-4 space-y-3">
+                    <div className="bg-surface-hover border border-surface-border rounded-xl p-4 space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
-                          <h4 className="text-sm font-black text-white">
-                            تفاصيل إجابات الطالب: {inspectingSubmission.studentName}
+                          <h4 className="text-sm font-bold text-text-main flex items-center gap-2">
+                            <span>إجابات الطالب: {inspectingSubmission.studentName}</span>
                           </h4>
-                          <p className="text-xs text-slate-400">
-                            الدرجة: {inspectingSubmission.correctAnswersCount} / {inspectingSubmission.totalQuestions} (
-                            {inspectingSubmission.scorePercentage}%) • 💰 {inspectingSubmission.goldEarned || 0} ذهب
+                          <p className="text-xs text-text-muted">
+                            النتيجة: {inspectingSubmission.correctAnswersCount} / {inspectingSubmission.totalQuestions} (
+                            {inspectingSubmission.scorePercentage}%) · 💰 {inspectingSubmission.goldEarned || 0} ذهب
                           </p>
                         </div>
                         <button
                           type="button"
                           onClick={() => setInspectingSubmission(null)}
-                          className="px-3 py-1 rounded-xl bg-slate-800 text-xs font-bold text-slate-300 cursor-pointer"
+                          className="px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-xs font-bold text-text-main hover:bg-surface-hover cursor-pointer"
                         >
                           إغلاق التفاصيل
                         </button>
@@ -864,21 +857,21 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                         {(inspectingSubmission.responses || []).map((r, idx) => (
                           <div
                             key={idx}
-                            className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-bold ${
+                            className={`flex items-center justify-between p-2.5 rounded-lg border text-xs font-bold ${
                               r.isCorrect
-                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                                : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                                : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
                             }`}
                           >
                             <div>
-                              <span className="text-white font-black">{r.germanWord}</span>
+                              <span className="font-bold text-text-main">{r.germanWord}</span>
                               {r.promptText && (
-                                <span className="text-[10px] text-slate-400 block">{r.promptText}</span>
+                                <span className="text-[10px] text-text-muted block">{r.promptText}</span>
                               )}
                             </div>
                             <div className="text-left">
                               <div>إجابة الطالب: {r.studentAnswer}</div>
-                              {!r.isCorrect && <div className="text-[10px] text-amber-300">الصواب: {r.correctAnswer}</div>}
+                              {!r.isCorrect && <div className="text-[10px] text-amber-600 dark:text-amber-400">الصواب: {r.correctAnswer}</div>}
                             </div>
                           </div>
                         ))}
@@ -886,20 +879,20 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                     </div>
                   ) : null}
 
-                  {/* Submissions Leaderboard Table */}
+                  {/* Submissions List */}
                   {!selectedDetails.submissions || selectedDetails.submissions.length === 0 ? (
-                    <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-8 text-center space-y-2">
-                      <Users className="w-10 h-10 text-slate-500 mx-auto" />
-                      <p className="text-sm font-bold text-slate-300">لم يقم أي طالب بإرسال الواجب حتى الآن</p>
-                      <p className="text-xs text-slate-500">
-                        شارك الرابط مع طلابك أو جرب فتحه وحله كطالب ثم اضغط «تحديث نتائج الطلاب»
+                    <div className="bg-surface-hover/50 border border-surface-border rounded-xl p-8 text-center space-y-2">
+                      <Users className="w-10 h-10 text-text-muted mx-auto opacity-50" />
+                      <p className="text-sm font-bold text-text-main">لم يقم أي طالب بتقديم الواجب حتى الآن</p>
+                      <p className="text-xs text-text-muted">
+                        شارك الرابط مع طلابك أو جرب حله بنفسك ثم اضغط «تحديث اللحظي»
                       </p>
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <h4 className="text-xs font-black text-amber-400 flex items-center gap-1.5">
-                        <Trophy className="w-4 h-4" />
-                        <span>ترتيب الطلاب والنتائج المستلمة ({selectedDetails.submissions.length}):</span>
+                      <h4 className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                        <Trophy className="w-4 h-4 text-amber-500" />
+                        <span>ترتيب الطلاب المستلمين ({selectedDetails.submissions.length}):</span>
                       </h4>
                       <div className="space-y-2">
                         {selectedDetails.submissions.map((sub: HomeworkSubmission, idx: number) => {
@@ -907,16 +900,16 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                           return (
                             <div
                               key={sub.id}
-                              className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3"
+                              className="bg-surface border border-surface-border rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 shadow-xs"
                             >
                               <div className="flex items-center gap-3">
-                                <span className="w-7 h-7 rounded-xl bg-amber-400/20 text-amber-300 font-black text-xs flex items-center justify-center">
+                                <span className="w-7 h-7 rounded-lg bg-surface-hover border border-surface-border text-text-main font-bold text-xs flex items-center justify-center shrink-0">
                                   {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                                 </span>
                                 <div>
-                                  <div className="text-sm font-black text-white">{sub.studentName}</div>
-                                  <div className="text-[11px] text-slate-400">
-                                    الوقت: {sub.timeSpentSeconds} ثانية •{' '}
+                                  <div className="text-sm font-bold text-text-main">{sub.studentName}</div>
+                                  <div className="text-[11px] text-text-muted">
+                                    الوقت: {sub.timeSpentSeconds} ثانية ·{' '}
                                     {new Date(sub.completedAt).toLocaleTimeString('ar-EG', {
                                       hour: '2-digit',
                                       minute: '2-digit'
@@ -926,19 +919,19 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                               </div>
 
                               <div className="flex items-center gap-3">
-                                <span className="text-xs font-black text-amber-300">
+                                <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
                                   💰 {sub.goldEarned ?? (sub.correctAnswersCount || 0) * 100}
                                 </span>
-                                <span className="text-xs font-bold text-slate-300">
+                                <span className="text-xs font-bold text-text-muted">
                                   {sub.correctAnswersCount} / {sub.totalQuestions}
                                 </span>
                                 <span
-                                  className={`px-2.5 py-1 rounded-xl text-xs font-black ${
+                                  className={`px-2 py-0.5 rounded-lg text-xs font-bold ${
                                     acc >= 80
-                                      ? 'bg-emerald-500/20 text-emerald-300'
+                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                                       : acc >= 50
-                                      ? 'bg-amber-500/20 text-amber-300'
-                                      : 'bg-rose-500/20 text-rose-300'
+                                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                      : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
                                   }`}
                                 >
                                   {acc}%
@@ -946,10 +939,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                 <button
                                   type="button"
                                   onClick={() => setInspectingSubmission(sub)}
-                                  className="px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 text-xs font-black flex items-center gap-1 cursor-pointer"
+                                  className="px-2.5 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-text-main text-xs font-bold flex items-center gap-1 cursor-pointer"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
-                                  <span>إجابات الطالب</span>
+                                  <span>تفاصيل الإجابات</span>
                                 </button>
                               </div>
                             </div>
@@ -960,91 +953,171 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   )}
                 </div>
               ) : (
-                /* List of All Created Assignments */
+                /* ================= HOMEWORK CARDS LIST ================= */
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-slate-300">
-                      جميع الواجبات المنشأة ({assignmentsList.length}):
-                    </span>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-text-main">
+                        جميع الواجبات ({filteredAssignments.length}):
+                      </span>
+
+                      {/* Group Filter Dropdown */}
+                      {groups.length > 0 && (
+                        <div className="flex items-center gap-1.5 bg-surface-hover px-2.5 py-1 rounded-lg border border-surface-border">
+                          <Filter className="w-3 h-3 text-text-muted" />
+                          <select
+                            value={filterGroup}
+                            onChange={(e) => setFilterGroup(e.target.value)}
+                            className="bg-transparent text-text-main font-bold text-xs outline-none cursor-pointer"
+                          >
+                            <option value="all">كل المجموعات</option>
+                            {groups.map((g) => (
+                              <option key={g.id} value={g.id}>
+                                {g.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={loadAllAssignments}
-                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                        className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-xs font-bold text-text-main flex items-center gap-1.5 cursor-pointer"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${loadingResults ? 'animate-spin' : ''}`} />
                         <span>تحديث</span>
                       </button>
-                      <a
-                        href="/teacher"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3 py-1.5 rounded-xl bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-xs font-black flex items-center gap-1"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>لوحة المعلم الكاملة</span>
-                      </a>
-                    </div>
-                  </div>
 
-                  {assignmentsList.length === 0 ? (
-                    <div className="bg-slate-950 border border-slate-800 rounded-2xl p-8 text-center space-y-3">
-                      <BookOpen className="w-10 h-10 text-amber-400 mx-auto" />
-                      <p className="text-sm font-bold text-white">لم تقم بإنشاء أي واجب بعد</p>
                       <button
                         type="button"
                         onClick={() => setActiveTab('create')}
-                        className="px-5 py-2.5 rounded-xl bg-amber-400 text-slate-950 font-black text-xs cursor-pointer"
+                        className="px-3.5 py-1.5 rounded-lg bg-primary hover:bg-primary-hover text-white font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
                       >
-                        + إنشاء أول واجب تفاعلي
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>إنشاء واجب</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {filteredAssignments.length === 0 ? (
+                    <div className="bg-surface-hover/40 border border-surface-border rounded-xl p-8 text-center space-y-3">
+                      <Trophy className="w-10 h-10 text-text-muted mx-auto opacity-50" />
+                      <h4 className="text-sm font-bold text-text-main">لا يوجد واجبات منشأة في هذه القائمة</h4>
+                      <p className="text-xs text-text-muted">
+                        اضغط على «إنشاء واجب» للبدء وتوزيع التدريبات التفاعلية على طلابك
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('create')}
+                        className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>إنشاء أول واجب تفاعلي</span>
                       </button>
                     </div>
                   ) : (
-                    <div className="space-y-2.5">
-                      {assignmentsList.map((hw) => {
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {filteredAssignments.map((hw) => {
                         const shareUrl = buildHomeworkShareUrl(hw);
+                        const subCount = hw.submissionCount || 0;
+                        const avgAcc = hw.avgAccuracy || 0;
+
                         return (
                           <div
                             key={hw.id}
-                            className="bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3"
+                            className="bg-surface border border-surface-border hover:border-primary/40 rounded-xl p-4 transition-all space-y-3 shadow-xs relative overflow-hidden group"
                           >
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-black text-white">{hw.title}</span>
-                                <span className="px-2 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-[10px] font-bold">
-                                  {hw.flowMode === 'quiz_only' ? '🎯 أسئلة مباشرة' : '👨‍🏫 معلم ناطق + أسئلة'}
-                                </span>
+                            {/* Card Header & Title */}
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="space-y-0.5">
+                                <h4 className="text-sm font-bold text-text-main group-hover:text-primary transition-colors">
+                                  {hw.title}
+                                </h4>
+                                <p className="text-xs text-text-muted">
+                                  {hw.setSnapshot?.title || 'مجموعة الكلمات'}
+                                </p>
                               </div>
-                              <p className="text-xs text-slate-400">
-                                {hw.setSnapshot?.title} • {hw.submissionCount || 0} طلاب سلّموا الواجب • متوسط الدقة:{' '}
-                                {hw.avgAccuracy > 0 ? `${hw.avgAccuracy}%` : '—'}
-                              </p>
-                            </div>
 
-                            <div className="flex items-center gap-2">
                               <button
                                 type="button"
-                                onClick={() => handleCopy(shareUrl, hw.id)}
-                                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                                onClick={() => setDeleteConfirmHw(hw)}
+                                className="p-1.5 rounded-lg text-text-muted hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
+                                title="حذف الواجب نهائياً"
                               >
-                                {copiedId === hw.id ? (
-                                  <>
-                                    <Check className="w-3.5 h-3.5 text-emerald-400" /> تم النسخ
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="w-3.5 h-3.5" /> نسخ الرابط
-                                  </>
-                                )}
+                                <Trash2 className="w-4 h-4" />
                               </button>
+                            </div>
+
+                            {/* Unboxed Metadata (Zero-Pill Rule) */}
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-text-muted pt-1">
+                              {hw.groupName ? (
+                                <span className="flex items-center gap-1 text-primary font-bold">
+                                  <Building2 className="w-3 h-3" />
+                                  <span>{hw.groupName}</span>
+                                </span>
+                              ) : (
+                                <span>عام لجميع المجموعات</span>
+                              )}
+                              <span>·</span>
+                              <span className="flex items-center gap-1">
+                                <Users className="w-3 h-3" />
+                                <span>{subCount} طلاب سلموا</span>
+                              </span>
+                              {subCount > 0 && (
+                                <>
+                                  <span>·</span>
+                                  <span className="font-bold text-text-main">
+                                    🎯 {avgAcc}% دقة
+                                  </span>
+                                </>
+                              )}
+                            </div>
+
+                            {/* Action Buttons Bar */}
+                            <div className="pt-2 border-t border-surface-border flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopy(shareUrl, hw.id)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-text-main font-bold text-xs flex items-center gap-1 cursor-pointer"
+                                >
+                                  {copiedId === hw.id ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-emerald-500" /> تم النسخ
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5" /> نسخ الرابط
+                                    </>
+                                  )}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const groupText = hw.groupName ? ` [${hw.groupName}]` : '';
+                                    const msg = `🇩🇪 *واجب الألماني التفاعلي (Glück Lernstudio)*${groupText}\n📚 *${hw.title}*\n\nيرجى فتح الرابط لبدء حل الواجب:\n${shareUrl}`;
+                                    navigator.clipboard.writeText(msg);
+                                    setCopiedId(`wa_${hw.id}`);
+                                    setTimeout(() => setCopiedId(null), 2000);
+                                  }}
+                                  className="p-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-emerald-600 dark:text-emerald-400 cursor-pointer"
+                                  title="نسخ رسالة واتساب للطلاب"
+                                >
+                                  <Share2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
 
                               <button
                                 type="button"
                                 onClick={() => handleOpenDetails(hw.id)}
-                                className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer"
+                                className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-hover text-white font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs active:scale-95"
                               >
                                 <BarChart3 className="w-3.5 h-3.5" />
-                                <span>عرض النتائج ({hw.submissionCount || 0})</span>
+                                <span>نتائج الطلاب ({subCount})</span>
                               </button>
                             </div>
                           </div>
@@ -1054,10 +1127,53 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   )}
                 </div>
               )}
+
             </div>
           )}
+
         </div>
+
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmHw && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-surface border border-surface-border rounded-2xl p-6 max-w-md w-full text-center space-y-4 shadow-2xl">
+            <div className="w-12 h-12 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20 flex items-center justify-center mx-auto text-xl">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div>
+              <h3 className="text-base font-bold text-text-main">حذف الواجب نهائياً؟</h3>
+              <p className="text-xs text-text-muted mt-1 leading-relaxed">
+                هل أنت متأكد من حذف الواجب <span className="text-rose-500 font-bold">"{deleteConfirmHw.title}"</span> نهائياً؟
+                سيتم حذف الواجب وجميع تسليمات إجابات الطلاب المرتبطة به.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDeleteAssignment}
+                className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs cursor-pointer shadow-xs transition-colors"
+              >
+                {isDeleting ? 'جاري الحذف...' : 'نعم، احذف الواجب'}
+              </button>
+
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setDeleteConfirmHw(null)}
+                className="flex-1 py-2 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main font-bold text-xs cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

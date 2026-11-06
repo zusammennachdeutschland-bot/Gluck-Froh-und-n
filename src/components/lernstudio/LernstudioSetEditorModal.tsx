@@ -103,12 +103,12 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-hidden" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <div className="bg-surface border border-surface-border rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-scale-up">
+    <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-hidden" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between bg-surface shrink-0">
-          <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" />
+          <h2 className="text-sm sm:text-base font-bold text-text-main flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-primary" />
             <span>
               {setToEdit
                 ? language === 'ar'

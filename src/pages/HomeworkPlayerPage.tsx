@@ -27,7 +27,8 @@ import {
   HomeworkQuestionResponse,
   HomeworkQuestionType,
   HomeworkFlowMode,
-  HomeworkBlooketMode
+  HomeworkBlooketMode,
+  HomeworkSubmission
 } from '../shared/homeworkTypes';
 import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
 import {
@@ -97,6 +98,38 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
   // Student Flow State
   const [studentName, setStudentName] = useState('');
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [cachedStudents, setCachedStudents] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('dl_students');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const list = parsed
+            .filter((s: any) => !s.deleted && s.status !== 'archived')
+            .map((s: any) => ({ id: s.id, name: s.name }));
+          setCachedStudents(list);
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  const displayStudents = useMemo(() => {
+    if (Array.isArray(assignment?.assignedStudents) && assignment.assignedStudents.length > 0) {
+      return assignment.assignedStudents;
+    }
+    if (cachedStudents.length > 0) {
+      return cachedStudents;
+    }
+    return [];
+  }, [assignment?.assignedStudents, cachedStudents]);
+
+  const [currentAttemptNumber, setCurrentAttemptNumber] = useState<number>(1);
+  const [allSubmissions, setAllSubmissions] = useState<HomeworkSubmission[]>([]);
   const [phase, setPhase] = useState<'lobby' | 'teacher_study' | 'quiz' | 'completed'>('lobby');
   const [studyIndex, setStudyIndex] = useState(0);
   const [completedStudyPhase, setCompletedStudyPhase] = useState(false);
@@ -125,6 +158,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   useEffect(() => {
     if (!assignmentId) return;
     const unsub = subscribeSubmissionsFromFirestore(assignmentId, (subs) => {
+      setAllSubmissions(subs);
       if (subs.length > 0) {
         const sorted = [...subs]
           .sort(
@@ -184,55 +218,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         const localFound = getLocalAssignments().find((a) => a.id === assignmentId);
         if (localFound && localFound.setSnapshot) {
           setAssignment(localFound);
-          saveAssignmentToFirestore(localFound).catch(() => {});
           return;
         }
 
-        // 4. Reconstruct from URL query parameters if needed
-        const params = new URLSearchParams(window.location.search);
-        const setId = params.get('s');
-        const fm = (params.get('fm') as HomeworkFlowMode) || 'teacher_then_quiz';
-        const qtRaw = params.get('qt');
-        const qtList = qtRaw
-          ? (qtRaw.split(',').filter(Boolean) as HomeworkQuestionType[])
-          : (['mc_de_ar', 'true_false'] as HomeworkQuestionType[]);
-        const bm = (params.get('bm') as HomeworkBlooketMode) || 'gold_quest';
-        const idsRaw = params.get('ids');
-        const selectedIds = idsRaw ? idsRaw.split(',').filter(Boolean) : undefined;
-        const customTitle = params.get('t');
-
-        const matchedSet =
-          (setId && DEFAULT_LERNSTUDIO_SETS.find((s) => s.id === setId)) ||
-          DEFAULT_LERNSTUDIO_SETS[0];
-
-        if (matchedSet) {
-          const filteredItems =
-            selectedIds && selectedIds.length > 0
-              ? matchedSet.items.filter((it) => selectedIds.includes(it.id))
-              : matchedSet.items;
-
-          const reconstructed = {
-            id: assignmentId,
-            title: customTitle || `واجب: ${matchedSet.title}`,
-            createdAt: new Date().toISOString(),
-            isActive: true,
-            flowMode: fm,
-            questionTypes: qtList,
-            blooketMode: bm,
-            selectedItemIds: selectedIds,
-            questionCount: (filteredItems.length || matchedSet.items.length) * qtList.length,
-            setSnapshot: {
-              ...matchedSet,
-              items: filteredItems.length > 0 ? filteredItems : matchedSet.items
-            },
-            maxAttempts: 0,
-            allowReplay: true
-          };
-          setAssignment(reconstructed);
-          saveAssignmentToFirestore(reconstructed as any).catch(() => {});
-        } else {
-          setError(data.error || 'تعذر تحميل الواجب المنزلي');
-        }
+        setError('Diese Hausaufgabe ist nicht mehr verfügbar. — تعذر العثور على الواجب أو تم حذفه من قبل المعلم.');
       } catch (err: any) {
         setError(err.message || 'خطأ في الاتصال');
       } finally {
@@ -494,6 +483,15 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     e.preventDefault();
     if (!studentName.trim()) return;
     activeSubmissionIdRef.current = 'sub_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
+
+    const studentSubs = allSubmissions.filter(
+      (s) =>
+        (selectedStudentId && s.studentId === selectedStudentId) ||
+        s.studentName.trim().toLowerCase() === studentName.trim().toLowerCase()
+    );
+    const nextAttempt = studentSubs.length + 1;
+    setCurrentAttemptNumber(nextAttempt);
+
     setStartTime(new Date().toISOString());
     playLernstudioSound('powerup_star');
 
@@ -606,8 +604,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const liveSubmissionObj = {
       id: activeSubmissionIdRef.current,
       assignmentId,
+      studentId: selectedStudentId || undefined,
       studentName: studentName.trim(),
-      attemptNumber: 1,
+      attemptNumber: currentAttemptNumber,
+      status: 'in_progress',
       startedAt: startTime || completedAtIso,
       completedAt: completedAtIso,
       timeSpentSeconds,
@@ -659,8 +659,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const localSubmissionObj = {
       id: activeSubmissionIdRef.current,
       assignmentId,
+      studentId: selectedStudentId || undefined,
       studentName: studentName.trim(),
-      attemptNumber: 1,
+      attemptNumber: currentAttemptNumber,
+      status: 'completed',
       startedAt: startTime || completedAtIso,
       completedAt: completedAtIso,
       timeSpentSeconds,
@@ -724,10 +726,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4" dir="rtl">
+      <div className="min-h-screen bg-background text-text-main flex items-center justify-center p-4 font-sans" dir="rtl">
         <div className="text-center space-y-3">
-          <div className="w-12 h-12 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm font-bold text-slate-300">جاري تحضير الواجب التفاعلي...</p>
+          <div className="w-10 h-10 border-3 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-xs font-bold text-text-muted">جاري تحضير الواجب...</p>
         </div>
       </div>
     );
@@ -735,14 +737,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
   if (error && phase === 'lobby') {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4" dir="rtl">
-        <div className="max-w-md w-full bg-slate-900 border-2 border-rose-500/40 p-6 sm:p-8 rounded-3xl text-center space-y-4">
-          <XCircle className="w-12 h-12 text-rose-500 mx-auto" />
-          <h2 className="text-xl font-black text-white">تنبيه بخصوص الواجب</h2>
-          <p className="text-sm font-medium text-slate-300">{error}</p>
+      <div className="min-h-screen bg-background text-text-main flex items-center justify-center p-4 font-sans" dir="rtl">
+        <div className="max-w-md w-full bg-surface border border-surface-border p-6 rounded-2xl text-center space-y-4 shadow-xs">
+          <XCircle className="w-10 h-10 text-rose-500 mx-auto" />
+          <h2 className="text-base font-bold text-text-main">تنبيه بخصوص الواجب</h2>
+          <p className="text-xs text-text-muted">{error}</p>
           <a
             href="/"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs hover:bg-primary-hover transition-colors shadow-xs"
           >
             <span>العودة للرئيسية</span>
           </a>
@@ -752,122 +754,116 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   }
 
   // ============================================================================
-  // PHASE 0: LOBBY & STUDENT NAME ENTRY (Blooket Style)
+  // PHASE 0: LOBBY & STUDENT NAME ENTRY (Glück Design System)
+  // ============================================================================
+  // ============================================================================
+  // PHASE 0: LOBBY & STUDENT NAME ENTRY (Glück Minimal Student Landing Page)
   // ============================================================================
   if (phase === 'lobby') {
     const flowMode: HomeworkFlowMode = assignment?.flowMode || 'teacher_then_quiz';
-    const activeTypes: HomeworkQuestionType[] =
-      Array.isArray(assignment?.questionTypes) && assignment.questionTypes.length > 0
-        ? assignment.questionTypes
-        : ['mc_de_ar', 'true_false'];
 
     return (
-      <div className="min-h-screen bg-gradient-to-b from-indigo-950 via-slate-950 to-black text-white flex items-center justify-center p-4 font-sans" dir="rtl">
-        <div className="max-w-xl w-full bg-slate-900/90 border-2 border-amber-400/40 p-6 sm:p-8 rounded-3xl space-y-6 shadow-2xl">
-          <div className="text-center space-y-2">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-400/20 border border-amber-400/40 text-amber-300 text-xs font-black">
-              <Sparkles className="w-4 h-4" />
-              <span>تحدي الواجب التفاعلي — أسلوب Blooket 🏆</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white">{assignment?.title}</h1>
-            <p className="text-xs sm:text-sm font-bold text-slate-400">
-              {assignment?.setSnapshot?.title} • {studyItems.length} كلمات • {quizQuestions.length} سؤال تفاعلي
-            </p>
+      <div className="min-h-screen bg-background text-text-main flex flex-col justify-between p-4 sm:p-6 font-sans" dir="rtl">
+        {/* Main Card */}
+        <div className="max-w-md w-full bg-surface border border-surface-border p-5 sm:p-7 rounded-2xl space-y-6 shadow-xs mx-auto my-auto">
+          {/* Glück Heading */}
+          <div className="text-center space-y-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-text-main">
+              {assignment?.title || 'واجب Glück التفاعلي'}
+            </h1>
+            {assignment?.groupName && (
+              <p className="text-xs text-text-muted font-medium">{assignment.groupName}</p>
+            )}
           </div>
 
-          {/* Stages Roadmap */}
-          <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3">
-            <div className="text-xs font-black text-amber-400 flex items-center gap-1.5">
-              <GraduationCap className="w-4 h-4" />
-              <span>خطة سير الواجب المحددة من المعلّم:</span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-              {flowMode === 'teacher_then_quiz' && (
-                <>
-                  <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center gap-1.5">
-                    <span>👨‍🏫 1. المعلّم الناطق (سماع ونطق الكلمات)</span>
-                  </span>
-                  <span className="text-slate-600">←</span>
-                </>
-              )}
-              {activeTypes.map((t, idx) => {
-                const meta = QUESTION_TYPE_META.find((m) => m.id === t);
-                return (
-                  <React.Fragment key={t}>
-                    <span className="px-3 py-1.5 rounded-xl bg-indigo-500/20 border border-indigo-500/40 text-indigo-200">
-                      {meta?.badgeEmoji} {meta?.labelAr || t}
-                    </span>
-                    {idx < activeTypes.length - 1 && <span className="text-slate-600">←</span>}
-                  </React.Fragment>
-                );
-              })}
-              <span className="text-slate-600">←</span>
-              <span className="px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300">
-                🏆 التقييم النهائي ولوحة الشرف
-              </span>
-            </div>
-          </div>
-
-          {/* Student Name Input Form */}
-          <form onSubmit={handleStartHomework} className="space-y-4">
-            <div>
-              <label className="block text-xs font-black text-slate-300 mb-2">
-                اكتب اسمك الثلاثي أو الثنائي للبدء وتسجيل نتيجتك لدى المعلم:
-              </label>
-              <input
-                type="text"
-                required
-                value={studentName}
-                onChange={(e) => setStudentName(e.target.value)}
-                placeholder="مثال: أحمد محمد / Omar Ali..."
-                className="w-full px-4 py-3.5 rounded-2xl bg-slate-800 border-2 border-slate-700 focus:border-amber-400 text-white font-black text-base outline-none transition-all"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={studentName.trim().length < 2}
-              className="w-full py-4 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 disabled:opacity-40 text-slate-950 font-black text-base shadow-lg shadow-amber-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
-            >
-              <span>
-                {flowMode === 'teacher_then_quiz'
-                  ? '👨‍🏫 ابدأ مع المعلّم الناطق ثم الأسئلة'
-                  : '🎯 ابدأ حل الأسئلة الآن'}
-              </span>
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          </form>
-
-          {/* Mini Leaderboard if classmates already played */}
-          {leaderboard.length > 0 && (
-            <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 space-y-2">
-              <div className="text-xs font-black text-amber-400 flex items-center gap-1.5">
-                <Trophy className="w-4 h-4" />
-                <span>لوحة صدارة الأبطال في هذا الواجب ({leaderboard.length}):</span>
+          {/* Student Names as Selectable Cards (Responsive Grid: 2 cols on mobile, 3 cols on sm) */}
+          {displayStudents.length > 0 ? (
+            <div className="space-y-4">
+              <div className="text-center">
+                <p className="text-xs sm:text-sm font-bold text-text-muted">
+                  اختر اسمك للبدء:
+                </p>
               </div>
-              <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                {leaderboard.slice(0, 5).map((entry, i) => (
-                  <div
-                    key={entry.id || i}
-                    className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs"
-                  >
-                    <div className="flex items-center gap-2 font-bold">
-                      <span className="text-amber-400 font-black">
-                        {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-72 overflow-y-auto p-0.5">
+                {displayStudents.map((st: any) => {
+                  const isSelected = selectedStudentId === st.id || studentName.trim().toLowerCase() === st.name.trim().toLowerCase();
+                  return (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedStudentId(st.id);
+                        setStudentName(st.name);
+                      }}
+                      className={`p-3 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1.5 text-xs font-semibold ${
+                        isSelected
+                          ? 'bg-primary text-white border-primary shadow-xs font-bold scale-[1.02]'
+                          : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main hover:border-primary/40'
+                      }`}
+                    >
+                      <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${
+                        isSelected ? 'bg-white/20 text-white' : 'bg-surface-hover border border-surface-border text-text-muted'
+                      }`}>
+                        👤
                       </span>
-                      <span className="text-white">{entry.studentName}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-amber-300 font-black">💰 {entry.goldEarned || 0}</span>
-                      <span className="text-emerald-400 font-black">{entry.accuracy}%</span>
-                    </div>
-                  </div>
-                ))}
+                      <span className="truncate w-full text-center">{st.name}</span>
+                    </button>
+                  );
+                })}
               </div>
+
+              {/* Start Button strictly BELOW student cards */}
+              <button
+                type="button"
+                disabled={!selectedStudentId && studentName.trim().length < 2}
+                onClick={handleStartHomework}
+                className="w-full py-3.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer mt-4"
+              >
+                <span>
+                  {flowMode === 'teacher_then_quiz'
+                    ? 'بدء الواجب 🚀'
+                    : 'بدء حل الأسئلة 🎯'}
+                </span>
+                <ArrowLeft className="w-4 h-4" />
+              </button>
             </div>
+          ) : (
+            /* Legacy Fallback for assignments without student rosters */
+            <form onSubmit={handleStartHomework} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-text-main mb-1.5 text-center">
+                  اكتب اسمك للبدء وتسجيل نتيجتك:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={studentName}
+                  onChange={(e) => setStudentName(e.target.value)}
+                  placeholder="مثال: أحمد محمد / Omar Ali..."
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-hover border border-surface-border focus:border-primary text-text-main font-bold text-sm outline-none transition-all text-center"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={studentName.trim().length < 2}
+                className="w-full py-3.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>
+                  {flowMode === 'teacher_then_quiz'
+                    ? 'بدء الواجب 🚀'
+                    : 'بدء حل الأسئلة 🎯'}
+                </span>
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            </form>
           )}
         </div>
+
+        {/* Teacher Signature Footer at the VERY BOTTOM of the page */}
+        <footer className="text-center text-xs text-text-muted font-normal py-4 select-none">
+          von Herr Abdul-rahman
+        </footer>
       </div>
     );
   }
@@ -880,21 +876,21 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const article = currentStudyItem.article || parsed.article;
     const articleBadgeClass =
       article === 'der'
-        ? 'bg-sky-500/20 border-sky-400 text-sky-300'
+        ? 'bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400'
         : article === 'die'
-        ? 'bg-rose-500/20 border-rose-400 text-rose-300'
+        ? 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
         : article === 'das'
-        ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
-        : 'bg-slate-800 border-slate-700 text-slate-300';
+        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+        : 'bg-surface-hover border-surface-border text-text-muted';
 
     return (
-      <div className="min-h-screen bg-gradient-to-b from-emerald-950 via-slate-950 to-black text-white flex flex-col p-4 sm:p-6 font-sans" dir="rtl">
+      <div className="min-h-screen bg-background text-text-main flex flex-col p-4 sm:p-6 font-sans" dir="rtl">
         {/* Top Bar */}
-        <div className="max-w-2xl w-full mx-auto flex items-center justify-between mb-4">
+        <div className="max-w-2xl w-full mx-auto flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-black flex items-center gap-1.5">
-              <GraduationCap className="w-4 h-4" />
-              <span>مرحلة المعلّم الناطق: الكلمة {studyIndex + 1} من {studyItems.length}</span>
+            <span className="px-3 py-1 rounded-lg bg-surface border border-surface-border text-primary text-xs font-bold flex items-center gap-1.5 shadow-2xs">
+              <GraduationCap className="w-3.5 h-3.5" />
+              <span>مرحلة المعلّم الناطق: {studyIndex + 1} / {studyItems.length}</span>
             </span>
           </div>
           <button
@@ -903,16 +899,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               setCurrentIdx(0);
               setPhase('quiz');
             }}
-            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer"
+            className="px-3 py-1 rounded-lg bg-surface-hover hover:bg-surface text-text-muted hover:text-text-main border border-surface-border text-xs font-semibold cursor-pointer transition-colors"
           >
-            تخطي إلى الأسئلة ←
+            تخطي للأسئلة ←
           </button>
         </div>
 
         {/* Progress Bar */}
-        <div className="max-w-2xl w-full mx-auto h-2.5 bg-slate-800 rounded-full overflow-hidden mb-6">
+        <div className="max-w-2xl w-full mx-auto h-2 bg-surface-border rounded-full overflow-hidden mb-5">
           <div
-            className="h-full bg-gradient-to-r from-emerald-400 to-teal-500 transition-all duration-300"
+            className="h-full bg-primary transition-all duration-300"
             style={{ width: `${((studyIndex + 1) / studyItems.length) * 100}%` }}
           />
         </div>
@@ -921,77 +917,77 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         <div className="flex-1 flex flex-col items-center justify-center max-w-2xl w-full mx-auto">
           <motion.div
             key={currentStudyItem.id}
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full bg-slate-900/95 border-2 border-emerald-400/40 rounded-3xl p-6 sm:p-8 text-center space-y-6 shadow-2xl"
+            className="w-full bg-surface border border-surface-border rounded-2xl p-5 sm:p-7 text-center space-y-4 shadow-xs"
           >
-            <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-black">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-hover border border-surface-border text-text-muted text-xs font-bold">
               <span>👨‍🏫 استمع لنطق المعلّم وردد الكلمة بصوت واضح</span>
             </div>
 
             {currentStudyItem.emoji && (
-              <div className="text-6xl sm:text-7xl select-none">{currentStudyItem.emoji}</div>
+              <div className="text-5xl sm:text-6xl select-none">{currentStudyItem.emoji}</div>
             )}
 
-            <div className="space-y-2" dir="ltr">
+            <div className="space-y-1.5" dir="ltr">
               {article && (
-                <span className={`inline-block px-3 py-0.5 rounded-full border text-xs font-black uppercase ${articleBadgeClass}`}>
+                <span className={`inline-block px-2.5 py-0.5 rounded-md border text-xs font-bold uppercase ${articleBadgeClass}`}>
                   {article === 'der' ? 'der (مذكر)' : article === 'die' ? 'die (مؤنث)' : 'das (محايد)'}
                 </span>
               )}
-              <h2 className="text-3xl sm:text-5xl font-black text-white tracking-wide">
+              <h2 className="text-2xl sm:text-4xl font-bold text-text-main tracking-wide">
                 {currentStudyItem.german}
               </h2>
               {currentStudyItem.plural && (
-                <p className="text-xs font-bold text-slate-400">الجمع (Plural): {currentStudyItem.plural}</p>
+                <p className="text-xs font-semibold text-text-muted">الجمع: {currentStudyItem.plural}</p>
               )}
             </div>
 
-            <div className="py-3 px-6 rounded-2xl bg-slate-950/90 border border-slate-800 inline-block">
-              <p className="text-2xl sm:text-3xl font-black text-amber-400">{currentStudyItem.arabic}</p>
+            <div className="py-2.5 px-5 rounded-xl bg-surface-hover border border-surface-border inline-block">
+              <p className="text-xl sm:text-2xl font-bold text-primary">{currentStudyItem.arabic}</p>
             </div>
 
             {(currentStudyItem.exampleSentenceGerman || currentStudyItem.example) && (
-              <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-3.5 text-center space-y-1">
-                <p className="text-sm font-bold text-slate-200" dir="ltr">
+              <div className="bg-surface-hover/50 border border-surface-border rounded-xl p-3 text-center space-y-1">
+                <p className="text-xs sm:text-sm font-semibold text-text-main" dir="ltr">
                   „{currentStudyItem.exampleSentenceGerman || currentStudyItem.example}“
                 </p>
                 {currentStudyItem.exampleSentenceArabic && (
-                  <p className="text-xs font-semibold text-slate-400">{currentStudyItem.exampleSentenceArabic}</p>
+                  <p className="text-xs text-text-muted">{currentStudyItem.exampleSentenceArabic}</p>
                 )}
               </div>
             )}
 
-            {/* Big Pronunciation Buttons */}
-            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            {/* Pronunciation Buttons */}
+            <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
               <button
                 type="button"
                 onClick={() => speakGermanText(currentStudyItem.german, 0.9)}
-                className="px-6 py-3.5 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition-all"
+                className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-xs cursor-pointer transition-all"
               >
-                <Volume2 className="w-5 h-5" />
-                <span>🔊 استمع للنطق الطبيعي</span>
+                <Volume2 className="w-4 h-4" />
+                <span>🔊 استمع للنطق</span>
               </button>
               <button
                 type="button"
                 onClick={() => speakGermanText(currentStudyItem.german, 0.55)}
-                className="px-5 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-300 font-black text-sm flex items-center gap-2 cursor-pointer active:scale-95 transition-all"
+                className="px-4 py-2.5 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer active:scale-95 transition-all shadow-2xs"
               >
-                <Snail className="w-5 h-5" />
-                <span>🐢 نطق بطيء ومفصّل</span>
+                <Snail className="w-4 h-4 text-primary" />
+                <span>🐢 نطق بطيء</span>
               </button>
             </div>
 
             {/* Prev / Next Navigation */}
-            <div className="flex items-center justify-between gap-3 pt-4 border-t border-slate-800">
+            <div className="flex items-center justify-between gap-2.5 pt-4 border-t border-surface-border">
               <button
                 type="button"
                 disabled={studyIndex === 0}
                 onClick={() => setStudyIndex((i) => Math.max(0, i - 1))}
-                className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 disabled:opacity-30 text-slate-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-2 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border disabled:opacity-30 text-text-muted hover:text-text-main font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
               >
-                <ArrowRight className="w-4 h-4" />
-                <span>الكلمة السابقة</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+                <span>السابقة</span>
               </button>
 
               {studyIndex + 1 < studyItems.length ? (
@@ -1001,9 +997,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                     playLernstudioSound('pop');
                     setStudyIndex((i) => i + 1);
                   }}
-                  className="flex-1 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 cursor-pointer active:scale-95 transition-all"
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
                 >
-                  <span>سمعت ونطقت الكلمة — الكلمة التالية</span>
+                  <span>الكلمة التالية</span>
                   <ArrowLeft className="w-4 h-4" />
                 </button>
               ) : (
@@ -1015,9 +1011,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                     setCurrentIdx(0);
                     setPhase('quiz');
                   }}
-                  className="flex-1 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/30 cursor-pointer active:scale-95 transition-all"
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
                 >
-                  <span>جاهز للأسئلة! ابدأ الاختبار والتقييم الآن 🚀</span>
+                  <span>جاهز للأسئلة! ابدأ الاختبار الآن 🎯</span>
                   <ArrowLeft className="w-4 h-4" />
                 </button>
               )}
@@ -1029,64 +1025,64 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   }
 
   // ============================================================================
-  // PHASE 3: COMPLETED EVALUATION & BLOOKET LEADERBOARD
+  // PHASE 3: COMPLETED EVALUATION & RESULTS
   // ============================================================================
   if (phase === 'completed') {
     const pct = finalScore?.scorePercentage ?? 0;
     const gradeLabel =
       pct >= 90
-        ? 'ممتاز جداً! بطل الألماني 🌟👑'
+        ? 'ممتاز جداً! أداء متميز 🌟'
         : pct >= 75
-        ? 'جيد جداً! أداء رائع 👏✨'
+        ? 'جيد جداً! عمل رائع 👏'
         : pct >= 50
         ? 'جيد! استمر في التدريب 💪'
         : 'تحتاج لمراجعة الكلمات والمحاولة مرة أخرى 📚';
 
     return (
-      <div className="min-h-screen bg-gradient-to-b from-indigo-950 via-slate-950 to-black text-white p-4 sm:p-6 font-sans" dir="rtl">
-        <div className="max-w-3xl mx-auto space-y-6 py-4">
+      <div className="min-h-screen bg-background text-text-main p-4 sm:p-6 font-sans" dir="rtl">
+        <div className="max-w-2xl mx-auto space-y-4 py-4">
           <motion.div
-            initial={{ scale: 0.92, opacity: 0 }}
+            initial={{ scale: 0.98, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="bg-slate-900 border-2 border-amber-400/50 p-6 sm:p-8 rounded-3xl text-center space-y-6 shadow-2xl"
+            className="bg-surface border border-surface-border p-5 sm:p-7 rounded-2xl text-center space-y-4 shadow-xs"
           >
-            <div className="w-20 h-20 rounded-3xl bg-amber-400/20 border-2 border-amber-400 flex items-center justify-center mx-auto">
-              <Trophy className="w-10 h-10 text-amber-400" />
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center mx-auto">
+              <Trophy className="w-7 h-7" />
             </div>
 
             <div className="space-y-1">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-black mb-1">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold mb-1">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>تم إرسال نتيجتك وتفاصيل إجاباتك إلى المعلّم بنجاح!</span>
+                <span>تم تسجيل نتيجتك بنجاح!</span>
               </div>
-              <h2 className="text-2xl sm:text-3xl font-black text-white">
+              <h2 className="text-xl sm:text-2xl font-bold text-text-main">
                 أحسنت يا {studentName}! 🎉
               </h2>
-              <p className="text-sm font-black text-amber-300">{gradeLabel}</p>
+              <p className="text-xs font-bold text-primary">{gradeLabel}</p>
             </div>
 
             {submitting ? (
-              <p className="text-sm font-bold text-amber-400 animate-pulse">جاري حفظ النتيجة وإرسالها للمعلم...</p>
+              <p className="text-xs font-bold text-text-muted animate-pulse">جاري حفظ النتيجة...</p>
             ) : (
               finalScore && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-                    <div className="text-2xl font-black text-amber-400">{finalScore.scorePercentage}%</div>
-                    <div className="text-[11px] font-bold text-slate-400 mt-1">التقييم العام</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                  <div className="p-3 rounded-xl bg-surface-hover border border-surface-border">
+                    <div className="text-xl font-bold text-primary">{finalScore.scorePercentage}%</div>
+                    <div className="text-[11px] font-medium text-text-muted mt-0.5">التقييم العام</div>
                   </div>
-                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-                    <div className="text-2xl font-black text-emerald-400">
+                  <div className="p-3 rounded-xl bg-surface-hover border border-surface-border">
+                    <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
                       {finalScore.correctAnswersCount} / {finalScore.totalQuestions}
                     </div>
-                    <div className="text-[11px] font-bold text-slate-400 mt-1">إجابات صحيحة</div>
+                    <div className="text-[11px] font-medium text-text-muted mt-0.5">إجابات صحيحة</div>
                   </div>
-                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-                    <div className="text-2xl font-black text-yellow-400">💰 {finalScore.goldEarned ?? gold}</div>
-                    <div className="text-[11px] font-bold text-slate-400 mt-1">ذهب Blooket</div>
+                  <div className="p-3 rounded-xl bg-surface-hover border border-surface-border">
+                    <div className="text-xl font-bold text-amber-500">💰 {finalScore.goldEarned ?? gold}</div>
+                    <div className="text-[11px] font-medium text-text-muted mt-0.5">النقاط</div>
                   </div>
-                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-                    <div className="text-2xl font-black text-orange-400">🔥 {finalScore.maxStreak ?? maxStreak}</div>
-                    <div className="text-[11px] font-bold text-slate-400 mt-1">أطول سلسلة</div>
+                  <div className="p-3 rounded-xl bg-surface-hover border border-surface-border">
+                    <div className="text-xl font-bold text-primary">🔥 {finalScore.maxStreak ?? maxStreak}</div>
+                    <div className="text-[11px] font-medium text-text-muted mt-0.5">أطول سلسلة</div>
                   </div>
                 </div>
               )
@@ -1094,35 +1090,35 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
             {/* Detailed Question Review */}
             <div className="text-right space-y-2 pt-2">
-              <h3 className="text-sm font-black text-slate-300">مراجعة إجاباتك بالتفصيل ({responses.length}):</h3>
-              <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+              <h3 className="text-xs font-bold text-text-main">مراجعة الإجابات ({responses.length}):</h3>
+              <div className="max-h-60 overflow-y-auto space-y-1.5 pr-0.5">
                 {responses.map((r, i) => (
                   <div
                     key={i}
-                    className={`flex items-center justify-between p-3 rounded-xl border text-xs font-bold ${
+                    className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium ${
                       r.isCorrect
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                        : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                        ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                        : 'bg-rose-500/5 border-rose-500/20 text-rose-700 dark:text-rose-400'
                     }`}
                   >
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => speakGermanText(r.germanWord, 0.9)}
-                        className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+                        className="p-1 rounded-md bg-surface border border-surface-border text-text-main cursor-pointer"
                       >
                         <Volume2 className="w-3.5 h-3.5" />
                       </button>
                       <div>
-                        <div className="font-black text-white">{r.germanWord}</div>
-                        <div className="text-[11px] text-slate-400">إجابتك: {r.studentAnswer}</div>
+                        <div className="font-bold text-text-main">{r.germanWord}</div>
+                        <div className="text-[11px] text-text-muted">إجابتك: {r.studentAnswer}</div>
                       </div>
                     </div>
-                    <div className="text-left">
+                    <div>
                       {r.isCorrect ? (
-                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300">صحيح ✓</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ صحيح</span>
                       ) : (
-                        <span className="text-rose-300">الصواب: {r.correctAnswer}</span>
+                        <span className="text-rose-600 dark:text-rose-400 font-bold">الصواب: {r.correctAnswer}</span>
                       )}
                     </div>
                   </div>
@@ -1144,10 +1140,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                     setStartTime(new Date().toISOString());
                     setPhase(assignment?.flowMode === 'teacher_then_quiz' ? 'teacher_study' : 'quiz');
                   }}
-                  className="w-full py-3.5 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-sm flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-2.5 px-4 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-2xs"
                 >
-                  <RotateCcw className="w-4 h-4" />
-                  <span>إعادة التحدي لتحسين نتيجتك</span>
+                  <RotateCcw className="w-3.5 h-3.5 text-primary" />
+                  <span>إعادة المحاولة لتحسين النتيجة</span>
                 </button>
               </div>
             )}
@@ -1158,63 +1154,56 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   }
 
   // ============================================================================
-  // PHASE 2: MULTI-STAGE QUIZ + BLOOKET GOLD CHESTS
+  // PHASE 2: MULTI-STAGE QUIZ & EVALUATION
   // ============================================================================
-  const cardColors = [
-    'bg-amber-500 hover:bg-amber-400 border-amber-300 text-slate-950',
-    'bg-indigo-600 hover:bg-indigo-500 border-indigo-400 text-white',
-    'bg-emerald-600 hover:bg-emerald-500 border-emerald-400 text-white',
-    'bg-rose-600 hover:bg-rose-500 border-rose-400 text-white'
-  ];
-
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col p-4 sm:p-6 font-sans" dir="rtl">
-      {/* Top Blooket HUD Bar */}
+    <div className="min-h-screen bg-background text-text-main flex flex-col p-4 sm:p-6 font-sans" dir="rtl">
+      {/* Top HUD Bar */}
       <div className="max-w-3xl w-full mx-auto flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2">
-          <span className="px-3 py-1.5 rounded-xl bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-xs font-black">
+          <span className="px-3 py-1 rounded-lg bg-surface border border-surface-border text-primary text-xs font-bold shadow-2xs">
             {currentQuestion?.stageBadgeEmoji} {currentQuestion?.stageLabelAr}
           </span>
-          <span className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-black text-amber-400">
+          <span className="px-3 py-1 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold text-text-main">
             السؤال {currentIdx + 1} / {quizQuestions.length}
           </span>
         </div>
 
         <div className="flex items-center gap-2">
           {streak > 1 && (
-            <span className="px-3 py-1.5 rounded-xl bg-orange-500/20 border border-orange-500/40 text-orange-300 text-xs font-black flex items-center gap-1 animate-bounce">
+            <span className="px-2.5 py-1 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-600 dark:text-orange-400 text-xs font-bold flex items-center gap-1">
               <Flame className="w-3.5 h-3.5" /> x{Math.min(3, streak)}
             </span>
           )}
-          <span className="px-3.5 py-1.5 rounded-xl bg-amber-400/20 border border-amber-400/40 text-amber-300 text-xs font-black flex items-center gap-1.5">
-            <Coins className="w-4 h-4 text-amber-400" />
-            <span>{gold} ذهب</span>
+          <span className="px-3 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5">
+            <Coins className="w-3.5 h-3.5" />
+            <span>{gold} نقطة</span>
           </span>
-          <span className="text-xs font-bold text-slate-400 hidden sm:inline">👤 {studentName}</span>
+          <span className="text-xs font-medium text-text-muted hidden sm:inline">👤 {studentName}</span>
         </div>
       </div>
 
       {/* Progress Bar */}
-      <div className="max-w-3xl w-full mx-auto h-2.5 bg-slate-800 rounded-full overflow-hidden mb-6">
+      <div className="max-w-3xl w-full mx-auto h-2 bg-surface-border rounded-full overflow-hidden mb-6">
         <div
-          className="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all duration-300"
+          className="h-full bg-primary transition-all duration-300"
           style={{ width: `${((currentIdx + 1) / Math.max(1, quizQuestions.length)) * 100}%` }}
         />
       </div>
 
       {/* Question Card */}
       {currentQuestion && (
-        <div className="flex-1 flex flex-col justify-center max-w-3xl w-full mx-auto space-y-6">
+        <div className="flex-1 flex flex-col justify-center max-w-2xl w-full mx-auto space-y-4">
           <motion.div
             key={currentQuestion.id}
-            initial={{ opacity: 0, y: 15 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-slate-900 border-2 border-slate-800 p-6 sm:p-8 rounded-3xl text-center space-y-4 shadow-2xl relative"
+            className="bg-surface border border-surface-border p-5 sm:p-7 rounded-2xl text-center space-y-3.5 shadow-xs relative"
           >
-            <p className="text-xs sm:text-sm font-black text-amber-400">{currentQuestion.promptTitleAr}</p>
+            <p className="text-xs font-bold text-primary">{currentQuestion.promptTitleAr}</p>
 
             {currentQuestion.emoji && (
-              <div className="text-5xl sm:text-6xl select-none">{currentQuestion.emoji}</div>
+              <div className="text-4xl sm:text-5xl select-none">{currentQuestion.emoji}</div>
             )}
 
             {currentQuestion.type === 'listen_choose' ? (
@@ -1222,15 +1211,15 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                 <button
                   type="button"
                   onClick={() => speakGermanText(currentQuestion.germanWord, 0.85)}
-                  className="px-8 py-5 rounded-3xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black text-lg inline-flex items-center gap-3 shadow-xl shadow-amber-500/25 cursor-pointer active:scale-95 transition-all"
+                  className="px-6 py-3.5 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-sm inline-flex items-center gap-2.5 shadow-xs cursor-pointer transition-all"
                 >
-                  <Volume2 className="w-7 h-7 animate-pulse" />
-                  <span>🔊 اضغط هنا للاستماع للكلمة</span>
+                  <Volume2 className="w-5 h-5 animate-pulse" />
+                  <span>🔊 اضغط للاستماع للكلمة</span>
                 </button>
               </div>
             ) : (
               <h2
-                className="text-2xl sm:text-4xl font-black text-white tracking-wide"
+                className="text-xl sm:text-3xl font-bold text-text-main tracking-wide"
                 dir={currentQuestion.type === 'mc_ar_de' ? 'rtl' : 'ltr'}
               >
                 {currentQuestion.promptMainText}
@@ -1238,27 +1227,27 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             )}
 
             {currentQuestion.promptSubText && (
-              <div className="py-2 px-5 rounded-2xl bg-slate-950/90 border border-slate-800 inline-block">
-                <p className="text-lg sm:text-2xl font-black text-amber-300">{currentQuestion.promptSubText}</p>
+              <div className="py-2 px-4 rounded-xl bg-surface-hover border border-surface-border inline-block">
+                <p className="text-base sm:text-xl font-bold text-primary">{currentQuestion.promptSubText}</p>
               </div>
             )}
 
             {!currentQuestion.hideGermanText && (
-              <div className="flex items-center justify-center gap-3 pt-1">
+              <div className="flex items-center justify-center gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => speakGermanText(currentQuestion.germanWord, 0.9)}
-                  className="px-4 py-2 rounded-xl bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/40 text-amber-300 font-black text-xs flex items-center gap-2 cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
                 >
-                  <Volume2 className="w-4 h-4" />
-                  <span>استمع للنطق</span>
+                  <Volume2 className="w-3.5 h-3.5 text-primary" />
+                  <span>استمع</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => speakGermanText(currentQuestion.germanWord, 0.55)}
-                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 font-black text-xs flex items-center gap-2 cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-text-muted hover:text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
                 >
-                  <Snail className="w-4 h-4" />
+                  <Snail className="w-3.5 h-3.5" />
                   <span>بطيء</span>
                 </button>
               </div>
@@ -1267,23 +1256,21 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
           {/* Answer Options */}
           {currentQuestion.type === 'true_false' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {currentQuestion.options.map((opt, idx) => {
                 const isSelected = selectedChoice === opt;
                 const isRightOption = opt === currentQuestion.correctAnswer;
                 const isTrueBtn = idx === 0;
 
-                let btnStyle = isTrueBtn
-                  ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400 text-white'
-                  : 'bg-rose-600 hover:bg-rose-500 border-rose-400 text-white';
+                let btnStyle = 'bg-surface hover:bg-surface-hover border-surface-border text-text-main';
 
                 if (selectedChoice !== null) {
                   if (isRightOption) {
-                    btnStyle = 'bg-emerald-500 border-emerald-300 text-slate-950 ring-4 ring-emerald-400/40';
+                    btnStyle = 'bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500/30';
                   } else if (isSelected) {
-                    btnStyle = 'bg-rose-700 border-rose-400 text-white opacity-90';
+                    btnStyle = 'bg-rose-500/15 border-rose-500 text-rose-600 dark:text-rose-400';
                   } else {
-                    btnStyle = 'bg-slate-900 border-slate-800 text-slate-500 opacity-50';
+                    btnStyle = 'bg-surface border-surface-border opacity-40';
                   }
                 }
 
@@ -1293,9 +1280,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                     type="button"
                     disabled={selectedChoice !== null}
                     onClick={() => handleSelectOption(opt)}
-                    className={`p-6 rounded-3xl border-b-4 font-black text-xl sm:text-2xl flex items-center justify-center gap-3 transition-all cursor-pointer active:scale-95 shadow-xl ${btnStyle}`}
+                    className={`p-4 rounded-xl border font-bold text-base sm:text-lg flex items-center justify-center gap-2.5 transition-all cursor-pointer active:scale-95 shadow-2xs ${btnStyle}`}
                   >
-                    {isTrueBtn ? <Check className="w-7 h-7 stroke-[3]" /> : <X className="w-7 h-7 stroke-[3]" />}
+                    {isTrueBtn ? <Check className="w-5 h-5" /> : <X className="w-5 h-5" />}
                     <span>{opt}</span>
                   </button>
                 );
@@ -1303,7 +1290,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             </div>
           ) : (
             <div
-              className={`grid gap-3.5 ${
+              className={`grid gap-2.5 ${
                 currentQuestion.options.length === 3 ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'
               }`}
             >
@@ -1311,14 +1298,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                 const isSelected = selectedChoice === choice;
                 const isRightOption = choice.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
 
-                let btnStyle = cardColors[idx % cardColors.length];
+                let btnStyle = 'bg-surface hover:bg-surface-hover border-surface-border text-text-main';
                 if (selectedChoice !== null) {
                   if (isRightOption) {
-                    btnStyle = 'bg-emerald-500 border-emerald-300 text-slate-950 ring-4 ring-emerald-400/40';
+                    btnStyle = 'bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500/30';
                   } else if (isSelected) {
-                    btnStyle = 'bg-rose-600 border-rose-400 text-white';
+                    btnStyle = 'bg-rose-500/15 border-rose-500 text-rose-600 dark:text-rose-400';
                   } else {
-                    btnStyle = 'bg-slate-900 border-slate-800 text-slate-500 opacity-50';
+                    btnStyle = 'bg-surface border-surface-border opacity-40';
                   }
                 }
 
@@ -1329,11 +1316,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                     disabled={selectedChoice !== null}
                     onClick={() => handleSelectOption(choice)}
                     dir="auto"
-                    className={`p-5 rounded-2xl border-b-4 font-black text-lg sm:text-xl text-center transition-all flex items-center justify-between gap-3 cursor-pointer active:scale-95 shadow-lg ${btnStyle}`}
+                    className={`p-3.5 rounded-xl border font-bold text-sm sm:text-base text-center transition-all flex items-center justify-between gap-2.5 cursor-pointer active:scale-95 shadow-2xs ${btnStyle}`}
                   >
-                    <span className="flex-1">{choice}</span>
-                    {selectedChoice !== null && isRightOption && <CheckCircle2 className="w-6 h-6 shrink-0" />}
-                    {selectedChoice !== null && isSelected && !isRightOption && <XCircle className="w-6 h-6 shrink-0" />}
+                    <span className="flex-1 text-center truncate">{choice}</span>
+                    {selectedChoice !== null && isRightOption && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
+                    {selectedChoice !== null && isSelected && !isRightOption && <XCircle className="w-4 h-4 text-rose-600 shrink-0" />}
                   </button>
                 );
               })}
@@ -1342,28 +1329,28 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         </div>
       )}
 
-      {/* Blooket 3-Chest Gold Quest Bonus Modal */}
+      {/* Bonus Box Modal */}
       <AnimatePresence>
         {showChestBonus && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
             dir="rtl"
           >
             <motion.div
-              initial={{ scale: 0.9, y: 20 }}
+              initial={{ scale: 0.95, y: 10 }}
               animate={{ scale: 1, y: 0 }}
-              className="bg-slate-900 border-2 border-amber-400 rounded-3xl max-w-lg w-full p-6 text-center space-y-5 shadow-2xl"
+              className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-6 text-center space-y-4 shadow-xl text-text-main"
             >
-              <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-amber-400/20 text-amber-300 text-xs font-black">
-                <Gift className="w-4 h-4" />
-                <span>إجابة صحيحة! مكافأة صناديق الذهب (Blooket Gold Quest)</span>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
+                <Gift className="w-3.5 h-3.5" />
+                <span>إجابة صحيحة! مكافأة إضافية</span>
               </div>
-              <h3 className="text-xl sm:text-2xl font-black text-white">اختر صندوق كنز واحد لزيادة ذهبك! 🎁</h3>
+              <h3 className="text-base sm:text-lg font-bold">اختر صندوقاً واحداً لمضاعفة نقاطك! 🎁</h3>
 
-              <div className="grid grid-cols-3 gap-3 pt-2">
+              <div className="grid grid-cols-3 gap-2.5 pt-1">
                 {chestOptions.map((c, i) => {
                   const isOpened = openedChestIndex === i;
                   const isOther = openedChestIndex !== null && openedChestIndex !== i;
@@ -1373,16 +1360,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                       type="button"
                       disabled={openedChestIndex !== null}
                       onClick={() => handlePickChest(i)}
-                      className={`p-4 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 transition-all cursor-pointer ${
+                      className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
                         isOpened
-                          ? 'bg-amber-400/25 border-amber-300 scale-105 shadow-lg shadow-amber-500/30'
+                          ? 'bg-primary/10 border-primary scale-105 shadow-xs'
                           : isOther
-                          ? 'bg-slate-950 border-slate-800 opacity-50'
-                          : 'bg-slate-800 hover:bg-slate-700 border-amber-400/50 hover:scale-105'
+                          ? 'bg-surface border-surface-border opacity-40'
+                          : 'bg-surface hover:bg-surface-hover border-surface-border hover:scale-105'
                       }`}
                     >
-                      <span className="text-4xl sm:text-5xl select-none">{isOpened ? '👑' : '🎁'}</span>
-                      <span className="text-xs font-black text-amber-300">
+                      <span className="text-3xl sm:text-4xl select-none">{isOpened ? '👑' : '🎁'}</span>
+                      <span className="text-xs font-bold text-text-main">
                         {openedChestIndex !== null ? c.bonusText : `صندوق ${i + 1}`}
                       </span>
                     </button>

@@ -1,24 +1,20 @@
-# Task List — Google Cloud Full Workspace Synchronization
+# Task List — Glück Smart Data Cleanup & Lesson Optimization
 
-- [x] **1. Schema & Security Rules Architecture**
-  - [x] Update `firebase-blueprint.json` with `UserWorkspaceCategoryChunkDoc` entity and `/user_workspaces/{userId}/categories/{docId}` path.
-  - [x] Update `firestore.rules` with strict ownership checks (`request.auth != null && request.auth.uid == userId`) and field validations (`isValidWorkspaceChunk`).
-  - [x] Deploy security rules to Firebase using `DeployRules`.
+- [x] **1. Architecture & Safeguard Service**
+  - [x] Created `src/services/lessonCleanupService.ts` with 30-day historical retention rules, 14-day future rolling window logic, and 100% financial invariance auditor (`preUnpaidBalancesTotal === postUnpaidBalancesTotal`).
+  - [x] Implemented local JSON archive export (`exportPrunedLessonsBackupJson`) and tombstone tracker (`getPrunedLessonIds`, `addPrunedLessonIds`) to prevent cloud sync resurrection.
 
-- [x] **2. Engine & Sync Service Implementation**
-  - [x] Build `src/services/firebaseWorkspaceSync.ts` supporting chunking, bidirectional upload/download, and real-time listeners (`onSnapshot`).
-  - [x] Build `src/hooks/useGoogleCloudWorkspaceSync.ts` with debounced auto-push on mutation and background pull on remote changes.
-  - [x] Build `GoogleCloudSyncCard.tsx` with Google sign-in/sign-out, auto-sync toggle, unboxed tabular stats, and 1-tap manual sync/upload/download actions.
+- [x] **2. Generator & Sync Deduplication Optimization**
+  - [x] Capped future recurring lesson generation loop in `src/context/AppContext.tsx` to 14 days (`ROLLING_FUTURE_WINDOW_DAYS = 14`), eliminating ~2400 bloated recurring placeholders.
+  - [x] Filtered out tombstoned pruned lessons in `initialLessonDeduplication` and `syncLessons` to guarantee pruned records never return from old storage chunks or Firebase caches.
+  - [x] Configured automated daily and on-startup cleanup check in `AppContext.tsx`.
 
-- [x] **3. Application UI Integration**
-  - [x] Mount `useGoogleCloudWorkspaceSync` hook inside `MainApp` (`src/App.tsx`).
-  - [x] Add `GoogleCloudSyncCard` to **SettingsView** (mobile overview & desktop right panel).
-  - [x] Add `GoogleCloudSyncCard` inside **TeacherProfileSection** (Teacher Identity & Account).
-  - [x] Add `GoogleCloudSyncCard` to the top of **SmartBackupCenter** (Backup & Restore).
+- [x] **3. UI & Control Surface**
+  - [x] Built `src/components/SmartDataCleanupCard.tsx` following Glück's minimalist design: unboxed metadata metrics (`·`), financial invariant verification shield, one-click preview modal with sample lessons list, and JSON archive download.
+  - [x] Integrated `SmartDataCleanupCard` into **Smart Backup Center** (`src/components/SmartBackupCenter.tsx`), **Teacher Profile** (`src/components/TeacherProfileSection.tsx`), and **Settings** (`src/components/SettingsView.tsx`).
 
-- [x] **4. Verification & Fixes**
-  - [x] Verify standalone build (`lernstudio-web` via `tsc -b && vite build`).
-  - [x] Verify root app compilation and linting (`compile_applet` & `lint_applet`).
-  - [x] Fix Firestore Security Rules for `lernstudio_sets`, `homework_assignments`, and `homework_submissions` list permissions.
-  - [x] Deploy updated security rules via `fax.DeployRules`.
-  - [x] Verify dev server restarted and responsive.
+- [x] **4. Verification & Testing**
+  - [x] Verified build with `compile_applet` (Clean compilation).
+  - [x] Verified types and linter with `lint_applet` (`tsc --noEmit` passed with 0 errors).
+  - [x] Verified full production bundle with `npm run build` (Succeeded).
+  - [x] Dev server restarted cleanly on port 3000.

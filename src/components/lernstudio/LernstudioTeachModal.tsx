@@ -610,17 +610,18 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     setIsCorrectAnswer(correct);
 
     if (correct) {
-      setStars((prev) => prev + 1);
-      setFeedbackMessage('ممتاز! إجابة صحيحة 🌟');
+      setStars((prev) => prev + 100);
+      setFeedbackMessage('ممتاز! إجابة صحيحة +100 💰 🌟');
       // Advance to next question without repeating pronunciation
       handleCorrectAnswerAdvance(handleStage2NextQuestion);
     } else {
+      setStars((prev) => Math.max(0, prev - 50));
       if (soundEnabled) {
         playLernstudioSound('wrong');
         handleSpeakGerman(currentQ.targetItem.german);
       }
       setFeedbackMessage(
-        `إجابة خاطئة! الإجابة الصحيحة هي: الكلمة ${
+        `إجابة خاطئة (-50 💰)! الإجابة الصحيحة هي: الكلمة ${
           currentQ.isMatch ? 'مطابقة بالفعل' : 'غير مطابقة'
         } (${currentQ.targetItem.german} = ${currentQ.targetItem.arabic})`
       );
@@ -651,17 +652,18 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     setIsCorrectAnswer(correct);
 
     if (correct) {
-      setStars((prev) => prev + 1);
-      setFeedbackMessage('رائع جداً! إجابة صحيحة 👏');
+      setStars((prev) => prev + 100);
+      setFeedbackMessage('رائع جداً! إجابة صحيحة +100 💰 👏');
       // Advance to next question without repeating pronunciation
       handleCorrectAnswerAdvance(handleStage3NextQuestion);
     } else {
+      setStars((prev) => Math.max(0, prev - 50));
       if (soundEnabled) {
         playLernstudioSound('wrong');
         handleSpeakGerman(currentQ.targetItem.german);
       }
       setFeedbackMessage(
-        `اختيار خاطئ! الاختيار الصحيح هو: ${currentQ.targetItem.german} (${currentQ.targetItem.arabic})`
+        `اختيار خاطئ (-50 💰)! الاختيار الصحيح هو: ${currentQ.targetItem.german} (${currentQ.targetItem.arabic})`
       );
     }
   };
@@ -690,17 +692,18 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     setIsCorrectAnswer(correct);
 
     if (correct) {
-      setStars((prev) => prev + 1);
-      setFeedbackMessage('بطل! إجابة صحيحة من بين كل الكلمات 🌟');
+      setStars((prev) => prev + 100);
+      setFeedbackMessage('بطل! إجابة صحيحة +100 💰 🌟');
       // Advance to next question without repeating pronunciation
       handleCorrectAnswerAdvance(handleStage4NextQuestion);
     } else {
+      setStars((prev) => Math.max(0, prev - 50));
       if (soundEnabled) {
         playLernstudioSound('wrong');
         handleSpeakGerman(currentQ.targetItem.german);
       }
       setFeedbackMessage(
-        `حاول مرة أخرى! الإجابة الصحيحة هي: ${currentQ.targetItem.german} (${currentQ.targetItem.arabic})`
+        `حاول مرة أخرى (-50 💰)! الإجابة الصحيحة هي: ${currentQ.targetItem.german} (${currentQ.targetItem.arabic})`
       );
     }
   };
@@ -743,8 +746,8 @@ export const LernstudioTeachModal: React.FC<Props> = ({
         // Completed all syllables!
         setIsAnswerSubmitted(true);
         setIsCorrectAnswer(true);
-        setStars((prev) => prev + 1);
-        setFeedbackMessage('ممتاز! تم تركيب المقاطع الصوتية للكلمة بنجاح 🧩🌟');
+        setStars((prev) => prev + 100);
+        setFeedbackMessage('ممتاز! تم تركيب المقاطع الصوتية بنجاح +100 💰 🧩🌟');
         handleCorrectAnswerAdvance(handleSyllableNextQuestion);
       } else {
         if (soundEnabled) {
@@ -753,12 +756,13 @@ export const LernstudioTeachModal: React.FC<Props> = ({
       }
     } else {
       // Incorrect choice
+      setStars((prev) => Math.max(0, prev - 25));
       if (soundEnabled) {
         playLernstudioSound('wrong');
       }
       setErrorSyllableChoiceId(choice.id);
       setTimeout(() => setErrorSyllableChoiceId(null), 600);
-      setFeedbackMessage(`مقطع غير مطابق، اختر المقطع التالي بالترتيب!`);
+      setFeedbackMessage(`مقطع غير مطابق (-25 💰)، اختر المقطع التالي بالترتيب!`);
     }
   };
 
@@ -786,15 +790,16 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     setIsCorrectAnswer(isCorrect);
 
     if (isCorrect) {
-      setStars((prev) => prev + 1);
-      setFeedbackMessage('ممتاز! تم إكمال الحرف الناقص بنجاح 🌟');
+      setStars((prev) => prev + 100);
+      setFeedbackMessage('ممتاز! تم إكمال الحرف الناقص بنجاح +100 💰 🌟');
       handleCorrectAnswerAdvance(handleStage5NextQuestion);
     } else {
+      setStars((prev) => Math.max(0, prev - 50));
       if (soundEnabled) {
         playLernstudioSound('wrong');
         handleSpeakGerman(currentQ.targetItem.german);
       }
-      setFeedbackMessage(`حاول مرة أخرى! الحرف الصحيح هو: "${currentQ.missingChar.toUpperCase()}"`);
+      setFeedbackMessage(`حاول مرة أخرى (-50 💰)! الحرف الصحيح هو: "${currentQ.missingChar.toUpperCase()}"`);
     }
   };
 
@@ -836,8 +841,8 @@ export const LernstudioTeachModal: React.FC<Props> = ({
         // Completed sequence!
         setIsAnswerSubmitted(true);
         setIsCorrectAnswer(true);
-        setStars((prev) => prev + 1);
-        setFeedbackMessage('رائع جدًا! اكتملت الحروف المتتالية بنجاح 🧩');
+        setStars((prev) => prev + 100);
+        setFeedbackMessage('رائع جدًا! اكتملت الحروف المتتالية بنجاح +100 💰 🧩');
         handleCorrectAnswerAdvance(handleStage6NextQuestion);
       } else {
         if (soundEnabled) {
@@ -846,12 +851,13 @@ export const LernstudioTeachModal: React.FC<Props> = ({
       }
     } else {
       // Incorrect choice
+      setStars((prev) => Math.max(0, prev - 25));
       if (soundEnabled) {
         playLernstudioSound('wrong');
       }
       setStage6ErrorChoiceId(choice.id);
       setTimeout(() => setStage6ErrorChoiceId(null), 600);
-      setFeedbackMessage(`حرف غير مطابق، ابحث عن الحرف التالي في الترتيب!`);
+      setFeedbackMessage(`حرف غير مطابق (-25 💰)، ابحث عن الحرف التالي في الترتيب!`);
     }
   };
 
@@ -892,8 +898,8 @@ export const LernstudioTeachModal: React.FC<Props> = ({
         // Completed full word!
         setIsAnswerSubmitted(true);
         setIsCorrectAnswer(true);
-        setStars((prev) => prev + 2);
-        setFeedbackMessage('عبقري! تم كِتابة الكلمة كاملة بالترتيب الصحيح ✍️🌟');
+        setStars((prev) => prev + 200);
+        setFeedbackMessage('عبقري! تم كِتابة الكلمة كاملة بالترتيب الصحيح +200 💰 ✍️🌟');
         handleCorrectAnswerAdvance(handleStage7NextQuestion);
       } else {
         if (soundEnabled) {
@@ -902,12 +908,13 @@ export const LernstudioTeachModal: React.FC<Props> = ({
       }
     } else {
       // Incorrect choice
+      setStars((prev) => Math.max(0, prev - 25));
       if (soundEnabled) {
         playLernstudioSound('wrong');
       }
       setStage7ErrorChoiceId(choice.id);
       setTimeout(() => setStage7ErrorChoiceId(null), 600);
-      setFeedbackMessage(`اختر الحرف التالي في الموضع المضيء!`);
+      setFeedbackMessage(`اختر الحرف التالي في الموضع المضيء (-25 💰)!`);
     }
   };
 
@@ -953,28 +960,28 @@ export const LernstudioTeachModal: React.FC<Props> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[120] bg-black/75 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-hidden animate-fade-in"
+      className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
-      <div className="bg-surface border border-surface-border rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-scale-up">
+      <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
         {/* Header */}
         <div className="px-4 py-3 border-b border-surface-border flex items-center justify-between bg-surface shrink-0 gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="p-2 bg-primary/10 text-primary rounded-xl shrink-0">
-              <BookOpen className="w-5 h-5" />
+            <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0">
+              <BookOpen className="w-4 h-4" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="text-sm sm:text-base font-black text-text-main truncate">
+                <h2 className="text-sm sm:text-base font-bold text-text-main truncate">
                   {t.teachModeTitle} - {displaySetTitle}
                 </h2>
-                <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-xs font-bold inline-flex items-center gap-1 shrink-0">
-                  <Star className="w-3.5 h-3.5 fill-amber-500" />
-                  {stars}
+                <span className="text-xs font-bold text-amber-500 inline-flex items-center gap-1 shrink-0">
+                  <span>💰 {stars}</span>
+                  <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
                 </span>
               </div>
-              <p className="text-[11px] font-bold text-text-muted truncate">
-                {set.topic} • {items.length} كلمات
+              <p className="text-xs text-text-muted truncate">
+                {set.topic} · {items.length} كلمات
               </p>
             </div>
           </div>
@@ -996,7 +1003,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                   ? 'text-primary bg-primary/10 hover:bg-primary/20'
                   : 'text-red-500 bg-red-500/10 hover:bg-red-500/20'
               }`}
-              title={soundEnabled ? 'كتم الصوت تماماً والخيارات الصوتية' : 'تفعيل النطق والصوت'}
+              title={soundEnabled ? 'كتم الصوت' : 'تفعيل النطق'}
             >
               {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </button>
@@ -1007,15 +1014,15 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                 resetAnswerState();
                 setShuffleKey((k) => k + 1);
               }}
-              className="p-1.5 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
-              title="خلط وإعادة ترتيب الأسئلة عشوائياً"
+              className="p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+              title="خلط الأسئلة"
             >
               <Shuffle className="w-4 h-4" />
             </button>
             <button
               type="button"
               onClick={handleResetProgress}
-              className="p-1.5 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+              className="p-1.5 text-text-muted hover:text-text-main hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
               title="إعادة التقدّم من البداية"
             >
               <RotateCcw className="w-4 h-4" />
@@ -1030,9 +1037,9 @@ export const LernstudioTeachModal: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Stages Stepper Nav - Horizontally Scrollable compact pills */}
-        <div className="bg-surface-hover/60 border-b border-surface-border px-2 py-2 shrink-0 overflow-x-auto scrollbar-none">
-          <div className="flex items-center gap-1.5 min-w-max">
+        {/* Stages Stepper Nav - Horizontally Scrollable compact segmented buttons */}
+        <div className="bg-surface-hover border-b border-surface-border px-2 py-1.5 shrink-0 overflow-x-auto scrollbar-none">
+          <div className="flex items-center gap-1 min-w-max">
             {stagesList.map((stg) => {
               const isActive = currentStage === stg.num;
               const isDone = completedStages.includes(stg.num);
@@ -1047,17 +1054,17 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                     resetAnswerState();
                     setShuffleKey((k) => k + 1);
                   }}
-                  className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
+                  className={`flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
                     isActive
-                      ? 'bg-primary text-white border-primary shadow-xs scale-[1.02]'
+                      ? 'bg-primary text-white border-primary shadow-xs'
                       : isDone
                       ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                      : 'bg-surface/80 text-text-muted hover:bg-surface border-surface-border'
+                      : 'bg-surface text-text-muted hover:text-text-main border-surface-border'
                   }`}
                   title={stg.desc}
                 >
-                  <span className="text-xs sm:text-sm shrink-0">{isDone ? '✔️' : stg.icon}</span>
-                  <span className="text-xs">{stg.title}</span>
+                  <span className="text-xs shrink-0">{isDone ? '✓' : stg.icon}</span>
+                  <span>{stg.title}</span>
                 </button>
               );
             })}
@@ -1069,8 +1076,8 @@ export const LernstudioTeachModal: React.FC<Props> = ({
           {/* ================= STAGE 1: Word Showcase & Auto Speech ================= */}
           {currentStage === 1 && (
             <div className="w-full space-y-4 flex-1 flex flex-col items-center justify-center">
-              <div className="w-full bg-gradient-to-b from-primary-soft/30 to-surface border border-primary-border/30 rounded-3xl p-5 sm:p-8 space-y-4 shadow-xs relative">
-                <span className="absolute top-4 right-4 px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-black">
+              <div className="w-full bg-surface border border-surface-border rounded-xl p-5 sm:p-8 space-y-4 shadow-xs relative">
+                <span className="absolute top-4 right-4 text-xs font-bold text-text-muted">
                   كلمة {stageQuestionIndex + 1} من {items.length}
                 </span>
 

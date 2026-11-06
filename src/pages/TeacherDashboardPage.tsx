@@ -382,7 +382,7 @@ export const TeacherDashboardPage: React.FC = () => {
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-amber-500/20 mb-4">
               <ShieldCheck className="w-9 h-9 text-white" />
             </div>
-            <h1 className="text-2xl font-black tracking-tight text-white">لوحة تحكم المعلّم — Blooket Homework</h1>
+            <h1 className="text-2xl font-black tracking-tight text-white">لوحة تحكم المعلم — واجبات وتدريبات الطلاب</h1>
             <p className="text-slate-400 text-xs mt-1">إدارة الواجبات التفاعلية ومتابعة تقييمات الطلاب</p>
           </div>
 

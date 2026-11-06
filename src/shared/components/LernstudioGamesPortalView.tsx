@@ -296,16 +296,16 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
 
   return (
     <div
-      className="min-h-[85vh] p-3 sm:p-5 rounded-3xl space-y-4 select-none transition-all bg-background text-text-main"
+      className="min-h-[85vh] p-2 sm:p-4 rounded-2xl space-y-4 select-none transition-all bg-background text-text-main"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
       {/* Top Bar Header */}
-      <div className="bg-surface p-3.5 sm:p-4 rounded-2xl border border-surface-border shadow-2xs flex items-center justify-between gap-3 flex-wrap">
+      <div className="bg-surface p-3 sm:p-3.5 rounded-xl border border-surface-border shadow-xs flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onBack}
-            className="p-2 rounded-xl bg-surface-hover text-text-main hover:bg-primary hover:text-white transition-all cursor-pointer border border-surface-border inline-flex items-center gap-1.5 text-xs font-bold shrink-0"
+            className="p-2 rounded-lg bg-surface-hover text-text-main hover:bg-surface hover:text-primary transition-colors cursor-pointer border border-surface-border inline-flex items-center gap-1.5 text-xs font-bold shrink-0"
           >
             <ArrowLeft className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
             <span>{t.gamesPortalBack}</span>
@@ -313,13 +313,13 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
 
           <div className="flex items-center gap-2 flex-wrap min-w-0">
             <Gamepad2 className="w-5 h-5 text-primary shrink-0" />
-            <h1 className="text-sm sm:text-base font-black text-text-main truncate">
+            <h1 className="text-sm sm:text-base font-bold text-text-main truncate">
               {t.gamesPortalTitle}
             </h1>
-            <span className="px-2.5 py-0.5 rounded-lg text-xs font-bold shrink-0 bg-primary/10 text-primary border border-primary/20">
-              {displayTitle}
+            <span className="text-xs font-bold text-primary truncate">
+              · {displayTitle}
             </span>
-            <span className="text-[11px] text-text-muted font-bold shrink-0">
+            <span className="text-xs text-text-muted">
               ({set.items?.length || 0} {t.vocabularyCount})
             </span>
           </div>
@@ -332,20 +332,20 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
       {/* Main Container */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Section 1: Team & Classroom Contests */}
-        <div className="bg-surface/80 backdrop-blur-sm p-4 sm:p-5 rounded-3xl border border-surface-border space-y-3.5 shadow-sm">
-          <div className="flex items-center justify-between border-b border-surface-border/60 pb-3">
-            <div className="flex items-center gap-2.5">
-              <span className="text-2xl p-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20">🏆</span>
+        <div className="bg-surface p-4 rounded-xl border border-surface-border space-y-3.5 shadow-xs">
+          <div className="flex items-center justify-between border-b border-surface-border pb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🏆</span>
               <div>
-                <h2 className="text-sm sm:text-base font-black text-text-main">
+                <h2 className="text-sm font-bold text-text-main">
                   {t.teamContestsSection}
                 </h2>
-                <p className="text-[11px] text-text-muted font-medium">
+                <p className="text-xs text-text-muted">
                   {language === 'ar' ? 'ألعاب حماسية جماعية للفرق والسبورة الذكية' : language === 'de' ? 'Spannende Gruppenspiele für Teams und Smartboard' : 'Exciting group games for teams and smartboard'}
                 </p>
               </div>
             </div>
-            <span className="text-xs font-bold px-3 py-1 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+            <span className="text-xs font-bold text-amber-500">
               {t.teamLabel}
             </span>
           </div>
@@ -355,12 +355,12 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
               <div
                 key={game.id}
                 onClick={() => onSelectGame(game.id)}
-                className="group p-3 rounded-2xl bg-surface hover:bg-surface-hover border border-surface-border/70 hover:border-primary/50 transition-all duration-200 cursor-pointer flex flex-col justify-between gap-3 shadow-2xs hover:shadow-md hover:-translate-y-0.5 overflow-hidden relative"
+                className="group p-3 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border hover:border-primary/50 transition-all duration-200 cursor-pointer flex flex-col justify-between gap-3 shadow-xs overflow-hidden relative"
               >
                 {/* Thumbnail Header */}
-                <div className="w-full h-28 rounded-xl overflow-hidden bg-background relative shrink-0 border border-surface-border/40">
+                <div className="w-full h-28 rounded-lg overflow-hidden bg-background relative shrink-0 border border-surface-border">
                   <GameThumbnailArt gameId={game.id} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                  <span className="absolute top-2 right-2 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-black/60 text-white backdrop-blur-md flex items-center gap-1">
+                  <span className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold bg-black/60 text-white backdrop-blur-xs flex items-center gap-1">
                     <span>{game.emoji}</span>
                     <span>{t.teamLabel}</span>
                   </span>
@@ -371,7 +371,7 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                   <h3 className="text-xs sm:text-sm font-bold text-text-main group-hover:text-primary transition-colors truncate">
                     {t[game.titleKey]}
                   </h3>
-                  <div className="flex items-center gap-1.5 text-[10px] text-text-muted font-medium">
+                  <div className="flex items-center gap-1.5 text-xs text-text-muted font-medium">
                     <Users className="w-3 h-3 text-amber-500 shrink-0" />
                     <span className="truncate">{t[game.categoryKey]}</span>
                   </div>
@@ -384,7 +384,7 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                     e.stopPropagation();
                     onSelectGame(game.id);
                   }}
-                  className="w-full py-2 px-3 rounded-xl text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0 bg-primary hover:bg-primary-hover text-white transition-all shadow-xs group-hover:shadow-sm"
+                  className="w-full py-2 px-3 rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0 bg-primary hover:bg-primary-hover text-white transition-colors shadow-xs"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
                   <span>{t.startBtn}</span>
@@ -395,20 +395,20 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
         </div>
 
         {/* Section 2: Solo & Practice Games */}
-        <div className="bg-surface/80 backdrop-blur-sm p-4 sm:p-5 rounded-3xl border border-surface-border space-y-3.5 shadow-sm">
-          <div className="flex items-center justify-between border-b border-surface-border/60 pb-3">
-            <div className="flex items-center gap-2.5">
-              <span className="text-2xl p-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">🎯</span>
+        <div className="bg-surface p-4 rounded-xl border border-surface-border space-y-3.5 shadow-xs">
+          <div className="flex items-center justify-between border-b border-surface-border pb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🎯</span>
               <div>
-                <h2 className="text-sm sm:text-base font-black text-text-main">
+                <h2 className="text-sm font-bold text-text-main">
                   {t.soloPracticeSection}
                 </h2>
-                <p className="text-[11px] text-text-muted font-medium">
+                <p className="text-xs text-text-muted">
                   {language === 'ar' ? 'تمارين تفاعلية وتدريب فردي ممتع' : language === 'de' ? 'Interaktive Übungen und unterhaltsames Einzeltraining' : 'Interactive exercises and fun individual practice'}
                 </p>
               </div>
             </div>
-            <span className="text-xs font-bold px-3 py-1 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+            <span className="text-xs font-bold text-emerald-500">
               {t.soloLabel}
             </span>
           </div>
@@ -423,16 +423,16 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                   onClick={() => {
                     if (!isDisabled) onSelectGame(game.id);
                   }}
-                  className={`group p-3 rounded-2xl border transition-all duration-200 flex flex-col justify-between gap-3 overflow-hidden relative ${
+                  className={`group p-3 rounded-xl border transition-all duration-200 flex flex-col justify-between gap-3 overflow-hidden relative ${
                     isDisabled
-                      ? 'bg-surface/40 border-surface-border/30 opacity-60 cursor-not-allowed'
-                      : 'bg-surface hover:bg-surface-hover border-surface-border/70 hover:border-primary/50 cursor-pointer shadow-2xs hover:shadow-md hover:-translate-y-0.5'
+                      ? 'bg-surface/40 border-surface-border/50 opacity-60 cursor-not-allowed'
+                      : 'bg-surface hover:bg-surface-hover border-surface-border hover:border-primary/50 cursor-pointer shadow-xs'
                   }`}
                 >
                   {/* Thumbnail Header */}
-                  <div className="w-full h-28 rounded-xl overflow-hidden bg-background relative shrink-0 border border-surface-border/40">
+                  <div className="w-full h-28 rounded-lg overflow-hidden bg-background relative shrink-0 border border-surface-border">
                     <GameThumbnailArt gameId={game.id} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    <span className="absolute top-2 right-2 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-black/60 text-white backdrop-blur-md flex items-center gap-1">
+                    <span className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold bg-black/60 text-white backdrop-blur-xs flex items-center gap-1">
                       <span>{game.emoji}</span>
                       <span>{t.soloLabel}</span>
                     </span>
@@ -443,11 +443,11 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                     <h3 className={`text-xs sm:text-sm font-bold truncate ${isDisabled ? 'text-text-muted' : 'text-text-main group-hover:text-primary transition-colors'}`}>
                       {t[game.titleKey]}
                     </h3>
-                    <div className="flex items-center gap-1.5 text-[10px] text-text-muted font-medium">
+                    <div className="flex items-center gap-1.5 text-xs text-text-muted font-medium">
                       <User className="w-3 h-3 text-emerald-500 shrink-0" />
                       <span className="truncate">{t[game.categoryKey]}</span>
                       {game.requiresArticles && (
-                        <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${isArticleSupported ? 'text-emerald-500 bg-emerald-500/10' : 'text-rose-500 bg-rose-500/10'}`}>
+                        <span className={`text-[10px] font-bold ${isArticleSupported ? 'text-emerald-500' : 'text-rose-500'}`}>
                           {isArticleSupported
                             ? `(${sortingItems.length})`
                             : t.noNounsMsg}
@@ -461,7 +461,7 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                     <button
                       type="button"
                       disabled
-                      className="w-full py-2 px-3 rounded-xl text-xs font-bold text-text-muted bg-surface-hover border border-surface-border cursor-not-allowed shrink-0"
+                      className="w-full py-2 px-3 rounded-lg text-xs font-bold text-text-muted bg-surface-hover border border-surface-border cursor-not-allowed shrink-0"
                     >
                       {t.unavailableBtn}
                     </button>
@@ -472,7 +472,7 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                         e.stopPropagation();
                         onSelectGame(game.id);
                       }}
-                      className="w-full py-2 px-3 rounded-xl text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0 bg-primary hover:bg-primary-hover text-white transition-all shadow-xs group-hover:shadow-sm"
+                      className="w-full py-2 px-3 rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0 bg-primary hover:bg-primary-hover text-white transition-colors shadow-xs"
                     >
                       <Play className="w-3.5 h-3.5 fill-current" />
                       <span>{t.startBtn}</span>

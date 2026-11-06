@@ -102,14 +102,14 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
   };
 
   return (
-    <div className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-hidden" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-      <div className="bg-surface border border-surface-border rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+    <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-hidden" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between bg-surface shrink-0">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" />
-            <h2 className="text-sm sm:text-base font-black text-text-main">
-              {language === 'ar' ? 'مولد البرومبت واستيراد المحتوى بالذكاء الاصطناعي 🤖' : 'AI Prompt Generator & Content Import 🤖'}
+            <Sparkles className="w-4 h-4 text-primary" />
+            <h2 className="text-sm sm:text-base font-bold text-text-main">
+              {language === 'ar' ? 'مولد البرومبت واستيراد المحتوى بالذكاء الاصطناعي' : 'AI Prompt Generator & Content Import'}
             </h2>
           </div>
           <button
@@ -122,24 +122,24 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
         </div>
 
         {/* Tab Switcher */}
-        <div className="grid grid-cols-2 p-1.5 bg-surface-hover/60 border-b border-surface-border text-xs font-bold shrink-0">
+        <div className="grid grid-cols-2 p-1 bg-surface-hover border-b border-surface-border text-xs font-bold shrink-0">
           <button
             type="button"
             onClick={() => setActiveTab('generate')}
-            className={`py-2.5 rounded-xl transition-all cursor-pointer ${
+            className={`py-2 rounded-lg transition-all cursor-pointer ${
               activeTab === 'generate' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
             }`}
           >
-            {language === 'ar' ? '1. إنشاء Prompt ذكي للدرس 📝' : '1. Generate AI Prompt 📝'}
+            {language === 'ar' ? '1. إنشاء Prompt ذكي للدرس' : '1. Generate AI Prompt'}
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('import')}
-            className={`py-2.5 rounded-xl transition-all cursor-pointer ${
+            className={`py-2 rounded-lg transition-all cursor-pointer ${
               activeTab === 'import' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
             }`}
           >
-            {language === 'ar' ? '2. استيراد كود JSON 📥' : '2. Import JSON Code 📥'}
+            {language === 'ar' ? '2. استيراد كود JSON' : '2. Import JSON Code'}
           </button>
         </div>
 
@@ -148,15 +148,15 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
           {activeTab === 'generate' ? (
             <div className="space-y-4">
               {/* Quick Children Topics Preset Picker */}
-              <div className="p-3 bg-primary-soft/40 border border-primary-border/40 rounded-2xl space-y-1.5">
-                <label className="text-xs font-black text-primary flex items-center gap-1.5">
-                  <BookOpen className="w-4 h-4" />
-                  <span>{language === 'ar' ? '🇩🇪 قائمة موضوعات الأطفال المعتمدة (اختر موضوعًا جاهزًا):' : '🇩🇪 Children Approved Topics Presets (Select Topic):'}</span>
+              <div className="p-3 bg-surface-hover border border-surface-border rounded-xl space-y-1.5">
+                <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4 text-primary" />
+                  <span>{language === 'ar' ? 'قائمة موضوعات الأطفال المعتمدة:' : 'Children Approved Topics Presets:'}</span>
                 </label>
                 <select
                   value={selectedPresetTopic}
                   onChange={(e) => handleSelectPreset(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-primary-border/60 bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary shadow-xs"
+                  className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary shadow-xs"
                 >
                   <option value="">-- {language === 'ar' ? 'اختر من قائمة 70 موضوعًا للأطفال' : 'Select from 70 Children Topics'} --</option>
                   {CHILDREN_LEVEL_CATEGORIES.map((cat) => {
@@ -185,7 +185,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
                       setSelectedPresetTopic('');
                     }}
                     placeholder="مثال: Tiere, Schule, Familie, Essen..."
-                    className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
+                    className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
                   />
                 </div>
 
@@ -194,7 +194,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
                   <select
                     value={grade}
                     onChange={(e) => setGrade(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary cursor-pointer"
+                    className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary cursor-pointer"
                   >
                     <option value="">{language === 'ar' ? '-- اسأل الذكاء الاصطناعي (دا جريد كام؟) --' : '-- Ask AI (Which Grade?) --'}</option>
                     {PROGRAM_GRADES.map((g) => (
@@ -210,7 +210,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
                   <select
                     value={level}
                     onChange={(e) => setLevel(e.target.value as LernstudioLevel)}
-                    className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
+                    className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
                   >
                     <option value="A1">A1 - {language === 'ar' ? 'مبتدئ' : 'Beginner'}</option>
                     <option value="A2">A2 - {language === 'ar' ? 'أساسي' : 'Elementary'}</option>
@@ -229,9 +229,9 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
                       const val = e.target.value;
                       setItemCount(val === 'auto' ? 'auto' : Number(val));
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
+                    className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
                   >
-                    <option value="auto">{language === 'ar' ? 'تلقائي يحدده الذكاء الاصطناعي بناءً على الصورة والدرس (5 إلى 30 كلمة) 🤖' : 'Auto determined by AI based on image (5 to 30 words) 🤖'}</option>
+                    <option value="auto">{language === 'ar' ? 'تلقائي يحدده الذكاء الاصطناعي (5 إلى 30 كلمة)' : 'Auto determined by AI (5 to 30 words)'}</option>
                     <option value="5">5 {language === 'ar' ? 'كلمات (درس قصير)' : 'words (short)'}</option>
                     <option value="10">10 {language === 'ar' ? 'كلمات (درس معياري)' : 'words (standard)'}</option>
                     <option value="15">15 {language === 'ar' ? 'كلمة (درس متوسط)' : 'words (medium)'}</option>
@@ -243,18 +243,18 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
               </div>
 
               {/* Verb Conjugation Focus Toggle */}
-              <div className="p-3.5 bg-surface-hover/80 border border-surface-border rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+              <div className="p-3 bg-surface-hover border border-surface-border rounded-xl flex items-center justify-between gap-3 shadow-2xs">
                 <div className="flex items-center gap-2.5">
-                  <div className={`p-2 rounded-xl transition-colors ${includeVerbConjugation ? 'bg-primary/20 text-primary' : 'bg-surface-border/50 text-text-muted'}`}>
+                  <div className={`p-2 rounded-lg transition-colors ${includeVerbConjugation ? 'bg-primary/20 text-primary' : 'bg-surface border border-surface-border text-text-muted'}`}>
                     <Sparkles className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-black text-text-main flex items-center gap-1.5">
-                      <span>{language === 'ar' ? 'تركيز على تصريف الأفعال (Präsens) ⏱️' : 'Verb Conjugation Focus (Präsens) ⏱️'}</span>
+                    <h4 className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                      <span>{language === 'ar' ? 'تركيز على تصريف الأفعال (Präsens)' : 'Verb Conjugation Focus (Präsens)'}</span>
                     </h4>
                     <p className="text-[11px] font-medium text-text-muted mt-0.5">
                       {language === 'ar' 
-                        ? 'استخراج الأفعال من الدرس وإنشاء تمارين اختيارات مع تنويع الفاعل (أحمد، أحمد ومونا، أنت وأنا)' 
+                        ? 'استخراج الأفعال من الدرس وإنشاء تمارين اختيارات مع تنويع الفاعل' 
                         : 'Extract verbs from source text & generate sentence completion exercises with varied subjects'}
                     </p>
                   </div>
@@ -274,7 +274,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
               {/* Prompt Output Box */}
               <div className="space-y-1.5 pt-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-text-main flex items-center gap-1">
+                  <span className="text-xs font-bold text-text-main flex items-center gap-1">
                     <FileText className="w-4 h-4 text-primary" />
                     <span>الأمر البرمجي المصمم للذكاء الاصطناعي (Prompt):</span>
                   </span>
@@ -282,10 +282,10 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
                   <button
                     type="button"
                     onClick={handleCopyPrompt}
-                    className="px-3 py-1.5 bg-primary text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer inline-flex items-center gap-1"
+                    className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1"
                   >
                     {copiedPrompt ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedPrompt ? 'تم نسخ البرومبت ✓' : 'نسخ البرومبت'}</span>
+                    <span>{copiedPrompt ? 'تم النسخ' : 'نسخ البرومبت'}</span>
                   </button>
                 </div>
 
@@ -294,7 +294,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
                   value={generatedPrompt}
                   rows={8}
                   dir="ltr"
-                  className="w-full p-3 bg-surface-hover/80 border border-surface-border rounded-2xl text-[11px] font-mono text-text-main focus:outline-none resize-none"
+                  className="w-full p-3 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-mono text-text-main focus:outline-none resize-none"
                 />
 
                 <p className="text-[11px] text-text-muted">
@@ -318,7 +318,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
                   rows={8}
                   dir="ltr"
                   placeholder='{\n  "title": "Tiere",\n  "level": "A1",\n  "items": [...]\n}'
-                  className="w-full p-3 bg-surface border border-surface-border rounded-2xl text-[11px] font-mono text-text-main focus:outline-none focus:border-primary resize-none"
+                  className="w-full p-3 bg-surface border border-surface-border rounded-xl text-[11px] font-mono text-text-main focus:outline-none focus:border-primary resize-none"
                 />
               </div>
 
@@ -338,7 +338,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
                   <button
                     type="button"
                     onClick={handleConfirmImport}
-                    className="px-5 py-2 bg-primary text-white rounded-xl text-xs font-black shadow-md cursor-pointer inline-flex items-center gap-1"
+                    className="px-5 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer inline-flex items-center gap-1 transition-colors"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>حفظ واستيراد الـ Set ({parsedPreview.items?.length} مفردات)</span>
@@ -356,14 +356,14 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
 
               {/* Preview Cards */}
               {parsedPreview && parsedPreview.items && (
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-3">
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl space-y-3">
                   <div className="flex items-center justify-between flex-wrap gap-1">
-                    <span className="text-xs font-black text-emerald-700 dark:text-emerald-300">
+                    <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">
                       ✓ التنسيق صحيح! تم العثور على {parsedPreview.items.length} مفردات في مجموعة ({parsedPreview.title}):
                     </span>
                     {validationInfo && validationInfo.repairedCount > 0 && (
                       <span className="text-[11px] font-bold bg-amber-500/20 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded-lg border border-amber-500/30">
-                        ⚡ تم إصلاح {validationInfo.repairedCount} جملة ترتيب تلقائياً لتطابق الجملة الألمانية.
+                        تم إصلاح {validationInfo.repairedCount} جملة ترتيب تلقائياً.
                       </span>
                     )}
                   </div>
@@ -381,7 +381,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
 
                   <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
                     {parsedPreview.items.map((item, idx) => (
-                      <div key={idx} className="p-2 bg-surface rounded-xl border border-surface-border text-xs flex items-center justify-between gap-2">
+                      <div key={idx} className="p-2 bg-surface rounded-lg border border-surface-border text-xs flex items-center justify-between gap-2">
                         <span className="font-bold text-primary font-mono" dir="ltr">{item.emoji} {item.german}</span>
                         <span className="text-text-muted">{item.arabic}</span>
                       </div>
