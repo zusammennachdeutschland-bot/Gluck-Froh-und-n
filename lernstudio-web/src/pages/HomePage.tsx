@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LernstudioSet } from '@shared/types';
-import { DEFAULT_LERNSTUDIO_SETS } from '@shared/defaultLernstudioSets';
-import { LernstudioView } from '@shared/components/LernstudioView';
-import { LernstudioSharedProvider } from '@shared/LernstudioSharedContext';
+import { LernstudioSet } from '../../shared/types';
+import { DEFAULT_LERNSTUDIO_SETS } from '../../shared/defaultLernstudioSets';
+import { LernstudioView } from '../../shared/components/LernstudioView';
+import { LernstudioSharedProvider } from '../../shared/LernstudioSharedContext';
 import { Lock, BookOpen, Sparkles, GraduationCap, ArrowRight } from 'lucide-react';
 
 export const HomePage: React.FC = () => {

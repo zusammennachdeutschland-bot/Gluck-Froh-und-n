@@ -179,20 +179,10 @@ async function startServer() {
       res.status(500).json({ error: "TTS failed" });
     }
   });
-  // Mount Lernstudio Web Teacher & Homework API routes
-  const loginHandler = (await import("./lernstudio-web/api/teacher/login.ts")).default;
-  const logoutHandler = (await import("./lernstudio-web/api/teacher/logout.ts")).default;
-  const assignmentsHandler = (await import("./lernstudio-web/api/teacher/assignments.ts")).default;
-  const assignmentDetailsHandler = (await import("./lernstudio-web/api/teacher/assignment-details.ts")).default;
-  const homeworkInfoHandler = (await import("./lernstudio-web/api/homework/info.ts")).default;
-  const homeworkSubmitHandler = (await import("./lernstudio-web/api/homework/submit.ts")).default;
-
-  app.all("/api/teacher/login", (req, res) => loginHandler(req, res));
-  app.all("/api/teacher/logout", (req, res) => logoutHandler(req, res));
-  app.all("/api/teacher/assignments", (req, res) => assignmentsHandler(req, res));
-  app.all("/api/teacher/assignment-details", (req, res) => assignmentDetailsHandler(req, res));
-  app.all("/api/homework/info", (req, res) => homeworkInfoHandler(req, res));
-  app.all("/api/homework/submit", (req, res) => homeworkSubmitHandler(req, res));
+  // Mount Lernstudio Web Teacher & Homework API routes via unified handler
+  const unifiedApiHandler = (await import("./lernstudio-web/api/index.ts")).default;
+  app.all("/api/teacher/*", (req, res) => unifiedApiHandler(req, res));
+  app.all("/api/homework/*", (req, res) => unifiedApiHandler(req, res));
   // Vite middleware for development or static serving for production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

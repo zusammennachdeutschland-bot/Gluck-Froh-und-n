@@ -684,11 +684,22 @@ function MainApp() {
 import { migrateFromLocalStorageToIndexedDB } from './services/migrationService';
 import { storage } from './services/storageService';
 import { sanitizeInitialData, clearAllLocalDataAndReset } from './services/dataSanitizer';
+import { HomeworkPlayerPage } from '../lernstudio-web/src/pages/HomeworkPlayerPage';
+import { TeacherDashboardPage } from '../lernstudio-web/src/pages/TeacherDashboardPage';
 
 export default function App() {
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
   const [initialData, setInitialData] = useState<any>(null);
   const [loadError, setLoadError] = useState(false);
   const [errorDetails, setErrorDetails] = useState('');
+
+  if (pathname.startsWith('/homework/')) {
+    return <HomeworkPlayerPage />;
+  }
+
+  if (pathname.startsWith('/teacher')) {
+    return <TeacherDashboardPage />;
+  }
 
   const runDataLoader = useCallback(async (isMounted: boolean) => {
     try {

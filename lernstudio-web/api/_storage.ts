@@ -1,9 +1,22 @@
 import fs from 'fs';
 import path from 'path';
 
+export type HomeworkQuestionType =
+  | 'mc_de_ar'
+  | 'true_false'
+  | 'listen_choose'
+  | 'mc_ar_de'
+  | 'article_quiz'
+  | 'missing_letter';
+
+export type HomeworkFlowMode = 'teacher_then_quiz' | 'quiz_only';
+export type HomeworkBlooketMode = 'gold_quest' | 'tower_energy' | 'classic_quiz';
+
 export interface HomeworkQuestionResponse {
   questionId: string;
+  questionType?: HomeworkQuestionType;
   germanWord: string;
+  promptText?: string;
   studentAnswer: string;
   correctAnswer: string;
   isCorrect: boolean;
@@ -23,6 +36,9 @@ export interface HomeworkSubmission {
   scorePercentage: number;
   score: number;
   accuracy: number;
+  goldEarned?: number;
+  maxStreak?: number;
+  completedStudyPhase?: boolean;
   responses: HomeworkQuestionResponse[];
 }
 
@@ -30,6 +46,10 @@ export interface HomeworkAssignment {
   id: string;
   title: string;
   setSnapshot: any;
+  selectedItemIds?: string[];
+  flowMode?: HomeworkFlowMode;
+  questionTypes?: HomeworkQuestionType[];
+  blooketMode?: HomeworkBlooketMode;
   allowedGameModes: string[];
   questionCount: number;
   targetQuestionCount: number;
@@ -55,15 +75,24 @@ const memoryStore: StoreShape = {
   submissions: {}
 };
 
-function readTmpStore(): StoreShape {
+export function readTmpStore(): StoreShape {
   try {
     if (fs.existsSync(TMP_STORE_PATH)) {
       const raw = fs.readFileSync(TMP_STORE_PATH, 'utf-8');
       const parsed = JSON.parse(raw);
-      return {
-        assignments: { ...memoryStore.assignments, ...(parsed.assignments || {}) },
-        submissions: { ...memoryStore.submissions, ...(parsed.submissions || {}) }
-      };
+      const mergedAssignments = { ...memoryStore.assignments, ...(parsed.assignments || {}) };
+      const mergedSubmissions: Record<string, HomeworkSubmission[]> = { ...memoryStore.submissions };
+      for (const [hwId, subs] of Object.entries(parsed.submissions || {})) {
+        const existing = mergedSubmissions[hwId] || [];
+        const byId = new Map<string, HomeworkSubmission>();
+        for (const s of [...existing, ...(Array.isArray(subs) ? subs : [])]) {
+          if (s && s.id) byId.set(s.id, s);
+        }
+        mergedSubmissions[hwId] = Array.from(byId.values());
+      }
+      memoryStore.assignments = mergedAssignments;
+      memoryStore.submissions = mergedSubmissions;
+      return { assignments: mergedAssignments, submissions: mergedSubmissions };
     }
   } catch {
     // Ignore fs errors
@@ -71,7 +100,7 @@ function readTmpStore(): StoreShape {
   return memoryStore;
 }
 
-function writeTmpStore(store: StoreShape): void {
+export function writeTmpStore(store: StoreShape): void {
   memoryStore.assignments = store.assignments;
   memoryStore.submissions = store.submissions;
   try {
@@ -79,6 +108,41 @@ function writeTmpStore(store: StoreShape): void {
   } catch {
     // Ignore fs errors
   }
+}
+
+export function mergeExternalStoreData(
+  incomingAssignments?: HomeworkAssignment[],
+  incomingSubmissions?: HomeworkSubmission[]
+): StoreShape {
+  const store = readTmpStore();
+  let changed = false;
+
+  if (Array.isArray(incomingAssignments)) {
+    for (const hw of incomingAssignments) {
+      if (hw && hw.id && !store.assignments[hw.id]) {
+        store.assignments[hw.id] = hw;
+        changed = true;
+      }
+    }
+  }
+
+  if (Array.isArray(incomingSubmissions)) {
+    for (const sub of incomingSubmissions) {
+      if (sub && sub.id && sub.assignmentId) {
+        const list = store.submissions[sub.assignmentId] || [];
+        if (!list.some((x) => x.id === sub.id)) {
+          list.push(sub);
+          store.submissions[sub.assignmentId] = list;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  if (changed) {
+    writeTmpStore(store);
+  }
+  return store;
 }
 
 async function getVercelBlobModule(): Promise<any | null> {
@@ -113,6 +177,11 @@ export async function saveAssignment(assignment: HomeworkAssignment): Promise<st
 }
 
 export async function getAssignment(id: string): Promise<HomeworkAssignment | null> {
+  const store = readTmpStore();
+  if (store.assignments[id]) {
+    return store.assignments[id];
+  }
+
   const blobMod = await getVercelBlobModule();
   if (blobMod) {
     try {
@@ -120,38 +189,40 @@ export async function getAssignment(id: string): Promise<HomeworkAssignment | nu
       if (blobs && blobs.length > 0) {
         const res = await fetch(blobs[0].url);
         if (res.ok) {
-          return (await res.json()) as HomeworkAssignment;
+          const hw = (await res.json()) as HomeworkAssignment;
+          store.assignments[id] = hw;
+          writeTmpStore(store);
+          return hw;
         }
       }
     } catch (e) {
       console.warn('Error fetching assignment from blob:', e);
     }
   }
-  const store = readTmpStore();
   return store.assignments[id] || null;
 }
 
 export async function listAllAssignments(): Promise<HomeworkAssignment[]> {
+  const store = readTmpStore();
   const blobMod = await getVercelBlobModule();
   if (blobMod) {
     try {
       const { blobs } = await blobMod.list({ prefix: 'assignments/' });
-      const assignments: HomeworkAssignment[] = [];
       for (const blob of blobs || []) {
         if (!blob.pathname.endsWith('.json')) continue;
         const res = await fetch(blob.url);
         if (res.ok) {
-          assignments.push((await res.json()) as HomeworkAssignment);
+          const hw = (await res.json()) as HomeworkAssignment;
+          if (hw && hw.id) {
+            store.assignments[hw.id] = hw;
+          }
         }
       }
-      if (assignments.length > 0) {
-        return assignments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      }
+      writeTmpStore(store);
     } catch (e) {
       console.warn('Error listing assignments from blob:', e);
     }
   }
-  const store = readTmpStore();
   return Object.values(store.assignments).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
@@ -160,7 +231,9 @@ export async function listAllAssignments(): Promise<HomeworkAssignment[]> {
 export async function saveSubmission(submission: HomeworkSubmission): Promise<string> {
   const store = readTmpStore();
   const current = store.submissions[submission.assignmentId] || [];
-  current.push(submission);
+  if (!current.some((s) => s.id === submission.id)) {
+    current.push(submission);
+  }
   store.submissions[submission.assignmentId] = current;
   writeTmpStore(store);
 
@@ -185,26 +258,29 @@ export async function saveSubmission(submission: HomeworkSubmission): Promise<st
 }
 
 export async function getSubmissionsForAssignment(assignmentId: string): Promise<HomeworkSubmission[]> {
+  const store = readTmpStore();
   const blobMod = await getVercelBlobModule();
   if (blobMod) {
     try {
       const { blobs } = await blobMod.list({ prefix: `submissions/${assignmentId}/` });
-      const subs: HomeworkSubmission[] = [];
+      const current = store.submissions[assignmentId] || [];
+      const byId = new Map<string, HomeworkSubmission>(current.map((s) => [s.id, s]));
       for (const blob of blobs || []) {
         if (!blob.pathname.endsWith('.json')) continue;
         const res = await fetch(blob.url);
         if (res.ok) {
-          subs.push((await res.json()) as HomeworkSubmission);
+          const sub = (await res.json()) as HomeworkSubmission;
+          if (sub && sub.id) {
+            byId.set(sub.id, sub);
+          }
         }
       }
-      if (subs.length > 0) {
-        return subs.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
-      }
+      store.submissions[assignmentId] = Array.from(byId.values());
+      writeTmpStore(store);
     } catch (e) {
       console.warn('Error fetching submissions from blob:', e);
     }
   }
-  const store = readTmpStore();
   return (store.submissions[assignmentId] || []).sort(
     (a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()
   );
