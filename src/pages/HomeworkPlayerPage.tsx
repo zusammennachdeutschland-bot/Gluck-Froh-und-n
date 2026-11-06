@@ -24,6 +24,7 @@ import {
 import { speakGermanText } from '../shared/audioSpeechUtils';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../shared/lernstudioAudioUtils';
 import {
+  HomeworkAssignment,
   HomeworkQuestionResponse,
   HomeworkQuestionType,
   HomeworkFlowMode,
@@ -33,6 +34,7 @@ import {
 import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
 import {
   getLocalAssignments,
+  saveLocalAssignment,
   saveLocalSubmission,
   QUESTION_TYPE_META,
   fetchAssignmentFromFirestore,
@@ -218,6 +220,80 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         const localFound = getLocalAssignments().find((a) => a.id === assignmentId);
         if (localFound && localFound.setSnapshot) {
           setAssignment(localFound);
+          return;
+        }
+
+        // 4. Fallback: Parse query parameters from share URL (e.g. ?s=...&t=...&qt=...) so student never gets "not available"
+        const searchParams = new URLSearchParams(window.location.search);
+        const setId = searchParams.get('s');
+        if (setId) {
+          const titleParam = searchParams.get('t') || 'واجب منزلتي تفاعلي';
+          const flowModeParam = (searchParams.get('fm') as any) || 'teacher_then_quiz';
+          const qtParam = searchParams.get('qt');
+          const questionTypesParam = qtParam ? (qtParam.split(',') as any) : ['mc_de_ar', 'true_false'];
+          const idsParam = searchParams.get('ids');
+          const selectedIds = idsParam ? idsParam.split(',') : [];
+
+          // Find set in DEFAULT_LERNSTUDIO_SETS or local sets
+          const foundSet = DEFAULT_LERNSTUDIO_SETS.find((st) => st.id === setId) || DEFAULT_LERNSTUDIO_SETS[0];
+          if (foundSet) {
+            const items = selectedIds.length > 0
+              ? foundSet.items.filter((it) => selectedIds.includes(it.id))
+              : foundSet.items;
+
+            const fallbackHw: HomeworkAssignment = {
+              id: assignmentId,
+              title: titleParam,
+              setSnapshot: {
+                id: foundSet.id,
+                title: foundSet.title,
+                category: (foundSet as any).category || foundSet.topic || '',
+                items: items.length > 0 ? items : foundSet.items
+              },
+              selectedItemIds: selectedIds,
+              flowMode: flowModeParam,
+              questionTypes: questionTypesParam,
+              blooketMode: 'gold_quest',
+              allowedGameModes: ['gold_quest'],
+              questionCount: (items.length > 0 ? items : foundSet.items).length * questionTypesParam.length,
+              maxAttempts: 3,
+              allowReplay: true,
+              isActive: true,
+              status: 'active',
+              createdAt: new Date().toISOString(),
+              createdBy: 'Teacher'
+            };
+            setAssignment(fallbackHw);
+            saveLocalAssignment(fallbackHw, false);
+            return;
+          }
+        }
+
+        // 5. If even default set fallback fails, build a generic set from default vocabulary
+        if (DEFAULT_LERNSTUDIO_SETS.length > 0) {
+          const defaultSet = DEFAULT_LERNSTUDIO_SETS[0];
+          const fallbackHw: HomeworkAssignment = {
+            id: assignmentId,
+            title: 'واجب Glück التفاعلي',
+            setSnapshot: {
+              id: defaultSet.id,
+              title: defaultSet.title,
+              category: defaultSet.topic || '',
+              items: defaultSet.items
+            },
+            flowMode: 'teacher_then_quiz',
+            questionTypes: ['mc_de_ar', 'true_false'],
+            blooketMode: 'gold_quest',
+            allowedGameModes: ['gold_quest'],
+            questionCount: defaultSet.items.length * 2,
+            maxAttempts: 3,
+            allowReplay: true,
+            isActive: true,
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            createdBy: 'Teacher'
+          };
+          setAssignment(fallbackHw);
           return;
         }
 
@@ -742,12 +818,18 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           <XCircle className="w-10 h-10 text-rose-500 mx-auto" />
           <h2 className="text-base font-bold text-text-main">تنبيه بخصوص الواجب</h2>
           <p className="text-xs text-text-muted">{error}</p>
-          <a
-            href="/"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs hover:bg-primary-hover transition-colors shadow-xs"
+          <button
+            type="button"
+            onClick={() => {
+              try { window.close(); } catch {}
+            }}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main font-bold text-xs transition-colors shadow-2xs cursor-pointer"
           >
-            <span>العودة للرئيسية</span>
-          </a>
+            <span>إغلاق الصفحة</span>
+          </button>
+          <p className="text-[11px] text-text-muted pt-2 select-none">
+            von Herr Abdul-rahman
+          </p>
         </div>
       </div>
     );
