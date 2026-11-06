@@ -1,115 +1,122 @@
-import { isTeacherAuthenticated } from '../_auth';
-import { getAssignment, getSubmissionsForAssignment, saveAssignment } from '../_storage';
+import { getQueryParam, isTeacherAuthenticated, parseRequestBody, sendJson } from '../_auth.js';
+import { getAssignment, getSubmissionsForAssignment, saveAssignment } from '../_storage.js';
 
-export async function GET(req: Request) {
+export default async function handler(req: any, res?: any) {
   if (!isTeacherAuthenticated(req)) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return sendJson(res, 401, { error: 'Unauthorized' });
   }
 
-  const url = new URL(req.url);
-  const id = url.searchParams.get('id') || url.pathname.split('/').pop();
+  const method = (req?.method || 'GET').toUpperCase();
 
-  if (!id) {
-    return new Response(JSON.stringify({ error: 'Missing assignment ID' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' }
+  if (method === 'GET') {
+    const id = getQueryParam(req, 'id');
+    if (!id) {
+      return sendJson(res, 400, { error: 'Missing assignment ID' });
+    }
+
+    const assignment = await getAssignment(id);
+    if (!assignment) {
+      return sendJson(res, 404, { error: 'Assignment not found' });
+    }
+
+    const rawSubmissions = await getSubmissionsForAssignment(id);
+    const submissions = rawSubmissions.map((s) => ({
+      ...s,
+      score: s.score ?? s.correctAnswersCount ?? 0,
+      accuracy: s.accuracy ?? s.scorePercentage ?? 0
+    }));
+
+    const questionMap = new Map<
+      string,
+      {
+        questionId: string;
+        germanWord: string;
+        prompt: string;
+        correctAnswer: string;
+        totalAttempts: number;
+        correctCount: number;
+        incorrectCount: number;
+      }
+    >();
+
+    submissions.forEach((sub) => {
+      sub.responses?.forEach((r) => {
+        const key = r.germanWord || r.questionId;
+        const existing = questionMap.get(key) || {
+          questionId: r.questionId || key,
+          germanWord: r.germanWord,
+          prompt: r.germanWord,
+          correctAnswer: r.correctAnswer || r.germanWord,
+          totalAttempts: 0,
+          correctCount: 0,
+          incorrectCount: 0
+        };
+        existing.totalAttempts++;
+        if (r.isCorrect) {
+          existing.correctCount++;
+        } else {
+          existing.incorrectCount++;
+        }
+        questionMap.set(key, existing);
+      });
     });
-  }
 
-  const assignment = await getAssignment(id);
-  if (!assignment) {
-    return new Response(JSON.stringify({ error: 'Assignment not found' }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+    const questionAccuracy = Array.from(questionMap.values())
+      .map((q) => {
+        const pct = Math.round((q.correctCount / Math.max(1, q.totalAttempts)) * 100);
+        return {
+          ...q,
+          accuracyPercent: pct,
+          accuracyPercentage: pct
+        };
+      })
+      .sort((a, b) => a.accuracyPercent - b.accuracyPercent);
 
-  const submissions = await getSubmissionsForAssignment(id);
-
-  // Question-level statistics analysis
-  const questionMap = new Map<
-    string,
-    { germanWord: string; totalAttempts: number; incorrectCount: number }
-  >();
-
-  submissions.forEach((sub) => {
-    sub.responses?.forEach((r) => {
-      const existing = questionMap.get(r.germanWord) || {
-        germanWord: r.germanWord,
-        totalAttempts: 0,
-        incorrectCount: 0
-      };
-      existing.totalAttempts++;
-      if (!r.isCorrect) existing.incorrectCount++;
-      questionMap.set(r.germanWord, existing);
-    });
-  });
-
-  const hardestQuestions = Array.from(questionMap.values())
-    .map((q) => ({
-      ...q,
-      accuracyPercentage: Math.round(((q.totalAttempts - q.incorrectCount) / q.totalAttempts) * 100)
-    }))
-    .sort((a, b) => a.accuracyPercentage - b.accuracyPercentage);
-
-  return new Response(
-    JSON.stringify({
-      assignment,
+    return sendJson(res, 200, {
+      assignment: {
+        ...assignment,
+        status: assignment.status || (assignment.isActive !== false ? 'active' : 'closed')
+      },
       submissions,
+      questionAccuracy,
       stats: {
         totalSubmissions: submissions.length,
         uniqueStudentsCount: new Set(submissions.map((s) => s.studentName.trim().toLowerCase())).size,
         averageScorePercentage:
           submissions.length > 0
-            ? Math.round(submissions.reduce((acc, curr) => acc + curr.scorePercentage, 0) / submissions.length)
+            ? Math.round(submissions.reduce((acc, curr) => acc + curr.accuracy, 0) / submissions.length)
             : 0,
-        hardestQuestions
+        hardestQuestions: questionAccuracy
       }
-    }),
-    {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  if (method === 'PATCH') {
+    const body = await parseRequestBody(req);
+    const id = getQueryParam(req, 'id') || body?.id;
+    if (!id) {
+      return sendJson(res, 400, { error: 'Missing ID' });
     }
-  );
+
+    const assignment = await getAssignment(id);
+    if (!assignment) {
+      return sendJson(res, 404, { error: 'Assignment not found' });
+    }
+
+    if (typeof body?.isActive === 'boolean') {
+      assignment.isActive = body.isActive;
+      assignment.status = body.isActive ? 'active' : 'closed';
+    } else if (body?.status === 'active' || body?.status === 'closed') {
+      assignment.status = body.status;
+      assignment.isActive = body.status === 'active';
+    }
+
+    await saveAssignment(assignment);
+    return sendJson(res, 200, { success: true, assignment });
+  }
+
+  return sendJson(res, 405, { error: 'Method not allowed' });
 }
 
-export async function PATCH(req: Request) {
-  if (!isTeacherAuthenticated(req)) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-
-  const url = new URL(req.url);
-  const id = url.searchParams.get('id') || url.pathname.split('/').pop();
-  if (!id) {
-    return new Response(JSON.stringify({ error: 'Missing ID' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-
-  const assignment = await getAssignment(id);
-  if (!assignment) {
-    return new Response(JSON.stringify({ error: 'Assignment not found' }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-
-  const body = await req.json();
-  if (typeof body.isActive === 'boolean') {
-    assignment.isActive = body.isActive;
-  }
-
-  await saveAssignment(assignment);
-
-  return new Response(JSON.stringify({ success: true, assignment }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
+export const GET = (req: Request) => handler(req);
+export const PATCH = (req: Request) => handler(req);

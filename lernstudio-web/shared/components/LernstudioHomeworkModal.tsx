@@ -63,6 +63,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         allowReplay: true
       };
 
+      const qCount = Math.min(targetQuestionCount, currentSet.items.length);
+      const querySuffix = `?s=${encodeURIComponent(currentSet.id)}&q=${qCount}`;
+
       const res = await fetch('/api/teacher/assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -70,18 +73,27 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         body: JSON.stringify(payload)
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        const fullLink = `${window.location.origin}/homework/${data.assignment.id}`;
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = {};
+      }
+
+      if (res.ok && data?.assignment?.id) {
+        const fullLink = `${window.location.origin}/homework/${data.assignment.id}${querySuffix}`;
         setCreatedShareLink(fullLink);
       } else {
         const fakeId = 'hw_' + Math.random().toString(36).substring(2, 9);
-        const fullLink = `${window.location.origin}/homework/${fakeId}`;
+        const fullLink = `${window.location.origin}/homework/${fakeId}${querySuffix}`;
         setCreatedShareLink(fullLink);
       }
     } catch {
+      const qCount = Math.min(targetQuestionCount, currentSet.items.length);
+      const querySuffix = `?s=${encodeURIComponent(currentSet.id)}&q=${qCount}`;
       const fakeId = 'hw_' + Math.random().toString(36).substring(2, 9);
-      const fullLink = `${window.location.origin}/homework/${fakeId}`;
+      const fullLink = `${window.location.origin}/homework/${fakeId}${querySuffix}`;
       setCreatedShareLink(fullLink);
     } finally {
       setIsCreating(false);

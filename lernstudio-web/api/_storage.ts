@@ -1,108 +1,211 @@
-import { put, list, del } from '@vercel/blob';
-import { HomeworkAssignment, HomeworkSubmission } from '../shared/homeworkTypes';
+import fs from 'fs';
+import path from 'path';
 
-const HAS_BLOB_TOKEN = !!process.env.BLOB_READ_WRITE_TOKEN;
+export interface HomeworkQuestionResponse {
+  questionId: string;
+  germanWord: string;
+  studentAnswer: string;
+  correctAnswer: string;
+  isCorrect: boolean;
+  timeSpentSeconds: number;
+}
 
-// In-memory fallback cache when testing locally or when BLOB_READ_WRITE_TOKEN is not yet provisioned
-const memoryStore = {
-  assignments: new Map<string, HomeworkAssignment>(),
-  submissions: new Map<string, HomeworkSubmission[]>()
+export interface HomeworkSubmission {
+  id: string;
+  assignmentId: string;
+  studentName: string;
+  attemptNumber: number;
+  startedAt: string;
+  completedAt: string;
+  timeSpentSeconds: number;
+  totalQuestions: number;
+  correctAnswersCount: number;
+  scorePercentage: number;
+  score: number;
+  accuracy: number;
+  responses: HomeworkQuestionResponse[];
+}
+
+export interface HomeworkAssignment {
+  id: string;
+  title: string;
+  setSnapshot: any;
+  allowedGameModes: string[];
+  questionCount: number;
+  targetQuestionCount: number;
+  timeLimitMinutes?: number;
+  maxAttempts: number;
+  allowReplay: boolean;
+  deadline?: string;
+  isActive: boolean;
+  status: 'active' | 'closed';
+  createdAt: string;
+  createdBy: string;
+}
+
+const TMP_STORE_PATH = path.join('/tmp', 'lernstudio_homework_store.json');
+
+interface StoreShape {
+  assignments: Record<string, HomeworkAssignment>;
+  submissions: Record<string, HomeworkSubmission[]>;
+}
+
+const memoryStore: StoreShape = {
+  assignments: {},
+  submissions: {}
 };
 
-export async function saveAssignment(assignment: HomeworkAssignment): Promise<string> {
-  const path = `assignments/${assignment.id}.json`;
-  const data = JSON.stringify(assignment);
-
-  if (HAS_BLOB_TOKEN) {
-    const blob = await put(path, data, {
-      access: 'public',
-      contentType: 'application/json',
-      addRandomSuffix: false
-    });
-    return blob.url;
-  } else {
-    memoryStore.assignments.set(assignment.id, assignment);
-    return `local://${path}`;
+function readTmpStore(): StoreShape {
+  try {
+    if (fs.existsSync(TMP_STORE_PATH)) {
+      const raw = fs.readFileSync(TMP_STORE_PATH, 'utf-8');
+      const parsed = JSON.parse(raw);
+      return {
+        assignments: { ...memoryStore.assignments, ...(parsed.assignments || {}) },
+        submissions: { ...memoryStore.submissions, ...(parsed.submissions || {}) }
+      };
+    }
+  } catch {
+    // Ignore fs errors
   }
+  return memoryStore;
+}
+
+function writeTmpStore(store: StoreShape): void {
+  memoryStore.assignments = store.assignments;
+  memoryStore.submissions = store.submissions;
+  try {
+    fs.writeFileSync(TMP_STORE_PATH, JSON.stringify(store), 'utf-8');
+  } catch {
+    // Ignore fs errors
+  }
+}
+
+async function getVercelBlobModule(): Promise<any | null> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
+  try {
+    const pkg = '@vercel/blob';
+    return await import(pkg);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveAssignment(assignment: HomeworkAssignment): Promise<string> {
+  const store = readTmpStore();
+  store.assignments[assignment.id] = assignment;
+  writeTmpStore(store);
+
+  const blobMod = await getVercelBlobModule();
+  if (blobMod) {
+    try {
+      const blob = await blobMod.put(`assignments/${assignment.id}.json`, JSON.stringify(assignment), {
+        access: 'public',
+        contentType: 'application/json',
+        addRandomSuffix: false
+      });
+      return blob.url;
+    } catch (e) {
+      console.warn('Vercel blob put fallback to tmp store:', e);
+    }
+  }
+  return `local://assignments/${assignment.id}.json`;
 }
 
 export async function getAssignment(id: string): Promise<HomeworkAssignment | null> {
-  if (HAS_BLOB_TOKEN) {
+  const blobMod = await getVercelBlobModule();
+  if (blobMod) {
     try {
-      const { blobs } = await list({ prefix: `assignments/${id}.json` });
-      if (blobs.length === 0) return null;
-      const res = await fetch(blobs[0].url);
-      if (!res.ok) return null;
-      return (await res.json()) as HomeworkAssignment;
+      const { blobs } = await blobMod.list({ prefix: `assignments/${id}.json` });
+      if (blobs && blobs.length > 0) {
+        const res = await fetch(blobs[0].url);
+        if (res.ok) {
+          return (await res.json()) as HomeworkAssignment;
+        }
+      }
     } catch (e) {
       console.warn('Error fetching assignment from blob:', e);
-      return memoryStore.assignments.get(id) || null;
     }
   }
-  return memoryStore.assignments.get(id) || null;
+  const store = readTmpStore();
+  return store.assignments[id] || null;
 }
 
 export async function listAllAssignments(): Promise<HomeworkAssignment[]> {
-  if (HAS_BLOB_TOKEN) {
+  const blobMod = await getVercelBlobModule();
+  if (blobMod) {
     try {
-      const { blobs } = await list({ prefix: 'assignments/' });
+      const { blobs } = await blobMod.list({ prefix: 'assignments/' });
       const assignments: HomeworkAssignment[] = [];
-      for (const blob of blobs) {
+      for (const blob of blobs || []) {
         if (!blob.pathname.endsWith('.json')) continue;
         const res = await fetch(blob.url);
         if (res.ok) {
           assignments.push((await res.json()) as HomeworkAssignment);
         }
       }
-      return assignments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      if (assignments.length > 0) {
+        return assignments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      }
     } catch (e) {
       console.warn('Error listing assignments from blob:', e);
-      return Array.from(memoryStore.assignments.values());
     }
   }
-  return Array.from(memoryStore.assignments.values()).sort(
+  const store = readTmpStore();
+  return Object.values(store.assignments).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 }
 
 export async function saveSubmission(submission: HomeworkSubmission): Promise<string> {
-  const path = `submissions/${submission.assignmentId}/${submission.id}.json`;
-  const data = JSON.stringify(submission);
+  const store = readTmpStore();
+  const current = store.submissions[submission.assignmentId] || [];
+  current.push(submission);
+  store.submissions[submission.assignmentId] = current;
+  writeTmpStore(store);
 
-  if (HAS_BLOB_TOKEN) {
-    const blob = await put(path, data, {
-      access: 'public',
-      contentType: 'application/json',
-      addRandomSuffix: false
-    });
-    return blob.url;
-  } else {
-    const current = memoryStore.submissions.get(submission.assignmentId) || [];
-    current.push(submission);
-    memoryStore.submissions.set(submission.assignmentId, current);
-    return `local://${path}`;
+  const blobMod = await getVercelBlobModule();
+  if (blobMod) {
+    try {
+      const blob = await blobMod.put(
+        `submissions/${submission.assignmentId}/${submission.id}.json`,
+        JSON.stringify(submission),
+        {
+          access: 'public',
+          contentType: 'application/json',
+          addRandomSuffix: false
+        }
+      );
+      return blob.url;
+    } catch (e) {
+      console.warn('Vercel blob submission put fallback to tmp store:', e);
+    }
   }
+  return `local://submissions/${submission.assignmentId}/${submission.id}.json`;
 }
 
 export async function getSubmissionsForAssignment(assignmentId: string): Promise<HomeworkSubmission[]> {
-  if (HAS_BLOB_TOKEN) {
+  const blobMod = await getVercelBlobModule();
+  if (blobMod) {
     try {
-      const { blobs } = await list({ prefix: `submissions/${assignmentId}/` });
+      const { blobs } = await blobMod.list({ prefix: `submissions/${assignmentId}/` });
       const subs: HomeworkSubmission[] = [];
-      for (const blob of blobs) {
+      for (const blob of blobs || []) {
         if (!blob.pathname.endsWith('.json')) continue;
         const res = await fetch(blob.url);
         if (res.ok) {
           subs.push((await res.json()) as HomeworkSubmission);
         }
       }
-      return subs.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+      if (subs.length > 0) {
+        return subs.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+      }
     } catch (e) {
       console.warn('Error fetching submissions from blob:', e);
-      return memoryStore.submissions.get(assignmentId) || [];
     }
   }
-  return (memoryStore.submissions.get(assignmentId) || []).sort(
+  const store = readTmpStore();
+  return (store.submissions[assignmentId] || []).sort(
     (a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()
   );
 }

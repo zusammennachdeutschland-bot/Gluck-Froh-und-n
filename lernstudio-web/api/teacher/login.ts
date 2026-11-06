@@ -1,42 +1,44 @@
-import { createSessionToken, getTeacherPassword, isTeacherAuthenticated, SESSION_COOKIE_NAME } from '../_auth';
+import {
+  createSessionToken,
+  getTeacherPassword,
+  isTeacherAuthenticated,
+  parseRequestBody,
+  sendJson,
+  SESSION_COOKIE_NAME
+} from '../_auth.js';
 
-export async function POST(req: Request) {
-  try {
-    const { password } = await req.json();
-    const correctPassword = getTeacherPassword();
+export default async function handler(req: any, res?: any) {
+  const method = (req?.method || 'GET').toUpperCase();
 
-    if (password !== correctPassword) {
-      return new Response(JSON.stringify({ error: 'Falsches Passwort / Incorrect password' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    const token = createSessionToken();
-    const isProduction = process.env.NODE_ENV === 'production';
-    const cookieHeader = `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${
-      30 * 24 * 60 * 60
-    }${isProduction ? '; Secure' : ''}`;
-
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Set-Cookie': cookieHeader
-      }
-    });
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message || 'Server error' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+  if (method === 'GET') {
+    const authed = isTeacherAuthenticated(req);
+    return sendJson(res, 200, { authenticated: authed });
   }
+
+  if (method === 'POST') {
+    try {
+      const body = await parseRequestBody(req);
+      const password = (body?.password || '').trim();
+      const correctPassword = getTeacherPassword();
+
+      if (password !== correctPassword) {
+        return sendJson(res, 401, { error: 'Falsches Passwort / كلمة المرور غير صحيحة' });
+      }
+
+      const token = createSessionToken();
+      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieHeader = `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${
+        30 * 24 * 60 * 60
+      }${isProduction ? '; Secure' : ''}`;
+
+      return sendJson(res, 200, { success: true }, { 'Set-Cookie': cookieHeader });
+    } catch (err: any) {
+      return sendJson(res, 500, { error: err?.message || 'Server error' });
+    }
+  }
+
+  return sendJson(res, 405, { error: 'Method not allowed' });
 }
 
-export async function GET(req: Request) {
-  const authed = isTeacherAuthenticated(req);
-  return new Response(JSON.stringify({ authenticated: authed }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
+export const GET = (req: Request) => handler(req);
+export const POST = (req: Request) => handler(req);

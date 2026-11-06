@@ -71,6 +71,15 @@ export const TeacherDashboardPage: React.FC = () => {
   const [detailedData, setDetailedData] = useState<DetailedViewData | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
+  const safeJson = async (res: Response): Promise<any> => {
+    const text = await res.text();
+    try {
+      return text ? JSON.parse(text) : {};
+    } catch {
+      return { error: `Serverfehler (${res.status}): Bitte Seite neu laden oder erneut versuchen.` };
+    }
+  };
+
   // Check auth by attempting to load assignments
   const loadAssignments = async () => {
     setIsLoadingAssignments(true);
@@ -79,7 +88,7 @@ export const TeacherDashboardPage: React.FC = () => {
       if (res.status === 401) {
         setIsAuthenticated(false);
       } else if (res.ok) {
-        const data = await res.json();
+        const data = await safeJson(res);
         setAssignments(data.assignments || []);
         setIsAuthenticated(true);
       } else {
@@ -107,7 +116,7 @@ export const TeacherDashboardPage: React.FC = () => {
         credentials: 'include',
         body: JSON.stringify({ password: passwordInput })
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) {
         setLoginError(data.error || 'Falsches Passwort');
       } else {
@@ -159,7 +168,7 @@ export const TeacherDashboardPage: React.FC = () => {
         credentials: 'include',
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) {
         alert(data.error || 'Fehler beim Erstellen');
       } else {

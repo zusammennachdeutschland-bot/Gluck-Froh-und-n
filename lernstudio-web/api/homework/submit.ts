@@ -1,72 +1,56 @@
-import { getAssignment, getSubmissionsForAssignment, saveSubmission } from '../_storage';
-import { HomeworkSubmission, HomeworkQuestionResponse } from '../../shared/homeworkTypes';
+import { parseRequestBody, sendJson } from '../_auth.js';
+import {
+  getAssignment,
+  getSubmissionsForAssignment,
+  saveSubmission,
+  HomeworkSubmission,
+  HomeworkQuestionResponse
+} from '../_storage.js';
 
-export async function POST(req: Request) {
+export default async function handler(req: any, res?: any) {
   try {
-    const body = await req.json();
-    const { assignmentId, studentName, responses, startedAt, completedAt } = body;
+    const body = await parseRequestBody(req);
+    const { assignmentId, studentName, responses, startedAt, completedAt, assignmentFallback } = body || {};
 
     if (!assignmentId || !studentName || !responses || !Array.isArray(responses)) {
-      return new Response(JSON.stringify({ error: 'Missing required submission fields' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return sendJson(res, 400, { error: 'Missing required submission fields' });
     }
 
     const cleanName = studentName.trim();
     if (cleanName.length < 2) {
-      return new Response(JSON.stringify({ error: 'Bitte gib deinen Namen ein / Please enter your name' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return sendJson(res, 400, { error: 'Bitte gib deinen Namen ein / Please enter your name' });
     }
 
-    const assignment = await getAssignment(assignmentId);
+    const assignment = (await getAssignment(assignmentId)) || assignmentFallback;
     if (!assignment) {
-      return new Response(JSON.stringify({ error: 'Assignment not found' }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return sendJson(res, 404, { error: 'Assignment not found' });
     }
 
-    // Server-side Deadline check
     if (assignment.deadline && new Date(assignment.deadline).getTime() < Date.now()) {
-      return new Response(JSON.stringify({ error: 'Deadline expired' }), {
-        status: 410,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return sendJson(res, 410, { error: 'Deadline expired' });
     }
 
-    if (!assignment.isActive) {
-      return new Response(JSON.stringify({ error: 'Assignment closed' }), {
-        status: 403,
-        headers: { 'Content-Type': 'application/json' }
-      });
+    if (assignment.isActive === false || assignment.status === 'closed') {
+      return sendJson(res, 403, { error: 'Assignment closed' });
     }
 
-    // Check student attempt limits
     const existingSubmissions = await getSubmissionsForAssignment(assignmentId);
     const studentAttempts = existingSubmissions.filter(
       (s) => s.studentName.trim().toLowerCase() === cleanName.toLowerCase()
     );
 
     if (assignment.maxAttempts > 0 && studentAttempts.length >= assignment.maxAttempts) {
-      return new Response(
-        JSON.stringify({
-          error: `Maximale Anzahl an Versuchen (${assignment.maxAttempts}) erreicht / Maximum attempts reached`
-        }),
-        {
-          status: 429,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
+      return sendJson(res, 429, {
+        error: `Maximale Anzahl an Versuchen (${assignment.maxAttempts}) erreicht / Maximum attempts reached`
+      });
     }
 
-    // SERVER-SIDE SCORING: Verify student answers against the immutable setSnapshot
     const itemsMap = new Map<string, any>();
-    assignment.setSnapshot.items.forEach((item: any) => {
+    (assignment.setSnapshot?.items || []).forEach((item: any) => {
       itemsMap.set(item.id, item);
-      itemsMap.set(item.german.toLowerCase().trim(), item);
+      if (item.german) {
+        itemsMap.set(item.german.toLowerCase().trim(), item);
+      }
     });
 
     let correctCount = 0;
@@ -77,7 +61,7 @@ export async function POST(req: Request) {
 
       const isCorrect =
         studentAns.toLowerCase() === expectedGerman.toLowerCase() ||
-        (targetItem && targetItem.arabic && studentAns === targetItem.arabic.trim());
+        Boolean(targetItem && targetItem.arabic && studentAns === targetItem.arabic.trim());
 
       if (isCorrect) correctCount++;
 
@@ -109,32 +93,29 @@ export async function POST(req: Request) {
       totalQuestions,
       correctAnswersCount: correctCount,
       scorePercentage,
+      score: correctCount,
+      accuracy: scorePercentage,
       responses: verifiedResponses
     };
 
     await saveSubmission(submission);
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        submission: {
-          id: submission.id,
-          studentName: submission.studentName,
-          scorePercentage,
-          correctAnswersCount: correctCount,
-          totalQuestions,
-          attemptNumber: submission.attemptNumber
-        }
-      }),
-      {
-        status: 201,
-        headers: { 'Content-Type': 'application/json' }
+    return sendJson(res, 201, {
+      success: true,
+      submission: {
+        id: submission.id,
+        studentName: submission.studentName,
+        scorePercentage,
+        correctAnswersCount: correctCount,
+        score: correctCount,
+        accuracy: scorePercentage,
+        totalQuestions,
+        attemptNumber: submission.attemptNumber
       }
-    );
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message || 'Error submitting homework' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
     });
+  } catch (err: any) {
+    return sendJson(res, 500, { error: err?.message || 'Error submitting homework' });
   }
 }
+
+export const POST = (req: Request) => handler(req);

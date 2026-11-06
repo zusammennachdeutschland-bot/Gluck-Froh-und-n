@@ -1,68 +1,43 @@
-import { getAssignment } from '../_storage';
+import { getQueryParam, sendJson } from '../_auth.js';
+import { getAssignment } from '../_storage.js';
 
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const id = url.searchParams.get('id') || url.pathname.split('/').pop();
+export default async function handler(req: any, res?: any) {
+  const id = getQueryParam(req, 'id');
 
   if (!id) {
-    return new Response(JSON.stringify({ error: 'Missing homework ID' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return sendJson(res, 400, { error: 'Missing homework ID' });
   }
 
   const assignment = await getAssignment(id);
   if (!assignment) {
-    return new Response(JSON.stringify({ error: 'Hausaufgabe nicht gefunden / Homework not found' }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' }
+    return sendJson(res, 404, { error: 'Hausaufgabe nicht gefunden / Homework not found' });
+  }
+
+  if (assignment.deadline && new Date(assignment.deadline).getTime() < Date.now()) {
+    return sendJson(res, 410, {
+      error: 'Die Abgabefrist für diese Hausaufgabe ist abgelaufen / Deadline has passed',
+      isExpired: true,
+      assignment: { id: assignment.id, title: assignment.title, deadline: assignment.deadline }
     });
   }
 
-  // Check deadline
-  if (assignment.deadline && new Date(assignment.deadline).getTime() < Date.now()) {
-    return new Response(
-      JSON.stringify({
-        error: 'Die Abgabefrist für diese Hausaufgabe ist abgelaufen / Deadline has passed',
-        isExpired: true,
-        assignment: { id: assignment.id, title: assignment.title, deadline: assignment.deadline }
-      }),
-      {
-        status: 410,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
+  if (assignment.isActive === false || assignment.status === 'closed') {
+    return sendJson(res, 403, {
+      error: 'Diese Hausaufgabe wurde von der Lehrkraft geschlossen / Assignment closed by teacher',
+      isClosed: true,
+      assignment: { id: assignment.id, title: assignment.title }
+    });
   }
 
-  // Check active status
-  if (!assignment.isActive) {
-    return new Response(
-      JSON.stringify({
-        error: 'Diese Hausaufgabe wurde von der Lehrkraft geschlossen / Assignment closed by teacher',
-        isClosed: true,
-        assignment: { id: assignment.id, title: assignment.title }
-      }),
-      {
-        status: 403,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
-  }
-
-  // Return public assignment data without sensitive teacher tokens
-  return new Response(
-    JSON.stringify({
-      id: assignment.id,
-      title: assignment.title,
-      questionCount: assignment.questionCount,
-      setSnapshot: assignment.setSnapshot,
-      maxAttempts: assignment.maxAttempts,
-      allowReplay: assignment.allowReplay,
-      deadline: assignment.deadline
-    }),
-    {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    }
-  );
+  return sendJson(res, 200, {
+    id: assignment.id,
+    title: assignment.title,
+    questionCount: assignment.questionCount || assignment.targetQuestionCount || 10,
+    setSnapshot: assignment.setSnapshot,
+    maxAttempts: assignment.maxAttempts,
+    allowReplay: assignment.allowReplay,
+    deadline: assignment.deadline
+  });
 }
+
+export const GET = (req: Request) => handler(req);

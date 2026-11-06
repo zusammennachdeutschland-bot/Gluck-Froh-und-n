@@ -1,16 +1,12 @@
-import { SESSION_COOKIE_NAME } from '../_auth';
+import { sendJson, SESSION_COOKIE_NAME } from '../_auth.js';
 
-export async function POST() {
+export default async function handler(_req: any, res?: any) {
   const isProduction = process.env.NODE_ENV === 'production';
   const cookieHeader = `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${
     isProduction ? '; Secure' : ''
   }`;
 
-  return new Response(JSON.stringify({ success: true }), {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json',
-      'Set-Cookie': cookieHeader
-    }
-  });
+  return sendJson(res, 200, { success: true }, { 'Set-Cookie': cookieHeader });
 }
+
+export const POST = (req: Request) => handler(req);
