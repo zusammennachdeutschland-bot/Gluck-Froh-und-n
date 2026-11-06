@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getSchoolSettings, DEFAULT_SCHOOL_SETTINGS } from '../utils/schoolUtils';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
 import { signInTeacherWithGoogle } from '../shared/firebaseCloudSync';
+import { downloadWorkspaceFromGoogleCloud, uploadWorkspaceToGoogleCloud } from '../services/firebaseWorkspaceSync';
 
 const PRESET_AVATARS = [
   { id: 'av_man_teacher', label: 'Herr (Teacher)', icon: '👨‍🏫' },
@@ -49,7 +50,7 @@ export const SetupWizard: React.FC = () => {
     profile, updateProfile, theme, toggleTheme, language: currentAppLang, setLanguage, 
     accentColor: currentAccent, setAccentColor, updateNotificationSettings,
     updateInspirationSettings, financeAccounts, addFinanceAccount,
-    importBackupFile, _t
+    importBackupFile, performBackup, _t
   } = useApp();
 
   const currentSchoolData = getSchoolSettings(profile);
@@ -107,6 +108,39 @@ export const SetupWizard: React.FC = () => {
           phone: user.phoneNumber || phone,
           whatsappNumber: user.phoneNumber || whatsappNumber
         });
+
+        // Auto-fetch remote cloud backup data if available!
+        try {
+          const cloudRes = await downloadWorkspaceFromGoogleCloud();
+          const remoteHasActualData = cloudRes.hasRemoteData && cloudRes.backupJsonStr && (() => {
+            try {
+              const p = JSON.parse(cloudRes.backupJsonStr);
+              return (p.students?.length > 0 || p.groups?.length > 0 || p.lessons?.length > 0);
+            } catch {
+              return false;
+            }
+          })();
+
+          if (remoteHasActualData) {
+            const success = await importBackupFile(cloudRes.backupJsonStr!);
+            if (success) {
+              localStorage.setItem('dl_setup_completed', 'true');
+              setIsOpen(false);
+              alert(`أهلاً بك يا ${user.displayName || 'المعلم'}! تم جلب بياناتك السحابية وجميع طلابك ومجموعاتك بنجاح 🌟`);
+              return;
+            }
+          } else {
+            // No remote actual data: protect local data and push to cloud if local data exists
+            try {
+              const snapStr = await performBackup();
+              if (snapStr) {
+                await uploadWorkspaceToGoogleCloud(snapStr);
+              }
+            } catch {}
+          }
+        } catch (cloudErr) {
+          console.warn('Cloud sync download notice during setup:', cloudErr);
+        }
       }
     } catch (err: any) {
       setGoogleSignInError(err?.message || 'Google sign-in failed');
@@ -225,7 +259,7 @@ export const SetupWizard: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!isBackupFileSizeValid(file.size)) {
-      console.error('SetupWizard restore rejected: file exceeds 25MB limit.');
+      alert('حجم الملف أكبر من الحد المسموح (25 ميجابايت).');
       e.target.value = '';
       return;
     }
@@ -236,12 +270,16 @@ export const SetupWizard: React.FC = () => {
       if (success) {
         localStorage.setItem('dl_setup_completed', 'true');
         setIsOpen(false);
-        /* confetti removed */
+        alert('أهلاً بك! تم استعادة بياناتك وجميع طلابك من ملف النسخ الاحتياطي بنجاح 🌟');
+      } else {
+        alert('فشل استعادة الملف. يرجى التأكد من أن ملف النسخ الاحتياطي صالح.');
       }
     } catch (err) {
       console.error('Failed to restore backup during setup:', err);
+      alert('حدث خطأ أثناء قراءة ملف النسخ الاحتياطي.');
     } finally {
       setIsRestoring(false);
+      e.target.value = '';
     }
   };
 
@@ -709,6 +747,30 @@ export const SetupWizard: React.FC = () => {
                       {googleSignInError}
                     </p>
                   )}
+
+                  {/* Restore from Backup File Card */}
+                  <div className="bg-surface-hover/60 border border-surface-border rounded-2xl p-3 flex items-center justify-between gap-3 shadow-2xs">
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5 truncate">
+                        <span>📁</span>
+                        <span>{_t('استعادة البيانات من ملف نسخ احتياطي', 'Restore from Backup File', 'Aus Backup wiederherstellen')}</span>
+                      </div>
+                      <p className="text-[10.5px] text-slate-600 dark:text-slate-400">
+                        {_t('استعد جميع طلابك، مجموعاتك، وحصصك مباشرة من ملف النسخ الاحتياطي.', 'Restore all your students, groups, and lessons from a backup file.', 'Stellen Sie alle Daten aus einer Backup-Datei wieder her.')}
+                      </p>
+                    </div>
+                    <label className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl transition-all flex items-center gap-2 shrink-0 cursor-pointer shadow-xs active:scale-95">
+                      <Upload className="w-4 h-4 shrink-0" />
+                      <span>{_t('استعادة ملف', 'Restore File', 'Wiederherstellen')}</span>
+                      <input
+                        type="file"
+                        accept=".json,.txt"
+                        ref={fileInputRef}
+                        onChange={handleRestoreBackup}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
 
                   {/* Names - Primary Input Focus */}
                   <div className="space-y-2.5">

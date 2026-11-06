@@ -6029,6 +6029,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // BACKUP & SYNC VERIFICATION SYSTEM
   const performBackup = async (): Promise<string> => {
+    const hwAssignments = (() => {
+      try {
+        const raw = localStorage.getItem('glueck_hw_assignments_v2');
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    })();
+
+    const hwSubmissions = (() => {
+      try {
+        const raw = localStorage.getItem('glueck_hw_submissions_v2');
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    })();
+
+    const pickerNames = (() => {
+      try {
+        const raw = localStorage.getItem('glueck_picker_custom_names');
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    })();
+
     const backupObj: BackupData = {
       timestamp: new Date().toISOString(),
       version: '2.0.0',
@@ -6040,6 +6067,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       payments,
       notifications,
       certificates,
+      customAiBackgrounds: (profile as any).customAiBackgrounds || [],
       todos,
       theme,
       accentColor,
@@ -6056,8 +6084,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeTransactions,
       financeRecurring,
       financeInstallments,
+      financeNotifications: financeNotifications || [],
       goldHoldings,
       lernstudioSets,
+      homeworkAssignments: hwAssignments,
+      homeworkSubmissions: hwSubmissions,
+      pickerNames,
       syncQueue: []
     };
 
@@ -6208,6 +6240,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (hasBackupSection(parsed, 'lernstudioSets') && data.lernstudioSets) {
         setLernstudioSets(data.lernstudioSets);
         await storage.setItem('dl_lernstudio_sets', data.lernstudioSets);
+      }
+      if (hasBackupSection(parsed, 'homeworkAssignments') && data.homeworkAssignments) {
+        await storage.setItem('glueck_hw_assignments_v2', data.homeworkAssignments);
+      }
+      if (hasBackupSection(parsed, 'homeworkSubmissions') && data.homeworkSubmissions) {
+        await storage.setItem('glueck_hw_submissions_v2', data.homeworkSubmissions);
+      }
+      if (hasBackupSection(parsed, 'pickerNames') && data.pickerNames) {
+        await storage.setItem('glueck_picker_custom_names', data.pickerNames);
       }
 
       // Reconcile and safeguard synchronization metadata
@@ -7050,6 +7091,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         dismissInspirationCard,
         checkAndTriggerInspirationReminder,
         lernstudioSets,
+        setLernstudioSets,
         saveLernstudioSet,
         deleteLernstudioSet,
         isAddLessonModalOpen,

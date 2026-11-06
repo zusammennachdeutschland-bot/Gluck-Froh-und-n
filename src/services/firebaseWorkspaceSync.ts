@@ -167,7 +167,10 @@ function partitionBackupPayload(fullData: any): Record<WorkspaceCategoryKey, any
       inspirationMessages: fullData.inspirationMessages || []
     },
     lernstudio_data: {
-      lernstudioSets: fullData.lernstudioSets || []
+      lernstudioSets: fullData.lernstudioSets || [],
+      homeworkAssignments: fullData.homeworkAssignments || [],
+      homeworkSubmissions: fullData.homeworkSubmissions || [],
+      pickerNames: fullData.pickerNames || []
     }
   };
 }
@@ -198,6 +201,8 @@ export async function uploadWorkspaceToGoogleCloud(
     const parsed = JSON.parse(backupJsonStr);
     const categories = partitionBackupPayload(parsed);
 
+    const writePromises: Promise<any>[] = [];
+
     for (const categoryKey of WORKSPACE_CATEGORY_KEYS) {
       const catPayloadStr = JSON.stringify(categories[categoryKey] || {});
       const chunks = splitStringIntoChunks(catPayloadStr, CHUNK_MAX_CHARS);
@@ -205,8 +210,8 @@ export async function uploadWorkspaceToGoogleCloud(
       for (let idx = 0; idx < chunks.length; idx++) {
         const docId = `${categoryKey}_chunk_${idx}`;
         const path = `user_workspaces/${uid}/categories/${docId}`;
-        try {
-          await setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), {
+        writePromises.push(
+          setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), {
             id: docId,
             categoryKey,
             chunkIndex: idx,
@@ -216,13 +221,15 @@ export async function uploadWorkspaceToGoogleCloud(
             deviceId,
             payloadChunk: chunks[idx],
             ...(user.email ? { ownerEmail: user.email.slice(0, 120) } : {})
-          });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, path);
-          throw err;
-        }
+          }).catch((err) => {
+            handleFirestoreError(err, OperationType.WRITE, path);
+            throw err;
+          })
+        );
       }
     }
+
+    await Promise.all(writePromises);
 
     // Also sync custom Lernstudio sets to shared `/lernstudio_sets` so Vercel has them immediately
     if (Array.isArray(parsed.lernstudioSets)) {

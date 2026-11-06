@@ -1004,6 +1004,9 @@ export interface BackupData {
   financeNotifications?: FinanceNotification[];
   goldHoldings?: GoldHolding[];
   lernstudioSets?: LernstudioSet[];
+  homeworkAssignments?: any[];
+  homeworkSubmissions?: any[];
+  pickerNames?: string[];
 }
 
 export type InspirationFrequency = 'disabled' | 'daily' | 'before_first_lesson' | 'random_daily';

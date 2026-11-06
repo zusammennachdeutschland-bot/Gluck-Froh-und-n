@@ -3,6 +3,8 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithCredential,
@@ -155,15 +157,37 @@ export function setVercelPublicDomain(domainUrl: string): string {
 // ============================================================================
 // FIREBASE AUTHENTICATION (Unified Teacher Login across Main App & Vercel)
 // ============================================================================
-// Initialize default persistence on load
+// Initialize default persistence & handle redirect results on load
 if (typeof window !== 'undefined') {
   setPersistence(auth, browserLocalPersistence).catch(() => {
     setPersistence(auth, inMemoryPersistence).catch(() => {});
   });
+  getRedirectResult(auth).then((res) => {
+    if (res?.user) {
+      console.log('Redirect sign-in success:', res.user.email);
+    }
+  }).catch((e) => {
+    console.warn('Redirect result notice:', e);
+  });
 }
 
 export async function signInTeacherWithGoogle(): Promise<User | null> {
-  // 1. Set persistence explicitly to prevent missing initial state errors in partitioned browsers
+  const isCapacitorNative =
+    (window as any).Capacitor?.isNativePlatform?.() ||
+    window.location.protocol === 'capacitor:' ||
+    window.location.protocol === 'file:';
+
+  // 1. On Capacitor Android native, popups are not supported. Use signInWithRedirect.
+  if (isCapacitorNative) {
+    try {
+      await signInWithRedirect(auth, googleProvider);
+      return null; // Completes upon redirect return
+    } catch (redirectErr) {
+      console.warn('Capacitor native redirect sign-in error:', redirectErr);
+    }
+  }
+
+  // 2. Set persistence explicitly
   try {
     await setPersistence(auth, browserLocalPersistence).catch(() => {
       return setPersistence(auth, browserSessionPersistence).catch(() => {
@@ -174,7 +198,7 @@ export async function signInTeacherWithGoogle(): Promise<User | null> {
     // Ignore persistence setup notice
   }
 
-  // 2. Primary popup sign-in attempt
+  // 3. Primary popup sign-in attempt
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
@@ -182,22 +206,12 @@ export async function signInTeacherWithGoogle(): Promise<User | null> {
     const errMsg = err?.message || String(err);
     console.warn('Google sign-in primary attempt notice:', errMsg);
 
-    // 3. Fallback for storage partitioning / missing initial state / popup blocking
-    if (
-      errMsg.includes('missing initial state') ||
-      errMsg.includes('sessionStorage') ||
-      errMsg.includes('auth/popup-blocked') ||
-      errMsg.includes('auth/internal-error') ||
-      errMsg.includes('storage') ||
-      err?.code === 'auth/internal-error'
-    ) {
-      try {
-        await setPersistence(auth, inMemoryPersistence);
-        const retryResult = await signInWithPopup(auth, googleProvider);
-        return retryResult.user;
-      } catch (retryErr: any) {
-        console.warn('Google sign-in fallback retry failed:', retryErr);
-      }
+    // 4. Fallback to signInWithRedirect for storage partitioning, missing initial state, or popup blocking
+    try {
+      await signInWithRedirect(auth, googleProvider);
+      return null;
+    } catch (redirectErr: any) {
+      console.warn('Redirect fallback sign-in failed:', redirectErr);
     }
 
     throw err;

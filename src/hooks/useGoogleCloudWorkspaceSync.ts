@@ -76,15 +76,24 @@ export function useGoogleCloudWorkspaceSync(): void {
             payments.length > 0 ||
             financeTransactions.length > 0;
 
-          if (cloudRes.hasRemoteData && cloudRes.backupJsonStr && !localHasData) {
+          const remoteHasActualData = cloudRes.hasRemoteData && cloudRes.backupJsonStr && (() => {
+            try {
+              const p = JSON.parse(cloudRes.backupJsonStr);
+              return (p.students?.length > 0 || p.groups?.length > 0 || p.lessons?.length > 0);
+            } catch {
+              return false;
+            }
+          })();
+
+          if (remoteHasActualData && !localHasData) {
             // Fresh device / browser: automatically pull everything from Google Cloud!
             isApplyingRemoteRef.current = true;
             await importBackupFile(cloudRes.backupJsonStr);
             setTimeout(() => {
               isApplyingRemoteRef.current = false;
             }, 2500);
-          } else if (!cloudRes.hasRemoteData && localHasData) {
-            // First time linking Google account on a populated device: push everything to Cloud!
+          } else if (localHasData) {
+            // Local data exists: protect it and upload to cloud (never overwrite local data with empty cloud data)
             const snapStr = await performBackup();
             await uploadWorkspaceToGoogleCloud(snapStr);
           }
@@ -157,7 +166,7 @@ export function useGoogleCloudWorkspaceSync(): void {
           new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'error' } })
         );
       }
-    }, 3500);
+    }, 1200);
 
     return () => {
       if (autoPushTimerRef.current) {
