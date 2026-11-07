@@ -277,39 +277,54 @@ app.post('/api/homework/submit', (req, res) => {
   return res.json({ success: true, submission });
 });
 
-// 6. P2P-Style Workspace Delta Relay Store (per workspaceId) with Firebase ID Token Authentication
+// 6. P2P-Style Workspace Delta Relay Store (per workspaceId) with Mandatory Firebase ID Token Cryptographic Verification
 const workspaceChunksRelayStore = new Map<string, Map<string, any>>();
 
-interface FirebaseTokenPayload {
+export interface FirebaseTokenPayload {
   iss: string;
   aud: string;
   sub: string;
   user_id?: string;
   email?: string;
   exp: number;
+  iat?: number;
+  auth_time?: number;
   [key: string]: any;
 }
 
 let cachedGoogleCerts: Record<string, string> | null = null;
 let cachedGoogleCertsExpiry = 0;
 
-async function getGooglePublicCerts(): Promise<Record<string, string>> {
-  const now = Date.now();
-  if (cachedGoogleCerts && now < cachedGoogleCertsExpiry) {
-    return cachedGoogleCerts;
-  }
+export async function fetchGooglePublicCerts(): Promise<Record<string, string> | null> {
   try {
     const res = await fetch(
       'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com'
     );
-    if (res.ok) {
-      const data = (await res.json()) as Record<string, string>;
-      cachedGoogleCerts = data;
-      cachedGoogleCertsExpiry = now + 6 * 60 * 60 * 1000;
-      return data;
+    if (!res.ok) {
+      console.warn(`Failed to fetch Google public certs: HTTP ${res.status}`);
+      return null;
     }
+    const data = (await res.json()) as Record<string, string>;
+    const cc = res.headers.get('cache-control') || '';
+    const match = cc.match(/max-age=(\d+)/);
+    const maxAgeSeconds = match ? parseInt(match[1], 10) : 6 * 60 * 60;
+    cachedGoogleCerts = data;
+    cachedGoogleCertsExpiry = Date.now() + Math.max(60, maxAgeSeconds) * 1000;
+    return data;
   } catch (err) {
-    console.warn('Could not fetch Google public certs for token verification:', err);
+    console.warn('Network error fetching Google public certs:', err);
+    return null;
+  }
+}
+
+export async function getGooglePublicCerts(kid?: string): Promise<Record<string, string>> {
+  const now = Date.now();
+  // If cache is expired or empty, fetch fresh certs
+  if (!cachedGoogleCerts || now >= cachedGoogleCertsExpiry) {
+    await fetchGooglePublicCerts();
+  } else if (kid && !cachedGoogleCerts[kid]) {
+    // Certificate rotation: if requested kid is missing from cache, force refresh from Google
+    await fetchGooglePublicCerts();
   }
   return cachedGoogleCerts || {};
 }
@@ -324,57 +339,136 @@ export function emailToLegacyWorkspaceId(email: string): string {
   return clean ? `ws_${clean.slice(0, 90)}` : '';
 }
 
-export async function verifyFirebaseIdToken(token: string, expectedProjectId = 'glueck-c8621'): Promise<{
+export async function verifyFirebaseIdToken(
+  token: string,
+  expectedProjectId = 'glueck-c8621',
+  certsOverride?: Record<string, string>
+): Promise<{
   isValid: boolean;
   payload: FirebaseTokenPayload | null;
   error?: string;
 }> {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return { isValid: false, payload: null, error: 'Malformed JWT format' };
-    }
-    const payload: FirebaseTokenPayload = JSON.parse(
-      Buffer.from(parts[1], 'base64url').toString('utf8')
-    );
-
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (!payload.exp || payload.exp < nowSec - 300) {
-      return { isValid: false, payload: null, error: 'Token expired' };
-    }
-    if (payload.iss !== `https://securetoken.google.com/${expectedProjectId}`) {
-      return { isValid: false, payload: null, error: 'Invalid token issuer' };
-    }
-    if (payload.aud !== expectedProjectId) {
-      return { isValid: false, payload: null, error: 'Invalid token audience' };
-    }
-    if (!payload.sub) {
-      return { isValid: false, payload: null, error: 'Token missing subject (UID)' };
-    }
-
-    // Attempt cryptographic signature check with Google's public certs if available
-    try {
-      const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
-      if (header.kid) {
-        const certs = await getGooglePublicCerts();
-        const cert = certs[header.kid];
-        if (cert) {
-          const verifier = crypto.createVerify('RSA-SHA256');
-          verifier.update(`${parts[0]}.${parts[1]}`);
-          const isSignatureValid = verifier.verify(cert, parts[2], 'base64url');
-          if (!isSignatureValid) {
-            return { isValid: false, payload: null, error: 'Invalid token cryptographic signature' };
-          }
-        }
-      }
-    } catch {
-      // If signature verification fails due to network/cert fetch error, claims check remains valid
-    }
-
-    return { isValid: true, payload };
-  } catch (err: any) {
-    return { isValid: false, payload: null, error: err?.message || 'Invalid token' };
+  if (!token || typeof token !== 'string') {
+    return { isValid: false, payload: null, error: 'Token is missing or empty' };
   }
+
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    return { isValid: false, payload: null, error: 'Malformed JWT format: Expected 3 dot-separated segments' };
+  }
+
+  // 1. Parse and validate JWT Header
+  let header: { alg?: string; kid?: string; typ?: string };
+  try {
+    const headerStr = Buffer.from(parts[0], 'base64url').toString('utf8');
+    header = JSON.parse(headerStr);
+  } catch {
+    return { isValid: false, payload: null, error: 'Malformed JWT header' };
+  }
+
+  if (!header || typeof header !== 'object') {
+    return { isValid: false, payload: null, error: 'JWT header is not an object' };
+  }
+
+  if (header.alg !== 'RS256') {
+    return { isValid: false, payload: null, error: `Invalid signing algorithm: Expected RS256, got ${header.alg}` };
+  }
+
+  if (!header.kid || typeof header.kid !== 'string' || header.kid.trim() === '') {
+    return { isValid: false, payload: null, error: 'Missing or empty kid in JWT header' };
+  }
+
+  // 2. Retrieve public certificate (mandatory, with key rotation handling)
+  let cert: string | undefined;
+  if (certsOverride) {
+    cert = certsOverride[header.kid];
+  } else {
+    const certs = await getGooglePublicCerts(header.kid);
+    cert = certs[header.kid];
+  }
+
+  if (!cert) {
+    return {
+      isValid: false,
+      payload: null,
+      error: `Matching Google public certificate unavailable for kid: ${header.kid}`
+    };
+  }
+
+  // 3. Cryptographic Signature Verification (MANDATORY - NEVER ACCEPT UNVERIFIED TOKEN)
+  try {
+    const verifier = crypto.createVerify('RSA-SHA256');
+    verifier.update(`${parts[0]}.${parts[1]}`);
+    const isSignatureValid = verifier.verify(cert, parts[2], 'base64url');
+    if (!isSignatureValid) {
+      return {
+        isValid: false,
+        payload: null,
+        error: 'Cryptographic signature verification failed: Signature does not match public key'
+      };
+    }
+  } catch (verifyErr: any) {
+    return {
+      isValid: false,
+      payload: null,
+      error: `Cryptographic signature verification error: ${verifyErr?.message || 'Verification exception'}`
+    };
+  }
+
+  // 4. Parse and validate JWT Payload Claims (Only evaluated after signature is cryptographically verified)
+  let payload: FirebaseTokenPayload;
+  try {
+    const payloadStr = Buffer.from(parts[1], 'base64url').toString('utf8');
+    payload = JSON.parse(payloadStr);
+  } catch {
+    return { isValid: false, payload: null, error: 'Malformed JWT payload' };
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return { isValid: false, payload: null, error: 'JWT payload is not an object' };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  // Audience must match Firebase project ID
+  if (payload.aud !== expectedProjectId) {
+    return {
+      isValid: false,
+      payload: null,
+      error: `Invalid token audience: Expected ${expectedProjectId}, got ${payload.aud}`
+    };
+  }
+
+  // Issuer must match https://securetoken.google.com/<projectId>
+  if (payload.iss !== `https://securetoken.google.com/${expectedProjectId}`) {
+    return {
+      isValid: false,
+      payload: null,
+      error: `Invalid token issuer: Expected https://securetoken.google.com/${expectedProjectId}, got ${payload.iss}`
+    };
+  }
+
+  // Subject (UID) must be non-empty string <= 128 chars
+  if (!payload.sub || typeof payload.sub !== 'string' || payload.sub.length > 128) {
+    return { isValid: false, payload: null, error: 'Invalid or missing token subject (sub/uid)' };
+  }
+
+  // Expiration check (with 5 seconds grace for minor clock drift)
+  if (typeof payload.exp !== 'number' || payload.exp <= nowSec - 5) {
+    return { isValid: false, payload: null, error: 'Token has expired' };
+  }
+
+  // Issued at (iat) check (tolerance up to 60s in future for clock skew)
+  if (typeof payload.iat !== 'number' || payload.iat > nowSec + 60) {
+    return { isValid: false, payload: null, error: 'Token issued in the future (iat)' };
+  }
+
+  // Auth time check
+  if (payload.auth_time !== undefined && (typeof payload.auth_time !== 'number' || payload.auth_time > nowSec + 60)) {
+    return { isValid: false, payload: null, error: 'Token auth_time is in the future' };
+  }
+
+  return { isValid: true, payload };
 }
 
 app.all('/api/workspace/delta', async (req, res) => {
