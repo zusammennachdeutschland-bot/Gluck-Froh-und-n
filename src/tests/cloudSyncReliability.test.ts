@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import http from 'node:http';
 import { mergeEntities } from '../services/sync/mergeEngine';
 import { SyncableRecord } from '../types';
 import {
@@ -9,7 +10,12 @@ import {
   DEFAULT_LERNSTUDIO_SETS,
   SYNC_CONTROL_DOC_ID
 } from '../services/firebaseWorkspaceSync';
-import { verifyFirebaseIdToken, emailToLegacyWorkspaceId } from '../api/expressApp';
+import expressApp, {
+  verifyFirebaseIdToken,
+  emailToLegacyWorkspaceId,
+  setGooglePublicCertsCacheForTesting,
+  resetGooglePublicCertsCacheForTesting
+} from '../api/expressApp';
 
 interface TestEntity extends SyncableRecord {
   id: string;
@@ -284,7 +290,7 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     log.push('[PASS] 11. Cryptographic Token Verification: Missing kid, unknown kid, non-RS256, and invalid signature rejected');
 
     // -------------------------------------------------------------------------
-    // Scenario 12: Expired Token, Wrong Audience, and Wrong Issuer are Rejected
+    // Scenario 12: Claims Verification: Expired Token, Wrong Audience, Wrong Issuer, and Mandatory auth_time
     // -------------------------------------------------------------------------
     const expiredJwt = buildSignedTestJwt({}, { exp: Math.floor(Date.now() / 1000) - 100 });
     const expiredRes = await verifyFirebaseIdToken(expiredJwt, 'glueck-c8621', testCertsFixture);
@@ -300,26 +306,73 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     const wrongIssRes = await verifyFirebaseIdToken(wrongIssJwt, 'glueck-c8621', testCertsFixture);
     assert.equal(wrongIssRes.isValid, false);
     assert.equal(wrongIssRes.error?.includes('issuer'), true);
-    log.push('[PASS] 12. Claims Verification: Expired token, wrong audience, and wrong issuer rejected');
+
+    // Mandatory auth_time validation: missing, non-numeric, or future must be rejected
+    const missingAuthTimeJwt = buildSignedTestJwt({}, { auth_time: undefined });
+    const missingAuthTimeRes = await verifyFirebaseIdToken(missingAuthTimeJwt, 'glueck-c8621', testCertsFixture);
+    assert.equal(missingAuthTimeRes.isValid, false);
+    assert.equal(missingAuthTimeRes.error?.includes('auth_time'), true);
+
+    const invalidAuthTimeJwt = buildSignedTestJwt({}, { auth_time: 'not-a-number' as any });
+    const invalidAuthTimeRes = await verifyFirebaseIdToken(invalidAuthTimeJwt, 'glueck-c8621', testCertsFixture);
+    assert.equal(invalidAuthTimeRes.isValid, false);
+    assert.equal(invalidAuthTimeRes.error?.includes('auth_time'), true);
+
+    const futureAuthTimeJwt = buildSignedTestJwt({}, { auth_time: Math.floor(Date.now() / 1000) + 120 });
+    const futureAuthTimeRes = await verifyFirebaseIdToken(futureAuthTimeJwt, 'glueck-c8621', testCertsFixture);
+    assert.equal(futureAuthTimeRes.isValid, false);
+    assert.equal(futureAuthTimeRes.error?.includes('auth_time is in the future'), true);
+
+    // Certificate Cache Expiry Validation: Expired cached certificates are rejected and never used
+    setGooglePublicCertsCacheForTesting({ valid_test_kid_001: testRsaKeyPair.publicKey }, Date.now() - 10000);
+    const expiredCacheRes = await verifyFirebaseIdToken(genuineSignedJwt, 'glueck-c8621');
+    assert.equal(expiredCacheRes.isValid, false);
+    assert.equal(expiredCacheRes.error?.includes('certificate unavailable'), true);
+    resetGooglePublicCertsCacheForTesting();
+
+    log.push('[PASS] 12. Claims Verification: Expired token, wrong aud/iss, mandatory auth_time, and expired cert cache rejection');
 
     // -------------------------------------------------------------------------
     // Scenario 13: Live Relay Endpoint returns HTTP 401 for Invalid/Missing Tokens
+    // Runs an ephemeral Express server inside the test (port 0) with zero mock fallbacks.
     // -------------------------------------------------------------------------
-    try {
-      // 1. Missing Authorization header
-      const httpResUnauth = await fetch('http://localhost:3000/api/workspace/delta?workspaceId=test_ws');
-      assert.equal(httpResUnauth.status, 401);
+    const server = http.createServer(expressApp);
+    await new Promise<void>((resolve, reject) => {
+      server.listen(0, '127.0.0.1', () => resolve());
+      server.once('error', reject);
+    });
 
-      // 2. Fake signature token in Authorization header
-      const httpResFakeSig = await fetch('http://localhost:3000/api/workspace/delta?workspaceId=test_ws', {
+    try {
+      const address = server.address() as import('node:net').AddressInfo;
+      const baseUrl = `http://127.0.0.1:${address.port}`;
+
+      // 1. Missing Authorization header (GET)
+      const httpResUnauthGet = await fetch(`${baseUrl}/api/workspace/delta?workspaceId=test_ws`);
+      assert.equal(httpResUnauthGet.status, 401);
+
+      // 2. Missing Authorization header (POST)
+      const httpResUnauthPost = await fetch(`${baseUrl}/api/workspace/delta`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: 'test_ws', chunks: [] })
+      });
+      assert.equal(httpResUnauthPost.status, 401);
+
+      // 3. Fake signature token in Authorization header
+      const httpResFakeSig = await fetch(`${baseUrl}/api/workspace/delta?workspaceId=test_ws`, {
         headers: { Authorization: `Bearer ${fakeSigJwt}` }
       });
       assert.equal(httpResFakeSig.status, 401);
 
-      log.push('[PASS] 13. Relay Endpoint: HTTP 401 strictly returned for missing or invalid tokens');
-    } catch (httpErr: any) {
-      // If dev server port is occupied or different in test process, verify status directly
-      log.push(`[PASS] 13. Relay Endpoint: Verified 401 guard behavior (Local check: ${httpErr.message})`);
+      // 4. Malformed JWT token in Authorization header
+      const httpResMalformed = await fetch(`${baseUrl}/api/workspace/delta?workspaceId=test_ws`, {
+        headers: { Authorization: 'Bearer this.isNot.aValidJwt' }
+      });
+      assert.equal(httpResMalformed.status, 401);
+
+      log.push('[PASS] 13. Relay Endpoint: Ephemeral Express server strictly returned HTTP 401 for unauthenticated and fake signature requests');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
 
     // -------------------------------------------------------------------------

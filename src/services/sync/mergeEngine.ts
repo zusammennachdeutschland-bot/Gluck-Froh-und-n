@@ -109,8 +109,14 @@ export function mergeEntities<T extends SyncableRecord>(
         // Higher logical version with minor clock drift
         shouldAcceptIncoming = true;
         resolutionStrategy = 'TIE_BREAKER';
-      } else if (((incomingItem.deleted && !localItem.deleted) || ((incomingItem as any).status === 'cancelled' && (localItem as any).status !== 'cancelled'))) {
-        // Intentional deletion or session cancellation tombstone: honor incoming tombstone unless local has strictly newer version AND timestamp
+      } else if (
+        (incomingItem.deleted && !localItem.deleted) ||
+        (
+          ((incomingItem as any).status === 'cancelled' || (incomingItem as any).status === 'completed' || (incomingItem as any).status === 'in_progress') &&
+          ((localItem as any).status === 'scheduled' || !(localItem as any).status)
+        )
+      ) {
+        // Intentional deletion or active progress status update: honor incoming status update unless local has strictly newer version AND timestamp
         if (!(localTime > incomingTime && localVer > incomingVer)) {
           shouldAcceptIncoming = true;
           resolutionStrategy = 'TIE_BREAKER';
@@ -132,6 +138,14 @@ export function mergeEntities<T extends SyncableRecord>(
             ...incomingItem
           };
           
+          // Ensure incoming completion/cancellation/in_progress status takes precedence if local was scheduled
+          if (
+            ((incomingItem as any).status === 'completed' || (incomingItem as any).status === 'cancelled' || (incomingItem as any).status === 'in_progress') &&
+            ((localItem as any).status === 'scheduled' || !(localItem as any).status)
+          ) {
+            (finalItem as any).status = (incomingItem as any).status;
+          }
+
           // Specialized field preservation
           if ((incomingItem as any).certificateName === undefined || (incomingItem as any).certificateName === '') {
             (finalItem as any).certificateName = (localItem as any).certificateName || '';

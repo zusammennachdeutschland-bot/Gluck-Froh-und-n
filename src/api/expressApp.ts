@@ -288,12 +288,22 @@ export interface FirebaseTokenPayload {
   email?: string;
   exp: number;
   iat?: number;
-  auth_time?: number;
+  auth_time: number;
   [key: string]: any;
 }
 
 let cachedGoogleCerts: Record<string, string> | null = null;
 let cachedGoogleCertsExpiry = 0;
+
+export function resetGooglePublicCertsCacheForTesting(): void {
+  cachedGoogleCerts = null;
+  cachedGoogleCertsExpiry = 0;
+}
+
+export function setGooglePublicCertsCacheForTesting(certs: Record<string, string> | null, expiryMs: number): void {
+  cachedGoogleCerts = certs;
+  cachedGoogleCertsExpiry = expiryMs;
+}
 
 export async function fetchGooglePublicCerts(): Promise<Record<string, string> | null> {
   try {
@@ -306,10 +316,11 @@ export async function fetchGooglePublicCerts(): Promise<Record<string, string> |
     }
     const data = (await res.json()) as Record<string, string>;
     const cc = res.headers.get('cache-control') || '';
-    const match = cc.match(/max-age=(\d+)/);
-    const maxAgeSeconds = match ? parseInt(match[1], 10) : 6 * 60 * 60;
+    const match = cc.match(/max-age=(\d+)/i);
+    // Respect Cache-Control max-age directly without imposing an artificial minimum beyond declared header
+    const maxAgeSeconds = match ? parseInt(match[1], 10) : 3600;
     cachedGoogleCerts = data;
-    cachedGoogleCertsExpiry = Date.now() + Math.max(60, maxAgeSeconds) * 1000;
+    cachedGoogleCertsExpiry = Date.now() + (maxAgeSeconds * 1000);
     return data;
   } catch (err) {
     console.warn('Network error fetching Google public certs:', err);
@@ -319,13 +330,32 @@ export async function fetchGooglePublicCerts(): Promise<Record<string, string> |
 
 export async function getGooglePublicCerts(kid?: string): Promise<Record<string, string>> {
   const now = Date.now();
-  // If cache is expired or empty, fetch fresh certs
-  if (!cachedGoogleCerts || now >= cachedGoogleCertsExpiry) {
-    await fetchGooglePublicCerts();
+  const isCacheExpired = !cachedGoogleCerts || now >= cachedGoogleCertsExpiry;
+
+  if (isCacheExpired) {
+    const freshCerts = await fetchGooglePublicCerts();
+    if (!freshCerts) {
+      // If certificates expired and remote fetch fails, reject token verification immediately - NEVER use expired certificates!
+      cachedGoogleCerts = null;
+      cachedGoogleCertsExpiry = 0;
+      return {};
+    }
   } else if (kid && !cachedGoogleCerts[kid]) {
-    // Certificate rotation: if requested kid is missing from cache, force refresh from Google
-    await fetchGooglePublicCerts();
+    // Certificate rotation: if requested kid is missing, attempt to refresh
+    const freshCerts = await fetchGooglePublicCerts();
+    if (!freshCerts && now >= cachedGoogleCertsExpiry) {
+      cachedGoogleCerts = null;
+      cachedGoogleCertsExpiry = 0;
+      return {};
+    }
   }
+
+  // Ensure we never return certificates if cache is expired
+  if (now >= cachedGoogleCertsExpiry) {
+    cachedGoogleCerts = null;
+    return {};
+  }
+
   return cachedGoogleCerts || {};
 }
 
@@ -463,8 +493,11 @@ export async function verifyFirebaseIdToken(
     return { isValid: false, payload: null, error: 'Token issued in the future (iat)' };
   }
 
-  // Auth time check
-  if (payload.auth_time !== undefined && (typeof payload.auth_time !== 'number' || payload.auth_time > nowSec + 60)) {
+  // Mandatory auth_time check: must be a valid finite number and cannot be in the future (within 60s tolerance)
+  if (typeof payload.auth_time !== 'number' || !Number.isFinite(payload.auth_time)) {
+    return { isValid: false, payload: null, error: 'Missing or invalid mandatory token auth_time' };
+  }
+  if (payload.auth_time > nowSec + 60) {
     return { isValid: false, payload: null, error: 'Token auth_time is in the future' };
   }
 
