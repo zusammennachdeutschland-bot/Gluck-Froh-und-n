@@ -63,7 +63,7 @@ service cloud.firestore {
 
     function isValidWorkspaceChunk(data) {
       return data.keys().hasAll(['id', 'categoryKey', 'chunkIndex', 'totalChunks', 'updatedAtMs', 'updatedAtIso', 'deviceId', 'payloadChunk'])
-        && data.keys().hasOnly(['id', 'categoryKey', 'chunkIndex', 'totalChunks', 'updatedAtMs', 'updatedAtIso', 'deviceId', 'payloadChunk', 'ownerEmail'])
+        && data.keys().hasOnly(['id', 'categoryKey', 'chunkIndex', 'totalChunks', 'updatedAtMs', 'updatedAtIso', 'deviceId', 'payloadChunk', 'ownerEmail', 'ownerUid'])
         && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
         && data.categoryKey is string && data.categoryKey.size() >= 1 && data.categoryKey.size() <= 100
         && data.chunkIndex is number && data.chunkIndex >= 0 && data.chunkIndex <= 200
@@ -112,8 +112,7 @@ service cloud.firestore {
 
     // Teacher Full App Cloud Sync (STRICTLY Isolated by UID - Pillar 8)
     match /user_workspaces/{userId}/categories/{docId} {
-      // allow list MUST check resource.data or path variables against request.auth.uid (Pillar 8)
-      allow get, list: if isOwner(userId) && isValidId(userId);
+      allow get, list: if isOwner(userId) || (isSignedIn() && request.auth.token.email != null && (resource == null || resource.data.ownerEmail == request.auth.token.email));
       
       allow create, update: if isOwner(userId)
         && isValidId(userId)
@@ -121,7 +120,7 @@ service cloud.firestore {
         && isValidWorkspaceChunk(incoming())
         && incoming().id == docId;
       
-      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(docId);
+      allow delete: if isOwner(userId) || (isSignedIn() && request.auth.token.email != null && resource.data.ownerEmail == request.auth.token.email);
     }
   }
 }

@@ -96,11 +96,13 @@ export function useGoogleCloudWorkspaceSync(): void {
           if (remoteHasActualData && !localHasData) {
             // Fresh device / browser: automatically pull everything from Google Cloud!
             isApplyingRemoteRef.current = true;
-            await importBackupFile(cloudRes.backupJsonStr);
-            try {
-              localStorage.setItem('dl_setup_completed', 'true');
-              window.dispatchEvent(new CustomEvent('close-setup-wizard'));
-            } catch {}
+            const success = await importBackupFile(cloudRes.backupJsonStr);
+            if (success) {
+              try {
+                localStorage.setItem('dl_setup_completed', 'true');
+                window.dispatchEvent(new CustomEvent('close-setup-wizard'));
+              } catch {}
+            }
             setTimeout(() => {
               isApplyingRemoteRef.current = false;
             }, 2500);
@@ -111,8 +113,26 @@ export function useGoogleCloudWorkspaceSync(): void {
             if (res.success) {
               lastUploadedSnapshotRef.current = stripSnapshotTimestamp(snapStr);
             }
+          } else if (localHasData && remoteHasActualData) {
+            // Both local and cloud have data on boot: Perform a two-way merge
+            console.log('Synchronizing: Both local and cloud have data. Merging...');
+            isApplyingRemoteRef.current = true;
+            const success = await importBackupFile(cloudRes.backupJsonStr);
+            
+            // After merging (which updates local state), push the merged state back to cloud
+            if (success && !isFirestoreWriteQuotaExhaustedToday()) {
+              const mergedSnapStr = await performBackup();
+              const uploadRes = await uploadWorkspaceToGoogleCloud(mergedSnapStr);
+              if (uploadRes.success) {
+                lastUploadedSnapshotRef.current = stripSnapshotTimestamp(mergedSnapStr);
+              }
+            }
+
+            setTimeout(() => {
+              isApplyingRemoteRef.current = false;
+            }, 2500);
           } else if (localHasData) {
-            // Both local and cloud have data on boot: baseline snapshot so we only push when user actually edits data
+            // Local data exists but cloud check failed or is empty/invalid
             const snapStr = await performBackup();
             lastUploadedSnapshotRef.current = stripSnapshotTimestamp(snapStr);
           }
@@ -136,9 +156,9 @@ export function useGoogleCloudWorkspaceSync(): void {
             window.dispatchEvent(
               new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
             );
-            await importBackupFile(remoteBackupJson);
+            const success = await importBackupFile(remoteBackupJson);
             window.dispatchEvent(
-              new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'synced' } })
+              new CustomEvent('gluck-cloud-sync-status', { detail: { status: success ? 'synced' : 'error' } })
             );
           } finally {
             setTimeout(() => {

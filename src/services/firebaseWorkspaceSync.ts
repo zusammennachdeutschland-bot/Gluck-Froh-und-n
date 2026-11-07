@@ -48,9 +48,6 @@ export function getPrimaryWorkspaceId(user: { uid: string; email?: string | null
   if (!user || !user.uid) {
     throw new Error('Authenticated user with valid UID is required to resolve workspace.');
   }
-  if (user.email) {
-    return emailToWorkspaceId(user.email);
-  }
   return user.uid;
 }
 
@@ -595,9 +592,10 @@ export async function uploadWorkspaceToGoogleCloud(
       return { success: true, syncedAtIso: nowIso, deltaCount: 0 };
     }
 
-    const ownerEmailField = user.email
-      ? { ownerEmail: user.email.trim().toLowerCase().slice(0, 120) }
-      : {};
+    const ownerFields = {
+      ownerUid: user.uid,
+      ...(user.email ? { ownerEmail: user.email.trim().toLowerCase().slice(0, 120) } : {})
+    };
 
     // 2. Fast Incremental P2P Delta Path (when baseline is already seeded)
     if (hasBaselineSeeded && !options?.forceFullBaseline) {
@@ -640,7 +638,7 @@ export async function uploadWorkspaceToGoogleCloud(
           updatedAtIso: nowIso,
           deviceId,
           payloadChunk: deltaPayloadStr,
-          ...ownerEmailField
+          ...ownerFields
         };
 
         await postChunksToRelayServer(uid, [chunkObj]);
@@ -648,9 +646,7 @@ export async function uploadWorkspaceToGoogleCloud(
         if (!isFirestoreWriteQuotaExhaustedToday()) {
           await executeSafeFirestoreWrite(() =>
             setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), chunkObj)
-          ).catch((err) => {
-            handleFirestoreError(err, OperationType.WRITE, `user_workspaces/${uid}/categories/${docId}`);
-          });
+          );
         }
 
         saveDeltaAccumulator(uid, nextAcc);
@@ -688,7 +684,7 @@ export async function uploadWorkspaceToGoogleCloud(
           updatedAtIso: nowIso,
           deviceId,
           payloadChunk: chunkData,
-          ...ownerEmailField
+          ...ownerFields
         };
 
         relayChunks.push(chunkObj);
@@ -698,13 +694,8 @@ export async function uploadWorkspaceToGoogleCloud(
           // Write sequentially to avoid flooding the Firestore WebChannel stream
           await executeSafeFirestoreWrite(() =>
             setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), chunkObj)
-          )
-            .then(() => {
-              lastUploadedChunkCache.set(cacheKey, chunkData);
-            })
-            .catch((err) => {
-              handleFirestoreError(err, OperationType.WRITE, path);
-            });
+          );
+          lastUploadedChunkCache.set(cacheKey, chunkData);
         } else {
           lastUploadedChunkCache.set(cacheKey, chunkData);
         }
@@ -836,38 +827,40 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
   }
 
   const primaryId = getPrimaryWorkspaceId(user);
-  const path = `user_workspaces/${primaryId}/categories`;
+  const legacyId = user.email ? emailToWorkspaceId(user.email) : null;
+  const deviceId = getCloudDeviceId();
 
   try {
-    const candidateIds: string[] = [primaryId];
-    if (user.uid && !candidateIds.includes(user.uid)) {
-      candidateIds.push(user.uid);
-    }
-
     const rawDocsMap = new Map<string, any>();
     let resolvedWorkspaceId = primaryId;
+    let isLegacyPath = false;
 
-    for (const cId of candidateIds) {
-      if (!verifyWorkspaceOwnership(user, null, cId)) continue;
-      try {
-        const s = await getDocs(collection(db, 'user_workspaces', cId, 'categories'));
-        if (!s.empty) {
-          resolvedWorkspaceId = cId;
-          s.forEach((docSnap: any) => {
-            const d = docSnap.data();
-            if (d && d.id && verifyWorkspaceOwnership(user, d, cId)) {
-              rawDocsMap.set(d.id, d);
-            }
-          });
-          break;
+    // 1. Try UID path first
+    const uidSnap = await getDocs(collection(db, 'user_workspaces', primaryId, 'categories'));
+    if (!uidSnap.empty) {
+      uidSnap.forEach((docSnap: any) => {
+        const d = docSnap.data();
+        if (d && d.id && verifyWorkspaceOwnership(user, d, primaryId)) {
+          rawDocsMap.set(d.id, d);
         }
-      } catch {
-        // try next candidate
+      });
+    } else if (legacyId && legacyId !== primaryId) {
+      // 2. If UID path empty, check legacy email path
+      const legacySnap = await getDocs(collection(db, 'user_workspaces', legacyId, 'categories'));
+      if (!legacySnap.empty) {
+        resolvedWorkspaceId = legacyId;
+        isLegacyPath = true;
+        legacySnap.forEach((docSnap: any) => {
+          const d = docSnap.data();
+          if (d && d.id && verifyWorkspaceOwnership(user, d, legacyId)) {
+            rawDocsMap.set(d.id, d);
+          }
+        });
       }
     }
 
     // Merge any newer chunks/deltas from fast relay server
-    const relayDocs = await fetchChunksFromRelayServer(primaryId);
+    const relayDocs = await fetchChunksFromRelayServer(resolvedWorkspaceId);
     for (const rDoc of relayDocs) {
       if (!rDoc || !rDoc.id) continue;
       const existing = rawDocsMap.get(rDoc.id);
@@ -992,6 +985,21 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       updatedAtIso: maxUpdatedAtIso
     };
 
+    // 5. If we loaded from legacy path, migrate to primary UID path now
+    if (isLegacyPath && legacyId && reassembled) {
+      console.log(`Migrating workspace from legacy ID ${legacyId} to primary ID ${primaryId}`);
+      const migrationRes = await uploadWorkspaceToGoogleCloud(JSON.stringify(reassembled), { forceFullBaseline: true });
+      if (migrationRes.success) {
+        // Cleanup legacy data from Firestore
+        const legacyDocs = Array.from(rawDocsMap.keys());
+        for (const docId of legacyDocs) {
+          await executeSafeFirestoreWrite(() => 
+            deleteDoc(doc(db, 'user_workspaces', legacyId, 'categories', docId))
+          ).catch(() => {});
+        }
+      }
+    }
+
     return {
       hasRemoteData: true,
       backupJsonStr: JSON.stringify(reassembled),
@@ -1000,7 +1008,8 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       summary
     };
   } catch (err: any) {
-    handleFirestoreError(err, OperationType.LIST, path);
+    const primaryId = user ? getPrimaryWorkspaceId(user) : 'unknown';
+    handleFirestoreError(err, OperationType.LIST, `user_workspaces/${primaryId}/categories`);
     return {
       hasRemoteData: false,
       backupJsonStr: null,
