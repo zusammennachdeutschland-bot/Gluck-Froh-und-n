@@ -155,12 +155,25 @@ export async function runSyncCycle(
     }
 
     // 5. Ingestion Phase: Merge received records into local storage with diff tracking
+    const localSettings = localData['settings'] as any[];
+    const localTeacherSettings = Array.isArray(localSettings) ? localSettings.find(s => s.id === 'singleton_teacher_settings') : undefined;
+    const inboundSettings = inboundDelta.records['settings'] as any[];
+    const inboundTeacherSettings = Array.isArray(inboundSettings) ? inboundSettings.find(s => s.id === 'singleton_teacher_settings') : undefined;
+
+    let activePurgedRecords: import('../../types').PurgedRecordTombstone[] = [
+      ...(localTeacherSettings?.recentlyDeleted?.purgedRecords || []),
+      ...(inboundTeacherSettings?.recentlyDeleted?.purgedRecords || [])
+    ];
+
     for (const [key, incomingRecords] of Object.entries(inboundDelta.records)) {
       if (Array.isArray(incomingRecords) && incomingRecords.length > 0) {
         receivedCount += incomingRecords.length;
         totalTransferred += incomingRecords.length;
         const currentLocalRecords = localData[key] || [];
-        const mergeResult = mergeEntities(currentLocalRecords, incomingRecords, key);
+        const mergeResult = mergeEntities(currentLocalRecords, incomingRecords, {
+          entityTypeName: key,
+          purgedRecords: activePurgedRecords
+        });
         
         entityDiffs[key] = mergeResult.diff;
         if (mergeResult.conflicts.length > 0) {

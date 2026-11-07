@@ -9,6 +9,15 @@ export interface MergeResult<T extends SyncableRecord> {
   diff: SyncEntityDiff;
 }
 
+export function parseTimestampMs(val: any): number {
+  if (typeof val === 'number' && !isNaN(val)) return val;
+  if (typeof val === 'string' && val.trim()) {
+    const parsed = Date.parse(val);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return 0;
+}
+
 /**
  * Type-safe merge for DeletedItem<T>[] wrapper objects (e.g. RecentlyDeletedData).
  * Identifies records by entry.item.id, preserves original item and deletedAt, deduplicates,
@@ -43,8 +52,8 @@ export function mergeDeletedItems<T extends { id: string }>(
     if (!existingEntry) {
       map.set(id, incomingEntry);
     } else {
-      const existingTime = new Date(existingEntry.deletedAt || 0).getTime() || (existingEntry.item as any)?.updatedAt || 0;
-      const incomingTime = new Date(incomingEntry.deletedAt || 0).getTime() || (incomingEntry.item as any)?.updatedAt || 0;
+      const existingTime = parseTimestampMs(existingEntry.deletedAt || (existingEntry.item as any)?.updatedAt);
+      const incomingTime = parseTimestampMs(incomingEntry.deletedAt || (incomingEntry.item as any)?.updatedAt);
 
       if (incomingTime > existingTime) {
         map.set(id, {
@@ -78,19 +87,72 @@ export function mergeDeletedItems<T extends { id: string }>(
 }
 
 /**
- * Dedicated, type-safe merge for RecentlyDeletedData containing wrapper objects.
+ * Merge and deduplicate PurgedRecordTombstone records by item ID.
+ */
+export function mergePurgedTombstones(
+  localPurged: import('../../types').PurgedRecordTombstone[] | undefined | null,
+  incomingPurged: import('../../types').PurgedRecordTombstone[] | undefined | null
+): import('../../types').PurgedRecordTombstone[] {
+  const localArr = Array.isArray(localPurged) ? localPurged : [];
+  const incomingArr = Array.isArray(incomingPurged) ? incomingPurged : [];
+  if (localArr.length === 0 && incomingArr.length === 0) return [];
+
+  const map = new Map<string, import('../../types').PurgedRecordTombstone>();
+  for (const t of [...localArr, ...incomingArr]) {
+    if (!t || !t.id || typeof t.id !== 'string') continue;
+    const id = t.id.trim();
+    const existing = map.get(id);
+    if (!existing) {
+      map.set(id, t);
+    } else {
+      const existingTime = parseTimestampMs(existing.updatedAt || existing.purgedAt);
+      const newTime = parseTimestampMs(t.updatedAt || t.purgedAt);
+      if (newTime >= existingTime) {
+        map.set(id, t);
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
+/**
+ * Dedicated, type-safe merge for RecentlyDeletedData containing wrapper objects and purged tombstones.
  */
 export function mergeRecentlyDeleted(
   localRec: RecentlyDeletedData | undefined | null,
   incomingRec: RecentlyDeletedData | undefined | null
 ): RecentlyDeletedData {
-  const local = localRec || { students: [], groups: [], lessons: [] };
-  const incoming = incomingRec || { students: [], groups: [], lessons: [] };
+  const local = localRec || { students: [], groups: [], lessons: [], purgedRecords: [] };
+  const incoming = incomingRec || { students: [], groups: [], lessons: [], purgedRecords: [] };
+
+  const mergedPurged = mergePurgedTombstones(local.purgedRecords, incoming.purgedRecords);
+  const mergedStudents = mergeDeletedItems(local.students, incoming.students);
+  const mergedGroups = mergeDeletedItems(local.groups, incoming.groups);
+  const mergedLessons = mergeDeletedItems(local.lessons, incoming.lessons);
+
+  const purgedMap = new Map<string, number>();
+  for (const p of mergedPurged) {
+    if (p && p.id) {
+      const pTime = Math.max(parseTimestampMs(p.purgedAt), parseTimestampMs(p.updatedAt));
+      purgedMap.set(p.id.trim(), Math.max(purgedMap.get(p.id.trim()) || 0, pTime));
+    }
+  }
+
+  const filterSoftDeleted = <T extends { id: string }>(items: DeletedItem<T>[]): DeletedItem<T>[] => {
+    return items.filter(entry => {
+      if (!entry || !entry.item || !entry.item.id) return false;
+      const purgedTime = purgedMap.get(entry.item.id.trim());
+      if (!purgedTime) return true;
+      const softDelTime = parseTimestampMs(entry.deletedAt || (entry.item as any)?.updatedAt);
+      return softDelTime > purgedTime;
+    });
+  };
 
   return {
-    students: mergeDeletedItems(local.students, incoming.students),
-    groups: mergeDeletedItems(local.groups, incoming.groups),
-    lessons: mergeDeletedItems(local.lessons, incoming.lessons)
+    students: filterSoftDeleted(mergedStudents),
+    groups: filterSoftDeleted(mergedGroups),
+    lessons: filterSoftDeleted(mergedLessons),
+    purgedRecords: mergedPurged
   };
 }
 
@@ -119,11 +181,37 @@ export function mergeDismissedDashboardLessons(
   }
 }
 
+export interface MergeEntitiesOptions {
+  entityTypeName?: string;
+  purgedRecords?: import('../../types').PurgedRecordTombstone[];
+  recentlyDeleted?: RecentlyDeletedData;
+}
+
 export function mergeEntities<T extends SyncableRecord>(
   localArray: T[],
   incomingArray: T[],
-  entityTypeName: string = 'entity'
+  entityTypeNameOrOptions?: string | MergeEntitiesOptions
 ): MergeResult<T> {
+  const options: MergeEntitiesOptions = typeof entityTypeNameOrOptions === 'string'
+    ? { entityTypeName: entityTypeNameOrOptions }
+    : (entityTypeNameOrOptions || {});
+
+  const entityTypeName = options.entityTypeName || 'entity';
+  const purgedList = options.purgedRecords || options.recentlyDeleted?.purgedRecords || [];
+
+  const purgedMap = new Map<string, { purgedTime: number; tombstoneRev: number }>();
+  if (Array.isArray(purgedList)) {
+    for (const p of purgedList) {
+      if (p && p.id) {
+        const pTime = Math.max(parseTimestampMs(p.purgedAt), parseTimestampMs(p.updatedAt));
+        const existing = purgedMap.get(p.id.trim());
+        const maxTime = Math.max(existing?.purgedTime || 0, pTime);
+        const maxRev = Math.max(existing?.tombstoneRev || 0, p.originRevision || 0);
+        purgedMap.set(p.id.trim(), { purgedTime: maxTime, tombstoneRev: maxRev });
+      }
+    }
+  }
+
   const entityMap = new Map<string, T>();
   
   // Populate initial map with local entities
@@ -152,11 +240,31 @@ export function mergeEntities<T extends SyncableRecord>(
 
   for (const incomingItem of incomingArray) {
     if (!incomingItem || !incomingItem.id) continue;
-    const localItem = entityMap.get(incomingItem.id);
+    const id = incomingItem.id.trim();
+    const localItem = entityMap.get(id);
+
+    // Purge tombstone suppression check
+    const purgedInfo = purgedMap.get(id);
+    if (purgedInfo && purgedInfo.purgedTime > 0) {
+      const incomingTime = parseTimestampMs(incomingItem.updatedAt);
+      if (incomingTime <= purgedInfo.purgedTime) {
+        // REJECT / SUPPRESS incoming active or soft-deleted record resurrection because an authoritative purge tombstone exists!
+        conflicts.push({
+          entityType: entityTypeName,
+          entityId: id,
+          localUpdatedAt: purgedInfo.purgedTime,
+          remoteUpdatedAt: incomingTime,
+          winner: 'local',
+          resolutionStrategy: 'LWW',
+          timestamp: Date.now()
+        });
+        continue;
+      }
+    }
 
     if (!localItem) {
       // Incoming record does not exist locally, insert it
-      entityMap.set(incomingItem.id, incomingItem);
+      entityMap.set(id, incomingItem);
       if (incomingItem.deleted) {
         deletedCount++;
       } else {

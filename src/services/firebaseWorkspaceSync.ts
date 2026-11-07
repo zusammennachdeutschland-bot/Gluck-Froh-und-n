@@ -1057,26 +1057,37 @@ function reassembleCategoryChunks(chunkDocs: any[]): any | null {
 function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): void {
   if (!deltaObj || typeof deltaObj !== 'object') return;
 
+  // 1. First merge recentlyDeleted and singletons so authoritative purge tombstones are available
+  if (deltaObj.recentlyDeleted) {
+    baseObj.recentlyDeleted = mergeRecentlyDeleted(baseObj.recentlyDeleted, deltaObj.recentlyDeleted);
+  }
+  if (deltaObj.dismissedDashboardLessons !== undefined) {
+    baseObj.dismissedDashboardLessons = mergeDismissedDashboardLessons(baseObj.dismissedDashboardLessons, deltaObj.dismissedDashboardLessons, true);
+  }
+  if (Array.isArray(deltaObj.prunedLessonIds)) {
+    const existingPruned = Array.isArray(baseObj.prunedLessonIds) ? baseObj.prunedLessonIds : [];
+    baseObj.prunedLessonIds = Array.from(new Set([...existingPruned, ...deltaObj.prunedLessonIds]));
+  }
+
+  for (const sKey of SINGLETON_KEYS) {
+    if (sKey !== 'recentlyDeleted' && sKey !== 'dismissedDashboardLessons' && sKey !== 'prunedLessonIds') {
+      if (deltaObj[sKey] !== undefined) {
+        baseObj[sKey] = deltaObj[sKey];
+      }
+    }
+  }
+
+  const purgedList = baseObj.recentlyDeleted?.purgedRecords || [];
+
+  // 2. Process entity collections with centralized purge tombstone protection
   for (const colKey of ENTITY_COLLECTION_KEYS) {
     const incomingItems = deltaObj[colKey];
     if (Array.isArray(incomingItems) && incomingItems.length > 0) {
       const existingItems = Array.isArray(baseObj[colKey]) ? baseObj[colKey] : [];
-      baseObj[colKey] = mergeEntities(existingItems, incomingItems, colKey).merged;
-    }
-  }
-
-  for (const sKey of SINGLETON_KEYS) {
-    if (deltaObj[sKey] !== undefined) {
-      if (sKey === 'prunedLessonIds' && Array.isArray(deltaObj.prunedLessonIds)) {
-        const existingPruned = Array.isArray(baseObj.prunedLessonIds) ? baseObj.prunedLessonIds : [];
-        baseObj.prunedLessonIds = Array.from(new Set([...existingPruned, ...deltaObj.prunedLessonIds]));
-      } else if (sKey === 'recentlyDeleted' && deltaObj.recentlyDeleted) {
-        baseObj.recentlyDeleted = mergeRecentlyDeleted(baseObj.recentlyDeleted, deltaObj.recentlyDeleted);
-      } else if (sKey === 'dismissedDashboardLessons' && deltaObj.dismissedDashboardLessons !== undefined) {
-        baseObj.dismissedDashboardLessons = mergeDismissedDashboardLessons(baseObj.dismissedDashboardLessons, deltaObj.dismissedDashboardLessons, true);
-      } else {
-        baseObj[sKey] = deltaObj[sKey];
-      }
+      baseObj[colKey] = mergeEntities(existingItems, incomingItems, {
+        entityTypeName: colKey,
+        purgedRecords: purgedList
+      }).merged;
     }
   }
 }

@@ -5,7 +5,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useCall
 import { LernstudioSet } from '../types/lernstudio';
 import { 
   TeacherProfile, Group, Student, Lesson, PaymentRecord, NotificationItem, 
-  LessonReport, StudentDocument, PaymentStatus, LessonStatus, AttendanceStatus, HomeworkStatus, SyncStatus, BackupData, BackupIntegrityReport, StudentPaymentDetail, AppLanguage, AccentColor, RecentlyDeletedData, ActiveLessonSession,
+  LessonReport, StudentDocument, PaymentStatus, LessonStatus, AttendanceStatus, HomeworkStatus, SyncStatus, BackupData, BackupIntegrityReport, StudentPaymentDetail, AppLanguage, AccentColor, RecentlyDeletedData, PurgedRecordTombstone, ActiveLessonSession,
   InspirationSettings, InspirationMessage, InspirationFrequency, InspirationDisplayMethod, InspirationSource,
   NotificationSettings, ScheduledNotificationItem, TeacherSettingsRecord, SyncCycleReport, PendingOutboxSummary, SyncHistoryEntry,
   CertificateRecord, HodGermanStudent, Complaint, StudentActionPlan, VisitRecord, SchoolNote,
@@ -29,7 +29,7 @@ import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import { runSyncMigration } from '../services/sync/syncMigration';
 import { trackLocalMutation, trackLocalDeletion, getActiveRecords } from '../services/sync/mutationTracker';
-import { mergeEntities, mergeRecentlyDeleted, mergeDismissedDashboardLessons } from '../services/sync/mergeEngine';
+import { mergeEntities, mergeRecentlyDeleted, mergePurgedTombstones, mergeDismissedDashboardLessons } from '../services/sync/mergeEngine';
 import { runSyncCycle, forceFullSync, SyncDataSource } from '../services/sync/syncOrchestrator';
 import { calculatePendingOutbox } from '../services/sync/deltaBuilder';
 import { startLocalServer } from '../services/sync/localServer';
@@ -4119,7 +4119,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           }
           return [...prev, wrapMutation({ ...target.item, deleted: false } as any)];
         });
-        setRecentlyDeleted(prev => ({ ...prev, students: prev.students.filter(d => d.item.id !== id) }));
+        setRecentlyDeleted(prev => ({
+          ...prev,
+          students: prev.students.filter(d => d.item.id !== id),
+          purgedRecords: (prev.purgedRecords || []).filter(p => p.id !== id)
+        }));
         autoSyncEngine.notifyMutation('students', id);
       }
     } else if (type === 'group') {
@@ -4135,8 +4139,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
         // Also restore associated students and lessons belonging to this group if they were deleted with it
         const linkedStudents = recentlyDeleted.students.filter(d => d.item.groupId === id);
+        const linkedStudentIds = new Set(linkedStudents.map(d => d.item.id));
         if (linkedStudents.length > 0) {
-          const linkedStudentIds = new Set(linkedStudents.map(d => d.item.id));
           setStudents(prev => {
             const existingIds = new Set(prev.map(s => s.id));
             const restored = linkedStudents
@@ -4148,8 +4152,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         }
 
         const linkedLessons = recentlyDeleted.lessons.filter(d => d.item.groupId === id);
+        const linkedLessonIds = new Set(linkedLessons.map(d => d.item.id));
         if (linkedLessons.length > 0) {
-          const linkedLessonIds = new Set(linkedLessons.map(d => d.item.id));
           updateFullLessonsStorage(all => {
             const existingIds = new Set(all.map(l => l.id));
             const restored = linkedLessons
@@ -4164,7 +4168,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           ...prev,
           groups: prev.groups.filter(d => d.item.id !== id),
           students: prev.students.filter(d => d.item.groupId !== id),
-          lessons: prev.lessons.filter(d => d.item.groupId !== id)
+          lessons: prev.lessons.filter(d => d.item.groupId !== id),
+          purgedRecords: (prev.purgedRecords || []).filter(p => p.id !== id && !linkedStudentIds.has(p.id) && !linkedLessonIds.has(p.id))
         }));
         autoSyncEngine.notifyMutation('groups', id);
       }
@@ -4181,7 +4186,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
         updateFullLessonsStorage(lessonRestorer);
 
-        setRecentlyDeleted(prev => ({ ...prev, lessons: prev.lessons.filter(d => d.item.id !== id) }));
+        setRecentlyDeleted(prev => ({
+          ...prev,
+          lessons: prev.lessons.filter(d => d.item.id !== id),
+          purgedRecords: (prev.purgedRecords || []).filter(p => p.id !== id)
+        }));
         autoSyncEngine.notifyMutation('lessons', id);
       }
     }
@@ -4189,18 +4198,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const permanentlyDeleteItem = (type: 'student' | 'group' | 'lesson', id: string) => {
-    if (type === 'student') {
-      setRecentlyDeleted(prev => ({ ...prev, students: prev.students.filter(d => d.item.id !== id) }));
-    } else if (type === 'group') {
-      setRecentlyDeleted(prev => ({ ...prev, groups: prev.groups.filter(d => d.item.id !== id) }));
-    } else if (type === 'lesson') {
-      setRecentlyDeleted(prev => ({ ...prev, lessons: prev.lessons.filter(d => d.item.id !== id) }));
+    const nowStr = new Date().toISOString();
+    const nowMs = Date.now();
+    const rev = (syncRevisionRef.current || 1) + 1;
+
+    const newTombstones: PurgedRecordTombstone[] = [
+      { id, type, purgedAt: nowStr, updatedAt: nowMs, originRevision: rev }
+    ];
+
+    if (type === 'group') {
+      const linkedStudents = recentlyDeleted.students.filter(d => d.item.groupId === id);
+      const linkedLessons = recentlyDeleted.lessons.filter(d => d.item.groupId === id);
+      for (const s of linkedStudents) {
+        newTombstones.push({ id: s.item.id, type: 'student', purgedAt: nowStr, updatedAt: nowMs, originRevision: rev });
+      }
+      for (const l of linkedLessons) {
+        newTombstones.push({ id: l.item.id, type: 'lesson', purgedAt: nowStr, updatedAt: nowMs, originRevision: rev });
+      }
+    } else if (type === 'student') {
+      const linkedLessons = recentlyDeleted.lessons.filter(d => d.item.studentId === id);
+      for (const l of linkedLessons) {
+        newTombstones.push({ id: l.item.id, type: 'lesson', purgedAt: nowStr, updatedAt: nowMs, originRevision: rev });
+      }
     }
+
+    setRecentlyDeleted(prev => {
+      const existingPurged = Array.isArray(prev.purgedRecords) ? prev.purgedRecords : [];
+      const updatedPurged = mergePurgedTombstones(existingPurged, newTombstones);
+      if (type === 'student') {
+        return {
+          ...prev,
+          students: prev.students.filter(d => d.item.id !== id),
+          lessons: prev.lessons.filter(d => d.item.studentId !== id),
+          purgedRecords: updatedPurged
+        };
+      } else if (type === 'group') {
+        return {
+          ...prev,
+          groups: prev.groups.filter(d => d.item.id !== id),
+          students: prev.students.filter(d => d.item.groupId !== id),
+          lessons: prev.lessons.filter(d => d.item.groupId !== id),
+          purgedRecords: updatedPurged
+        };
+      } else {
+        return {
+          ...prev,
+          lessons: prev.lessons.filter(d => d.item.id !== id),
+          purgedRecords: updatedPurged
+        };
+      }
+    });
     bumpSyncRevision();
   };
 
   const clearRecentlyDeleted = () => {
-    setRecentlyDeleted({ students: [], groups: [], lessons: [] });
+    const nowStr = new Date().toISOString();
+    const nowMs = Date.now();
+    const rev = (syncRevisionRef.current || 1) + 1;
+    const newTombstones: PurgedRecordTombstone[] = [
+      ...recentlyDeleted.students.map(s => ({ id: s.item.id, type: 'student' as const, purgedAt: nowStr, updatedAt: nowMs, originRevision: rev })),
+      ...recentlyDeleted.groups.map(g => ({ id: g.item.id, type: 'group' as const, purgedAt: nowStr, updatedAt: nowMs, originRevision: rev })),
+      ...recentlyDeleted.lessons.map(l => ({ id: l.item.id, type: 'lesson' as const, purgedAt: nowStr, updatedAt: nowMs, originRevision: rev }))
+    ];
+    setRecentlyDeleted(prev => ({
+      students: [],
+      groups: [],
+      lessons: [],
+      purgedRecords: mergePurgedTombstones(prev.purgedRecords, newTombstones)
+    }));
     bumpSyncRevision();
   };
 
@@ -6164,6 +6229,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const localTimestamp = new Date(lastBackupTime || 0).getTime();
       const isIncomingNewer = incomingTimestamp >= localTimestamp;
 
+      let mergedRecentlyDeleted = recentlyDeleted || { students: [], groups: [], lessons: [], purgedRecords: [] };
+      if (hasBackupSection(parsed, 'recentlyDeleted') && data.recentlyDeleted) {
+        mergedRecentlyDeleted = mergeRecentlyDeleted(mergedRecentlyDeleted, data.recentlyDeleted);
+        setRecentlyDeleted(mergedRecentlyDeleted);
+        await storage.setItem('dl_recently_deleted', mergedRecentlyDeleted);
+      }
+      const activePurged = mergedRecentlyDeleted?.purgedRecords || [];
+
       if ((hasProfile && data.profile) || (hasSchoolSettings && data.schoolSettings)) {
         if (isIncomingNewer) {
           const baseProfile = (hasProfile && data.profile) ? data.profile : profile;
@@ -6176,16 +6249,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (hasGroups && data.groups) {
         const localSourceGroups = isCloudDelta ? groups : groups.filter((g: any) => g.deleted);
         const mergedGroups = localSourceGroups.length > 0
-          ? mergeEntities(localSourceGroups, data.groups, 'group').merged
-          : data.groups;
+          ? mergeEntities(localSourceGroups, data.groups, { entityTypeName: 'group', purgedRecords: activePurged }).merged
+          : mergeEntities([], data.groups, { entityTypeName: 'group', purgedRecords: activePurged }).merged;
         setGroups(mergedGroups);
         await storage.setItem('dl_groups', mergedGroups);
       }
       if (hasStudents && data.students) {
         const localSourceStudents = isCloudDelta ? students : students.filter((s: any) => s.deleted);
         const mergedStudents = localSourceStudents.length > 0
-          ? mergeEntities(localSourceStudents, data.students, 'student').merged
-          : data.students;
+          ? mergeEntities(localSourceStudents, data.students, { entityTypeName: 'student', purgedRecords: activePurged }).merged
+          : mergeEntities([], data.students, { entityTypeName: 'student', purgedRecords: activePurged }).merged;
         setStudents(mergedStudents);
         await storage.setItem('dl_students', mergedStudents);
       }
@@ -6193,8 +6266,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const allLocalLessons = fullLessonsRef.current || [];
         const localSourceLessons = isCloudDelta ? allLocalLessons : allLocalLessons.filter((l: any) => l && l.deleted);
         const mergedRawLessons = localSourceLessons.length > 0
-          ? mergeEntities(localSourceLessons, Array.isArray(data.lessons) ? data.lessons : [], 'lesson').merged
-          : (Array.isArray(data.lessons) ? data.lessons : []);
+          ? mergeEntities(localSourceLessons, Array.isArray(data.lessons) ? data.lessons : [], { entityTypeName: 'lesson', purgedRecords: activePurged }).merged
+          : mergeEntities([], Array.isArray(data.lessons) ? data.lessons : [], { entityTypeName: 'lesson', purgedRecords: activePurged }).merged;
         const seenL = new Set<string>();
         const dedupedLessons = mergedRawLessons.filter((l: any) => {
           if (!l || !l.id || seenL.has(l.id) || prunedLessonIdsSet.has(l.id)) return false;
@@ -6209,8 +6282,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const allLocalPayments = fullPaymentsRef.current || [];
         const localSourcePayments = isCloudDelta ? allLocalPayments : allLocalPayments.filter((p: any) => p && p.deleted);
         const mergedRawPayments = localSourcePayments.length > 0
-          ? mergeEntities(localSourcePayments, Array.isArray(data.payments) ? data.payments : [], 'payment').merged
-          : (Array.isArray(data.payments) ? data.payments : []);
+          ? mergeEntities(localSourcePayments, Array.isArray(data.payments) ? data.payments : [], { entityTypeName: 'payment', purgedRecords: activePurged }).merged
+          : mergeEntities([], Array.isArray(data.payments) ? data.payments : [], { entityTypeName: 'payment', purgedRecords: activePurged }).merged;
         const seenP = new Set<string>();
         const dedupedPayments = mergedRawPayments.filter((p: any) => {
           if (!p || !p.id || seenP.has(p.id)) return false;

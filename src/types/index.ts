@@ -865,10 +865,19 @@ export interface DeletedItem<T> {
   deletedAt: string;
 }
 
+export interface PurgedRecordTombstone {
+  id: string;
+  type: 'student' | 'group' | 'lesson';
+  purgedAt: string;
+  updatedAt: number;
+  originRevision?: number;
+}
+
 export interface RecentlyDeletedData {
   students: DeletedItem<Student>[];
   groups: DeletedItem<Group>[];
   lessons: DeletedItem<Lesson>[];
+  purgedRecords?: PurgedRecordTombstone[];
 }
 
 export interface ActiveLessonSession {

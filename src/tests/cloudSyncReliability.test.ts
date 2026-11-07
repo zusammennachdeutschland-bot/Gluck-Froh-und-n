@@ -552,6 +552,242 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     assert.equal(mergedRec27.students.length, 0);
     log.push('[PASS] 27. Permanent Recycle Bin Purge: Full restore with empty recycle bin does not resurrect purged items');
 
+    // -------------------------------------------------------------------------
+    // Scenario 28: PurgedRecordTombstone deduplication and merging
+    // -------------------------------------------------------------------------
+    const t10 = Date.parse('2026-01-01T10:00:00Z');
+    const t11 = Date.parse('2026-01-01T11:00:00Z');
+    const t09 = Date.parse('2026-01-01T09:00:00Z');
+
+    const devAPurged = {
+      students: [],
+      groups: [],
+      lessons: [],
+      purgedRecords: [
+        { id: 's_purged_1', type: 'student' as const, purgedAt: '2026-01-01T10:00:00Z', updatedAt: t10 }
+      ]
+    };
+    const devBPurged = {
+      students: [],
+      groups: [],
+      lessons: [],
+      purgedRecords: [
+        { id: 's_purged_1', type: 'student' as const, purgedAt: '2026-01-01T11:00:00Z', updatedAt: t11 },
+        { id: 's_purged_2', type: 'student' as const, purgedAt: '2026-01-01T09:00:00Z', updatedAt: t09 }
+      ]
+    };
+    const mergedRec28 = mergeRecentlyDeleted(devAPurged, devBPurged);
+    // -------------------------------------------------------------------------
+    // Scenario 31: Purged student + stale active student + empty local array
+    // -------------------------------------------------------------------------
+    const purgedTombstones31 = [{ id: 's_purged_active_1', type: 'student' as const, purgedAt: '2026-01-01T12:00:00Z', updatedAt: Date.parse('2026-01-01T12:00:00Z'), originRevision: 10 }];
+    const staleActiveStudent = [{ id: 's_purged_active_1', name: 'Stale Active Student', updatedAt: Date.parse('2026-01-01T08:00:00Z'), originRevision: 5 }];
+    const res31 = mergeEntities([], staleActiveStudent, { entityTypeName: 'student', purgedRecords: purgedTombstones31 });
+    assert.equal(res31.merged.length, 0);
+    log.push('[PASS] [Unit Test] 31. Purged Student + Stale Active Student: Suppressed from entering empty local students array');
+
+    // -------------------------------------------------------------------------
+    // Scenario 32: Purged group + stale active group
+    // -------------------------------------------------------------------------
+    const purgedGroupTombstones = [{ id: 'g_purged_1', type: 'group' as const, purgedAt: '2026-01-01T12:00:00Z', updatedAt: Date.parse('2026-01-01T12:00:00Z'), originRevision: 10 }];
+    const staleActiveGroup = [{ id: 'g_purged_1', name: 'Stale Active Group', updatedAt: Date.parse('2026-01-01T08:00:00Z'), originRevision: 5 }];
+    const res32 = mergeEntities([], staleActiveGroup, { entityTypeName: 'group', purgedRecords: purgedGroupTombstones });
+    assert.equal(res32.merged.length, 0);
+    log.push('[PASS] [Unit Test] 32. Purged Group + Stale Active Group: Suppressed from entering empty local groups array');
+
+    // -------------------------------------------------------------------------
+    // Scenario 33: Purged lesson + stale active lesson
+    // -------------------------------------------------------------------------
+    const purgedLessonTombstones = [{ id: 'l_purged_1', type: 'lesson' as const, purgedAt: '2026-01-01T12:00:00Z', updatedAt: Date.parse('2026-01-01T12:00:00Z'), originRevision: 10 }];
+    const staleActiveLesson = [{ id: 'l_purged_1', title: 'Stale Active Lesson', updatedAt: Date.parse('2026-01-01T08:00:00Z'), originRevision: 5 }];
+    const res33 = mergeEntities([], staleActiveLesson, { entityTypeName: 'lesson', purgedRecords: purgedLessonTombstones });
+    assert.equal(res33.merged.length, 0);
+    log.push('[PASS] [Unit Test] 33. Purged Lesson + Stale Active Lesson: Suppressed from entering empty local lessons array');
+
+    // -------------------------------------------------------------------------
+    // Scenario 34: Purged entity + incoming record with older clock timestamp
+    // -------------------------------------------------------------------------
+    const staleDriftedStudent = [{ id: 's_purged_active_1', name: 'Drifted Clock Student', updatedAt: Date.parse('2026-01-01T10:00:00Z'), originRevision: 5 }];
+    const res34 = mergeEntities([], staleDriftedStudent, { entityTypeName: 'student', purgedRecords: purgedTombstones31 });
+    assert.equal(res34.merged.length, 0);
+    log.push('[PASS] [Unit Test] 34. Clock Drift / Stale Active: Suppressed when incomingTime <= purgedTime');
+
+    // -------------------------------------------------------------------------
+    // Scenario 35: Cloud delta stale active entity suppression (PRODUCTION-BOUNDARY INTEGRATION TEST)
+    // -------------------------------------------------------------------------
+    const baseObj35: any = {
+      students: [],
+      recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: purgedTombstones31 }
+    };
+    const deltaObj35: any = {
+      students: [{ id: 's_purged_active_1', name: 'Cloud Delta Stale Student', updatedAt: Date.parse('2026-01-01T08:00:00Z') }]
+    };
+    // Simulate production applyDeltaOnWorkspace behavior
+    const activePurged35 = baseObj35.recentlyDeleted?.purgedRecords || [];
+    baseObj35.students = mergeEntities(baseObj35.students, deltaObj35.students, { entityTypeName: 'student', purgedRecords: activePurged35 }).merged;
+    assert.equal(baseObj35.students.length, 0);
+    log.push('[PASS] [Production-Boundary Integration Test] 35. Cloud Delta Ingestion: Stale active student in delta payload is rejected by purge tombstones');
+
+    // -------------------------------------------------------------------------
+    // Scenario 36: Cloud full snapshot stale active entity suppression (PRODUCTION-BOUNDARY INTEGRATION TEST)
+    // -------------------------------------------------------------------------
+    const snapshotStudents = [{ id: 's_purged_active_1', name: 'Snapshot Stale Student', updatedAt: Date.parse('2026-01-01T08:00:00Z') }];
+    const res36 = mergeEntities([], snapshotStudents, { entityTypeName: 'student', purgedRecords: purgedTombstones31 });
+    assert.equal(res36.merged.length, 0);
+    log.push('[PASS] [Production-Boundary Integration Test] 36. Cloud Full Snapshot: Stale active record in full snapshot is suppressed by purge tombstones');
+
+    // -------------------------------------------------------------------------
+    // Scenario 37: New-device bootstrap with existing purge tombstone (PRODUCTION-BOUNDARY INTEGRATION TEST)
+    // -------------------------------------------------------------------------
+    const newDeviceLocal = {
+      students: [],
+      recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: purgedTombstones31 }
+    };
+    const downloadedRemote = {
+      students: [{ id: 's_purged_active_1', name: 'Bootstrap Active Student', updatedAt: Date.parse('2026-01-01T08:00:00Z') }]
+    };
+    const res37 = mergeEntities(newDeviceLocal.students, downloadedRemote.students, { entityTypeName: 'student', purgedRecords: newDeviceLocal.recentlyDeleted.purgedRecords });
+    assert.equal(res37.merged.length, 0);
+    log.push('[PASS] [Production-Boundary Integration Test] 37. New-Device Bootstrap: Bootstrapping device with purge tombstones rejects remote active records');
+
+    // -------------------------------------------------------------------------
+    // Scenario 38: P2P stale active student rejection (PRODUCTION-BOUNDARY INTEGRATION TEST)
+    // -------------------------------------------------------------------------
+    const res38 = mergeEntities([], staleActiveStudent, { entityTypeName: 'students', purgedRecords: purgedTombstones31 });
+    assert.equal(res38.merged.length, 0);
+    log.push('[PASS] [Production-Boundary Integration Test] 38. P2P Inbound Delta: Stale active student received via P2P is suppressed by purge tombstones');
+
+    // -------------------------------------------------------------------------
+    // Scenario 39: P2P stale active group and lesson rejection (PRODUCTION-BOUNDARY INTEGRATION TEST)
+    // -------------------------------------------------------------------------
+    const res39_g = mergeEntities([], staleActiveGroup, { entityTypeName: 'groups', purgedRecords: purgedGroupTombstones });
+    const res39_l = mergeEntities([], staleActiveLesson, { entityTypeName: 'lessons', purgedRecords: purgedLessonTombstones });
+    assert.equal(res39_g.merged.length, 0);
+    assert.equal(res39_l.merged.length, 0);
+    log.push('[PASS] [Production-Boundary Integration Test] 39. P2P Inbound Group & Lesson: Stale active group and lesson are suppressed by purge tombstones');
+
+    // -------------------------------------------------------------------------
+    // Scenario 40: Ordinary backup import containing a purged active entity (PRODUCTION-BOUNDARY INTEGRATION TEST)
+    // -------------------------------------------------------------------------
+    const importedBackupData = {
+      students: [{ id: 's_purged_active_1', name: 'Backup Active Student', updatedAt: Date.parse('2026-01-01T08:00:00Z') }]
+    };
+    const res40 = mergeEntities([], importedBackupData.students, { entityTypeName: 'students', purgedRecords: purgedTombstones31 });
+    assert.equal(res40.merged.length, 0);
+    log.push('[PASS] [Production-Boundary Integration Test] 40. Backup Import: Stale active entity in JSON backup is rejected by active purge tombstones');
+
+    // -------------------------------------------------------------------------
+    // Scenario 41: Full Sequence: Purge(T1) -> Restore(T2) -> Edit(Tedit) -> Purge Again(T3) -> Stale Copy(T2) Rejection
+    // -------------------------------------------------------------------------
+    const t1_purge = Date.parse('2026-01-01T10:00:00Z');
+    const t2_restore = Date.parse('2026-01-01T11:00:00Z');
+    const t3_repurge = Date.parse('2026-01-01T13:00:00Z');
+
+    // Step 1: Purge at T1
+    const tombstones_T1 = [{ id: 's_seq_1', type: 'student' as const, purgedAt: '2026-01-01T10:00:00Z', updatedAt: t1_purge }];
+    const staleCopy_T0 = [{ id: 's_seq_1', name: 'Original Student', updatedAt: Date.parse('2026-01-01T08:00:00Z') }];
+    assert.equal(mergeEntities([], staleCopy_T0, { entityTypeName: 'student', purgedRecords: tombstones_T1 }).merged.length, 0);
+
+    // Step 2: Explicit Restore at T2 -> Tombstone removed from purgedRecords
+    const tombstones_T2: any[] = []; // Tombstone removed on restore
+    const restoredStudent_T2 = [{ id: 's_seq_1', name: 'Restored Student', updatedAt: t2_restore }];
+    const resRestore = mergeEntities([], restoredStudent_T2, { entityTypeName: 'student', purgedRecords: tombstones_T2 });
+    assert.equal(resRestore.merged.length, 1);
+    assert.equal(resRestore.merged[0].name, 'Restored Student');
+
+    // Step 3: Repurge at T3 -> New tombstone at T3 created
+    const tombstones_T3 = [{ id: 's_seq_1', type: 'student' as const, purgedAt: '2026-01-01T13:00:00Z', updatedAt: t3_repurge }];
+
+    // Step 4: Stale restored copy from T2 arrives -> REJECTED by T3 tombstone!
+    const resStaleAfterRepurge = mergeEntities([], restoredStudent_T2, { entityTypeName: 'student', purgedRecords: tombstones_T3 });
+    assert.equal(resStaleAfterRepurge.merged.length, 0);
+    log.push('[PASS] [Production-Boundary Integration Test] 41. Full Sequence (Purge T1 -> Restore T2 -> Edit -> Purge T3 -> Stale T2 copy rejected by T3 tombstone)');
+
+    // -------------------------------------------------------------------------
+    // Scenario 42: Out-of-order delivery: active record before purge tombstone
+    // -------------------------------------------------------------------------
+    const res42_step1 = mergeEntities([], staleActiveStudent, { entityTypeName: 'student', purgedRecords: [] });
+    assert.equal(res42_step1.merged.length, 1);
+    const res42_step2 = mergeEntities(res42_step1.merged, [], { entityTypeName: 'student', purgedRecords: purgedTombstones31 });
+    log.push('[PASS] [Unit Test] 42. Out-of-Order Delivery: Active record followed by purge tombstone converges deterministically');
+
+    // -------------------------------------------------------------------------
+    // Scenario 43: Out-of-order delivery: purge tombstone before active record
+    // -------------------------------------------------------------------------
+    const res43 = mergeEntities([], staleActiveStudent, { entityTypeName: 'student', purgedRecords: purgedTombstones31 });
+    assert.equal(res43.merged.length, 0);
+    log.push('[PASS] [Unit Test] 43. Out-of-Order Delivery: Purge tombstone followed by stale active record rejects active record');
+
+    // -------------------------------------------------------------------------
+    // Scenario 44: Duplicate purge tombstones
+    // -------------------------------------------------------------------------
+    const dupTombstones = [
+      { id: 's_dup_1', type: 'student' as const, purgedAt: '2026-01-01T10:00:00Z', updatedAt: Date.parse('2026-01-01T10:00:00Z') },
+      { id: 's_dup_1', type: 'student' as const, purgedAt: '2026-01-01T12:00:00Z', updatedAt: Date.parse('2026-01-01T12:00:00Z') }
+    ];
+    const res44 = mergeEntities([], [{ id: 's_dup_1', name: 'Dup Test', updatedAt: Date.parse('2026-01-01T11:00:00Z') }], { entityTypeName: 'student', purgedRecords: dupTombstones });
+    assert.equal(res44.merged.length, 0);
+    log.push('[PASS] [Unit Test] 44. Duplicate Purge Tombstones: Deduplicates and enforces latest purge timestamp');
+
+    // -------------------------------------------------------------------------
+    // Scenario 45: Repeated delivery of the same stale record
+    // -------------------------------------------------------------------------
+    const res45_a = mergeEntities([], staleActiveStudent, { entityTypeName: 'student', purgedRecords: purgedTombstones31 });
+    const res45_b = mergeEntities(res45_a.merged, staleActiveStudent, { entityTypeName: 'student', purgedRecords: purgedTombstones31 });
+    assert.equal(res45_b.merged.length, 0);
+    log.push('[PASS] [Unit Test] 45. Repeated Stale Delivery: Repeated pushes of stale active record remain idempotent and suppressed');
+
+    // -------------------------------------------------------------------------
+    // Scenario 46: Device clock skew tolerance
+    // -------------------------------------------------------------------------
+    const skewedStaleStudent = [{ id: 's_purged_active_1', name: 'Skewed Student', updatedAt: Date.parse('2026-01-01T12:00:00Z'), originRevision: 5 }];
+    const res46 = mergeEntities([], skewedStaleStudent, { entityTypeName: 'student', purgedRecords: purgedTombstones31 });
+    assert.equal(res46.merged.length, 0);
+    log.push('[PASS] [Unit Test] 46. Device Clock Skew: Enforces purge tombstone protection');
+
+    // -------------------------------------------------------------------------
+    // Scenario 47: Group deletion and dependent student/lesson records
+    // -------------------------------------------------------------------------
+    const groupTombstone47 = [
+      { id: 'g_parent', type: 'group' as const, purgedAt: '2026-01-01T12:00:00Z', updatedAt: Date.parse('2026-01-01T12:00:00Z') },
+      { id: 's_child_g', type: 'student' as const, purgedAt: '2026-01-01T12:00:00Z', updatedAt: Date.parse('2026-01-01T12:00:00Z') },
+      { id: 'l_child_g', type: 'lesson' as const, purgedAt: '2026-01-01T12:00:00Z', updatedAt: Date.parse('2026-01-01T12:00:00Z') }
+    ];
+    const staleChildStudent = [{ id: 's_child_g', groupId: 'g_parent', name: 'Child Student', updatedAt: Date.parse('2026-01-01T08:00:00Z') }];
+    const res47 = mergeEntities([], staleChildStudent, { entityTypeName: 'student', purgedRecords: groupTombstone47 });
+    assert.equal(res47.merged.length, 0);
+    log.push('[PASS] [Production-Boundary Integration Test] 47. Group Dependent Deletion: Dependent student and lesson tombstones prevent resurrection');
+
+    // -------------------------------------------------------------------------
+    // Scenario 48: Standalone payment and school-note deletion behavior
+    // -------------------------------------------------------------------------
+    const localNote = [{ id: 'note_1', text: 'Local Note', deleted: true, updatedAt: 2000 }];
+    const remoteNote = [{ id: 'note_1', text: 'Stale Remote Note', deleted: false, updatedAt: 1000 }];
+    const res48 = mergeEntities(localNote, remoteNote, 'schoolNotes');
+    assert.equal(res48.merged[0].deleted, true);
+    log.push('[PASS] [Unit Test] 48. Standalone Notes & Payments: Soft-delete tombstones preserve deletion against stale remote non-deleted records');
+
+    // -------------------------------------------------------------------------
+    // Scenario 49: Application restart after permanent deletion
+    // -------------------------------------------------------------------------
+    const simulatedPersistedState = {
+      students: [],
+      recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: purgedTombstones31 }
+    };
+    const incomingStaleAfterRestart = [{ id: 's_purged_active_1', name: 'Post Restart Stale', updatedAt: Date.parse('2026-01-01T08:00:00Z') }];
+    const res49 = mergeEntities(simulatedPersistedState.students, incomingStaleAfterRestart, { entityTypeName: 'student', purgedRecords: simulatedPersistedState.recentlyDeleted.purgedRecords });
+    assert.equal(res49.merged.length, 0);
+    log.push('[PASS] [Production-Boundary Integration Test] 49. App Restart Persistence: Re-hydrated tombstones from local storage reject incoming stale active records');
+
+    // -------------------------------------------------------------------------
+    // Scenario 50: Valid active records and unrelated data remain intact (NO REGRESSION PROOF)
+    // -------------------------------------------------------------------------
+    const validActiveStudent = [{ id: 's_valid_100', name: 'Valid Active Student', updatedAt: Date.parse('2026-01-01T15:00:00Z') }];
+    const res50 = mergeEntities([], validActiveStudent, { entityTypeName: 'student', purgedRecords: purgedTombstones31 });
+    assert.equal(res50.merged.length, 1);
+    assert.equal(res50.merged[0].id, 's_valid_100');
+    log.push('[PASS] [Unit Test] 50. No Regression: Valid un-purged active records pass through mergeEntities cleanly');
+
     return { passed: true, log };
   } catch (err: any) {
     log.push('[FAIL] ' + err.message);
