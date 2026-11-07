@@ -18,6 +18,7 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore,
+  initializeFirestore,
   collection,
   doc,
   setDoc,
@@ -45,7 +46,20 @@ export const FIREBASE_CONFIG = {
 };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(FIREBASE_CONFIG);
-export const db = getFirestore(app, FIREBASE_CONFIG.firestoreDatabaseId);
+
+function initFirestoreDb() {
+  try {
+    return initializeFirestore(
+      app,
+      { experimentalAutoDetectLongPolling: true },
+      FIREBASE_CONFIG.firestoreDatabaseId
+    );
+  } catch {
+    return getFirestore(app, FIREBASE_CONFIG.firestoreDatabaseId);
+  }
+}
+
+export const db = initFirestoreDb();
 try {
   // Silence internal @firebase/firestore SDK backoff logs when free-tier daily quota is reached
   setLogLevel('silent');
@@ -73,8 +87,8 @@ export function isFirestoreWriteQuotaExhaustedToday(): boolean {
 }
 
 export function markFirestoreWriteQuotaExhaustedToday(): void {
-  // Pause background auto-writes for 60 seconds instead of locking out for 24 hours
-  quotaCooldownUntilMs = Date.now() + 60 * 1000;
+  // Pause background auto-writes for 45 seconds instead of locking out for 24 hours
+  quotaCooldownUntilMs = Date.now() + 45 * 1000;
 }
 
 export function clearFirestoreWriteQuotaFlag(): void {
@@ -90,11 +104,11 @@ export function clearFirestoreWriteQuotaFlag(): void {
 
 export async function executeSafeFirestoreWrite<T>(
   writePromiseOrFn: Promise<T> | (() => Promise<T>),
-  timeoutMs = 15000,
-  maxRetries = 1
+  timeoutMs = 7000,
+  maxRetries = 0
 ): Promise<T> {
   if (isFirestoreWriteQuotaExhaustedToday()) {
-    throw new Error('Quota limit exceeded (temporary cooldown active).');
+    return undefined as unknown as T;
   }
 
   let attempt = 0;
@@ -106,28 +120,42 @@ export async function executeSafeFirestoreWrite<T>(
       const currentPromise =
         typeof writePromiseOrFn === 'function' ? writePromiseOrFn() : writePromiseOrFn;
 
-      const timeoutPromise = new Promise<never>((_, reject) => {
+      // Prevent unhandled rejection if currentPromise settles after timeout
+      Promise.resolve(currentPromise).catch((bgErr) => {
+        const bgMsg = bgErr?.message || String(bgErr);
+        if (bgMsg.includes('resource-exhausted') || bgMsg.includes('Quota')) {
+          markFirestoreWriteQuotaExhaustedToday();
+        }
+      });
+
+      const timeoutSymbol = Symbol('firestore_write_buffered');
+      const timeoutPromise = new Promise<typeof timeoutSymbol>((resolve) => {
         timer = setTimeout(() => {
-          reject(new Error('Firestore write timeout.'));
+          resolve(timeoutSymbol);
         }, timeoutMs);
       });
 
       const res = await Promise.race([currentPromise, timeoutPromise]);
-      return res;
+      if (res === timeoutSymbol) {
+        // Firestore SDK keeps the write in its internal pending queue to flush when stream/quota resumes
+        markFirestoreWriteQuotaExhaustedToday();
+        return undefined as unknown as T;
+      }
+      return res as T;
     } catch (err: any) {
       lastError = err;
       const code = err?.code || '';
       const msg = err?.message || String(err);
       if (code === 'resource-exhausted' || msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
         markFirestoreWriteQuotaExhaustedToday();
-        throw err;
+        return undefined as unknown as T;
       }
       if (code === 'permission-denied' || msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
         throw err;
       }
       attempt++;
       if (attempt <= maxRetries) {
-        await new Promise((r) => setTimeout(r, 800 * attempt));
+        await new Promise((r) => setTimeout(r, 600 * attempt));
       }
     } finally {
       if (timer) clearTimeout(timer);

@@ -4,3 +4,6 @@ release.keystore
 release.keystore.b64
 *.keystore
 *.keystore.b64
+*.jks
+*.jks.b64
+

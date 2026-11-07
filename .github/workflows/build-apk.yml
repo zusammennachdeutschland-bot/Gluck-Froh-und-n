@@ -27,8 +27,12 @@ jobs:
           echo "Verifying Version Code Auto-Increment..."
           grep -q "GITHUB_RUN_NUMBER" android/app/build.gradle || (echo "ERROR: Missing GITHUB_RUN_NUMBER for versionCode" && exit 1)
 
-          echo "Verifying Release Signing Configuration..."
-          grep -q "ANDROID_KEYSTORE" android/app/build.gradle || (echo "ERROR: Missing environment-based release keystore configuration" && exit 1)
+          echo "Verifying Strict Release Signing Configuration (No Debug Fallback)..."
+          grep -q "signingConfig signingConfigs.release" android/app/build.gradle || (echo "ERROR: Missing strict release signingConfig" && exit 1)
+          if grep -q "signingConfigs.release : signingConfigs.debug" android/app/build.gradle; then
+            echo "ERROR: Debug signing fallback detected in release buildType!"
+            exit 1
+          fi
           echo "All verifications passed."
 
       - name: Setup Node.js
@@ -48,19 +52,54 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_STORE_PASSWORD" ]; then
-            echo "ERROR: Required GitHub Secrets ANDROID_KEYSTORE_BASE64 and/or ANDROID_STORE_PASSWORD are not configured."
+          set -euo pipefail
+          missing_secrets=0
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then echo "ERROR: Missing secret ANDROID_KEYSTORE_BASE64"; missing_secrets=1; fi
+          if [ -z "${ANDROID_STORE_PASSWORD:-}" ]; then echo "ERROR: Missing secret ANDROID_STORE_PASSWORD"; missing_secrets=1; fi
+          if [ -z "${ANDROID_KEY_ALIAS:-}" ]; then echo "ERROR: Missing secret ANDROID_KEY_ALIAS"; missing_secrets=1; fi
+          if [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then echo "ERROR: Missing secret ANDROID_KEY_PASSWORD"; missing_secrets=1; fi
+          if [ "$missing_secrets" -ne 0 ]; then
+            echo "ERROR: All four Android release signing secrets must be configured in GitHub Actions Secrets."
             exit 1
           fi
+
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d ' \n\r\t' | base64 -d > android/app/release.keystore
           if [ ! -s "android/app/release.keystore" ]; then
-            echo "ERROR: Release keystore missing or empty after decode!"
+            echo "ERROR: Release keystore is missing or empty after Base64 decoding!"
             exit 1
           fi
-          echo "Verifying keystore integrity with keytool..."
-          keytool -list -keystore android/app/release.keystore -storepass "$ANDROID_STORE_PASSWORD" >/dev/null || (echo "ERROR: Keystore integrity check failed!" && exit 1)
-          echo "Release keystore verified."
+
+          echo "Verifying keystore integrity, store password, and alias '${ANDROID_KEY_ALIAS}'..."
+          keytool -list \
+            -keystore android/app/release.keystore \
+            -alias "$ANDROID_KEY_ALIAS" \
+            -storepass:env ANDROID_STORE_PASSWORD >/dev/null || {
+              echo "ERROR: Keystore verification failed! Check ANDROID_STORE_PASSWORD and ANDROID_KEY_ALIAS."
+              exit 1
+            }
+
+          echo "Verifying private key password for alias '${ANDROID_KEY_ALIAS}'..."
+          tmp_verify_ks="$(mktemp -u).p12"
+          trap 'rm -f "$tmp_verify_ks"' EXIT
+          keytool -importkeystore \
+            -srckeystore android/app/release.keystore \
+            -srcstorepass:env ANDROID_STORE_PASSWORD \
+            -srckeypass:env ANDROID_KEY_PASSWORD \
+            -srcalias "$ANDROID_KEY_ALIAS" \
+            -destkeystore "$tmp_verify_ks" \
+            -deststoretype PKCS12 \
+            -deststorepass:env ANDROID_STORE_PASSWORD \
+            -destkeypass:env ANDROID_KEY_PASSWORD \
+            -noprompt >/dev/null 2>&1 || {
+              echo "ERROR: Private key verification failed! Check ANDROID_KEY_PASSWORD for alias '${ANDROID_KEY_ALIAS}'."
+              rm -f "$tmp_verify_ks"
+              exit 1
+            }
+          rm -f "$tmp_verify_ks"
+          echo "Release keystore, alias, store password, and key password verified successfully."
 
       - name: Force Clean Stale Build Artifacts
         run: |
@@ -125,6 +164,7 @@ jobs:
       - name: Build Release APK
         env:
           ANDROID_KEYSTORE_PATH: release.keystore
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -133,13 +173,23 @@ jobs:
           chmod +x gradlew
           ./gradlew clean assembleRelease --stacktrace
 
-      - name: Verify APK Generated
+      - name: Verify APK Generated & Signed with Release Certificate
         run: |
-          if [ ! -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_PATH" ]; then
             echo "ERROR: Release APK build failed - output file missing!"
             exit 1
           fi
-          echo "Release APK successfully generated."
+          CERT_INFO="$(keytool -printcert -jarfile "$APK_PATH" 2>&1 || true)"
+          if [ -z "$CERT_INFO" ] || echo "$CERT_INFO" | grep -qi "Not a signed jar"; then
+            echo "ERROR: Generated APK is not signed!"
+            exit 1
+          fi
+          if echo "$CERT_INFO" | grep -qi "CN=Android Debug"; then
+            echo "ERROR: Generated APK is signed with an Android Debug certificate instead of Release certificate!"
+            exit 1
+          fi
+          echo "Release APK presence and non-debug release signature verified."
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4

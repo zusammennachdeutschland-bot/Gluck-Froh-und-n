@@ -6145,6 +6145,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       const prunedLessonIdsSet = getPrunedLessonIds();
 
+      const isCloudDelta = Boolean((parsed as any).isCloudDelta);
       const hasProfile = hasBackupSection(parsed, 'profile');
       const hasSchoolSettings = hasBackupSection(parsed, 'schoolSettings');
       const hasGroups = hasBackupSection(parsed, 'groups');
@@ -6160,25 +6161,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_profile', mergedProfile);
       }
       if (hasGroups && data.groups) {
-        const localDeletedGroups = groups.filter((g: any) => g.deleted);
-        const mergedGroups = localDeletedGroups.length > 0
-          ? mergeEntities(localDeletedGroups, data.groups, 'group').merged
+        const localSourceGroups = isCloudDelta ? groups : groups.filter((g: any) => g.deleted);
+        const mergedGroups = localSourceGroups.length > 0
+          ? mergeEntities(localSourceGroups, data.groups, 'group').merged
           : data.groups;
         setGroups(mergedGroups);
         await storage.setItem('dl_groups', mergedGroups);
       }
       if (hasStudents && data.students) {
-        const localDeletedStudents = students.filter((s: any) => s.deleted);
-        const mergedStudents = localDeletedStudents.length > 0
-          ? mergeEntities(localDeletedStudents, data.students, 'student').merged
+        const localSourceStudents = isCloudDelta ? students : students.filter((s: any) => s.deleted);
+        const mergedStudents = localSourceStudents.length > 0
+          ? mergeEntities(localSourceStudents, data.students, 'student').merged
           : data.students;
         setStudents(mergedStudents);
         await storage.setItem('dl_students', mergedStudents);
       }
       if (hasLessons && data.lessons) {
-        const localDeletedLessons = (fullLessonsRef.current || []).filter((l: any) => l && l.deleted);
-        const mergedRawLessons = localDeletedLessons.length > 0
-          ? mergeEntities(localDeletedLessons, Array.isArray(data.lessons) ? data.lessons : [], 'lesson').merged
+        const allLocalLessons = fullLessonsRef.current || [];
+        const localSourceLessons = isCloudDelta ? allLocalLessons : allLocalLessons.filter((l: any) => l && l.deleted);
+        const mergedRawLessons = localSourceLessons.length > 0
+          ? mergeEntities(localSourceLessons, Array.isArray(data.lessons) ? data.lessons : [], 'lesson').merged
           : (Array.isArray(data.lessons) ? data.lessons : []);
         const seenL = new Set<string>();
         const dedupedLessons = mergedRawLessons.filter((l: any) => {
@@ -6191,9 +6193,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setLessons(filterActiveLessons(dedupedLessons));
       }
       if (hasPayments && data.payments) {
-        const localDeletedPayments = (fullPaymentsRef.current || []).filter((p: any) => p && p.deleted);
-        const mergedRawPayments = localDeletedPayments.length > 0
-          ? mergeEntities(localDeletedPayments, Array.isArray(data.payments) ? data.payments : [], 'payment').merged
+        const allLocalPayments = fullPaymentsRef.current || [];
+        const localSourcePayments = isCloudDelta ? allLocalPayments : allLocalPayments.filter((p: any) => p && p.deleted);
+        const mergedRawPayments = localSourcePayments.length > 0
+          ? mergeEntities(localSourcePayments, Array.isArray(data.payments) ? data.payments : [], 'payment').merged
           : (Array.isArray(data.payments) ? data.payments : []);
         const seenP = new Set<string>();
         const dedupedPayments = mergedRawPayments.filter((p: any) => {
@@ -6210,12 +6213,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_notifications', data.notifications);
       }
       if (hasBackupSection(parsed, 'certificates') && data.certificates) {
-        setCertificates(data.certificates);
-        await storage.setItem('dl_certificates', data.certificates);
+        const mergedCerts = isCloudDelta && certificates.length > 0
+          ? mergeEntities(certificates, data.certificates, 'certificates').merged
+          : data.certificates;
+        setCertificates(mergedCerts);
+        await storage.setItem('dl_certificates', mergedCerts);
       }
       if (hasBackupSection(parsed, 'todos') && data.todos) {
-        setTodos(data.todos);
-        await storage.setItem('dl_quick_todos', data.todos);
+        const mergedTodos = isCloudDelta && todos.length > 0
+          ? mergeEntities(todos, data.todos, 'todos').merged
+          : data.todos;
+        setTodos(mergedTodos);
+        await storage.setItem('dl_quick_todos', mergedTodos);
       }
       if (hasBackupSection(parsed, 'theme') && data.theme) {
         setTheme(data.theme);
@@ -6237,52 +6246,88 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_inspiration_messages', data.inspirationMessages);
       }
       if (hasBackupSection(parsed, 'hodStudents') && data.hodStudents) {
-        setHodStudents(data.hodStudents);
-        await storage.setItem('hod_german_students', data.hodStudents);
+        const mergedHodSt = isCloudDelta && hodStudents.length > 0
+          ? mergeEntities(hodStudents, data.hodStudents, 'hodStudents').merged
+          : data.hodStudents;
+        setHodStudents(mergedHodSt);
+        await storage.setItem('hod_german_students', mergedHodSt);
       }
       if (hasBackupSection(parsed, 'hodComplaints') && data.hodComplaints) {
-        setHodComplaints(data.hodComplaints);
-        await storage.setItem('hod_complaints', data.hodComplaints);
+        const mergedHodComp = isCloudDelta && hodComplaints.length > 0
+          ? mergeEntities(hodComplaints, data.hodComplaints, 'hodComplaints').merged
+          : data.hodComplaints;
+        setHodComplaints(mergedHodComp);
+        await storage.setItem('hod_complaints', mergedHodComp);
       }
       if (hasBackupSection(parsed, 'hodActionPlans') && data.hodActionPlans) {
-        setHodActionPlans(data.hodActionPlans);
-        await storage.setItem('hod_student_action_plans', data.hodActionPlans);
+        const mergedHodPlans = isCloudDelta && hodActionPlans.length > 0
+          ? mergeEntities(hodActionPlans, data.hodActionPlans, 'hodActionPlans').merged
+          : data.hodActionPlans;
+        setHodActionPlans(mergedHodPlans);
+        await storage.setItem('hod_student_action_plans', mergedHodPlans);
       }
       if (hasBackupSection(parsed, 'hodVisits') && data.hodVisits) {
-        setHodVisits(data.hodVisits);
-        await storage.setItem('hod_visit_records', data.hodVisits);
+        const mergedHodVisits = isCloudDelta && hodVisits.length > 0
+          ? mergeEntities(hodVisits, data.hodVisits, 'hodVisits').merged
+          : data.hodVisits;
+        setHodVisits(mergedHodVisits);
+        await storage.setItem('hod_visit_records', mergedHodVisits);
       }
       if (hasBackupSection(parsed, 'schoolNotes') && data.schoolNotes) {
-        setSchoolNotes(data.schoolNotes);
-        await storage.setItem('dl_school_notes', data.schoolNotes);
+        const mergedNotes = isCloudDelta && schoolNotes.length > 0
+          ? mergeEntities(schoolNotes, data.schoolNotes, 'schoolNotes').merged
+          : data.schoolNotes;
+        setSchoolNotes(mergedNotes);
+        await storage.setItem('dl_school_notes', mergedNotes);
       }
       if (hasBackupSection(parsed, 'financeAccounts') && data.financeAccounts) {
-        setFinanceAccounts(data.financeAccounts);
-        await storage.setItem('dl_finance_accounts', data.financeAccounts);
+        const mergedAcc = isCloudDelta && financeAccounts.length > 0
+          ? mergeEntities(financeAccounts, data.financeAccounts, 'financeAccounts').merged
+          : data.financeAccounts;
+        setFinanceAccounts(mergedAcc);
+        await storage.setItem('dl_finance_accounts', mergedAcc);
       }
       if (hasBackupSection(parsed, 'financeCategories') && data.financeCategories) {
-        setFinanceCategories(data.financeCategories);
-        await storage.setItem('dl_finance_categories', data.financeCategories);
+        const mergedCats = isCloudDelta && financeCategories.length > 0
+          ? mergeEntities(financeCategories, data.financeCategories, 'financeCategories').merged
+          : data.financeCategories;
+        setFinanceCategories(mergedCats);
+        await storage.setItem('dl_finance_categories', mergedCats);
       }
       if (hasBackupSection(parsed, 'financeTransactions') && data.financeTransactions) {
-        setFinanceTransactions(data.financeTransactions);
-        await storage.setItem('dl_finance_transactions', data.financeTransactions);
+        const mergedTx = isCloudDelta && financeTransactions.length > 0
+          ? mergeEntities(financeTransactions, data.financeTransactions, 'financeTransactions').merged
+          : data.financeTransactions;
+        setFinanceTransactions(mergedTx);
+        await storage.setItem('dl_finance_transactions', mergedTx);
       }
       if (hasBackupSection(parsed, 'financeRecurring') && data.financeRecurring) {
-        setFinanceRecurring(data.financeRecurring);
-        await storage.setItem('dl_finance_recurring', data.financeRecurring);
+        const mergedRec = isCloudDelta && financeRecurring.length > 0
+          ? mergeEntities(financeRecurring, data.financeRecurring, 'financeRecurring').merged
+          : data.financeRecurring;
+        setFinanceRecurring(mergedRec);
+        await storage.setItem('dl_finance_recurring', mergedRec);
       }
       if (hasBackupSection(parsed, 'financeInstallments') && data.financeInstallments) {
-        setFinanceInstallments(data.financeInstallments);
-        await storage.setItem('dl_finance_installments', data.financeInstallments);
+        const mergedInst = isCloudDelta && financeInstallments.length > 0
+          ? mergeEntities(financeInstallments, data.financeInstallments, 'financeInstallments').merged
+          : data.financeInstallments;
+        setFinanceInstallments(mergedInst);
+        await storage.setItem('dl_finance_installments', mergedInst);
       }
       if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings && Array.isArray(data.goldHoldings)) {
-        setGoldHoldings(data.goldHoldings);
-        await storage.setItem('gluck_gold_holdings', data.goldHoldings);
+        const mergedGold = isCloudDelta && goldHoldings.length > 0
+          ? mergeEntities(goldHoldings, data.goldHoldings, 'goldHoldings').merged
+          : data.goldHoldings;
+        setGoldHoldings(mergedGold);
+        await storage.setItem('gluck_gold_holdings', mergedGold);
       }
       if (hasBackupSection(parsed, 'lernstudioSets') && data.lernstudioSets) {
-        setLernstudioSets(data.lernstudioSets);
-        await storage.setItem('dl_lernstudio_sets', data.lernstudioSets);
+        const mergedLernSets = isCloudDelta && lernstudioSets.length > 0
+          ? mergeEntities(lernstudioSets as any[], data.lernstudioSets as any[], 'lernstudioSets').merged
+          : data.lernstudioSets;
+        setLernstudioSets(mergedLernSets as LernstudioSet[]);
+        await storage.setItem('dl_lernstudio_sets', mergedLernSets);
       }
       if (hasBackupSection(parsed, 'homeworkAssignments') && data.homeworkAssignments) {
         await storage.setItem('glueck_hw_assignments_v2', data.homeworkAssignments);

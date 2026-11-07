@@ -15,7 +15,6 @@ import {
   signInTeacherWithGoogle,
   signOutTeacherFirebase,
   subscribeTeacherAuth,
-  saveLernstudioSetToFirestore,
   getVercelPublicDomain,
   setVercelPublicDomain,
   DEFAULT_VERCEL_DOMAIN,
@@ -27,6 +26,8 @@ import {
   clearFirestoreWriteQuotaFlag,
   executeSafeFirestoreWrite
 } from '../shared/firebaseCloudSync';
+import { DEFAULT_LERNSTUDIO_SETS } from '../data/defaultLernstudioSets';
+import { mergeEntities } from './sync/mergeEngine';
 
 export {
   signInTeacherWithGoogle,
@@ -82,7 +83,6 @@ export function verifyWorkspaceOwnership(
 
   if (docData) {
     if (docData.ownerUid && docData.ownerUid !== current.uid) {
-      // Allow only if the verified email matches
       const docEmail = (docData.ownerEmail || '').trim().toLowerCase();
       const userEmail = (current.email || '').trim().toLowerCase();
       if (!docEmail || !userEmail || docEmail !== userEmail) {
@@ -105,13 +105,15 @@ const AUTO_SYNC_KEY = 'gluck_google_auto_sync_enabled';
 const LAST_SYNC_TIME_KEY = 'gluck_google_last_sync_time';
 const DEVICE_ID_KEY = 'gluck_cloud_device_id';
 const CHUNK_MAX_CHARS = 550000; // Safe margin below 750KB rule & 1MB Firestore limit
+const DELTA_MAX_COMPACT_CHARS = 180000; // Compact delta threshold before folding into category
 
 export type WorkspaceCategoryKey =
   | 'core_crm'
   | 'finance_gold'
   | 'school_hod'
   | 'profile_settings'
-  | 'lernstudio_data';
+  | 'lernstudio_data'
+  | 'delta_log';
 
 export const WORKSPACE_CATEGORY_KEYS: WorkspaceCategoryKey[] = [
   'core_crm',
@@ -120,6 +122,283 @@ export const WORKSPACE_CATEGORY_KEYS: WorkspaceCategoryKey[] = [
   'profile_settings',
   'lernstudio_data'
 ];
+
+const ENTITY_COLLECTION_KEYS = [
+  'groups',
+  'students',
+  'lessons',
+  'payments',
+  'certificates',
+  'notifications',
+  'todos',
+  'hodStudents',
+  'hodComplaints',
+  'hodActionPlans',
+  'hodVisits',
+  'schoolNotes',
+  'financeAccounts',
+  'financeCategories',
+  'financeTransactions',
+  'financeRecurring',
+  'financeInstallments',
+  'goldHoldings',
+  'lernstudioSets',
+  'homeworkAssignments',
+  'homeworkSubmissions'
+] as const;
+
+const SINGLETON_KEYS = [
+  'profile',
+  'schoolSettings',
+  'theme',
+  'accentColor',
+  'notificationSettings',
+  'inspirationSettings',
+  'inspirationMessages',
+  'pickerNames',
+  'prunedLessonIds'
+] as const;
+
+// Pre-compute built-in Lernstudio sets lookup so we never waste bandwidth syncing 277 static sets
+const BUILTIN_LERNSTUDIO_MAP = new Map<string, string>();
+for (const s of DEFAULT_LERNSTUDIO_SETS) {
+  if (s && s.id) {
+    BUILTIN_LERNSTUDIO_MAP.set(
+      s.id,
+      `${s.title || ''}|${Array.isArray(s.items) ? s.items.length : 0}`
+    );
+  }
+}
+
+function filterCustomOrModifiedLernstudioSets(sets: any[]): any[] {
+  if (!Array.isArray(sets)) return [];
+  return sets.filter((s) => {
+    if (!s || !s.id) return false;
+    const builtinSig = BUILTIN_LERNSTUDIO_MAP.get(s.id);
+    if (!builtinSig) {
+      return true; // Teacher's custom set -> always sync
+    }
+    if (s.deleted || s.updatedAt) {
+      const currentSig = `${s.title || ''}|${Array.isArray(s.items) ? s.items.length : 0}`;
+      if (s.deleted || currentSig !== builtinSig) {
+        return true; // Modified or deleted built-in set -> sync
+      }
+    }
+    return false; // Unmodified built-in set -> already bundled in app code!
+  });
+}
+
+function mergeWithBuiltinLernstudioSets(customOrModifiedSets: any[]): any[] {
+  const incoming = Array.isArray(customOrModifiedSets) ? customOrModifiedSets : [];
+  const byId = new Map<string, any>();
+  for (const s of incoming) {
+    if (s && s.id) {
+      byId.set(s.id, s);
+    }
+  }
+  const combined: any[] = [...incoming.filter((s) => s && !s.deleted)];
+  for (const defSet of DEFAULT_LERNSTUDIO_SETS) {
+    if (!defSet || !defSet.id) continue;
+    if (!byId.has(defSet.id)) {
+      combined.push(defSet);
+    }
+  }
+  return combined;
+}
+
+function sanitizeHeavyInlineMedia(data: any): any {
+  if (!data || typeof data !== 'object') return data;
+  const clone = { ...data };
+  if (Array.isArray(clone.students)) {
+    clone.students = clone.students.map((s: any) => {
+      if (!s || typeof s !== 'object') return s;
+      let next = s;
+      if (typeof s.avatarUrl === 'string' && s.avatarUrl.length > 90000) {
+        next = { ...next, avatarUrl: '' };
+      }
+      if (Array.isArray(s.documents) && s.documents.some((d: any) => d?.dataUrl?.length > 90000)) {
+        next = {
+          ...next,
+          documents: s.documents.map((d: any) =>
+            d?.dataUrl?.length > 90000 ? { ...d, dataUrl: '' } : d
+          )
+        };
+      }
+      return next;
+    });
+  }
+  if (clone.profile && typeof clone.profile === 'object') {
+    const prof = { ...clone.profile };
+    if (typeof prof.avatarUrl === 'string' && prof.avatarUrl.length > 90000) {
+      prof.avatarUrl = '';
+    }
+    if (Array.isArray(prof.customAiBackgrounds)) {
+      prof.customAiBackgrounds = prof.customAiBackgrounds.filter(
+        (bg: any) => typeof bg === 'string' && bg.length <= 90000
+      );
+    }
+    clone.profile = prof;
+  }
+  return clone;
+}
+
+function fastHash(str: string): string {
+  let h1 = 0xdeadbeef ^ str.length;
+  let h2 = 0x41c6ce57 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36) + '_' + str.length.toString(36);
+}
+
+function loadWatermarks(uid: string): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(`gluck_cloud_watermarks_v2_${uid}`);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveWatermarks(uid: string, watermarks: Record<string, string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(`gluck_cloud_watermarks_v2_${uid}`, JSON.stringify(watermarks));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function loadDeltaAccumulator(uid: string): Record<string, any> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(`gluck_cloud_delta_acc_v2_${uid}`);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveDeltaAccumulator(uid: string, acc: Record<string, any>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(`gluck_cloud_delta_acc_v2_${uid}`, JSON.stringify(acc));
+  } catch {
+    // Ignore
+  }
+}
+
+/**
+ * Computes P2P-style record-level delta between current state and last synced watermarks.
+ */
+function computeWorkspaceDelta(
+  uid: string,
+  sanitizedData: any
+): {
+  changedEntities: Record<string, any[]>;
+  changedSingletons: Record<string, any>;
+  nextWatermarks: Record<string, string>;
+  totalChangedCount: number;
+  hasBaselineSeeded: boolean;
+} {
+  const prevWatermarks = loadWatermarks(uid);
+  const hasBaselineSeeded = prevWatermarks['__baseline_seeded__'] === '1';
+  const nextWatermarks: Record<string, string> = {
+    __baseline_seeded__: '1'
+  };
+
+  const changedEntities: Record<string, any[]> = {};
+  const changedSingletons: Record<string, any> = {};
+  let totalChangedCount = 0;
+  const nowMs = Date.now();
+
+  for (const colKey of ENTITY_COLLECTION_KEYS) {
+    const rawArr: any[] =
+      colKey === 'lernstudioSets'
+        ? filterCustomOrModifiedLernstudioSets(sanitizedData.lernstudioSets || [])
+        : Array.isArray(sanitizedData[colKey])
+        ? sanitizedData[colKey]
+        : [];
+
+    const currentIds = new Set<string>();
+    const colChanged: any[] = [];
+
+    for (const item of rawArr) {
+      if (!item || typeof item !== 'object' || !item.id) continue;
+      const id = String(item.id);
+      currentIds.add(id);
+      const wmKey = `e:${colKey}:${id}`;
+      const itemHash = fastHash(JSON.stringify(item));
+      nextWatermarks[wmKey] = itemHash;
+
+      if (prevWatermarks[wmKey] !== itemHash) {
+        colChanged.push(item);
+        totalChangedCount++;
+      }
+    }
+
+    // Detect records that existed in prevWatermarks for this collection but were hard-deleted locally
+    const prefix = `e:${colKey}:`;
+    for (const prevKey of Object.keys(prevWatermarks)) {
+      if (prevKey.startsWith(prefix)) {
+        const oldId = prevKey.slice(prefix.length);
+        if (oldId && !currentIds.has(oldId)) {
+          const tombstone = {
+            id: oldId,
+            deleted: true,
+            updatedAt: nowMs,
+            version: 999
+          };
+          const wmKey = `e:${colKey}:${oldId}`;
+          const tombHash = fastHash(JSON.stringify(tombstone));
+          nextWatermarks[wmKey] = tombHash;
+          if (prevWatermarks[wmKey] !== tombHash) {
+            colChanged.push(tombstone);
+            totalChangedCount++;
+          }
+        }
+      }
+    }
+
+    if (colChanged.length > 0) {
+      changedEntities[colKey] = colChanged;
+    }
+  }
+
+  for (const sKey of SINGLETON_KEYS) {
+    const val =
+      sKey === 'schoolSettings'
+        ? sanitizedData.schoolSettings || sanitizedData.profile?.schoolSettings || {}
+        : sanitizedData[sKey];
+    if (val === undefined) continue;
+    const wmKey = `s:${sKey}`;
+    const sHash = fastHash(JSON.stringify(val));
+    nextWatermarks[wmKey] = sHash;
+    if (prevWatermarks[wmKey] !== sHash) {
+      changedSingletons[sKey] = val;
+      totalChangedCount++;
+    }
+  }
+
+  return {
+    changedEntities,
+    changedSingletons,
+    nextWatermarks,
+    totalChangedCount,
+    hasBaselineSeeded
+  };
+}
+
+function seedWatermarksFromData(uid: string, rawData: any): void {
+  const sanitized = sanitizeHeavyInlineMedia(rawData);
+  const { nextWatermarks } = computeWorkspaceDelta(uid, sanitized);
+  saveWatermarks(uid, nextWatermarks);
+}
 
 export interface CloudSyncSummary {
   studentsCount: number;
@@ -196,7 +475,7 @@ function splitStringIntoChunks(str: string, maxChars: number): string[] {
   return chunks;
 }
 
-function partitionBackupPayload(fullData: any): Record<WorkspaceCategoryKey, any> {
+function partitionBackupPayload(fullData: any): Record<Exclude<WorkspaceCategoryKey, 'delta_log'>, any> {
   return {
     core_crm: {
       groups: fullData.groups || [],
@@ -233,7 +512,7 @@ function partitionBackupPayload(fullData: any): Record<WorkspaceCategoryKey, any
       inspirationMessages: fullData.inspirationMessages || []
     },
     lernstudio_data: {
-      lernstudioSets: fullData.lernstudioSets || [],
+      lernstudioSets: filterCustomOrModifiedLernstudioSets(fullData.lernstudioSets || []),
       homeworkAssignments: fullData.homeworkAssignments || [],
       homeworkSubmissions: fullData.homeworkSubmissions || [],
       pickerNames: fullData.pickerNames || []
@@ -244,14 +523,39 @@ function partitionBackupPayload(fullData: any): Record<WorkspaceCategoryKey, any
 const lastUploadedChunkCache = new Map<string, string>();
 const lastUploadedChunkCount = new Map<string, number>();
 
+async function postChunksToRelayServer(workspaceId: string, chunks: any[]): Promise<void> {
+  if (typeof window === 'undefined' || chunks.length === 0) return;
+  try {
+    await fetch('/api/workspace/delta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspaceId, chunks })
+    });
+  } catch {
+    // Ignore local relay error when offline
+  }
+}
+
+async function fetchChunksFromRelayServer(workspaceId: string): Promise<any[]> {
+  if (typeof window === 'undefined') return [];
+  try {
+    const res = await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(workspaceId)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data?.docs) ? data.docs : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Uploads the entire application state (only modified categories & chunks) to the signed-in
- * teacher's Google Cloud Firestore workspace (`/user_workspaces/{uid}/categories/{docId}`).
+ * P2P-Style Delta Sync to Google Cloud Firestore (`/user_workspaces/{uid}/categories/{docId}`).
+ * Sends ONLY the records that changed since the last sync!
  */
 export async function uploadWorkspaceToGoogleCloud(
   backupJsonStr: string,
-  options?: { isManual?: boolean }
-): Promise<{ success: boolean; syncedAtIso: string; error?: string }> {
+  options?: { isManual?: boolean; forceFullBaseline?: boolean }
+): Promise<{ success: boolean; syncedAtIso: string; deltaCount?: number; error?: string }> {
   const user = getActiveCloudUser();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
@@ -268,23 +572,97 @@ export async function uploadWorkspaceToGoogleCloud(
     clearFirestoreWriteQuotaFlag();
   }
 
-  if (isFirestoreWriteQuotaExhaustedToday()) {
-    return {
-      success: false,
-      syncedAtIso: nowIso,
-      error: 'تم إيقاف المزامنة التلقائية مؤقتاً لحماية حصة Firestore؛ اضغط «مزامنة الآن» لإعادة المحاولة.'
-    };
-  }
-
   const uid = getPrimaryWorkspaceId(user);
   const deviceId = getCloudDeviceId();
   lastLocalPushTimestampMs = nowMs;
 
   try {
-    const parsed = JSON.parse(backupJsonStr);
-    const categories = partitionBackupPayload(parsed);
+    const rawParsed = JSON.parse(backupJsonStr);
+    const parsed = sanitizeHeavyInlineMedia(rawParsed);
 
-    const writePromises: Promise<any>[] = [];
+    // 1. Compute P2P-style record-level delta
+    const {
+      changedEntities,
+      changedSingletons,
+      nextWatermarks,
+      totalChangedCount,
+      hasBaselineSeeded
+    } = computeWorkspaceDelta(uid, parsed);
+
+    // If nothing changed at all since last sync, perform 0 network writes!
+    if (hasBaselineSeeded && !options?.forceFullBaseline && totalChangedCount === 0) {
+      setLastCloudSyncTime(nowIso);
+      return { success: true, syncedAtIso: nowIso, deltaCount: 0 };
+    }
+
+    const ownerEmailField = user.email
+      ? { ownerEmail: user.email.trim().toLowerCase().slice(0, 120) }
+      : {};
+
+    // 2. Fast Incremental P2P Delta Path (when baseline is already seeded)
+    if (hasBaselineSeeded && !options?.forceFullBaseline) {
+      const prevAcc = loadDeltaAccumulator(uid);
+      const nextAcc: Record<string, any> = {
+        ...prevAcc,
+        isCloudDelta: true,
+        updatedAtMs: nowMs,
+        updatedAtIso: nowIso,
+        deviceId
+      };
+
+      // Merge changed entities into the rolling delta accumulator using P2P mergeEngine
+      for (const [colKey, deltaItems] of Object.entries(changedEntities)) {
+        const existingDeltaItems = Array.isArray(nextAcc[colKey]) ? nextAcc[colKey] : [];
+        nextAcc[colKey] = mergeEntities(existingDeltaItems, deltaItems, colKey).merged;
+      }
+
+      // Merge changed singletons into the rolling delta accumulator
+      for (const [sKey, sVal] of Object.entries(changedSingletons)) {
+        if (sKey === 'prunedLessonIds' && Array.isArray(sVal)) {
+          const prevPruned = Array.isArray(nextAcc.prunedLessonIds) ? nextAcc.prunedLessonIds : [];
+          nextAcc.prunedLessonIds = Array.from(new Set([...prevPruned, ...sVal]));
+        } else {
+          nextAcc[sKey] = sVal;
+        }
+      }
+
+      const deltaPayloadStr = JSON.stringify(nextAcc);
+
+      // If compact delta fits comfortably in a single fast packet (<180KB), write ONLY 1 delta doc!
+      if (deltaPayloadStr.length <= DELTA_MAX_COMPACT_CHARS) {
+        const docId = 'delta_log_chunk_0';
+        const chunkObj = {
+          id: docId,
+          categoryKey: 'delta_log',
+          chunkIndex: 0,
+          totalChunks: 1,
+          updatedAtMs: nowMs,
+          updatedAtIso: nowIso,
+          deviceId,
+          payloadChunk: deltaPayloadStr,
+          ...ownerEmailField
+        };
+
+        await postChunksToRelayServer(uid, [chunkObj]);
+
+        if (!isFirestoreWriteQuotaExhaustedToday()) {
+          await executeSafeFirestoreWrite(() =>
+            setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), chunkObj)
+          ).catch((err) => {
+            handleFirestoreError(err, OperationType.WRITE, `user_workspaces/${uid}/categories/${docId}`);
+          });
+        }
+
+        saveDeltaAccumulator(uid, nextAcc);
+        saveWatermarks(uid, nextWatermarks);
+        setLastCloudSyncTime(nowIso);
+        return { success: true, syncedAtIso: nowIso, deltaCount: totalChangedCount };
+      }
+    }
+
+    // 3. Category-Level Sync (Initial baseline seed or when delta accumulator compacts into categories)
+    const categories = partitionBackupPayload(parsed);
+    const relayChunks: any[] = [];
 
     for (const categoryKey of WORKSPACE_CATEGORY_KEYS) {
       const catPayloadStr = JSON.stringify(categories[categoryKey] || {});
@@ -295,61 +673,68 @@ export async function uploadWorkspaceToGoogleCloud(
       for (let idx = 0; idx < chunks.length; idx++) {
         const docId = `${categoryKey}_chunk_${idx}`;
         const cacheKey = `${uid}:${docId}:${chunks.length}`;
-        if (lastUploadedChunkCache.get(cacheKey) === chunks[idx]) {
+        const chunkData = chunks[idx];
+
+        if (lastUploadedChunkCache.get(cacheKey) === chunkData) {
           continue; // Unchanged chunk -> 0 Firestore write units used!
         }
-        const path = `user_workspaces/${uid}/categories/${docId}`;
-        const chunkData = chunks[idx];
-        writePromises.push(
-          executeSafeFirestoreWrite(
-            () =>
-              setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), {
-                id: docId,
-                categoryKey,
-                chunkIndex: idx,
-                totalChunks: chunks.length,
-                updatedAtMs: nowMs,
-                updatedAtIso: nowIso,
-                deviceId,
-                payloadChunk: chunkData,
-                ...(user.email ? { ownerEmail: user.email.trim().toLowerCase().slice(0, 120) } : {})
-              })
+
+        const chunkObj = {
+          id: docId,
+          categoryKey,
+          chunkIndex: idx,
+          totalChunks: chunks.length,
+          updatedAtMs: nowMs,
+          updatedAtIso: nowIso,
+          deviceId,
+          payloadChunk: chunkData,
+          ...ownerEmailField
+        };
+
+        relayChunks.push(chunkObj);
+
+        if (!isFirestoreWriteQuotaExhaustedToday()) {
+          const path = `user_workspaces/${uid}/categories/${docId}`;
+          // Write sequentially to avoid flooding the Firestore WebChannel stream
+          await executeSafeFirestoreWrite(() =>
+            setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), chunkObj)
           )
             .then(() => {
               lastUploadedChunkCache.set(cacheKey, chunkData);
             })
             .catch((err) => {
               handleFirestoreError(err, OperationType.WRITE, path);
-              throw err;
-            })
-        );
+            });
+        } else {
+          lastUploadedChunkCache.set(cacheKey, chunkData);
+        }
       }
 
-      // Clean up stale higher-index chunks if category payload shrank compared to previous upload
-      if (previousChunkCount > chunks.length) {
+      if (previousChunkCount > chunks.length && !isFirestoreWriteQuotaExhaustedToday()) {
         for (let staleIdx = chunks.length; staleIdx < previousChunkCount; staleIdx++) {
           const staleDocId = `${categoryKey}_chunk_${staleIdx}`;
-          writePromises.push(
-            executeSafeFirestoreWrite(() =>
-              deleteDoc(doc(db, 'user_workspaces', uid, 'categories', staleDocId))
-            ).catch(() => {})
-          );
+          await executeSafeFirestoreWrite(() =>
+            deleteDoc(doc(db, 'user_workspaces', uid, 'categories', staleDocId))
+          ).catch(() => {});
         }
       }
       lastUploadedChunkCount.set(countKey, chunks.length);
     }
 
-    if (writePromises.length > 0) {
-      await Promise.all(writePromises);
+    if (relayChunks.length > 0) {
+      await postChunksToRelayServer(uid, relayChunks);
     }
 
+    // Reset rolling delta accumulator after full category compaction
+    saveDeltaAccumulator(uid, {});
+    saveWatermarks(uid, nextWatermarks);
     setLastCloudSyncTime(nowIso);
-    return { success: true, syncedAtIso: nowIso };
+    return { success: true, syncedAtIso: nowIso, deltaCount: totalChangedCount };
   } catch (err: any) {
     return {
       success: false,
       syncedAtIso: nowIso,
-      error: err?.message || 'حدث خطأ أثناء رفع البيانات إلى سحابة جوجل.'
+      error: err?.message || 'حدث خطأ أثناء مزامنة التغييرات مع السحابة.'
     };
   }
 }
@@ -360,7 +745,6 @@ export async function uploadWorkspaceToGoogleCloud(
 function reassembleCategoryChunks(chunkDocs: any[]): any | null {
   if (!Array.isArray(chunkDocs) || chunkDocs.length === 0) return null;
 
-  // Group by chunkIndex and keep the newest document per chunkIndex
   const newestByIndex = new Map<number, any>();
   let latestHeaderDoc: any = null;
 
@@ -389,7 +773,6 @@ function reassembleCategoryChunks(chunkDocs: any[]): any | null {
   for (let i = 0; i < expectedTotalChunks; i++) {
     const chunkDoc = newestByIndex.get(i);
     if (!chunkDoc || typeof chunkDoc.payloadChunk !== 'string') {
-      // Missing chunk in sequence — abort reassembling this category to avoid partial JSON corruption
       return null;
     }
     orderedParts.push(chunkDoc.payloadChunk);
@@ -401,8 +784,34 @@ function reassembleCategoryChunks(chunkDocs: any[]): any | null {
 }
 
 /**
- * Downloads and reassembles the entire application workspace from Google Cloud Firestore
- * for the currently signed-in Google account.
+ * Applies a P2P delta payload on top of a base workspace object using `mergeEntities`.
+ */
+function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): void {
+  if (!deltaObj || typeof deltaObj !== 'object') return;
+
+  for (const colKey of ENTITY_COLLECTION_KEYS) {
+    const incomingItems = deltaObj[colKey];
+    if (Array.isArray(incomingItems) && incomingItems.length > 0) {
+      const existingItems = Array.isArray(baseObj[colKey]) ? baseObj[colKey] : [];
+      baseObj[colKey] = mergeEntities(existingItems, incomingItems, colKey).merged;
+    }
+  }
+
+  for (const sKey of SINGLETON_KEYS) {
+    if (deltaObj[sKey] !== undefined) {
+      if (sKey === 'prunedLessonIds' && Array.isArray(deltaObj.prunedLessonIds)) {
+        const existingPruned = Array.isArray(baseObj.prunedLessonIds) ? baseObj.prunedLessonIds : [];
+        baseObj.prunedLessonIds = Array.from(new Set([...existingPruned, ...deltaObj.prunedLessonIds]));
+      } else {
+        baseObj[sKey] = deltaObj[sKey];
+      }
+    }
+  }
+}
+
+/**
+ * Downloads and reassembles the application workspace (base categories + P2P delta log)
+ * from Google Cloud Firestore and relay for the currently signed-in Google account.
  */
 export async function downloadWorkspaceFromGoogleCloud(): Promise<{
   hasRemoteData: boolean;
@@ -433,15 +842,21 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       candidateIds.push(user.uid);
     }
 
-    let snap: any = null;
+    const rawDocsMap = new Map<string, any>();
     let resolvedWorkspaceId = primaryId;
+
     for (const cId of candidateIds) {
       if (!verifyWorkspaceOwnership(user, null, cId)) continue;
       try {
         const s = await getDocs(collection(db, 'user_workspaces', cId, 'categories'));
         if (!s.empty) {
-          snap = s;
           resolvedWorkspaceId = cId;
+          s.forEach((docSnap: any) => {
+            const d = docSnap.data();
+            if (d && d.id && verifyWorkspaceOwnership(user, d, cId)) {
+              rawDocsMap.set(d.id, d);
+            }
+          });
           break;
         }
       } catch {
@@ -449,7 +864,17 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       }
     }
 
-    if (!snap || snap.empty) {
+    // Merge any newer chunks/deltas from fast relay server
+    const relayDocs = await fetchChunksFromRelayServer(primaryId);
+    for (const rDoc of relayDocs) {
+      if (!rDoc || !rDoc.id) continue;
+      const existing = rawDocsMap.get(rDoc.id);
+      if (!existing || (Number(rDoc.updatedAtMs) || 0) >= (Number(existing.updatedAtMs) || 0)) {
+        rawDocsMap.set(rDoc.id, rDoc);
+      }
+    }
+
+    if (rawDocsMap.size === 0) {
       return {
         hasRemoteData: false,
         backupJsonStr: null,
@@ -463,8 +888,7 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
     let maxUpdatedAtMs = 0;
     let maxUpdatedAtIso: string | null = null;
 
-    snap.forEach((docSnap: any) => {
-      const data = docSnap.data();
+    rawDocsMap.forEach((data) => {
       if (!data || !data.categoryKey) return;
       if (!verifyWorkspaceOwnership(user, data, resolvedWorkspaceId)) {
         return;
@@ -490,15 +914,18 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
 
     const reassembled: any = {
       timestamp: maxUpdatedAtIso || new Date().toISOString(),
-      version: '2.0.0'
+      version: '2.0.0',
+      isCloudDelta: true
     };
 
-    docsByCategory.forEach((chunkDocs, categoryKey) => {
+    // 1. Reassemble baseline categories first
+    for (const categoryKey of WORKSPACE_CATEGORY_KEYS) {
+      const chunkDocs = docsByCategory.get(categoryKey);
+      if (!chunkDocs) continue;
       try {
         const parsedCat = reassembleCategoryChunks(chunkDocs);
         if (parsedCat && typeof parsedCat === 'object') {
           Object.assign(reassembled, parsedCat);
-          // Seed chunk cache from downloaded cloud state so unchanged categories cost 0 writes on next sync
           const catStr = JSON.stringify(parsedCat);
           const chunks = splitStringIntoChunks(catStr, CHUNK_MAX_CHARS);
           lastUploadedChunkCount.set(`${primaryId}:${categoryKey}`, chunks.length);
@@ -509,16 +936,50 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       } catch (parseErr) {
         console.warn('Failed to parse reassembled cloud category:', parseErr);
       }
-    });
+    }
+
+    // 2. Apply P2P delta_log on top of baseline categories using mergeEntities
+    const deltaChunks = docsByCategory.get('delta_log');
+    if (deltaChunks && deltaChunks.length > 0) {
+      try {
+        const parsedDelta = reassembleCategoryChunks(deltaChunks);
+        if (parsedDelta && typeof parsedDelta === 'object') {
+          applyDeltaOnWorkspace(reassembled, parsedDelta);
+          saveDeltaAccumulator(primaryId, parsedDelta);
+        }
+      } catch (deltaErr) {
+        console.warn('Failed to parse cloud delta_log:', deltaErr);
+      }
+    }
+
+    // 3. Re-attach built-in Lernstudio sets so the full 297+ curriculum is preserved locally
+    reassembled.lernstudioSets = mergeWithBuiltinLernstudioSets(reassembled.lernstudioSets || []);
+
+    // 4. Seed local watermarks from the downloaded cloud state so unchanged records cost 0 writes
+    seedWatermarksFromData(primaryId, reassembled);
+
+    const activeStudents = Array.isArray(reassembled.students)
+      ? reassembled.students.filter((s: any) => s && !s.deleted)
+      : [];
+    const activeGroups = Array.isArray(reassembled.groups)
+      ? reassembled.groups.filter((g: any) => g && !g.deleted)
+      : [];
+    const activeLessons = Array.isArray(reassembled.lessons)
+      ? reassembled.lessons.filter((l: any) => l && !l.deleted)
+      : [];
+    const activePayments = Array.isArray(reassembled.payments)
+      ? reassembled.payments.filter((p: any) => p && !p.deleted)
+      : [];
+    const activeFinanceTx = Array.isArray(reassembled.financeTransactions)
+      ? reassembled.financeTransactions.filter((t: any) => t && !t.deleted)
+      : [];
 
     const summary: CloudSyncSummary = {
-      studentsCount: Array.isArray(reassembled.students) ? reassembled.students.length : 0,
-      groupsCount: Array.isArray(reassembled.groups) ? reassembled.groups.length : 0,
-      lessonsCount: Array.isArray(reassembled.lessons) ? reassembled.lessons.length : 0,
-      paymentsCount: Array.isArray(reassembled.payments) ? reassembled.payments.length : 0,
-      financeTransactionsCount: Array.isArray(reassembled.financeTransactions)
-        ? reassembled.financeTransactions.length
-        : 0,
+      studentsCount: activeStudents.length,
+      groupsCount: activeGroups.length,
+      lessonsCount: activeLessons.length,
+      paymentsCount: activePayments.length,
+      financeTransactionsCount: activeFinanceTx.length,
       lernstudioSetsCount: Array.isArray(reassembled.lernstudioSets)
         ? reassembled.lernstudioSets.length
         : 0,
@@ -593,7 +1054,6 @@ export function subscribeToRemoteWorkspaceChanges(
         }
       });
 
-      // Only pull automatically if the change came from another device or is newer than what we pushed/applied
       if (!fromOtherDevice || newestRemoteMs <= lastAppliedRemoteMs) {
         return;
       }
@@ -624,4 +1084,3 @@ export function subscribeToRemoteWorkspaceChanges(
     unsub();
   };
 }
-

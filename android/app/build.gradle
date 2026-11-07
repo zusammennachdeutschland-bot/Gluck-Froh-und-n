@@ -1,21 +1,57 @@
 apply plugin: 'com.android.application'
 
+import java.security.KeyStore
+
 // Decode release.keystore from ANDROID_KEYSTORE_BASE64 environment variable if provided
-def keystorePathEnv = System.getenv("ANDROID_KEYSTORE_PATH") ?: "release.keystore"
+def keystorePathEnv = (System.getenv("ANDROID_KEYSTORE_PATH") ?: "release.keystore").trim()
 def keystoreFile = file(keystorePathEnv)
 def keystoreB64Env = System.getenv("ANDROID_KEYSTORE_BASE64")
 if (!keystoreFile.exists() && keystoreB64Env != null && !keystoreB64Env.trim().isEmpty()) {
     try {
-        keystoreFile.bytes = keystoreB64Env.trim().decodeBase64()
+        def cleanedB64 = keystoreB64Env.replaceAll("\\s+", "")
+        keystoreFile.bytes = cleanedB64.decodeBase64()
     } catch (Exception e) {
-        logger.warn("Could not decode ANDROID_KEYSTORE_BASE64: " + e.message)
+        throw new GradleException("Failed to decode ANDROID_KEYSTORE_BASE64 into keystore file: " + e.message)
     }
 }
 
-def releaseStorePassword = System.getenv("ANDROID_STORE_PASSWORD") ?: project.findProperty("ANDROID_STORE_PASSWORD")
-def releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: project.findProperty("ANDROID_KEY_ALIAS")
-def releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: project.findProperty("ANDROID_KEY_PASSWORD")
-def hasReleaseSigning = keystoreFile.exists() && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+def releaseStorePassword = (System.getenv("ANDROID_STORE_PASSWORD") ?: project.findProperty("ANDROID_STORE_PASSWORD") ?: "").toString().trim()
+def releaseKeyAlias = (System.getenv("ANDROID_KEY_ALIAS") ?: project.findProperty("ANDROID_KEY_ALIAS") ?: "").toString().trim()
+def releaseKeyPassword = (System.getenv("ANDROID_KEY_PASSWORD") ?: project.findProperty("ANDROID_KEY_PASSWORD") ?: "").toString().trim()
+
+def isReleaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.toLowerCase().contains("release")
+}
+
+def validateReleaseSigningCredentials = {
+    if (!keystoreFile.exists() || keystoreFile.length() == 0) {
+        throw new GradleException("Release signing failed: Keystore file '${keystoreFile.name}' is missing or empty. Provide ANDROID_KEYSTORE_BASE64 or place '${keystoreFile.name}' in android/app/.")
+    }
+    if (releaseStorePassword.isEmpty() || releaseKeyAlias.isEmpty() || releaseKeyPassword.isEmpty()) {
+        throw new GradleException("Release signing failed: ANDROID_STORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD must all be provided and non-empty.")
+    }
+    try {
+        def ks = KeyStore.getInstance(KeyStore.getDefaultType())
+        keystoreFile.withInputStream { is ->
+            ks.load(is, releaseStorePassword.toCharArray())
+        }
+        if (!ks.containsAlias(releaseKeyAlias)) {
+            throw new GradleException("Release signing failed: Key alias '${releaseKeyAlias}' was not found inside the keystore.")
+        }
+        def key = ks.getKey(releaseKeyAlias, releaseKeyPassword.toCharArray())
+        if (key == null) {
+            throw new GradleException("Release signing failed: Could not retrieve private key for alias '${releaseKeyAlias}'.")
+        }
+    } catch (GradleException ge) {
+        throw ge
+    } catch (Exception e) {
+        throw new GradleException("Release signing validation failed (invalid keystore format, store password, or key password): " + e.getClass().getSimpleName())
+    }
+}
+
+if (isReleaseTaskRequested) {
+    validateReleaseSigningCredentials()
+}
 
 android {
     namespace = "com.glueck.app"
@@ -35,16 +71,14 @@ android {
     }
     signingConfigs {
         release {
-            if (hasReleaseSigning) {
-                storeFile keystoreFile
-                storePassword releaseStorePassword.toString()
-                keyAlias releaseKeyAlias.toString()
-                keyPassword releaseKeyPassword.toString()
-                v1SigningEnabled true
-                v2SigningEnabled true
-                enableV3Signing true
-                enableV4Signing false
-            }
+            storeFile keystoreFile
+            storePassword releaseStorePassword
+            keyAlias releaseKeyAlias
+            keyPassword releaseKeyPassword
+            v1SigningEnabled true
+            v2SigningEnabled true
+            enableV3Signing true
+            enableV4Signing false
         }
     }
     compileOptions {
@@ -58,7 +92,7 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 }

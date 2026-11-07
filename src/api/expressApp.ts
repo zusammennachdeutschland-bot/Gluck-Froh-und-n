@@ -1,7 +1,8 @@
 import express from 'express';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // In-Memory Fallback Stores for Homework & Teacher Assignments
 const localAssignmentsStore: any[] = [];
@@ -214,4 +215,165 @@ app.all('/api/homework/submissions', (req, res) => {
   return res.json({ success: true });
 });
 
+// 6. P2P-Style Workspace Delta Relay Store (per workspaceId)
+const workspaceChunksRelayStore = new Map<string, Map<string, any>>();
+
+app.all('/api/workspace/delta', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  if (req.method === 'GET') {
+    const workspaceId = String(req.query.workspaceId || '').trim();
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'Missing workspaceId' });
+    }
+    const docsMap = workspaceChunksRelayStore.get(workspaceId);
+    const docs = docsMap ? Array.from(docsMap.values()) : [];
+    return res.json({ success: true, docs });
+  }
+
+  if (req.method === 'POST') {
+    const { workspaceId, chunks } = req.body || {};
+    if (!workspaceId || !Array.isArray(chunks)) {
+      return res.status(400).json({ error: 'Invalid delta payload' });
+    }
+    let docsMap = workspaceChunksRelayStore.get(workspaceId);
+    if (!docsMap) {
+      docsMap = new Map<string, any>();
+      workspaceChunksRelayStore.set(workspaceId, docsMap);
+    }
+    for (const chunk of chunks) {
+      if (chunk && chunk.id) {
+        docsMap.set(chunk.id, chunk);
+      }
+    }
+    return res.json({ success: true, storedCount: chunks.length });
+  }
+
+  return res.json({ success: true });
+});
+
+// 7. Ephemeral Mobile-Friendly Android Keystore Generator (writes only to /tmp and deletes immediately)
+app.post('/api/android/generate-keystore', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  const { storePassword, keyAlias = 'glueckrelease' } = req.body || {};
+  const cleanAlias = String(keyAlias || 'glueckrelease').trim() || 'glueckrelease';
+  const pass = String(storePassword || '');
+
+  if (pass.length < 6) {
+    return res.status(400).json({
+      success: false,
+      error: 'Password must be at least 6 characters long.'
+    });
+  }
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(cleanAlias)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Key alias must contain only letters, numbers, underscores, or hyphens.'
+    });
+  }
+
+  const fs = await import('fs');
+  const os = await import('os');
+  const path = await import('path');
+  const { execFileSync } = await import('child_process');
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glueck-ks-'));
+  const keyPemPath = path.join(tmpDir, 'key.pem');
+  const certPemPath = path.join(tmpDir, 'cert.pem');
+  const keystorePath = path.join(tmpDir, 'release.keystore');
+
+  try {
+    const envWithSecret = {
+      ...process.env,
+      _GLUECK_EPHEMERAL_KS_PASS: pass
+    };
+
+    // 1. Generate 2048-bit RSA private key and self-signed certificate (10,000 days)
+    execFileSync(
+      'openssl',
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-keyout',
+        keyPemPath,
+        '-out',
+        certPemPath,
+        '-days',
+        '10000',
+        '-subj',
+        '/CN=Glueck Teacher/OU=Mobile/O=Glueck/L=Cairo/ST=Cairo/C=EG'
+      ],
+      { stdio: 'ignore' }
+    );
+
+    // 2. Export standard PKCS#12 (.keystore) with alias "glueckrelease"
+    execFileSync(
+      'openssl',
+      [
+        'pkcs12',
+        '-export',
+        '-in',
+        certPemPath,
+        '-inkey',
+        keyPemPath,
+        '-out',
+        keystorePath,
+        '-name',
+        cleanAlias,
+        '-passout',
+        'env:_GLUECK_EPHEMERAL_KS_PASS'
+      ],
+      { env: envWithSecret, stdio: 'ignore' }
+    );
+
+    // 3. Verify the generated PKCS#12 keystore can be unlocked with the password
+    execFileSync(
+      'openssl',
+      [
+        'pkcs12',
+        '-in',
+        keystorePath,
+        '-noout',
+        '-passin',
+        'env:_GLUECK_EPHEMERAL_KS_PASS'
+      ],
+      { env: envWithSecret, stdio: 'ignore' }
+    );
+
+    // 4. Read SHA-256 certificate fingerprint (safe public metadata)
+    const fpOut = execFileSync(
+      'openssl',
+      ['x509', '-in', certPemPath, '-noout', '-fingerprint', '-sha256'],
+      { encoding: 'utf8' }
+    ).trim();
+
+    const keystoreBuffer = fs.readFileSync(keystorePath);
+    const keystoreBase64 = keystoreBuffer.toString('base64').replace(/\s+/g, '');
+
+    return res.status(200).json({
+      success: true,
+      alias: cleanAlias,
+      keystoreBase64,
+      byteLength: keystoreBuffer.length,
+      sha256Fingerprint: fpOut.replace(/^.*Fingerprint=/i, '')
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to generate PKCS12 keystore.'
+    });
+  } finally {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+});
+
 export default app;
+
+

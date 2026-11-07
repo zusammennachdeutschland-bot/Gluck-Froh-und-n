@@ -65,6 +65,91 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
   const [customVercelDomain, setCustomVercelDomain] = useState<string>(() => getVercelPublicDomain());
   const [isEditingDomain, setIsEditingDomain] = useState(false);
 
+  // Mobile-Friendly Android Keystore Generator State
+  const [showKeystoreTool, setShowKeystoreTool] = useState(false);
+  const [ksPassword, setKsPassword] = useState('');
+  const [ksAlias, setKsAlias] = useState('glueckrelease');
+  const [ksLoading, setKsLoading] = useState(false);
+  const [ksResult, setKsResult] = useState<{
+    alias: string;
+    keystoreBase64: string;
+    sha256Fingerprint: string;
+  } | null>(null);
+  const [ksB64Copied, setKsB64Copied] = useState(false);
+  const [ksAliasCopied, setKsAliasCopied] = useState(false);
+
+  const handleGenerateMobileKeystore = async () => {
+    if (!ksPassword || ksPassword.length < 6) {
+      setFeedbackMsg({
+        type: 'error',
+        text: _t(
+          'يرجى إدخال كلمة مرور لا تقل عن 6 أحرف لتوليد المفتاح.',
+          'Please enter a password of at least 6 characters.',
+          'Bitte geben Sie ein Passwort mit mindestens 6 Zeichen ein.'
+        )
+      });
+      return;
+    }
+    setKsLoading(true);
+    setFeedbackMsg(null);
+    try {
+      const res = await fetch('/api/android/generate-keystore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storePassword: ksPassword,
+          keyAlias: ksAlias.trim() || 'glueckrelease'
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success || !data?.keystoreBase64) {
+        throw new Error(data?.error || 'Failed to generate keystore');
+      }
+      setKsResult({
+        alias: data.alias || 'glueckrelease',
+        keystoreBase64: data.keystoreBase64,
+        sha256Fingerprint: data.sha256Fingerprint || ''
+      });
+      setFeedbackMsg({
+        type: 'success',
+        text: _t(
+          'تم توليد مفتاح توقيع أندرويد الجديد (glueckrelease) بنجاح دون حفظه في Git! انسخ كود Base64 بالأسفل.',
+          'New Android release keystore (glueckrelease) generated in memory! Copy the Base64 value below.',
+          'Neuer Android Release-Keystore (glueckrelease) erfolgreich generiert!'
+        )
+      });
+    } catch (err: any) {
+      setFeedbackMsg({
+        type: 'error',
+        text: err?.message || 'تعذر توليد ملف Keystore'
+      });
+    } finally {
+      setKsLoading(false);
+    }
+  };
+
+  const handleDownloadGeneratedKeystore = () => {
+    if (!ksResult?.keystoreBase64) return;
+    try {
+      const binStr = atob(ksResult.keystoreBase64);
+      const bytes = new Uint8Array(binStr.length);
+      for (let i = 0; i < binStr.length; i++) {
+        bytes[i] = binStr.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'release.keystore';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      // Ignore
+    }
+  };
+
   const handleSaveVercelDomain = () => {
     const cleaned = setVercelPublicDomain(customVercelDomain);
     setVercelDomainState(cleaned);
@@ -251,11 +336,19 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
           hodRecordsCount: hodStudents.length + schoolNotes.length,
           updatedAtIso: res.syncedAtIso
         });
-        const msg = _t(
-          'تم رفع ومزامنة جميع بيانات البرنامج إلى سحابة Google بنجاح',
-          'All app data uploaded to Google Cloud successfully',
-          'Alle App-Daten erfolgreich in die Google Cloud hochgeladen'
-        );
+        const changedCount = res.deltaCount ?? 0;
+        const msg =
+          changedCount === 0
+            ? _t(
+                'جميع البيانات متطابقة بالفعل مع السحابة (0 تغييرات جديدة)',
+                'All data is already up to date with the cloud (0 changes)',
+                'Alle Daten sind bereits auf dem neuesten Stand (0 Änderungen)'
+              )
+            : _t(
+                `تم إرسال التغييرات فقط (${changedCount} عنصر) إلى سحابة Google بنجاح`,
+                `Uploaded only changes (${changedCount} items) to Google Cloud`,
+                `Nur Änderungen (${changedCount} Elemente) erfolgreich hochgeladen`
+              );
         setFeedbackMsg({ type: 'success', text: msg });
         if (triggerToast) triggerToast(msg);
       } else {
@@ -297,9 +390,9 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
         setLastSyncTime(nowIso);
         setLastCloudSyncTime(nowIso);
         const msg = _t(
-          'تم استرجاع وتحديث جميع بيانات البرنامج من سحابة Google بنجاح',
-          'All app data restored from Google Cloud successfully',
-          'Alle Daten erfolgreich aus der Google Cloud wiederhergestellt'
+          'تم استرجاع ودمج التغييرات من سحابة Google بنجاح',
+          'All app data restored and merged from Google Cloud successfully',
+          'Alle Daten erfolgreich aus der Google Cloud zusammengeführt'
         );
         setFeedbackMsg({ type: 'success', text: msg });
         if (triggerToast) triggerToast(msg);
@@ -323,57 +416,43 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     setFeedbackMsg(null);
     setSyncStatus('syncing');
     try {
-      const remote = await downloadWorkspaceFromGoogleCloud();
-      const localHasData =
-        students.length > 0 ||
-        groups.length > 0 ||
-        lessons.length > 0 ||
-        payments.length > 0 ||
-        financeTransactions.length > 0;
+      // 1. Upload only local delta changes first so local edits are recorded
+      const snapStr = await performBackup();
+      const upRes = await uploadWorkspaceToGoogleCloud(snapStr, { isManual: true });
 
-      // If local device is empty and cloud has data, pull from cloud
-      if (remote.hasRemoteData && remote.backupJsonStr && !localHasData) {
-        await importBackupFile(remote.backupJsonStr);
-        if (remote.summary) setCloudSummary(remote.summary);
+      if (upRes.success) {
+        const nowIso = upRes.syncedAtIso || new Date().toISOString();
+        setLastSyncTime(nowIso);
+        setLastCloudSyncTime(nowIso);
         setSyncStatus('synced');
-        setFeedbackMsg({
-          type: 'success',
-          text: _t(
-            'تم سحب جميع بياناتك من سحابة Google إلى هذا الجهاز بنجاح',
-            'Pulled all your data from Google Cloud to this device',
-            'Alle Daten aus der Google Cloud synchronisiert'
-          )
+        setCloudSummary({
+          studentsCount: students.length,
+          groupsCount: groups.length,
+          lessonsCount: lessons.length,
+          paymentsCount: payments.length,
+          financeTransactionsCount: financeTransactions.length,
+          lernstudioSetsCount: lernstudioSets.length,
+          hodRecordsCount: hodStudents.length + schoolNotes.length,
+          updatedAtIso: nowIso
         });
+        const changedCount = upRes.deltaCount ?? 0;
+        const msg =
+          changedCount === 0
+            ? _t(
+                'تمت المزامنة الذكية (جميع البيانات محدّثة بالفعل — 0 تغييرات جديدة)',
+                'Smart delta sync complete (already up to date — 0 changes)',
+                'Delta-Synchronisierung abgeschlossen (bereits aktuell — 0 Änderungen)'
+              )
+            : _t(
+                `تمت المزامنة الذكية بنظام Delta بنجاح (تم إرسال ${changedCount} تعديل فقط)`,
+                `Smart Delta Sync completed (${changedCount} changed items synced)`,
+                `Delta-Synchronisierung abgeschlossen (${changedCount} Änderungen gesendet)`
+              );
+        setFeedbackMsg({ type: 'success', text: msg });
+        if (triggerToast) triggerToast(msg);
       } else {
-        // Upload latest state from this device to Google Cloud
-        const snapStr = await performBackup();
-        const upRes = await uploadWorkspaceToGoogleCloud(snapStr, { isManual: true });
-        if (upRes.success) {
-          const nowIso = upRes.syncedAtIso || new Date().toISOString();
-          setLastSyncTime(nowIso);
-          setLastCloudSyncTime(nowIso);
-          setCloudSummary({
-            studentsCount: students.length,
-            groupsCount: groups.length,
-            lessonsCount: lessons.length,
-            paymentsCount: payments.length,
-            financeTransactionsCount: financeTransactions.length,
-            lernstudioSetsCount: lernstudioSets.length,
-            hodRecordsCount: hodStudents.length + schoolNotes.length,
-            updatedAtIso: upRes.syncedAtIso
-          });
-          setFeedbackMsg({
-            type: 'success',
-            text: _t(
-              'تمت المزامنة الشاملة مع حساب Google بنجاح (الطلاب، الحصص، الماليات، الإعدادات، والألعاب)',
-              'Full Google Cloud sync completed successfully',
-              'Vollständige Google Cloud-Synchronisierung abgeschlossen'
-            )
-          });
-        } else {
-          setSyncStatus('error');
-          setFeedbackMsg({ type: 'error', text: upRes.error || 'تعذرت المزامنة' });
-        }
+        setSyncStatus('error');
+        setFeedbackMsg({ type: 'error', text: upRes.error || 'تعذرت المزامنة' });
       }
     } catch (err: any) {
       setSyncStatus('error');
@@ -729,6 +808,148 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
             </div>
           )}
         </div>
+      </div>
+
+      {/* Mobile-Friendly Android Keystore Generator (No Terminal Required) */}
+      <div className="p-3.5 bg-surface/60 border border-surface-border rounded-xl space-y-3 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="font-bold text-text-main">
+              🔐 {_t(
+                'أداة توليد مفتاح توقيع أندرويد من الموبايل (Android Release Keystore)',
+                'Mobile Android Release Keystore & Base64 Generator',
+                'Android Release-Keystore & Base64 Generator (Mobil)'
+              )}
+            </div>
+            <p className="text-[11px] text-text-muted mt-0.5">
+              {_t(
+                'توليد ملف Keystore جديد بالاسم الرمزي glueckrelease والحصول على كود Base64 مباشرة من هاتفك دون تيرمينال ودون رفعه إلى GitHub',
+                'Generate a brand-new keystore (alias: glueckrelease) and get its Base64 string directly on your phone without terminal or committing to GitHub',
+                'Neuen Keystore (Alias: glueckrelease) und Base64 direkt auf dem Smartphone erzeugen'
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowKeystoreTool((prev) => !prev)}
+            className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary font-bold rounded-lg cursor-pointer transition-colors"
+          >
+            {showKeystoreTool
+              ? _t('إخفاء الأداة', 'Hide Tool', 'Ausblenden')
+              : _t('فتح أداة التوليد للموبايل', 'Open Mobile Generator', 'Generator öffnen')}
+          </button>
+        </div>
+
+        {showKeystoreTool && (
+          <div className="pt-3 border-t border-surface-border space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-[11px] font-bold text-text-muted mb-1">
+                  ANDROID_KEY_ALIAS
+                </label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={ksAlias}
+                  onChange={(e) => setKsAlias(e.target.value)}
+                  className="w-full px-3 py-2 bg-surface border border-surface-border rounded-lg font-mono text-xs text-text-main outline-none"
+                  placeholder="glueckrelease"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-text-muted mb-1">
+                  {_t(
+                    'كلمة المرور السرية (ANDROID_STORE_PASSWORD & ANDROID_KEY_PASSWORD)',
+                    'Secret Password (ANDROID_STORE_PASSWORD & ANDROID_KEY_PASSWORD)',
+                    'Geheimes Passwort (min. 6 Zeichen)'
+                  )}
+                </label>
+                <input
+                  type="password"
+                  dir="ltr"
+                  value={ksPassword}
+                  onChange={(e) => setKsPassword(e.target.value)}
+                  className="w-full px-3 py-2 bg-surface border border-surface-border rounded-lg font-mono text-xs text-text-main outline-none"
+                  placeholder="••••••••"
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={ksLoading}
+              onClick={handleGenerateMobileKeystore}
+              className="w-full sm:w-auto px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-black text-xs rounded-xl cursor-pointer transition-all"
+            >
+              {ksLoading
+                ? _t('جاري التوليد والتشفير...', 'Generating Keystore...', 'Generiere Keystore...')
+                : _t(
+                    'توليد Keystore جديد واستخراج كود Base64',
+                    'Generate New Keystore & Base64',
+                    'Neuen Keystore & Base64 generieren'
+                  )}
+            </button>
+
+            {ksResult && (
+              <div className="p-3 bg-surface border border-emerald-500/30 rounded-xl space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                    ✓ {_t('تم توليد المفتاح بنجاح (Alias:', 'Keystore ready (Alias:', 'Keystore bereit (Alias:')}{' '}
+                    <code className="font-mono">{ksResult.alias}</code>)
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(ksResult.keystoreBase64);
+                        setKsB64Copied(true);
+                        setTimeout(() => setKsB64Copied(false), 2500);
+                      }}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-lg cursor-pointer"
+                    >
+                      {ksB64Copied
+                        ? _t('تم نسخ Base64 ✓', 'Base64 Copied ✓', 'Base64 kopiert ✓')
+                        : _t('نسخ ANDROID_KEYSTORE_BASE64', 'Copy ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_BASE64 kopieren')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(ksResult.alias);
+                        setKsAliasCopied(true);
+                        setTimeout(() => setKsAliasCopied(false), 2000);
+                      }}
+                      className="px-2.5 py-1.5 bg-surface-hover border border-surface-border text-text-main font-bold rounded-lg cursor-pointer"
+                    >
+                      {ksAliasCopied ? '✓ glueckrelease' : _t('نسخ الـ Alias', 'Copy Alias', 'Alias kopieren')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadGeneratedKeystore}
+                      className="px-2.5 py-1.5 bg-surface-hover border border-surface-border text-text-main font-bold rounded-lg cursor-pointer"
+                    >
+                      {_t('تنزيل release.keystore احتياطياً', 'Download release.keystore', 'release.keystore herunterladen')}
+                    </button>
+                  </div>
+                </div>
+
+                <textarea
+                  readOnly
+                  dir="ltr"
+                  rows={3}
+                  value={ksResult.keystoreBase64}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full p-2 bg-surface-hover border border-surface-border rounded-lg font-mono text-[10px] text-text-main break-all"
+                />
+                {ksResult.sha256Fingerprint && (
+                  <div className="text-[10px] font-mono text-text-muted break-all" dir="ltr">
+                    SHA-256: {ksResult.sha256Fingerprint}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Feedback Banner */}
