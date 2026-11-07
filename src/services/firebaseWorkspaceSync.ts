@@ -358,7 +358,9 @@ export const SINGLETON_KEYS = [
   'inspirationMessages',
   'customAiBackgrounds',
   'pickerNames',
-  'prunedLessonIds'
+  'prunedLessonIds',
+  'recentlyDeleted',
+  'dismissedDashboardLessons'
 ] as const;
 
 // Pre-compute built-in Lernstudio sets lookup so we NEVER sync or duplicate built-in sets!
@@ -1068,6 +1070,16 @@ function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): void {
       if (sKey === 'prunedLessonIds' && Array.isArray(deltaObj.prunedLessonIds)) {
         const existingPruned = Array.isArray(baseObj.prunedLessonIds) ? baseObj.prunedLessonIds : [];
         baseObj.prunedLessonIds = Array.from(new Set([...existingPruned, ...deltaObj.prunedLessonIds]));
+      } else if (sKey === 'recentlyDeleted' && deltaObj.recentlyDeleted) {
+        const existingRec = baseObj.recentlyDeleted || { students: [], groups: [], lessons: [] };
+        baseObj.recentlyDeleted = {
+          students: mergeEntities(existingRec.students || [], deltaObj.recentlyDeleted.students || [], 'recentlyDeleted_students').merged,
+          groups: mergeEntities(existingRec.groups || [], deltaObj.recentlyDeleted.groups || [], 'recentlyDeleted_groups').merged,
+          lessons: mergeEntities(existingRec.lessons || [], deltaObj.recentlyDeleted.lessons || [], 'recentlyDeleted_lessons').merged,
+        };
+      } else if (sKey === 'dismissedDashboardLessons' && Array.isArray(deltaObj.dismissedDashboardLessons)) {
+        const existingDismissed = Array.isArray(baseObj.dismissedDashboardLessons) ? baseObj.dismissedDashboardLessons : [];
+        baseObj.dismissedDashboardLessons = Array.from(new Set([...existingDismissed, ...deltaObj.dismissedDashboardLessons]));
       } else {
         baseObj[sKey] = deltaObj[sKey];
       }

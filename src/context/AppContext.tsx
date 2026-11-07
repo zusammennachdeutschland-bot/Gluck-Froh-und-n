@@ -6344,6 +6344,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           await storage.setItem('dl_pruned_lesson_ids', Array.from(getPrunedLessonIds()));
         }
       }
+      if (hasBackupSection(parsed, 'recentlyDeleted') && data.recentlyDeleted) {
+        const currentRec = recentlyDeleted || { students: [], groups: [], lessons: [] };
+        const mergedRecentlyDeleted = {
+          students: isCloudDelta && currentRec.students?.length > 0 ? mergeEntities(currentRec.students, data.recentlyDeleted.students || [], 'recentlyDeleted_students').merged : (data.recentlyDeleted.students || []),
+          groups: isCloudDelta && currentRec.groups?.length > 0 ? mergeEntities(currentRec.groups, data.recentlyDeleted.groups || [], 'recentlyDeleted_groups').merged : (data.recentlyDeleted.groups || []),
+          lessons: isCloudDelta && currentRec.lessons?.length > 0 ? mergeEntities(currentRec.lessons, data.recentlyDeleted.lessons || [], 'recentlyDeleted_lessons').merged : (data.recentlyDeleted.lessons || []),
+        };
+        setRecentlyDeleted(mergedRecentlyDeleted);
+        await storage.setItem('dl_recently_deleted', mergedRecentlyDeleted);
+      }
+      if (hasBackupSection(parsed, 'dismissedDashboardLessons') && Array.isArray(data.dismissedDashboardLessons)) {
+        const currentDismissed = dismissedDashboardLessonIds || [];
+        const mergedDismissed = isCloudDelta && currentDismissed.length > 0
+          ? Array.from(new Set([...currentDismissed, ...data.dismissedDashboardLessons]))
+          : data.dismissedDashboardLessons;
+        setDismissedDashboardLessonIds(mergedDismissed);
+        await storage.setItem('dl_dismissed_dashboard_lessons', mergedDismissed);
+      }
       if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings) {
         const mergedGold = isCloudDelta && goldHoldings.length > 0
           ? mergeEntities(goldHoldings, data.goldHoldings, 'goldHoldings').merged

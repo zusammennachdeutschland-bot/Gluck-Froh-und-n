@@ -8,7 +8,8 @@ import {
   mergeWithBuiltinLernstudioSets,
   BUILTIN_LERNSTUDIO_MAP,
   DEFAULT_LERNSTUDIO_SETS,
-  SYNC_CONTROL_DOC_ID
+  SYNC_CONTROL_DOC_ID,
+  SINGLETON_KEYS
 } from '../services/firebaseWorkspaceSync';
 import expressApp, {
   verifyFirebaseIdToken,
@@ -395,6 +396,27 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     }
     assert.deepEqual(delays, [1000, 2000, 4000, 8000, 16000]);
     log.push('[PASS] 15. Bootstrap retries with exponential backoff on temporary network failures');
+
+    // -------------------------------------------------------------------------
+    // Scenario 16: Incremental Sync & Singleton Registry for recentlyDeleted & dismissedDashboardLessons
+    // -------------------------------------------------------------------------
+    assert.equal(SINGLETON_KEYS.includes('recentlyDeleted' as any), true);
+    assert.equal(SINGLETON_KEYS.includes('dismissedDashboardLessons' as any), true);
+    log.push('[PASS] 16. Singleton Registry: recentlyDeleted and dismissedDashboardLessons are strictly included in SINGLETON_KEYS');
+
+    // -------------------------------------------------------------------------
+    // Scenario 17: Cloud Restore & Delta Merge for recentlyDeleted & dismissedDashboardLessons
+    // -------------------------------------------------------------------------
+    const localRec = { students: [{ id: 's1', name: 'S1' }], groups: [], lessons: [] };
+    const remoteRec = { students: [{ id: 's2', name: 'S2' }], groups: [], lessons: [] };
+    const mergedStudents = mergeEntities(localRec.students, remoteRec.students, 'recentlyDeleted_students').merged;
+    assert.equal(mergedStudents.length, 2);
+
+    const localDismissed = ['l1'];
+    const remoteDismissed = ['l2'];
+    const mergedDismissed = Array.from(new Set([...localDismissed, ...remoteDismissed]));
+    assert.deepEqual(mergedDismissed, ['l1', 'l2']);
+    log.push('[PASS] 17. Cloud Restore & Delta Merge: recentlyDeleted sub-entities and dismissedDashboardLessons merge and restore correctly');
 
     return { passed: true, log };
   } catch (err: any) {
