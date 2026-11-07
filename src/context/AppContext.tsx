@@ -6075,6 +6075,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const gold = (await storage.getItem<GoldHolding[]>('gluck_gold_holdings')) || [];
     const financeNotifs = (await storage.getItem<FinanceNotification[]>('dl_finance_notifications')) || [];
     const notes = (await storage.getItem<SchoolNote[]>('dl_school_notes')) || [];
+    const recDeleted = (await storage.getItem<any>('dl_recently_deleted')) || recentlyDeleted || { students: [], groups: [], lessons: [] };
+    const dismissedLessons = (await storage.getItem<string[]>('dl_dismissed_dashboard_lessons')) || dismissedDashboardLessonIds || [];
 
     const backupObj: BackupData & { prunedLessonIds?: string[] } = {
       timestamp: new Date().toISOString(),
@@ -6111,6 +6113,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       homeworkAssignments: hwAssignments,
       homeworkSubmissions: hwSubmissions,
       pickerNames,
+      recentlyDeleted: recDeleted,
+      dismissedDashboardLessons: dismissedLessons,
       syncQueue: []
     };
 

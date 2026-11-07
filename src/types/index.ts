@@ -1007,6 +1007,8 @@ export interface BackupData {
   homeworkAssignments?: any[];
   homeworkSubmissions?: any[];
   pickerNames?: string[];
+  recentlyDeleted?: RecentlyDeletedData;
+  dismissedDashboardLessons?: string[];
 }
 
 export type InspirationFrequency = 'disabled' | 'daily' | 'before_first_lesson' | 'random_daily';

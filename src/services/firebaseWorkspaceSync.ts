@@ -717,7 +717,9 @@ function partitionBackupPayload(fullData: any): Record<Exclude<WorkspaceCategory
       notificationSettings: fullData.notificationSettings || {},
       inspirationSettings: fullData.inspirationSettings || {},
       inspirationMessages: fullData.inspirationMessages || [],
-      customAiBackgrounds: fullData.customAiBackgrounds || fullData.profile?.customAiBackgrounds || []
+      customAiBackgrounds: fullData.customAiBackgrounds || fullData.profile?.customAiBackgrounds || [],
+      recentlyDeleted: fullData.recentlyDeleted || { students: [], groups: [], lessons: [] },
+      dismissedDashboardLessons: fullData.dismissedDashboardLessons || []
     },
     lernstudio_data: {
       lernstudioSets: filterCustomOrModifiedLernstudioSets(fullData.lernstudioSets || []),
