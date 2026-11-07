@@ -19,10 +19,12 @@ try {
 // Check if localStorage is available
 let isLocalStorageSupported = false;
 try {
-  const testKey = '__test_storage__';
-  localStorage.setItem(testKey, '1');
-  localStorage.removeItem(testKey);
-  isLocalStorageSupported = true;
+  if (typeof localStorage !== 'undefined') {
+    const testKey = '__test_storage__';
+    localStorage.setItem(testKey, '1');
+    localStorage.removeItem(testKey);
+    isLocalStorageSupported = true;
+  }
 } catch (e) {
   console.warn('localStorage is not available in this context (probably blocked in iframe).', e);
 }

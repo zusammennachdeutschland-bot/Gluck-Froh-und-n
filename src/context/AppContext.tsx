@@ -6356,11 +6356,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_finance_notifications', mergedFinNotif);
       }
       if (hasBackupSection(parsed, 'lernstudioSets') && data.lernstudioSets) {
-        const mergedLernSets = isCloudDelta && lernstudioSets.length > 0
-          ? mergeEntities(lernstudioSets as any[], data.lernstudioSets as any[], 'lernstudioSets').merged
-          : data.lernstudioSets;
-        setLernstudioSets(mergedLernSets as LernstudioSet[]);
-        await storage.setItem('dl_lernstudio_sets', mergedLernSets);
+        // Enforce protection: built-in sets must never be wiped or overwritten.
+        // Merge incoming sets (custom + updates) with the bundled DEFAULT_LERNSTUDIO_SETS.
+        const incomingCustomOnly = (data.lernstudioSets as any[]).filter(
+          (s: any) => s && s.id && !DEFAULT_LERNSTUDIO_SETS.some((d) => d.id === s.id)
+        );
+        const localCustomOnly = (lernstudioSets as any[]).filter(
+          (s: any) => s && s.id && !DEFAULT_LERNSTUDIO_SETS.some((d) => d.id === s.id)
+        );
+        const mergedCustom = isCloudDelta && localCustomOnly.length > 0
+          ? mergeEntities(localCustomOnly, incomingCustomOnly, 'lernstudioSets').merged
+          : incomingCustomOnly;
+
+        // Combine active custom sets with the bundled DEFAULT_LERNSTUDIO_SETS
+        const customActive = mergedCustom.filter((s: any) => s && !s.deleted);
+        const finalSets = [...customActive, ...DEFAULT_LERNSTUDIO_SETS];
+
+        setLernstudioSets(finalSets as LernstudioSet[]);
+        await storage.setItem('dl_lernstudio_sets', finalSets);
       }
       if (hasBackupSection(parsed, 'homeworkAssignments') && data.homeworkAssignments) {
         const localHw = (() => {

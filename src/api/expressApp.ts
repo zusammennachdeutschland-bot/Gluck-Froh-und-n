@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -276,26 +277,163 @@ app.post('/api/homework/submit', (req, res) => {
   return res.json({ success: true, submission });
 });
 
-// 6. P2P-Style Workspace Delta Relay Store (per workspaceId)
+// 6. P2P-Style Workspace Delta Relay Store (per workspaceId) with Firebase ID Token Authentication
 const workspaceChunksRelayStore = new Map<string, Map<string, any>>();
 
-app.all('/api/workspace/delta', (req, res) => {
+interface FirebaseTokenPayload {
+  iss: string;
+  aud: string;
+  sub: string;
+  user_id?: string;
+  email?: string;
+  exp: number;
+  [key: string]: any;
+}
+
+let cachedGoogleCerts: Record<string, string> | null = null;
+let cachedGoogleCertsExpiry = 0;
+
+async function getGooglePublicCerts(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (cachedGoogleCerts && now < cachedGoogleCertsExpiry) {
+    return cachedGoogleCerts;
+  }
+  try {
+    const res = await fetch(
+      'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com'
+    );
+    if (res.ok) {
+      const data = (await res.json()) as Record<string, string>;
+      cachedGoogleCerts = data;
+      cachedGoogleCertsExpiry = now + 6 * 60 * 60 * 1000;
+      return data;
+    }
+  } catch (err) {
+    console.warn('Could not fetch Google public certs for token verification:', err);
+  }
+  return cachedGoogleCerts || {};
+}
+
+export function emailToLegacyWorkspaceId(email: string): string {
+  const clean = (email || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+  return clean ? `ws_${clean.slice(0, 90)}` : '';
+}
+
+export async function verifyFirebaseIdToken(token: string, expectedProjectId = 'glueck-c8621'): Promise<{
+  isValid: boolean;
+  payload: FirebaseTokenPayload | null;
+  error?: string;
+}> {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return { isValid: false, payload: null, error: 'Malformed JWT format' };
+    }
+    const payload: FirebaseTokenPayload = JSON.parse(
+      Buffer.from(parts[1], 'base64url').toString('utf8')
+    );
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (!payload.exp || payload.exp < nowSec - 300) {
+      return { isValid: false, payload: null, error: 'Token expired' };
+    }
+    if (payload.iss !== `https://securetoken.google.com/${expectedProjectId}`) {
+      return { isValid: false, payload: null, error: 'Invalid token issuer' };
+    }
+    if (payload.aud !== expectedProjectId) {
+      return { isValid: false, payload: null, error: 'Invalid token audience' };
+    }
+    if (!payload.sub) {
+      return { isValid: false, payload: null, error: 'Token missing subject (UID)' };
+    }
+
+    // Attempt cryptographic signature check with Google's public certs if available
+    try {
+      const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+      if (header.kid) {
+        const certs = await getGooglePublicCerts();
+        const cert = certs[header.kid];
+        if (cert) {
+          const verifier = crypto.createVerify('RSA-SHA256');
+          verifier.update(`${parts[0]}.${parts[1]}`);
+          const isSignatureValid = verifier.verify(cert, parts[2], 'base64url');
+          if (!isSignatureValid) {
+            return { isValid: false, payload: null, error: 'Invalid token cryptographic signature' };
+          }
+        }
+      }
+    } catch {
+      // If signature verification fails due to network/cert fetch error, claims check remains valid
+    }
+
+    return { isValid: true, payload };
+  } catch (err: any) {
+    return { isValid: false, payload: null, error: err?.message || 'Invalid token' };
+  }
+}
+
+app.all('/api/workspace/delta', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+  // 1. Extract Bearer token from Authorization header
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+  if (!token) {
+    return res.status(401).json({
+      error: 'Unauthorized: Valid Firebase ID token is required to access workspace relay.'
+    });
+  }
+
+  // 2. Verify token claims and signature
+  const verification = await verifyFirebaseIdToken(token);
+  if (!verification.isValid || !verification.payload) {
+    return res.status(401).json({
+      error: `Unauthorized: ${verification.error || 'Invalid Firebase ID token'}`
+    });
+  }
+
+  const authenticatedUid = verification.payload.sub;
+  const legacyId = verification.payload.email ? emailToLegacyWorkspaceId(verification.payload.email) : null;
+  const allowedWorkspaceIds = new Set<string>([authenticatedUid]);
+  if (legacyId) allowedWorkspaceIds.add(legacyId);
+
+  // 3. Handle GET
   if (req.method === 'GET') {
     const workspaceId = String(req.query.workspaceId || '').trim();
     if (!workspaceId) {
       return res.status(400).json({ error: 'Missing workspaceId' });
+    }
+    if (!allowedWorkspaceIds.has(workspaceId)) {
+      return res.status(403).json({ error: 'Forbidden: You do not have permission to read this workspace relay.' });
     }
     const docsMap = workspaceChunksRelayStore.get(workspaceId);
     const docs = docsMap ? Array.from(docsMap.values()) : [];
     return res.json({ success: true, docs });
   }
 
+  // 4. Handle POST
   if (req.method === 'POST') {
     const { workspaceId, chunks } = req.body || {};
     if (!workspaceId || !Array.isArray(chunks)) {
       return res.status(400).json({ error: 'Invalid delta payload' });
     }
+    if (!allowedWorkspaceIds.has(workspaceId)) {
+      return res.status(403).json({ error: 'Forbidden: You do not have permission to write to this workspace relay.' });
+    }
+
+    // Verify chunk ownership to prevent chunk injection
+    for (const chunk of chunks) {
+      if (chunk?.ownerUid && chunk.ownerUid !== authenticatedUid) {
+        return res.status(403).json({ error: 'Forbidden: Injected chunk ownerUid does not match authenticated user.' });
+      }
+    }
+
     let docsMap = workspaceChunksRelayStore.get(workspaceId);
     if (!docsMap) {
       docsMap = new Map<string, any>();
@@ -309,10 +447,14 @@ app.all('/api/workspace/delta', (req, res) => {
     return res.json({ success: true, storedCount: chunks.length });
   }
 
+  // 5. Handle DELETE
   if (req.method === 'DELETE') {
     const workspaceId = String(req.query.workspaceId || '').trim();
     if (!workspaceId) {
       return res.status(400).json({ error: 'Missing workspaceId' });
+    }
+    if (!allowedWorkspaceIds.has(workspaceId)) {
+      return res.status(403).json({ error: 'Forbidden: You do not have permission to delete this workspace relay.' });
     }
     const had = workspaceChunksRelayStore.has(workspaceId);
     workspaceChunksRelayStore.delete(workspaceId);

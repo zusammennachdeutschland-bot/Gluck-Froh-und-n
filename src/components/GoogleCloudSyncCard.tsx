@@ -11,6 +11,8 @@ import {
   uploadWorkspaceToGoogleCloud,
   downloadWorkspaceFromGoogleCloud,
   clearCloudWorkspaceData,
+  reactivateCloudSync,
+  getCloudSyncControlState,
   CloudSyncSummary,
   getVercelPublicDomain,
   setVercelPublicDomain,
@@ -140,16 +142,32 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     };
   }, []);
 
-  const handleToggleAutoSync = () => {
+  const handleToggleAutoSync = async () => {
     const next = !autoSync;
+    if (next && firebaseUser) {
+      // If user is enabling sync, check if cloud is paused and reactivate cloud generation
+      const control = await getCloudSyncControlState(firebaseUser.uid);
+      if (control.isPaused) {
+        setActionLoading('sync');
+        const reactRes = await reactivateCloudSync(firebaseUser.uid);
+        setActionLoading(null);
+        if (!reactRes.success) {
+          setFeedbackMsg({
+            type: 'error',
+            text: reactRes.error || 'تعذر إعادة تفعيل المزامنة السحابية.'
+          });
+          return;
+        }
+      }
+    }
     setAutoSync(next);
     setAutoCloudSyncEnabled(next);
     if (triggerToast) {
       triggerToast(
         next
           ? _t(
-              'تم تفعيل المزامنة اللحظية التلقائية عبر حساب Google',
-              'Automatic Google Cloud sync enabled',
+              'تم تفعيل المزامنة اللحظية وبدء جيل مزامنة جديد للحساب',
+              'Automatic Google Cloud sync enabled (new generation started)',
               'Automatische Google Cloud-Synchronisierung aktiviert'
             )
           : _t(

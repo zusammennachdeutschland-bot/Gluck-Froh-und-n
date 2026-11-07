@@ -7,7 +7,8 @@ import {
   downloadWorkspaceFromGoogleCloud,
   subscribeToRemoteWorkspaceChanges,
   isFirestoreWriteQuotaExhaustedToday,
-  BUILTIN_LERNSTUDIO_MAP
+  BUILTIN_LERNSTUDIO_MAP,
+  getCloudSyncControlState
 } from '../services/firebaseWorkspaceSync';
 
 function stripSnapshotTimestamp(jsonStr: string): string {
@@ -159,12 +160,14 @@ export function useGoogleCloudWorkspaceSync(): void {
     }
   }, []);
 
-  // 1. Auth listener + real-time remote changes listener (`onSnapshot`) + initial cloud bootstrap
+  // 1. Auth listener + real-time remote changes listener (`onSnapshot`) + initial cloud bootstrap with Exponential Backoff
   useEffect(() => {
     let unsubRemote: (() => void) | null = null;
+    let isCancelled = false;
+    let retryTimeoutId: any = null;
 
-    const runBootstrap = async (uid: string) => {
-      if (hasCompletedInitialCheckRef.current || !isAutoCloudSyncEnabled() || isSyncInFlightRef.current) {
+    const runBootstrap = async (uid: string, attempt = 1) => {
+      if (isCancelled || hasCompletedInitialCheckRef.current || !isAutoCloudSyncEnabled() || isSyncInFlightRef.current) {
         return;
       }
 
@@ -174,14 +177,36 @@ export function useGoogleCloudWorkspaceSync(): void {
           new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
         );
 
+        // Check Cloud-side pause and generation marker FIRST
+        const controlState = await getCloudSyncControlState(uid);
+        if (controlState.isPaused) {
+          window.dispatchEvent(
+            new CustomEvent('gluck-cloud-sync-status', {
+              detail: { status: 'idle', error: 'المزامنة السحابية متوقفة مؤقتاً لهذا الحساب.' }
+            })
+          );
+          return;
+        }
+
         const cloudRes = await downloadWorkspaceFromGoogleCloud();
         if (cloudRes.error) {
           // Network or permission failure: do NOT mark initial check completed!
+          // Never interpret a network error as an empty workspace!
           window.dispatchEvent(
             new CustomEvent('gluck-cloud-sync-status', {
               detail: { status: 'error', error: cloudRes.error }
             })
           );
+
+          // Retry with exponential backoff if not cancelled
+          if (!isCancelled && attempt <= 5) {
+            const delay = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
+            retryTimeoutId = setTimeout(() => {
+              if (!isCancelled && !hasCompletedInitialCheckRef.current) {
+                runBootstrap(uid, attempt + 1);
+              }
+            }, delay);
+          }
           return;
         }
 
@@ -207,7 +232,7 @@ export function useGoogleCloudWorkspaceSync(): void {
             finalError = 'تعذر استيراد البيانات السحابية.';
           }
         } else if (!remoteHasActualData && localHasData && !isFirestoreWriteQuotaExhaustedToday()) {
-          // Cloud is completely empty and local has data: seed cloud once
+          // Cloud is genuinely verified as completely empty and local has data: seed cloud once
           const res = await uploadWorkspaceToGoogleCloud(localSnapStr, { forceFullBaseline: true });
           if (res.success) {
             lastUploadedSnapshotRef.current = stripSnapshotTimestamp(localSnapStr);
@@ -251,6 +276,14 @@ export function useGoogleCloudWorkspaceSync(): void {
             detail: { status: 'error', error: err?.message }
           })
         );
+        if (!isCancelled && attempt <= 5) {
+          const delay = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
+          retryTimeoutId = setTimeout(() => {
+            if (!isCancelled && !hasCompletedInitialCheckRef.current) {
+              runBootstrap(uid, attempt + 1);
+            }
+          }, delay);
+        }
       } finally {
         isSyncInFlightRef.current = false;
       }
@@ -260,6 +293,10 @@ export function useGoogleCloudWorkspaceSync(): void {
       if (unsubRemote) {
         unsubRemote();
         unsubRemote = null;
+      }
+      if (retryTimeoutId) {
+        clearTimeout(retryTimeoutId);
+        retryTimeoutId = null;
       }
 
       if (!user) {
@@ -275,7 +312,7 @@ export function useGoogleCloudWorkspaceSync(): void {
       unsubRemote = subscribeToRemoteWorkspaceChanges(
         user.uid,
         async (remoteBackupJson) => {
-          if (!isAutoCloudSyncEnabled() || isSyncInFlightRef.current) return;
+          if (!isAutoCloudSyncEnabled() || isSyncInFlightRef.current || isCancelled) return;
           isSyncInFlightRef.current = true;
           try {
             window.dispatchEvent(
@@ -298,7 +335,21 @@ export function useGoogleCloudWorkspaceSync(): void {
       );
     });
 
+    const handleOnline = () => {
+      if (currentUserUidRef.current && !hasCompletedInitialCheckRef.current) {
+        runBootstrap(currentUserUidRef.current);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline);
+    }
+
     return () => {
+      isCancelled = true;
+      if (retryTimeoutId) clearTimeout(retryTimeoutId);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', handleOnline);
+      }
       unsubAuth();
       if (unsubRemote) unsubRemote();
     };
@@ -306,8 +357,10 @@ export function useGoogleCloudWorkspaceSync(): void {
 
   // 2. Debounced Auto-Push (15s debounce) whenever app data changes locally
   useEffect(() => {
+    // CRITICAL: Never allow Auto-Push to seed the cloud while the initial cloud state is unknown!
     if (
       !currentUserUidRef.current ||
+      !hasCompletedInitialCheckRef.current ||
       !isAutoCloudSyncEnabled() ||
       isSyncInFlightRef.current ||
       isFirestoreWriteQuotaExhaustedToday()
@@ -323,6 +376,7 @@ export function useGoogleCloudWorkspaceSync(): void {
     autoPushTimerRef.current = setTimeout(async () => {
       if (
         !currentUserUidRef.current ||
+        !hasCompletedInitialCheckRef.current ||
         !isAutoCloudSyncEnabled() ||
         isSyncInFlightRef.current ||
         isFirestoreWriteQuotaExhaustedToday()

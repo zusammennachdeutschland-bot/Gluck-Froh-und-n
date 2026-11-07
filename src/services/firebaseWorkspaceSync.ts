@@ -3,8 +3,10 @@ import {
   doc,
   setDoc,
   getDocs,
+  getDoc,
   deleteDoc,
-  onSnapshot
+  onSnapshot,
+  runTransaction
 } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import {
@@ -104,6 +106,206 @@ const LAST_SYNC_TIME_KEY = 'gluck_google_last_sync_time';
 const DEVICE_ID_KEY = 'gluck_cloud_device_id';
 const CHUNK_MAX_CHARS = 550000; // Safe margin below 750KB rule & 1MB Firestore limit
 const DELTA_MAX_COMPACT_CHARS = 180000; // Compact delta threshold before folding into category
+
+export const SYNC_CONTROL_DOC_ID = 'sync_control_chunk_0';
+export const LOCAL_ACTIVE_GENERATION_KEY = 'gluck_cloud_active_generation';
+
+export interface CloudSyncControlState {
+  isPaused: boolean;
+  syncGeneration: string;
+  updatedAtIso: string;
+  updatedAtMs: number;
+  pausedByDeviceId?: string;
+  reason?: string;
+}
+
+export function getLocalActiveGeneration(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(LOCAL_ACTIVE_GENERATION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setLocalActiveGeneration(gen: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (gen) {
+      localStorage.setItem(LOCAL_ACTIVE_GENERATION_KEY, gen);
+    } else {
+      localStorage.removeItem(LOCAL_ACTIVE_GENERATION_KEY);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Reads the cloud-side synchronization control state (/user_workspaces/{uid}/categories/sync_control_chunk_0).
+ * Fail-safe: Returns { isPaused: true, isError: true } if network/firestore fails.
+ */
+export async function getCloudSyncControlState(workspaceId: string): Promise<{
+  isPaused: boolean;
+  syncGeneration: string;
+  isError?: boolean;
+  rawDoc?: any;
+}> {
+  try {
+    const docRef = doc(db, 'user_workspaces', workspaceId, 'categories', SYNC_CONTROL_DOC_ID);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      return { isPaused: false, syncGeneration: 'gen_initial' };
+    }
+    const d = snap.data();
+    let parsedPayload: any = {};
+    if (d && typeof d.payloadChunk === 'string') {
+      try {
+        parsedPayload = JSON.parse(d.payloadChunk);
+      } catch {
+        parsedPayload = {};
+      }
+    }
+    return {
+      isPaused: Boolean(parsedPayload.isPaused),
+      syncGeneration: parsedPayload.syncGeneration || 'gen_initial',
+      rawDoc: d
+    };
+  } catch (err) {
+    console.warn('Fail-safe: Failed to read cloud sync control state:', err);
+    return { isPaused: true, syncGeneration: '', isError: true };
+  }
+}
+
+/**
+ * Manually reactivates cloud synchronization by creating a deliberate new synchronization generation.
+ */
+export async function reactivateCloudSync(workspaceId: string): Promise<{ success: boolean; newGeneration: string; error?: string }> {
+  const user = getActiveCloudUser();
+  if (!user || !verifyWorkspaceOwnership(user)) {
+    return { success: false, newGeneration: '', error: 'User not authenticated' };
+  }
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const newGen = `gen_${nowMs}_${Math.random().toString(36).slice(2, 8)}`;
+  const deviceId = getCloudDeviceId();
+
+  const controlPayload = JSON.stringify({
+    isPaused: false,
+    syncGeneration: newGen,
+    updatedAtIso: nowIso,
+    updatedAtMs: nowMs,
+    reactivatedByDeviceId: deviceId,
+    reason: 'manual_reactivation'
+  });
+
+  const chunkObj = {
+    id: SYNC_CONTROL_DOC_ID,
+    categoryKey: 'core_crm',
+    chunkIndex: 0,
+    totalChunks: 1,
+    updatedAtMs: nowMs,
+    updatedAtIso: nowIso,
+    deviceId,
+    payloadChunk: controlPayload,
+    ownerUid: user.uid,
+    ...(user.email ? { ownerEmail: user.email.trim().toLowerCase().slice(0, 120) } : {})
+  };
+
+  try {
+    await executeSafeFirestoreWrite(() =>
+      setDoc(doc(db, 'user_workspaces', workspaceId, 'categories', SYNC_CONTROL_DOC_ID), chunkObj)
+    );
+    setLocalActiveGeneration(newGen);
+    setAutoCloudSyncEnabled(true);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gluck-cloud-sync-config-changed'));
+    }
+    return { success: true, newGeneration: newGen };
+  } catch (err: any) {
+    return { success: false, newGeneration: '', error: err?.message || 'Failed to reactivate cloud sync' };
+  }
+}
+
+/**
+ * Executes a write within a Firestore transaction that validates the cloud generation state
+ * (/user_workspaces/{workspaceId}/categories/sync_control_chunk_0).
+ * Prevents writes from committing if the workspace was cleared (paused) or if the cloud generation
+ * was modified after the caller's initial generation check.
+ */
+export async function executeGenerationGuardedWrite(
+  workspaceId: string,
+  expectedGeneration: string,
+  chunkDocId: string,
+  chunkObj: any
+): Promise<void> {
+  const controlDocRef = doc(db, 'user_workspaces', workspaceId, 'categories', SYNC_CONTROL_DOC_ID);
+  const targetDocRef = doc(db, 'user_workspaces', workspaceId, 'categories', chunkDocId);
+
+  await executeSafeFirestoreWrite(async () => {
+    await runTransaction(db, async (transaction) => {
+      const controlSnap = await transaction.get(controlDocRef);
+      if (controlSnap.exists()) {
+        const d = controlSnap.data();
+        let parsed: any = {};
+        if (d && typeof d.payloadChunk === 'string') {
+          try {
+            parsed = JSON.parse(d.payloadChunk);
+          } catch {
+            parsed = {};
+          }
+        }
+        if (parsed.isPaused) {
+          throw new Error('SYNC_ABORTED_PAUSED: Cloud synchronization is paused for this workspace.');
+        }
+        const activeCloudGen = parsed.syncGeneration || 'gen_initial';
+        if (expectedGeneration && activeCloudGen !== expectedGeneration) {
+          throw new Error(
+            `SYNC_ABORTED_GENERATION_MISMATCH: Cloud generation changed from ${expectedGeneration} to ${activeCloudGen}`
+          );
+        }
+      }
+      transaction.set(targetDocRef, chunkObj);
+    });
+  });
+}
+
+/**
+ * Executes a stale chunk deletion within a Firestore transaction that validates the cloud generation state.
+ */
+export async function executeGenerationGuardedDelete(
+  workspaceId: string,
+  expectedGeneration: string,
+  chunkDocId: string
+): Promise<void> {
+  const controlDocRef = doc(db, 'user_workspaces', workspaceId, 'categories', SYNC_CONTROL_DOC_ID);
+  const targetDocRef = doc(db, 'user_workspaces', workspaceId, 'categories', chunkDocId);
+
+  await executeSafeFirestoreWrite(async () => {
+    await runTransaction(db, async (transaction) => {
+      const controlSnap = await transaction.get(controlDocRef);
+      if (controlSnap.exists()) {
+        const d = controlSnap.data();
+        let parsed: any = {};
+        if (d && typeof d.payloadChunk === 'string') {
+          try {
+            parsed = JSON.parse(d.payloadChunk);
+          } catch {
+            parsed = {};
+          }
+        }
+        if (parsed.isPaused) {
+          throw new Error('SYNC_ABORTED_PAUSED: Cloud synchronization is paused for this workspace.');
+        }
+        const activeCloudGen = parsed.syncGeneration || 'gen_initial';
+        if (expectedGeneration && activeCloudGen !== expectedGeneration) {
+          throw new Error('SYNC_ABORTED_GENERATION_MISMATCH: Cloud generation changed.');
+        }
+      }
+      transaction.delete(targetDocRef);
+    });
+  });
+}
 
 export type WorkspaceCategoryKey =
   | 'core_crm'
@@ -529,23 +731,56 @@ function partitionBackupPayload(fullData: any): Record<Exclude<WorkspaceCategory
 const lastUploadedChunkCache = new Map<string, string>();
 const lastUploadedChunkCount = new Map<string, number>();
 
-async function postChunksToRelayServer(workspaceId: string, chunks: any[]): Promise<void> {
-  if (typeof window === 'undefined' || chunks.length === 0) return;
+async function postChunksToRelayServer(workspaceId: string, chunks: any[]): Promise<boolean> {
+  if (typeof window === 'undefined' || chunks.length === 0) return true;
   try {
-    await fetch('/api/workspace/delta', {
+    let authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      try {
+        const token = await currentUser.getIdToken();
+        if (token) {
+          authHeaders['Authorization'] = `Bearer ${token}`;
+        }
+      } catch {
+        // Ignore token error, relay is disposable cache
+      }
+    }
+    const res = await fetch('/api/workspace/delta', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ workspaceId, chunks })
     });
-  } catch {
-    // Ignore local relay error when offline
+    if (!res.ok) {
+      console.warn(`Relay server returned HTTP ${res.status}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    // Relay is a disposable cache: failure does not affect Firestore truth
+    console.warn('Relay server post error:', err);
+    return false;
   }
 }
 
 async function fetchChunksFromRelayServer(workspaceId: string): Promise<any[]> {
   if (typeof window === 'undefined') return [];
   try {
-    const res = await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(workspaceId)}`);
+    let authHeaders: Record<string, string> = {};
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      try {
+        const token = await currentUser.getIdToken();
+        if (token) {
+          authHeaders['Authorization'] = `Bearer ${token}`;
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    const res = await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(workspaceId)}`, {
+      headers: authHeaders
+    });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data?.docs) ? data.docs : [];
@@ -583,6 +818,28 @@ export async function uploadWorkspaceToGoogleCloud(
   lastLocalPushTimestampMs = nowMs;
 
   try {
+    // Check Cloud-side pause and generation marker first (cross-device protection)
+    const controlState = await getCloudSyncControlState(uid);
+    if (controlState.isPaused) {
+      return {
+        success: false,
+        syncedAtIso: nowIso,
+        error: 'Cloud synchronization is currently paused for this workspace. Use explicit manual reactivation.'
+      };
+    }
+    const localActiveGen = getLocalActiveGeneration();
+    if (localActiveGen && controlState.syncGeneration && localActiveGen !== controlState.syncGeneration) {
+      return {
+        success: false,
+        syncedAtIso: nowIso,
+        error: 'Stale sync generation detected. Cloud workspace generation mismatch. Sync paused for safety.'
+      };
+    }
+    const targetGeneration = controlState.syncGeneration || 'gen_initial';
+    if (!localActiveGen && controlState.syncGeneration) {
+      setLocalActiveGeneration(controlState.syncGeneration);
+    }
+
     const rawParsed = JSON.parse(backupJsonStr);
     const parsed = sanitizeHeavyInlineMedia(rawParsed);
 
@@ -650,8 +907,6 @@ export async function uploadWorkspaceToGoogleCloud(
           ...ownerFields
         };
 
-        await postChunksToRelayServer(uid, [chunkObj]);
-
         if (isFirestoreWriteQuotaExhaustedToday()) {
           return {
             success: false,
@@ -660,9 +915,11 @@ export async function uploadWorkspaceToGoogleCloud(
           };
         }
 
-        await executeSafeFirestoreWrite(() =>
-          setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), chunkObj)
-        );
+        // CONFIRM FIRESTORE WRITE FIRST with Server-Enforced Generation Validation
+        await executeGenerationGuardedWrite(uid, targetGeneration, docId, chunkObj);
+
+        // ONLY post to Relay cache after Firestore write is confirmed
+        await postChunksToRelayServer(uid, [chunkObj]);
 
         saveDeltaAccumulator(uid, nextAcc);
         saveWatermarks(uid, nextWatermarks);
@@ -712,19 +969,15 @@ export async function uploadWorkspaceToGoogleCloud(
 
         relayChunks.push(chunkObj);
 
-        // Write sequentially to avoid flooding the Firestore WebChannel stream
-        await executeSafeFirestoreWrite(() =>
-          setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), chunkObj)
-        );
+        // Write sequentially with Server-Enforced Generation Validation
+        await executeGenerationGuardedWrite(uid, targetGeneration, docId, chunkObj);
         lastUploadedChunkCache.set(cacheKey, chunkData);
       }
 
       if (previousChunkCount > chunks.length && !isFirestoreWriteQuotaExhaustedToday()) {
         for (let staleIdx = chunks.length; staleIdx < previousChunkCount; staleIdx++) {
           const staleDocId = `${categoryKey}_chunk_${staleIdx}`;
-          await executeSafeFirestoreWrite(() =>
-            deleteDoc(doc(db, 'user_workspaces', uid, 'categories', staleDocId))
-          ).catch(() => {});
+          await executeGenerationGuardedDelete(uid, targetGeneration, staleDocId).catch(() => {});
         }
       }
       lastUploadedChunkCount.set(countKey, chunks.length);
@@ -1154,25 +1407,58 @@ export async function clearCloudWorkspaceData(): Promise<{
   let deletedCount = 0;
   let clearedLegacy = false;
   let clearedRelay = false;
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const clearedGen = `gen_cleared_${nowMs}`;
+  const deviceId = getCloudDeviceId();
 
   try {
-    // Immediately pause auto-sync before doing anything else
+    // 1. Immediately pause local auto-sync and invalidate local active generation
     setAutoCloudSyncEnabled(false);
+    setLocalActiveGeneration(null);
 
-    // 1. Delete documents from primary UID workspace in Firestore
+    // 2. Write persistent CLOUD-SIDE PAUSE doc so all connected devices recognize the pause
+    const pausedControlPayload = JSON.stringify({
+      isPaused: true,
+      syncGeneration: clearedGen,
+      updatedAtIso: nowIso,
+      updatedAtMs: nowMs,
+      pausedByDeviceId: deviceId,
+      reason: 'cleared_cloud_data',
+      lastClearedAtIso: nowIso
+    });
+
+    const controlChunkObj = {
+      id: SYNC_CONTROL_DOC_ID,
+      categoryKey: 'core_crm',
+      chunkIndex: 0,
+      totalChunks: 1,
+      updatedAtMs: nowMs,
+      updatedAtIso: nowIso,
+      deviceId,
+      payloadChunk: pausedControlPayload,
+      ownerUid: user.uid,
+      ...(user.email ? { ownerEmail: user.email.trim().toLowerCase().slice(0, 120) } : {})
+    };
+
+    // Ensure the pause document is persisted to Firestore FIRST
+    await executeSafeFirestoreWrite(() =>
+      setDoc(doc(db, 'user_workspaces', primaryId, 'categories', SYNC_CONTROL_DOC_ID), controlChunkObj)
+    );
+
+    // 3. Delete all category/chunk documents in primary UID workspace (except sync_control which holds the pause state)
     const uidSnap = await getDocs(collection(db, 'user_workspaces', primaryId, 'categories'));
     if (!uidSnap.empty) {
       for (const docSnap of uidSnap.docs) {
+        if (docSnap.id === SYNC_CONTROL_DOC_ID) continue; // Keep the pause state marker!
         await executeSafeFirestoreWrite(() =>
           deleteDoc(doc(db, 'user_workspaces', primaryId, 'categories', docSnap.id))
-        ).catch((err) => {
-          console.warn(`Failed to delete cloud chunk ${docSnap.id}:`, err);
-        });
+        );
         deletedCount++;
       }
     }
 
-    // 2. Check and delete legacy email workspace if existing
+    // 4. Check and delete legacy email workspace documents if existing
     if (legacyId && legacyId !== primaryId) {
       try {
         const legacySnap = await getDocs(collection(db, 'user_workspaces', legacyId, 'categories'));
@@ -1180,34 +1466,93 @@ export async function clearCloudWorkspaceData(): Promise<{
           for (const docSnap of legacySnap.docs) {
             await executeSafeFirestoreWrite(() =>
               deleteDoc(doc(db, 'user_workspaces', legacyId, 'categories', docSnap.id))
-            ).catch(() => {});
+            );
             deletedCount++;
           }
           clearedLegacy = true;
         }
-      } catch (legacyErr) {
-        console.warn('Notice while inspecting legacy cloud workspace:', legacyErr);
+      } catch (legacyErr: any) {
+        console.warn('Notice while cleaning legacy cloud workspace:', legacyErr);
+        return {
+          success: false,
+          deletedCount,
+          clearedRelay: false,
+          clearedLegacy: false,
+          error: `فشل مسح مساحة العمل القديمة: ${legacyErr?.message || 'خطأ غير متوقع'}`
+        };
       }
     }
 
-    // 3. Delete relay server cached chunks
+    // 5. Delete and verify relay server cached chunks
     if (typeof window !== 'undefined') {
       try {
-        await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(primaryId)}`, {
-          method: 'DELETE'
+        let relayAuthHeaders: Record<string, string> = {};
+        if (user) {
+          try {
+            const token = await user.getIdToken();
+            if (token) relayAuthHeaders['Authorization'] = `Bearer ${token}`;
+          } catch {}
+        }
+
+        const relayRes1 = await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(primaryId)}`, {
+          method: 'DELETE',
+          headers: relayAuthHeaders
         });
+        if (!relayRes1.ok) {
+          return {
+            success: false,
+            deletedCount,
+            clearedRelay: false,
+            clearedLegacy,
+            error: `تعذر مسح ذاكرة الـ Relay المؤقتة (HTTP ${relayRes1.status})`
+          };
+        }
+
         if (legacyId && legacyId !== primaryId) {
-          await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(legacyId)}`, {
-            method: 'DELETE'
+          const relayRes2 = await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(legacyId)}`, {
+            method: 'DELETE',
+            headers: relayAuthHeaders
           });
+          if (!relayRes2.ok) {
+            return {
+              success: false,
+              deletedCount,
+              clearedRelay: false,
+              clearedLegacy,
+              error: `تعذر مسح ذاكرة الـ Relay القديمة (HTTP ${relayRes2.status})`
+            };
+          }
+        }
+
+        // Verify Relay cleanup
+        const verifyRelay = await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(primaryId)}`, {
+          headers: relayAuthHeaders
+        });
+        if (verifyRelay.ok) {
+          const vData = await verifyRelay.json();
+          if (Array.isArray(vData?.docs) && vData.docs.length > 0) {
+            return {
+              success: false,
+              deletedCount,
+              clearedRelay: false,
+              clearedLegacy,
+              error: 'فشل التحقق من مسح خادم الـ Relay (لا تزال هناك مستندات موجودة)'
+            };
+          }
         }
         clearedRelay = true;
-      } catch (relayErr) {
-        console.warn('Failed to clear relay workspace:', relayErr);
+      } catch (relayErr: any) {
+        return {
+          success: false,
+          deletedCount,
+          clearedRelay: false,
+          clearedLegacy,
+          error: `تعذر الاتصال بخادم الـ Relay للتنظيف: ${relayErr?.message || 'خطأ شبكة'}`
+        };
       }
     }
 
-    // 4. Clear local sync watermarks and cache for this account
+    // 6. Clear local sync watermarks and cache for this account
     if (typeof window !== 'undefined') {
       try {
         localStorage.removeItem(`gluck_cloud_watermarks_v2_${primaryId}`);
@@ -1226,15 +1571,16 @@ export async function clearCloudWorkspaceData(): Promise<{
     lastUploadedChunkCache.clear();
     lastUploadedChunkCount.clear();
 
-    // 5. Verification check: ensure Firestore primary collection is now empty
+    // 7. Verification check: ensure Firestore primary collection contains ONLY sync_control
     const verifySnap = await getDocs(collection(db, 'user_workspaces', primaryId, 'categories'));
-    if (!verifySnap.empty) {
+    const remainingDocs = verifySnap.docs.filter((d) => d.id !== SYNC_CONTROL_DOC_ID);
+    if (remainingDocs.length > 0) {
       return {
         success: false,
         deletedCount,
         clearedRelay,
         clearedLegacy,
-        error: 'لم تكتمل عملية التنظيف بالكامل، لا تزال بعض الملفات موجودة بالسحابة.'
+        error: `لم تكتمل عملية التنظيف بالكامل، لا تزال هناك ${remainingDocs.length} أجزاء موجودة بالسحابة.`
       };
     }
 
