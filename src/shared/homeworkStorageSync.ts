@@ -17,6 +17,7 @@ import {
   fetchSubmissionsForAssignmentFromFirestore,
   fetchAllSubmissionsFromFirestore,
   subscribeSubmissionsFromFirestore,
+  fetchLernstudioSetFromFirestore,
   signInTeacherWithGoogle,
   signOutTeacherFirebase,
   subscribeTeacherAuth
@@ -36,6 +37,7 @@ export {
   fetchSubmissionsForAssignmentFromFirestore,
   fetchAllSubmissionsFromFirestore,
   subscribeSubmissionsFromFirestore,
+  fetchLernstudioSetFromFirestore,
   signInTeacherWithGoogle,
   signOutTeacherFirebase,
   subscribeTeacherAuth
@@ -317,7 +319,9 @@ export async function fetchAssignmentDetailsWithSync(id: string): Promise<any | 
       (s) => (s.studentId && s.studentId === st.id) || s.studentName.trim().toLowerCase() === st.name.trim().toLowerCase()
     );
 
-    const completedAttempts = studentSubs.filter((s) => s.status === 'completed' || s.completedAt);
+    const completedAttempts = studentSubs.filter(
+      (s) => s.status === 'completed' || (!s.status && Boolean(s.completedAt))
+    );
     const inProgressAttempts = studentSubs.filter((s) => s.status === 'in_progress' && completedAttempts.length === 0);
 
     let status: 'not_started' | 'in_progress' | 'completed' = 'not_started';

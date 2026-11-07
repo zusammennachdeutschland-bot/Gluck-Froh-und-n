@@ -13,8 +13,7 @@ import {
   CloudSyncSummary,
   getVercelPublicDomain,
   setVercelPublicDomain,
-  DEFAULT_VERCEL_DOMAIN,
-  signInWithCloudEmailDirect
+  DEFAULT_VERCEL_DOMAIN
 } from '../services/firebaseWorkspaceSync';
 import {
   Cloud,
@@ -59,7 +58,6 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [cloudSummary, setCloudSummary] = useState<CloudSyncSummary | null>(null);
   const [showUnauthorizedDomainHelper, setShowUnauthorizedDomainHelper] = useState(false);
-  const [directCloudEmail, setDirectCloudEmail] = useState('zusammennachdeutschland@gmail.com');
   const [domainCopied, setDomainCopied] = useState(false);
 
   // Vercel Student Platform Domain State
@@ -171,7 +169,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
 
       if (!remote.hasRemoteData && localHasData) {
         const snapStr = await performBackup();
-        const upRes = await uploadWorkspaceToGoogleCloud(snapStr);
+        const upRes = await uploadWorkspaceToGoogleCloud(snapStr, { isManual: true });
         if (upRes.success) {
           setLastSyncTime(upRes.syncedAtIso);
         }
@@ -233,30 +231,13 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     }
   };
 
-  const handleDirectCloudEmailSignIn = async () => {
-    setActionLoading('login');
-    setFeedbackMsg(null);
-    try {
-      const vUser = await signInWithCloudEmailDirect(directCloudEmail);
-      await executePostLoginSync(vUser);
-      setShowUnauthorizedDomainHelper(false);
-    } catch (err: any) {
-      setFeedbackMsg({
-        type: 'error',
-        text: err?.message || 'تعذر ربط البريد الإلكتروني السحابي'
-      });
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const handlePushToCloud = async () => {
     setActionLoading('push');
     setFeedbackMsg(null);
     setSyncStatus('syncing');
     try {
       const snapStr = await performBackup();
-      const res = await uploadWorkspaceToGoogleCloud(snapStr);
+      const res = await uploadWorkspaceToGoogleCloud(snapStr, { isManual: true });
       if (res.success) {
         setSyncStatus('synced');
         setLastSyncTime(res.syncedAtIso);
@@ -366,7 +347,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
       } else {
         // Upload latest state from this device to Google Cloud
         const snapStr = await performBackup();
-        const upRes = await uploadWorkspaceToGoogleCloud(snapStr);
+        const upRes = await uploadWorkspaceToGoogleCloud(snapStr, { isManual: true });
         if (upRes.success) {
           const nowIso = upRes.syncedAtIso || new Date().toISOString();
           setLastSyncTime(nowIso);
@@ -484,29 +465,11 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
           {showUnauthorizedDomainHelper && (
             <div className="w-full mt-2 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 space-y-2.5">
               <div className="text-xs font-black text-amber-600 dark:text-amber-400">
-                ⚡ {_t('ربط الحساب السحابي المباشر (لدومينات Vercel والهاتف)', 'Direct Cloud Email Sync (For Vercel/Mobile)', 'Direkte Cloud-E-Mail-Verknüpfung')}
-              </div>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="email"
-                  dir="ltr"
-                  value={directCloudEmail}
-                  onChange={(e) => setDirectCloudEmail(e.target.value)}
-                  placeholder="your.email@gmail.com"
-                  className="flex-1 px-3 py-2 bg-surface border border-surface-border rounded-xl text-xs font-mono text-text-main outline-none focus:ring-2 focus:ring-primary"
-                />
-                <button
-                  type="button"
-                  disabled={actionLoading === 'login' || !directCloudEmail.trim()}
-                  onClick={handleDirectCloudEmailSignIn}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition-all cursor-pointer shrink-0"
-                >
-                  {_t('ربط الحساب والمزامنة الآن', 'Link & Sync Now', 'Jetzt verbinden')}
-                </button>
+                ⚡ {_t('تفعيل الدومين في إعدادات مصادقة Firebase', 'Authorize Domain in Firebase Auth', 'Domain in Firebase Auth autorisieren')}
               </div>
               <div className="pt-2 border-t border-amber-500/20 flex flex-wrap items-center justify-between gap-2 text-[11px] text-text-muted">
                 <span>
-                  {_t('أو أضف هذا الدومين في Firebase:', 'Or add this domain in Firebase:', 'Oder Domain in Firebase hinzufügen:')}{' '}
+                  {_t('أضف هذا الدومين في Firebase:', 'Add this domain in Firebase:', 'Domain in Firebase hinzufügen:')}{' '}
                   <code className="font-mono font-bold text-text-main bg-surface px-1.5 py-0.5 rounded">
                     {typeof window !== 'undefined' ? window.location.hostname : ''}
                   </code>

@@ -34,10 +34,12 @@ import {
 import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
 import {
   getLocalAssignments,
+  getLocalSubmissions,
   saveLocalAssignment,
   saveLocalSubmission,
   QUESTION_TYPE_META,
   fetchAssignmentFromFirestore,
+  fetchLernstudioSetFromFirestore,
   saveAssignmentToFirestore,
   saveSubmissionToFirestore,
   subscribeSubmissionsFromFirestore
@@ -223,7 +225,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           return;
         }
 
-        // 4. Fallback: Parse query parameters from share URL (e.g. ?s=...&t=...&qt=...) so student never gets "not available"
+        // 4. Fallback: Parse query parameters from share URL (e.g. ?s=...&t=...&qt=...)
         const searchParams = new URLSearchParams(window.location.search);
         const setId = searchParams.get('s');
         if (setId) {
@@ -234,11 +236,28 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           const idsParam = searchParams.get('ids');
           const selectedIds = idsParam ? idsParam.split(',') : [];
 
-          // Find set in DEFAULT_LERNSTUDIO_SETS or local sets
-          const foundSet = DEFAULT_LERNSTUDIO_SETS.find((st) => st.id === setId) || DEFAULT_LERNSTUDIO_SETS[0];
-          if (foundSet) {
+          // Look up set in: 1) DEFAULT_LERNSTUDIO_SETS, 2) local dl_lernstudio_sets, 3) Firestore lernstudio_sets
+          let foundSet: any = DEFAULT_LERNSTUDIO_SETS.find((st) => st.id === setId) || null;
+          if (!foundSet) {
+            try {
+              const rawSets = localStorage.getItem('dl_lernstudio_sets');
+              if (rawSets) {
+                const parsedSets = JSON.parse(rawSets);
+                if (Array.isArray(parsedSets)) {
+                  foundSet = parsedSets.find((st: any) => st && st.id === setId) || null;
+                }
+              }
+            } catch {
+              // Ignore local parse errors
+            }
+          }
+          if (!foundSet) {
+            foundSet = await fetchLernstudioSetFromFirestore(setId).catch(() => null);
+          }
+
+          if (foundSet && Array.isArray(foundSet.items) && foundSet.items.length > 0) {
             const items = selectedIds.length > 0
-              ? foundSet.items.filter((it) => selectedIds.includes(it.id))
+              ? foundSet.items.filter((it: any) => selectedIds.includes(it.id))
               : foundSet.items;
 
             const fallbackHw: HomeworkAssignment = {
@@ -267,34 +286,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             saveLocalAssignment(fallbackHw, false);
             return;
           }
-        }
-
-        // 5. If even default set fallback fails, build a generic set from default vocabulary
-        if (DEFAULT_LERNSTUDIO_SETS.length > 0) {
-          const defaultSet = DEFAULT_LERNSTUDIO_SETS[0];
-          const fallbackHw: HomeworkAssignment = {
-            id: assignmentId,
-            title: 'واجب Glück التفاعلي',
-            setSnapshot: {
-              id: defaultSet.id,
-              title: defaultSet.title,
-              category: defaultSet.topic || '',
-              items: defaultSet.items
-            },
-            flowMode: 'teacher_then_quiz',
-            questionTypes: ['mc_de_ar', 'true_false'],
-            blooketMode: 'gold_quest',
-            allowedGameModes: ['gold_quest'],
-            questionCount: defaultSet.items.length * 2,
-            maxAttempts: 3,
-            allowReplay: true,
-            isActive: true,
-            status: 'active',
-            createdAt: new Date().toISOString(),
-            createdBy: 'Teacher'
-          };
-          setAssignment(fallbackHw);
-          return;
         }
 
         setError('Diese Hausaufgabe ist nicht mehr verfügbar. — تعذر العثور على الواجب أو تم حذفه من قبل المعلم.');
@@ -555,17 +546,51 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     }
   }, [phase, currentIdx, currentQuestion]);
 
+  // Merged submissions (Cloud + Local) for accurate attempt tracking and enforcement
+  const mergedSubmissionsForAssignment = useMemo(() => {
+    const map = new Map<string, HomeworkSubmission>();
+    const localSubs = getLocalSubmissions().filter((s) => s.assignmentId === assignmentId);
+    for (const s of localSubs) {
+      if (s && s.id) map.set(s.id, s);
+    }
+    for (const s of allSubmissions) {
+      if (s && s.id) map.set(s.id, s);
+    }
+    return Array.from(map.values());
+  }, [allSubmissions, assignmentId, phase, finalScore]);
+
+  const studentCompletedAttempts = useMemo(() => {
+    const trimmedName = studentName.trim().toLowerCase();
+    if (!selectedStudentId && !trimmedName) return [];
+    return mergedSubmissionsForAssignment.filter((s) => {
+      const matchesStudent =
+        (selectedStudentId && s.studentId === selectedStudentId) ||
+        (trimmedName && (s.studentName || '').trim().toLowerCase() === trimmedName);
+      if (!matchesStudent) return false;
+      return s.status === 'completed' || (!s.status && Boolean(s.completedAt));
+    });
+  }, [mergedSubmissionsForAssignment, selectedStudentId, studentName]);
+
+  const isAttemptLimitReached = useMemo(() => {
+    const completedCount = studentCompletedAttempts.length;
+    if (completedCount === 0) return false;
+    if (assignment?.allowReplay === false && completedCount >= 1) {
+      return true;
+    }
+    const maxAttempts = typeof assignment?.maxAttempts === 'number' ? assignment.maxAttempts : 0;
+    if (maxAttempts > 0 && completedCount >= maxAttempts) {
+      return true;
+    }
+    return false;
+  }, [assignment?.allowReplay, assignment?.maxAttempts, studentCompletedAttempts.length]);
+
   const handleStartHomework = (e: React.FormEvent) => {
     e.preventDefault();
     if (!studentName.trim()) return;
+    if (isAttemptLimitReached) return;
     activeSubmissionIdRef.current = 'sub_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
 
-    const studentSubs = allSubmissions.filter(
-      (s) =>
-        (selectedStudentId && s.studentId === selectedStudentId) ||
-        s.studentName.trim().toLowerCase() === studentName.trim().toLowerCase()
-    );
-    const nextAttempt = studentSubs.length + 1;
+    const nextAttempt = studentCompletedAttempts.length + 1;
     setCurrentAttemptNumber(nextAttempt);
 
     setStartTime(new Date().toISOString());
@@ -673,7 +698,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const correctCount = currResponses.filter((r) => r.isCorrect).length;
     const totalQ = quizQuestions.length || currResponses.length;
     const localScorePct = totalQ > 0 ? Math.round((correctCount / totalQ) * 100) : 0;
-    const completedAtIso = new Date().toISOString();
+    const nowIso = new Date().toISOString();
     const startMs = startTime ? new Date(startTime).getTime() : Date.now() - currResponses.length * 4000;
     const timeSpentSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
 
@@ -684,8 +709,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       studentName: studentName.trim(),
       attemptNumber: currentAttemptNumber,
       status: 'in_progress',
-      startedAt: startTime || completedAtIso,
-      completedAt: completedAtIso,
+      startedAt: startTime || nowIso,
+      completedAt: '',
       timeSpentSeconds,
       totalQuestions: totalQ,
       correctAnswersCount: correctCount,
@@ -894,19 +919,27 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                 })}
               </div>
 
+              {isAttemptLimitReached && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold text-center">
+                  لقد أتممت المحاولات المسموحة لهذا الواجب ({studentCompletedAttempts.length} / {assignment?.allowReplay === false ? 1 : assignment?.maxAttempts}).
+                </div>
+              )}
+
               {/* Start Button strictly BELOW student cards */}
               <button
                 type="button"
-                disabled={!selectedStudentId && studentName.trim().length < 2}
+                disabled={(!selectedStudentId && studentName.trim().length < 2) || isAttemptLimitReached}
                 onClick={handleStartHomework}
                 className="w-full py-3.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer mt-4"
               >
                 <span>
-                  {flowMode === 'teacher_then_quiz'
+                  {isAttemptLimitReached
+                    ? 'تم إتمام الواجب ✓'
+                    : flowMode === 'teacher_then_quiz'
                     ? 'بدء الواجب 🚀'
                     : 'بدء حل الأسئلة 🎯'}
                 </span>
-                <ArrowLeft className="w-4 h-4" />
+                {!isAttemptLimitReached && <ArrowLeft className="w-4 h-4" />}
               </button>
             </div>
           ) : (
@@ -926,17 +959,25 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                 />
               </div>
 
+              {isAttemptLimitReached && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold text-center">
+                  لقد أتممت المحاولات المسموحة لهذا الواجب ({studentCompletedAttempts.length} / {assignment?.allowReplay === false ? 1 : assignment?.maxAttempts}).
+                </div>
+              )}
+
               <button
                 type="submit"
-                disabled={studentName.trim().length < 2}
+                disabled={studentName.trim().length < 2 || isAttemptLimitReached}
                 className="w-full py-3.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <span>
-                  {flowMode === 'teacher_then_quiz'
+                  {isAttemptLimitReached
+                    ? 'تم إتمام الواجب ✓'
+                    : flowMode === 'teacher_then_quiz'
                     ? 'بدء الواجب 🚀'
                     : 'بدء حل الأسئلة 🎯'}
                 </span>
-                <ArrowLeft className="w-4 h-4" />
+                {!isAttemptLimitReached && <ArrowLeft className="w-4 h-4" />}
               </button>
             </form>
           )}
@@ -1208,11 +1249,17 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               </div>
             </div>
 
-            {assignment?.allowReplay && (
+            {assignment?.allowReplay !== false &&
+              !(
+                typeof assignment?.maxAttempts === 'number' &&
+                assignment.maxAttempts > 0 &&
+                Math.max(currentAttemptNumber, studentCompletedAttempts.length) >= assignment.maxAttempts
+              ) && (
               <div className="pt-2">
                 <button
                   onClick={() => {
                     activeSubmissionIdRef.current = 'sub_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
+                    setCurrentAttemptNumber((prev) => Math.max(prev + 1, studentCompletedAttempts.length + 1));
                     setCurrentIdx(0);
                     setStudyIndex(0);
                     setResponses([]);

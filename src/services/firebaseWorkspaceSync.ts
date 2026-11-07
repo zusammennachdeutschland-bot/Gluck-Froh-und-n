@@ -4,8 +4,6 @@ import {
   setDoc,
   getDocs,
   deleteDoc,
-  query,
-  where,
   onSnapshot
 } from 'firebase/firestore';
 import { User } from 'firebase/auth';
@@ -25,10 +23,9 @@ import {
   signInWithGoogleIdToken,
   emailToWorkspaceId,
   getActiveCloudUser,
-  signInWithCloudEmailDirect,
   isFirestoreWriteQuotaExhaustedToday,
-  executeSafeFirestoreWrite,
-  VirtualCloudUser
+  clearFirestoreWriteQuotaFlag,
+  executeSafeFirestoreWrite
 } from '../shared/firebaseCloudSync';
 
 export {
@@ -42,16 +39,66 @@ export {
   DEFAULT_VERCEL_DOMAIN,
   emailToWorkspaceId,
   getActiveCloudUser,
-  signInWithCloudEmailDirect,
-  isFirestoreWriteQuotaExhaustedToday
+  isFirestoreWriteQuotaExhaustedToday,
+  clearFirestoreWriteQuotaFlag
 };
-export type { VirtualCloudUser };
 
 export function getPrimaryWorkspaceId(user: { uid: string; email?: string | null }): string {
+  if (!user || !user.uid) {
+    throw new Error('Authenticated user with valid UID is required to resolve workspace.');
+  }
   if (user.email) {
     return emailToWorkspaceId(user.email);
   }
   return user.uid;
+}
+
+/**
+ * Verifies that the active user is genuinely authenticated via Firebase Auth
+ * and owns the workspace document being accessed.
+ */
+export function verifyWorkspaceOwnership(
+  user: User | null,
+  docData?: { ownerUid?: string; ownerEmail?: string } | null,
+  workspaceId?: string
+): boolean {
+  const current = auth.currentUser;
+  if (!user || !current || user.uid !== current.uid) {
+    return false;
+  }
+
+  const allowedWorkspaceIds = new Set<string>([current.uid]);
+  if (current.email) {
+    try {
+      allowedWorkspaceIds.add(emailToWorkspaceId(current.email));
+    } catch {
+      // Ignore invalid email format
+    }
+  }
+
+  if (workspaceId && !allowedWorkspaceIds.has(workspaceId)) {
+    return false;
+  }
+
+  if (docData) {
+    if (docData.ownerUid && docData.ownerUid !== current.uid) {
+      // Allow only if the verified email matches
+      const docEmail = (docData.ownerEmail || '').trim().toLowerCase();
+      const userEmail = (current.email || '').trim().toLowerCase();
+      if (!docEmail || !userEmail || docEmail !== userEmail) {
+        return false;
+      }
+    }
+    if (docData.ownerEmail && current.email) {
+      const docEmail = docData.ownerEmail.trim().toLowerCase();
+      const userEmail = current.email.trim().toLowerCase();
+      if (docEmail !== userEmail) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 const AUTO_SYNC_KEY = 'gluck_google_auto_sync_enabled';
@@ -157,7 +204,8 @@ function partitionBackupPayload(fullData: any): Record<WorkspaceCategoryKey, any
       lessons: fullData.lessons || [],
       payments: fullData.payments || [],
       certificates: fullData.certificates || [],
-      notifications: fullData.notifications || []
+      notifications: fullData.notifications || [],
+      prunedLessonIds: fullData.prunedLessonIds || []
     },
     finance_gold: {
       financeAccounts: fullData.financeAccounts || [],
@@ -194,31 +242,37 @@ function partitionBackupPayload(fullData: any): Record<WorkspaceCategoryKey, any
 }
 
 const lastUploadedChunkCache = new Map<string, string>();
+const lastUploadedChunkCount = new Map<string, number>();
 
 /**
  * Uploads the entire application state (only modified categories & chunks) to the signed-in
  * teacher's Google Cloud Firestore workspace (`/user_workspaces/{uid}/categories/{docId}`).
  */
 export async function uploadWorkspaceToGoogleCloud(
-  backupJsonStr: string
+  backupJsonStr: string,
+  options?: { isManual?: boolean }
 ): Promise<{ success: boolean; syncedAtIso: string; error?: string }> {
   const user = getActiveCloudUser();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
 
-  if (!user) {
+  if (!user || !verifyWorkspaceOwnership(user)) {
     return {
       success: false,
       syncedAtIso: nowIso,
-      error: 'يرجى تسجيل الدخول بحساب Google أولاً لتفعيل المزامنة السحابية.'
+      error: 'يرجى تسجيل الدخول بحساب Google الموثق أولاً لتفعيل المزامنة السحابية.'
     };
+  }
+
+  if (options?.isManual) {
+    clearFirestoreWriteQuotaFlag();
   }
 
   if (isFirestoreWriteQuotaExhaustedToday()) {
     return {
       success: false,
       syncedAtIso: nowIso,
-      error: 'Quota exceeded. تم الوصول للحد اليومي المجاني لكتابة Firestore اليوم؛ بياناتك محفوظة محلياً بأمان وستُستأنف المزامنة غداً.'
+      error: 'تم إيقاف المزامنة التلقائية مؤقتاً لحماية حصة Firestore؛ اضغط «مزامنة الآن» لإعادة المحاولة.'
     };
   }
 
@@ -231,11 +285,12 @@ export async function uploadWorkspaceToGoogleCloud(
     const categories = partitionBackupPayload(parsed);
 
     const writePromises: Promise<any>[] = [];
-    let lernstudioChanged = false;
 
     for (const categoryKey of WORKSPACE_CATEGORY_KEYS) {
       const catPayloadStr = JSON.stringify(categories[categoryKey] || {});
       const chunks = splitStringIntoChunks(catPayloadStr, CHUNK_MAX_CHARS);
+      const countKey = `${uid}:${categoryKey}`;
+      const previousChunkCount = lastUploadedChunkCount.get(countKey) || 0;
 
       for (let idx = 0; idx < chunks.length; idx++) {
         const docId = `${categoryKey}_chunk_${idx}`;
@@ -243,24 +298,22 @@ export async function uploadWorkspaceToGoogleCloud(
         if (lastUploadedChunkCache.get(cacheKey) === chunks[idx]) {
           continue; // Unchanged chunk -> 0 Firestore write units used!
         }
-        if (categoryKey === 'lernstudio_data') {
-          lernstudioChanged = true;
-        }
         const path = `user_workspaces/${uid}/categories/${docId}`;
         const chunkData = chunks[idx];
         writePromises.push(
           executeSafeFirestoreWrite(
-            setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), {
-              id: docId,
-              categoryKey,
-              chunkIndex: idx,
-              totalChunks: chunks.length,
-              updatedAtMs: nowMs,
-              updatedAtIso: nowIso,
-              deviceId,
-              payloadChunk: chunkData,
-              ...(user.email ? { ownerEmail: user.email.slice(0, 120) } : {})
-            })
+            () =>
+              setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), {
+                id: docId,
+                categoryKey,
+                chunkIndex: idx,
+                totalChunks: chunks.length,
+                updatedAtMs: nowMs,
+                updatedAtIso: nowIso,
+                deviceId,
+                payloadChunk: chunkData,
+                ...(user.email ? { ownerEmail: user.email.trim().toLowerCase().slice(0, 120) } : {})
+              })
           )
             .then(() => {
               lastUploadedChunkCache.set(cacheKey, chunkData);
@@ -271,20 +324,23 @@ export async function uploadWorkspaceToGoogleCloud(
             })
         );
       }
+
+      // Clean up stale higher-index chunks if category payload shrank compared to previous upload
+      if (previousChunkCount > chunks.length) {
+        for (let staleIdx = chunks.length; staleIdx < previousChunkCount; staleIdx++) {
+          const staleDocId = `${categoryKey}_chunk_${staleIdx}`;
+          writePromises.push(
+            executeSafeFirestoreWrite(() =>
+              deleteDoc(doc(db, 'user_workspaces', uid, 'categories', staleDocId))
+            ).catch(() => {})
+          );
+        }
+      }
+      lastUploadedChunkCount.set(countKey, chunks.length);
     }
 
     if (writePromises.length > 0) {
       await Promise.all(writePromises);
-    }
-
-    // Only sync custom Lernstudio sets if lernstudio_data actually changed
-    if (lernstudioChanged && Array.isArray(parsed.lernstudioSets) && !isFirestoreWriteQuotaExhaustedToday()) {
-      const customSets = parsed.lernstudioSets.filter(
-        (s: any) => s && s.id && !s.id.startsWith('curric_') && !s.id.startsWith('set_def_')
-      );
-      for (const cs of customSets.slice(0, 15)) {
-        saveLernstudioSetToFirestore(cs).catch(() => {});
-      }
     }
 
     setLastCloudSyncTime(nowIso);
@@ -296,6 +352,52 @@ export async function uploadWorkspaceToGoogleCloud(
       error: err?.message || 'حدث خطأ أثناء رفع البيانات إلى سحابة جوجل.'
     };
   }
+}
+
+/**
+ * Reassembles chunks for a category deterministically without relying on a 5-second clock window.
+ */
+function reassembleCategoryChunks(chunkDocs: any[]): any | null {
+  if (!Array.isArray(chunkDocs) || chunkDocs.length === 0) return null;
+
+  // Group by chunkIndex and keep the newest document per chunkIndex
+  const newestByIndex = new Map<number, any>();
+  let latestHeaderDoc: any = null;
+
+  for (const docData of chunkDocs) {
+    const idx = Number(docData.chunkIndex);
+    if (!Number.isInteger(idx) || idx < 0) continue;
+    const existing = newestByIndex.get(idx);
+    if (!existing || (Number(docData.updatedAtMs) || 0) >= (Number(existing.updatedAtMs) || 0)) {
+      newestByIndex.set(idx, docData);
+    }
+    if (
+      !latestHeaderDoc ||
+      (Number(docData.updatedAtMs) || 0) > (Number(latestHeaderDoc.updatedAtMs) || 0)
+    ) {
+      latestHeaderDoc = docData;
+    }
+  }
+
+  const chunkZero = newestByIndex.get(0);
+  const expectedTotalChunks = Math.max(
+    1,
+    Number(latestHeaderDoc?.totalChunks) || Number(chunkZero?.totalChunks) || 1
+  );
+
+  const orderedParts: string[] = [];
+  for (let i = 0; i < expectedTotalChunks; i++) {
+    const chunkDoc = newestByIndex.get(i);
+    if (!chunkDoc || typeof chunkDoc.payloadChunk !== 'string') {
+      // Missing chunk in sequence — abort reassembling this category to avoid partial JSON corruption
+      return null;
+    }
+    orderedParts.push(chunkDoc.payloadChunk);
+  }
+
+  const joinedStr = orderedParts.join('');
+  if (!joinedStr) return null;
+  return JSON.parse(joinedStr);
 }
 
 /**
@@ -311,14 +413,14 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
   error?: string;
 }> {
   const user = getActiveCloudUser();
-  if (!user) {
+  if (!user || !verifyWorkspaceOwnership(user)) {
     return {
       hasRemoteData: false,
       backupJsonStr: null,
       remoteTimestampMs: 0,
       remoteTimestampIso: null,
       summary: null,
-      error: 'يرجى تسجيل الدخول بحساب Google أولاً.'
+      error: 'يرجى تسجيل الدخول بحساب Google الموثق أولاً.'
     };
   }
 
@@ -326,20 +428,20 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
   const path = `user_workspaces/${primaryId}/categories`;
 
   try {
-    const candidateIds: string[] = [];
-    if (primaryId) candidateIds.push(primaryId);
-    if (user.uid && !candidateIds.includes(user.uid)) candidateIds.push(user.uid);
-    if (user.email) {
-      const emailWs = emailToWorkspaceId(user.email);
-      if (!candidateIds.includes(emailWs)) candidateIds.push(emailWs);
+    const candidateIds: string[] = [primaryId];
+    if (user.uid && !candidateIds.includes(user.uid)) {
+      candidateIds.push(user.uid);
     }
 
     let snap: any = null;
+    let resolvedWorkspaceId = primaryId;
     for (const cId of candidateIds) {
+      if (!verifyWorkspaceOwnership(user, null, cId)) continue;
       try {
         const s = await getDocs(collection(db, 'user_workspaces', cId, 'categories'));
         if (!s.empty) {
           snap = s;
+          resolvedWorkspaceId = cId;
           break;
         }
       } catch {
@@ -361,9 +463,12 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
     let maxUpdatedAtMs = 0;
     let maxUpdatedAtIso: string | null = null;
 
-    snap.forEach((docSnap) => {
+    snap.forEach((docSnap: any) => {
       const data = docSnap.data();
       if (!data || !data.categoryKey) return;
+      if (!verifyWorkspaceOwnership(user, data, resolvedWorkspaceId)) {
+        return;
+      }
       const list = docsByCategory.get(data.categoryKey) || [];
       list.push(data);
       docsByCategory.set(data.categoryKey, list);
@@ -373,26 +478,36 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       }
     });
 
+    if (docsByCategory.size === 0) {
+      return {
+        hasRemoteData: false,
+        backupJsonStr: null,
+        remoteTimestampMs: 0,
+        remoteTimestampIso: null,
+        summary: null
+      };
+    }
+
     const reassembled: any = {
       timestamp: maxUpdatedAtIso || new Date().toISOString(),
       version: '2.0.0'
     };
 
-    docsByCategory.forEach((chunkDocs) => {
-      // Find latest updatedAtMs for this category so stale old chunks from a larger previous upload are ignored
-      const latestCatMs = Math.max(...chunkDocs.map((c) => Number(c.updatedAtMs) || 0));
-      const activeChunks = chunkDocs
-        .filter((c) => Math.abs((Number(c.updatedAtMs) || 0) - latestCatMs) < 5000)
-        .sort((a, b) => (Number(a.chunkIndex) || 0) - (Number(b.chunkIndex) || 0));
-
-      const joinedStr = activeChunks.map((c) => c.payloadChunk || '').join('');
-      if (joinedStr) {
-        try {
-          const parsedCat = JSON.parse(joinedStr);
+    docsByCategory.forEach((chunkDocs, categoryKey) => {
+      try {
+        const parsedCat = reassembleCategoryChunks(chunkDocs);
+        if (parsedCat && typeof parsedCat === 'object') {
           Object.assign(reassembled, parsedCat);
-        } catch (parseErr) {
-          console.warn('Failed to parse reassembled cloud category:', parseErr);
+          // Seed chunk cache from downloaded cloud state so unchanged categories cost 0 writes on next sync
+          const catStr = JSON.stringify(parsedCat);
+          const chunks = splitStringIntoChunks(catStr, CHUNK_MAX_CHARS);
+          lastUploadedChunkCount.set(`${primaryId}:${categoryKey}`, chunks.length);
+          chunks.forEach((c, idx) => {
+            lastUploadedChunkCache.set(`${primaryId}:${categoryKey}_chunk_${idx}:${chunks.length}`, c);
+          });
         }
+      } catch (parseErr) {
+        console.warn('Failed to parse reassembled cloud category:', parseErr);
       }
     });
 
@@ -442,11 +557,19 @@ export function subscribeToRemoteWorkspaceChanges(
   uid: string,
   onRemoteWorkspaceReady: (backupJsonStr: string, updatedAtIso: string, summary: CloudSyncSummary) => void
 ): () => void {
+  const activeUser = getActiveCloudUser();
+  if (!activeUser || !verifyWorkspaceOwnership(activeUser)) {
+    return () => {};
+  }
+
+  const targetWorkspaceId = getPrimaryWorkspaceId(activeUser);
+  if (!verifyWorkspaceOwnership(activeUser, null, targetWorkspaceId)) {
+    return () => {};
+  }
+
   const deviceId = getCloudDeviceId();
   let debounceTimer: any = null;
   let lastAppliedRemoteMs = 0;
-  const activeUser = getActiveCloudUser();
-  const targetWorkspaceId = activeUser ? getPrimaryWorkspaceId(activeUser) : uid;
 
   const colRef = collection(db, 'user_workspaces', targetWorkspaceId, 'categories');
   const unsub = onSnapshot(
@@ -459,6 +582,7 @@ export function subscribeToRemoteWorkspaceChanges(
 
       snap.forEach((docSnap) => {
         const d = docSnap.data();
+        if (!verifyWorkspaceOwnership(activeUser, d, targetWorkspaceId)) return;
         if (d && typeof d.updatedAtMs === 'number') {
           if (d.updatedAtMs > newestRemoteMs) {
             newestRemoteMs = d.updatedAtMs;
@@ -491,7 +615,7 @@ export function subscribeToRemoteWorkspaceChanges(
       }, 1200);
     },
     (err) => {
-      handleFirestoreError(err, OperationType.LIST, `user_workspaces/${uid}/categories`);
+      handleFirestoreError(err, OperationType.LIST, `user_workspaces/${targetWorkspaceId}/categories`);
     }
   );
 
@@ -500,3 +624,4 @@ export function subscribeToRemoteWorkspaceChanges(
     unsub();
   };
 }
+

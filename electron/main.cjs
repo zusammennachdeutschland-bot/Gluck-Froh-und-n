@@ -28,11 +28,13 @@ function createWindow() {
     show: false, // Prevent white flash on Linux startup
     backgroundColor: '#0f172a', // Matches dark theme background
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      preload: path.join(__dirname, 'preload.cjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
       backgroundThrottling: true, // Throttles background timers when minimized to save CPU/RAM
       spellcheck: false, // Saves ~100MB+ RAM by disabling Chromium spellcheck dictionaries
-      webSecurity: false
+      webSecurity: true
     },
     icon: path.join(__dirname, '../dist/icon.png')
   });

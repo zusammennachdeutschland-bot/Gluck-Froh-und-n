@@ -14,7 +14,6 @@ import { getSchoolSettings, DEFAULT_SCHOOL_SETTINGS } from '../utils/schoolUtils
 import { isBackupFileSizeValid } from '../utils/backupEngine';
 import {
   signInTeacherWithGoogle,
-  signInWithCloudEmailDirect,
   subscribeTeacherAuth,
   getActiveCloudUser,
   downloadWorkspaceFromGoogleCloud,
@@ -82,7 +81,6 @@ export const SetupWizard: React.FC = () => {
   const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
   const [googleSignInError, setGoogleSignInError] = useState<string | null>(null);
   const [showUnauthorizedDomainHelper, setShowUnauthorizedDomainHelper] = useState(false);
-  const [directCloudEmail, setDirectCloudEmail] = useState(profile.email || 'zusammennachdeutschland@gmail.com');
   const [domainCopied, setDomainCopied] = useState(false);
 
   const [connectedGoogleUser, setConnectedGoogleUser] = useState<{
@@ -200,20 +198,6 @@ export const SetupWizard: React.FC = () => {
       } else {
         setGoogleSignInError(msg || 'Google sign-in failed');
       }
-    } finally {
-      setIsGoogleSigningIn(false);
-    }
-  };
-
-  const handleDirectCloudEmailSetup = async () => {
-    setIsGoogleSigningIn(true);
-    setGoogleSignInError(null);
-    try {
-      const vUser = await signInWithCloudEmailDirect(directCloudEmail, displayName || 'Herr Omar');
-      await applySignedInCloudUser(vUser);
-      setShowUnauthorizedDomainHelper(false);
-    } catch (err: any) {
-      setGoogleSignInError(err?.message || 'تعذر ربط الحساب السحابي');
     } finally {
       setIsGoogleSigningIn(false);
     }
@@ -914,38 +898,19 @@ export const SetupWizard: React.FC = () => {
                           <span>⚡</span>
                           <span>
                             {_t(
-                              'ربط الحساب السحابي المباشر (بدون الحاجة لنافذة جوجل المنبثقة)',
-                              'Direct Cloud Account Sync (No Popup Needed)',
-                              'Direkte Cloud-Konto-Verknüpfung'
+                              'تفعيل الدومين في إعدادات مصادقة Firebase',
+                              'Authorize Domain in Firebase Auth Settings',
+                              'Domain in Firebase Auth autorisieren'
                             )}
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
                           {_t(
-                            'لأنك تفتح التطبيق من رابط Vercel خارجي لم يُضف بعد في قائمة نوافذ Firebase، يمكنك ربط بريدك الإلكتروني واستعادة كافة بياناتك وطلابك السحابية فوراً من هنا:',
-                            'Since this Vercel domain is not yet in Firebase popup domains, enter your Google email to link and restore your cloud workspace immediately:',
-                            'Verknüpfen Sie Ihre Google-E-Mail direkt, um Ihre Cloud-Daten sofort wiederherzustellen:'
+                            'لتسجيل الدخول بحساب Google بأمان من هذا الرابط، يرجى إضافة الدومين الحالي إلى قائمة Authorized Domains في إعدادات Firebase Authentication:',
+                            'To sign in securely with Google from this URL, please add this domain to Authorized Domains in Firebase Authentication settings:',
+                            'Um sich sicher mit Google anzumelden, fügen Sie diese Domain in den Firebase Authentication-Einstellungen hinzu:'
                           )}
                         </p>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <input
-                          type="email"
-                          dir="ltr"
-                          value={directCloudEmail}
-                          onChange={(e) => setDirectCloudEmail(e.target.value)}
-                          placeholder="your.email@gmail.com"
-                          className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary"
-                        />
-                        <button
-                          type="button"
-                          disabled={isGoogleSigningIn || !directCloudEmail.trim()}
-                          onClick={handleDirectCloudEmailSetup}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition-all cursor-pointer shrink-0 shadow-xs"
-                        >
-                          {_t('ربط واستعادة بياناتي فوراً', 'Link & Restore Now', 'Jetzt verbinden')}
-                        </button>
                       </div>
 
                       <div className="pt-2 border-t border-amber-500/20 flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-slate-500 dark:text-slate-400">

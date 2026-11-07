@@ -687,7 +687,6 @@ import { migrateFromLocalStorageToIndexedDB } from './services/migrationService'
 import { storage } from './services/storageService';
 import { sanitizeInitialData, clearAllLocalDataAndReset } from './services/dataSanitizer';
 import { HomeworkPlayerPage } from './pages/HomeworkPlayerPage';
-import { TeacherDashboardPage } from './pages/TeacherDashboardPage';
 
 export default function App() {
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
@@ -697,10 +696,6 @@ export default function App() {
 
   if (pathname.startsWith('/homework/')) {
     return <HomeworkPlayerPage />;
-  }
-
-  if (pathname.startsWith('/teacher')) {
-    return <TeacherDashboardPage />;
   }
 
   const runDataLoader = useCallback(async (isMounted: boolean) => {

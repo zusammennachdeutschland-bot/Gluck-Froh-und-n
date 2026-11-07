@@ -1,150 +1,119 @@
-# Glück — Smart Data Cleanup & Lesson Optimization
+# Glück – Full Codebase Bug Fix & Security Remediation Plan
 
-An automated, safe data pruning and lesson lifecycle architecture for Glück. This reduces the database volume (from 2831+ lessons down to an optimal, lightweight footprint), speeds up multi-device synchronization, and enforces a strict rolling 14-day future window while guaranteeing 100% financial and student balance accuracy.
+This plan details the verification and remediation of security vulnerabilities, homework lifecycle bugs, synchronization tombstone gaps, financial cleanup safeguards, Electron process hardening, and build verification across the Glück application while preserving all working features and respecting explicit exclusions.
+
+---
+
+## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> **User Review & Confirmed Decisions**:
-> 1. **Location of Controls & Preview**: Dedicated Card in **Settings** (`SettingsView.tsx`) and **Smart Backup Center** (`SmartBackupCenter.tsx`).
-> 2. **Automatic Maintenance**: Runs automatically once per day in the background and on app startup.
-> 3. **Safety Backup**: Saved internally in the Smart Backup Center and instantly downloadable as a timestamped JSON file (`glueck-lessons-backup-YYYY-MM-DD.json`) before any destructive action.
-> 4. **Financial Invariance Guarantee**: No financial transaction (`financeTransactions`), student payment record (`payments`), or balance calculation is ever modified or deleted. Deleting an old fully settled lesson never decreases revenue or alters student ledger balances.
+> The following architectural and security decisions were confirmed during Phase 1 and govern this implementation:
+
+- **Confirmed Decision 1 (Android Release Keystore)**: Remove the tracked keystore file from the repository and load release signing credentials exclusively from environment variables / GitHub Actions Secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) with a safe local fallback to debug signing when secrets are absent. This preserves the existing signing identity so existing Android installations update seamlessly without uninstalling.
+- **Confirmed Decision 2 (Standalone Teacher Portal Removal)**: Completely remove the unused standalone Teacher Portal page (`/teacher`), its password login gate, and obsolete login/logout endpoints, while preserving all homework creation, management, and live student tracking inside Learn Studio (`LernstudioHomeworkModal`) as well as all student-facing homework routes (`/homework/:id`).
+- **Confirmed Decision 3 (Real Firebase Cloud Authentication)**: Remove the unauthenticated local `VirtualCloudUser` (`signInWithCloudEmailDirect`) fallback and auto-registration on invalid credentials. Require a real authenticated Firebase user (`auth.currentUser`) and enforce strict workspace ownership validation on every cloud read, write, and real-time subscription.
+- **Confirmed Exclusions (Unchanged)**:
+  1. Firestore security rules (`firestore.rules`) remain untouched with their current public read/write/delete permissions.
+  2. Gold and currency exchange rate logic remains untouched.
 
 ---
 
 ## 1. Overview & Core Concept
 
-Currently, the auto-generator in `AppContext.tsx` projects recurring group schedules for **365 days into the future** (`dayOffset < 365`), generating over 2,400 unneeded future placeholder lessons. Simultaneously, historical completed lessons accumulate indefinitely.
-
-### Core Objectives:
-1. **14-Day Rolling Future Window**: Restrict automatic lesson generation from 365 days down to **14 days**. Each day, as time advances, automatically generate the next day's recurring lessons, maintaining exactly a 14-day horizon without duplicates.
-2. **30-Day Historical Retention**: Clean historical lessons completed more than 30 days ago, **provided they are fully paid and have zero outstanding student balances**.
-3. **Strict Financial & Debt Preservation**:
-   - Any lesson with `paymentStatus !== 'paid'` (e.g. `pending`, `partial`, `overdue`), or with any student having an unpaid attendance report, is **strictly preserved**.
-   - Individual 1-on-1 lessons (online or offline) are only pruned if 100% paid and older than 30 days.
-   - All financial ledgers (`dl_finance_transactions`, `dl_payments`, `dl_finance_accounts`) remain permanently untouched.
-4. **Pre-Cleanup Safety & Preview**:
-   - Provide an interactive preview modal showing exact counts of lessons to be removed vs preserved.
-   - Run an automated invariant audit verifying that `Total Revenue`, `Total Payments`, and `Student Unpaid Balances` are byte-for-byte identical before and after cleanup.
-   - Generate an automated backup archive before performing any deletion.
-5. **Sync Integrity Across Devices**:
-   - Ensure pruned lesson IDs are tracked in tombstones (`dl_pruned_lesson_ids`) so old Firestore chunks or device caches cannot re-resurrect deleted lessons during synchronization.
+- **What It Does**: Eliminates exposed credentials and unauthenticated workspace spoofing, enforces strict homework attempt and replay rules, prevents deleted or pruned lessons from resurrecting during multi-device synchronization, hardens financial settlement checks before lesson cleanup, removes dead Teacher Portal login code, secures the Electron desktop runtime, and enforces TypeScript verification in production builds and CI workflows.
+- **Target Audience / Persona**: Teachers managing classes, schedules, finances, and Learn Studio interactive homework across Android, Desktop (Linux/Windows Electron), and Web, as well as students completing interactive German assignments.
+- **Key Value**: Guarantees financial and operational data integrity across devices, protects release signing credentials, and ensures homework rules (`maxAttempts`, `allowReplay`, custom vocabulary sets) work deterministically.
 
 ---
 
-## 2. Technical Architecture & Component Flow
+## 2. User Experience & Visual Design
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       Glück Storage & Sync Engine                           │
-│                                                                             │
-│  LocalStorage / Capacitor Storage            Google Cloud Firestore Sync    │
-│  ┌──────────────────────────────┐            ┌───────────────────────────┐  │
-│  │ dl_lessons (2831 -> ~350)    │◄──────────►│ /user_workspaces/{uid}/   │  │
-│  │ dl_payments (320 intact)     │            │   categories/lessons      │  │
-│  │ dl_finance_transactions (420)│            └───────────────────────────┘  │
-│  │ dl_pruned_lessons_archive    │                          ▲                │
-│  └──────────────────────────────┘                          │                │
-└─────────────────────────────────▲──────────────────────────┼────────────────┘
-                                  │                          │
-                   ┌──────────────┴──────────────────────────┴────────┐
-                   │                                                  │
-┌──────────────────┴──────────────────────┐  ┌────────────────────────┴──────────────┐
-│  Lesson Lifecycle & Maintenance Service │  │  UI Controls & Pre-Cleanup Preview    │
-│  (src/services/lessonCleanupService.ts) │  │  (src/components/SmartDataCleanupCard)│
-│                                         │  │                                       │
-│  • Rolling 14-day future generator      │  │  • Settings & Smart Backup Center view│
-│  • 30-day historical eligibility audit  │  │  • Breakdown: To Delete vs To Keep   │
-│  • Invariant balance & revenue checker  │  │  • One-click Download Backup (.json)  │
-│  • Automated daily startup maintenance  │  │  • Safe "Execute Cleanup" action      │
-└─────────────────────────────────────────┘  └───────────────────────────────────────┘
-```
+- **Key User Flows**:
+  - **Student Homework Flow**: Students opening a homework link see the clean Glück student landing page, select their student card, and start the assignment. While in progress, their status is tracked as `in_progress` without prematurely setting `completedAt`. If `allowReplay` is disabled or `maxAttempts` is reached, the student is shown their completed summary and prevented from starting additional attempts even if they reload or reopen the URL. If an assigned vocabulary set cannot be found, a clear error state is displayed rather than silently substituting an unrelated default set.
+  - **Cloud Sync & Setup Flow**: Teachers sign in via Google OAuth (`signInTeacherWithGoogle`) or verified Firebase credentials. Setup and Settings views reflect real Firebase authentication state without unverified email-only spoofing.
+  - **Smart Data Cleanup & Sync Flow**: When lessons are deleted or pruned via Smart Cleanup, their tombstone state (`deleted: true` and pruned lesson IDs) is preserved across local merges and cloud workspace snapshots so deleted lessons never reappear when syncing with another device. If archival storage fails or financial calculations throw an error, destructive cleanup is safely aborted.
+- **Visual Identity & Theme**:
+  - Preserves Glück's existing unified design system (`--background`, `--surface`, `--surface-border`, `--primary`, `--text-main`, `--text-muted`) with zero visual regressions.
 
 ---
 
-## 3. Data Strategy & Invariant Rules
+## 3. Key Product Decisions & Trade-Offs
 
-### A. The 14-Day Future Rolling Window
-In `src/context/AppContext.tsx`, update the auto-generator from:
-```ts
-// Old: 365 days
-for (let dayOffset = 0; dayOffset < 365; dayOffset++)
-```
-to:
-```ts
-// New: Exactly 14 rolling days
-const FUTURE_HORIZON_DAYS = 14;
-for (let dayOffset = 0; dayOffset <= FUTURE_HORIZON_DAYS; dayOffset++)
-```
-- Existing auto-generated lessons beyond `today + 14 days` that have not been started, completed, or manually edited are categorized as **Prunable Future Bloat**.
-- Manually created or confirmed lessons (those with custom titles, non-auto IDs, reports, or explicit teacher notes) are **never pruned**, regardless of date.
-
-### B. The 30-Day Historical Pruning Rules
-A historical lesson ($Date < Today - 30\text{ days}$) is **eligible for cleanup ONLY IF ALL of the following criteria are met**:
-1. **Status is Completed**: `lesson.status === 'completed'`.
-2. **Fully Settled Financially**:
-   - `lesson.paymentStatus === 'paid'`.
-   - AND every student in `lesson.studentPayments` (or `lesson.report.studentPayments`) has `status === 'paid'` or `paymentStatus === 'paid'`.
-   - AND no student attending this lesson has an unpaid charge tied to it.
-3. **No Active Disputes or Packages**: Not part of an unfinished multi-lesson package that is awaiting final billing.
-4. **Never Delete**:
-   - Any lesson with `paymentStatus === 'pending'`, `'partial'`, or `'unpaid'`.
-   - Any lesson where any student's payment is pending.
-   - Any lesson with an open report or unresolved attendance.
-
-### C. Financial & Balance Invariant Check
-Before any batch deletion, the engine calculates:
-$$\text{Audit Pre-Check} = (\text{Total Revenue}_{\text{pre}}, \text{Unpaid Balances}_{\text{pre}}, \text{Student Payments}_{\text{pre}})$$
-$$\text{Audit Post-Check} = (\text{Total Revenue}_{\text{post}}, \text{Unpaid Balances}_{\text{post}}, \text{Student Payments}_{\text{post}})$$
-If $\text{Audit Pre-Check} \neq \text{Audit Post-Check}$, the operation is **aborted immediately** with an error banner, guaranteeing zero data or financial loss.
+- **Decision 1: Environment-Driven Android Signing with Debug Fallback**
+  - *Chosen Approach*: Untrack the repository keystore artifact, add `*.keystore` and `*.keystore.b64` to ignore rules, and configure Gradle to read signing credentials from environment variables (`ANDROID_KEYSTORE_PATH` / `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`). When building locally without release secrets, Gradle falls back cleanly without exposing hardcoded passwords.
+  - *Why*: Eliminates credential exposure in source control while keeping the exact same certificate for production updates when secrets are configured in GitHub Actions.
+- **Decision 2: Strict Workspace Ownership & Real Auth Enforcement**
+  - *Chosen Approach*: Derive the active workspace ID exclusively from `auth.currentUser` (verifying `auth.currentUser.uid` and `auth.currentUser.email`), validate `ownerEmail` / `uid` on downloaded workspace documents before applying them, and remove `VirtualCloudUser` (`signInWithCloudEmailDirect`) and automatic account creation on `auth/invalid-credential`.
+  - *Why*: Prevents unauthorized workspace impersonation via client-supplied email strings.
+- **Decision 3: Deterministic Chunk Reassembly & Tombstone-Aware Cloud Sync**
+  - *Chosen Approach*:
+    1. Replace the fragile 5-second timestamp window (`Math.abs(updatedAtMs - latestCatMs) < 5000`) during cloud category reassembly with deterministic batch/chunk validation using `totalChunks` from the newest chunk header (`chunkIndex === 0`) and matching `chunkIndex < totalChunks`, plus cleaning up stale higher-index chunks when a category shrinks.
+    2. Include soft-deleted records (`fullLessonsRef.current`, `fullPaymentsRef.current`) and `prunedLessonIds` in workspace backups, and use `mergeEntities` + `getPrunedLessonIds()` during workspace import/sync so remote syncs respect local deletions and tombstones.
+  - *Why*: Large multi-chunk uploads on slow connections can take longer than 5 seconds across chunks, and overwriting arrays on sync without tombstones causes deleted lessons to reappear.
+- **Decision 4: Fail-Closed Financial Settlement & Archival Validation**
+  - *Chosen Approach*:
+    1. Update `isLessonFullySettled` so a lesson is only treated as settled when it has explicit proof of settlement (`paymentStatus === 'paid'`, `paymentStatus === 'exempted'`, `report.paymentStatus === 'paid'`, or verified paid student/payment records covering the due amount)—never merely because payment fields are `undefined`.
+    2. Enforce individual-lesson per-lesson arrangement checks for historical pruning where applicable, and fail closed (`financialInvarianceVerified = false`) if pre- or post-cleanup balance calculations throw an error instead of defaulting to `0`.
+    3. In `executeLessonCleanup`, if writing to the backup archive throws an error, abort immediately before pruning any lesson records.
+  - *Why*: Protects against accidental deletion of unpaid lessons or unarchived historical records.
 
 ---
 
-## 4. User Experience & Interface Design
+## 4. Technical Architecture & Data Strategy *(Technical Reference)*
 
-### A. Smart Data Cleanup Card (`SmartDataCleanupCard.tsx`)
-- Displayed in:
-  1. `SettingsView.tsx`: Integrated cleanly under the Cloud Sync and Backup sections.
-  2. `SmartBackupCenter.tsx`: Highlighted at the top as the primary optimization tool.
-- Visuals (Glück Design Constitution compliant):
-  - Compact container: `bg-surface border border-surface-border rounded-xl p-4 shadow-xs`.
-  - Unboxed metric row with `·` separators:
-    `2831 Lektionen gesamt · ~2150 bereinigbar · ~680 aktiv & geschützt`.
-  - Action buttons:
-    - `Vorschau & Prüfung` (Preview & Audit).
-    - `Sicherung herunterladen` (Download Backup .json).
-    - `Automatische Wartung aktiv (14 Tage)` toggle/badge.
+### Architecture & Remediation Flow Diagram
 
-### B. Interactive Pre-Cleanup Audit Modal
-- Opens before any deletion is executed.
-- Displays:
-  - **Prunable Historical** ($>30$ days, 100% paid): e.g. 180 lessons.
-  - **Prunable Future Bloat** ($>14$ days, unconfirmed recurring): e.g. 1970 lessons.
-  - **Protected Records** (unpaid, within 30 days, or manual): e.g. 681 lessons.
-  - **Financial Safety Verification**: A green check showing:
-    - *Gesamtumsatz unverändert* (Revenue unchanged).
-    - *Schülersalden 100% identisch* (Student balances 100% identical).
-    - *Zahlungshistorie vollständig gesichert* (320 payment records untouched).
-  - Prominent download button for the JSON backup archive.
-  - Red/Primary confirmation button: `Bereinigung jetzt sicher ausführen` (Execute Safe Cleanup).
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        GLÜCK SECURITY & SYNC ARCHITECTURE                    │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────────┐        ┌─────────────────────────────────────┐  │
+│  │   Firebase Auth Guard   │        │   Workspace Sync & Merge Engine     │  │
+│  │  - Real auth.currentUser│───────▶│  - Deterministic totalChunks check  │  │
+│  │  - No VirtualCloudUser  │        │  - Tombstone & Pruned IDs preserved │  │
+│  │  - Ownership verified   │        │  - LWW + Tombstone mergeEntities()  │  │
+│  └─────────────────────────┘        └──────────────────┬──────────────────┘  │
+│                                                        │                     │
+│                                                        ▼                     │
+│  ┌─────────────────────────┐        ┌─────────────────────────────────────┐  │
+│  │  Student Homework Flow  │        │  Financial & Cleanup Safety Gate    │  │
+│  │  - in_progress != done  │        │  - Explicit paid/exempted proof     │  │
+│  │  - Enforce maxAttempts  │        │  - Fail-closed balance calculation  │  │
+│  │  - Enforce allowReplay  │        │  - Mandatory archive before delete  │  │
+│  │  - Custom Set snapshot  │        └─────────────────────────────────────┘  │
+│  └─────────────────────────┘                                                 │
+│                                                                              │
+│  ┌─────────────────────────┐        ┌─────────────────────────────────────┐  │
+│  │   Electron Hardening    │        │     CI/CD & Build Verification      │  │
+│  │  - nodeIntegration:false│        │  - tsc --noEmit before bundle       │  │
+│  │  - contextIsolation:true│        │  - Env-based Android Keystore       │  │
+│  │  - webSecurity:true     │        │  - Automated test & build checks    │  │
+│  │  - Preload bridge       │        └─────────────────────────────────────┘  │
+│  └─────────────────────────┘                                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
 
----
+### Issue Verification Classification (Confirmed Against Current Codebase)
 
-## 5. Implementation Steps
-
-1. **Build `lessonCleanupService.ts`**:
-   - Create functions:
-     - `analyzeLessonPruning(lessons, groups, students, payments, financeTransactions)`
-     - `performLessonCleanup(...)`
-     - `exportPrunedLessonsBackup(...)`
-     - `runAutomatedDailyMaintenance(...)`
-2. **Update `AppContext.tsx` Auto-Generator**:
-   - Cap future generation window to `14 days`.
-   - Hook automated maintenance into daily startup routine.
-3. **Build `SmartDataCleanupCard.tsx` & Modal**:
-   - Render preview stats, financial verification, backup download, and manual trigger.
-4. **Integrate into `SettingsView.tsx` and `SmartBackupCenter.tsx`**:
-   - Mount the card in both locations.
-5. **Verify Synchronization (`firebaseWorkspaceSync.ts`)**:
-   - Ensure pruned lesson removals properly sync to Firestore without re-importing old chunks.
-6. **Compile & Lint Verification**:
-   - Run `compile_applet` and `lint_applet` to ensure zero regressions.
+1. **Android Keystore & Gradle Credentials (CONFIRMED)**:
+   - Tracked base64 keystore exists in `android/app/` and hardcoded passwords (`glueck2026`) exist in `android/app/build.gradle` and `.github/workflows/build-apk.yml`.
+2. **Cloud Auth & Workspace Ownership (CONFIRMED)**:
+   - `VirtualCloudUser` (`signInWithCloudEmailDirect`) allows setting an arbitrary email in `localStorage` without authentication; `signInTeacherWithEmailPassword` auto-creates users on `auth/invalid-credential`; `downloadWorkspaceFromGoogleCloud` and `subscribeToRemoteWorkspaceChanges` do not verify document `ownerEmail` against `auth.currentUser`.
+3. **Homework System Bugs (CONFIRMED)**:
+   - `syncLiveProgressToFirestore` sets `completedAt: completedAtIso` while `status === 'in_progress'`, causing `fetchAssignmentDetailsWithSync` (`s.status === 'completed' || s.completedAt`) to treat in-progress attempts as completed.
+   - `HomeworkPlayerPage` does not block students when `allowReplay === false` (after 1 completed attempt) or when `completedAttempts.length >= assignment.maxAttempts`.
+   - When a set ID in URL fallback is not found, `HomeworkPlayerPage` silently falls back to `DEFAULT_LERNSTUDIO_SETS[0]` instead of looking up custom sets in Firestore (`lernstudio_sets`) or showing a clear error when unavailable.
+4. **Synchronization, Chunk Reassembly & Cleanup Archival (CONFIRMED)**:
+   - `downloadWorkspaceFromGoogleCloud` filters chunks using `Math.abs(updatedAtMs - latestCatMs) < 5000`, which drops valid chunks if uploading takes >5s.
+   - `performBackup` / `importBackupFile` omit soft-deleted tombstones and `prunedLessonIds`, allowing deleted/pruned lessons from another device to resurrect on sync.
+   - `executeLessonCleanup` catches archive storage errors with a warning and continues deleting lessons anyway.
+5. **Financial Cleanup Validation (CONFIRMED)**:
+   - `isLessonFullySettled` returns `true` at the end if `paymentStatus` and `amountDue` are missing/undefined.
+   - `analyzeLessonCleanup` catches errors in `calculateDuePaymentCycles` and leaves `preUnpaidBalancesTotal = 0` and `postUnpaidBalancesTotal = 0`, which causes `0 === 0` (`financialInvarianceVerified = true`) even when calculation failed.
+6. **Unused Teacher Portal Login (CONFIRMED)**:
+   - `/teacher` route in `App.tsx` renders `TeacherDashboardPage.tsx` with unused `/api/teacher/login` and `/api/teacher/logout` calls.
+7. **Electron Security & Static Loading (CONFIRMED)**:
+   - `electron/main.cjs` uses `nodeIntegration: true`, `contextIsolation: false`, `webSecurity: false`, and `vite.config.ts` uses `base: '/'` which breaks relative asset paths when `mainWindow.loadFile('../dist/index.html')` is used in packaged Electron builds unless handled via relative base or local server/protocol.
+8. **Build & CI Verification (CONFIRMED)**:
+   - `npm run build` runs `vite build && esbuild...` without running `tsc --noEmit` first, and GitHub workflows do not run typechecks/tests prior to packaging.

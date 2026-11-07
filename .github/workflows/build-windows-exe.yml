@@ -39,8 +39,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends wine wine64 wine32
 
-      - name: Build web assets
-        run: npm run build
+      - name: Typecheck & Build web assets
+        run: npm run lint && ELECTRON_BUILD=true npm run build
 
       - name: Build Windows Installer (.exe)
         run: npx electron-builder --win nsis --x64 --publish never

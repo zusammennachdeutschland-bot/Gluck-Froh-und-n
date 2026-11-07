@@ -23,13 +23,14 @@ import { storage } from '../services/storageService';
 import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
-import { getPrunedLessonIds, executeLessonCleanup, analyzeLessonCleanup, formatLocalDateStr, LAST_CLEANUP_DATE_KEY } from '../services/lessonCleanupService';
+import { getPrunedLessonIds, addPrunedLessonIds, executeLessonCleanup, analyzeLessonCleanup, formatLocalDateStr, LAST_CLEANUP_DATE_KEY } from '../services/lessonCleanupService';
 import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resequenceScheduledLessonsAfterChange, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, makeLessonSlotKey } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import LiveTimer from '../services/liveTimerPlugin';
 import { runSyncMigration } from '../services/sync/syncMigration';
 import { trackLocalMutation, trackLocalDeletion, getActiveRecords } from '../services/sync/mutationTracker';
+import { mergeEntities } from '../services/sync/mergeEngine';
 import { runSyncCycle, forceFullSync, SyncDataSource } from '../services/sync/syncOrchestrator';
 import { calculatePendingOutbox } from '../services/sync/deltaBuilder';
 import { startLocalServer } from '../services/sync/localServer';
@@ -6071,15 +6072,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
     })();
 
-    const backupObj: BackupData = {
+    const backupObj: BackupData & { prunedLessonIds?: string[] } = {
       timestamp: new Date().toISOString(),
       version: '2.0.0',
       profile,
       schoolSettings: profile.schoolSettings,
       groups,
       students,
-      lessons,
-      payments,
+      lessons: fullLessonsRef.current.length > 0 ? fullLessonsRef.current : lessons,
+      payments: fullPaymentsRef.current.length > 0 ? fullPaymentsRef.current : payments,
+      prunedLessonIds: Array.from(getPrunedLessonIds()),
       notifications,
       certificates,
       customAiBackgrounds: (profile as any).customAiBackgrounds || [],
@@ -6133,6 +6135,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
 
       const data = validation.data;
+      const incomingPrunedIds = Array.isArray((parsed as any).prunedLessonIds)
+        ? (parsed as any).prunedLessonIds
+        : Array.isArray((data as any).prunedLessonIds)
+        ? (data as any).prunedLessonIds
+        : [];
+      if (incomingPrunedIds.length > 0) {
+        addPrunedLessonIds(incomingPrunedIds.filter((id: any) => typeof id === 'string'));
+      }
+      const prunedLessonIdsSet = getPrunedLessonIds();
+
       const hasProfile = hasBackupSection(parsed, 'profile');
       const hasSchoolSettings = hasBackupSection(parsed, 'schoolSettings');
       const hasGroups = hasBackupSection(parsed, 'groups');
@@ -6148,17 +6160,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_profile', mergedProfile);
       }
       if (hasGroups && data.groups) {
-        setGroups(data.groups);
-        await storage.setItem('dl_groups', data.groups);
+        const localDeletedGroups = groups.filter((g: any) => g.deleted);
+        const mergedGroups = localDeletedGroups.length > 0
+          ? mergeEntities(localDeletedGroups, data.groups, 'group').merged
+          : data.groups;
+        setGroups(mergedGroups);
+        await storage.setItem('dl_groups', mergedGroups);
       }
       if (hasStudents && data.students) {
-        setStudents(data.students);
-        await storage.setItem('dl_students', data.students);
+        const localDeletedStudents = students.filter((s: any) => s.deleted);
+        const mergedStudents = localDeletedStudents.length > 0
+          ? mergeEntities(localDeletedStudents, data.students, 'student').merged
+          : data.students;
+        setStudents(mergedStudents);
+        await storage.setItem('dl_students', mergedStudents);
       }
       if (hasLessons && data.lessons) {
+        const localDeletedLessons = (fullLessonsRef.current || []).filter((l: any) => l && l.deleted);
+        const mergedRawLessons = localDeletedLessons.length > 0
+          ? mergeEntities(localDeletedLessons, Array.isArray(data.lessons) ? data.lessons : [], 'lesson').merged
+          : (Array.isArray(data.lessons) ? data.lessons : []);
         const seenL = new Set<string>();
-        const dedupedLessons = (Array.isArray(data.lessons) ? data.lessons : []).filter((l: any) => {
-          if (!l || !l.id || seenL.has(l.id)) return false;
+        const dedupedLessons = mergedRawLessons.filter((l: any) => {
+          if (!l || !l.id || seenL.has(l.id) || prunedLessonIdsSet.has(l.id)) return false;
           seenL.add(l.id);
           return true;
         });
@@ -6167,8 +6191,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setLessons(filterActiveLessons(dedupedLessons));
       }
       if (hasPayments && data.payments) {
+        const localDeletedPayments = (fullPaymentsRef.current || []).filter((p: any) => p && p.deleted);
+        const mergedRawPayments = localDeletedPayments.length > 0
+          ? mergeEntities(localDeletedPayments, Array.isArray(data.payments) ? data.payments : [], 'payment').merged
+          : (Array.isArray(data.payments) ? data.payments : []);
         const seenP = new Set<string>();
-        const dedupedPayments = (Array.isArray(data.payments) ? data.payments : []).filter((p: any) => {
+        const dedupedPayments = mergedRawPayments.filter((p: any) => {
           if (!p || !p.id || seenP.has(p.id)) return false;
           seenP.add(p.id);
           return true;

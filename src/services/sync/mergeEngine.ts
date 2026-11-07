@@ -98,15 +98,15 @@ export function mergeEntities<T extends SyncableRecord>(
         shouldAcceptIncoming = true;
         resolutionStrategy = 'TIE_BREAKER';
       } else if (((incomingItem.deleted && !localItem.deleted) || ((incomingItem as any).status === 'cancelled' && (localItem as any).status !== 'cancelled'))) {
-        // Intentional deletion or session cancellation tombstone: prioritize cancellation/deletion if version >= local or reasonable timestamp
-        if (incomingVer >= localVer || incomingTime >= localTime - 300000) {
+        // Intentional deletion or session cancellation tombstone: honor incoming tombstone unless local has strictly newer version AND timestamp
+        if (!(localTime > incomingTime && localVer > incomingVer)) {
           shouldAcceptIncoming = true;
           resolutionStrategy = 'TIE_BREAKER';
         }
       }
 
-      // Preserve local deletion and archival tombstones against older/drifted remote non-deleted items
-      if (localItem.deleted && !incomingItem.deleted && incomingTime <= localTime + 300000 && incomingVer <= localVer) {
+      // Preserve local deletion tombstones against remote non-deleted items unless remote has strictly newer timestamp AND strictly higher version
+      if (localItem.deleted && !incomingItem.deleted && !(incomingTime > localTime && incomingVer > localVer)) {
         shouldAcceptIncoming = false;
       }
 

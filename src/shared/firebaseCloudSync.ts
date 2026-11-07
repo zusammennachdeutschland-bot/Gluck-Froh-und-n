@@ -56,46 +56,45 @@ export const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-const QUOTA_EXHAUSTED_DATE_KEY = 'gluck_firestore_write_quota_date';
+const LEGACY_QUOTA_EXHAUSTED_DATE_KEY = 'gluck_firestore_write_quota_date';
+let quotaCooldownUntilMs = 0;
 
-function getTodayUtcDateStr(): string {
-  return new Date().toISOString().slice(0, 10);
+// Clean up any stale 24-hour localStorage lock from earlier versions immediately on load
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem(LEGACY_QUOTA_EXHAUSTED_DATE_KEY);
+  } catch {
+    // Ignore
+  }
 }
 
 export function isFirestoreWriteQuotaExhaustedToday(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return localStorage.getItem(QUOTA_EXHAUSTED_DATE_KEY) === getTodayUtcDateStr();
-  } catch {
-    return false;
-  }
+  return Date.now() < quotaCooldownUntilMs;
 }
 
 export function markFirestoreWriteQuotaExhaustedToday(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(QUOTA_EXHAUSTED_DATE_KEY, getTodayUtcDateStr());
-  } catch {
-    // Ignore
-  }
+  // Pause background auto-writes for 60 seconds instead of locking out for 24 hours
+  quotaCooldownUntilMs = Date.now() + 60 * 1000;
 }
 
 export function clearFirestoreWriteQuotaFlag(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.removeItem(QUOTA_EXHAUSTED_DATE_KEY);
-  } catch {
-    // Ignore
+  quotaCooldownUntilMs = 0;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(LEGACY_QUOTA_EXHAUSTED_DATE_KEY);
+    } catch {
+      // Ignore
+    }
   }
 }
 
 export async function executeSafeFirestoreWrite<T>(
   writePromiseOrFn: Promise<T> | (() => Promise<T>),
   timeoutMs = 15000,
-  maxRetries = 3
+  maxRetries = 1
 ): Promise<T> {
   if (isFirestoreWriteQuotaExhaustedToday()) {
-    throw new Error('Quota limit exceeded (free tier daily write limit reached for today).');
+    throw new Error('Quota limit exceeded (temporary cooldown active).');
   }
 
   let attempt = 0;
@@ -117,9 +116,13 @@ export async function executeSafeFirestoreWrite<T>(
       return res;
     } catch (err: any) {
       lastError = err;
+      const code = err?.code || '';
       const msg = err?.message || String(err);
-      if (err?.code === 'resource-exhausted' || msg.includes('resource-exhausted') || msg.includes('Quota')) {
+      if (code === 'resource-exhausted' || msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
         markFirestoreWriteQuotaExhaustedToday();
+        throw err;
+      }
+      if (code === 'permission-denied' || msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
         throw err;
       }
       attempt++;
@@ -260,25 +263,10 @@ if (typeof window !== 'undefined') {
   getRedirectResult(auth).then((res) => {
     if (res?.user) {
       console.log('Redirect sign-in success:', res.user.email);
-      try {
-        localStorage.removeItem(VIRTUAL_CLOUD_USER_STORAGE_KEY);
-      } catch {}
-      window.dispatchEvent(new CustomEvent('gluck-virtual-auth-changed'));
     }
   }).catch((e) => {
     console.warn('Redirect result notice:', e);
   });
-}
-
-const VIRTUAL_CLOUD_USER_STORAGE_KEY = 'gluck_cloud_virtual_teacher_v1';
-
-export interface VirtualCloudUser {
-  uid: string;
-  email: string;
-  displayName: string;
-  photoURL: string | null;
-  phoneNumber: string | null;
-  isVirtualCloudUser: true;
 }
 
 export function emailToWorkspaceId(email: string): string {
@@ -288,54 +276,14 @@ export function emailToWorkspaceId(email: string): string {
     .replace(/[^a-z0-9]/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');
-  return clean ? `ws_${clean.slice(0, 90)}` : 'ws_default_teacher';
+  if (!clean) {
+    throw new Error('Invalid email for workspace identification.');
+  }
+  return `ws_${clean.slice(0, 90)}`;
 }
 
-export function getVirtualCloudUser(): VirtualCloudUser | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(VIRTUAL_CLOUD_USER_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.email && parsed.uid) {
-      return parsed as VirtualCloudUser;
-    }
-  } catch {
-    // Ignore
-  }
-  return null;
-}
-
-export function getActiveCloudUser(): User | VirtualCloudUser | null {
-  return auth.currentUser || getVirtualCloudUser();
-}
-
-export async function signInWithCloudEmailDirect(
-  email: string,
-  displayName?: string
-): Promise<VirtualCloudUser> {
-  const cleanEmail = (email || '').trim().toLowerCase();
-  if (!cleanEmail || !cleanEmail.includes('@')) {
-    throw new Error('يرجى إدخال بريد Google الإلكتروني بشكل صحيح.');
-  }
-  const fallbackName = cleanEmail.split('@')[0].replace(/[._-]+/g, ' ');
-  const vUser: VirtualCloudUser = {
-    uid: emailToWorkspaceId(cleanEmail),
-    email: cleanEmail,
-    displayName: (displayName || '').trim() || fallbackName,
-    photoURL: null,
-    phoneNumber: null,
-    isVirtualCloudUser: true
-  };
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(VIRTUAL_CLOUD_USER_STORAGE_KEY, JSON.stringify(vUser));
-      window.dispatchEvent(new CustomEvent('gluck-virtual-auth-changed'));
-    } catch {
-      // Ignore
-    }
-  }
-  return vUser;
+export function getActiveCloudUser(): User | null {
+  return auth.currentUser;
 }
 
 export async function signInTeacherWithGoogle(): Promise<User | null> {
@@ -369,12 +317,6 @@ export async function signInTeacherWithGoogle(): Promise<User | null> {
   // 3. Primary popup sign-in attempt
   try {
     const result = await signInWithPopup(auth, googleProvider);
-    // Clear any virtual fallback if real Firebase Auth succeeded
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.removeItem(VIRTUAL_CLOUD_USER_STORAGE_KEY);
-      } catch {}
-    }
     return result.user;
   } catch (err: any) {
     const errCode = err?.code || '';
@@ -417,32 +359,11 @@ export async function signInWithGoogleIdToken(idToken: string): Promise<User | n
 export async function signInTeacherWithEmailPassword(email: string, pass: string): Promise<User | null> {
   const cleanEmail = email.trim().toLowerCase();
   const cleanPass = pass.trim();
-  try {
-    const res = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
-    return res.user;
-  } catch (err: any) {
-    // If user does not exist yet in Firebase Auth, automatically create it for the teacher!
-    if (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-credential') {
-      try {
-        const createRes = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
-        return createRes.user;
-      } catch (createErr) {
-        throw createErr;
-      }
-    }
-    throw err;
-  }
+  const res = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
+  return res.user;
 }
 
 export async function signOutTeacherFirebase(): Promise<void> {
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.removeItem(VIRTUAL_CLOUD_USER_STORAGE_KEY);
-      window.dispatchEvent(new CustomEvent('gluck-virtual-auth-changed'));
-    } catch {
-      // Ignore
-    }
-  }
   try {
     await signOut(auth);
   } catch (err) {
@@ -451,26 +372,12 @@ export async function signOutTeacherFirebase(): Promise<void> {
 }
 
 export function subscribeTeacherAuth(cb: (user: User | null) => void): () => void {
-  const emitCurrent = () => {
-    const active = auth.currentUser || (getVirtualCloudUser() as unknown as User | null);
-    cb(active);
-  };
-  emitCurrent();
+  cb(auth.currentUser);
   const unsubFirebase = onAuthStateChanged(auth, (u) => {
-    if (u) {
-      cb(u);
-    } else {
-      cb(getVirtualCloudUser() as unknown as User | null);
-    }
+    cb(u || null);
   });
-  if (typeof window !== 'undefined') {
-    window.addEventListener('gluck-virtual-auth-changed', emitCurrent);
-  }
   return () => {
     unsubFirebase();
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('gluck-virtual-auth-changed', emitCurrent);
-    }
   };
 }
 
@@ -613,10 +520,12 @@ export async function saveSubmissionToFirestore(submission: HomeworkSubmission):
   const safeAssignmentId = sanitizeDocId(submission.assignmentId);
   const path = `homework_submissions/${safeId}`;
   try {
+    const isCompleted = submission.status === 'completed';
     const normalized: HomeworkSubmission = {
       ...submission,
       id: safeId,
-      assignmentId: safeAssignmentId
+      assignmentId: safeAssignmentId,
+      completedAt: isCompleted ? (submission.completedAt || new Date().toISOString()) : ''
     };
     const payloadJson = JSON.stringify(normalized).slice(0, 490000);
     await executeSafeFirestoreWrite(
@@ -627,7 +536,7 @@ export async function saveSubmissionToFirestore(submission: HomeworkSubmission):
           studentName: (submission.studentName || 'طالب').slice(0, 140),
           score: Math.max(0, Math.min(100000, Number(submission.score) || 0)),
           accuracyPercent: Math.max(0, Math.min(100, Number(submission.accuracyPercent) || 0)),
-          completedAt: (submission.completedAt || new Date().toISOString()).slice(0, 60),
+          completedAt: (normalized.completedAt || submission.startedAt || new Date().toISOString()).slice(0, 60),
           payloadJson
         }),
       15000,
@@ -660,7 +569,11 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
         // Ignore
       }
     });
-    return list.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+    return list.sort(
+      (a, b) =>
+        new Date(b.completedAt || b.startedAt || 0).getTime() -
+        new Date(a.completedAt || a.startedAt || 0).getTime()
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
     return [];
@@ -682,7 +595,11 @@ export async function fetchAllSubmissionsFromFirestore(): Promise<HomeworkSubmis
         // Ignore
       }
     });
-    return list.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+    return list.sort(
+      (a, b) =>
+        new Date(b.completedAt || b.startedAt || 0).getTime() -
+        new Date(a.completedAt || a.startedAt || 0).getTime()
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
     return [];
@@ -711,7 +628,11 @@ export function subscribeSubmissionsFromFirestore(
           // Ignore
         }
       });
-      list.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+      list.sort(
+        (a, b) =>
+          new Date(b.completedAt || b.startedAt || 0).getTime() -
+          new Date(a.completedAt || a.startedAt || 0).getTime()
+      );
       onUpdate(list);
     },
     (error) => {
@@ -755,6 +676,24 @@ export async function deleteLernstudioSetFromFirestore(setId: string): Promise<v
   }
 }
 
+export async function fetchLernstudioSetFromFirestore(setId: string): Promise<LernstudioSet | null> {
+  if (!setId) return null;
+  const safeId = sanitizeDocId(setId);
+  const path = `lernstudio_sets/${safeId}`;
+  try {
+    const snap = await getDoc(doc(db, 'lernstudio_sets', safeId));
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    if (data?.payloadJson) {
+      return JSON.parse(data.payloadJson) as LernstudioSet;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+
 export function subscribeLernstudioSetsFromFirestore(
   onUpdate: (sets: LernstudioSet[]) => void
 ): () => void {
@@ -780,3 +719,4 @@ export function subscribeLernstudioSetsFromFirestore(
     }
   );
 }
+

@@ -1,15 +1,21 @@
 apply plugin: 'com.android.application'
 
-// Automatically decode release.keystore from release.keystore.b64 if missing
-def keystoreFile = file('release.keystore')
-def keystoreB64File = file('release.keystore.b64')
-if (!keystoreFile.exists() && keystoreB64File.exists()) {
+// Decode release.keystore from ANDROID_KEYSTORE_BASE64 environment variable if provided
+def keystorePathEnv = System.getenv("ANDROID_KEYSTORE_PATH") ?: "release.keystore"
+def keystoreFile = file(keystorePathEnv)
+def keystoreB64Env = System.getenv("ANDROID_KEYSTORE_BASE64")
+if (!keystoreFile.exists() && keystoreB64Env != null && !keystoreB64Env.trim().isEmpty()) {
     try {
-        keystoreFile.bytes = keystoreB64File.text.trim().decodeBase64()
+        keystoreFile.bytes = keystoreB64Env.trim().decodeBase64()
     } catch (Exception e) {
-        logger.warn("Could not auto-decode release.keystore.b64: " + e.message)
+        logger.warn("Could not decode ANDROID_KEYSTORE_BASE64: " + e.message)
     }
 }
+
+def releaseStorePassword = System.getenv("ANDROID_STORE_PASSWORD") ?: project.findProperty("ANDROID_STORE_PASSWORD")
+def releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: project.findProperty("ANDROID_KEY_ALIAS")
+def releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: project.findProperty("ANDROID_KEY_PASSWORD")
+def hasReleaseSigning = keystoreFile.exists() && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
 
 android {
     namespace = "com.glueck.app"
@@ -29,14 +35,16 @@ android {
     }
     signingConfigs {
         release {
-            storeFile file('release.keystore')
-            storePassword 'glueck2026'
-            keyAlias 'glueckrelease'
-            keyPassword 'glueck2026'
-            v1SigningEnabled true
-            v2SigningEnabled true
-            enableV3Signing true
-            enableV4Signing false
+            if (hasReleaseSigning) {
+                storeFile keystoreFile
+                storePassword releaseStorePassword.toString()
+                keyAlias releaseKeyAlias.toString()
+                keyPassword releaseKeyPassword.toString()
+                v1SigningEnabled true
+                v2SigningEnabled true
+                enableV3Signing true
+                enableV4Signing false
+            }
         }
     }
     compileOptions {
@@ -50,7 +58,7 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
         }
     }
 }

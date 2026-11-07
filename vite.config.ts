@@ -6,9 +6,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+  const isElectronBuild = process.env.ELECTRON_BUILD === 'true';
 
   return {
-    base: '/',
+    base: isElectronBuild ? './' : '/',
     plugins: [
       react(), 
       tailwindcss(),

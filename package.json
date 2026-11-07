@@ -71,9 +71,10 @@
   },
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/server.cjs",
-    "build:deb": "npm run build && electron-builder --linux deb --x64",
-    "build:linux": "npm run build && electron-builder --linux AppImage deb --x64",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/server.cjs",
+    "build:deb": "ELECTRON_BUILD=true npm run build && electron-builder --linux deb --x64",
+    "build:linux": "ELECTRON_BUILD=true npm run build && electron-builder --linux AppImage deb --x64",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

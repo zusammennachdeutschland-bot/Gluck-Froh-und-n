@@ -1,5 +1,6 @@
 import { Lesson, Group, Student, PaymentRecord, FinanceTransaction } from '../types';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
+import { isGroupPerLesson } from '../utils/lessonUtils';
 import { calculateStudentDueBannerTotals } from './financeService';
 import { storage } from './storageService';
 
@@ -78,11 +79,21 @@ export function addPrunedLessonIds(ids: string[]): void {
 
 /**
  * Checks if a historical lesson is strictly 100% paid and free of any student debts.
+ * Requires explicit proof of settlement; never defaults to true when payment data is missing.
  */
-export function isLessonFullySettled(lesson: Lesson): boolean {
+export function isLessonFullySettled(
+  lesson: Lesson,
+  groups: Group[] = [],
+  payments: PaymentRecord[] = []
+): boolean {
   if (lesson.deleted) return true;
-  // If explicitly pending or partial, it is NOT settled
+
+  // If explicitly pending or partial at lesson or report level, it is NOT settled
   if (lesson.paymentStatus === 'pending' || lesson.paymentStatus === 'partial') {
+    return false;
+  }
+  const reportPaymentStatus = (lesson.report as any)?.paymentStatus;
+  if (reportPaymentStatus === 'pending' || reportPaymentStatus === 'partial') {
     return false;
   }
 
@@ -93,37 +104,111 @@ export function isLessonFullySettled(lesson: Lesson): boolean {
     }
   }
 
+  // Individual lesson check: only per-lesson individual lessons (or lessons explicitly covered by a paid PaymentRecord) are eligible
+  const group = groups.find((g) => g.id === lesson.groupId);
+  const isIndividualLesson =
+    Boolean(lesson.studentId) ||
+    Boolean((group as any)?.isIndividual);
+
+  const isCoveredByPaidPaymentRecord =
+    Array.isArray(payments) &&
+    payments.some(
+      (p) =>
+        !p.deleted &&
+        p.status === 'paid' &&
+        Array.isArray(p.lessonIds) &&
+        p.lessonIds.includes(lesson.id)
+    );
+
+  if (
+    isIndividualLesson &&
+    group &&
+    !isGroupPerLesson(group) &&
+    !isCoveredByPaidPaymentRecord
+  ) {
+    return false;
+  }
+
+  let hasExplicitSettlementProof = false;
+
+  if (
+    lesson.paymentStatus === 'paid' ||
+    lesson.paymentStatus === 'exempted' ||
+    reportPaymentStatus === 'paid' ||
+    reportPaymentStatus === 'exempted' ||
+    isCoveredByPaidPaymentRecord
+  ) {
+    hasExplicitSettlementProof = true;
+  }
+
+  if (
+    typeof lesson.amountDue === 'number' &&
+    lesson.amountDue > 0 &&
+    typeof lesson.amountPaid === 'number' &&
+    lesson.amountPaid >= lesson.amountDue
+  ) {
+    hasExplicitSettlementProof = true;
+  }
+
   // Check studentPayments mapping if present
   if (lesson.studentPayments && typeof lesson.studentPayments === 'object') {
-    for (const [_, sp] of Object.entries(lesson.studentPayments)) {
-      const status = (sp as any)?.paymentStatus || (sp as any)?.status;
-      if (status === 'pending' || status === 'partial') {
-        return false;
+    const entries = Object.entries(lesson.studentPayments);
+    if (entries.length > 0) {
+      let allEntriesSettled = true;
+      for (const [_, sp] of entries) {
+        const status = (sp as any)?.paymentStatus || (sp as any)?.status;
+        if (status === 'pending' || status === 'partial') {
+          return false;
+        }
+        const due = Number((sp as any)?.amountDue ?? (sp as any)?.amount ?? 0);
+        const paid = Number((sp as any)?.amountPaid ?? 0);
+        if (due > 0 && paid < due && status !== 'exempted' && status !== 'paid') {
+          return false;
+        }
+        const entrySettled =
+          status === 'paid' ||
+          status === 'exempted' ||
+          (due > 0 && paid >= due);
+        if (!entrySettled) {
+          allEntriesSettled = false;
+        }
       }
-      const due = Number((sp as any)?.amountDue || (sp as any)?.amount || 0);
-      const paid = Number((sp as any)?.amountPaid || 0);
-      if (due > 0 && paid < due && status !== 'exempted' && status !== 'paid') {
-        return false;
+      if (allEntriesSettled) {
+        hasExplicitSettlementProof = true;
       }
     }
   }
 
   // Check report.studentPayments if present
   if (lesson.report?.studentPayments && typeof lesson.report.studentPayments === 'object') {
-    for (const [_, sp] of Object.entries(lesson.report.studentPayments)) {
-      const status = (sp as any)?.paymentStatus || (sp as any)?.status;
-      if (status === 'pending' || status === 'partial') {
-        return false;
+    const entries = Object.entries(lesson.report.studentPayments);
+    if (entries.length > 0) {
+      let allEntriesSettled = true;
+      for (const [_, sp] of entries) {
+        const status = (sp as any)?.paymentStatus || (sp as any)?.status;
+        if (status === 'pending' || status === 'partial') {
+          return false;
+        }
+        const due = Number((sp as any)?.amountDue ?? (sp as any)?.amount ?? 0);
+        const paid = Number((sp as any)?.amountPaid ?? 0);
+        if (due > 0 && paid < due && status !== 'exempted' && status !== 'paid') {
+          return false;
+        }
+        const entrySettled =
+          status === 'paid' ||
+          status === 'exempted' ||
+          (due > 0 && paid >= due);
+        if (!entrySettled) {
+          allEntriesSettled = false;
+        }
       }
-      const due = Number((sp as any)?.amountDue || (sp as any)?.amount || 0);
-      const paid = Number((sp as any)?.amountPaid || 0);
-      if (due > 0 && paid < due && status !== 'exempted' && status !== 'paid') {
-        return false;
+      if (allEntriesSettled) {
+        hasExplicitSettlementProof = true;
       }
     }
   }
 
-  return true;
+  return hasExplicitSettlementProof;
 }
 
 /**
@@ -159,12 +244,17 @@ export function analyzeLessonCleanup(
 
   // Pre-calculate student balances before cleanup using Glück's canonical due payment calculator
   let preUnpaidBalancesTotal = 0;
+  let preCalcSucceeded = false;
   try {
     const dueCycles = calculateDuePaymentCycles(activeStudents, groups, lessons, payments);
     const banner = calculateStudentDueBannerTotals(dueCycles, payments);
-    preUnpaidBalancesTotal = banner.totalAmountDueFromStudents;
+    if (typeof banner?.totalAmountDueFromStudents === 'number' && Number.isFinite(banner.totalAmountDueFromStudents)) {
+      preUnpaidBalancesTotal = banner.totalAmountDueFromStudents;
+      preCalcSucceeded = true;
+    }
   } catch (err) {
     console.error('Balance pre-calc error:', err);
+    preCalcSucceeded = false;
   }
 
   // Pre-calculate revenue & payments
@@ -204,7 +294,7 @@ export function analyzeLessonCleanup(
     if (lessonDate < thirtyDaysAgoStr) {
       // Safe to prune ONLY if completed AND 100% fully paid / settled
       const isCompleted = l.status === 'completed';
-      const isFullySettled = isLessonFullySettled(l);
+      const isFullySettled = isLessonFullySettled(l, groups, payments);
 
       if (isCompleted && isFullySettled) {
         historicalEligibleToPrune.push(l);
@@ -227,21 +317,30 @@ export function analyzeLessonCleanup(
 
   // Post-calculate student balances on simulated remaining lessons
   let postUnpaidBalancesTotal = 0;
+  let postCalcSucceeded = false;
   try {
     const postDueCycles = calculateDuePaymentCycles(activeStudents, groups, simulatedRemainingLessons, payments);
     const postBanner = calculateStudentDueBannerTotals(postDueCycles, payments);
-    postUnpaidBalancesTotal = postBanner.totalAmountDueFromStudents;
+    if (
+      typeof postBanner?.totalAmountDueFromStudents === 'number' &&
+      Number.isFinite(postBanner.totalAmountDueFromStudents)
+    ) {
+      postUnpaidBalancesTotal = postBanner.totalAmountDueFromStudents;
+      postCalcSucceeded = true;
+    }
   } catch (err) {
     console.error('Balance post-calc error:', err);
+    postCalcSucceeded = false;
   }
 
   const postTotalRevenue = preTotalRevenue; // Finance transactions are untouched
   const postTotalPayments = preTotalPayments; // Payments are untouched
 
   // Financial Invariance Check:
-  // Since we only prune 100% settled historical lessons and untouched future placeholders,
-  // the unpaid balances must match exactly!
+  // Both pre and post calculations must succeed without error, and unpaid balances must match.
   const financialInvarianceVerified =
+    preCalcSucceeded &&
+    postCalcSucceeded &&
     Math.round(preUnpaidBalancesTotal) === Math.round(postUnpaidBalancesTotal) &&
     preTotalRevenue === postTotalRevenue &&
     preTotalPayments === postTotalPayments;
@@ -298,14 +397,19 @@ export function exportPrunedLessonsBackupJson(prunedLessons: Lesson[]): void {
 
 /**
  * Executes the safe cleanup.
- * 1. Saves pruned lessons to internal archive storage.
- * 2. Adds IDs to the tombstone set to prevent re-import from Firestore caches.
- * 3. Returns the cleaned lessons array.
+ * 1. Verifies financial invariance passed.
+ * 2. Saves pruned lessons to internal archive storage (aborts if backup write fails).
+ * 3. Adds IDs to the tombstone set to prevent re-import from Firestore caches.
+ * 4. Returns the cleaned lessons array.
  */
 export async function executeLessonCleanup(
   currentLessons: Lesson[],
   analysis: LessonCleanupAnalysis
 ): Promise<LessonCleanupResult> {
+  if (!analysis.financialInvarianceVerified) {
+    throw new Error('Cannot execute lesson cleanup: financial invariance verification failed.');
+  }
+
   const prunableIds = new Set([
     ...analysis.historicalEligibleToPrune.map((l) => l.id),
     ...analysis.futureBloatToPrune.map((l) => l.id)
@@ -314,15 +418,21 @@ export async function executeLessonCleanup(
   const prunedLessons = currentLessons.filter((l) => prunableIds.has(l.id));
   const cleanedLessons = currentLessons.filter((l) => !prunableIds.has(l.id));
 
-  // 1. Save to local storage archive
-  try {
-    const existingArchive = (await storage.getItem<Lesson[]>(PRUNED_LESSONS_BACKUP_KEY)) || [];
-    const combinedArchive = [...existingArchive, ...prunedLessons];
-    // Keep at most 5000 archived items
-    const truncatedArchive = combinedArchive.slice(-5000);
-    await storage.setItem(PRUNED_LESSONS_BACKUP_KEY, truncatedArchive);
-  } catch (err) {
-    console.warn('Could not store all pruned lessons to local storage archive:', err);
+  // 1. Save to local storage archive BEFORE deleting any lessons. If archiving fails, abort cleanup!
+  if (prunedLessons.length > 0) {
+    try {
+      const existingArchive = (await storage.getItem<Lesson[]>(PRUNED_LESSONS_BACKUP_KEY)) || [];
+      const existingIds = new Set(existingArchive.map((l) => l.id));
+      const newToArchive = prunedLessons.filter((l) => !existingIds.has(l.id));
+      const combinedArchive = [...existingArchive, ...newToArchive];
+      // Keep at most 5000 archived items
+      const truncatedArchive = combinedArchive.slice(-5000);
+      await storage.setItem(PRUNED_LESSONS_BACKUP_KEY, truncatedArchive);
+    } catch (err: any) {
+      throw new Error(
+        `Failed to save pruned lessons archive before deletion (${err?.message || 'Storage error'}). Cleanup aborted.`
+      );
+    }
   }
 
   // 2. Record tombstone IDs so cloud sync will never resurrect them
