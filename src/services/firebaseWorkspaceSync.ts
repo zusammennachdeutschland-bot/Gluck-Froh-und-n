@@ -29,7 +29,7 @@ import {
   executeSafeFirestoreWrite
 } from '../shared/firebaseCloudSync';
 import { DEFAULT_LERNSTUDIO_SETS } from '../data/defaultLernstudioSets';
-import { mergeEntities } from './sync/mergeEngine';
+import { mergeEntities, mergeRecentlyDeleted, mergeDismissedDashboardLessons } from './sync/mergeEngine';
 
 export {
   signInTeacherWithGoogle,
@@ -1071,15 +1071,9 @@ function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): void {
         const existingPruned = Array.isArray(baseObj.prunedLessonIds) ? baseObj.prunedLessonIds : [];
         baseObj.prunedLessonIds = Array.from(new Set([...existingPruned, ...deltaObj.prunedLessonIds]));
       } else if (sKey === 'recentlyDeleted' && deltaObj.recentlyDeleted) {
-        const existingRec = baseObj.recentlyDeleted || { students: [], groups: [], lessons: [] };
-        baseObj.recentlyDeleted = {
-          students: mergeEntities(existingRec.students || [], deltaObj.recentlyDeleted.students || [], 'recentlyDeleted_students').merged,
-          groups: mergeEntities(existingRec.groups || [], deltaObj.recentlyDeleted.groups || [], 'recentlyDeleted_groups').merged,
-          lessons: mergeEntities(existingRec.lessons || [], deltaObj.recentlyDeleted.lessons || [], 'recentlyDeleted_lessons').merged,
-        };
-      } else if (sKey === 'dismissedDashboardLessons' && Array.isArray(deltaObj.dismissedDashboardLessons)) {
-        const existingDismissed = Array.isArray(baseObj.dismissedDashboardLessons) ? baseObj.dismissedDashboardLessons : [];
-        baseObj.dismissedDashboardLessons = Array.from(new Set([...existingDismissed, ...deltaObj.dismissedDashboardLessons]));
+        baseObj.recentlyDeleted = mergeRecentlyDeleted(baseObj.recentlyDeleted, deltaObj.recentlyDeleted);
+      } else if (sKey === 'dismissedDashboardLessons' && deltaObj.dismissedDashboardLessons !== undefined) {
+        baseObj.dismissedDashboardLessons = mergeDismissedDashboardLessons(baseObj.dismissedDashboardLessons, deltaObj.dismissedDashboardLessons, true);
       } else {
         baseObj[sKey] = deltaObj[sKey];
       }

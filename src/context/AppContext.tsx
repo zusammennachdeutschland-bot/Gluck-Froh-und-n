@@ -27,10 +27,9 @@ import { getPrunedLessonIds, addPrunedLessonIds, executeLessonCleanup, analyzeLe
 import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resequenceScheduledLessonsAfterChange, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, makeLessonSlotKey } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
-import LiveTimer from '../services/liveTimerPlugin';
 import { runSyncMigration } from '../services/sync/syncMigration';
 import { trackLocalMutation, trackLocalDeletion, getActiveRecords } from '../services/sync/mutationTracker';
-import { mergeEntities } from '../services/sync/mergeEngine';
+import { mergeEntities, mergeRecentlyDeleted, mergeDismissedDashboardLessons } from '../services/sync/mergeEngine';
 import { runSyncCycle, forceFullSync, SyncDataSource } from '../services/sync/syncOrchestrator';
 import { calculatePendingOutbox } from '../services/sync/deltaBuilder';
 import { startLocalServer } from '../services/sync/localServer';
@@ -6346,19 +6345,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       if (hasBackupSection(parsed, 'recentlyDeleted') && data.recentlyDeleted) {
         const currentRec = recentlyDeleted || { students: [], groups: [], lessons: [] };
-        const mergedRecentlyDeleted = {
-          students: isCloudDelta && currentRec.students?.length > 0 ? mergeEntities(currentRec.students, data.recentlyDeleted.students || [], 'recentlyDeleted_students').merged : (data.recentlyDeleted.students || []),
-          groups: isCloudDelta && currentRec.groups?.length > 0 ? mergeEntities(currentRec.groups, data.recentlyDeleted.groups || [], 'recentlyDeleted_groups').merged : (data.recentlyDeleted.groups || []),
-          lessons: isCloudDelta && currentRec.lessons?.length > 0 ? mergeEntities(currentRec.lessons, data.recentlyDeleted.lessons || [], 'recentlyDeleted_lessons').merged : (data.recentlyDeleted.lessons || []),
-        };
+        const mergedRecentlyDeleted = mergeRecentlyDeleted(currentRec, data.recentlyDeleted);
         setRecentlyDeleted(mergedRecentlyDeleted);
         await storage.setItem('dl_recently_deleted', mergedRecentlyDeleted);
       }
       if (hasBackupSection(parsed, 'dismissedDashboardLessons') && Array.isArray(data.dismissedDashboardLessons)) {
         const currentDismissed = dismissedDashboardLessonIds || [];
-        const mergedDismissed = isCloudDelta && currentDismissed.length > 0
-          ? Array.from(new Set([...currentDismissed, ...data.dismissedDashboardLessons]))
-          : data.dismissedDashboardLessons;
+        const mergedDismissed = mergeDismissedDashboardLessons(currentDismissed, data.dismissedDashboardLessons, isCloudDelta);
         setDismissedDashboardLessonIds(mergedDismissed);
         await storage.setItem('dl_dismissed_dashboard_lessons', mergedDismissed);
       }

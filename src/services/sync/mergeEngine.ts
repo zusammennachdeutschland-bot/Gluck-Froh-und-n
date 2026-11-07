@@ -1,4 +1,4 @@
-import { SyncableRecord, SyncConflictRecord, SyncEntityDiff, TeacherSettingsRecord } from '../../types';
+import { SyncableRecord, SyncConflictRecord, SyncEntityDiff, TeacherSettingsRecord, DeletedItem, RecentlyDeletedData } from '../../types';
 
 export interface MergeResult<T extends SyncableRecord> {
   merged: T[];
@@ -7,6 +7,116 @@ export interface MergeResult<T extends SyncableRecord> {
   deletedCount: number;
   conflicts: SyncConflictRecord[];
   diff: SyncEntityDiff;
+}
+
+/**
+ * Type-safe merge for DeletedItem<T>[] wrapper objects (e.g. RecentlyDeletedData).
+ * Identifies records by entry.item.id, preserves original item and deletedAt, deduplicates,
+ * and uses deterministic conflict resolution based on deletion timestamps and item metadata.
+ */
+export function mergeDeletedItems<T extends { id: string }>(
+  localItems: DeletedItem<T>[] | undefined | null,
+  incomingItems: DeletedItem<T>[] | undefined | null
+): DeletedItem<T>[] {
+  const localArr = Array.isArray(localItems) ? localItems : [];
+  const incomingArr = Array.isArray(incomingItems) ? incomingItems : [];
+
+  if (localArr.length === 0 && incomingArr.length === 0) return [];
+
+  const map = new Map<string, DeletedItem<T>>();
+
+  for (const entry of localArr) {
+    if (!entry || !entry.item || typeof entry.item.id !== 'string' || !entry.item.id.trim()) {
+      continue;
+    }
+    map.set(entry.item.id.trim(), entry);
+  }
+
+  for (const incomingEntry of incomingArr) {
+    if (!incomingEntry || !incomingEntry.item || typeof incomingEntry.item.id !== 'string' || !incomingEntry.item.id.trim()) {
+      continue;
+    }
+
+    const id = incomingEntry.item.id.trim();
+    const existingEntry = map.get(id);
+
+    if (!existingEntry) {
+      map.set(id, incomingEntry);
+    } else {
+      const existingTime = new Date(existingEntry.deletedAt || 0).getTime() || (existingEntry.item as any)?.updatedAt || 0;
+      const incomingTime = new Date(incomingEntry.deletedAt || 0).getTime() || (incomingEntry.item as any)?.updatedAt || 0;
+
+      if (incomingTime > existingTime) {
+        map.set(id, {
+          deletedAt: incomingEntry.deletedAt || existingEntry.deletedAt || new Date().toISOString(),
+          item: {
+            ...existingEntry.item,
+            ...incomingEntry.item
+          }
+        });
+      } else if (existingTime > incomingTime) {
+        map.set(id, {
+          deletedAt: existingEntry.deletedAt || incomingEntry.deletedAt || new Date().toISOString(),
+          item: {
+            ...incomingEntry.item,
+            ...existingEntry.item
+          }
+        });
+      } else {
+        map.set(id, {
+          deletedAt: incomingEntry.deletedAt || existingEntry.deletedAt || new Date().toISOString(),
+          item: {
+            ...existingEntry.item,
+            ...incomingEntry.item
+          }
+        });
+      }
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+/**
+ * Dedicated, type-safe merge for RecentlyDeletedData containing wrapper objects.
+ */
+export function mergeRecentlyDeleted(
+  localRec: RecentlyDeletedData | undefined | null,
+  incomingRec: RecentlyDeletedData | undefined | null
+): RecentlyDeletedData {
+  const local = localRec || { students: [], groups: [], lessons: [] };
+  const incoming = incomingRec || { students: [], groups: [], lessons: [] };
+
+  return {
+    students: mergeDeletedItems(local.students, incoming.students),
+    groups: mergeDeletedItems(local.groups, incoming.groups),
+    lessons: mergeDeletedItems(local.lessons, incoming.lessons)
+  };
+}
+
+/**
+ * Deduplicated union-based merge for dismissedDashboardLessons string IDs.
+ */
+export function mergeDismissedDashboardLessons(
+  localDismissed: string[] | undefined | null,
+  incomingDismissed: string[] | undefined | null,
+  isDelta: boolean = true
+): string[] {
+  const localArr = Array.isArray(localDismissed)
+    ? localDismissed.filter(id => typeof id === 'string' && id.trim())
+    : [];
+
+  if (!Array.isArray(incomingDismissed)) {
+    return localArr;
+  }
+
+  const incomingArr = incomingDismissed.filter(id => typeof id === 'string' && id.trim());
+
+  if (isDelta) {
+    return Array.from(new Set([...localArr, ...incomingArr]));
+  } else {
+    return Array.from(new Set([...localArr, ...incomingArr]));
+  }
 }
 
 export function mergeEntities<T extends SyncableRecord>(
@@ -307,6 +417,8 @@ export function mergeTeacherSettings(
       ...fallbackRecord?.schedulingPreferences,
       ...baseRecord?.schedulingPreferences
     },
+    recentlyDeleted: mergeRecentlyDeleted(local?.recentlyDeleted, incoming?.recentlyDeleted),
+    dismissedDashboardLessons: mergeDismissedDashboardLessons(local?.dismissedDashboardLessons, incoming?.dismissedDashboardLessons, true),
     updatedAt: Math.max(localTime, incomingTime, Date.now()),
     updatedByDeviceId: isIncomingNewer ? incoming?.updatedByDeviceId : local?.updatedByDeviceId,
     originDeviceId: isIncomingNewer ? incoming?.originDeviceId : local?.originDeviceId,

@@ -28,8 +28,13 @@ function stripSnapshotTimestamp(jsonStr: string): string {
 export function hasAnyWorkspaceData(jsonStr: string | null): boolean {
   if (!jsonStr) return false;
   try {
-    const p = JSON.parse(jsonStr);
-    if (!p || typeof p !== 'object') return false;
+    const raw = JSON.parse(jsonStr);
+    if (!raw || typeof raw !== 'object') return false;
+
+    // Support both root-level backup properties and nested `data` properties
+    const p = (raw.data && typeof raw.data === 'object' && raw.data !== null)
+      ? { ...raw.data, ...raw }
+      : raw;
 
     // 1. Check array collections
     const collectionKeys = [
@@ -56,7 +61,8 @@ export function hasAnyWorkspaceData(jsonStr: string | null): boolean {
       'homeworkSubmissions',
       'pickerNames',
       'prunedLessonIds',
-      'inspirationMessages'
+      'inspirationMessages',
+      'dismissedDashboardLessons'
     ];
 
     for (const key of collectionKeys) {
@@ -65,7 +71,19 @@ export function hasAnyWorkspaceData(jsonStr: string | null): boolean {
       }
     }
 
-    // 2. Check Custom Lernstudio Sets created by teacher
+    // 2. Check recentlyDeleted
+    const rec = p.recentlyDeleted;
+    if (rec && typeof rec === 'object') {
+      if (
+        (Array.isArray(rec.students) && rec.students.length > 0) ||
+        (Array.isArray(rec.groups) && rec.groups.length > 0) ||
+        (Array.isArray(rec.lessons) && rec.lessons.length > 0)
+      ) {
+        return true;
+      }
+    }
+
+    // 3. Check Custom Lernstudio Sets created by teacher
     if (Array.isArray(p.lernstudioSets)) {
       const hasCustomSet = p.lernstudioSets.some(
         (s: any) => s && s.id && !BUILTIN_LERNSTUDIO_MAP.has(s.id)
@@ -73,7 +91,7 @@ export function hasAnyWorkspaceData(jsonStr: string | null): boolean {
       if (hasCustomSet) return true;
     }
 
-    // 3. Check custom AI backgrounds
+    // 4. Check custom AI backgrounds
     if (
       (Array.isArray(p.customAiBackgrounds) && p.customAiBackgrounds.length > 0) ||
       (Array.isArray(p.profile?.customAiBackgrounds) && p.profile.customAiBackgrounds.length > 0)
@@ -81,7 +99,7 @@ export function hasAnyWorkspaceData(jsonStr: string | null): boolean {
       return true;
     }
 
-    // 4. Check teacher profile customization
+    // 5. Check teacher profile customization
     if (p.profile && typeof p.profile === 'object') {
       if (
         (p.profile.name && p.profile.name !== 'معلم Glück' && p.profile.name !== 'المعلم') ||
@@ -93,7 +111,7 @@ export function hasAnyWorkspaceData(jsonStr: string | null): boolean {
       }
     }
 
-    // 5. Check schoolSettings customization
+    // 6. Check schoolSettings customization
     const sch = p.schoolSettings || p.profile?.schoolSettings;
     if (sch && typeof sch === 'object') {
       if (

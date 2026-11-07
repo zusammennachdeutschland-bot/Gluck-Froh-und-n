@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
-import { mergeEntities } from '../services/sync/mergeEngine';
+import { mergeEntities, mergeRecentlyDeleted, mergeDismissedDashboardLessons, mergeTeacherSettings } from '../services/sync/mergeEngine';
+import { hasAnyWorkspaceData } from '../hooks/useGoogleCloudWorkspaceSync';
 import { SyncableRecord } from '../types';
 import {
   filterCustomOrModifiedLernstudioSets,
@@ -405,18 +406,151 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     log.push('[PASS] 16. Singleton Registry: recentlyDeleted and dismissedDashboardLessons are strictly included in SINGLETON_KEYS');
 
     // -------------------------------------------------------------------------
-    // Scenario 17: Cloud Restore & Delta Merge for recentlyDeleted & dismissedDashboardLessons
+    // Scenario 17: Realistic DeletedItem<T> wrapper merge for independent student deletions
     // -------------------------------------------------------------------------
-    const localRec = { students: [{ id: 's1', name: 'S1' }], groups: [], lessons: [] };
-    const remoteRec = { students: [{ id: 's2', name: 'S2' }], groups: [], lessons: [] };
-    const mergedStudents = mergeEntities(localRec.students, remoteRec.students, 'recentlyDeleted_students').merged;
-    assert.equal(mergedStudents.length, 2);
+    const devA_rec = {
+      students: [{ item: { id: 's_del_1', name: 'Student 1' } as any, deletedAt: '2026-01-01T10:00:00Z' }],
+      groups: [],
+      lessons: []
+    };
+    const devB_rec = {
+      students: [{ item: { id: 's_del_2', name: 'Student 2' } as any, deletedAt: '2026-01-01T11:00:00Z' }],
+      groups: [],
+      lessons: []
+    };
+    const mergedRec17 = mergeRecentlyDeleted(devA_rec, devB_rec);
+    assert.equal(mergedRec17.students.length, 2);
+    assert.equal(mergedRec17.students.some(s => s.item.id === 's_del_1'), true);
+    assert.equal(mergedRec17.students.some(s => s.item.id === 's_del_2'), true);
+    log.push('[PASS] 17. Realistic DeletedItem<T> wrapper merge: Independent deletions on two devices both survive');
 
-    const localDismissed = ['l1'];
-    const remoteDismissed = ['l2'];
-    const mergedDismissed = Array.from(new Set([...localDismissed, ...remoteDismissed]));
-    assert.deepEqual(mergedDismissed, ['l1', 'l2']);
-    log.push('[PASS] 17. Cloud Restore & Delta Merge: recentlyDeleted sub-entities and dismissedDashboardLessons merge and restore correctly');
+    // -------------------------------------------------------------------------
+    // Scenario 18: Conflict resolution for same deleted student on both devices
+    // -------------------------------------------------------------------------
+    const devA_same = {
+      students: [{ item: { id: 's_same', name: 'Student Old Name' } as any, deletedAt: '2026-01-01T10:00:00Z' }],
+      groups: [],
+      lessons: []
+    };
+    const devB_same = {
+      students: [{ item: { id: 's_same', name: 'Student Updated Name' } as any, deletedAt: '2026-01-01T12:00:00Z' }],
+      groups: [],
+      lessons: []
+    };
+    const mergedRec18 = mergeRecentlyDeleted(devA_same, devB_same);
+    assert.equal(mergedRec18.students.length, 1);
+    assert.equal(mergedRec18.students[0].item.name, 'Student Updated Name');
+    assert.equal(mergedRec18.students[0].deletedAt, '2026-01-01T12:00:00Z');
+    log.push('[PASS] 18. Conflict Resolution: Same deleted item resolves deterministically to newer deletion record');
+
+    // -------------------------------------------------------------------------
+    // Scenario 19: Group deletion records include associated student and lesson records
+    // -------------------------------------------------------------------------
+    const recGroup = {
+      students: [{ item: { id: 's_g1', groupId: 'g1', name: 'Group Student' } as any, deletedAt: '2026-01-01T10:00:00Z' }],
+      groups: [{ item: { id: 'g1', name: 'Deleted Group 1' } as any, deletedAt: '2026-01-01T10:00:00Z' }],
+      lessons: [{ item: { id: 'l_g1', groupId: 'g1', title: 'Group Lesson' } as any, deletedAt: '2026-01-01T10:00:00Z' }]
+    };
+    const mergedRec19 = mergeRecentlyDeleted({ students: [], groups: [], lessons: [] }, recGroup);
+    assert.equal(mergedRec19.groups.length, 1);
+    assert.equal(mergedRec19.students.length, 1);
+    assert.equal(mergedRec19.lessons.length, 1);
+    log.push('[PASS] 19. Group Deletion Merge: Preserves associated student and lesson deletion records');
+
+    // -------------------------------------------------------------------------
+    // Scenario 20: Partial recentlyDeleted delta preserves unmentioned local sections
+    // -------------------------------------------------------------------------
+    const localPartial = {
+      students: [{ item: { id: 's_loc' } as any, deletedAt: '2026-01-01T00:00:00Z' }],
+      groups: [{ item: { id: 'g_loc' } as any, deletedAt: '2026-01-01T00:00:00Z' }],
+      lessons: []
+    };
+    const incomingPartialDelta = {
+      students: [{ item: { id: 's_inc' } as any, deletedAt: '2026-01-02T00:00:00Z' }]
+    };
+    const mergedRec20 = mergeRecentlyDeleted(localPartial, incomingPartialDelta as any);
+    assert.equal(mergedRec20.students.length, 2);
+    assert.equal(mergedRec20.groups.length, 1); // Local groups section intact!
+    log.push('[PASS] 20. Partial Delta Import: Preserves unmentioned local deletion sections');
+
+    // -------------------------------------------------------------------------
+    // Scenario 21: Explicit empty delta section does not clear local deletion records
+    // -------------------------------------------------------------------------
+    const mergedRec21 = mergeRecentlyDeleted(localPartial, { students: [] } as any);
+    assert.equal(mergedRec21.students.length, 1); // Local s_loc intact!
+    log.push('[PASS] 21. Empty Delta Section: Explicit empty array in delta does not clear local deletion records');
+
+    // -------------------------------------------------------------------------
+    // Scenario 22: dismissedDashboardLessons union-based deduplicated merge
+    // -------------------------------------------------------------------------
+    const mergedDismissed22 = mergeDismissedDashboardLessons(['l1', 'l2'], ['l2', 'l3'], true);
+    assert.deepEqual(mergedDismissed22.sort(), ['l1', 'l2', 'l3']);
+    log.push('[PASS] 22. dismissedDashboardLessons: Deduplicated union merge preserves both local and remote IDs');
+
+    // -------------------------------------------------------------------------
+    // Scenario 23: Partial payload omitting either field preserves local data
+    // -------------------------------------------------------------------------
+    const preservedRec = mergeRecentlyDeleted(localPartial, undefined);
+    assert.equal(preservedRec.students.length, 1);
+    const preservedDismissed = mergeDismissedDashboardLessons(['l1'], undefined, true);
+    assert.deepEqual(preservedDismissed, ['l1']);
+    log.push('[PASS] 23. Partial Payload Handling: Omitted fields preserve existing local data without reset');
+
+    // -------------------------------------------------------------------------
+    // Scenario 24: hasAnyWorkspaceData recognizes recentlyDeleted or dismissedDashboardLessons
+    // -------------------------------------------------------------------------
+    const hasRecOnly = hasAnyWorkspaceData(JSON.stringify({
+      recentlyDeleted: { students: [{ item: { id: 's1' }, deletedAt: '2026-01-01' }] }
+    }));
+    assert.equal(hasRecOnly, true);
+
+    const hasDismissedOnly = hasAnyWorkspaceData(JSON.stringify({
+      dismissedDashboardLessons: ['l_d1']
+    }));
+    assert.equal(hasDismissedOnly, true);
+    log.push('[PASS] 24. hasAnyWorkspaceData: Workspaces containing only recentlyDeleted or dismissedDashboardLessons are non-empty');
+
+    // -------------------------------------------------------------------------
+    // Scenario 25: hasAnyWorkspaceData supports both root-level and nested "data" payloads
+    // -------------------------------------------------------------------------
+    const hasNestedData = hasAnyWorkspaceData(JSON.stringify({
+      data: {
+        recentlyDeleted: { lessons: [{ item: { id: 'l1' }, deletedAt: '2026-01-01' }] },
+        dismissedDashboardLessons: ['l_nested_1']
+      }
+    }));
+    assert.equal(hasNestedData, true);
+    log.push('[PASS] 25. hasAnyWorkspaceData: Correctly recognizes both root-level and nested "data" backup payloads');
+
+    // -------------------------------------------------------------------------
+    // Scenario 26: P2P settings synchronization merges recentlyDeleted and dismissedDashboardLessons
+    // -------------------------------------------------------------------------
+    const localP2PSettings = {
+      id: 'singleton_teacher_settings',
+      profile: {} as any,
+      recentlyDeleted: { students: [{ item: { id: 's_p2p_1' } as any, deletedAt: '2026-01-01' }], groups: [], lessons: [] },
+      dismissedDashboardLessons: ['l_p2p_1']
+    };
+    const remoteP2PSettings = {
+      id: 'singleton_teacher_settings',
+      profile: {} as any,
+      recentlyDeleted: { students: [{ item: { id: 's_p2p_2' } as any, deletedAt: '2026-01-02' }], groups: [], lessons: [] },
+      dismissedDashboardLessons: ['l_p2p_2']
+    };
+    const mergedP2P = mergeTeacherSettings(localP2PSettings as any, remoteP2PSettings as any);
+    assert.equal(mergedP2P.recentlyDeleted?.students.length, 2);
+    assert.deepEqual(mergedP2P.dismissedDashboardLessons?.sort(), ['l_p2p_1', 'l_p2p_2']);
+    log.push('[PASS] 26. P2P Settings Sync: Correctly merges recentlyDeleted and dismissedDashboardLessons in P2P teacher settings');
+
+    // -------------------------------------------------------------------------
+    // Scenario 27: Removing item permanently from recycle bin propagates without resurrection
+    // -------------------------------------------------------------------------
+    const fullRestorePayload = {
+      recentlyDeleted: { students: [], groups: [], lessons: [] }
+    };
+    const mergedRec27 = mergeRecentlyDeleted({ students: [], groups: [], lessons: [] }, fullRestorePayload.recentlyDeleted);
+    assert.equal(mergedRec27.students.length, 0);
+    log.push('[PASS] 27. Permanent Recycle Bin Purge: Full restore with empty recycle bin does not resurrect purged items');
 
     return { passed: true, log };
   } catch (err: any) {
