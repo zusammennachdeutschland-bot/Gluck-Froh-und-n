@@ -725,16 +725,18 @@ export async function uploadWorkspaceToGoogleCloud(
       await postChunksToRelayServer(uid, relayChunks);
     }
 
-    // Reset rolling delta accumulator after full category compaction
+    // Reset rolling delta accumulator and watermarks ONLY after confirmed category compaction
     saveDeltaAccumulator(uid, {});
     saveWatermarks(uid, nextWatermarks);
     setLastCloudSyncTime(nowIso);
     return { success: true, syncedAtIso: nowIso, deltaCount: totalChangedCount };
   } catch (err: any) {
+    const errMsg = err?.message || 'حدث خطأ أثناء مزامنة التغييرات مع السحابة.';
+    console.error('Workspace upload error:', errMsg);
     return {
       success: false,
       syncedAtIso: nowIso,
-      error: err?.message || 'حدث خطأ أثناء مزامنة التغييرات مع السحابة.'
+      error: errMsg
     };
   }
 }

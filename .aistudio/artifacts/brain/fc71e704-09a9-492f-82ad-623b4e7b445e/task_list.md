@@ -18,3 +18,9 @@
   - [x] Verified types and linter with `lint_applet` (`tsc --noEmit` passed with 0 errors).
   - [x] Verified full production bundle with `npm run build` (Succeeded).
   - [x] Dev server restarted cleanly on port 3000.
+- [ ] **5. Google Auth & Sync Repair**
+  - [ ] Transition to Native Capacitor Google Sign-In for Android.
+  - [ ] Hardening `executeSafeFirestoreWrite` and sync reports.
+  - [ ] Implementing UID validation in `firestore.rules`.
+  - [ ] Adding Sync Status indicators and Android Keystore tool to Settings.
+  - [ ] Verification across 12 test scenarios.

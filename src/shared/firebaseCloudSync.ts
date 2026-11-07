@@ -16,6 +16,7 @@ import {
   inMemoryPersistence,
   User
 } from 'firebase/auth';
+import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 import {
   getFirestore,
   initializeFirestore,
@@ -137,9 +138,9 @@ export async function executeSafeFirestoreWrite<T>(
 
       const res = await Promise.race([currentPromise, timeoutPromise]);
       if (res === timeoutSymbol) {
-        // Firestore SDK keeps the write in its internal pending queue to flush when stream/quota resumes
-        markFirestoreWriteQuotaExhaustedToday();
-        return undefined as unknown as T;
+        // Firestore SDK keeps the write in its internal pending queue, but we must NOT report success to the sync engine
+        console.warn('Firestore write buffered due to timeout/quota.');
+        throw new Error('Firestore write timeout/buffered');
       }
       return res as T;
     } catch (err: any) {
@@ -148,7 +149,7 @@ export async function executeSafeFirestoreWrite<T>(
       const msg = err?.message || String(err);
       if (code === 'resource-exhausted' || msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
         markFirestoreWriteQuotaExhaustedToday();
-        return undefined as unknown as T;
+        throw new Error('Quota exceeded: ' + msg);
       }
       if (code === 'permission-denied' || msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
         throw err;
@@ -320,26 +321,32 @@ export async function signInTeacherWithGoogle(): Promise<User | null> {
     window.location.protocol === 'capacitor:' ||
     window.location.protocol === 'file:';
 
-  // 1. On Capacitor Android native, popups are not supported. Use signInWithRedirect.
+  // 1. On Capacitor Android native, use the Native SDK for a seamless experience
   if (isCapacitorNative) {
     try {
-      await signInWithRedirect(auth, googleProvider);
-      return null; // Completes upon redirect return
-    } catch (redirectErr) {
-      console.warn('Capacitor native redirect sign-in error:', redirectErr);
-      throw redirectErr;
+      // Initialize the plugin if not already done (it reads from capacitor.config.ts)
+      const googleUser = await GoogleAuth.signIn();
+      if (googleUser?.authentication?.idToken) {
+        return await signInWithGoogleIdToken(googleUser.authentication.idToken);
+      }
+      throw new Error('Native Google Sign-In failed to return an ID token.');
+    } catch (err: any) {
+      console.warn('Capacitor native Google sign-in error:', err);
+      // Fallback to standard redirect if native plugin fails
+      try {
+        await signInWithRedirect(auth, googleProvider);
+        return null;
+      } catch (redirectErr) {
+        throw err;
+      }
     }
   }
 
   // 2. Set persistence explicitly
   try {
-    await setPersistence(auth, browserLocalPersistence).catch(() => {
-      return setPersistence(auth, browserSessionPersistence).catch(() => {
-        return setPersistence(auth, inMemoryPersistence).catch(() => {});
-      });
-    });
+    await setPersistence(auth, browserLocalPersistence);
   } catch {
-    // Ignore persistence setup notice
+    // Ignore
   }
 
   // 3. Primary popup sign-in attempt
@@ -351,17 +358,15 @@ export async function signInTeacherWithGoogle(): Promise<User | null> {
     const errMsg = err?.message || String(err);
     console.warn('Google sign-in primary attempt notice:', errMsg);
 
-    // Do NOT attempt signInWithRedirect if domain is unauthorized or user closed the popup
     if (
       errCode === 'auth/unauthorized-domain' ||
-      errMsg.includes('unauthorized-domain') ||
       errCode === 'auth/popup-closed-by-user' ||
       errCode === 'auth/cancelled-popup-request'
     ) {
       throw err;
     }
 
-    // 4. Fallback to signInWithRedirect only for storage partitioning, missing initial state, or popup blocking
+    // 4. Fallback to signInWithRedirect
     try {
       await signInWithRedirect(auth, googleProvider);
       return null;
@@ -410,19 +415,74 @@ export function subscribeTeacherAuth(cb: (user: User | null) => void): () => voi
 }
 
 // ============================================================================
+// CONFIRMED FIRESTORE WRITE HELPER (FOR HOMEWORK & SUBMISSIONS)
+// Never treats failed or timed-out writes as successful; retries safely.
+// ============================================================================
+export async function executeConfirmedFirestoreWrite<T>(
+  writeFn: () => Promise<T>,
+  timeoutMs = 12000,
+  maxRetries = 2
+): Promise<T> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw new Error('Offline: no internet connection.');
+  }
+
+  let attempt = 0;
+  let lastError: any = null;
+
+  while (attempt <= maxRetries) {
+    let timer: any = null;
+    try {
+      const writePromise = writeFn();
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('Firestore write timeout.'));
+        }, timeoutMs);
+      });
+
+      const res = await Promise.race([writePromise, timeoutPromise]);
+      return res;
+    } catch (err: any) {
+      lastError = err;
+      const code = err?.code || '';
+      const msg = err?.message || String(err);
+      if (
+        code === 'permission-denied' ||
+        msg.includes('permission-denied') ||
+        msg.includes('Missing or insufficient permissions')
+      ) {
+        throw err;
+      }
+      attempt++;
+      if (attempt <= maxRetries) {
+        await new Promise((r) => setTimeout(r, 800 * attempt));
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  throw lastError || new Error('Firestore write failed.');
+}
+
+// ============================================================================
 // FIRESTORE HOMEWORK ASSIGNMENTS
 // ============================================================================
-function sanitizeDocId(rawId: string): string {
+export function sanitizeDocId(rawId: string): string {
   return (rawId || 'hw_default').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
 }
 
-export async function saveAssignmentToFirestore(assignment: HomeworkAssignment): Promise<void> {
-  if (isFirestoreWriteQuotaExhaustedToday()) return;
+export async function saveAssignmentToFirestore(assignment: HomeworkAssignment): Promise<boolean> {
+  if (!assignment || !assignment.id) return false;
   const safeId = sanitizeDocId(assignment.id);
   const path = `homework_assignments/${safeId}`;
   try {
-    const payloadJson = JSON.stringify({ ...assignment, id: safeId }).slice(0, 490000);
-    await executeSafeFirestoreWrite(
+    const cleanAssignment: HomeworkAssignment = {
+      ...assignment,
+      id: safeId,
+      cloudSynced: true
+    };
+    const payloadJson = JSON.stringify(cleanAssignment).slice(0, 490000);
+    await executeConfirmedFirestoreWrite(
       () =>
         setDoc(doc(db, 'homework_assignments', safeId), {
           id: safeId,
@@ -432,11 +492,13 @@ export async function saveAssignmentToFirestore(assignment: HomeworkAssignment):
           payloadJson,
           ...(auth.currentUser?.email ? { ownerEmail: auth.currentUser.email.slice(0, 120) } : {})
         }),
-      15000,
-      3
+      12000,
+      2
     );
+    return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+    return false;
   }
 }
 
@@ -448,7 +510,8 @@ export async function fetchAssignmentFromFirestore(assignmentId: string): Promis
     if (!snap.exists()) return null;
     const data = snap.data();
     if (data?.payloadJson) {
-      return JSON.parse(data.payloadJson) as HomeworkAssignment;
+      const parsed = JSON.parse(data.payloadJson) as HomeworkAssignment;
+      return { ...parsed, cloudSynced: true };
     }
     return null;
   } catch (error) {
@@ -467,7 +530,8 @@ export async function fetchAllAssignmentsFromFirestore(): Promise<HomeworkAssign
       try {
         const data = docSnap.data();
         if (data?.payloadJson) {
-          list.push(JSON.parse(data.payloadJson));
+          const parsed = JSON.parse(data.payloadJson);
+          list.push({ ...parsed, cloudSynced: true });
         }
       } catch {
         // Ignore malformed doc
@@ -491,7 +555,8 @@ export function subscribeAssignmentsFromFirestore(
         try {
           const data = docSnap.data();
           if (data?.payloadJson) {
-            list.push(JSON.parse(data.payloadJson));
+            const parsed = JSON.parse(data.payloadJson);
+            list.push({ ...parsed, cloudSynced: true });
           }
         } catch {
           // Ignore
@@ -506,19 +571,21 @@ export function subscribeAssignmentsFromFirestore(
   );
 }
 
-export async function deleteAssignmentFromFirestore(assignmentId: string): Promise<void> {
-  if (!assignmentId || isFirestoreWriteQuotaExhaustedToday()) return;
+export async function deleteAssignmentFromFirestore(assignmentId: string): Promise<boolean> {
+  if (!assignmentId) return false;
   const safeId = sanitizeDocId(assignmentId);
   const path = `homework_assignments/${safeId}`;
   try {
-    await executeSafeFirestoreWrite(deleteDoc(doc(db, 'homework_assignments', safeId)));
+    await executeConfirmedFirestoreWrite(() => deleteDoc(doc(db, 'homework_assignments', safeId)));
+    return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+    return false;
   }
 }
 
-export async function deleteSubmissionsForAssignmentFromFirestore(assignmentId: string): Promise<void> {
-  if (!assignmentId || isFirestoreWriteQuotaExhaustedToday()) return;
+export async function deleteSubmissionsForAssignmentFromFirestore(assignmentId: string): Promise<boolean> {
+  if (!assignmentId) return false;
   const safeAssignmentId = sanitizeDocId(assignmentId);
   const path = 'homework_submissions';
   try {
@@ -529,49 +596,59 @@ export async function deleteSubmissionsForAssignmentFromFirestore(assignmentId: 
     const snap = await getDocs(q);
     const deletePromises: Promise<any>[] = [];
     snap.forEach((docSnap) => {
-      deletePromises.push(executeSafeFirestoreWrite(deleteDoc(docSnap.ref)));
+      deletePromises.push(executeConfirmedFirestoreWrite(() => deleteDoc(docSnap.ref)));
     });
     if (deletePromises.length > 0) {
       await Promise.all(deletePromises);
     }
+    return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+    return false;
   }
 }
 
 // ============================================================================
 // FIRESTORE STUDENT SUBMISSIONS
 // ============================================================================
-export async function saveSubmissionToFirestore(submission: HomeworkSubmission): Promise<void> {
-  if (isFirestoreWriteQuotaExhaustedToday()) return;
+export async function saveSubmissionToFirestore(submission: HomeworkSubmission): Promise<boolean> {
+  if (!submission || !submission.id || !submission.assignmentId) return false;
   const safeId = sanitizeDocId(submission.id);
   const safeAssignmentId = sanitizeDocId(submission.assignmentId);
   const path = `homework_submissions/${safeId}`;
   try {
     const isCompleted = submission.status === 'completed';
+    const nowIso = new Date().toISOString();
     const normalized: HomeworkSubmission = {
       ...submission,
       id: safeId,
       assignmentId: safeAssignmentId,
-      completedAt: isCompleted ? (submission.completedAt || new Date().toISOString()) : ''
+      completedAt: isCompleted ? (submission.completedAt || nowIso) : '',
+      updatedAt: nowIso,
+      cloudSynced: true
     };
     const payloadJson = JSON.stringify(normalized).slice(0, 490000);
-    await executeSafeFirestoreWrite(
+    await executeConfirmedFirestoreWrite(
       () =>
         setDoc(doc(db, 'homework_submissions', safeId), {
           id: safeId,
           assignmentId: safeAssignmentId,
           studentName: (submission.studentName || 'طالب').slice(0, 140),
-          score: Math.max(0, Math.min(100000, Number(submission.score) || 0)),
-          accuracyPercent: Math.max(0, Math.min(100, Number(submission.accuracyPercent) || 0)),
-          completedAt: (normalized.completedAt || submission.startedAt || new Date().toISOString()).slice(0, 60),
+          score: Math.max(0, Math.min(100000, Number(submission.score ?? submission.correctAnswersCount) || 0)),
+          accuracyPercent: Math.max(
+            0,
+            Math.min(100, Number(submission.accuracyPercent ?? submission.scorePercentage ?? submission.accuracy) || 0)
+          ),
+          completedAt: (normalized.completedAt || submission.startedAt || nowIso).slice(0, 60),
           payloadJson
         }),
-      15000,
-      3
+      12000,
+      2
     );
+    return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+    return false;
   }
 }
 
@@ -591,7 +668,8 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
       try {
         const data = docSnap.data();
         if (data?.payloadJson) {
-          list.push(JSON.parse(data.payloadJson));
+          const parsed = JSON.parse(data.payloadJson);
+          list.push({ ...parsed, cloudSynced: true });
         }
       } catch {
         // Ignore
@@ -599,8 +677,8 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
     });
     return list.sort(
       (a, b) =>
-        new Date(b.completedAt || b.startedAt || 0).getTime() -
-        new Date(a.completedAt || a.startedAt || 0).getTime()
+        new Date(b.updatedAt || b.completedAt || b.startedAt || 0).getTime() -
+        new Date(a.updatedAt || a.completedAt || a.startedAt || 0).getTime()
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
@@ -617,7 +695,8 @@ export async function fetchAllSubmissionsFromFirestore(): Promise<HomeworkSubmis
       try {
         const data = docSnap.data();
         if (data?.payloadJson) {
-          list.push(JSON.parse(data.payloadJson));
+          const parsed = JSON.parse(data.payloadJson);
+          list.push({ ...parsed, cloudSynced: true });
         }
       } catch {
         // Ignore
@@ -625,8 +704,8 @@ export async function fetchAllSubmissionsFromFirestore(): Promise<HomeworkSubmis
     });
     return list.sort(
       (a, b) =>
-        new Date(b.completedAt || b.startedAt || 0).getTime() -
-        new Date(a.completedAt || a.startedAt || 0).getTime()
+        new Date(b.updatedAt || b.completedAt || b.startedAt || 0).getTime() -
+        new Date(a.updatedAt || a.completedAt || a.startedAt || 0).getTime()
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
@@ -650,7 +729,8 @@ export function subscribeSubmissionsFromFirestore(
         try {
           const data = docSnap.data();
           if (data?.payloadJson) {
-            list.push(JSON.parse(data.payloadJson));
+            const parsed = JSON.parse(data.payloadJson);
+            list.push({ ...parsed, cloudSynced: true });
           }
         } catch {
           // Ignore
@@ -658,8 +738,8 @@ export function subscribeSubmissionsFromFirestore(
       });
       list.sort(
         (a, b) =>
-          new Date(b.completedAt || b.startedAt || 0).getTime() -
-          new Date(a.completedAt || a.startedAt || 0).getTime()
+          new Date(b.updatedAt || b.completedAt || b.startedAt || 0).getTime() -
+          new Date(a.updatedAt || a.completedAt || a.startedAt || 0).getTime()
       );
       onUpdate(list);
     },
@@ -672,13 +752,13 @@ export function subscribeSubmissionsFromFirestore(
 // ============================================================================
 // FIRESTORE LERNSTUDIO SETS SYNC (Main App <-> Vercel)
 // ============================================================================
-export async function saveLernstudioSetToFirestore(setItem: LernstudioSet): Promise<void> {
-  if (!setItem || !setItem.id || isFirestoreWriteQuotaExhaustedToday()) return;
+export async function saveLernstudioSetToFirestore(setItem: LernstudioSet): Promise<boolean> {
+  if (!setItem || !setItem.id) return false;
   const safeId = sanitizeDocId(setItem.id);
   const path = `lernstudio_sets/${safeId}`;
   try {
     const payloadJson = JSON.stringify(setItem).slice(0, 490000);
-    await executeSafeFirestoreWrite(
+    await executeConfirmedFirestoreWrite(() =>
       setDoc(doc(db, 'lernstudio_sets', safeId), {
         id: safeId,
         title: (setItem.title || 'Set').slice(0, 290),
@@ -688,19 +768,23 @@ export async function saveLernstudioSetToFirestore(setItem: LernstudioSet): Prom
         ...(auth.currentUser?.email ? { ownerEmail: auth.currentUser.email.slice(0, 120) } : {})
       })
     );
+    return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+    return false;
   }
 }
 
-export async function deleteLernstudioSetFromFirestore(setId: string): Promise<void> {
-  if (isFirestoreWriteQuotaExhaustedToday()) return;
+export async function deleteLernstudioSetFromFirestore(setId: string): Promise<boolean> {
+  if (!setId) return false;
   const safeId = sanitizeDocId(setId);
   const path = `lernstudio_sets/${safeId}`;
   try {
-    await executeSafeFirestoreWrite(deleteDoc(doc(db, 'lernstudio_sets', safeId)));
+    await executeConfirmedFirestoreWrite(() => deleteDoc(doc(db, 'lernstudio_sets', safeId)));
+    return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+    return false;
   }
 }
 

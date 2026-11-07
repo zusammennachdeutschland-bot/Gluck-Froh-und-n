@@ -23,6 +23,11 @@ const config: CapacitorConfig = {
       backgroundColor: "#ffffff",
       androidSplashResourceName: "splash",
       showSpinner: false
+    },
+    GoogleAuth: {
+      scopes: ["profile", "email"],
+      serverClientId: "REPLACE_WITH_GOOGLE_CLIENT_ID_FOR_WEB",
+      forceCodeForRefreshToken: true
     }
   }
 };

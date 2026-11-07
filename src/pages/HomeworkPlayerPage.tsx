@@ -18,7 +18,9 @@ import {
   Gift,
   Check,
   X,
-  HelpCircle,
+  Cloud,
+  CloudOff,
+  RefreshCw,
   Award
 } from 'lucide-react';
 import { speakGermanText } from '../shared/audioSpeechUtils';
@@ -41,8 +43,10 @@ import {
   fetchAssignmentFromFirestore,
   fetchLernstudioSetFromFirestore,
   saveAssignmentToFirestore,
-  saveSubmissionToFirestore,
-  subscribeSubmissionsFromFirestore
+  subscribeSubmissionsFromFirestore,
+  buildDeterministicSubmissionId,
+  saveSubmissionWithConfirmation,
+  flushPendingHomeworkCloudWrites
 } from '../shared/homeworkStorageSync';
 
 interface Props {
@@ -156,7 +160,22 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   const [submitting, setSubmitting] = useState(false);
   const [finalScore, setFinalScore] = useState<any | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
+  const [cloudSyncState, setCloudSyncState] = useState<'idle' | 'syncing' | 'synced' | 'pending_retry'>('idle');
+  const [retryingCloudSync, setRetryingCloudSync] = useState(false);
   const activeSubmissionIdRef = React.useRef<string>('sub_' + Math.random().toString(36).substring(2, 9));
+  const isSubmittingRef = React.useRef<boolean>(false);
+
+  // Automatically flush any pending homework cloud writes when connectivity resumes
+  useEffect(() => {
+    const handleOnline = async () => {
+      const res = await flushPendingHomeworkCloudWrites();
+      if (res.remainingPending === 0 && res.syncedSubmissions > 0) {
+        setCloudSyncState('synced');
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
 
   // Subscribe to live Firestore class leaderboard for this assignment
   useEffect(() => {
@@ -588,13 +607,50 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     e.preventDefault();
     if (!studentName.trim()) return;
     if (isAttemptLimitReached) return;
-    activeSubmissionIdRef.current = 'sub_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
 
     const nextAttempt = studentCompletedAttempts.length + 1;
     setCurrentAttemptNumber(nextAttempt);
+    isSubmittingRef.current = false;
 
-    setStartTime(new Date().toISOString());
+    const deterministicId = buildDeterministicSubmissionId(
+      assignmentId,
+      selectedStudentId,
+      studentName.trim(),
+      nextAttempt
+    );
+    activeSubmissionIdRef.current = deterministicId;
+
+    const nowIso = new Date().toISOString();
+    setStartTime(nowIso);
     playLernstudioSound('powerup_star');
+
+    // Immediately record the initial in-progress attempt so the teacher sees "In Progress" in real time
+    const initialInProgress: HomeworkSubmission = {
+      id: deterministicId,
+      assignmentId,
+      studentId: selectedStudentId || undefined,
+      studentName: studentName.trim(),
+      attemptNumber: nextAttempt,
+      status: 'in_progress',
+      startedAt: nowIso,
+      completedAt: '',
+      updatedAt: nowIso,
+      timeSpentSeconds: 0,
+      totalQuestions: quizQuestions.length || assignment?.questionCount || 0,
+      correctAnswersCount: 0,
+      scorePercentage: 0,
+      accuracyPercent: 0,
+      score: 0,
+      accuracy: 0,
+      goldEarned: 0,
+      maxStreak: 0,
+      completedStudyPhase: false,
+      responses: []
+    };
+    setCloudSyncState('syncing');
+    saveSubmissionWithConfirmation(initialInProgress).then((res) => {
+      setCloudSyncState(res.cloudSynced ? 'synced' : 'pending_retry');
+    });
 
     const flowMode: HomeworkFlowMode = assignment?.flowMode || 'teacher_then_quiz';
     if (flowMode === 'teacher_then_quiz' && studyItems.length > 0) {
@@ -702,7 +758,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const startMs = startTime ? new Date(startTime).getTime() : Date.now() - currResponses.length * 4000;
     const timeSpentSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
 
-    const liveSubmissionObj = {
+    const liveSubmissionObj: HomeworkSubmission = {
       id: activeSubmissionIdRef.current,
       assignmentId,
       studentId: selectedStudentId || undefined,
@@ -711,6 +767,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       status: 'in_progress',
       startedAt: startTime || nowIso,
       completedAt: '',
+      updatedAt: nowIso,
       timeSpentSeconds,
       totalQuestions: totalQ,
       correctAnswersCount: correctCount,
@@ -724,8 +781,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       responses: currResponses
     };
 
-    saveLocalSubmission(liveSubmissionObj as any, false);
-    saveSubmissionToFirestore(liveSubmissionObj as any).catch(() => {});
+    setCloudSyncState('syncing');
+    saveSubmissionWithConfirmation(liveSubmissionObj).then((res) => {
+      setCloudSyncState(res.cloudSynced ? 'synced' : 'pending_retry');
+    });
   };
 
   const handlePickChest = (idx: number) => {
@@ -746,8 +805,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     finalGoldValue: number,
     finalMaxStreak: number
   ) => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
     setPhase('completed');
     setSubmitting(true);
+    setCloudSyncState('syncing');
     confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
 
     const correctCount = allResponses.filter((r) => r.isCorrect).length;
@@ -757,7 +820,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const startMs = startTime ? new Date(startTime).getTime() : Date.now() - totalQ * 4000;
     const timeSpentSeconds = Math.max(5, Math.round((Date.now() - startMs) / 1000));
 
-    const localSubmissionObj = {
+    const localSubmissionObj: HomeworkSubmission = {
       id: activeSubmissionIdRef.current,
       assignmentId,
       studentId: selectedStudentId || undefined,
@@ -766,6 +829,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       status: 'completed',
       startedAt: startTime || completedAtIso,
       completedAt: completedAtIso,
+      updatedAt: completedAtIso,
       timeSpentSeconds,
       totalQuestions: totalQ,
       correctAnswersCount: correctCount,
@@ -779,18 +843,25 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       responses: allResponses
     };
 
-    // 1. Save immediately to localStorage AND Firebase Firestore so the teacher sees it in real time in the Main App & Vercel!
-    saveLocalSubmission(localSubmissionObj, false);
-    await saveSubmissionToFirestore(localSubmissionObj as any).catch(() => {});
-    setFinalScore(localSubmissionObj);
+    // 1. Save immediately to localStorage AND verify Firebase Firestore persistence
+    const confirmRes = await saveSubmissionWithConfirmation(localSubmissionObj);
+    const syncedSubmissionObj: HomeworkSubmission = {
+      ...localSubmissionObj,
+      cloudSynced: confirmRes.cloudSynced
+    };
+    setCloudSyncState(confirmRes.cloudSynced ? 'synced' : 'pending_retry');
+    setFinalScore(syncedSubmissionObj);
 
     try {
       const res = await fetch('/api/homework/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          id: activeSubmissionIdRef.current,
           assignmentId,
+          studentId: selectedStudentId || undefined,
           studentName: studentName.trim(),
+          attemptNumber: currentAttemptNumber,
           responses: allResponses,
           startedAt: startTime,
           completedAt: completedAtIso,
@@ -810,18 +881,47 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       }
 
       if (res.ok && data.submission) {
-        saveLocalSubmission(data.submission, false);
-        setFinalScore(data.submission);
+        const mergedFinal: HomeworkSubmission = {
+          ...syncedSubmissionObj,
+          ...data.submission,
+          id: activeSubmissionIdRef.current,
+          studentId: selectedStudentId || data.submission.studentId || undefined,
+          attemptNumber: currentAttemptNumber,
+          status: 'completed',
+          completedAt: completedAtIso,
+          cloudSynced: confirmRes.cloudSynced
+        };
+        saveLocalSubmission(mergedFinal, !confirmRes.cloudSynced);
+        setFinalScore(mergedFinal);
         playLernstudioSound('fanfare_victory');
       } else {
-        setFinalScore(localSubmissionObj);
+        setFinalScore(syncedSubmissionObj);
         playLernstudioSound('fanfare_victory');
       }
     } catch {
-      setFinalScore(localSubmissionObj);
+      setFinalScore(syncedSubmissionObj);
       playLernstudioSound('fanfare_victory');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleManualRetryCloudSync = async () => {
+    setRetryingCloudSync(true);
+    setCloudSyncState('syncing');
+    try {
+      if (finalScore) {
+        const res = await saveSubmissionWithConfirmation(finalScore);
+        if (res.cloudSynced) {
+          setCloudSyncState('synced');
+          setFinalScore((prev: any) => (prev ? { ...prev, cloudSynced: true } : prev));
+          return;
+        }
+      }
+      const flushRes = await flushPendingHomeworkCloudWrites();
+      setCloudSyncState(flushRes.remainingPending === 0 ? 'synced' : 'pending_retry');
+    } finally {
+      setRetryingCloudSync(false);
     }
   };
 
@@ -1173,11 +1273,34 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               <Trophy className="w-7 h-7" />
             </div>
 
-            <div className="space-y-1">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold mb-1">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>تم تسجيل نتيجتك بنجاح!</span>
-              </div>
+            <div className="space-y-1.5">
+              {cloudSyncState === 'synced' ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold mb-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>تم حفظ نتيجتك ومزامنتها سحابياً مع المعلم ✓</span>
+                </div>
+              ) : cloudSyncState === 'syncing' ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold mb-1">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>تم الحفظ محلياً · جاري المزامنة السحابية...</span>
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold space-y-2 mb-2">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <CloudOff className="w-4 h-4 shrink-0" />
+                    <span>تم حفظ إجابتك محلياً بأمان — بانتظار الإنترنت للمزامنة مع جهاز المعلم</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={retryingCloudSync}
+                    onClick={handleManualRetryCloudSync}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold cursor-pointer transition-colors"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${retryingCloudSync ? 'animate-spin' : ''}`} />
+                    <span>{retryingCloudSync ? 'جاري إعادة المحاولة...' : 'إعادة محاولة الإرسال السحابي الآن'}</span>
+                  </button>
+                </div>
+              )}
               <h2 className="text-xl sm:text-2xl font-bold text-text-main">
                 أحسنت يا {studentName}! 🎉
               </h2>
@@ -1185,7 +1308,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             </div>
 
             {submitting ? (
-              <p className="text-xs font-bold text-text-muted animate-pulse">جاري حفظ النتيجة...</p>
+              <p className="text-xs font-bold text-text-muted animate-pulse">جاري تأكيد حفظ النتيجة...</p>
             ) : (
               finalScore && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
@@ -1258,15 +1381,23 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               <div className="pt-2">
                 <button
                   onClick={() => {
-                    activeSubmissionIdRef.current = 'sub_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
-                    setCurrentAttemptNumber((prev) => Math.max(prev + 1, studentCompletedAttempts.length + 1));
+                    const nextAttempt = Math.max(currentAttemptNumber + 1, studentCompletedAttempts.length + 1);
+                    isSubmittingRef.current = false;
+                    activeSubmissionIdRef.current = buildDeterministicSubmissionId(
+                      assignmentId,
+                      selectedStudentId,
+                      studentName.trim(),
+                      nextAttempt
+                    );
+                    setCurrentAttemptNumber(nextAttempt);
                     setCurrentIdx(0);
                     setStudyIndex(0);
                     setResponses([]);
                     setGold(0);
                     setStreak(0);
                     setFinalScore(null);
-                    setStartTime(new Date().toISOString());
+                    const nowIso = new Date().toISOString();
+                    setStartTime(nowIso);
                     setPhase(assignment?.flowMode === 'teacher_then_quiz' ? 'teacher_study' : 'quiz');
                   }}
                   className="w-full py-2.5 px-4 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-2xs"

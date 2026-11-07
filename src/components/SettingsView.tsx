@@ -6,7 +6,7 @@ import {
   HardDrive, Download, Upload, Trash2, AlertTriangle, MessageSquare, ChevronRight,
   ArrowLeft, ArrowRight, Calendar, ShieldAlert, ShieldCheck, Info, Copy, Save, Phone, ExternalLink,
   BookOpen, FileText, Bell, CheckSquare, XCircle, Award, Sparkles, Star, Plus, Pencil, RotateCcw, Heart,
-  Target, Zap, Smartphone, Lock, Shield, Share2, Layers, CheckCircle, Palette
+  Target, Zap, Smartphone, Lock, Shield, Share2, Layers, CheckCircle, Palette, FolderOpen, Key, Cloud
 } from 'lucide-react';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
 import { SmartBackupCenter } from './SmartBackupCenter';
@@ -21,7 +21,8 @@ import { DownloadedFilesSection } from './DownloadedFilesSection';
 import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
 import { SmartDataCleanupCard } from './SmartDataCleanupCard';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
-import { FolderOpen } from 'lucide-react';
+import { AndroidKeystoreSection } from './AndroidKeystoreSection';
+import { getActiveCloudUser, getLastCloudSyncTime } from '../services/firebaseWorkspaceSync';
 
 type SettingsCategory = 
   | 'downloaded_files'
@@ -34,6 +35,7 @@ type SettingsCategory =
   | 'messages'
   | 'inspiration'
   | 'backup'
+  | 'keystore'
   | 'about'
   | 'danger';
 
@@ -387,6 +389,14 @@ export const SettingsView: React.FC = () => {
       badge: 'Backup & Reset'
     },
     {
+      id: 'keystore' as SettingsCategory,
+      title: _t('توقيع أندرويد', 'Android Signing', 'Android Signierung'),
+      description: _t('إنشاء ملفات Keystore وإعداد GitHub Actions للتطبيقات', 'Generate Keystore and setup GitHub Actions signing', 'Keystore generieren und GitHub Actions einrichten'),
+      icon: ShieldCheck,
+      color: 'bg-primary/10 text-primary border-primary-border',
+      badge: 'Release Ready'
+    },
+    {
       id: 'about' as SettingsCategory,
       title: t('auto_about'),
       description: t('auto_application_information_and_ve'),
@@ -581,6 +591,20 @@ export const SettingsView: React.FC = () => {
                     </button>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* ==========================================
+                SUBPAGE: ANDROID KEYSTORE (توقيع أندرويد)
+            ========================================== */}
+            {activeCategory === 'keystore' && (
+              <div className="space-y-3.5 animate-scale-up">
+                {renderSubPageHeader(
+                  _t('توقيع أندرويد (Release Signing)', 'Android Release Signing', 'Android Release Signierung'),
+                  _t('إعداد ملفات التوقيع الرسمية لتطبيقات أندرويد وربطها بـ GitHub Actions', 'Prepare official Android signing keys and connect to GitHub Actions', 'Signierschlüssel für Android vorbereiten'),
+                  ShieldCheck
+                )}
+                <AndroidKeystoreSection />
               </div>
             )}
 
@@ -1737,13 +1761,12 @@ export const SettingsView: React.FC = () => {
 
           {/* 4. FOOTER INFO */}
           <div className="text-center pt-1 text-[11px] font-mono font-bold text-slate-500">
-            Glück fröhlich und froh • Version 3.0 Pro • Offline-First
           </div>
         </div>
       )}
-          </div>
-        )}
-      </div>
+    </div>
+  )}
+</div>
 
       {/* ==========================================
           CONFIRMATION MODAL FOR DATA CLEAR

@@ -63,6 +63,14 @@ import {
   deleteLernstudioSetFromFirestore,
   subscribeLernstudioSetsFromFirestore,
 } from '../firebaseCloudSync';
+import {
+  subscribeAssignmentsFromFirestore,
+  subscribeSubmissionsFromFirestore,
+  saveLocalAssignment,
+  saveLocalSubmission,
+  getLocalAssignments,
+  getLocalSubmissions
+} from '../homeworkStorageSync';
 import { RandomStudentPickerModal } from '../RandomStudentPickerModal';
 
 import {
@@ -88,6 +96,7 @@ import {
   Share2,
   Dices,
   Send,
+  BarChart3,
   Bot,
   GraduationCap
 } from 'lucide-react';
@@ -166,6 +175,44 @@ export const LernstudioView: React.FC<Props> = ({
 
   const [isHomeworkModalOpen, setIsHomeworkModalOpen] = useState(false);
   const [selectedSetForHomework, setSelectedSetForHomework] = useState<LernstudioSet | null>(null);
+  const [homeworkModalInitialTab, setHomeworkModalInitialTab] = useState<'create' | 'results'>('create');
+  const [homeworkStats, setHomeworkStats] = useState<{ assignmentsCount: number; submissionsCount: number; inProgressCount: number }>(() => {
+    const a = getLocalAssignments();
+    const s = getLocalSubmissions();
+    return {
+      assignmentsCount: a.length,
+      submissionsCount: s.filter((x) => x.status === 'completed' || Boolean(x.completedAt)).length,
+      inProgressCount: s.filter((x) => x.status === 'in_progress' && !x.completedAt).length
+    };
+  });
+
+  // Real-time Firestore subscriptions for Homework Monitoring inside Lernstudio
+  React.useEffect(() => {
+    const refreshStats = () => {
+      const a = getLocalAssignments();
+      const s = getLocalSubmissions();
+      setHomeworkStats({
+        assignmentsCount: a.length,
+        submissionsCount: s.filter((x) => x.status === 'completed' || Boolean(x.completedAt)).length,
+        inProgressCount: s.filter((x) => x.status === 'in_progress' && !x.completedAt).length
+      });
+    };
+
+    const unsubHw = subscribeAssignmentsFromFirestore((cloudAssignments) => {
+      cloudAssignments.forEach((hw) => saveLocalAssignment({ ...hw, cloudSynced: true }, false));
+      refreshStats();
+    });
+
+    const unsubSubs = subscribeSubmissionsFromFirestore(null, (cloudSubs) => {
+      cloudSubs.forEach((sub) => saveLocalSubmission({ ...sub, cloudSynced: true }, false));
+      refreshStats();
+    });
+
+    return () => {
+      unsubHw();
+      unsubSubs();
+    };
+  }, []);
 
   // Copy Set Code State
   const [copiedSetId, setCopiedSetId] = useState<string | null>(null);
@@ -813,18 +860,51 @@ export const LernstudioView: React.FC<Props> = ({
               <Bot className="w-4 h-4 shrink-0 text-primary" />
             </button>
 
-            {/* 4. Homework / Tasks */}
+            {/* 4. Create Homework */}
             <button
               type="button"
               onClick={() => {
                 setSelectedSetForHomework(null);
+                setHomeworkModalInitialTab('create');
                 setIsHomeworkModalOpen(true);
               }}
               className="p-2.5 bg-surface-hover hover:bg-surface border border-surface-border active:scale-95 text-text-main rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
-              title={language === 'ar' ? 'واجبات وتدريبات الطلاب' : 'Hausaufgaben'}
-              aria-label={language === 'ar' ? 'واجبات وتدريبات الطلاب' : 'Hausaufgaben'}
+              title={language === 'ar' ? 'إنشاء واجب جديد للطلاب' : 'Hausaufgabe erstellen'}
+              aria-label={language === 'ar' ? 'إنشاء واجب جديد للطلاب' : 'Hausaufgabe erstellen'}
             >
               <Send className="w-4 h-4 shrink-0 text-primary" />
+            </button>
+
+            {/* 5. Homework Monitoring Dashboard (Direct Access in Main App) */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedSetForHomework(null);
+                setHomeworkModalInitialTab('results');
+                setIsHomeworkModalOpen(true);
+              }}
+              className="px-2.5 py-2 bg-surface-hover hover:bg-surface border border-surface-border active:scale-95 text-text-main rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0 relative"
+              title={language === 'ar' ? 'متابعة الواجبات ونتائج الطلاب لحظياً' : 'Hausaufgaben-Monitoring'}
+              aria-label={language === 'ar' ? 'متابعة الواجبات ونتائج الطلاب لحظياً' : 'Hausaufgaben-Monitoring'}
+            >
+              <BarChart3 className="w-4 h-4 shrink-0 text-primary" />
+              <span className="text-xs font-bold hidden sm:inline">
+                {language === 'ar' ? 'متابعة الواجبات' : 'Monitoring'}
+              </span>
+              {(homeworkStats.submissionsCount > 0 || homeworkStats.inProgressCount > 0) && (
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-black tabular-nums flex items-center gap-1 ${
+                    homeworkStats.inProgressCount > 0
+                      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                      : 'bg-primary/10 text-primary'
+                  }`}
+                >
+                  {homeworkStats.inProgressCount > 0 && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
+                  )}
+                  {homeworkStats.submissionsCount + homeworkStats.inProgressCount}
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -1099,6 +1179,7 @@ export const LernstudioView: React.FC<Props> = ({
                             type="button"
                             onClick={() => {
                               setSelectedSetForHomework(set);
+                              setHomeworkModalInitialTab('create');
                               setIsHomeworkModalOpen(true);
                             }}
                             className="p-1.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-main hover:text-primary rounded-lg transition-colors cursor-pointer shrink-0"
@@ -1296,6 +1377,7 @@ export const LernstudioView: React.FC<Props> = ({
           }}
           sets={sets}
           defaultSet={selectedSetForHomework}
+          initialTab={homeworkModalInitialTab}
           language={language}
         />
 

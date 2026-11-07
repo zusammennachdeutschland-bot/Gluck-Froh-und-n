@@ -7,6 +7,7 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // --- GLOBAL HELPERS (Phase 3) ---
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -15,9 +16,19 @@ service cloud.firestore {
       return request.resource.data;
     }
 
+    function existing() {
+      return resource.data;
+    }
+
     function isSignedIn() {
       return request.auth != null;
     }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // --- VALIDATION BLUEPRINTS (Pillar 2) ---
 
     function isValidLernstudioSet(data) {
       return data.keys().hasAll(['id', 'title', 'payloadJson', 'updatedAtIso'])
@@ -63,40 +74,54 @@ service cloud.firestore {
         && data.payloadChunk is string && data.payloadChunk.size() <= 750000;
     }
 
-    // Connection test doc
+    // --- COLLECTION RULES ---
+
+    // Connection test doc (Safe public read)
     match /test/{docId} {
       allow get: if isValidId(docId);
     }
 
-    // Shared Lernstudio Vocabulary Sets
+    // Shared Lernstudio Vocabulary Sets (Public read for students/app; Authenticated write for teachers)
     match /lernstudio_sets/{setId} {
       allow get, list: if true;
-      allow create, update: if isValidId(setId) && isValidLernstudioSet(incoming()) && incoming().id == setId;
-      allow delete: if isValidId(setId);
+      allow create, update: if isSignedIn() 
+        && isValidId(setId) 
+        && isValidLernstudioSet(incoming()) 
+        && incoming().id == setId;
+      allow delete: if isSignedIn() && isValidId(setId);
     }
 
-    // Homework Assignments (Teacher creates in Main App or Vercel; Student reads on Vercel)
+    // Homework Assignments (Public read for students; Authenticated write for teachers)
     match /homework_assignments/{assignmentId} {
       allow get, list: if true;
-      allow create, update: if isValidId(assignmentId) && isValidHomeworkAssignment(incoming()) && incoming().id == assignmentId;
-      allow delete: if isValidId(assignmentId);
+      allow create, update: if isSignedIn() 
+        && isValidId(assignmentId) 
+        && isValidHomeworkAssignment(incoming()) 
+        && incoming().id == assignmentId;
+      allow delete: if isSignedIn() && isValidId(assignmentId);
     }
 
-    // Student Submissions (Student submits on Vercel without needing Google account; Teacher views in Main App & Vercel)
+    // Student Submissions (Public read for students to view result; Public create for students; Authenticated delete for teachers)
     match /homework_submissions/{submissionId} {
       allow get, list: if true;
-      allow create, update: if isValidId(submissionId) && isValidHomeworkSubmission(incoming()) && incoming().id == submissionId;
-      allow delete: if isValidId(submissionId);
+      allow create, update: if isValidId(submissionId) 
+        && isValidHomeworkSubmission(incoming()) 
+        && incoming().id == submissionId;
+      allow delete: if isSignedIn() && isValidId(submissionId);
     }
 
-    // Teacher Full App Cloud Sync (Isolated by validated Workspace ID / UID)
+    // Teacher Full App Cloud Sync (STRICTLY Isolated by UID - Pillar 8)
     match /user_workspaces/{userId}/categories/{docId} {
-      allow get, list: if isValidId(userId);
-      allow create, update: if isValidId(userId)
+      // allow list MUST check resource.data or path variables against request.auth.uid (Pillar 8)
+      allow get, list: if isOwner(userId) && isValidId(userId);
+      
+      allow create, update: if isOwner(userId)
+        && isValidId(userId)
         && isValidId(docId)
         && isValidWorkspaceChunk(incoming())
         && incoming().id == docId;
-      allow delete: if isValidId(userId) && isValidId(docId);
+      
+      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(docId);
     }
   }
 }

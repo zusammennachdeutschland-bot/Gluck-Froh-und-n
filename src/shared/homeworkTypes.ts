@@ -35,6 +35,7 @@ export interface HomeworkSubmission {
   status?: 'in_progress' | 'completed' | string;
   startedAt: string;
   completedAt: string;
+  updatedAt?: string;
   timeSpentSeconds: number;
   totalQuestions: number;
   correctAnswersCount: number;
@@ -45,6 +46,7 @@ export interface HomeworkSubmission {
   goldEarned?: number;
   maxStreak?: number;
   completedStudyPhase?: boolean;
+  cloudSynced?: boolean;
   responses: HomeworkQuestionResponse[];
 }
 
@@ -70,6 +72,7 @@ export interface HomeworkAssignment {
   assignedStudents?: { id: string; name: string }[]; // Selected students snapshot
   createdAt: string;
   createdBy: string;
+  cloudSynced?: boolean;
 }
 
 export interface HomeworkSummaryStats {

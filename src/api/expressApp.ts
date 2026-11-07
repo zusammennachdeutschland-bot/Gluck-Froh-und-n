@@ -203,16 +203,77 @@ app.all('/api/teacher/assignments', (req, res) => {
 
 app.all('/api/homework/submissions', (req, res) => {
   if (req.method === 'GET') {
-    return res.json({ submissions: localSubmissionsStore });
+    const assignmentId = req.query.assignmentId ? String(req.query.assignmentId) : null;
+    const list = assignmentId
+      ? localSubmissionsStore.filter((s) => s.assignmentId === assignmentId)
+      : localSubmissionsStore;
+    return res.json({ submissions: list });
   }
   if (req.method === 'POST') {
     const body = req.body || {};
     if (body.id) {
-      localSubmissionsStore.unshift(body);
+      const idx = localSubmissionsStore.findIndex((s) => s.id === body.id);
+      if (idx >= 0) {
+        localSubmissionsStore[idx] = { ...localSubmissionsStore[idx], ...body };
+      } else {
+        localSubmissionsStore.unshift(body);
+      }
     }
     return res.json({ success: true, submission: body });
   }
   return res.json({ success: true });
+});
+
+app.get('/api/homework/info', (req, res) => {
+  const id = String(req.query.id || '').trim();
+  const found = localAssignmentsStore.find((a) => a.id === id);
+  if (!found) {
+    return res.status(404).json({ error: 'Assignment not found in local relay' });
+  }
+  return res.json(found);
+});
+
+app.post('/api/homework/submit', (req, res) => {
+  const body = req.body || {};
+  const responses = Array.isArray(body.responses) ? body.responses : [];
+  const correctCount = responses.filter((r: any) => r && r.isCorrect).length;
+  const totalQ = responses.length;
+  const pct = totalQ > 0 ? Math.round((correctCount / totalQ) * 100) : 0;
+  const nowIso = new Date().toISOString();
+  const startMs = body.startedAt ? new Date(body.startedAt).getTime() : Date.now() - totalQ * 4000;
+  const timeSpentSeconds = Math.max(5, Math.round((Date.now() - startMs) / 1000));
+
+  const submission = {
+    id: body.id || `sub_${body.assignmentId || 'hw'}_${Date.now()}`,
+    assignmentId: body.assignmentId,
+    studentId: body.studentId,
+    studentName: body.studentName,
+    attemptNumber: body.attemptNumber || 1,
+    status: 'completed',
+    startedAt: body.startedAt || nowIso,
+    completedAt: body.completedAt || nowIso,
+    updatedAt: nowIso,
+    timeSpentSeconds,
+    totalQuestions: totalQ,
+    correctAnswersCount: correctCount,
+    scorePercentage: pct,
+    accuracyPercent: pct,
+    score: correctCount,
+    accuracy: pct,
+    goldEarned: body.goldEarned || 0,
+    maxStreak: body.maxStreak || 0,
+    completedStudyPhase: Boolean(body.completedStudyPhase),
+    responses
+  };
+
+  const idx = localSubmissionsStore.findIndex((s) => s.id === submission.id);
+  if (idx >= 0) {
+    localSubmissionsStore[idx] = { ...localSubmissionsStore[idx], ...submission };
+  } else {
+    localSubmissionsStore.unshift(submission);
+  }
+
+  return res.json({ success: true, submission });
 });
 
 // 6. P2P-Style Workspace Delta Relay Store (per workspaceId)
