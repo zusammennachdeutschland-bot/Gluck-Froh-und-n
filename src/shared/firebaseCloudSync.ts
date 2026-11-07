@@ -16,7 +16,7 @@ import {
   inMemoryPersistence,
   User
 } from 'firebase/auth';
-import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
+import { SocialLogin } from '@capgo/capacitor-social-login';
 import {
   getFirestore,
   initializeFirestore,
@@ -324,12 +324,32 @@ export async function signInTeacherWithGoogle(): Promise<User | null> {
   // 1. On Capacitor Android native, use the Native SDK for a seamless experience
   if (isCapacitorNative) {
     try {
-      // Initialize the plugin if not already done (it reads from capacitor.config.ts)
-      const googleUser = await GoogleAuth.signIn();
-      if (googleUser?.authentication?.idToken) {
-        return await signInWithGoogleIdToken(googleUser.authentication.idToken);
+      // 1.1 Ensure plugin is initialized with the Web Client ID (Required for all platforms)
+      const webClientId = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID || "REPLACE_WITH_GOOGLE_CLIENT_ID_FOR_WEB";
+      
+      try {
+        await SocialLogin.initialize({
+          google: {
+            webClientId: webClientId
+          }
+        });
+      } catch (initErr) {
+        // May already be initialized or config-based
+        console.log('SocialLogin initialization notice:', initErr);
       }
-      throw new Error('Native Google Sign-In failed to return an ID token.');
+
+      // 1.2 Perform native login
+      const result = await SocialLogin.login({
+        provider: 'google',
+        options: {
+          scopes: ['profile', 'email']
+        }
+      });
+
+      if (result.result?.responseType === 'online' && result.result.idToken) {
+        return await signInWithGoogleIdToken(result.result.idToken);
+      }
+      throw new Error('Native Google Sign-In failed to return an ID token or was in offline mode.');
     } catch (err: any) {
       console.warn('Capacitor native Google sign-in error:', err);
       // Fallback to standard redirect if native plugin fails
@@ -398,6 +418,18 @@ export async function signInTeacherWithEmailPassword(email: string, pass: string
 
 export async function signOutTeacherFirebase(): Promise<void> {
   try {
+    const isCapacitorNative =
+      (window as any).Capacitor?.isNativePlatform?.() ||
+      window.location.protocol === 'capacitor:' ||
+      window.location.protocol === 'file:';
+
+    if (isCapacitorNative) {
+      try {
+        await SocialLogin.logout({ provider: 'google' });
+      } catch (logoutErr) {
+        console.warn('Native logout notice:', logoutErr);
+      }
+    }
     await signOut(auth);
   } catch (err) {
     console.warn('Sign out notice:', err);
