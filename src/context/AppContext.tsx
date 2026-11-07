@@ -10,7 +10,7 @@ import {
   NotificationSettings, ScheduledNotificationItem, TeacherSettingsRecord, SyncCycleReport, PendingOutboxSummary, SyncHistoryEntry,
   CertificateRecord, HodGermanStudent, Complaint, StudentActionPlan, VisitRecord, SchoolNote,
   FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment, FinanceNotification,
-  TodoItem, PaymentPlanType
+  TodoItem, PaymentPlanType, AICertificateBackground
 } from '../types';
 import { recalculateAllAccountBalances, computeAccountBalance, shouldSettlePendingCycleRecord, splitPaymentAcrossLessons } from '../services/financeService';
 import { 
@@ -6067,10 +6067,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       try {
         const raw = localStorage.getItem('glueck_picker_custom_names');
         return raw ? JSON.parse(raw) : [];
-      } catch {
-        return [];
-      }
+      } catch { return []; }
     })();
+
+    const aiBackgrounds = (await storage.getItem<AICertificateBackground[]>('dl_custom_ai_backgrounds')) || [];
+    const prunedIds = (await storage.getItem<string[]>('dl_pruned_lesson_ids')) || [];
+    const gold = (await storage.getItem<GoldHolding[]>('gluck_gold_holdings')) || [];
+    const financeNotifs = (await storage.getItem<FinanceNotification[]>('dl_finance_notifications')) || [];
+    const notes = (await storage.getItem<SchoolNote[]>('dl_school_notes')) || [];
 
     const backupObj: BackupData & { prunedLessonIds?: string[] } = {
       timestamp: new Date().toISOString(),
@@ -6081,10 +6085,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       students,
       lessons: fullLessonsRef.current.length > 0 ? fullLessonsRef.current : lessons,
       payments: fullPaymentsRef.current.length > 0 ? fullPaymentsRef.current : payments,
-      prunedLessonIds: Array.from(getPrunedLessonIds()),
+      prunedLessonIds: prunedIds.length > 0 ? prunedIds : Array.from(getPrunedLessonIds()),
       notifications,
       certificates,
-      customAiBackgrounds: (profile as any).customAiBackgrounds || [],
+      customAiBackgrounds: aiBackgrounds,
       todos,
       theme,
       accentColor,
@@ -6095,14 +6099,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       hodComplaints,
       hodActionPlans,
       hodVisits,
-      schoolNotes,
+      schoolNotes: notes.length > 0 ? notes : schoolNotes,
       financeAccounts,
       financeCategories,
       financeTransactions,
       financeRecurring,
       financeInstallments,
-      financeNotifications: financeNotifications || [],
-      goldHoldings,
+      financeNotifications: financeNotifs.length > 0 ? financeNotifs : (financeNotifications || []),
+      goldHoldings: gold.length > 0 ? gold : goldHoldings,
       lernstudioSets,
       homeworkAssignments: hwAssignments,
       homeworkSubmissions: hwSubmissions,
@@ -6153,12 +6157,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const hasLessons = hasBackupSection(parsed, 'lessons');
       const hasPayments = hasBackupSection(parsed, 'payments');
 
+      const incomingTimestamp = new Date(parsed.timestamp || 0).getTime();
+      const localTimestamp = new Date(lastBackupTime || 0).getTime();
+      const isIncomingNewer = incomingTimestamp >= localTimestamp;
+
       if ((hasProfile && data.profile) || (hasSchoolSettings && data.schoolSettings)) {
-        const baseProfile = (hasProfile && data.profile) ? data.profile : profile;
-        const mergedSchoolSettings = (hasSchoolSettings && data.schoolSettings) ? data.schoolSettings : baseProfile.schoolSettings;
-        const mergedProfile = { ...baseProfile, schoolSettings: mergedSchoolSettings };
-        setProfile(mergedProfile);
-        await storage.setItem('dl_profile', mergedProfile);
+        if (isIncomingNewer) {
+          const baseProfile = (hasProfile && data.profile) ? data.profile : profile;
+          const mergedSchoolSettings = (hasSchoolSettings && data.schoolSettings) ? data.schoolSettings : baseProfile.schoolSettings;
+          const mergedProfile = { ...baseProfile, schoolSettings: mergedSchoolSettings };
+          setProfile(mergedProfile);
+          await storage.setItem('dl_profile', mergedProfile);
+        }
       }
       if (hasGroups && data.groups) {
         const localSourceGroups = isCloudDelta ? groups : groups.filter((g: any) => g.deleted);
@@ -6226,22 +6236,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setTodos(mergedTodos);
         await storage.setItem('dl_quick_todos', mergedTodos);
       }
-      if (hasBackupSection(parsed, 'theme') && data.theme) {
+      if (hasBackupSection(parsed, 'theme') && data.theme && isIncomingNewer) {
         setTheme(data.theme);
         await storage.setItem('dl_theme', data.theme);
       }
-      if (hasBackupSection(parsed, 'accentColor') && data.accentColor) {
+      if (hasBackupSection(parsed, 'accentColor') && data.accentColor && isIncomingNewer) {
         setAccentColor(data.accentColor);
       }
-      if (hasBackupSection(parsed, 'notificationSettings') && data.notificationSettings) {
+      if (hasBackupSection(parsed, 'notificationSettings') && data.notificationSettings && isIncomingNewer) {
         setNotificationSettings(data.notificationSettings);
         await storage.setItem('dl_notification_settings', data.notificationSettings);
       }
-      if (hasBackupSection(parsed, 'inspirationSettings') && data.inspirationSettings) {
+      if (hasBackupSection(parsed, 'inspirationSettings') && data.inspirationSettings && isIncomingNewer) {
         setInspirationSettings(data.inspirationSettings);
         await storage.setItem('dl_inspiration_settings', data.inspirationSettings);
       }
-      if (hasBackupSection(parsed, 'inspirationMessages') && data.inspirationMessages) {
+      if (hasBackupSection(parsed, 'inspirationMessages') && data.inspirationMessages && isIncomingNewer) {
         setInspirationMessages(data.inspirationMessages);
         await storage.setItem('dl_inspiration_messages', data.inspirationMessages);
       }
@@ -6274,8 +6284,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('hod_visit_records', mergedHodVisits);
       }
       if (hasBackupSection(parsed, 'schoolNotes') && data.schoolNotes) {
-        const mergedNotes = isCloudDelta && schoolNotes.length > 0
-          ? mergeEntities(schoolNotes, data.schoolNotes, 'schoolNotes').merged
+        const localNotes = (await storage.getItem<SchoolNote[]>('dl_school_notes')) || [];
+        const mergedNotes = isCloudDelta && localNotes.length > 0
+          ? mergeEntities(localNotes, data.schoolNotes, 'schoolNotes').merged
           : data.schoolNotes;
         setSchoolNotes(mergedNotes);
         await storage.setItem('dl_school_notes', mergedNotes);
@@ -6315,12 +6326,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setFinanceInstallments(mergedInst);
         await storage.setItem('dl_finance_installments', mergedInst);
       }
-      if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings && Array.isArray(data.goldHoldings)) {
+      if (hasBackupSection(parsed, 'customAiBackgrounds') && data.customAiBackgrounds) {
+        const localAi = (await storage.getItem<AICertificateBackground[]>('dl_custom_ai_backgrounds')) || [];
+        const mergedAi = isCloudDelta && localAi.length > 0
+          ? mergeEntities(localAi, data.customAiBackgrounds, 'customAiBackgrounds').merged
+          : data.customAiBackgrounds;
+        await storage.setItem('dl_custom_ai_backgrounds', mergedAi);
+      }
+      if (hasBackupSection(parsed, 'prunedLessonIds') && Array.isArray((parsed as any).prunedLessonIds)) {
+        const incomingIds = (parsed as any).prunedLessonIds as string[];
+        if (incomingIds.length > 0) {
+          addPrunedLessonIds(incomingIds);
+          await storage.setItem('dl_pruned_lesson_ids', Array.from(getPrunedLessonIds()));
+        }
+      }
+      if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings) {
         const mergedGold = isCloudDelta && goldHoldings.length > 0
           ? mergeEntities(goldHoldings, data.goldHoldings, 'goldHoldings').merged
           : data.goldHoldings;
         setGoldHoldings(mergedGold);
         await storage.setItem('gluck_gold_holdings', mergedGold);
+      }
+      if (hasBackupSection(parsed, 'financeNotifications') && data.financeNotifications) {
+        const localFinNotif = (await storage.getItem<FinanceNotification[]>('dl_finance_notifications')) || [];
+        const mergedFinNotif = isCloudDelta && localFinNotif.length > 0
+          ? mergeEntities(localFinNotif, data.financeNotifications, 'financeNotifications').merged
+          : data.financeNotifications;
+        setFinanceNotifications(mergedFinNotif);
+        await storage.setItem('dl_finance_notifications', mergedFinNotif);
       }
       if (hasBackupSection(parsed, 'lernstudioSets') && data.lernstudioSets) {
         const mergedLernSets = isCloudDelta && lernstudioSets.length > 0
@@ -6330,13 +6363,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_lernstudio_sets', mergedLernSets);
       }
       if (hasBackupSection(parsed, 'homeworkAssignments') && data.homeworkAssignments) {
-        await storage.setItem('glueck_hw_assignments_v2', data.homeworkAssignments);
+        const localHw = (() => {
+          try {
+            const raw = localStorage.getItem('glueck_hw_assignments_v2');
+            return raw ? JSON.parse(raw) : [];
+          } catch { return []; }
+        })();
+        const mergedHw = mergeEntities(localHw, data.homeworkAssignments, 'homeworkAssignments').merged;
+        await storage.setItem('glueck_hw_assignments_v2', mergedHw);
       }
       if (hasBackupSection(parsed, 'homeworkSubmissions') && data.homeworkSubmissions) {
-        await storage.setItem('glueck_hw_submissions_v2', data.homeworkSubmissions);
+        const localSub = (() => {
+          try {
+            const raw = localStorage.getItem('glueck_hw_submissions_v2');
+            return raw ? JSON.parse(raw) : [];
+          } catch { return []; }
+        })();
+        const mergedSub = mergeEntities(localSub, data.homeworkSubmissions, 'homeworkSubmissions').merged;
+        await storage.setItem('glueck_hw_submissions_v2', mergedSub);
       }
       if (hasBackupSection(parsed, 'pickerNames') && data.pickerNames) {
-        await storage.setItem('glueck_picker_custom_names', data.pickerNames);
+        const localPicker = (() => {
+          try {
+            const raw = localStorage.getItem('glueck_picker_custom_names');
+            return raw ? JSON.parse(raw) : [];
+          } catch { return []; }
+        })();
+        // Unique union merge for pickerNames
+        const combined = Array.from(new Set([...localPicker, ...data.pickerNames]));
+        await storage.setItem('glueck_picker_custom_names', combined);
       }
 
       // Reconcile and safeguard synchronization metadata

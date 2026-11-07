@@ -23,6 +23,18 @@ export function mergeEntities<T extends SyncableRecord>(
     }
   }
 
+  // If incoming is empty or not an array, return local state as is (Safety Rule: Empty != Delete)
+  if (!Array.isArray(incomingArray) || incomingArray.length === 0) {
+    return {
+      merged: Array.from(entityMap.values()),
+      createdCount: 0,
+      updatedCount: 0,
+      deletedCount: 0,
+      conflicts: [],
+      diff: { created: 0, updated: 0, deleted: 0, conflicts: 0 }
+    };
+  }
+
   let createdCount = 0;
   let updatedCount = 0;
   let deletedCount = 0;
@@ -67,7 +79,7 @@ export function mergeEntities<T extends SyncableRecord>(
         continue;
       }
 
-      // Conflict logging
+      // Conflict logic
       let shouldAcceptIncoming = false;
       let resolutionStrategy: 'LWW' | 'TIE_BREAKER' | 'FIELD_MERGE' = 'LWW';
 
@@ -111,25 +123,26 @@ export function mergeEntities<T extends SyncableRecord>(
       }
 
       if (shouldAcceptIncoming) {
-        // If incoming item is not deleted, preserve non-empty local fields like certificateName (Latin name) if incoming is missing them
         let finalItem = incomingItem;
+        
+        // Field-level preservation for non-deleted items
         if (!incomingItem.deleted && !localItem.deleted) {
           finalItem = {
             ...localItem,
-            ...incomingItem,
-            certificateName: (incomingItem as any).certificateName !== undefined && (incomingItem as any).certificateName !== ''
-              ? (incomingItem as any).certificateName
-              : ((localItem as any).certificateName || (incomingItem as any).certificateName || ''),
-            documents: Array.isArray((incomingItem as any).documents) && (incomingItem as any).documents.length > 0
-              ? (incomingItem as any).documents
-              : ((localItem as any).documents || [])
+            ...incomingItem
           };
-          // Preserve local student status/group if locally archived or unassigned
-          if ((localItem as any).status === 'archived') {
+          
+          // Specialized field preservation
+          if ((incomingItem as any).certificateName === undefined || (incomingItem as any).certificateName === '') {
+            (finalItem as any).certificateName = (localItem as any).certificateName || '';
+          }
+          if (!Array.isArray((incomingItem as any).documents) || (incomingItem as any).documents.length === 0) {
+            (finalItem as any).documents = (localItem as any).documents || [];
+          }
+          
+          // Preserve local student status if archived
+          if ((localItem as any).status === 'archived' && !(incomingItem as any).status) {
             (finalItem as any).status = 'archived';
-            (finalItem as any).groupId = '';
-          } else if ((localItem as any).groupId === '' && localTime >= incomingTime) {
-            (finalItem as any).groupId = '';
           }
         }
 
@@ -150,16 +163,12 @@ export function mergeEntities<T extends SyncableRecord>(
           timestamp: Date.now()
         });
       } else {
-        // Local won the conflict. If local is missing certificateName but incoming had it, backfill it cleanly.
+        // Local won. Backfill fields if local is missing something the remote has (and local isn't deleted)
         if (!localItem.deleted && !incomingItem.deleted) {
           const localCertName = (localItem as any).certificateName;
           const incomingCertName = (incomingItem as any).certificateName;
           if ((!localCertName || localCertName.trim() === '') && incomingCertName && incomingCertName.trim() !== '') {
-            const backfilled = {
-              ...localItem,
-              certificateName: incomingCertName
-            };
-            entityMap.set(localItem.id, backfilled);
+            (localItem as any).certificateName = incomingCertName;
           }
         }
 

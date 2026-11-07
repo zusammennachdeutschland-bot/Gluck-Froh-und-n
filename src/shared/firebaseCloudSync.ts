@@ -105,64 +105,54 @@ export function clearFirestoreWriteQuotaFlag(): void {
 
 export async function executeSafeFirestoreWrite<T>(
   writePromiseOrFn: Promise<T> | (() => Promise<T>),
-  timeoutMs = 7000,
-  maxRetries = 0
+  timeoutMs = 20000
 ): Promise<T> {
   if (isFirestoreWriteQuotaExhaustedToday()) {
-    return undefined as unknown as T;
+    throw new Error('Quota exceeded: Firestore daily write quota is temporarily on cooldown.');
   }
 
-  let attempt = 0;
-  let lastError: any = null;
+  let timer: any = null;
+  try {
+    const currentPromise =
+      typeof writePromiseOrFn === 'function' ? writePromiseOrFn() : writePromiseOrFn;
 
-  while (attempt <= maxRetries) {
-    let timer: any = null;
-    try {
-      const currentPromise =
-        typeof writePromiseOrFn === 'function' ? writePromiseOrFn() : writePromiseOrFn;
-
-      // Prevent unhandled rejection if currentPromise settles after timeout
-      Promise.resolve(currentPromise).catch((bgErr) => {
-        const bgMsg = bgErr?.message || String(bgErr);
-        if (bgMsg.includes('resource-exhausted') || bgMsg.includes('Quota')) {
-          markFirestoreWriteQuotaExhaustedToday();
-        }
-      });
-
-      const timeoutSymbol = Symbol('firestore_write_buffered');
-      const timeoutPromise = new Promise<typeof timeoutSymbol>((resolve) => {
-        timer = setTimeout(() => {
-          resolve(timeoutSymbol);
-        }, timeoutMs);
-      });
-
-      const res = await Promise.race([currentPromise, timeoutPromise]);
-      if (res === timeoutSymbol) {
-        // Firestore SDK keeps the write in its internal pending queue, but we must NOT report success to the sync engine
-        console.warn('Firestore write buffered due to timeout/quota.');
-        throw new Error('Firestore write timeout/buffered');
-      }
-      return res as T;
-    } catch (err: any) {
-      lastError = err;
-      const code = err?.code || '';
-      const msg = err?.message || String(err);
-      if (code === 'resource-exhausted' || msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+    // Prevent unhandled rejection if currentPromise settles after timeout
+    Promise.resolve(currentPromise).catch((bgErr) => {
+      const bgMsg = bgErr?.message || String(bgErr);
+      if (bgMsg.includes('resource-exhausted') || bgMsg.includes('Quota')) {
         markFirestoreWriteQuotaExhaustedToday();
-        throw new Error('Quota exceeded: ' + msg);
       }
-      if (code === 'permission-denied' || msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
-        throw err;
-      }
-      attempt++;
-      if (attempt <= maxRetries) {
-        await new Promise((r) => setTimeout(r, 600 * attempt));
-      }
-    } finally {
-      if (timer) clearTimeout(timer);
+    });
+
+    const timeoutSymbol = Symbol('firestore_write_timeout');
+    const timeoutPromise = new Promise<typeof timeoutSymbol>((resolve) => {
+      timer = setTimeout(() => {
+        resolve(timeoutSymbol);
+      }, timeoutMs);
+    });
+
+    const res = await Promise.race([currentPromise, timeoutPromise]);
+    if (res === timeoutSymbol) {
+      // Firestore SDK keeps the write in its internal pending queue when daily free-tier quota is reached or network is slow
+      markFirestoreWriteQuotaExhaustedToday();
+      throw new Error('Quota exceeded or network slow: Firestore write buffered.');
     }
+    return res as T;
+  } catch (err: any) {
+    const code = err?.code || '';
+    const msg = err?.message || String(err);
+    if (
+      code === 'resource-exhausted' ||
+      msg.includes('resource-exhausted') ||
+      msg.includes('Quota exceeded')
+    ) {
+      markFirestoreWriteQuotaExhaustedToday();
+      throw new Error('Quota exceeded: ' + msg);
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  throw lastError;
 }
 
 export enum OperationType {
@@ -452,8 +442,8 @@ export function subscribeTeacherAuth(cb: (user: User | null) => void): () => voi
 // ============================================================================
 export async function executeConfirmedFirestoreWrite<T>(
   writeFn: () => Promise<T>,
-  timeoutMs = 12000,
-  maxRetries = 2
+  timeoutMs = 20000,
+  maxRetries = 3
 ): Promise<T> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     throw new Error('Offline: no internet connection.');

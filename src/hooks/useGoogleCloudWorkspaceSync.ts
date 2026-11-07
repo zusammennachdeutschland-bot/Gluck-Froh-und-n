@@ -77,23 +77,45 @@ export function useGoogleCloudWorkspaceSync(): void {
             new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
           );
           const cloudRes = await downloadWorkspaceFromGoogleCloud();
-          const localHasData =
-            students.length > 0 ||
-            groups.length > 0 ||
-            lessons.length > 0 ||
-            payments.length > 0 ||
-            financeTransactions.length > 0;
-
-          const remoteHasActualData = cloudRes.hasRemoteData && cloudRes.backupJsonStr && (() => {
+          const localSnapStr = await performBackup();
+          const hasAnyWorkspaceData = (jsonStr: string | null): boolean => {
+            if (!jsonStr) return false;
             try {
-              const p = JSON.parse(cloudRes.backupJsonStr);
-              return (p.students?.length > 0 || p.groups?.length > 0 || p.lessons?.length > 0);
+              const p = JSON.parse(jsonStr);
+              const collectionKeys = [
+                'students',
+                'groups',
+                'lessons',
+                'payments',
+                'certificates',
+                'todos',
+                'hodStudents',
+                'hodComplaints',
+                'hodActionPlans',
+                'hodVisits',
+                'schoolNotes',
+                'financeAccounts',
+                'financeTransactions',
+                'financeRecurring',
+                'financeInstallments',
+                'goldHoldings',
+                'homeworkAssignments',
+                'homeworkSubmissions',
+                'pickerNames'
+              ];
+              return collectionKeys.some((k) => Array.isArray(p[k]) && p[k].length > 0);
             } catch {
               return false;
             }
-          })();
+          };
 
-          if (remoteHasActualData && !localHasData) {
+          const localHasData = hasAnyWorkspaceData(localSnapStr);
+          const remoteHasActualData = cloudRes.hasRemoteData && hasAnyWorkspaceData(cloudRes.backupJsonStr);
+
+          let finalStatus: 'synced' | 'error' = 'synced';
+          let finalError: string | undefined;
+
+          if (remoteHasActualData && !localHasData && cloudRes.backupJsonStr) {
             // Fresh device / browser: automatically pull everything from Google Cloud!
             isApplyingRemoteRef.current = true;
             const success = await importBackupFile(cloudRes.backupJsonStr);
@@ -102,29 +124,40 @@ export function useGoogleCloudWorkspaceSync(): void {
                 localStorage.setItem('dl_setup_completed', 'true');
                 window.dispatchEvent(new CustomEvent('close-setup-wizard'));
               } catch {}
+              const postImportSnap = await performBackup();
+              lastUploadedSnapshotRef.current = stripSnapshotTimestamp(postImportSnap);
+            } else {
+              finalStatus = 'error';
+              finalError = 'تعذر استيراد البيانات السحابية.';
             }
             setTimeout(() => {
               isApplyingRemoteRef.current = false;
             }, 2500);
           } else if (!remoteHasActualData && localHasData && !isFirestoreWriteQuotaExhaustedToday()) {
             // Cloud is completely empty and local has data: seed cloud once
-            const snapStr = await performBackup();
-            const res = await uploadWorkspaceToGoogleCloud(snapStr);
+            const res = await uploadWorkspaceToGoogleCloud(localSnapStr);
             if (res.success) {
-              lastUploadedSnapshotRef.current = stripSnapshotTimestamp(snapStr);
+              lastUploadedSnapshotRef.current = stripSnapshotTimestamp(localSnapStr);
+            } else {
+              finalStatus = 'error';
+              finalError = res.error;
             }
-          } else if (localHasData && remoteHasActualData) {
+          } else if (localHasData && remoteHasActualData && cloudRes.backupJsonStr) {
             // Both local and cloud have data on boot: Perform a two-way merge
-            console.log('Synchronizing: Both local and cloud have data. Merging...');
             isApplyingRemoteRef.current = true;
             const success = await importBackupFile(cloudRes.backupJsonStr);
-            
-            // After merging (which updates local state), push the merged state back to cloud
-            if (success && !isFirestoreWriteQuotaExhaustedToday()) {
+            if (!success) {
+              finalStatus = 'error';
+              finalError = 'تعذر دمج البيانات السحابية.';
+            } else if (!isFirestoreWriteQuotaExhaustedToday()) {
+              // After merging (which updates local storage), push any local-only changes back to cloud
               const mergedSnapStr = await performBackup();
               const uploadRes = await uploadWorkspaceToGoogleCloud(mergedSnapStr);
               if (uploadRes.success) {
                 lastUploadedSnapshotRef.current = stripSnapshotTimestamp(mergedSnapStr);
+              } else {
+                finalStatus = 'error';
+                finalError = uploadRes.error;
               }
             }
 
@@ -132,16 +165,19 @@ export function useGoogleCloudWorkspaceSync(): void {
               isApplyingRemoteRef.current = false;
             }, 2500);
           } else if (localHasData) {
-            // Local data exists but cloud check failed or is empty/invalid
-            const snapStr = await performBackup();
-            lastUploadedSnapshotRef.current = stripSnapshotTimestamp(snapStr);
+            lastUploadedSnapshotRef.current = stripSnapshotTimestamp(localSnapStr);
           }
+
           window.dispatchEvent(
-            new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'synced' } })
+            new CustomEvent('gluck-cloud-sync-status', {
+              detail: { status: finalStatus, error: finalError }
+            })
           );
-        } catch {
+        } catch (err: any) {
           window.dispatchEvent(
-            new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'error' } })
+            new CustomEvent('gluck-cloud-sync-status', {
+              detail: { status: 'error', error: err?.message }
+            })
           );
         }
       }
@@ -157,6 +193,10 @@ export function useGoogleCloudWorkspaceSync(): void {
               new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
             );
             const success = await importBackupFile(remoteBackupJson);
+            if (success) {
+              const postSnap = await performBackup();
+              lastUploadedSnapshotRef.current = stripSnapshotTimestamp(postSnap);
+            }
             window.dispatchEvent(
               new CustomEvent('gluck-cloud-sync-status', { detail: { status: success ? 'synced' : 'error' } })
             );
@@ -181,7 +221,6 @@ export function useGoogleCloudWorkspaceSync(): void {
       !currentUserUidRef.current ||
       !isAutoCloudSyncEnabled() ||
       isApplyingRemoteRef.current ||
-      quotaExceededRef.current ||
       isFirestoreWriteQuotaExhaustedToday()
     ) {
       return;
@@ -196,7 +235,6 @@ export function useGoogleCloudWorkspaceSync(): void {
         !currentUserUidRef.current ||
         !isAutoCloudSyncEnabled() ||
         isApplyingRemoteRef.current ||
-        quotaExceededRef.current ||
         isFirestoreWriteQuotaExhaustedToday()
       ) {
         return;
@@ -215,10 +253,6 @@ export function useGoogleCloudWorkspaceSync(): void {
         const res = await uploadWorkspaceToGoogleCloud(snapStr);
         if (res.success) {
           lastUploadedSnapshotRef.current = normalizedSnap;
-        } else if (res.error && (res.error.includes('resource-exhausted') || res.error.includes('Quota'))) {
-          quotaExceededRef.current = true;
-          setAutoCloudSyncEnabled(false);
-          console.warn('Firestore free tier quota exceeded. Auto-sync paused to protect quota.');
         }
 
         window.dispatchEvent(
@@ -227,12 +261,10 @@ export function useGoogleCloudWorkspaceSync(): void {
           })
         );
       } catch (err: any) {
-        if (err?.message?.includes('resource-exhausted') || err?.message?.includes('Quota')) {
-          quotaExceededRef.current = true;
-          setAutoCloudSyncEnabled(false);
-        }
         window.dispatchEvent(
-          new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'error' } })
+          new CustomEvent('gluck-cloud-sync-status', {
+            detail: { status: 'error', error: err?.message }
+          })
         );
       }
     }, 45000);

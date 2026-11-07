@@ -643,11 +643,17 @@ export async function uploadWorkspaceToGoogleCloud(
 
         await postChunksToRelayServer(uid, [chunkObj]);
 
-        if (!isFirestoreWriteQuotaExhaustedToday()) {
-          await executeSafeFirestoreWrite(() =>
-            setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), chunkObj)
-          );
+        if (isFirestoreWriteQuotaExhaustedToday()) {
+          return {
+            success: false,
+            syncedAtIso: nowIso,
+            error: 'Quota exceeded: تم بلوغ الحد اليومي المجاني لكتابة Firestore، ستُستأنف المزامنة تلقائياً.'
+          };
         }
+
+        await executeSafeFirestoreWrite(() =>
+          setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), chunkObj)
+        );
 
         saveDeltaAccumulator(uid, nextAcc);
         saveWatermarks(uid, nextWatermarks);
@@ -659,6 +665,14 @@ export async function uploadWorkspaceToGoogleCloud(
     // 3. Category-Level Sync (Initial baseline seed or when delta accumulator compacts into categories)
     const categories = partitionBackupPayload(parsed);
     const relayChunks: any[] = [];
+
+    if (isFirestoreWriteQuotaExhaustedToday()) {
+      return {
+        success: false,
+        syncedAtIso: nowIso,
+        error: 'Quota exceeded: تم بلوغ الحد اليومي المجاني لكتابة Firestore، ستُستأنف المزامنة تلقائياً.'
+      };
+    }
 
     for (const categoryKey of WORKSPACE_CATEGORY_KEYS) {
       const catPayloadStr = JSON.stringify(categories[categoryKey] || {});
@@ -689,16 +703,11 @@ export async function uploadWorkspaceToGoogleCloud(
 
         relayChunks.push(chunkObj);
 
-        if (!isFirestoreWriteQuotaExhaustedToday()) {
-          const path = `user_workspaces/${uid}/categories/${docId}`;
-          // Write sequentially to avoid flooding the Firestore WebChannel stream
-          await executeSafeFirestoreWrite(() =>
-            setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), chunkObj)
-          );
-          lastUploadedChunkCache.set(cacheKey, chunkData);
-        } else {
-          lastUploadedChunkCache.set(cacheKey, chunkData);
-        }
+        // Write sequentially to avoid flooding the Firestore WebChannel stream
+        await executeSafeFirestoreWrite(() =>
+          setDoc(doc(db, 'user_workspaces', uid, 'categories', docId), chunkObj)
+        );
+        lastUploadedChunkCache.set(cacheKey, chunkData);
       }
 
       if (previousChunkCount > chunks.length && !isFirestoreWriteQuotaExhaustedToday()) {
@@ -723,7 +732,7 @@ export async function uploadWorkspaceToGoogleCloud(
     return { success: true, syncedAtIso: nowIso, deltaCount: totalChangedCount };
   } catch (err: any) {
     const errMsg = err?.message || 'حدث خطأ أثناء مزامنة التغييرات مع السحابة.';
-    console.error('Workspace upload error:', errMsg);
+    console.warn('Workspace upload notice:', errMsg);
     return {
       success: false,
       syncedAtIso: nowIso,
@@ -986,16 +995,23 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
     };
 
     // 5. If we loaded from legacy path, migrate to primary UID path now
-    if (isLegacyPath && legacyId && reassembled) {
-      console.log(`Migrating workspace from legacy ID ${legacyId} to primary ID ${primaryId}`);
-      const migrationRes = await uploadWorkspaceToGoogleCloud(JSON.stringify(reassembled), { forceFullBaseline: true });
+    if (isLegacyPath && legacyId && reassembled && !isFirestoreWriteQuotaExhaustedToday()) {
+      const migrationRes = await uploadWorkspaceToGoogleCloud(JSON.stringify(reassembled), {
+        forceFullBaseline: true
+      });
       if (migrationRes.success) {
-        // Cleanup legacy data from Firestore
-        const legacyDocs = Array.from(rawDocsMap.keys());
-        for (const docId of legacyDocs) {
-          await executeSafeFirestoreWrite(() => 
-            deleteDoc(doc(db, 'user_workspaces', legacyId, 'categories', docId))
-          ).catch(() => {});
+        try {
+          const verifySnap = await getDocs(collection(db, 'user_workspaces', primaryId, 'categories'));
+          if (!verifySnap.empty && verifySnap.size >= WORKSPACE_CATEGORY_KEYS.length) {
+            const legacyDocs = Array.from(rawDocsMap.keys());
+            for (const docId of legacyDocs) {
+              await executeSafeFirestoreWrite(() =>
+                deleteDoc(doc(db, 'user_workspaces', legacyId, 'categories', docId))
+              ).catch(() => {});
+            }
+          }
+        } catch {
+          // Retain legacy data if verification read fails
         }
       }
     }
