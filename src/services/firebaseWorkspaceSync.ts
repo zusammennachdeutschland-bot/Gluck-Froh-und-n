@@ -41,7 +41,8 @@ export {
   emailToWorkspaceId,
   getActiveCloudUser,
   isFirestoreWriteQuotaExhaustedToday,
-  clearFirestoreWriteQuotaFlag
+  clearFirestoreWriteQuotaFlag,
+  DEFAULT_LERNSTUDIO_SETS
 };
 
 export function getPrimaryWorkspaceId(user: { uid: string; email?: string | null }): string {
@@ -120,7 +121,7 @@ export const WORKSPACE_CATEGORY_KEYS: WorkspaceCategoryKey[] = [
   'lernstudio_data'
 ];
 
-const ENTITY_COLLECTION_KEYS = [
+export const ENTITY_COLLECTION_KEYS = [
   'groups',
   'students',
   'lessons',
@@ -138,13 +139,14 @@ const ENTITY_COLLECTION_KEYS = [
   'financeTransactions',
   'financeRecurring',
   'financeInstallments',
+  'financeNotifications',
   'goldHoldings',
   'lernstudioSets',
   'homeworkAssignments',
   'homeworkSubmissions'
 ] as const;
 
-const SINGLETON_KEYS = [
+export const SINGLETON_KEYS = [
   'profile',
   'schoolSettings',
   'theme',
@@ -152,12 +154,13 @@ const SINGLETON_KEYS = [
   'notificationSettings',
   'inspirationSettings',
   'inspirationMessages',
+  'customAiBackgrounds',
   'pickerNames',
   'prunedLessonIds'
 ] as const;
 
-// Pre-compute built-in Lernstudio sets lookup so we never waste bandwidth syncing 277 static sets
-const BUILTIN_LERNSTUDIO_MAP = new Map<string, string>();
+// Pre-compute built-in Lernstudio sets lookup so we NEVER sync or duplicate built-in sets!
+export const BUILTIN_LERNSTUDIO_MAP = new Map<string, string>();
 for (const s of DEFAULT_LERNSTUDIO_SETS) {
   if (s && s.id) {
     BUILTIN_LERNSTUDIO_MAP.set(
@@ -167,38 +170,42 @@ for (const s of DEFAULT_LERNSTUDIO_SETS) {
   }
 }
 
-function filterCustomOrModifiedLernstudioSets(sets: any[]): any[] {
+/**
+ * Strictly filters sets so built-in sets (DEFAULT_LERNSTUDIO_SETS) are NEVER uploaded.
+ * Only custom teacher-created sets (!BUILTIN_LERNSTUDIO_MAP.has(id)) are synced.
+ * Also preserves tombstones for custom sets when deleted: true.
+ */
+export function filterCustomOrModifiedLernstudioSets(sets: any[]): any[] {
   if (!Array.isArray(sets)) return [];
   return sets.filter((s) => {
     if (!s || !s.id) return false;
-    const builtinSig = BUILTIN_LERNSTUDIO_MAP.get(s.id);
-    if (!builtinSig) {
-      return true; // Teacher's custom set -> always sync
+    // Built-in sets are NEVER uploaded to cloud workspace!
+    if (BUILTIN_LERNSTUDIO_MAP.has(s.id)) {
+      return false;
     }
-    if (s.deleted || s.updatedAt) {
-      const currentSig = `${s.title || ''}|${Array.isArray(s.items) ? s.items.length : 0}`;
-      if (s.deleted || currentSig !== builtinSig) {
-        return true; // Modified or deleted built-in set -> sync
-      }
-    }
-    return false; // Unmodified built-in set -> already bundled in app code!
+    // Only teacher's custom sets (or deleted custom sets) are synced
+    return true;
   });
 }
 
-function mergeWithBuiltinLernstudioSets(customOrModifiedSets: any[]): any[] {
-  const incoming = Array.isArray(customOrModifiedSets) ? customOrModifiedSets : [];
+/**
+ * On download/restore, preserves all bundled DEFAULT_LERNSTUDIO_SETS
+ * and layers custom sets (and updates) on top.
+ */
+export function mergeWithBuiltinLernstudioSets(customSets: any[]): any[] {
+  const incoming = Array.isArray(customSets) ? customSets : [];
   const byId = new Map<string, any>();
   for (const s of incoming) {
     if (s && s.id) {
       byId.set(s.id, s);
     }
   }
-  const combined: any[] = [...incoming.filter((s) => s && !s.deleted)];
+  // Start with incoming custom sets that are not deleted
+  const combined: any[] = [...incoming.filter((s) => s && !s.deleted && !BUILTIN_LERNSTUDIO_MAP.has(s.id))];
+  // Always attach built-in curriculum sets from the local app bundle
   for (const defSet of DEFAULT_LERNSTUDIO_SETS) {
     if (!defSet || !defSet.id) continue;
-    if (!byId.has(defSet.id)) {
-      combined.push(defSet);
-    }
+    combined.push(defSet);
   }
   return combined;
 }
@@ -489,6 +496,7 @@ function partitionBackupPayload(fullData: any): Record<Exclude<WorkspaceCategory
       financeTransactions: fullData.financeTransactions || [],
       financeRecurring: fullData.financeRecurring || [],
       financeInstallments: fullData.financeInstallments || [],
+      financeNotifications: fullData.financeNotifications || [],
       goldHoldings: fullData.goldHoldings || []
     },
     school_hod: {
@@ -506,7 +514,8 @@ function partitionBackupPayload(fullData: any): Record<Exclude<WorkspaceCategory
       accentColor: fullData.accentColor || '#6366f1',
       notificationSettings: fullData.notificationSettings || {},
       inspirationSettings: fullData.inspirationSettings || {},
-      inspirationMessages: fullData.inspirationMessages || []
+      inspirationMessages: fullData.inspirationMessages || [],
+      customAiBackgrounds: fullData.customAiBackgrounds || fullData.profile?.customAiBackgrounds || []
     },
     lernstudio_data: {
       lernstudioSets: filterCustomOrModifiedLernstudioSets(fullData.lernstudioSets || []),
@@ -1111,3 +1120,145 @@ export function subscribeToRemoteWorkspaceChanges(
     unsub();
   };
 }
+
+/**
+ * Wipes remote cloud workspace data from Google Cloud Firestore and Relay Server:
+ * 1. Verifies ownership of the active Google account.
+ * 2. Deletes all docs in `user_workspaces/{uid}/categories`.
+ * 3. Checks and deletes legacy email-derived path `user_workspaces/{legacyEmailId}/categories`.
+ * 4. Calls DELETE on `/api/workspace/delta` for both UID and legacy IDs.
+ * 5. Clears local sync metadata for this account (watermarks, delta accumulator, caches).
+ * 6. Disables auto-sync immediately so local data is NOT re-uploaded seconds later.
+ * 7. Leaves local app data, local backups, and Firebase Auth user completely untouched.
+ */
+export async function clearCloudWorkspaceData(): Promise<{
+  success: boolean;
+  deletedCount: number;
+  clearedRelay: boolean;
+  clearedLegacy: boolean;
+  error?: string;
+}> {
+  const user = getActiveCloudUser();
+  if (!user || !verifyWorkspaceOwnership(user)) {
+    return {
+      success: false,
+      deletedCount: 0,
+      clearedRelay: false,
+      clearedLegacy: false,
+      error: 'يرجى تسجيل الدخول بحساب Google الموثق أولاً لتنفيذ عملية التنظيف.'
+    };
+  }
+
+  const primaryId = getPrimaryWorkspaceId(user);
+  const legacyId = user.email ? emailToWorkspaceId(user.email) : null;
+  let deletedCount = 0;
+  let clearedLegacy = false;
+  let clearedRelay = false;
+
+  try {
+    // Immediately pause auto-sync before doing anything else
+    setAutoCloudSyncEnabled(false);
+
+    // 1. Delete documents from primary UID workspace in Firestore
+    const uidSnap = await getDocs(collection(db, 'user_workspaces', primaryId, 'categories'));
+    if (!uidSnap.empty) {
+      for (const docSnap of uidSnap.docs) {
+        await executeSafeFirestoreWrite(() =>
+          deleteDoc(doc(db, 'user_workspaces', primaryId, 'categories', docSnap.id))
+        ).catch((err) => {
+          console.warn(`Failed to delete cloud chunk ${docSnap.id}:`, err);
+        });
+        deletedCount++;
+      }
+    }
+
+    // 2. Check and delete legacy email workspace if existing
+    if (legacyId && legacyId !== primaryId) {
+      try {
+        const legacySnap = await getDocs(collection(db, 'user_workspaces', legacyId, 'categories'));
+        if (!legacySnap.empty) {
+          for (const docSnap of legacySnap.docs) {
+            await executeSafeFirestoreWrite(() =>
+              deleteDoc(doc(db, 'user_workspaces', legacyId, 'categories', docSnap.id))
+            ).catch(() => {});
+            deletedCount++;
+          }
+          clearedLegacy = true;
+        }
+      } catch (legacyErr) {
+        console.warn('Notice while inspecting legacy cloud workspace:', legacyErr);
+      }
+    }
+
+    // 3. Delete relay server cached chunks
+    if (typeof window !== 'undefined') {
+      try {
+        await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(primaryId)}`, {
+          method: 'DELETE'
+        });
+        if (legacyId && legacyId !== primaryId) {
+          await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(legacyId)}`, {
+            method: 'DELETE'
+          });
+        }
+        clearedRelay = true;
+      } catch (relayErr) {
+        console.warn('Failed to clear relay workspace:', relayErr);
+      }
+    }
+
+    // 4. Clear local sync watermarks and cache for this account
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(`gluck_cloud_watermarks_v2_${primaryId}`);
+        localStorage.removeItem(`gluck_cloud_delta_acc_v2_${primaryId}`);
+        if (legacyId) {
+          localStorage.removeItem(`gluck_cloud_watermarks_v2_${legacyId}`);
+          localStorage.removeItem(`gluck_cloud_delta_acc_v2_${legacyId}`);
+        }
+        localStorage.removeItem(LAST_SYNC_TIME_KEY);
+      } catch {
+        // Ignore localStorage error
+      }
+    }
+
+    // Clear memory caches
+    lastUploadedChunkCache.clear();
+    lastUploadedChunkCount.clear();
+
+    // 5. Verification check: ensure Firestore primary collection is now empty
+    const verifySnap = await getDocs(collection(db, 'user_workspaces', primaryId, 'categories'));
+    if (!verifySnap.empty) {
+      return {
+        success: false,
+        deletedCount,
+        clearedRelay,
+        clearedLegacy,
+        error: 'لم تكتمل عملية التنظيف بالكامل، لا تزال بعض الملفات موجودة بالسحابة.'
+      };
+    }
+
+    // Dispatch event so UI cards update immediately
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gluck-cloud-sync-config-changed'));
+    }
+
+    return {
+      success: true,
+      deletedCount,
+      clearedRelay,
+      clearedLegacy
+    };
+  } catch (err: any) {
+    const errMsg = err?.message || 'تعذر تنظيف بيانات السحابة.';
+    console.error('Clear cloud workspace error:', err);
+    return {
+      success: false,
+      deletedCount,
+      clearedRelay,
+      clearedLegacy,
+      error: errMsg
+    };
+  }
+}
+

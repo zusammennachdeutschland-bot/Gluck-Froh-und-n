@@ -10,6 +10,7 @@ import {
   setLastCloudSyncTime,
   uploadWorkspaceToGoogleCloud,
   downloadWorkspaceFromGoogleCloud,
+  clearCloudWorkspaceData,
   CloudSyncSummary,
   getVercelPublicDomain,
   setVercelPublicDomain,
@@ -27,7 +28,9 @@ import {
   Globe,
   ExternalLink,
   Edit3,
-  RotateCcw
+  RotateCcw,
+  Trash2,
+  ShieldAlert
 } from 'lucide-react';
 
 interface GoogleCloudSyncCardProps {
@@ -54,8 +57,9 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
   const [autoSync, setAutoSync] = useState<boolean>(() => isAutoCloudSyncEnabled());
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => getLastCloudSyncTime());
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
-  const [actionLoading, setActionLoading] = useState<'sync' | 'push' | 'pull' | 'login' | null>(null);
+  const [actionLoading, setActionLoading] = useState<'sync' | 'push' | 'pull' | 'login' | 'clear' | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState<boolean>(false);
   const [cloudSummary, setCloudSummary] = useState<CloudSyncSummary | null>(null);
   const [showUnauthorizedDomainHelper, setShowUnauthorizedDomainHelper] = useState(false);
   const [domainCopied, setDomainCopied] = useState(false);
@@ -378,6 +382,40 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     }
   };
 
+  const handleClearCloudData = async () => {
+    setActionLoading('clear');
+    setFeedbackMsg(null);
+    try {
+      const res = await clearCloudWorkspaceData();
+      if (res.success) {
+        setAutoSync(false);
+        setLastSyncTime(null);
+        setCloudSummary(null);
+        setSyncStatus('idle');
+        const msg = _t(
+          `تم تنظيف بيانات السحابة بنجاح (تم حذف ${res.deletedCount} جزء ومسح الـ Relay وإيقاف المزامنة التلقائية). بيانات جهازك المحلية والواجبات المنشورة للطلاب محفوظة تماماً.`,
+          `Cloud workspace cleared successfully (${res.deletedCount} chunks removed, auto-sync paused). Local device data and published homework remain safe.`,
+          `Cloud-Arbeitsbereich erfolgreich bereinigt. Lokale Daten bleiben erhalten.`
+        );
+        setFeedbackMsg({ type: 'success', text: msg });
+        if (triggerToast) triggerToast(msg);
+      } else {
+        setFeedbackMsg({
+          type: 'error',
+          text: res.error || _t('تعذر تنظيف بيانات السحابة.', 'Failed to clear cloud workspace.', 'Fehler beim Löschen.')
+        });
+      }
+    } catch (err: any) {
+      setFeedbackMsg({
+        type: 'error',
+        text: err?.message || 'حدث خطأ أثناء تنظيف بيانات السحابة.'
+      });
+    } finally {
+      setActionLoading(null);
+      setShowClearConfirmModal(false);
+    }
+  };
+
   return (
     <div className="bg-surface border border-surface-border rounded-2xl p-4 sm:p-5 space-y-4">
       {/* Header Row */}
@@ -641,6 +679,93 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
               </button>
             </div>
           )}
+
+          {/* Danger Zone: Clear Cloud Workspace Button */}
+          {!compact && (
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                disabled={actionLoading !== null}
+                onClick={() => setShowClearConfirmModal(true)}
+                className="py-2 px-3 text-red-600 dark:text-red-400 hover:bg-red-500/10 border border-red-500/20 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                title={_t('تنظيف ومسح بيانات السحابة فقط مع بقاء بيانات هذا الجهاز', 'Clear Cloud Data only', 'Cloud-Daten bereinigen')}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{_t('تنظيف بيانات السحابة (Clear Cloud Data)', 'Clear Cloud Data', 'Cloud-Daten bereinigen')}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Confirmation Modal for Clearing Cloud Data */}
+      {showClearConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 shrink-0">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-black text-sm text-text-main">
+                  {_t(
+                    'تأكيد تنظيف بيانات السحابة (Clear Cloud Data)',
+                    'Confirm Clear Cloud Workspace',
+                    'Cloud-Bereinigung bestätigen'
+                  )}
+                </h3>
+                <p className="text-xs text-text-muted leading-relaxed">
+                  {_t(
+                    'سيتم حذف كافة بيانات مساحة العمل الخاصة بك المحفوظة في سحابة Google Cloud Firestore ومسح بيانات الـ Relay السريعة وإيقاف المزامنة التلقائية فوراً لمنع إعادة الرفع.',
+                    'This will remove your private workspace data and relay cache from Google Cloud Firestore and immediately pause auto-sync.',
+                    'Dies löscht den Cloud-Arbeitsbereich und pausiert die automatische Synchronisierung.'
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs space-y-1 text-amber-700 dark:text-amber-400 font-medium">
+              <div className="font-bold flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>
+                  {_t(
+                    'بيانات جهازك الحالية والواجبات المنشورة للطلاب آمنة تماماً ولن تُحذف.',
+                    'Your local device data and published student homework remain 100% safe.',
+                    'Ihre lokalen Daten und Hausaufgaben bleiben vollständig erhalten.'
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={actionLoading === 'clear'}
+                onClick={() => setShowClearConfirmModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-text-muted hover:text-text-main hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                type="button"
+                disabled={actionLoading === 'clear'}
+                onClick={handleClearCloudData}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                {actionLoading === 'clear' ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>{_t('جاري التنظيف...', 'Clearing...', 'Wird gelöscht...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{_t('نعم، نظّف السحابة الآن', 'Yes, Clear Cloud Now', 'Ja, jetzt bereinigen')}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

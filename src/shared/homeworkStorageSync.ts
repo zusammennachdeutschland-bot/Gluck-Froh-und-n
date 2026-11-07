@@ -200,6 +200,7 @@ export function deduplicateSubmissions(submissions: HomeworkSubmission[]): Homew
 function notifyHomeworkSyncStateChanged(): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('glueck-homework-sync-updated'));
+    window.dispatchEvent(new CustomEvent('gluck-local-data-mutated', { detail: { source: 'homework' } }));
   }
 }
 

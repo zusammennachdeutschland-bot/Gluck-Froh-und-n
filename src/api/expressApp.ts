@@ -309,6 +309,16 @@ app.all('/api/workspace/delta', (req, res) => {
     return res.json({ success: true, storedCount: chunks.length });
   }
 
+  if (req.method === 'DELETE') {
+    const workspaceId = String(req.query.workspaceId || '').trim();
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'Missing workspaceId' });
+    }
+    const had = workspaceChunksRelayStore.has(workspaceId);
+    workspaceChunksRelayStore.delete(workspaceId);
+    return res.json({ success: true, cleared: had });
+  }
+
   return res.json({ success: true });
 });
 

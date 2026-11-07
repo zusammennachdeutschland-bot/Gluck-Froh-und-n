@@ -1,17 +1,112 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   subscribeTeacherAuth,
   isAutoCloudSyncEnabled,
-  setAutoCloudSyncEnabled,
   uploadWorkspaceToGoogleCloud,
   downloadWorkspaceFromGoogleCloud,
   subscribeToRemoteWorkspaceChanges,
-  isFirestoreWriteQuotaExhaustedToday
+  isFirestoreWriteQuotaExhaustedToday,
+  BUILTIN_LERNSTUDIO_MAP
 } from '../services/firebaseWorkspaceSync';
 
 function stripSnapshotTimestamp(jsonStr: string): string {
   return (jsonStr || '').replace(/"timestamp":"[^"]*",?/, '');
+}
+
+/**
+ * Checks whether the given JSON backup has any meaningful application workspace data.
+ * Checks ALL backup sections:
+ * - Core CRM: students, groups, lessons, payments, certificates, notifications, prunedLessonIds
+ * - School & HOD: hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes
+ * - Finance: financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, goldHoldings
+ * - Homework: homeworkAssignments, homeworkSubmissions
+ * - Lernstudio: CUSTOM sets created by teacher (!BUILTIN_LERNSTUDIO_MAP.has(s.id))
+ * - Singletons: custom pickerNames, customAiBackgrounds, todos, non-default profile or schoolSettings
+ */
+export function hasAnyWorkspaceData(jsonStr: string | null): boolean {
+  if (!jsonStr) return false;
+  try {
+    const p = JSON.parse(jsonStr);
+    if (!p || typeof p !== 'object') return false;
+
+    // 1. Check array collections
+    const collectionKeys = [
+      'students',
+      'groups',
+      'lessons',
+      'payments',
+      'certificates',
+      'notifications',
+      'todos',
+      'hodStudents',
+      'hodComplaints',
+      'hodActionPlans',
+      'hodVisits',
+      'schoolNotes',
+      'financeAccounts',
+      'financeCategories',
+      'financeTransactions',
+      'financeRecurring',
+      'financeInstallments',
+      'financeNotifications',
+      'goldHoldings',
+      'homeworkAssignments',
+      'homeworkSubmissions',
+      'pickerNames',
+      'prunedLessonIds',
+      'inspirationMessages'
+    ];
+
+    for (const key of collectionKeys) {
+      if (Array.isArray(p[key]) && p[key].length > 0) {
+        return true;
+      }
+    }
+
+    // 2. Check Custom Lernstudio Sets created by teacher
+    if (Array.isArray(p.lernstudioSets)) {
+      const hasCustomSet = p.lernstudioSets.some(
+        (s: any) => s && s.id && !BUILTIN_LERNSTUDIO_MAP.has(s.id)
+      );
+      if (hasCustomSet) return true;
+    }
+
+    // 3. Check custom AI backgrounds
+    if (
+      (Array.isArray(p.customAiBackgrounds) && p.customAiBackgrounds.length > 0) ||
+      (Array.isArray(p.profile?.customAiBackgrounds) && p.profile.customAiBackgrounds.length > 0)
+    ) {
+      return true;
+    }
+
+    // 4. Check teacher profile customization
+    if (p.profile && typeof p.profile === 'object') {
+      if (
+        (p.profile.name && p.profile.name !== 'معلم Glück' && p.profile.name !== 'المعلم') ||
+        p.profile.phone ||
+        p.profile.email ||
+        p.profile.avatarUrl
+      ) {
+        return true;
+      }
+    }
+
+    // 5. Check schoolSettings customization
+    const sch = p.schoolSettings || p.profile?.schoolSettings;
+    if (sch && typeof sch === 'object') {
+      if (
+        (sch.name && sch.name !== 'Glück Deutsch' && sch.name !== 'مدرستنا') ||
+        (Array.isArray(sch.stages) && sch.stages.length > 0)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 export function useGoogleCloudWorkspaceSync(): void {
@@ -45,15 +140,121 @@ export function useGoogleCloudWorkspaceSync(): void {
   } = useApp();
 
   const currentUserUidRef = useRef<string | null>(null);
-  const isApplyingRemoteRef = useRef<boolean>(false);
+  const isSyncInFlightRef = useRef<boolean>(false);
   const hasCompletedInitialCheckRef = useRef<boolean>(false);
   const autoPushTimerRef = useRef<any>(null);
   const lastUploadedSnapshotRef = useRef<string | null>(null);
-  const quotaExceededRef = useRef<boolean>(false);
+  const [localMutationTick, setLocalMutationTick] = useState<number>(0);
+
+  // Listen to unified local data mutations (like homework, picker names, custom backgrounds saved directly)
+  useEffect(() => {
+    const handleLocalMutation = () => {
+      setLocalMutationTick((t) => t + 1);
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('gluck-local-data-mutated', handleLocalMutation);
+      return () => {
+        window.removeEventListener('gluck-local-data-mutated', handleLocalMutation);
+      };
+    }
+  }, []);
 
   // 1. Auth listener + real-time remote changes listener (`onSnapshot`) + initial cloud bootstrap
   useEffect(() => {
     let unsubRemote: (() => void) | null = null;
+
+    const runBootstrap = async (uid: string) => {
+      if (hasCompletedInitialCheckRef.current || !isAutoCloudSyncEnabled() || isSyncInFlightRef.current) {
+        return;
+      }
+
+      isSyncInFlightRef.current = true;
+      try {
+        window.dispatchEvent(
+          new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
+        );
+
+        const cloudRes = await downloadWorkspaceFromGoogleCloud();
+        if (cloudRes.error) {
+          // Network or permission failure: do NOT mark initial check completed!
+          window.dispatchEvent(
+            new CustomEvent('gluck-cloud-sync-status', {
+              detail: { status: 'error', error: cloudRes.error }
+            })
+          );
+          return;
+        }
+
+        const localSnapStr = await performBackup();
+        const localHasData = hasAnyWorkspaceData(localSnapStr);
+        const remoteHasActualData = cloudRes.hasRemoteData && hasAnyWorkspaceData(cloudRes.backupJsonStr);
+
+        let finalStatus: 'synced' | 'error' = 'synced';
+        let finalError: string | undefined;
+
+        if (remoteHasActualData && !localHasData && cloudRes.backupJsonStr) {
+          // Fresh device: automatically restore from Google Cloud
+          const success = await importBackupFile(cloudRes.backupJsonStr);
+          if (success) {
+            try {
+              localStorage.setItem('dl_setup_completed', 'true');
+              window.dispatchEvent(new CustomEvent('close-setup-wizard'));
+            } catch {}
+            const postImportSnap = await performBackup();
+            lastUploadedSnapshotRef.current = stripSnapshotTimestamp(postImportSnap);
+          } else {
+            finalStatus = 'error';
+            finalError = 'تعذر استيراد البيانات السحابية.';
+          }
+        } else if (!remoteHasActualData && localHasData && !isFirestoreWriteQuotaExhaustedToday()) {
+          // Cloud is completely empty and local has data: seed cloud once
+          const res = await uploadWorkspaceToGoogleCloud(localSnapStr, { forceFullBaseline: true });
+          if (res.success) {
+            lastUploadedSnapshotRef.current = stripSnapshotTimestamp(localSnapStr);
+          } else {
+            finalStatus = 'error';
+            finalError = res.error;
+          }
+        } else if (localHasData && remoteHasActualData && cloudRes.backupJsonStr) {
+          // Both have data: Perform a real two-way merge
+          const success = await importBackupFile(cloudRes.backupJsonStr);
+          if (!success) {
+            finalStatus = 'error';
+            finalError = 'تعذر دمج البيانات السحابية.';
+          } else if (!isFirestoreWriteQuotaExhaustedToday()) {
+            const mergedSnapStr = await performBackup();
+            const uploadRes = await uploadWorkspaceToGoogleCloud(mergedSnapStr);
+            if (uploadRes.success) {
+              lastUploadedSnapshotRef.current = stripSnapshotTimestamp(mergedSnapStr);
+            } else {
+              finalStatus = 'error';
+              finalError = uploadRes.error;
+            }
+          }
+        } else if (localHasData) {
+          lastUploadedSnapshotRef.current = stripSnapshotTimestamp(localSnapStr);
+        }
+
+        // Only mark initial check completed if bootstrap actually completed without error
+        if (finalStatus === 'synced') {
+          hasCompletedInitialCheckRef.current = true;
+        }
+
+        window.dispatchEvent(
+          new CustomEvent('gluck-cloud-sync-status', {
+            detail: { status: finalStatus, error: finalError }
+          })
+        );
+      } catch (err: any) {
+        window.dispatchEvent(
+          new CustomEvent('gluck-cloud-sync-status', {
+            detail: { status: 'error', error: err?.message }
+          })
+        );
+      } finally {
+        isSyncInFlightRef.current = false;
+      }
+    };
 
     const unsubAuth = subscribeTeacherAuth(async (user) => {
       if (unsubRemote) {
@@ -68,127 +269,15 @@ export function useGoogleCloudWorkspaceSync(): void {
       }
 
       currentUserUidRef.current = user.uid;
+      await runBootstrap(user.uid);
 
-      // Initial check on sign-in / boot
-      if (!hasCompletedInitialCheckRef.current && isAutoCloudSyncEnabled()) {
-        hasCompletedInitialCheckRef.current = true;
-        try {
-          window.dispatchEvent(
-            new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
-          );
-          const cloudRes = await downloadWorkspaceFromGoogleCloud();
-          const localSnapStr = await performBackup();
-          const hasAnyWorkspaceData = (jsonStr: string | null): boolean => {
-            if (!jsonStr) return false;
-            try {
-              const p = JSON.parse(jsonStr);
-              const collectionKeys = [
-                'students',
-                'groups',
-                'lessons',
-                'payments',
-                'certificates',
-                'todos',
-                'hodStudents',
-                'hodComplaints',
-                'hodActionPlans',
-                'hodVisits',
-                'schoolNotes',
-                'financeAccounts',
-                'financeTransactions',
-                'financeRecurring',
-                'financeInstallments',
-                'goldHoldings',
-                'homeworkAssignments',
-                'homeworkSubmissions',
-                'pickerNames'
-              ];
-              return collectionKeys.some((k) => Array.isArray(p[k]) && p[k].length > 0);
-            } catch {
-              return false;
-            }
-          };
-
-          const localHasData = hasAnyWorkspaceData(localSnapStr);
-          const remoteHasActualData = cloudRes.hasRemoteData && hasAnyWorkspaceData(cloudRes.backupJsonStr);
-
-          let finalStatus: 'synced' | 'error' = 'synced';
-          let finalError: string | undefined;
-
-          if (remoteHasActualData && !localHasData && cloudRes.backupJsonStr) {
-            // Fresh device / browser: automatically pull everything from Google Cloud!
-            isApplyingRemoteRef.current = true;
-            const success = await importBackupFile(cloudRes.backupJsonStr);
-            if (success) {
-              try {
-                localStorage.setItem('dl_setup_completed', 'true');
-                window.dispatchEvent(new CustomEvent('close-setup-wizard'));
-              } catch {}
-              const postImportSnap = await performBackup();
-              lastUploadedSnapshotRef.current = stripSnapshotTimestamp(postImportSnap);
-            } else {
-              finalStatus = 'error';
-              finalError = 'تعذر استيراد البيانات السحابية.';
-            }
-            setTimeout(() => {
-              isApplyingRemoteRef.current = false;
-            }, 2500);
-          } else if (!remoteHasActualData && localHasData && !isFirestoreWriteQuotaExhaustedToday()) {
-            // Cloud is completely empty and local has data: seed cloud once
-            const res = await uploadWorkspaceToGoogleCloud(localSnapStr);
-            if (res.success) {
-              lastUploadedSnapshotRef.current = stripSnapshotTimestamp(localSnapStr);
-            } else {
-              finalStatus = 'error';
-              finalError = res.error;
-            }
-          } else if (localHasData && remoteHasActualData && cloudRes.backupJsonStr) {
-            // Both local and cloud have data on boot: Perform a two-way merge
-            isApplyingRemoteRef.current = true;
-            const success = await importBackupFile(cloudRes.backupJsonStr);
-            if (!success) {
-              finalStatus = 'error';
-              finalError = 'تعذر دمج البيانات السحابية.';
-            } else if (!isFirestoreWriteQuotaExhaustedToday()) {
-              // After merging (which updates local storage), push any local-only changes back to cloud
-              const mergedSnapStr = await performBackup();
-              const uploadRes = await uploadWorkspaceToGoogleCloud(mergedSnapStr);
-              if (uploadRes.success) {
-                lastUploadedSnapshotRef.current = stripSnapshotTimestamp(mergedSnapStr);
-              } else {
-                finalStatus = 'error';
-                finalError = uploadRes.error;
-              }
-            }
-
-            setTimeout(() => {
-              isApplyingRemoteRef.current = false;
-            }, 2500);
-          } else if (localHasData) {
-            lastUploadedSnapshotRef.current = stripSnapshotTimestamp(localSnapStr);
-          }
-
-          window.dispatchEvent(
-            new CustomEvent('gluck-cloud-sync-status', {
-              detail: { status: finalStatus, error: finalError }
-            })
-          );
-        } catch (err: any) {
-          window.dispatchEvent(
-            new CustomEvent('gluck-cloud-sync-status', {
-              detail: { status: 'error', error: err?.message }
-            })
-          );
-        }
-      }
-
-      // Attach live `onSnapshot` listener for changes made on other devices
+      // Attach live `onSnapshot` listener for real-time multi-device sync
       unsubRemote = subscribeToRemoteWorkspaceChanges(
         user.uid,
         async (remoteBackupJson) => {
-          if (!isAutoCloudSyncEnabled()) return;
+          if (!isAutoCloudSyncEnabled() || isSyncInFlightRef.current) return;
+          isSyncInFlightRef.current = true;
           try {
-            isApplyingRemoteRef.current = true;
             window.dispatchEvent(
               new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
             );
@@ -198,12 +287,12 @@ export function useGoogleCloudWorkspaceSync(): void {
               lastUploadedSnapshotRef.current = stripSnapshotTimestamp(postSnap);
             }
             window.dispatchEvent(
-              new CustomEvent('gluck-cloud-sync-status', { detail: { status: success ? 'synced' : 'error' } })
+              new CustomEvent('gluck-cloud-sync-status', {
+                detail: { status: success ? 'synced' : 'error' }
+              })
             );
           } finally {
-            setTimeout(() => {
-              isApplyingRemoteRef.current = false;
-            }, 2500);
+            isSyncInFlightRef.current = false;
           }
         }
       );
@@ -213,14 +302,14 @@ export function useGoogleCloudWorkspaceSync(): void {
       unsubAuth();
       if (unsubRemote) unsubRemote();
     };
-  }, []);
+  }, [importBackupFile, performBackup]);
 
-  // 2. Debounced Auto-Push whenever any app data changes locally
+  // 2. Debounced Auto-Push (15s debounce) whenever app data changes locally
   useEffect(() => {
     if (
       !currentUserUidRef.current ||
       !isAutoCloudSyncEnabled() ||
-      isApplyingRemoteRef.current ||
+      isSyncInFlightRef.current ||
       isFirestoreWriteQuotaExhaustedToday()
     ) {
       return;
@@ -230,19 +319,21 @@ export function useGoogleCloudWorkspaceSync(): void {
       clearTimeout(autoPushTimerRef.current);
     }
 
+    // 15 seconds debounce as selected to preserve daily Firestore quota
     autoPushTimerRef.current = setTimeout(async () => {
       if (
         !currentUserUidRef.current ||
         !isAutoCloudSyncEnabled() ||
-        isApplyingRemoteRef.current ||
+        isSyncInFlightRef.current ||
         isFirestoreWriteQuotaExhaustedToday()
       ) {
         return;
       }
+
+      isSyncInFlightRef.current = true;
       try {
         const snapStr = await performBackup();
         const normalizedSnap = stripSnapshotTimestamp(snapStr);
-        // Skip upload if snapshot content hasn't changed since last successful upload
         if (normalizedSnap === lastUploadedSnapshotRef.current) {
           return;
         }
@@ -266,8 +357,10 @@ export function useGoogleCloudWorkspaceSync(): void {
             detail: { status: 'error', error: err?.message }
           })
         );
+      } finally {
+        isSyncInFlightRef.current = false;
       }
-    }, 45000);
+    }, 15000);
 
     return () => {
       if (autoPushTimerRef.current) {
@@ -298,6 +391,8 @@ export function useGoogleCloudWorkspaceSync(): void {
     financeRecurring,
     financeInstallments,
     goldHoldings,
-    lernstudioSets
+    lernstudioSets,
+    localMutationTick,
+    performBackup
   ]);
 }

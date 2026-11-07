@@ -1,6 +1,6 @@
 {
-  "summary":  "Detailed plan for auditing and repairing the Google Account authentication and Firebase Firestore synchronization system for the Glück application. Covers Android native auth transition, sync reliability hardening, security rule remediation, and in-app release keystore management.",
-  "updatedAt":  "2026-11-07T08:15:32.583875247Z",
+  "summary":  "خطة عمل شاملة ومفصلة لإصلاح مزامنة Google Cloud التلقائية ذهاباً وإياباً، وتغطية جميع أقسام النسخ الاحتياطي (بما فيها المجموعات المخصصة حصراً لـ Lernstudio)، ومنع حلقات الرفع والدمج، وتوفير زر تنظيف بيانات السحابة (Clear Cloud Data) مع إيقاف المزامنة التلقائية فوراً وبقاء الواجبات المنشورة والبيانات المحلية سليمة، وتنفيذ 14 اختباراً آلياً شاملاً.",
+  "updatedAt":  "2026-11-07T11:12:01.463223586Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

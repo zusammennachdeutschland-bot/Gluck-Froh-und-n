@@ -1,4 +1,5 @@
-import { Peer, DataConnection } from 'peerjs';
+import PeerPkg, { type DataConnection } from 'peerjs';
+const Peer = (PeerPkg as any).default || PeerPkg;
 import { connectivityEngine } from './connectivityEngine';
 
 // Modern, robust public STUN servers for WebRTC P2P discovery without broken TURN endpoints
@@ -26,8 +27,8 @@ export function formatPairingPinId(pin: string): string {
 }
 
 class PeerNetwork {
-  private peer: Peer | null = null;
-  private pairingPeer: Peer | null = null;
+  private peer: any | null = null;
+  private pairingPeer: any | null = null;
   private connections: Map<string, DataConnection> = new Map();
   private resolvers: Map<string, { resolve: (val: any) => void; reject: (err: any) => void; timeout: any }> = new Map();
   private pendingConnects: Map<string, { reject: (err: any) => void; timeout: any }> = new Map();

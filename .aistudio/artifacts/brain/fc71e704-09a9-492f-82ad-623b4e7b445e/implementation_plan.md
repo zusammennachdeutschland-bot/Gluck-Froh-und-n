@@ -1,98 +1,93 @@
-# Glück – Google Auth & Firebase Cloud Sync Repair Plan
+# خطة عمل: الإصلاح الشامل للمزامنة السحابية (Google Cloud Sync) وإضافة ميزة تنظيف بيانات السحابة
 
-This plan details the audit and repair of the synchronization and authentication systems to ensure reliable two-way sync between Android and Web, hardened security, and seamless native mobile authentication.
-
----
-
-## User Review & Critical Decisions
-
-> [!IMPORTANT]
-> The following confirmed choices from Phase 1 govern this implementation:
-
-- **Confirmed Decision 1 (Android Native Auth)**: Transition to the **Native Capacitor Google Sign-In plugin**. This replaces the `signInWithRedirect` fallback, providing a modern, seamless login experience on Android devices without leaving the app.
-- **Confirmed Decision 2 (Sync Status UI)**: Place synchronization status and "Pending Changes" indicators exclusively inside the **Settings / Cloud Sync** view. This maintains the minimalist UI while providing necessary transparency for the sync lifecycle.
-- **Confirmed Decision 3 (Keystore Management)**: Implement a mobile-friendly button in the app's internal management section to trigger the secure `/api/android/generate-keystore` endpoint. This allows generating a release keystore and obtaining its Base64 value directly from an Android phone without terminal access.
+بناءً على الفحص الدقيق للكود الحالي وإجاباتك الكريمة، تتضمن هذه الخطة معالجة جذرية لجميع مشاكل المزامنة السحابية وضمان عدم فقدان أي بيانات محلية أو استهلاك غير مبرر للحصة اليومية، مع إضافة زر تنظيف بيانات السحابة.
 
 ---
 
-## 1. Overview & Core Concept
-
-- **What It Does**: Hardens the Firestore synchronization engine to eliminate "False Success" reports, enforces strict ownership via security rules, transitions Android authentication to native SDKs, and provides mobile-first tools for Android release signing.
-- **Target Audience**: Teachers using the "Glück" manager across Android and Web who require consistent data availability and secure workspace isolation.
-- **Key Value**: Guarantees that data is never lost during network interruptions and ensures that workspaces are private and tamper-proof.
-
----
-
-## 2. User Experience & Visual Design
-
-- **Key User Flows**:
-    - **Native Login**: On Android, tapping "Sign in with Google" opens the native system account picker. Once selected, the app immediately authenticates and initializes the cloud workspace.
-    - **Sync Monitoring**: Users can visit "Settings > Cloud Sync" to see the real-time status: "Synced", "Syncing...", "Pending Changes (Offline)", or "Quota Exceeded".
-    - **Release Preparation**: In the developer/management section, a teacher can enter a password, tap "Generate Release Keystore", and receive the Base64 string and Fingerprint to be used for their GitHub Actions configuration.
-- **Visual Identity & Theme**:
-    - Leverages existing Tailwind tokens (`--primary`, `--surface`, `--text-muted`) for all new UI elements.
-    - Uses status-colored accents (emerald for success, amber for pending, rose for errors).
-
----
-
-## 3. Key Product Decisions & Trade-Offs
-
-- **Decision 1: Native Capacitor Auth Transition**
-    - *Approach*: Install `@codetrix-studio/capacitor-google-auth` and configure it for Android.
-    - *Rationale*: `signInWithRedirect` is prone to context-loss on mobile browsers and provides a poor UX compared to native system prompts.
-- **Decision 2: Atomic Watermark Updates**
-    - *Approach*: Only update `lastSyncTimestamp` and local watermarks *after* the Firestore `setDoc` promise resolves successfully.
-    - *Rationale*: Prevents the "False Success" bug where the app thinks it's synced but the data is actually stuck in the SDK's internal buffer or rejected by security rules.
-- **Decision 3: UID-Based Security Enforcement**
-    - *Approach*: Update `firestore.rules` to strictly check `request.auth.uid == userId` for the `user_workspaces` path.
-    - *Rationale*: Closes the current security gap where workspace isolation relied on client-side logic rather than server-side enforcement.
+## 1. الأهداف والقرارات المعتمدة
+1. **نطاق تنظيف بيانات السحابة (Clear Cloud Data)**:
+   - حذف بيانات مساحة العمل السحابية الخاصة (`user_workspaces/{uid}/categories` و `user_workspaces/{legacyEmailId}/categories`) ومخزن الـ Relay (`/api/workspace/delta`).
+   - الإبقاء الكامل على الواجبات المنشورة المشتركة للطلاب (`homework_assignments`).
+   - الإبقاء الكامل على البيانات المحلية للجهاز وملفات النسخ الاحتياطي المحلية ومستخدم المصادقة (Firebase Auth User).
+   - إيقاف المزامنة التلقائية فوراً (`autoCloudSyncEnabled = false`) مع حفظ هذه الحالة في التخزين المحلي لمنع إعادة الرفع التلقائي بعدها مباشرة.
+2. **مهلة انتظار الرفع التلقائي (Debounce)**:
+   - اعتماد مهلة 15 ثانية بعد أي تعديل محلي (مثل إضافة واجب، مجموعة تعليمية، أو تعديل أسماء) لحماية الحصة اليومية ومنع العمليات المتكررة.
+3. **مجموعات Lernstudio**:
+   - استبعاد مجموعات النظام المضمنة (`DEFAULT_LERNSTUDIO_SETS`) تماماً وبشكل قاطع من الرفع أو التنزيل أو التكرار عبر السحابة.
+   - مزامنة المجموعات التعليمية المخصصة التي أنشأها المعلم فقط (`!BUILTIN_LERNSTUDIO_MAP.has(s.id)`) مع دعم علامات الحذف (Tombstones).
+4. **تغطية شاملة لجميع أقسام النسخ الاحتياطي**:
+   - ضم `financeNotifications` و `customAiBackgrounds` و `prunedLessonIds` و `pickerNames` و `homeworkAssignments` و `homeworkSubmissions` إلى فئات المزامنة التفاضلية (`ENTITY_COLLECTION_KEYS`) و التقسيم (`partitionBackupPayload`).
+5. **إصلاح حلقة الإقلاع والتحقق (`hasCompletedInitialCheckRef`)**:
+   - عدم اعتماد `hasCompletedInitialCheckRef = true` إلا بعد نجاح قراءة السحابة فعلياً.
+   - منع التعامل مع فشل الشبكة أو أخطاء القراءة على أنها سحابة فارغة.
+   - استخدام قفل غير متزامن (Mutex/Queue) يمنع تداخل الرفع والتنزيل.
 
 ---
 
-## 4. Technical Architecture & Data Strategy
+## 2. خطوات التنفيذ التفصيلية
 
-### Sync Lifecycle & Error Recovery
+### الخطوة 1: تحديث الـ API لدعم تنظيف الـ Relay
+- تعديل `src/api/expressApp.ts` لإضافة دعم `DELETE /api/workspace/delta?workspaceId=...` لمسح أجزاء الـ Relay للمعرفين (UID والبريد الإلكتروني القديم).
 
-```
-┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-│  Local Change   │──────▶│  Debounced Push │──────▶│ Firestore Write │
-└─────────────────┘       └────────┬────────┘       └────────┬────────┘
-                                   │                         │
-                                   ▼                         ▼
-                          ┌─────────────────┐       ┌─────────────────┐
-                          │ Update Status:  │       │ Success: Update │
-                          │   "Syncing..."  │       │   Watermarks    │
-                          └─────────────────┘       └────────┬────────┘
-                                                             │
-                                                             ▼
-                                                    ┌─────────────────┐
-                                                    │ Status: "Synced"│
-                                                    └─────────────────┘
-```
+### الخطوة 2: تحديث محرك المزامنة `src/services/firebaseWorkspaceSync.ts`
+1. **تحديث `ENTITY_COLLECTION_KEYS` و `partitionBackupPayload`**:
+   - إدراج `financeNotifications` في فئة `finance_gold`.
+   - إدراج `customAiBackgrounds` في فئة `profile_settings`.
+2. **عزل مجموعات Lernstudio المضمنة**:
+   - تعديل دالة ترشيح المجموعات بحيث ترفع فقط المجموعات التي ليست ضمن `BUILTIN_LERNSTUDIO_MAP`.
+   - عند الاستعادة، دمج مجموعات النظام الثابتة من حزمة التطبيق مع المجموعات المخصصة المستعادة من السحابة دون تكرار.
+3. **تنفيذ دالة تنظيف السحابة `clearCloudWorkspaceData`**:
+   - التحقق من هوية المستخدم ومعرف مساحة العمل.
+   - حذف مستندات الفئات من مسار مساحة العمل الحالية (`user_workspaces/{uid}/categories`).
+   - فحص وحذف مسار مساحة العمل القديمة المبنية على البريد إذا كانت موجودة (`user_workspaces/{legacyEmailId}/categories`).
+   - استدعاء `DELETE /api/workspace/delta` لتنظيف مخزن الـ Relay.
+   - تنظيف بيانات المزامنة الوصفية المحلية لهذا الحساب فقط (Watermarks, Delta Accumulator, Chunk Cache).
+   - التأكد الفعلي من خلو السحابة وإرجاع تقرير دقيق للنجاح.
 
-### Implementation Steps
+### الخطوة 3: تحديث خطاف المزامنة التلقائية `src/hooks/useGoogleCloudWorkspaceSync.ts`
+1. **تحديث `hasAnyWorkspaceData`**:
+   - فحص كافة أقسام البيانات: الطلاب، المجموعات، الحصص، المدفوعات، الشهادات، الإشعارات، المهام، ملاحظات HOD، المالية، المجموعات التعليمية المخصصة (Custom Lernstudio Sets)، إعدادات الملف الشخصي والمدرسة المخصصة، الواجبات والتسليمات، أسماء القرعة، والخلفيات المخصصة.
+2. **نظام إشارات التعديل الموحد (Mutation Signal)**:
+   - الاستماع لحدث نافذة مخصص `gluck-local-data-mutated` للبيانات التي تُكتب مباشرة في `localStorage` مع تطبيق مهلة الانتظار 15 ثانية.
+3. **قفل غير متزامن للعمليات (Sync Mutex)**:
+   - استبدال مؤقت `setTimeout` الثابت بقفل `isSyncOperationInFlightRef` يمنع تداخل الرفع التلقائي مع التنزيل في نفس اللحظة.
+4. **حماية فحص الإقلاع**:
+   - عدم تفعيل `hasCompletedInitialCheckRef = true` في حال حدث خطأ أثناء التنزيل الأولي، وجدولة إعادة محاولة آمنة عند استقرار الاتصال.
 
-1. **Auth Hardening**:
-    - Update `firebaseCloudSync.ts` to use `GoogleAuth` from Capacitor for native platforms.
-    - Preserve `signInWithPopup` for Web.
+### الخطوة 4: ربط مخازن البيانات المباشرة بالحدث الموحد
+- إرسال حدث `gluck-local-data-mutated` من:
+  - `src/shared/homeworkStorageSync.ts` (عند حفظ أو تعديل الواجبات والتسليمات).
+  - `src/components/RandomStudentPickerModal.tsx` (عند حفظ أسماء القرعة المخصصة).
+  - دوال حفظ الخلفيات والإشعارات المالية.
 
-2. **Sync Reliability (The "False Success" Fix)**:
-    - Modify `executeSafeFirestoreWrite` to correctly propagate errors back to the sync hook.
-    - Update `uploadWorkspaceToGoogleCloud` to wait for confirmed server writes before committing watermarks to `localStorage`.
+### الخطوة 5: إضافة واجهة تنظيف بيانات السحابة في `src/components/GoogleCloudSyncCard.tsx`
+- إضافة زر أحمر أنيق متناسق مع تصميم Glück: **"تنظيف بيانات السحابة – Clear Cloud Data"**.
+- نافذة تأكيد تحذيرية توضح بدقة:
+  - سيتم مسح مساحة العمل السحابية فقط.
+  - لن تتأثر بيانات هذا الجهاز المحلية أو النسخ الاحتياطية.
+  - ستبقى الواجبات المنشورة المشتركة للطلاب كما هي دون حذف.
+  - سيتم إيقاف المزامنة التلقائية تلقائياً لمنع الرفع الفوري.
+- عرض شريط تقدم أو مؤشر انتظار أثناء الحذف ورسالة نجاح/فشل واضحة.
 
-3. **Security Remediation**:
-    - Apply the "Eight Pillars" to `firestore.rules`.
-    - Enforce `auth.uid` validation and `email_verified` checks.
+### الخطوة 6: إنشاء حزمة الاختبارات الآلية الـ 14 المطلوبة
+- إنشاء ملف اختبار متكامل `src/tests/cloudSyncReliability.test.ts` يختبر بشكل واقعي جميع الحالات الـ 14 المحددة في المتطلبات عبر استدعاء دوال الإنتاج الحقيقية:
+  1. Login & UID Workspace resolution.
+  2. Startup detection with only Custom Lernstudio Sets.
+  3. Startup detection with local & cloud data (Merge triggering).
+  4. Built-in Lernstudio sets exclusion from upload.
+  5. Custom Lernstudio sets upload & deletion tombstones.
+  6. Two-way record-level merge without data loss.
+  7. Tombstone conflict resolution across devices.
+  8. Coverage of all sections (financeNotifications, customAiBackgrounds, etc.).
+  9. Non-React localStorage mutation trigger (gluck-local-data-mutated).
+  10. False upload success prevention (no watermark advancement on error).
+  11. Real-time onSnapshot sync handling.
+  12. Clear Cloud Data execution & verification.
+  13. Auto-sync pause after cloud clearing.
+  14. Network failure retry without corrupting local data.
 
-4. **UI & Keystore Integration**:
-    - Create `AndroidKeystoreSection` component using the server-side generation proxy.
-    - Add real-time sync status badges to the Settings view.
-
----
-
-## 5. Verification Plan
-
-1. **Scenario: Device Cross-Sync**: Change a student name on Web, verify it appears on Android within 10 seconds.
-2. **Scenario: Network Interruption**: Disable Wi-Fi during a sync, verify the status changes to "Pending", and verify it resumes automatically when Wi-Fi is restored.
-3. **Scenario: Unauthorized Access**: Attempt to read `user_workspaces/target-uid` using a different authenticated UID; verify `PERMISSION_DENIED`.
-4. **Scenario: Native Auth**: Verify the native Android account picker appears on an Android build.
+### الخطوة 7: التحقق والتقرير النهائي
+- تشغيل فحص الأنواع `npx tsc --noEmit`.
+- تشغيل حزمة الاختبارات `npm test` أو `npx vitest run`.
+- تشغيل بناء المشروع `npm run build`.
+- تقديم التقرير النهائي باللغة العربية مع جدول تغطية الأقسام وشرح التعديلات بالكامل دون تنفيذ `git push`.
