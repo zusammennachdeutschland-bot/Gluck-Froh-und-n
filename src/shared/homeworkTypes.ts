@@ -15,6 +15,17 @@ export type HomeworkBlooketMode =
   | 'tower_energy'  // طاقة الأبطال (Tower Defense / Energy)
   | 'classic_quiz'; // اختبار مباشر كلاسيكي
 
+export type HomeworkAudienceMode =
+  | 'open'  // مفتوح لأي اسم
+  | 'group'; // جروب معين
+
+export interface AssignedStudentSnapshot {
+  id: string;
+  name: string;
+  code?: string;
+  groupId?: string;
+}
+
 export interface HomeworkQuestionResponse {
   questionId: string;
   questionType?: HomeworkQuestionType;
@@ -29,7 +40,10 @@ export interface HomeworkQuestionResponse {
 export interface HomeworkSubmission {
   id: string; // e.g. "sub_abc123"
   assignmentId: string;
-  studentId?: string; // Real student ID from Glück roster
+  audienceMode?: HomeworkAudienceMode; // 'open' | 'group'
+  studentId?: string; // Real student ID from Glück roster (required in 'group' mode)
+  participantId?: string; // Stable per-device participant ID for 'open' mode
+  groupId?: string; // Group ID when submitted under 'group' mode
   studentName: string;
   attemptNumber: number;
   status?: 'in_progress' | 'completed' | string;
@@ -67,9 +81,10 @@ export interface HomeworkAssignment {
   deadline?: string;
   isActive: boolean;
   status?: 'active' | 'closed';
+  audienceMode?: HomeworkAudienceMode; // 'open' | 'group'
   groupId?: string;
   groupName?: string;
-  assignedStudents?: { id: string; name: string }[]; // Selected students snapshot
+  assignedStudents?: AssignedStudentSnapshot[]; // Selected group students snapshot (only in 'group' mode)
   createdAt: string;
   createdBy: string;
   cloudSynced?: boolean;
@@ -88,3 +103,4 @@ export interface HomeworkSummaryStats {
     accuracyPercentage: number;
   }[];
 }
+

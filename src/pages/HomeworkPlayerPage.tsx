@@ -27,6 +27,7 @@ import { speakGermanText } from '../shared/audioSpeechUtils';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../shared/lernstudioAudioUtils';
 import {
   HomeworkAssignment,
+  HomeworkAudienceMode,
   HomeworkQuestionResponse,
   HomeworkQuestionType,
   HomeworkFlowMode,
@@ -46,7 +47,12 @@ import {
   subscribeSubmissionsFromFirestore,
   buildDeterministicSubmissionId,
   saveSubmissionWithConfirmation,
-  flushPendingHomeworkCloudWrites
+  flushPendingHomeworkCloudWrites,
+  resolveAssignmentAudienceMode,
+  getAuthorizedGroupStudentsForAssignment,
+  normalizeHomeworkAssignment,
+  getOrCreateOpenParticipantId,
+  validateHomeworkSubmissionIdentity
 } from '../shared/homeworkStorageSync';
 
 interface Props {
@@ -101,40 +107,25 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [assignment, setAssignment] = useState<any | null>(null);
-  const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [assignment, setAssignment] = useState<HomeworkAssignment | null>(null);
+  const [, setLeaderboard] = useState<any[]>([]);
 
-  // Student Flow State
+  // Student Flow State (Never reads or falls back to localStorage dl_students)
   const [studentName, setStudentName] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
-  const [cachedStudents, setCachedStudents] = useState<{ id: string; name: string }[]>([]);
+  const [openParticipantId, setOpenParticipantId] = useState<string>('');
+  const [identityError, setIdentityError] = useState<string | null>(null);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('dl_students');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const list = parsed
-            .filter((s: any) => !s.deleted && s.status !== 'archived')
-            .map((s: any) => ({ id: s.id, name: s.name }));
-          setCachedStudents(list);
-        }
-      }
-    } catch {
-      // Ignore
-    }
-  }, []);
+  const audienceMode: HomeworkAudienceMode = useMemo(
+    () => resolveAssignmentAudienceMode(assignment),
+    [assignment]
+  );
 
-  const displayStudents = useMemo(() => {
-    if (Array.isArray(assignment?.assignedStudents) && assignment.assignedStudents.length > 0) {
-      return assignment.assignedStudents;
-    }
-    if (cachedStudents.length > 0) {
-      return cachedStudents;
-    }
-    return [];
-  }, [assignment?.assignedStudents, cachedStudents]);
+  // Authorized group students strictly from the assignment's group roster (empty in 'open' mode)
+  const displayStudents = useMemo(
+    () => getAuthorizedGroupStudentsForAssignment(assignment),
+    [assignment]
+  );
 
   const [currentAttemptNumber, setCurrentAttemptNumber] = useState<number>(1);
   const [allSubmissions, setAllSubmissions] = useState<HomeworkSubmission[]>([]);
@@ -204,16 +195,17 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     return () => unsub();
   }, [assignmentId]);
 
-  // Load Assignment (Primary: Firebase Firestore -> Secondary: API -> Fallback: Local/URL)
+  // Load Assignment (Primary: Firebase Firestore -> Secondary: API -> Fallback: Local/URL for open mode only)
   useEffect(() => {
     async function loadHomework() {
       try {
         setLoading(true);
+        setError(null);
 
         // 1. Check Firebase Firestore first (works seamlessly between Main App & Vercel!)
         const cloudHw = await fetchAssignmentFromFirestore(assignmentId).catch(() => null);
         if (cloudHw && cloudHw.setSnapshot) {
-          setAssignment(cloudHw);
+          setAssignment(normalizeHomeworkAssignment(cloudHw));
           return;
         }
 
@@ -228,11 +220,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             data = {};
           }
           if (res.ok && data && data.setSnapshot) {
-            setAssignment(data);
+            const normalized = normalizeHomeworkAssignment(data);
+            setAssignment(normalized);
             if (Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
               setLeaderboard(data.leaderboard);
             }
-            saveAssignmentToFirestore(data).catch(() => {});
+            saveAssignmentToFirestore(normalized).catch(() => {});
             return;
           }
         }
@@ -240,22 +233,32 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         // 3. Check local assignments cache
         const localFound = getLocalAssignments().find((a) => a.id === assignmentId);
         if (localFound && localFound.setSnapshot) {
-          setAssignment(localFound);
+          setAssignment(normalizeHomeworkAssignment(localFound));
           return;
         }
 
-        // 4. Fallback: Parse query parameters from share URL (e.g. ?s=...&t=...&qt=...)
+        // 4. Fallback: Parse query parameters from share URL (ONLY allowed for 'open' assignments)
         const searchParams = new URLSearchParams(window.location.search);
+        const amParam = searchParams.get('am');
+        const gidParam = searchParams.get('gid');
+
+        // CRITICAL: Never construct a group-less open fallback assignment when the link belongs to a specific group!
+        if (amParam === 'group' || (gidParam && gidParam !== 'all')) {
+          setError(
+            'هذا الواجب مخصص لمجموعة محددة، وتعذر تحميل قائمة طلاب المجموعة حالياً. يرجى التحقق من اتصال الإنترنت أو التواصل مع المعلم.'
+          );
+          return;
+        }
+
         const setId = searchParams.get('s');
         if (setId) {
-          const titleParam = searchParams.get('t') || 'واجب منزلتي تفاعلي';
+          const titleParam = searchParams.get('t') || 'واجب منزلي تفاعلي';
           const flowModeParam = (searchParams.get('fm') as any) || 'teacher_then_quiz';
           const qtParam = searchParams.get('qt');
           const questionTypesParam = qtParam ? (qtParam.split(',') as any) : ['mc_de_ar', 'true_false'];
           const idsParam = searchParams.get('ids');
           const selectedIds = idsParam ? idsParam.split(',') : [];
 
-          // Look up set in: 1) DEFAULT_LERNSTUDIO_SETS, 2) local dl_lernstudio_sets, 3) Firestore lernstudio_sets
           let foundSet: any = DEFAULT_LERNSTUDIO_SETS.find((st) => st.id === setId) || null;
           if (!foundSet) {
             try {
@@ -282,6 +285,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             const fallbackHw: HomeworkAssignment = {
               id: assignmentId,
               title: titleParam,
+              audienceMode: 'open',
               setSnapshot: {
                 id: foundSet.id,
                 title: foundSet.title,
@@ -578,17 +582,33 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     return Array.from(map.values());
   }, [allSubmissions, assignmentId, phase, finalScore]);
 
+  const resolvedOpenPid = useMemo(() => {
+    if (audienceMode !== 'open') return '';
+    if (openParticipantId) return openParticipantId;
+    const clean = studentName.trim();
+    if (!clean || !assignmentId) return '';
+    return getOrCreateOpenParticipantId(assignmentId, clean);
+  }, [audienceMode, openParticipantId, studentName, assignmentId]);
+
   const studentCompletedAttempts = useMemo(() => {
+    if (audienceMode === 'group') {
+      if (!selectedStudentId) return [];
+      return mergedSubmissionsForAssignment.filter((s) => {
+        if (s.studentId !== selectedStudentId) return false;
+        return s.status === 'completed' || (!s.status && Boolean(s.completedAt));
+      });
+    }
+
     const trimmedName = studentName.trim().toLowerCase();
-    if (!selectedStudentId && !trimmedName) return [];
+    if (!trimmedName || !resolvedOpenPid) return [];
     return mergedSubmissionsForAssignment.filter((s) => {
-      const matchesStudent =
-        (selectedStudentId && s.studentId === selectedStudentId) ||
-        (trimmedName && (s.studentName || '').trim().toLowerCase() === trimmedName);
-      if (!matchesStudent) return false;
+      const matchesParticipant =
+        (s.participantId && s.participantId === resolvedOpenPid) ||
+        (!s.participantId && !s.studentId && (s.studentName || '').trim().toLowerCase() === trimmedName);
+      if (!matchesParticipant) return false;
       return s.status === 'completed' || (!s.status && Boolean(s.completedAt));
     });
-  }, [mergedSubmissionsForAssignment, selectedStudentId, studentName]);
+  }, [mergedSubmissionsForAssignment, audienceMode, selectedStudentId, studentName, resolvedOpenPid]);
 
   const isAttemptLimitReached = useMemo(() => {
     const completedCount = studentCompletedAttempts.length;
@@ -605,8 +625,32 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
   const handleStartHomework = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!studentName.trim()) return;
+    setIdentityError(null);
     if (isAttemptLimitReached) return;
+
+    const candidateSub: Partial<HomeworkSubmission> = {
+      assignmentId,
+      audienceMode,
+      studentId: audienceMode === 'group' ? selectedStudentId : undefined,
+      participantId: audienceMode === 'open' ? resolvedOpenPid : undefined,
+      groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
+      studentName: studentName.trim()
+    };
+
+    const check = validateHomeworkSubmissionIdentity(assignment, candidateSub);
+    if (!check.valid) {
+      setIdentityError(check.error || 'يرجى التحقق من اختيار الاسم الصحيح قبل البدء.');
+      return;
+    }
+
+    const finalStudentId = check.normalizedStudentId;
+    const finalParticipantId = check.normalizedParticipantId;
+    const finalStudentName = check.normalizedStudentName || studentName.trim();
+    const finalGroupId = check.normalizedGroupId;
+
+    if (finalParticipantId) {
+      setOpenParticipantId(finalParticipantId);
+    }
 
     const nextAttempt = studentCompletedAttempts.length + 1;
     setCurrentAttemptNumber(nextAttempt);
@@ -614,9 +658,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
     const deterministicId = buildDeterministicSubmissionId(
       assignmentId,
-      selectedStudentId,
-      studentName.trim(),
-      nextAttempt
+      finalStudentId,
+      finalStudentName,
+      nextAttempt,
+      finalParticipantId
     );
     activeSubmissionIdRef.current = deterministicId;
 
@@ -628,8 +673,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const initialInProgress: HomeworkSubmission = {
       id: deterministicId,
       assignmentId,
-      studentId: selectedStudentId || undefined,
-      studentName: studentName.trim(),
+      audienceMode: check.audienceMode,
+      studentId: finalStudentId,
+      participantId: finalParticipantId,
+      groupId: finalGroupId,
+      studentName: finalStudentName,
       attemptNumber: nextAttempt,
       status: 'in_progress',
       startedAt: nowIso,
@@ -648,9 +696,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       responses: []
     };
     setCloudSyncState('syncing');
-    saveSubmissionWithConfirmation(initialInProgress).then((res) => {
-      setCloudSyncState(res.cloudSynced ? 'synced' : 'pending_retry');
-    });
+    saveSubmissionWithConfirmation(initialInProgress, assignment)
+      .then((res) => {
+        setCloudSyncState(res.cloudSynced ? 'synced' : 'pending_retry');
+      })
+      .catch(() => {
+        setCloudSyncState('pending_retry');
+      });
 
     const flowMode: HomeworkFlowMode = assignment?.flowMode || 'teacher_then_quiz';
     if (flowMode === 'teacher_then_quiz' && studyItems.length > 0) {
@@ -761,7 +813,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const liveSubmissionObj: HomeworkSubmission = {
       id: activeSubmissionIdRef.current,
       assignmentId,
-      studentId: selectedStudentId || undefined,
+      audienceMode,
+      studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
+      participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
+      groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
       studentName: studentName.trim(),
       attemptNumber: currentAttemptNumber,
       status: 'in_progress',
@@ -782,9 +837,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     };
 
     setCloudSyncState('syncing');
-    saveSubmissionWithConfirmation(liveSubmissionObj).then((res) => {
-      setCloudSyncState(res.cloudSynced ? 'synced' : 'pending_retry');
-    });
+    saveSubmissionWithConfirmation(liveSubmissionObj, assignment)
+      .then((res) => {
+        setCloudSyncState(res.cloudSynced ? 'synced' : 'pending_retry');
+      })
+      .catch(() => {
+        setCloudSyncState('pending_retry');
+      });
   };
 
   const handlePickChest = (idx: number) => {
@@ -823,7 +882,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const localSubmissionObj: HomeworkSubmission = {
       id: activeSubmissionIdRef.current,
       assignmentId,
-      studentId: selectedStudentId || undefined,
+      audienceMode,
+      studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
+      participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
+      groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
       studentName: studentName.trim(),
       attemptNumber: currentAttemptNumber,
       status: 'completed',
@@ -844,9 +906,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     };
 
     // 1. Save immediately to localStorage AND verify Firebase Firestore persistence
-    const confirmRes = await saveSubmissionWithConfirmation(localSubmissionObj);
+    const confirmRes = await saveSubmissionWithConfirmation(localSubmissionObj, assignment);
     const syncedSubmissionObj: HomeworkSubmission = {
-      ...localSubmissionObj,
+      ...confirmRes.submission,
       cloudSynced: confirmRes.cloudSynced
     };
     setCloudSyncState(confirmRes.cloudSynced ? 'synced' : 'pending_retry');
@@ -859,7 +921,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         body: JSON.stringify({
           id: activeSubmissionIdRef.current,
           assignmentId,
-          studentId: selectedStudentId || undefined,
+          audienceMode,
+          studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
+          participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
+          groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
           studentName: studentName.trim(),
           attemptNumber: currentAttemptNumber,
           responses: allResponses,
@@ -885,7 +950,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           ...syncedSubmissionObj,
           ...data.submission,
           id: activeSubmissionIdRef.current,
-          studentId: selectedStudentId || data.submission.studentId || undefined,
+          audienceMode,
+          studentId: audienceMode === 'group' ? selectedStudentId || data.submission.studentId || undefined : undefined,
+          participantId: audienceMode === 'open' ? resolvedOpenPid || data.submission.participantId || undefined : undefined,
+          groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
           attemptNumber: currentAttemptNumber,
           status: 'completed',
           completedAt: completedAtIso,
@@ -978,72 +1046,105 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             <h1 className="text-xl sm:text-2xl font-bold text-text-main">
               {assignment?.title || 'واجب Glück التفاعلي'}
             </h1>
-            {assignment?.groupName && (
-              <p className="text-xs text-text-muted font-medium">{assignment.groupName}</p>
+            {audienceMode === 'group' && assignment?.groupName && (
+              <p className="text-xs text-primary font-bold">🏫 {assignment.groupName}</p>
             )}
           </div>
 
-          {/* Student Names as Selectable Cards (Responsive Grid: 2 cols on mobile, 3 cols on sm) */}
-          {displayStudents.length > 0 ? (
-            <div className="space-y-4">
-              <div className="text-center">
-                <p className="text-xs sm:text-sm font-bold text-text-muted">
-                  اختر اسمك للبدء:
-                </p>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-72 overflow-y-auto p-0.5">
-                {displayStudents.map((st: any) => {
-                  const isSelected = selectedStudentId === st.id || studentName.trim().toLowerCase() === st.name.trim().toLowerCase();
-                  return (
-                    <button
-                      key={st.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedStudentId(st.id);
-                        setStudentName(st.name);
-                      }}
-                      className={`p-3 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1.5 text-xs font-semibold ${
-                        isSelected
-                          ? 'bg-primary text-white border-primary shadow-xs font-bold scale-[1.02]'
-                          : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main hover:border-primary/40'
-                      }`}
-                    >
-                      <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${
-                        isSelected ? 'bg-white/20 text-white' : 'bg-surface-hover border border-surface-border text-text-muted'
-                      }`}>
-                        👤
-                      </span>
-                      <span className="truncate w-full text-center">{st.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {isAttemptLimitReached && (
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold text-center">
-                  لقد أتممت المحاولات المسموحة لهذا الواجب ({studentCompletedAttempts.length} / {assignment?.allowReplay === false ? 1 : assignment?.maxAttempts}).
-                </div>
-              )}
-
-              {/* Start Button strictly BELOW student cards */}
-              <button
-                type="button"
-                disabled={(!selectedStudentId && studentName.trim().length < 2) || isAttemptLimitReached}
-                onClick={handleStartHomework}
-                className="w-full py-3.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer mt-4"
-              >
-                <span>
-                  {isAttemptLimitReached
-                    ? 'تم إتمام الواجب ✓'
-                    : flowMode === 'teacher_then_quiz'
-                    ? 'بدء الواجب 🚀'
-                    : 'بدء حل الأسئلة 🎯'}
-                </span>
-                {!isAttemptLimitReached && <ArrowLeft className="w-4 h-4" />}
-              </button>
+          {identityError && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold text-center">
+              {identityError}
             </div>
+          )}
+
+          {audienceMode === 'group' ? (
+            /* MODE B: SPECIFIC GROUP ONLY — Display ONLY students from the selected group; fail closed if empty */
+            displayStudents.length > 0 ? (
+              <div className="space-y-4">
+                <div className="text-center">
+                  <p className="text-xs sm:text-sm font-bold text-text-muted">
+                    اختر اسمك من قائمة المجموعة للبدء:
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-72 overflow-y-auto p-0.5">
+                  {displayStudents.map((st) => {
+                    const isSelected = selectedStudentId === st.id;
+                    return (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedStudentId(st.id);
+                          setStudentName(st.name);
+                          setIdentityError(null);
+                        }}
+                        className={`p-3 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1.5 text-xs font-semibold ${
+                          isSelected
+                            ? 'bg-primary text-white border-primary shadow-xs font-bold scale-[1.02]'
+                            : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main hover:border-primary/40'
+                        }`}
+                      >
+                        <span
+                          className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${
+                            isSelected
+                              ? 'bg-white/20 text-white'
+                              : 'bg-surface-hover border border-surface-border text-text-muted'
+                          }`}
+                        >
+                          👤
+                        </span>
+                        <span className="truncate w-full text-center">{st.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {isAttemptLimitReached && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold text-center">
+                    لقد أتممت المحاولات المسموحة لهذا الواجب ({studentCompletedAttempts.length} /{' '}
+                    {assignment?.allowReplay === false ? 1 : assignment?.maxAttempts}).
+                  </div>
+                )}
+
+                {/* Start Button strictly BELOW student cards */}
+                <button
+                  type="button"
+                  disabled={!selectedStudentId || isAttemptLimitReached}
+                  onClick={handleStartHomework}
+                  className="w-full py-3.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer mt-4"
+                >
+                  <span>
+                    {isAttemptLimitReached
+                      ? 'تم إتمام الواجب ✓'
+                      : flowMode === 'teacher_then_quiz'
+                      ? 'بدء الواجب 🚀'
+                      : 'بدء حل الأسئلة 🎯'}
+                  </span>
+                  {!isAttemptLimitReached && <ArrowLeft className="w-4 h-4" />}
+                </button>
+              </div>
+            ) : (
+              /* Fail-closed error when a group-restricted homework has no loaded group student list */
+              <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-center space-y-3">
+                <XCircle className="w-8 h-8 text-rose-500 mx-auto" />
+                <p className="text-xs font-bold text-text-main">
+                  تعذر تحميل قائمة طلاب هذه المجموعة حاليًا.
+                </p>
+                <p className="text-[11px] text-text-muted">
+                  هذا الواجب مخصص لطلاب المجموعة فقط ولا يمكن بدء الحل بدون قائمة المجموعة المسجلة. يرجى التحقق من اتصال الإنترنت أو التواصل مع المعلم.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-xs font-bold text-text-main cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>إعادة المحاولة</span>
+                </button>
+              </div>
+            )
           ) : (
-            /* Legacy Fallback for assignments without student rosters */
+            /* MODE A: OPEN HOMEWORK ("مفتوح لأي اسم") — Manual name input ONLY; never displays any student list */
             <form onSubmit={handleStartHomework} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-text-main mb-1.5 text-center">
@@ -1053,7 +1154,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                   type="text"
                   required
                   value={studentName}
-                  onChange={(e) => setStudentName(e.target.value)}
+                  onChange={(e) => {
+                    setStudentName(e.target.value);
+                    setSelectedStudentId('');
+                    setOpenParticipantId('');
+                    setIdentityError(null);
+                  }}
                   placeholder="مثال: أحمد محمد / Omar Ali..."
                   className="w-full px-3.5 py-2.5 rounded-xl bg-surface-hover border border-surface-border focus:border-primary text-text-main font-bold text-sm outline-none transition-all text-center"
                 />
@@ -1061,7 +1167,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
               {isAttemptLimitReached && (
                 <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold text-center">
-                  لقد أتممت المحاولات المسموحة لهذا الواجب ({studentCompletedAttempts.length} / {assignment?.allowReplay === false ? 1 : assignment?.maxAttempts}).
+                  لقد أتممت المحاولات المسموحة لهذا الواجب ({studentCompletedAttempts.length} /{' '}
+                  {assignment?.allowReplay === false ? 1 : assignment?.maxAttempts}).
                 </div>
               )}
 
@@ -1385,9 +1492,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                     isSubmittingRef.current = false;
                     activeSubmissionIdRef.current = buildDeterministicSubmissionId(
                       assignmentId,
-                      selectedStudentId,
+                      audienceMode === 'group' ? selectedStudentId : undefined,
                       studentName.trim(),
-                      nextAttempt
+                      nextAttempt,
+                      audienceMode === 'open' ? resolvedOpenPid : undefined
                     );
                     setCurrentAttemptNumber(nextAttempt);
                     setCurrentIdx(0);

@@ -1,7 +1,9 @@
 import {
   HomeworkAssignment,
   HomeworkSubmission,
-  HomeworkQuestionType
+  HomeworkQuestionType,
+  HomeworkAudienceMode,
+  AssignedStudentSnapshot
 } from './homeworkTypes';
 import {
   getVercelPublicDomain,
@@ -49,6 +51,7 @@ export {
 
 const LOCAL_ASSIGNMENTS_KEY = 'glueck_hw_assignments_v2';
 const LOCAL_SUBMISSIONS_KEY = 'glueck_hw_submissions_v2';
+const OPEN_PARTICIPANT_PREFIX = 'glueck_hw_open_pid_';
 
 export const QUESTION_TYPE_META: {
   id: HomeworkQuestionType;
@@ -112,23 +115,314 @@ function simpleStringHash(input: string): string {
 }
 
 /**
- * Generates a deterministic submission ID per (assignmentId, student, attemptNumber)
+ * Resolves the authoritative HomeworkAudienceMode ('open' | 'group') for an assignment,
+ * including backward-compatible inference for legacy assignments.
+ * Legacy assignments without a specific groupId (or with groupId === 'all') resolve to 'open'.
+ */
+export function resolveAssignmentAudienceMode(
+  hw: Partial<HomeworkAssignment> | null | undefined
+): HomeworkAudienceMode {
+  if (!hw) return 'open';
+  if (hw.audienceMode === 'open') return 'open';
+  if (hw.audienceMode === 'group') return 'group';
+  const gid = (hw.groupId || '').trim();
+  if (gid && gid !== 'all') {
+    return 'group';
+  }
+  return 'open';
+}
+
+/**
+ * Returns the authorized student snapshot list for a group-restricted assignment.
+ * Returns an empty array for 'open' assignments so student lists are never exposed.
+ */
+export function getAuthorizedGroupStudentsForAssignment(
+  hw: Partial<HomeworkAssignment> | null | undefined,
+  rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[]
+): AssignedStudentSnapshot[] {
+  const mode = resolveAssignmentAudienceMode(hw);
+  if (mode !== 'group') {
+    return [];
+  }
+
+  const targetGroupId = (hw?.groupId || '').trim();
+  const byId = new Map<string, AssignedStudentSnapshot>();
+
+  if (Array.isArray(hw?.assignedStudents)) {
+    for (const raw of hw.assignedStudents) {
+      if (!raw) continue;
+      const cleanId = (raw.id || '').trim();
+      const cleanName = (raw.name || '').trim();
+      if (!cleanId || !cleanName) continue;
+      if (raw.groupId && targetGroupId && raw.groupId.trim() !== targetGroupId) {
+        continue;
+      }
+      if (!byId.has(cleanId)) {
+        byId.set(cleanId, {
+          id: cleanId,
+          name: cleanName,
+          ...(raw.code ? { code: raw.code } : {}),
+          ...(raw.groupId || targetGroupId ? { groupId: (raw.groupId || targetGroupId).trim() } : {})
+        });
+      }
+    }
+  }
+
+  if (Array.isArray(rosterStudents) && targetGroupId && targetGroupId !== 'all') {
+    for (const st of rosterStudents) {
+      if (!st || st.deleted || st.status === 'archived') continue;
+      if ((st.groupId || '').trim() !== targetGroupId) continue;
+      const cleanId = (st.id || '').trim();
+      const cleanName = (st.name || '').trim();
+      if (!cleanId || !cleanName) continue;
+      const existing = byId.get(cleanId);
+      byId.set(cleanId, {
+        id: cleanId,
+        name: cleanName,
+        ...(st.code || existing?.code ? { code: st.code || existing?.code } : {}),
+        groupId: targetGroupId
+      });
+    }
+  }
+
+  return Array.from(byId.values());
+}
+
+/**
+ * Normalizes an assignment record so 'open' assignments never retain or leak
+ * groupId, groupName, or assignedStudents, and 'group' assignments have a clean,
+ * deduplicated student roster strictly for that group.
+ */
+export function normalizeHomeworkAssignment(hw: HomeworkAssignment): HomeworkAssignment {
+  const mode = resolveAssignmentAudienceMode(hw);
+  if (mode === 'open') {
+    const copy: HomeworkAssignment = {
+      ...hw,
+      audienceMode: 'open',
+      groupId: undefined,
+      groupName: undefined,
+      assignedStudents: undefined
+    };
+    delete copy.groupId;
+    delete copy.groupName;
+    delete copy.assignedStudents;
+    return copy;
+  }
+
+  const cleanGroupId = (hw.groupId || '').trim();
+  const cleanGroupName = (hw.groupName || '').trim();
+  const cleanRoster = getAuthorizedGroupStudentsForAssignment(hw);
+
+  return {
+    ...hw,
+    audienceMode: 'group',
+    groupId: cleanGroupId && cleanGroupId !== 'all' ? cleanGroupId : undefined,
+    groupName: cleanGroupName || undefined,
+    assignedStudents: cleanRoster
+  };
+}
+
+/**
+ * Generates or retrieves a per-device participant ID for an Open Homework participant.
+ * Ensures two different people who enter the same name on different devices/sessions
+ * remain separate participants while allowing the same person to replay on their device.
+ */
+export function getOrCreateOpenParticipantId(
+  assignmentId: string,
+  participantName: string
+): string {
+  const safeHw = sanitizeDocId(assignmentId || 'hw').slice(0, 40);
+  const nameHash = simpleStringHash((participantName || 'participant').trim().toLowerCase());
+  const storageKey = `${OPEN_PARTICIPANT_PREFIX}${safeHw}_${nameHash}`;
+
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const existing = window.localStorage.getItem(storageKey);
+      if (existing && existing.trim()) {
+        return existing.trim();
+      }
+      const generated = `pid_${safeHw.slice(0, 16)}_${nameHash}_${Date.now().toString(36)}_${Math.random()
+        .toString(36)
+        .slice(2, 7)}`;
+      window.localStorage.setItem(storageKey, generated);
+      return generated;
+    } catch {
+      // Fall through to ephemeral ID if storage is blocked
+    }
+  }
+
+  return `pid_${safeHw.slice(0, 16)}_${nameHash}_${Date.now().toString(36)}_${Math.random()
+    .toString(36)
+    .slice(2, 7)}`;
+}
+
+export interface SubmissionIdentityValidationResult {
+  valid: boolean;
+  error?: string;
+  audienceMode: HomeworkAudienceMode;
+  normalizedStudentId?: string;
+  normalizedParticipantId?: string;
+  normalizedStudentName?: string;
+  normalizedGroupId?: string;
+}
+
+/**
+ * Validates student/participant identity against the assignment's audienceMode and group roster.
+ */
+export function validateHomeworkSubmissionIdentity(
+  hw: Partial<HomeworkAssignment> | null | undefined,
+  submission: Partial<HomeworkSubmission> | null | undefined
+): SubmissionIdentityValidationResult {
+  if (!hw || !hw.id) {
+    return {
+      valid: false,
+      audienceMode: 'open',
+      error: 'بيانات الواجب غير موجودة.'
+    };
+  }
+  if (!submission) {
+    return {
+      valid: false,
+      audienceMode: resolveAssignmentAudienceMode(hw),
+      error: 'بيانات الإرسال غير صالحة.'
+    };
+  }
+
+  const mode = resolveAssignmentAudienceMode(hw);
+
+  if (mode === 'group') {
+    const targetGroupId = (hw.groupId || '').trim();
+    if (!targetGroupId || targetGroupId === 'all') {
+      return {
+        valid: false,
+        audienceMode: 'group',
+        error: 'هذا الواجب مخصص لمجموعة محددة ولكن معرف المجموعة غير صالح.'
+      };
+    }
+
+    const authorizedStudents = getAuthorizedGroupStudentsForAssignment(hw);
+    if (authorizedStudents.length === 0) {
+      return {
+        valid: false,
+        audienceMode: 'group',
+        error: 'قائمة طلاب المجموعة غير متاحة حالياً لهذا الواجب.'
+      };
+    }
+
+    const submittedStudentId = (submission.studentId || '').trim();
+    if (!submittedStudentId) {
+      return {
+        valid: false,
+        audienceMode: 'group',
+        error: 'يجب اختيار اسم الطالب من قائمة المجموعة المحددة؛ لا يُسمح بكتابة اسم يدوي لهذا الواجب.'
+      };
+    }
+
+    if (submission.groupId && submission.groupId.trim() !== targetGroupId) {
+      return {
+        valid: false,
+        audienceMode: 'group',
+        error: 'معرف المجموعة المرسل لا يطابق المجموعة المخصصة لهذا الواجب.'
+      };
+    }
+
+    const matchedStudent = authorizedStudents.find((s) => s.id === submittedStudentId);
+    if (!matchedStudent) {
+      return {
+        valid: false,
+        audienceMode: 'group',
+        error: 'هذا الطالب غير مقيد ضمن المجموعة المخصصة لهذا الواجب.'
+      };
+    }
+
+    const submittedName = (submission.studentName || '').trim();
+    if (!submittedName || submittedName.toLowerCase() !== matchedStudent.name.trim().toLowerCase()) {
+      return {
+        valid: false,
+        audienceMode: 'group',
+        error: 'اسم الطالب المرسل لا يطابق السجل الرسمي للطالب في هذه المجموعة.'
+      };
+    }
+
+    return {
+      valid: true,
+      audienceMode: 'group',
+      normalizedStudentId: matchedStudent.id,
+      normalizedParticipantId: undefined,
+      normalizedStudentName: matchedStudent.name.trim(),
+      normalizedGroupId: targetGroupId
+    };
+  }
+
+  // Open mode ('open')
+  const cleanName = (submission.studentName || '').trim();
+  if (!cleanName) {
+    return {
+      valid: false,
+      audienceMode: 'open',
+      error: 'يرجى كتابة اسمك قبل بدء الواجب أو إرسال الإجابات.'
+    };
+  }
+
+  const participantId =
+    (submission.participantId || '').trim() ||
+    getOrCreateOpenParticipantId(hw.id, cleanName);
+
+  return {
+    valid: true,
+    audienceMode: 'open',
+    normalizedStudentId: undefined,
+    normalizedParticipantId: participantId,
+    normalizedStudentName: cleanName,
+    normalizedGroupId: undefined
+  };
+}
+
+/**
+ * Generates a deterministic submission ID per (assignmentId, studentId/participantId, attemptNumber)
  * so live in-progress updates, retries, and final completion update the exact same document
- * without creating duplicate submissions or attempts.
+ * without creating duplicate submissions or merging distinct people who share a name.
  */
 export function buildDeterministicSubmissionId(
   assignmentId: string,
   studentId: string | undefined,
   studentName: string,
-  attemptNumber: number
+  attemptNumber: number,
+  participantId?: string
 ): string {
   const safeHw = sanitizeDocId(assignmentId).slice(0, 40);
-  const rawKey = (studentId && studentId.trim()) ? studentId.trim() : (studentName || 'student').trim().toLowerCase();
-  const safeAscii = rawKey.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
+  const rawKey =
+    studentId && studentId.trim()
+      ? `sid_${studentId.trim()}`
+      : participantId && participantId.trim()
+      ? `pid_${participantId.trim()}`
+      : (studentName || 'student').trim().toLowerCase();
+  const safeAscii = rawKey.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 28);
   const hashPart = simpleStringHash(rawKey);
   const studentToken = safeAscii ? `${safeAscii}_${hashPart}` : `st_${hashPart}`;
   const att = Math.max(1, Number(attemptNumber) || 1);
   return sanitizeDocId(`sub_${safeHw}_${studentToken}_a${att}`);
+}
+
+/**
+ * Computes a collision-free identity key for a submission so two students or
+ * two open participants with the exact same name are never merged together.
+ */
+export function getSubmissionIdentityKey(s: Partial<HomeworkSubmission>): string {
+  if (s.studentId && s.studentId.trim()) {
+    return `sid::${s.studentId.trim()}`;
+  }
+  if (s.participantId && s.participantId.trim()) {
+    return `pid::${s.participantId.trim()}`;
+  }
+  if (s.id) {
+    const match = s.id.match(/^(sub_.+)_a\d+$/);
+    if (match) {
+      return `legacy_token::${match[1]}`;
+    }
+    return `legacy_id::${s.id}`;
+  }
+  return `legacy_name::${(s.studentName || '').trim().toLowerCase()}`;
 }
 
 /**
@@ -165,8 +459,8 @@ function pickBetterSubmission(a: HomeworkSubmission, b: HomeworkSubmission): Hom
 }
 
 /**
- * Deduplicates submissions by ID and by (assignmentId + student identity + attemptNumber)
- * while preserving historical submissions from older versions.
+ * Deduplicates submissions by ID and by (assignmentId + collision-free identity + attemptNumber)
+ * while preserving historical submissions and never merging distinct participants with identical names.
  */
 export function deduplicateSubmissions(submissions: HomeworkSubmission[]): HomeworkSubmission[] {
   const byId = new Map<string, HomeworkSubmission>();
@@ -178,11 +472,13 @@ export function deduplicateSubmissions(submissions: HomeworkSubmission[]): Homew
 
   const byAttemptKey = new Map<string, HomeworkSubmission>();
   for (const s of byId.values()) {
-    const studentIdentity = (s.studentId || s.studentName || '').trim().toLowerCase();
+    const identityKey = getSubmissionIdentityKey(s);
     const attNum = Number(s.attemptNumber) || 0;
-    // If attemptNumber > 0 and studentIdentity is present, deduplicate same attempt number for same student
-    if (studentIdentity && attNum > 0) {
-      const attemptKey = `${s.assignmentId}::${studentIdentity}::${attNum}`;
+    if (
+      (s.studentId?.trim() || s.participantId?.trim() || identityKey.startsWith('legacy_token::')) &&
+      attNum > 0
+    ) {
+      const attemptKey = `${s.assignmentId}::${identityKey}::${attNum}`;
       const existing = byAttemptKey.get(attemptKey);
       byAttemptKey.set(attemptKey, existing ? pickBetterSubmission(existing, s) : s);
     } else {
@@ -208,7 +504,8 @@ export function getLocalAssignments(): HomeworkAssignment[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(LOCAL_ASSIGNMENTS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed: HomeworkAssignment[] = raw ? JSON.parse(raw) : [];
+    return parsed.map((hw) => normalizeHomeworkAssignment(hw));
   } catch {
     return [];
   }
@@ -217,18 +514,59 @@ export function getLocalAssignments(): HomeworkAssignment[] {
 function writeLocalAssignmentsList(list: HomeworkAssignment[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(LOCAL_ASSIGNMENTS_KEY, JSON.stringify(list.slice(0, 150)));
+    const normalized = list.slice(0, 150).map((hw) => normalizeHomeworkAssignment(hw));
+    localStorage.setItem(LOCAL_ASSIGNMENTS_KEY, JSON.stringify(normalized));
   } catch {
     // Ignore storage quota errors
   }
 }
 
+export interface HomeworkCloudTransportOverride {
+  saveAssignment?: (hw: HomeworkAssignment) => Promise<boolean>;
+  saveSubmission?: (sub: HomeworkSubmission) => Promise<boolean>;
+  fetchAssignment?: (id: string) => Promise<HomeworkAssignment | null>;
+  fetchSubmissionsForAssignment?: (id: string) => Promise<HomeworkSubmission[]>;
+  fetchAllAssignments?: () => Promise<HomeworkAssignment[]>;
+  fetchAllSubmissions?: () => Promise<HomeworkSubmission[]>;
+}
+
+let testCloudTransport: HomeworkCloudTransportOverride | null = null;
+
+export function __setHomeworkSyncTransportForTests(
+  transport: HomeworkCloudTransportOverride | null
+): void {
+  testCloudTransport = transport;
+}
+
+const activeSaveAssignmentToCloud = (hw: HomeworkAssignment) =>
+  testCloudTransport?.saveAssignment
+    ? testCloudTransport.saveAssignment(hw)
+    : saveAssignmentToFirestore(hw);
+
+const activeSaveSubmissionToCloud = (sub: HomeworkSubmission) =>
+  testCloudTransport?.saveSubmission
+    ? testCloudTransport.saveSubmission(sub)
+    : saveSubmissionToFirestore(sub);
+
+const activeFetchAssignmentFromCloud = (id: string) =>
+  testCloudTransport?.fetchAssignment
+    ? testCloudTransport.fetchAssignment(id)
+    : fetchAssignmentFromFirestore(id);
+
+const activeFetchSubmissionsForAssignmentFromCloud = (id: string) =>
+  testCloudTransport?.fetchSubmissionsForAssignment
+    ? testCloudTransport.fetchSubmissionsForAssignment(id)
+    : fetchSubmissionsForAssignmentFromFirestore(id);
+
 export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): void {
   if (typeof window === 'undefined' || !hw || !hw.id) return;
   const existing = getLocalAssignments().find((a) => a.id === hw.id);
-  const initialRecord: HomeworkAssignment = {
+  const normalizedHw = normalizeHomeworkAssignment({
     ...existing,
-    ...hw,
+    ...hw
+  });
+  const initialRecord: HomeworkAssignment = {
+    ...normalizedHw,
     cloudSynced: syncCloud ? false : (hw.cloudSynced ?? existing?.cloudSynced ?? true)
   };
 
@@ -237,7 +575,7 @@ export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): v
   writeLocalAssignmentsList(current);
 
   if (syncCloud) {
-    saveAssignmentToFirestore(initialRecord)
+    activeSaveAssignmentToCloud(initialRecord)
       .then((ok) => {
         if (ok) {
           const updated = getLocalAssignments().map((a) =>
@@ -255,10 +593,11 @@ export async function saveAssignmentWithConfirmation(hw: HomeworkAssignment): Pr
   assignment: HomeworkAssignment;
   cloudSynced: boolean;
 }> {
-  saveLocalAssignment({ ...hw, cloudSynced: false }, false);
-  const cloudOk = await saveAssignmentToFirestore(hw);
+  const normalizedHw = normalizeHomeworkAssignment(hw);
+  saveLocalAssignment({ ...normalizedHw, cloudSynced: false }, false);
+  const cloudOk = await activeSaveAssignmentToCloud(normalizedHw);
   const finalHw: HomeworkAssignment = {
-    ...hw,
+    ...normalizedHw,
     cloudSynced: cloudOk
   };
   saveLocalAssignment(finalHw, false);
@@ -308,16 +647,36 @@ function writeLocalSubmissionsList(list: HomeworkSubmission[]): void {
 
 export function saveLocalSubmission(sub: HomeworkSubmission, syncCloud = true): void {
   if (typeof window === 'undefined' || !sub || !sub.id) return;
+
+  // If the assignment exists locally, enforce audienceMode and group membership validation
+  const matchingHw = getLocalAssignments().find((a) => a.id === sub.assignmentId);
+  let validatedSub: HomeworkSubmission = { ...sub };
+  if (matchingHw) {
+    const check = validateHomeworkSubmissionIdentity(matchingHw, sub);
+    if (!check.valid) {
+      // Do not persist invalid/unauthorized submissions against a known assignment
+      return;
+    }
+    validatedSub = {
+      ...sub,
+      audienceMode: check.audienceMode,
+      studentId: check.normalizedStudentId,
+      participantId: check.normalizedParticipantId,
+      studentName: check.normalizedStudentName || sub.studentName,
+      groupId: check.normalizedGroupId
+    };
+  }
+
   const currentAll = getLocalSubmissions();
-  const existing = currentAll.find((s) => s.id === sub.id);
+  const existing = currentAll.find((s) => s.id === validatedSub.id);
   const mergedRecord: HomeworkSubmission = existing
     ? pickBetterSubmission(existing, {
-        ...sub,
-        cloudSynced: syncCloud ? false : (sub.cloudSynced ?? existing.cloudSynced ?? true)
+        ...validatedSub,
+        cloudSynced: syncCloud ? false : (validatedSub.cloudSynced ?? existing.cloudSynced ?? true)
       })
     : {
-        ...sub,
-        cloudSynced: syncCloud ? false : (sub.cloudSynced ?? true)
+        ...validatedSub,
+        cloudSynced: syncCloud ? false : (validatedSub.cloudSynced ?? true)
       };
 
   if (syncCloud) {
@@ -329,7 +688,7 @@ export function saveLocalSubmission(sub: HomeworkSubmission, syncCloud = true): 
   writeLocalSubmissionsList(others);
 
   if (syncCloud) {
-    saveSubmissionToFirestore(mergedRecord)
+    activeSaveSubmissionToCloud(mergedRecord)
       .then((ok) => {
         if (ok) {
           const updated = getLocalSubmissions().map((s) =>
@@ -343,14 +702,34 @@ export function saveLocalSubmission(sub: HomeworkSubmission, syncCloud = true): 
   }
 }
 
-export async function saveSubmissionWithConfirmation(sub: HomeworkSubmission): Promise<{
+export async function saveSubmissionWithConfirmation(
+  sub: HomeworkSubmission,
+  assignmentContext?: Partial<HomeworkAssignment> | null
+): Promise<{
   submission: HomeworkSubmission;
   cloudSynced: boolean;
 }> {
-  saveLocalSubmission({ ...sub, cloudSynced: false }, false);
-  const cloudOk = await saveSubmissionToFirestore(sub);
+  const hw = assignmentContext || getLocalAssignments().find((a) => a.id === sub.assignmentId);
+  let normalizedSub: HomeworkSubmission = { ...sub };
+  if (hw && hw.id) {
+    const validation = validateHomeworkSubmissionIdentity(hw, sub);
+    if (!validation.valid) {
+      throw new Error(validation.error || 'فشل التحقق من هوية الطالب لهذا الواجب.');
+    }
+    normalizedSub = {
+      ...sub,
+      audienceMode: validation.audienceMode,
+      studentId: validation.normalizedStudentId,
+      participantId: validation.normalizedParticipantId,
+      studentName: validation.normalizedStudentName || sub.studentName,
+      groupId: validation.normalizedGroupId
+    };
+  }
+
+  saveLocalSubmission({ ...normalizedSub, cloudSynced: false }, false);
+  const cloudOk = await activeSaveSubmissionToCloud(normalizedSub);
   const finalSub: HomeworkSubmission = {
-    ...sub,
+    ...normalizedSub,
     cloudSynced: cloudOk
   };
   saveLocalSubmission(finalSub, false);
@@ -383,7 +762,7 @@ export async function flushPendingHomeworkCloudWrites(): Promise<{
     const localHw = getLocalAssignments();
     for (const hw of localHw) {
       if (hw.cloudSynced === false) {
-        const ok = await saveAssignmentToFirestore(hw);
+        const ok = await activeSaveAssignmentToCloud(hw);
         if (ok) {
           syncedAssignments++;
           saveLocalAssignment({ ...hw, cloudSynced: true }, false);
@@ -394,7 +773,7 @@ export async function flushPendingHomeworkCloudWrites(): Promise<{
     const localSubs = getLocalSubmissions();
     for (const sub of localSubs) {
       if (sub.cloudSynced === false) {
-        const ok = await saveSubmissionToFirestore(sub);
+        const ok = await activeSaveSubmissionToCloud(sub);
         if (ok) {
           syncedSubmissions++;
           saveLocalSubmission({ ...sub, cloudSynced: true }, false);
@@ -428,11 +807,18 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Generates the student/parent homework link using the Vercel public domain
+ * Generates the student/parent homework link using the Vercel public domain.
+ * Encodes the audience mode ('am') and group metadata ('gid', 'gn') without exposing student lists.
  */
 export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: string): string {
   const baseDomain = (overrideDomain || getVercelPublicDomain()).replace(/\/+$/, '');
+  const mode = resolveAssignmentAudienceMode(hw);
   const params = new URLSearchParams();
+  params.set('am', mode);
+  if (mode === 'group' && hw.groupId) {
+    params.set('gid', hw.groupId);
+    if (hw.groupName) params.set('gn', hw.groupName);
+  }
   if (hw.setSnapshot?.id) params.set('s', hw.setSnapshot.id);
   if (hw.flowMode) params.set('fm', hw.flowMode);
   if (hw.questionTypes && hw.questionTypes.length > 0) {
@@ -447,7 +833,7 @@ export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: s
 }
 
 export async function syncAndFetchTeacherAssignments(
-  rosterStudents?: { id: string; name: string; groupId?: string; deleted?: boolean; status?: string }[]
+  rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[]
 ): Promise<any[]> {
   // 1. Flush any pending local-only writes first
   await flushPendingHomeworkCloudWrites().catch(() => {});
@@ -488,49 +874,87 @@ export async function syncAndFetchTeacherAssignments(
   const mergedAssignments = getLocalAssignments();
   const mergedSubmissions = getLocalSubmissions();
 
-  return mergedAssignments.map((hw) => {
-    const subs = mergedSubmissions.filter((s) => s.assignmentId === hw.id);
-    const completedSubs = subs.filter(
+  return mergedAssignments.map((rawHw) => {
+    const hw = normalizeHomeworkAssignment(rawHw);
+    const mode = resolveAssignmentAudienceMode(hw);
+    const allHwSubs = mergedSubmissions.filter((s) => s.assignmentId === hw.id);
+
+    if (mode === 'group') {
+      const groupRoster = getAuthorizedGroupStudentsForAssignment(hw, rosterStudents);
+      const rosterIds = new Set(groupRoster.map((st) => st.id));
+      const nameCounts = new Map<string, number>();
+      groupRoster.forEach((st) => {
+        const key = st.name.trim().toLowerCase();
+        nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+      });
+
+      const validGroupSubs = allHwSubs.filter((s) => {
+        if (s.studentId && rosterIds.has(s.studentId.trim())) return true;
+        if (!s.studentId && !s.participantId) {
+          const cleanName = (s.studentName || '').trim().toLowerCase();
+          return nameCounts.get(cleanName) === 1;
+        }
+        return false;
+      });
+
+      const resolveSubStudentId = (s: HomeworkSubmission): string => {
+        if (s.studentId && rosterIds.has(s.studentId.trim())) return s.studentId.trim();
+        const cleanName = (s.studentName || '').trim().toLowerCase();
+        const matched = groupRoster.find((st) => st.name.trim().toLowerCase() === cleanName);
+        return matched ? matched.id : s.id;
+      };
+
+      const completedSubs = validGroupSubs.filter(
+        (s) => s.status === 'completed' || (!s.status && Boolean(s.completedAt))
+      );
+      const inProgressSubs = validGroupSubs.filter((s) => s.status === 'in_progress');
+
+      const uniqueCompletedStudents = new Set(completedSubs.map(resolveSubStudentId));
+      const uniqueInProgressStudents = new Set(
+        inProgressSubs.map(resolveSubStudentId).filter((id) => !uniqueCompletedStudents.has(id))
+      );
+
+      const scoringSubs = completedSubs.length > 0 ? completedSubs : validGroupSubs;
+      const avgScore =
+        scoringSubs.length > 0
+          ? Math.round(
+              scoringSubs.reduce(
+                (acc, c) => acc + (c.scorePercentage ?? c.accuracyPercent ?? c.accuracy ?? 0),
+                0
+              ) / scoringSubs.length
+            )
+          : 0;
+
+      return {
+        ...hw,
+        audienceMode: 'group' as HomeworkAudienceMode,
+        status: hw.status || (hw.isActive !== false ? 'active' : 'closed'),
+        submissionCount: validGroupSubs.length,
+        completedStudentsCount: uniqueCompletedStudents.size,
+        inProgressStudentsCount: uniqueInProgressStudents.size,
+        assignedStudentsCount: groupRoster.length,
+        avgAccuracy: avgScore,
+        avgScore,
+        cloudSynced: hw.cloudSynced !== false,
+        recentSubmissions: validGroupSubs
+      };
+    }
+
+    // Open mode ('open')
+    const completedSubs = allHwSubs.filter(
       (s) => s.status === 'completed' || (!s.status && Boolean(s.completedAt))
     );
-    const inProgressSubs = subs.filter((s) => s.status === 'in_progress');
+    const inProgressSubs = allHwSubs.filter((s) => s.status === 'in_progress');
 
-    // Determine assigned students count
-    const assignedRoster = new Map<string, { id: string; name: string }>();
-    if (Array.isArray(hw.assignedStudents)) {
-      hw.assignedStudents.forEach((st) => {
-        if (st && (st.id || st.name)) {
-          assignedRoster.set((st.id || st.name).trim().toLowerCase(), st);
-        }
-      });
-    }
-    if (Array.isArray(rosterStudents) && hw.groupId) {
-      rosterStudents
-        .filter((s) => !s.deleted && s.status !== 'archived' && s.groupId === hw.groupId)
-        .forEach((st) => {
-          const key = (st.id || st.name).trim().toLowerCase();
-          if (!assignedRoster.has(key)) {
-            assignedRoster.set(key, { id: st.id, name: st.name });
-          }
-        });
-    }
-    subs.forEach((s) => {
-      const key = (s.studentId || s.studentName || '').trim().toLowerCase();
-      if (key && !assignedRoster.has(key)) {
-        assignedRoster.set(key, { id: s.studentId || s.studentName, name: s.studentName });
-      }
-    });
-
-    const uniqueCompletedStudents = new Set(
-      completedSubs.map((s) => (s.studentId || s.studentName || '').trim().toLowerCase())
-    );
-    const uniqueInProgressStudents = new Set(
+    const uniqueParticipants = new Set(allHwSubs.map((s) => getSubmissionIdentityKey(s)));
+    const uniqueCompletedParticipants = new Set(completedSubs.map((s) => getSubmissionIdentityKey(s)));
+    const uniqueInProgressParticipants = new Set(
       inProgressSubs
-        .map((s) => (s.studentId || s.studentName || '').trim().toLowerCase())
-        .filter((k) => !uniqueCompletedStudents.has(k))
+        .map((s) => getSubmissionIdentityKey(s))
+        .filter((k) => !uniqueCompletedParticipants.has(k))
     );
 
-    const scoringSubs = completedSubs.length > 0 ? completedSubs : subs;
+    const scoringSubs = completedSubs.length > 0 ? completedSubs : allHwSubs;
     const avgScore =
       scoringSubs.length > 0
         ? Math.round(
@@ -543,27 +967,28 @@ export async function syncAndFetchTeacherAssignments(
 
     return {
       ...hw,
+      audienceMode: 'open' as HomeworkAudienceMode,
       status: hw.status || (hw.isActive !== false ? 'active' : 'closed'),
-      submissionCount: subs.length,
-      completedStudentsCount: uniqueCompletedStudents.size,
-      inProgressStudentsCount: uniqueInProgressStudents.size,
-      assignedStudentsCount: assignedRoster.size,
+      submissionCount: allHwSubs.length,
+      completedStudentsCount: uniqueCompletedParticipants.size,
+      inProgressStudentsCount: uniqueInProgressParticipants.size,
+      assignedStudentsCount: uniqueParticipants.size,
       avgAccuracy: avgScore,
       avgScore,
       cloudSynced: hw.cloudSynced !== false,
-      recentSubmissions: subs
+      recentSubmissions: allHwSubs
     };
   });
 }
 
 export async function fetchAssignmentDetailsWithSync(
   id: string,
-  rosterStudents?: { id: string; name: string; groupId?: string; deleted?: boolean; status?: string }[]
+  rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[]
 ): Promise<any | null> {
   // 1. Fetch assignment + submissions from Firebase Firestore
   const [cloudHw, cloudSubs] = await Promise.all([
-    fetchAssignmentFromFirestore(id).catch(() => null),
-    fetchSubmissionsForAssignmentFromFirestore(id).catch(() => [] as HomeworkSubmission[])
+    activeFetchAssignmentFromCloud(id).catch(() => null),
+    activeFetchSubmissionsForAssignmentFromCloud(id).catch(() => [] as HomeworkSubmission[])
   ]);
 
   if (cloudHw) {
@@ -571,10 +996,13 @@ export async function fetchAssignmentDetailsWithSync(
   }
   cloudSubs.forEach((sub) => saveLocalSubmission({ ...sub, cloudSynced: true }, false));
 
-  const hw = cloudHw || getLocalAssignments().find((a) => a.id === id);
-  if (!hw) return null;
+  const rawHw = cloudHw || getLocalAssignments().find((a) => a.id === id);
+  if (!rawHw) return null;
 
-  const subs = deduplicateSubmissions(
+  const hw = normalizeHomeworkAssignment(rawHw);
+  const audienceMode = resolveAssignmentAudienceMode(hw);
+
+  const allDeduplicatedSubs = deduplicateSubmissions(
     getLocalSubmissions().filter((s) => s.assignmentId === id)
   ).map((s) => ({
     ...s,
@@ -583,127 +1011,217 @@ export async function fetchAssignmentDetailsWithSync(
     goldEarned: s.goldEarned ?? (s.correctAnswersCount || s.score || 0) * 100
   }));
 
-  // Build student status summary & attempt history
-  const rosterMap = new Map<string, { id: string; name: string }>();
-  const addRosterStudent = (st: { id?: string; name?: string }) => {
-    const cleanName = (st.name || '').trim();
-    if (!cleanName) return;
-    const nameKey = cleanName.toLowerCase();
-    if (!rosterMap.has(nameKey)) {
-      rosterMap.set(nameKey, { id: st.id || cleanName, name: cleanName });
-    }
-  };
-
-  if (Array.isArray(hw.assignedStudents)) {
-    hw.assignedStudents.forEach(addRosterStudent);
-  }
-
-  // Enrich with active students from the teacher's Glück group roster
-  if (Array.isArray(rosterStudents)) {
-    const matchingGroupStudents = hw.groupId
-      ? rosterStudents.filter((s) => !s.deleted && s.status !== 'archived' && s.groupId === hw.groupId)
-      : [];
-    matchingGroupStudents.forEach(addRosterStudent);
-  }
-
-  // Also include any students who submitted via link
-  subs.forEach((s) => {
-    addRosterStudent({ id: s.studentId || s.studentName, name: s.studentName });
-  });
-
   const studentStatusSummary: any[] = [];
   const leaderboardMap = new Map<string, any>();
+  let validSubsForStats: HomeworkSubmission[] = [];
 
-  rosterMap.forEach((st) => {
-    const stNameLower = st.name.trim().toLowerCase();
-    const studentSubs = subs
-      .filter(
-        (s) =>
-          (s.studentId && st.id && s.studentId === st.id) ||
-          (s.studentName || '').trim().toLowerCase() === stNameLower
-      )
-      .sort(
+  if (audienceMode === 'group') {
+    const groupRoster = getAuthorizedGroupStudentsForAssignment(hw, rosterStudents);
+    const rosterIds = new Set(groupRoster.map((st) => st.id));
+    const nameCounts = new Map<string, number>();
+    groupRoster.forEach((st) => {
+      const key = st.name.trim().toLowerCase();
+      nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+    });
+
+    validSubsForStats = allDeduplicatedSubs.filter((s) => {
+      if (s.studentId && rosterIds.has(s.studentId.trim())) return true;
+      if (!s.studentId && !s.participantId) {
+        const cleanName = (s.studentName || '').trim().toLowerCase();
+        return nameCounts.get(cleanName) === 1;
+      }
+      return false;
+    });
+
+    for (const st of groupRoster) {
+      const stNameLower = st.name.trim().toLowerCase();
+      const allowLegacyNameMatch = nameCounts.get(stNameLower) === 1;
+
+      const studentSubs = validSubsForStats
+        .filter((s) => {
+          if (s.studentId && s.studentId.trim() === st.id) return true;
+          if (!s.studentId && !s.participantId && allowLegacyNameMatch) {
+            return (s.studentName || '').trim().toLowerCase() === stNameLower;
+          }
+          return false;
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAt || b.completedAt || b.startedAt || 0).getTime() -
+            new Date(a.updatedAt || a.completedAt || a.startedAt || 0).getTime()
+        );
+
+      const completedAttempts = studentSubs.filter(
+        (s) => s.status === 'completed' || (!s.status && Boolean(s.completedAt))
+      );
+      const inProgressAttempts = studentSubs.filter((s) => s.status === 'in_progress');
+
+      let status: 'not_started' | 'in_progress' | 'completed' = 'not_started';
+      if (inProgressAttempts.length > 0 && completedAttempts.length === 0) {
+        status = 'in_progress';
+      } else if (completedAttempts.length > 0) {
+        status = 'completed';
+      }
+
+      const attemptsCount = studentSubs.length;
+      const completedAttemptsCount = completedAttempts.length;
+      const sortedByBest = [...(completedAttempts.length > 0 ? completedAttempts : studentSubs)].sort(
+        (a, b) =>
+          (b.scorePercentage ?? b.accuracy ?? 0) - (a.scorePercentage ?? a.accuracy ?? 0) ||
+          (a.timeSpentSeconds || 999999) - (b.timeSpentSeconds || 999999)
+      );
+      const bestAttempt = sortedByBest[0] || null;
+      const latestAttempt = studentSubs[0] || null;
+      const activeInProgressAttempt = inProgressAttempts[0] || null;
+
+      const bestScore = bestAttempt ? (bestAttempt.scorePercentage ?? bestAttempt.accuracy ?? 0) : 0;
+      const latestScore = latestAttempt ? (latestAttempt.scorePercentage ?? latestAttempt.accuracy ?? 0) : 0;
+      const bestCorrectCount = bestAttempt ? (bestAttempt.correctAnswersCount ?? bestAttempt.score ?? 0) : 0;
+      const latestCorrectCount = latestAttempt ? (latestAttempt.correctAnswersCount ?? latestAttempt.score ?? 0) : 0;
+      const totalQuestions =
+        latestAttempt?.totalQuestions || hw.questionCount || hw.targetQuestionCount || 0;
+      const answeredCount = latestAttempt?.responses?.length || 0;
+      const bestAccuracy = bestAttempt ? (bestAttempt.accuracyPercent ?? bestAttempt.accuracy ?? bestScore) : 0;
+      const totalTimeSpent = studentSubs.reduce((acc, c) => acc + (c.timeSpentSeconds || 0), 0);
+      const latestTimeSpent = latestAttempt?.timeSpentSeconds || 0;
+      const lastActivity = latestAttempt
+        ? latestAttempt.updatedAt || latestAttempt.completedAt || latestAttempt.startedAt
+        : null;
+      const allSynced = studentSubs.every((s) => s.cloudSynced !== false);
+
+      studentStatusSummary.push({
+        studentId: st.id,
+        studentName: st.name,
+        studentCode: st.code,
+        groupId: st.groupId || hw.groupId,
+        audienceMode: 'group' as HomeworkAudienceMode,
+        status,
+        hasActiveInProgress: Boolean(activeInProgressAttempt),
+        attemptsCount,
+        completedAttemptsCount,
+        bestScore,
+        latestScore,
+        bestCorrectCount,
+        latestCorrectCount,
+        totalQuestions,
+        answeredCount,
+        bestAccuracy,
+        totalTimeSpent,
+        latestTimeSpent,
+        lastActivity,
+        cloudSynced: allSynced,
+        latestAttempt,
+        bestAttempt,
+        attempts: studentSubs
+      });
+
+      if (bestAttempt && completedAttemptsCount > 0) {
+        leaderboardMap.set(`id::${st.id}`, {
+          studentId: st.id,
+          studentName: st.name,
+          bestScore,
+          bestAccuracy,
+          timeSpentSeconds: bestAttempt.timeSpentSeconds || 0,
+          goldEarned: bestAttempt.goldEarned || 0,
+          completedAt: bestAttempt.completedAt
+        });
+      }
+    }
+  } else {
+    // Open mode ('open'): build participant summary strictly from submissions without pulling group rosters
+    validSubsForStats = allDeduplicatedSubs;
+    const groupedByParticipant = new Map<string, HomeworkSubmission[]>();
+
+    for (const s of validSubsForStats) {
+      const pKey = getSubmissionIdentityKey(s);
+      const list = groupedByParticipant.get(pKey) || [];
+      list.push(s);
+      groupedByParticipant.set(pKey, list);
+    }
+
+    groupedByParticipant.forEach((participantSubs, pKey) => {
+      const sortedSubs = [...participantSubs].sort(
         (a, b) =>
           new Date(b.updatedAt || b.completedAt || b.startedAt || 0).getTime() -
           new Date(a.updatedAt || a.completedAt || a.startedAt || 0).getTime()
       );
 
-    const completedAttempts = studentSubs.filter(
-      (s) => s.status === 'completed' || (!s.status && Boolean(s.completedAt))
-    );
-    const inProgressAttempts = studentSubs.filter((s) => s.status === 'in_progress');
+      const completedAttempts = sortedSubs.filter(
+        (s) => s.status === 'completed' || (!s.status && Boolean(s.completedAt))
+      );
+      const inProgressAttempts = sortedSubs.filter((s) => s.status === 'in_progress');
 
-    let status: 'not_started' | 'in_progress' | 'completed' = 'not_started';
-    if (inProgressAttempts.length > 0 && completedAttempts.length === 0) {
-      status = 'in_progress';
-    } else if (completedAttempts.length > 0) {
-      // If student is currently in the middle of a new replay attempt, show in_progress or completed
-      status = 'completed';
-    }
+      const status: 'not_started' | 'in_progress' | 'completed' =
+        completedAttempts.length > 0 ? 'completed' : 'in_progress';
 
-    const attemptsCount = studentSubs.length;
-    const completedAttemptsCount = completedAttempts.length;
-    const sortedByBest = [...(completedAttempts.length > 0 ? completedAttempts : studentSubs)].sort(
-      (a, b) =>
-        (b.scorePercentage ?? b.accuracy ?? 0) - (a.scorePercentage ?? a.accuracy ?? 0) ||
-        (a.timeSpentSeconds || 999999) - (b.timeSpentSeconds || 999999)
-    );
-    const bestAttempt = sortedByBest[0] || null;
-    const latestAttempt = studentSubs[0] || null;
-    const activeInProgressAttempt = inProgressAttempts[0] || null;
+      const attemptsCount = sortedSubs.length;
+      const completedAttemptsCount = completedAttempts.length;
+      const sortedByBest = [...(completedAttempts.length > 0 ? completedAttempts : sortedSubs)].sort(
+        (a, b) =>
+          (b.scorePercentage ?? b.accuracy ?? 0) - (a.scorePercentage ?? a.accuracy ?? 0) ||
+          (a.timeSpentSeconds || 999999) - (b.timeSpentSeconds || 999999)
+      );
+      const bestAttempt = sortedByBest[0] || null;
+      const latestAttempt = sortedSubs[0] || null;
+      const activeInProgressAttempt = inProgressAttempts[0] || null;
 
-    const bestScore = bestAttempt ? (bestAttempt.scorePercentage ?? bestAttempt.accuracy ?? 0) : 0;
-    const latestScore = latestAttempt ? (latestAttempt.scorePercentage ?? latestAttempt.accuracy ?? 0) : 0;
-    const bestCorrectCount = bestAttempt ? (bestAttempt.correctAnswersCount ?? bestAttempt.score ?? 0) : 0;
-    const latestCorrectCount = latestAttempt ? (latestAttempt.correctAnswersCount ?? latestAttempt.score ?? 0) : 0;
-    const totalQuestions =
-      latestAttempt?.totalQuestions || hw.questionCount || hw.targetQuestionCount || 0;
-    const answeredCount = latestAttempt?.responses?.length || 0;
-    const bestAccuracy = bestAttempt ? (bestAttempt.accuracyPercent ?? bestAttempt.accuracy ?? bestScore) : 0;
-    const totalTimeSpent = studentSubs.reduce((acc, c) => acc + (c.timeSpentSeconds || 0), 0);
-    const latestTimeSpent = latestAttempt?.timeSpentSeconds || 0;
-    const lastActivity = latestAttempt
-      ? latestAttempt.updatedAt || latestAttempt.completedAt || latestAttempt.startedAt
-      : null;
-    const allSynced = studentSubs.every((s) => s.cloudSynced !== false);
+      const participantName = (latestAttempt?.studentName || bestAttempt?.studentName || 'مشارك').trim();
+      const participantIdentifier =
+        latestAttempt?.participantId || latestAttempt?.studentId || pKey;
 
-    const studentRecord = {
-      studentId: st.id,
-      studentName: st.name,
-      status,
-      hasActiveInProgress: Boolean(activeInProgressAttempt),
-      attemptsCount,
-      completedAttemptsCount,
-      bestScore,
-      latestScore,
-      bestCorrectCount,
-      latestCorrectCount,
-      totalQuestions,
-      answeredCount,
-      bestAccuracy,
-      totalTimeSpent,
-      latestTimeSpent,
-      lastActivity,
-      cloudSynced: allSynced,
-      latestAttempt,
-      bestAttempt,
-      attempts: studentSubs
-    };
+      const bestScore = bestAttempt ? (bestAttempt.scorePercentage ?? bestAttempt.accuracy ?? 0) : 0;
+      const latestScore = latestAttempt ? (latestAttempt.scorePercentage ?? latestAttempt.accuracy ?? 0) : 0;
+      const bestCorrectCount = bestAttempt ? (bestAttempt.correctAnswersCount ?? bestAttempt.score ?? 0) : 0;
+      const latestCorrectCount = latestAttempt ? (latestAttempt.correctAnswersCount ?? latestAttempt.score ?? 0) : 0;
+      const totalQuestions =
+        latestAttempt?.totalQuestions || hw.questionCount || hw.targetQuestionCount || 0;
+      const answeredCount = latestAttempt?.responses?.length || 0;
+      const bestAccuracy = bestAttempt ? (bestAttempt.accuracyPercent ?? bestAttempt.accuracy ?? bestScore) : 0;
+      const totalTimeSpent = sortedSubs.reduce((acc, c) => acc + (c.timeSpentSeconds || 0), 0);
+      const latestTimeSpent = latestAttempt?.timeSpentSeconds || 0;
+      const lastActivity = latestAttempt
+        ? latestAttempt.updatedAt || latestAttempt.completedAt || latestAttempt.startedAt
+        : null;
+      const allSynced = sortedSubs.every((s) => s.cloudSynced !== false);
 
-    studentStatusSummary.push(studentRecord);
-
-    if (bestAttempt && completedAttemptsCount > 0) {
-      leaderboardMap.set(st.id || st.name, {
-        studentId: st.id,
-        studentName: st.name,
+      studentStatusSummary.push({
+        studentId: participantIdentifier,
+        participantId: latestAttempt?.participantId,
+        studentName: participantName,
+        audienceMode: 'open' as HomeworkAudienceMode,
+        status,
+        hasActiveInProgress: Boolean(activeInProgressAttempt),
+        attemptsCount,
+        completedAttemptsCount,
         bestScore,
+        latestScore,
+        bestCorrectCount,
+        latestCorrectCount,
+        totalQuestions,
+        answeredCount,
         bestAccuracy,
-        timeSpentSeconds: bestAttempt.timeSpentSeconds || 0,
-        goldEarned: bestAttempt.goldEarned || 0,
-        completedAt: bestAttempt.completedAt
+        totalTimeSpent,
+        latestTimeSpent,
+        lastActivity,
+        cloudSynced: allSynced,
+        latestAttempt,
+        bestAttempt,
+        attempts: sortedSubs
       });
-    }
-  });
+
+      if (bestAttempt && completedAttemptsCount > 0) {
+        leaderboardMap.set(pKey, {
+          studentId: participantIdentifier,
+          studentName: participantName,
+          bestScore,
+          bestAccuracy,
+          timeSpentSeconds: bestAttempt.timeSpentSeconds || 0,
+          goldEarned: bestAttempt.goldEarned || 0,
+          completedAt: bestAttempt.completedAt
+        });
+      }
+    });
+  }
 
   // Sort studentStatusSummary: in_progress first, then completed (by bestScore desc), then not_started
   const statusOrder: Record<string, number> = {
@@ -738,7 +1256,7 @@ export async function fetchAssignmentDetailsWithSync(
     }
   >();
 
-  subs.forEach((sub) => {
+  validSubsForStats.forEach((sub) => {
     sub.responses?.forEach((r) => {
       const key = `${r.questionType || 'q'}::${r.germanWord || r.questionId}`;
       const existing = questionMap.get(key) || {
@@ -767,17 +1285,17 @@ export async function fetchAssignmentDetailsWithSync(
     }))
     .sort((a, b) => a.accuracyPercent - b.accuracyPercent);
 
-  const totalAssigned = rosterMap.size;
+  const totalAssigned = studentStatusSummary.length;
   const completedCount = studentStatusSummary.filter((s) => s.status === 'completed').length;
   const inProgressCount = studentStatusSummary.filter((s) => s.status === 'in_progress').length;
   const notStartedCount = studentStatusSummary.filter((s) => s.status === 'not_started').length;
   const completionPercentage =
     totalAssigned > 0 ? Math.round((completedCount / totalAssigned) * 100) : 0;
 
-  const completedSubsList = subs.filter(
+  const completedSubsList = validSubsForStats.filter(
     (s) => s.status === 'completed' || (!s.status && Boolean(s.completedAt))
   );
-  const scoringPool = completedSubsList.length > 0 ? completedSubsList : subs;
+  const scoringPool = completedSubsList.length > 0 ? completedSubsList : validSubsForStats;
   const averageScorePercentage =
     scoringPool.length > 0
       ? Math.round(
@@ -788,7 +1306,7 @@ export async function fetchAssignmentDetailsWithSync(
 
   return {
     assignment: hw,
-    submissions: subs,
+    submissions: validSubsForStats,
     studentStatusSummary,
     officialLeaderboard,
     questionAccuracy,
@@ -798,8 +1316,9 @@ export async function fetchAssignmentDetailsWithSync(
       inProgressCount,
       notStartedCount,
       completionPercentage,
-      totalAttemptsCount: subs.length,
+      totalAttemptsCount: validSubsForStats.length,
       averageScorePercentage
     }
   };
 }
+

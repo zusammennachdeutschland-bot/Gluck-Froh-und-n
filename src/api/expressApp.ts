@@ -182,22 +182,200 @@ app.get('/api/tts', async (req, res) => {
   }
 });
 
-// 5. Teacher & Homework Assignments API routes
+// 5. Teacher & Homework Assignments API routes with Audience Mode & Group Membership Validation
+export function resetHomeworkStoresForTesting(): void {
+  localAssignmentsStore.length = 0;
+  localSubmissionsStore.length = 0;
+}
+
+function resolveServerAudienceMode(hw: any): 'open' | 'group' {
+  if (!hw) return 'open';
+  if (hw.audienceMode === 'open') return 'open';
+  if (hw.audienceMode === 'group') return 'group';
+  const gid = String(hw.groupId || '').trim();
+  if (gid && gid !== 'all') return 'group';
+  return 'open';
+}
+
+function normalizeServerAssignment(hw: any): any {
+  if (!hw || typeof hw !== 'object') return hw;
+  const mode = resolveServerAudienceMode(hw);
+  if (mode === 'open') {
+    const copy = { ...hw, audienceMode: 'open' };
+    delete copy.groupId;
+    delete copy.groupName;
+    delete copy.assignedStudents;
+    return copy;
+  }
+  const targetGroupId = String(hw.groupId || '').trim();
+  const byId = new Map<string, any>();
+  if (Array.isArray(hw.assignedStudents)) {
+    for (const raw of hw.assignedStudents) {
+      if (!raw) continue;
+      const cleanId = String(raw.id || '').trim();
+      const cleanName = String(raw.name || '').trim();
+      if (!cleanId || !cleanName) continue;
+      if (raw.groupId && targetGroupId && String(raw.groupId).trim() !== targetGroupId) continue;
+      if (!byId.has(cleanId)) {
+        byId.set(cleanId, {
+          id: cleanId,
+          name: cleanName,
+          ...(raw.code ? { code: raw.code } : {}),
+          ...(raw.groupId || targetGroupId ? { groupId: String(raw.groupId || targetGroupId).trim() } : {})
+        });
+      }
+    }
+  }
+  return {
+    ...hw,
+    audienceMode: 'group',
+    groupId: targetGroupId && targetGroupId !== 'all' ? targetGroupId : undefined,
+    groupName: hw.groupName ? String(hw.groupName).trim() : undefined,
+    assignedStudents: Array.from(byId.values())
+  };
+}
+
+function validateServerSubmission(hw: any, body: any): {
+  valid: boolean;
+  status?: number;
+  error?: string;
+  audienceMode: 'open' | 'group';
+  normalizedStudentId?: string;
+  normalizedParticipantId?: string;
+  normalizedStudentName?: string;
+  normalizedGroupId?: string;
+} {
+  const cleanSubmittedName = String(body?.studentName || '').trim();
+  if (!hw) {
+    if (!cleanSubmittedName) {
+      return { valid: false, status: 400, error: 'Missing studentName', audienceMode: 'open' };
+    }
+    return {
+      valid: true,
+      audienceMode: body?.audienceMode === 'group' ? 'group' : 'open',
+      normalizedStudentId: body?.studentId ? String(body.studentId).trim() : undefined,
+      normalizedParticipantId: body?.participantId ? String(body.participantId).trim() : undefined,
+      normalizedStudentName: cleanSubmittedName,
+      normalizedGroupId: body?.groupId ? String(body.groupId).trim() : undefined
+    };
+  }
+
+  const normalizedHw = normalizeServerAssignment(hw);
+  const mode = resolveServerAudienceMode(normalizedHw);
+
+  if (mode === 'group') {
+    const targetGroupId = String(normalizedHw.groupId || '').trim();
+    if (!targetGroupId || targetGroupId === 'all') {
+      return {
+        valid: false,
+        status: 403,
+        error: 'Group assignment is missing a valid groupId',
+        audienceMode: 'group'
+      };
+    }
+    const roster: any[] = Array.isArray(normalizedHw.assignedStudents) ? normalizedHw.assignedStudents : [];
+    if (roster.length === 0) {
+      return {
+        valid: false,
+        status: 403,
+        error: 'Group student roster is unavailable for this assignment',
+        audienceMode: 'group'
+      };
+    }
+    const submittedStudentId = String(body?.studentId || '').trim();
+    if (!submittedStudentId) {
+      return {
+        valid: false,
+        status: 403,
+        error: 'studentId is required for a group-restricted homework assignment',
+        audienceMode: 'group'
+      };
+    }
+    if (body?.groupId && String(body.groupId).trim() !== targetGroupId) {
+      return {
+        valid: false,
+        status: 403,
+        error: 'Submitted groupId does not match assignment groupId',
+        audienceMode: 'group'
+      };
+    }
+    const matchedStudent = roster.find((s) => s.id === submittedStudentId);
+    if (!matchedStudent) {
+      return {
+        valid: false,
+        status: 403,
+        error: 'Student does not belong to the assigned group',
+        audienceMode: 'group'
+      };
+    }
+    if (!cleanSubmittedName || cleanSubmittedName.toLowerCase() !== String(matchedStudent.name).trim().toLowerCase()) {
+      return {
+        valid: false,
+        status: 403,
+        error: 'Submitted studentName does not match registered student record',
+        audienceMode: 'group'
+      };
+    }
+    return {
+      valid: true,
+      audienceMode: 'group',
+      normalizedStudentId: matchedStudent.id,
+      normalizedParticipantId: undefined,
+      normalizedStudentName: String(matchedStudent.name).trim(),
+      normalizedGroupId: targetGroupId
+    };
+  }
+
+  // Open mode ('open')
+  if (!cleanSubmittedName) {
+    return {
+      valid: false,
+      status: 400,
+      error: 'Participant name is required for open homework',
+      audienceMode: 'open'
+    };
+  }
+  const pid =
+    String(body?.participantId || '').trim() ||
+    `pid_${String(body?.assignmentId || 'hw').slice(0, 16)}_${Date.now().toString(36)}`;
+  return {
+    valid: true,
+    audienceMode: 'open',
+    normalizedStudentId: undefined,
+    normalizedParticipantId: pid,
+    normalizedStudentName: cleanSubmittedName,
+    normalizedGroupId: undefined
+  };
+}
+
 app.all('/api/teacher/assignments', (req, res) => {
   if (req.method === 'GET') {
-    return res.json({ assignments: localAssignmentsStore });
+    return res.json({ assignments: localAssignmentsStore.map(normalizeServerAssignment) });
   }
   if (req.method === 'POST') {
     const body = req.body || {};
-    if (body.id) {
-      const idx = localAssignmentsStore.findIndex((a) => a.id === body.id);
-      if (idx >= 0) {
-        localAssignmentsStore[idx] = { ...localAssignmentsStore[idx], ...body };
-      } else {
-        localAssignmentsStore.unshift(body);
+    if (body.audienceMode === 'group') {
+      const gid = String(body.groupId || '').trim();
+      if (!gid || gid === 'all') {
+        return res.status(400).json({
+          success: false,
+          error: 'يجب تحديد مجموعة صالحة عند اختيار جروب معين.'
+        });
       }
     }
-    return res.json({ success: true, assignment: body });
+    const normalized = normalizeServerAssignment(body);
+    if (normalized.id) {
+      const idx = localAssignmentsStore.findIndex((a) => a.id === normalized.id);
+      if (idx >= 0) {
+        localAssignmentsStore[idx] = normalizeServerAssignment({
+          ...localAssignmentsStore[idx],
+          ...normalized
+        });
+      } else {
+        localAssignmentsStore.unshift(normalized);
+      }
+    }
+    return res.json({ success: true, assignment: normalized });
   }
   return res.json({ success: true });
 });
@@ -212,15 +390,32 @@ app.all('/api/homework/submissions', (req, res) => {
   }
   if (req.method === 'POST') {
     const body = req.body || {};
-    if (body.id) {
-      const idx = localSubmissionsStore.findIndex((s) => s.id === body.id);
+    const targetHw =
+      localAssignmentsStore.find((a) => a.id === body.assignmentId) || body.assignmentFallback || null;
+    const check = validateServerSubmission(targetHw, body);
+    if (!check.valid) {
+      return res.status(check.status || 403).json({
+        success: false,
+        error: check.error || 'Submission validation failed'
+      });
+    }
+    const cleanSub = {
+      ...body,
+      audienceMode: check.audienceMode,
+      studentId: check.normalizedStudentId,
+      participantId: check.normalizedParticipantId,
+      groupId: check.normalizedGroupId,
+      studentName: check.normalizedStudentName
+    };
+    if (cleanSub.id) {
+      const idx = localSubmissionsStore.findIndex((s) => s.id === cleanSub.id);
       if (idx >= 0) {
-        localSubmissionsStore[idx] = { ...localSubmissionsStore[idx], ...body };
+        localSubmissionsStore[idx] = { ...localSubmissionsStore[idx], ...cleanSub };
       } else {
-        localSubmissionsStore.unshift(body);
+        localSubmissionsStore.unshift(cleanSub);
       }
     }
-    return res.json({ success: true, submission: body });
+    return res.json({ success: true, submission: cleanSub });
   }
   return res.json({ success: true });
 });
@@ -231,11 +426,21 @@ app.get('/api/homework/info', (req, res) => {
   if (!found) {
     return res.status(404).json({ error: 'Assignment not found in local relay' });
   }
-  return res.json(found);
+  return res.json(normalizeServerAssignment(found));
 });
 
 app.post('/api/homework/submit', (req, res) => {
   const body = req.body || {};
+  const targetHw =
+    localAssignmentsStore.find((a) => a.id === body.assignmentId) || body.assignmentFallback || null;
+  const check = validateServerSubmission(targetHw, body);
+  if (!check.valid) {
+    return res.status(check.status || 403).json({
+      success: false,
+      error: check.error || 'Submission rejected'
+    });
+  }
+
   const responses = Array.isArray(body.responses) ? body.responses : [];
   const correctCount = responses.filter((r: any) => r && r.isCorrect).length;
   const totalQ = responses.length;
@@ -247,8 +452,11 @@ app.post('/api/homework/submit', (req, res) => {
   const submission = {
     id: body.id || `sub_${body.assignmentId || 'hw'}_${Date.now()}`,
     assignmentId: body.assignmentId,
-    studentId: body.studentId,
-    studentName: body.studentName,
+    audienceMode: check.audienceMode,
+    studentId: check.normalizedStudentId,
+    participantId: check.normalizedParticipantId,
+    groupId: check.normalizedGroupId,
+    studentName: check.normalizedStudentName,
     attemptNumber: body.attemptNumber || 1,
     status: 'completed',
     startedAt: body.startedAt || nowIso,

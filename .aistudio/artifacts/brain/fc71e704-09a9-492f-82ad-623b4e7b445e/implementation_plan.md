@@ -1,127 +1,131 @@
-# Implementation Plan: Unified Lesson Cycle Numbering (Glück)
+# Glück — Homework Assignment, Student Identity & Results Tracking Repair
 
-## 1. Root Cause Analysis
+A production-grade architectural repair of the Glück Homework Assignment lifecycle—from teacher creation and audience selection to student identity verification, submission persistence, and the Teacher Follow-up Dashboard. This eliminates student-list exposure across groups, prevents unexpected fallback to manual name entry on group assignments, and guarantees accurate, non-colliding result tracking by stable student and participant IDs.
 
-A code-level audit of `src/utils/lessonUtils.ts`, `src/context/AppContext.tsx`, and the lesson UI components identified the exact causes of cycle numbering discrepancies:
+## User Review & Critical Decisions
 
-1. **Blind Trust in Stale Stored `lesson.sessionNumber` Values**:
-   - `LessonReminderModal.tsx` (line 106), `ArabicParentReportModal.tsx` (line 184), `ParentSummaryModal.tsx` (line 49), `LessonControlModal.tsx` (line 509), and `TodaysProgressTimeline.tsx` (line 152) all check `if (typeof lesson.sessionNumber === 'number' && lesson.sessionNumber >= 1) return lesson.sessionNumber;` **before** invoking `calculateSequentialSessionNumber()`.
-   - Inside `calculateSequentialSessionNumber()` (`src/utils/lessonUtils.ts`, lines 184–191), it also immediately returns `lesson.sessionNumber` whenever `1 <= lesson.sessionNumber <= cycleTotalSessions` unless `forceRecalculate: true` is passed.
-   - Even when `forceRecalculate: true` is passed (`src/utils/lessonUtils.ts`, lines 253–262), `calculateSequentialSessionNumber()` walks backward (`for (let i = index - 1; i >= 0; i--)`) and anchors off the nearest preceding lesson's stored `prev.sessionNumber`, propagating stale or corrupted session numbers forward to all subsequent lessons.
+> [!IMPORTANT]
+> The following architectural decisions incorporate your confirmed answers and establish strict privacy and identity guarantees across all homework flows.
 
-2. **Cancelled Lessons Counted During Schedule Generation & Startup**:
-   - `AppContext.tsx` auto-generation loop (lines 2496–2501 & 2549) counts `groupLessonCounts` over all `!l.deleted` lessons **without excluding `l.status === 'cancelled'`**.
-   - `AppContext.tsx` `updateGroup` regeneration loop (line 3006) counts `pastGroupLessonsCount` over `!l.deleted` lessons **without excluding `l.status === 'cancelled'`**, and lines 3134–3148 / 3209–3223 reset `upcomingScheduled` starting from `mergedStartingNumber` (`idx = 0`) while ignoring already-completed lessons in the current cycle.
-   - `AppContext.tsx` `addLesson` (line 4558) assigns `getGroupCycleInfo(targetGroup, activeLessons).currentSessionNumber` based on total active lessons count rather than the chronological position of the newly added lesson.
-   - `AppContext.tsx` `saveLessonReport` (line 4740) falls back to `targetLesson.sessionNumber || 1` instead of resolving the authoritative sequential session number when `sessionNumber` is not explicitly passed.
-
-3. **Modal State Desynchronization & Non-Chronological Target Selection in `LessonReminderModal.tsx`**:
-   - Line 52 selects `upcomingLesson` via `.find(...)` without sorting chronologically, which can pick a later scheduled lesson instead of the nearest upcoming one when opened from a Group card.
-   - Line 206 initializes `useState<number>(defaultSessionNumber)` once on mount without a `useEffect` to stay synchronized when `currentTargetLesson`, `lessons`, or `defaultSessionNumber` updates, and clicking `+` / `-` in `LessonReminderModal` only changes local preview state without persisting to the lesson or resequencing subsequent scheduled lessons.
-
-4. **Missing Deterministic Tie-Breaking & Incomplete Resequencing**:
-   - `calculateSequentialSessionNumber()` sorts only by `${date}T${time}` without a deterministic tie-breaker (`createdAt`, then `id`) when two lessons share the same date and time.
-   - `resequenceScheduledLessonsAfterChange()` only resequences lessons with `lTime >= pivotTime`, leaving earlier misnumbered lessons intact and anchoring off them.
+- **Confirmed Decision 1 — Per-Device Participant Identity in Open Mode (`مفتوح لأي اسم`)**: When an assignment is created in Open mode, each browser/device generates a persistent per-assignment participant token (`participantId`). If two different people enter the exact same name on different devices, their submissions and attempts remain completely separate in the Teacher Follow-up Dashboard while allowing the same participant to replay and track multiple attempts from their own device.
+- **Confirmed Decision 2 — Complete Removal of "All Groups" (`شيل حوار كل الجروبات أصلا من الاختيارات`)**: The old "All Groups" option is completely removed. Teachers choose explicitly between **Open Homework (`مفتوح لأي اسم`)** and **Specific Group (`جروب معين`)**. Any legacy assignment without a specific group ID is classified as Open mode (`'open'`) and never exposes the full student database.
+- **Confirmed Decision 3 — Strict Group Roster Isolation & Fail-Closed Student Gate**: In Specific Group mode (`جروب معين`), the student-facing page displays only the students belonging to that single selected group and never reads `dl_students` from local storage. If the group roster cannot be loaded or is empty, the page fails closed with a clear message (`"تعذر تحميل قائمة طلاب هذه المجموعة حاليًا. يرجى التواصل مع المعلم أو إعادة فتح الرابط."`) instead of falling back to an open text input.
 
 ---
 
-## 2. Authoritative Numbering Architecture (`src/utils/lessonUtils.ts`)
+## 1. Overview & Core Concept
 
-### 2.1 Single Authoritative Function: `resolveLessonCycleNumber` & `calculateSequentialSessionNumber`
-We will implement `resolveLessonCycleNumber(targetLesson, allLessons, options)` in `src/utils/lessonUtils.ts` and route `calculateSequentialSessionNumber` through it as the single source of truth across the entire application:
-
-- **Return Signature**:
-  ```ts
-  export interface LessonCycleResolution {
-    sessionNumber: number;         // 1..totalCycleSessions (or 0 if targetLesson is cancelled/deleted)
-    totalCycleSessions: number;    // 1 for per-lesson, otherwise package size (e.g. 4, 8)
-    cycleIndex: number;            // 0-based cycle number (0, 1, 2, ...)
-    sequenceIndex: number;         // 0-based index among valid chronological lessons
-    isPerLesson: boolean;
-  }
-  ```
-- **Strict Filtering Rules**:
-  - Exclude any lesson where `l.deleted === true`.
-  - Exclude any lesson where `l.status === 'cancelled'`.
-  - Match lessons belonging to the same scope:
-    - **Group scope**: match by `groupId` (or normalized `groupName` fallback when `groupId` is legacy/name-based).
-    - **Individual / Private Student scope**: match by `studentId` (or normalized `studentName` fallback) where lessons do not belong to a separate group.
-- **Deterministic Chronological Ordering**:
-  1. Primary sort: normalized `date` (`YYYY-MM-DD`) + normalized `time` (`HH:MM`, defaulting to `'00:00'`).
-  2. Secondary tie-breaker: `createdAt` / `updatedAt` timestamp if available, followed by deterministic lexical comparison on `id` (`(a.id || '').localeCompare(b.id || '')`).
-- **Pure Chronological Cycle Formula**:
-  - For per-lesson groups/students (`isPerLesson === true`): `sessionNumber = 1`, `totalCycleSessions = 1`.
-  - For package/cycle groups/students (`totalCycleSessions = group.sessionCount || student.bundleSize || targetLesson.totalSessionsInPackage || 4`):
-    - Let `startingSessionNumber = clamp(group?.startingSessionNumber || 1, 1, totalCycleSessions)`.
-    - For a non-cancelled, non-deleted lesson at chronological `sequenceIndex` ($0, 1, 2, \dots$):
-      $$\text{sessionNumber} = ((\text{startingSessionNumber} - 1 + \text{sequenceIndex}) \bmod \text{totalCycleSessions}) + 1$$
-    - Does **not** blindly trust stale stored `lesson.sessionNumber` values unless an explicit manual override anchor is being applied via resequencing.
-
-### 2.2 Full-Scope Resequencing (`resequenceScheduledLessonsAfterChange`)
-We will upgrade `resequenceScheduledLessonsAfterChange` in `src/utils/lessonUtils.ts` so that whenever any lesson in a group or private student scope is created, completed, cancelled, un-cancelled, deleted, restored, or rescheduled:
-- All non-deleted, non-cancelled lessons in that group/student scope are sorted using the deterministic chronological comparator.
-- Every lesson in the scope has its `sessionNumber` and `totalSessionsInPackage` synchronized to the authoritative chronological sequence (or anchored from `startingSessionNumber`), ensuring zero gaps, zero duplicates, and immediate consistency between stored `lesson.sessionNumber` and calculated `resolveLessonCycleNumber()`.
-- When a teacher explicitly sets a manual session number $M$ on a specific lesson $L_k$ (in `LessonReminderModal`, `LessonControlModal`, or `GroupProfileModal`), the group's effective `startingSessionNumber` (or sequence offset so $L_k$ has session number $M$) is updated and all non-cancelled lessons in the scope are deterministically resequenced so the entire timeline remains continuous.
-
-### 2.3 Consistent `getGroupCycleInfo`
-We will update `getGroupCycleInfo(group, lessons, lang)` in `src/utils/lessonUtils.ts` so its `currentSessionNumber` and badge text use the exact same chronological non-cancelled sequence and `startingSessionNumber` offset as `resolveLessonCycleNumber`.
+- **What It Does**: Repairs the end-to-end homework system so teachers can create either an open public assignment (manual name entry, zero student roster exposure) or a group-restricted assignment (selectable student cards strictly limited to the chosen group), validate student identity on submission, and inspect complete per-student or per-participant progress in the Follow-up Dashboard.
+- **Target Audience / Persona**: German language teachers managing multiple student groups in Glück, and students or external participants opening shared homework links on mobile or desktop browsers.
+- **Key Value**:
+  - **Zero Privacy Leaks**: Never embeds or exposes the full student database (`dl_students`) or students from other groups in shared homework links or student-facing views.
+  - **Collision-Free Identity**: Distinguishes two registered students who share the same name via `studentId`, and distinguishes two open participants who type the same name via `participantId`.
+  - **Honest Cloud Sync**: Confirms Firestore and API writes before reporting success, and clearly warns the teacher or student when a save is stored locally pending connection recovery.
 
 ---
 
-## 3. Lifecycle & Mutation Synchronization (`src/context/AppContext.tsx`)
+## 2. User Experience & Visual Design
 
-Without touching any financial, payment, or billing logic, we will unify every lesson mutation path in `src/context/AppContext.tsx` to use the authoritative numbering engine:
-
-1. **Startup Synchronization (`useEffect` lines 1054–1095)**:
-   - Replace the inline loop that trusted `hasValidSessionNumber` with `resequenceScheduledLessonsAfterChange` / `resolveLessonCycleNumber` so any stale stored `sessionNumber` values from previously cancelled/deleted lessons are automatically healed on startup.
-2. **Rolling 14-Day Auto-Generation (`useEffect` lines 2496–2575)**:
-   - Exclude `l.status === 'cancelled'` when counting existing lessons and run `resequenceScheduledLessonsAfterChange` on the group's lessons when new auto-generated lessons are inserted.
-3. **Group Update & Schedule Regeneration (`updateGroup`, lines 3005–3245)**:
-   - Exclude `l.status === 'cancelled'` from `pastGroupLessonsCount` and resequence the group's non-cancelled lessons cleanly across the entire timeline so completed and upcoming scheduled lessons form a continuous cycle (`1..sessionCount`).
-4. **Lesson Creation (`addLesson`, lines 4530–4587 & `generateGroupScheduleLessons`, lines 5242–5360)**:
-   - Insert the new lesson(s) and resequence the group/student scope via `resequenceScheduledLessonsAfterChange` so lessons added on any date (including backdated or multi-week lessons) receive their exact chronological cycle number and shift subsequent lessons accordingly.
-5. **Lesson Update, Cancellation, Deletion, and Restoration (`updateLesson`, `cancelLesson`, `deleteLesson`, `restoreItem`, `saveLessonReport`)**:
-   - Ensure `deleteLesson` resequences regardless of whether the deleted lesson was `scheduled` or `completed`.
-   - Ensure `restoreItem` (when restoring a lesson or group from Recently Deleted) triggers `resequenceScheduledLessonsAfterChange` for the affected group/student.
-   - Ensure `saveLessonReport` resolves the authoritative session number via `resolveLessonCycleNumber` (when no manual override is supplied) and resequences subsequent lessons.
-
----
-
-## 4. UI Component Unification
-
-All UI surfaces will read from `resolveLessonCycleNumber` / `calculateSequentialSessionNumber` without blindly short-circuiting on a stale `lesson.sessionNumber`:
-
-1. **`src/components/LessonReminderModal.tsx`**:
-   - Sort candidate scheduled/in-progress lessons chronologically when resolving `upcomingLesson` for a group.
-   - Compute `defaultSessionNumber` and `totalCycleSessions` via `resolveLessonCycleNumber(currentTargetLesson, lessons, { group: targetGroup, student: targetStudent, students })`.
-   - Add a `useEffect` to keep `sessionNumber` synchronized whenever `currentTargetLesson?.id`, `defaultSessionNumber`, or `totalCycleSessions` changes.
-   - When the teacher clicks `-` or `+` to manually adjust `sessionNumber`, persist the adjusted number to the lesson and resequence subsequent scheduled lessons in the group/student scope (matching `LessonControlModal` behavior).
-2. **`src/components/ArabicParentReportModal.tsx`**:
-   - Remove the short-circuit `if (typeof lesson.sessionNumber === 'number' && lesson.sessionNumber >= 1) return lesson.sessionNumber;` in `effectiveSessionNumber` and always resolve through `resolveLessonCycleNumber()`.
-3. **`src/components/ParentSummaryModal.tsx`**:
-   - Remove the short-circuit on `lesson.sessionNumber` in `effectiveSessionNumber` and always resolve through `resolveLessonCycleNumber()`.
-4. **`src/components/LessonControlModal.tsx`, `src/components/TodaysProgressTimeline.tsx`, and `src/components/GroupProfileModal.tsx`**:
-   - Use `resolveLessonCycleNumber` as the default session number instead of preferring a potentially stale `selectedLesson.sessionNumber`, while preserving `customSessionNumber` manual adjustments.
+- **Key User Flows**:
+  1. **Teacher Homework Creation**:
+     - Inside the Homework Creation panel, the ambiguous group dropdown is replaced with a compact two-option segmented audience selector:
+       - **مفتوح لأي اسم (`open`)**: Hides the group dropdown, never attaches any student roster, and saves `audienceMode: 'open'`.
+       - **جروب معين (`group`)**: Displays the teacher's active groups dropdown. Selecting a group is mandatory before creating the assignment and snapshots only that group's active (non-deleted, non-archived) students (`id`, `name`, `code`, `groupId`).
+  2. **Student-Facing Entry Gate**:
+     - **Open Mode (`open`)**: Immediately presents the clean manual name input (`"اكتب اسمك للبدء وتسجيل نتيجتك"`). Never displays any student cards, even if opened on the teacher's own browser.
+     - **Specific Group Mode (`group`)**: Displays selectable student cards exclusively for the assigned group (`"اختر اسمك من قائمة المجموعة لبدء الواجب وتسجيل نتيجتك"`), along with the group badge. Manual name entry is completely disabled. If the group roster is unavailable or empty, displays an explicit error state with a retry button.
+  3. **Teacher Follow-up Dashboard**:
+     - **Group Mode View**: Displays the group name, audience badge (`جروب معين`), total group roster count, completed count, in-progress count, and not-started count (`لم يبدأ بعد`). Every student in the group is listed by their unique `studentId`.
+     - **Open Mode View**: Displays the audience badge (`مفتوح لأي اسم`), total participant count, total attempts, and average score, listing each participant entry with their submitted name, attempt history, best score, latest score, and timestamps.
+- **Visual Identity & Theme**:
+  - Preserves Glück's existing German-studio dark/light aesthetic (`Plus Jakarta Sans` / `Cairo` Arabic typography, emerald/indigo semantic accents, hairline borders, and tabular numerals `tabular-nums` for scores, percentages, and attempt counters).
+- **Interactive Feedback & Motion**:
+  - Immediate validation feedback if a teacher tries to create a Group homework without selecting a group or if the selected group has zero active students.
+  - Explicit sync badge on created assignments (`تم الحفظ سحابياً` vs. `محفوظ محلياً فقط — بانتظار المزامنة`) so teachers know whether a link is ready for remote students.
 
 ---
 
-## 5. Automated Verification Plan (`src/tests/lessonCycleNumbering.test.ts`)
+## 3. Key Product Decisions & Trade-Offs
 
-We will create a dedicated test suite `src/tests/lessonCycleNumbering.test.ts` verifying all 16 mandatory scenarios (`TEST A` through `TEST P`) and run the entire test suite (`npm test`), TypeScript check (`npm run typecheck`), `compile_applet`, and `lint_applet`:
+- **Decision 1 — Strict Audience Mode Resolution & Share Link Encoding**
+  - *Chosen Approach*: Persist `audienceMode: 'open' | 'group'` on both `HomeworkAssignment` and `HomeworkSubmission`. Include `am` (`audienceMode`) and `gid` (`groupId`) in the share URL parameters. If a student opens a share link with `am=group` and the cloud/server assignment record cannot be fetched, the player refuses to construct a fake open assignment from URL parameters and instead shows the roster load error.
+  - *Why*: Previously, when Firestore was unreachable or slow, the URL query fallback created a temporary assignment with an empty `assignedStudents` array, tricking the UI into rendering the `"اكتب اسمك"` manual input for a restricted group homework.
+  - *Alternatives Considered*: Embedding the full group student list inside the URL query string was rejected because it bloats share URLs and exposes student names in plain URL text.
 
-- **TEST A**: Basic 4-lesson cycle (`1, 2, 3, 4`).
-- **TEST B**: Cancelled lesson in the middle (`completed #1`, `cancelled` excluded, `scheduled #2, #3, #4`).
-- **TEST C**: Multiple cancelled lessons (`completed #1`, `cancelled`, `cancelled`, `scheduled #2`).
-- **TEST D**: Cancelled first lesson (`cancelled` excluded, next lessons `#1, #2`).
-- **TEST E**: Un-cancelling a cancelled lesson restores its number and shifts subsequent scheduled lessons (`#2, #3`).
-- **TEST F**: Deleting a scheduled lesson shifts later scheduled lessons (`#2, #3`).
-- **TEST G**: Restoring a soft-deleted lesson restores its position and shifts subsequent lessons.
-- **TEST H**: Cycle rollover across 8 lessons in a 4-session package (`1, 2, 3, 4, 1, 2, 3, 4`).
-- **TEST I**: Cycle rollover with a cancelled lesson (`5th` active lesson becomes `#1` of Cycle 2).
-- **TEST J**: Custom `startingSessionNumber = 3` (`3, 4, 1, 2`).
-- **TEST K**: Cross-modal consistency (`LessonReminderModal`, `ArabicParentReportModal`, and `ParentSummaryModal` all resolve the exact same session number and total cycle sessions for the same lesson).
-- **TEST L**: Stale stored `sessionNumber = 3` on the 2nd active lesson (after a cancelled lesson) is repaired/resolved as `Session 2 of 4` everywhere.
-- **TEST M**: Per-lesson group (`isGroupPerLesson`) always resolves `1 of 1`.
-- **TEST N**: Individual student lessons without a group (`bundleSize = 4`) follow the same cycle and cancellation exclusion rules.
-- **TEST O**: Rescheduling a lesson's date/time reorders and resequences the cycle numbers chronologically.
-- **TEST P**: Two lessons on the same date (`10:00` and `18:00`, plus identical-time tie-breaking) are ordered deterministically.
+- **Decision 2 — Identity Keying in Roster & Submission Aggregation**
+  - *Chosen Approach*: Refactor submission deduplication and dashboard aggregation to key registered group students strictly by `id:${studentId}` and open participants by `pid:${participantId}` (falling back to legacy submission IDs only for historical pre-repair records).
+  - *Why*: Keying the follow-up roster map by `studentName.toLowerCase()` caused two students with the same name—or an external participant and a registered student—to overwrite each other's scores and attempts.
+  - *Alternatives Considered*: Disallowing duplicate student names at registration was rejected because real classrooms frequently have students with identical first or full names.
+
+- **Decision 3 — Multi-Layer Group Membership Validation**
+  - *Chosen Approach*: Enforce group membership validation across three layers: (1) Student Player UI before starting/submitting, (2) Client Sync Engine (`validateHomeworkSubmissionIdentity`), and (3) Express API (`/api/homework/submit` and `/api/homework/submissions`) when the assignment exists on the server.
+  - *Why*: Prevents forged requests, stale tab state, or manipulated payloads from recording a submission under an unauthorized name or foreign `studentId` in a group-restricted assignment.
+
+---
+
+## 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+### Architecture & Component Diagram
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                   TEACHER HOMEWORK CREATION & FOLLOW-UP                    │
+│  ┌──────────────────────────────────┐  ┌────────────────────────────────┐  │
+│  │Audience Selector                 │  │Follow-Up Dashboard             │  │
+│  │• Mode A: مفتوح لأي اسم ('open')   │  │• Group Mode: Roster by         │  │
+│  │  (No groupId, no student roster) │  │  studentId + Pending students  │  │
+│  │• Mode B: جروب معين ('group')      │  │• Open Mode: Participants by    │  │
+│  │  (1 groupId + group snapshot)    │  │  participantId + All attempts  │  │
+│  └───────────────┬──────────────────┘  └───────────────▲────────────────┘  │
+└──────────────────┼─────────────────────────────────────┼───────────────────┘
+                   │ Confirmed Save                      │ ID-Keyed Sync
+                   ▼                                     │
+┌────────────────────────────────────────────────────────────────────────────┐
+│                HOMEWORK SYNC & VALIDATION ENGINE                           │
+│  • resolveAssignmentAudienceMode(hw): 'open' | 'group'                     │
+│  • validateHomeworkSubmissionIdentity(hw, sub): Strict Mode/Group Check    │
+│  • buildDeterministicSubmissionId(hwId, mode, studentId/participantId, n)  │
+│  • Confirmed Firestore + Express API Persistence + Pending Retry Queue     │
+└──────────────────┬─────────────────────────────────────▲───────────────────┘
+                   │ Fetch Authoritative Assignment      │ Validated Submit
+                   ▼                                     │
+┌────────────────────────────────────────────────────────────────────────────┐
+│                      STUDENT HOMEWORK PLAYER GATE                          │
+│  ┌──────────────────────────────────┐  ┌────────────────────────────────┐  │
+│  │If audienceMode === 'open'        │  │If audienceMode === 'group'     │  │
+│  │• Manual Name Input Only          │  │• Selectable Group Student Cards│  │
+│  │• Per-Device participantId        │  │• Fail-Closed if Roster Missing │  │
+│  │• Zero access to dl_students      │  │• Binds registered studentId    │  │
+│  └──────────────────────────────────┘  └────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Model & State
+
+- **`HomeworkAudienceMode`**: `'open' | 'group'`
+- **`HomeworkAssignment`**:
+  - `audienceMode?: HomeworkAudienceMode` — Explicitly stored on creation (`'open'` or `'group'`).
+  - `groupId?: string` — Populated only when `audienceMode === 'group'`. Undefined in `'open'` mode.
+  - `groupName?: string` — Populated only when `audienceMode === 'group'`. Undefined in `'open'` mode.
+  - `assignedStudents?: AssignedStudentSnapshot[]` — Populated with the selected group's active students (`id`, `name`, `code`, `groupId`) only when `audienceMode === 'group'`. Undefined in `'open'` mode.
+- **`HomeworkSubmission`**:
+  - `audienceMode?: HomeworkAudienceMode` — Mirrors the assignment's mode.
+  - `studentId?: string` — Required for `'group'` mode (must match a student in `assignedStudents`). Empty/undefined in `'open'` mode.
+  - `participantId?: string` — Generated per browser/device for `'open'` mode so same-name participants on different devices never collide.
+  - `studentName: string` — Registered student name in `'group'` mode; participant-entered name in `'open'` mode.
+  - `groupId?: string` — Set to `assignment.groupId` in `'group'` mode.
+
+### Interactive Component & State Mapping
+
+1. **Audience Mode Resolution (`resolveAssignmentAudienceMode`)**:
+   - Returns `'group'` if `hw.audienceMode === 'group'` or if `hw.groupId` is a non-empty string other than `'all'`.
+   - Returns `'open'` if `hw.audienceMode === 'open'` or if no specific `groupId` is present (automatically migrating legacy general assignments to `'open'` and ignoring any legacy full-database `assignedStudents` snapshot).
+2. **Student Gate Isolation**:
+   - Removes all `localStorage.getItem('dl_students')` reads from the student homework player.
+   - In `'group'` mode, filters `assignment.assignedStudents` by `assignment.groupId` (when `groupId` is present on snapshot entries) and requires a non-empty roster; if the URL fallback is triggered for a `'group'` link (`am=group`) because the cloud/server fetch failed, sets an explicit error state rather than rendering a group-less fallback assignment.
+3. **Submission Identity Validation (`validateHomeworkSubmissionIdentity`)**:
+   - For `'group'` assignments: Verifies `studentId` is non-empty, exists in `assignment.assignedStudents`, matches the registered student's name and `groupId`, and rejects manual or mismatched identities.
+   - For `'open'` assignments: Verifies `studentName` is non-empty, ensures `participantId` is present, and clears any registered `studentId` or `groupId`.
+4. **Follow-up Aggregation (`fetchAssignmentDetailsWithSync` & `syncAndFetchTeacherAssignments`)**:
+   - **Group Mode**: Builds the student roster strictly from `assignment.assignedStudents` merged with active students in `dl_students` whose `groupId === assignment.groupId`, keyed by `id:${student.id}`. Matches submissions by `studentId` (with a guarded fallback for pre-repair historical submissions on that group that lacked `studentId`). Computes `completed`, `in_progress`, and `not_started` counts accurately.
+   - **Open Mode**: Ignores `dl_students` and group rosters completely. Groups submissions by `pid:${submission.participantId}` (or `sub:${submission.id}` / normalized legacy key when `participantId` is absent on old records) so every participant and their multiple attempts appear in the dashboard without merging two different people who entered the same name.

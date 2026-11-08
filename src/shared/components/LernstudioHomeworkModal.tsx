@@ -3,6 +3,7 @@ import { LernstudioSet } from '../../types/lernstudio';
 import { useApp } from '../../context/AppContext';
 import {
   HomeworkAssignment,
+  HomeworkAudienceMode,
   HomeworkFlowMode,
   HomeworkQuestionType,
   HomeworkBlooketMode,
@@ -23,11 +24,11 @@ import {
   saveLernstudioSetToFirestore,
   subscribeAssignmentsFromFirestore,
   subscribeSubmissionsFromFirestore,
-  subscribeTeacherAuth
+  subscribeTeacherAuth,
+  resolveAssignmentAudienceMode
 } from '../homeworkStorageSync';
 import {
   Sparkles,
-  XCircle,
   X,
   Send,
   Copy,
@@ -51,8 +52,8 @@ import {
   Clock,
   Target,
   Activity,
-  Award,
-  HelpCircle
+  HelpCircle,
+  Globe
 } from 'lucide-react';
 
 interface Props {
@@ -91,7 +92,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
   // Create Homework State
   const [selectedSetId, setSelectedSetId] = useState(defaultSet?.id || sets[0]?.id || '');
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
+  const [audienceMode, setAudienceMode] = useState<HomeworkAudienceMode>('open');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(() => groups[0]?.id || '');
+  const [createError, setCreateError] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [flowMode, setFlowMode] = useState<HomeworkFlowMode>('teacher_then_quiz');
   const [questionTypes, setQuestionTypes] = useState<HomeworkQuestionType[]>([
@@ -102,8 +105,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [blooketMode, setBlooketMode] = useState<HomeworkBlooketMode>('gold_quest');
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [maxAttempts, setMaxAttempts] = useState(0);
-  const [hasDeadline, setHasDeadline] = useState(false);
-  const [deadlineDate, setDeadlineDate] = useState('');
+  const [hasDeadline] = useState(false);
+  const [deadlineDate] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [createdAssignment, setCreatedAssignment] = useState<HomeworkAssignment | null>(null);
   const [createdShareLink, setCreatedShareLink] = useState<string | null>(null);
@@ -130,6 +133,20 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     selectedDetailsIdRef.current = selectedDetails?.assignment?.id || null;
   }, [selectedDetails?.assignment?.id]);
 
+  // Ensure a valid default group ID is selected when groups load
+  useEffect(() => {
+    if ((!selectedGroupId || !groups.some((g) => g.id === selectedGroupId)) && groups.length > 0) {
+      setSelectedGroupId(groups[0].id);
+    }
+  }, [groups, selectedGroupId]);
+
+  const activeSelectedGroupStudents = useMemo(() => {
+    if (audienceMode !== 'group' || !selectedGroupId) return [];
+    return students.filter(
+      (s) => !s.deleted && s.status !== 'archived' && s.groupId === selectedGroupId
+    );
+  }, [audienceMode, selectedGroupId, students]);
+
   // Firebase Auth + Vercel Public Domain State
   const [, setFirebaseUser] = useState<any | null>(null);
   const [vercelDomain] = useState<string>(() => getVercelPublicDomain());
@@ -147,6 +164,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       } else if (defaultSet) {
         setActiveTab('create');
       }
+      setCreateError(null);
       setPendingSyncCount(getPendingHomeworkSyncCount());
     }
   }, [isOpen, initialTab, defaultSet]);
@@ -213,11 +231,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
             setInspectingStudentAttempts((prevAttempts) => {
               if (prevAttempts.length === 0) return prevAttempts;
               const first = prevAttempts[0];
-              const studentMatch = (d.studentStatusSummary || []).find(
-                (st: any) =>
-                  (first.studentId && st.studentId === first.studentId) ||
-                  (st.studentName || '').trim().toLowerCase() === (first.studentName || '').trim().toLowerCase()
-              );
+              const studentMatch = (d.studentStatusSummary || []).find((st: any) => {
+                if (first.studentId && st.studentId === first.studentId) return true;
+                if (first.participantId && st.participantId === first.participantId) return true;
+                if (!first.studentId && !first.participantId) {
+                  return (st.studentName || '').trim().toLowerCase() === (first.studentName || '').trim().toLowerCase();
+                }
+                return false;
+              });
               return studentMatch?.attempts || prevAttempts;
             });
           }
@@ -269,6 +290,21 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentSet) return;
+    setCreateError(null);
+
+    const isGroupMode = audienceMode === 'group';
+    const targetGroup = isGroupMode ? groups.find((g) => g.id === selectedGroupId) : undefined;
+
+    if (isGroupMode) {
+      if (!selectedGroupId || !targetGroup) {
+        setCreateError('يرجى اختيار المجموعة المستهدفة أولاً قبل إنشاء الواجب.');
+        return;
+      }
+      if (activeSelectedGroupStudents.length === 0) {
+        setCreateError(`المجموعة المختارة (${targetGroup.name}) لا تحتوي على طلاب نشطين حالياً.`);
+        return;
+      }
+    }
 
     setIsCreating(true);
     try {
@@ -276,12 +312,15 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       const finalItems = chosenItems.length > 0 ? chosenItems : currentSet.items;
       const totalQ = finalItems.length * questionTypes.length;
       const generatedId = 'hw_' + Math.random().toString(36).substring(2, 8);
-      const targetGroup = groups.find((g) => g.id === selectedGroupId);
-      const assignedStudentsList = (
-        selectedGroupId !== 'all'
-          ? students.filter((s) => !s.deleted && s.status !== 'archived' && s.groupId === selectedGroupId)
-          : students.filter((s) => !s.deleted && s.status !== 'archived')
-      ).map((s) => ({ id: s.id, name: s.name }));
+
+      const assignedStudentsList = isGroupMode
+        ? activeSelectedGroupStudents.map((s) => ({
+            id: s.id,
+            name: s.name,
+            ...(s.code ? { code: s.code } : {}),
+            groupId: selectedGroupId
+          }))
+        : undefined;
 
       const payload: HomeworkAssignment = {
         id: generatedId,
@@ -299,9 +338,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         allowedGameModes: [blooketMode],
         questionCount: totalQ,
         targetQuestionCount: totalQ,
-        groupId: selectedGroupId !== 'all' ? selectedGroupId : undefined,
-        groupName: targetGroup ? targetGroup.name : undefined,
-        assignedStudents: assignedStudentsList.length > 0 ? assignedStudentsList : undefined,
+        audienceMode,
+        groupId: isGroupMode ? selectedGroupId : undefined,
+        groupName: isGroupMode && targetGroup ? targetGroup.name : undefined,
+        assignedStudents: isGroupMode ? assignedStudentsList : undefined,
         deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : undefined,
         maxAttempts,
         allowReplay: maxAttempts !== 1,
@@ -336,7 +376,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
       const finalAssignment: HomeworkAssignment =
         res && res.ok && data?.assignment
-          ? { ...payload, ...data.assignment, id: payload.id, cloudSynced: confirmRes.cloudSynced }
+          ? { ...payload, ...data.assignment, id: payload.id, audienceMode, cloudSynced: confirmRes.cloudSynced }
           : { ...payload, cloudSynced: confirmRes.cloudSynced };
 
       if (!confirmRes.cloudSynced) {
@@ -354,12 +394,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       if (currentSet) {
         const chosenItems = currentSet.items.filter((it) => selectedItemIds.includes(it.id));
         const finalItems = chosenItems.length > 0 ? chosenItems : currentSet.items;
-        const targetGroup = groups.find((g) => g.id === selectedGroupId);
-        const assignedStudentsList = (
-          selectedGroupId !== 'all'
-            ? students.filter((s) => !s.deleted && s.status !== 'archived' && s.groupId === selectedGroupId)
-            : students.filter((s) => !s.deleted && s.status !== 'archived')
-        ).map((s) => ({ id: s.id, name: s.name }));
+        const assignedStudentsList = isGroupMode
+          ? activeSelectedGroupStudents.map((s) => ({
+              id: s.id,
+              name: s.name,
+              ...(s.code ? { code: s.code } : {}),
+              groupId: selectedGroupId
+            }))
+          : undefined;
 
         const fallbackHw: HomeworkAssignment = {
           id: 'hw_' + Math.random().toString(36).substring(2, 8),
@@ -372,9 +414,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           allowedGameModes: [blooketMode],
           questionCount: finalItems.length * questionTypes.length,
           targetQuestionCount: finalItems.length * questionTypes.length,
-          groupId: selectedGroupId !== 'all' ? selectedGroupId : undefined,
-          groupName: targetGroup ? targetGroup.name : undefined,
-          assignedStudents: assignedStudentsList.length > 0 ? assignedStudentsList : undefined,
+          audienceMode,
+          groupId: isGroupMode ? selectedGroupId : undefined,
+          groupName: isGroupMode && targetGroup ? targetGroup.name : undefined,
+          assignedStudents: isGroupMode ? assignedStudentsList : undefined,
           maxAttempts,
           allowReplay: maxAttempts !== 1,
           isActive: true,
@@ -420,11 +463,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
   const handleInspectSingleSubmission = (sub: HomeworkSubmission) => {
     if (selectedDetails?.studentStatusSummary) {
-      const matchedStudent = selectedDetails.studentStatusSummary.find(
-        (st: any) =>
-          (sub.studentId && st.studentId === sub.studentId) ||
-          (st.studentName || '').trim().toLowerCase() === (sub.studentName || '').trim().toLowerCase()
-      );
+      const matchedStudent = selectedDetails.studentStatusSummary.find((st: any) => {
+        if (sub.studentId && st.studentId === sub.studentId) return true;
+        if (sub.participantId && st.participantId === sub.participantId) return true;
+        if (!sub.studentId && !sub.participantId) {
+          return (st.studentName || '').trim().toLowerCase() === (sub.studentName || '').trim().toLowerCase();
+        }
+        return false;
+      });
       if (matchedStudent && Array.isArray(matchedStudent.attempts) && matchedStudent.attempts.length > 0) {
         setInspectingStudentAttempts(matchedStudent.attempts);
       } else {
@@ -454,7 +500,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
   const filteredAssignments = useMemo(() => {
     if (filterGroup === 'all') return assignmentsList;
-    return assignmentsList.filter((a) => a.groupId === filterGroup);
+    if (filterGroup === 'open_only') {
+      return assignmentsList.filter((a) => resolveAssignmentAudienceMode(a) === 'open');
+    }
+    return assignmentsList.filter(
+      (a) => resolveAssignmentAudienceMode(a) === 'group' && a.groupId === filterGroup
+    );
   }, [assignmentsList, filterGroup]);
 
   const filteredStudentRows = useMemo(() => {
@@ -567,7 +618,20 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
               /* ================= CREATE HOMEWORK FORM ================= */
               <form onSubmit={handleCreate} className="space-y-4">
                 
-                {/* 1. Vocabulary Set & Group Selection Row */}
+                {createError && (
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center justify-between gap-2">
+                    <span>⚠️ {createError}</span>
+                    <button
+                      type="button"
+                      onClick={() => setCreateError(null)}
+                      className="text-rose-500 hover:underline text-[11px] cursor-pointer shrink-0"
+                    >
+                      إغلاق
+                    </button>
+                  </div>
+                )}
+
+                {/* 1. Vocabulary Set & Audience Mode Selection Row */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {/* Select Vocabulary Set */}
                   <div className="space-y-1">
@@ -588,26 +652,99 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                     </select>
                   </div>
 
-                  {/* Select Target Student Group */}
+                  {/* Select Homework Audience Mode */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
-                      <Building2 className="w-3.5 h-3.5 text-primary" />
-                      <span>المجموعة المستهدفة (من طلابك):</span>
+                      <Users className="w-3.5 h-3.5 text-primary" />
+                      <span>من يمكنه فتح وحل الواجب؟</span>
                     </label>
-                    <select
-                      value={selectedGroupId}
-                      onChange={(e) => setSelectedGroupId(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="all">🌍 جميع المجموعات (عام لجميع الطلاب)</option>
-                      {groups.map((g) => (
-                        <option key={g.id} value={g.id}>
-                          🏫 {g.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="grid grid-cols-2 gap-1 p-1 bg-surface-hover rounded-xl border border-surface-border">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAudienceMode('open');
+                          setCreateError(null);
+                        }}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                          audienceMode === 'open'
+                            ? 'bg-surface text-primary shadow-xs'
+                            : 'text-text-muted hover:text-text-main'
+                        }`}
+                      >
+                        <Globe className="w-3.5 h-3.5 shrink-0" />
+                        <span>مفتوح لأي اسم</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAudienceMode('group');
+                          setCreateError(null);
+                          if (!selectedGroupId && groups.length > 0) {
+                            setSelectedGroupId(groups[0].id);
+                          }
+                        }}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                          audienceMode === 'group'
+                            ? 'bg-surface text-primary shadow-xs'
+                            : 'text-text-muted hover:text-text-main'
+                        }`}
+                      >
+                        <Building2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>جروب معين</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
+
+                {/* Conditional Group Selection when audienceMode === 'group' */}
+                {audienceMode === 'group' ? (
+                  <div className="p-3 rounded-xl bg-surface-hover/70 border border-surface-border space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-primary" />
+                        <span>اختر المجموعة المستهدفة:</span>
+                      </label>
+                      <span className="text-[11px] font-bold text-primary tabular-nums">
+                        طلاب المجموعة النشطون: {activeSelectedGroupStudents.length} طالب
+                      </span>
+                    </div>
+                    {groups.length === 0 ? (
+                      <p className="text-xs text-rose-500 font-semibold">
+                        لا توجد مجموعات مسجلة حالياً. أنشئ مجموعة أولاً أو اختر «مفتوح لأي اسم».
+                      </p>
+                    ) : (
+                      <select
+                        value={selectedGroupId}
+                        onChange={(e) => {
+                          setSelectedGroupId(e.target.value);
+                          setCreateError(null);
+                        }}
+                        className="w-full px-3 py-2 bg-surface border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        {groups.map((g) => {
+                          const groupCount = students.filter(
+                            (st) => !st.deleted && st.status !== 'archived' && st.groupId === g.id
+                          ).length;
+                          return (
+                            <option key={g.id} value={g.id}>
+                              🏫 {g.name} ({groupCount} طالب)
+                            </option>
+                          );
+                        })}
+                      </select>
+                    )}
+                    <p className="text-[11px] text-text-muted">
+                      سيظهر لطلاب هذه المجموعة فقط أسماؤهم المسجلة لاختيار اسمهم، ولن يظهر أي طالب من المجموعات الأخرى.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="px-3 py-2 rounded-xl bg-surface-hover/50 border border-surface-border text-[11px] text-text-muted flex items-center gap-2">
+                    <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
+                    <span>
+                      وضع <strong className="text-text-main">مفتوح لأي اسم</strong>: يكتب الطالب أو المشارك اسمه مباشرة عند فتح الرابط دون إظهار قائمة طلابك المسجلين.
+                    </span>
+                  </div>
+                )}
 
                 {/* 2. Custom Title & Max Attempts Row */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -974,9 +1111,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-sm sm:text-base font-black text-text-main">{selectedDetails.assignment.title}</h3>
-                          {selectedDetails.assignment.groupName && (
+                          {resolveAssignmentAudienceMode(selectedDetails.assignment) === 'group' ? (
                             <span className="text-[11px] font-bold text-primary">
-                              · 🏫 {selectedDetails.assignment.groupName}
+                              · 🏫 جروب معين: {selectedDetails.assignment.groupName || 'مجموعة محددة'}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+                              · 🌍 مفتوح لأي اسم
                             </span>
                           )}
                           <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
@@ -1004,7 +1145,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                         <div className="text-sm sm:text-base font-black text-text-main">
                           {selectedDetails.metrics?.totalAssigned ?? selectedDetails.studentStatusSummary?.length ?? 0}
                         </div>
-                        <div className="text-[10px] text-text-muted font-semibold">الطلاب المستهدفون</div>
+                        <div className="text-[10px] text-text-muted font-semibold">
+                          {resolveAssignmentAudienceMode(selectedDetails.assignment) === 'group'
+                            ? 'طلاب المجموعة'
+                            : 'المشاركون'}
+                        </div>
                       </div>
 
                       <div className="bg-surface border border-surface-border rounded-lg p-2.5 text-center">
@@ -1510,24 +1655,23 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                         جميع الواجبات ({filteredAssignments.length}):
                       </span>
 
-                      {/* Group Filter Dropdown */}
-                      {groups.length > 0 && (
-                        <div className="flex items-center gap-1.5 bg-surface-hover px-2.5 py-1 rounded-lg border border-surface-border">
-                          <Filter className="w-3 h-3 text-text-muted" />
-                          <select
-                            value={filterGroup}
-                            onChange={(e) => setFilterGroup(e.target.value)}
-                            className="bg-transparent text-text-main font-bold text-xs outline-none cursor-pointer"
-                          >
-                            <option value="all">كل المجموعات</option>
-                            {groups.map((g) => (
-                              <option key={g.id} value={g.id}>
-                                {g.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
+                      {/* Audience / Group Filter Dropdown */}
+                      <div className="flex items-center gap-1.5 bg-surface-hover px-2.5 py-1 rounded-lg border border-surface-border">
+                        <Filter className="w-3 h-3 text-text-muted" />
+                        <select
+                          value={filterGroup}
+                          onChange={(e) => setFilterGroup(e.target.value)}
+                          className="bg-transparent text-text-main font-bold text-xs outline-none cursor-pointer"
+                        >
+                          <option value="all">كل الواجبات</option>
+                          <option value="open_only">🌍 مفتوح لأي اسم</option>
+                          {groups.map((g) => (
+                            <option key={g.id} value={g.id}>
+                              🏫 {g.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -1571,10 +1715,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {filteredAssignments.map((hw) => {
                         const shareUrl = buildHomeworkShareUrl(hw, vercelDomain);
+                        const isGroupHw = resolveAssignmentAudienceMode(hw) === 'group';
                         const completedCount = hw.completedStudentsCount ?? hw.submissionCount ?? 0;
-                        const inProgressCount = hw.inProgressCount || 0;
-                        const notStartedCount = hw.notStartedCount || 0;
-                        const totalAssigned = hw.totalAssignedCount || 0;
+                        const inProgressCount = hw.inProgressStudentsCount ?? hw.inProgressCount ?? 0;
+                        const totalAssigned = hw.assignedStudentsCount ?? hw.totalAssignedCount ?? 0;
+                        const notStartedCount = isGroupHw
+                          ? Math.max(0, totalAssigned - completedCount - inProgressCount)
+                          : 0;
                         const avgAcc = hw.avgAccuracy || 0;
 
                         return (
@@ -1616,17 +1763,20 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
                             {/* Unboxed Metadata (Zero-Pill Rule) */}
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted pt-0.5 tabular-nums">
-                              {hw.groupName ? (
+                              {isGroupHw ? (
                                 <span className="flex items-center gap-1 text-primary font-bold">
                                   <Building2 className="w-3 h-3" />
-                                  <span>{hw.groupName}</span>
+                                  <span>{hw.groupName || 'جروب معين'}</span>
                                 </span>
                               ) : (
-                                <span>عام لجميع المجموعات</span>
+                                <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-bold">
+                                  <Globe className="w-3 h-3" />
+                                  <span>مفتوح لأي اسم</span>
+                                </span>
                               )}
                               <span>·</span>
                               <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                                ✓ {completedCount}{totalAssigned > 0 ? `/${totalAssigned}` : ''} مكتمل
+                                ✓ {completedCount}{isGroupHw && totalAssigned > 0 ? `/${totalAssigned}` : ''} مكتمل
                               </span>
                               {inProgressCount > 0 && (
                                 <>
@@ -1637,7 +1787,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                   </span>
                                 </>
                               )}
-                              {totalAssigned > 0 && notStartedCount > 0 && (
+                              {isGroupHw && totalAssigned > 0 && notStartedCount > 0 && (
                                 <>
                                   <span>·</span>
                                   <span>{notStartedCount} لم يبدأ</span>
