@@ -553,12 +553,56 @@ function notifyHomeworkSyncStateChanged(): void {
   }
 }
 
+const LOCAL_DELETED_ASSIGNMENTS_KEY = 'glueck_hw_deleted_ids_v2';
+
+export function getDeletedAssignmentIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(LOCAL_DELETED_ASSIGNMENTS_KEY);
+    const parsed: string[] = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string' && id.length > 0) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function isAssignmentDeletedLocally(assignmentId?: string | null): boolean {
+  if (!assignmentId) return false;
+  const deletedSet = getDeletedAssignmentIds();
+  if (deletedSet.has(assignmentId)) return true;
+  const safeId = sanitizeDocId(assignmentId);
+  return deletedSet.has(safeId);
+}
+
+export function markAssignmentDeletedLocally(assignmentId: string): void {
+  if (typeof window === 'undefined' || !assignmentId) return;
+  try {
+    const deletedSet = getDeletedAssignmentIds();
+    deletedSet.add(assignmentId);
+    deletedSet.add(sanitizeDocId(assignmentId));
+    const list = Array.from(deletedSet).slice(-500);
+    localStorage.setItem(LOCAL_DELETED_ASSIGNMENTS_KEY, JSON.stringify(list));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
 export function getLocalAssignments(): HomeworkAssignment[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(LOCAL_ASSIGNMENTS_KEY);
     const parsed: HomeworkAssignment[] = raw ? JSON.parse(raw) : [];
-    return parsed.map((hw) => normalizeHomeworkAssignment(hw));
+    const deletedSet = getDeletedAssignmentIds();
+    return parsed
+      .filter(
+        (hw) =>
+          hw &&
+          hw.id &&
+          !(hw as any).deleted &&
+          !deletedSet.has(hw.id) &&
+          !deletedSet.has(sanitizeDocId(hw.id))
+      )
+      .map((hw) => normalizeHomeworkAssignment(hw));
   } catch {
     return [];
   }
@@ -567,7 +611,18 @@ export function getLocalAssignments(): HomeworkAssignment[] {
 function writeLocalAssignmentsList(list: HomeworkAssignment[]): void {
   if (typeof window === 'undefined') return;
   try {
-    const normalized = list.slice(0, 150).map((hw) => normalizeHomeworkAssignment(hw));
+    const deletedSet = getDeletedAssignmentIds();
+    const normalized = list
+      .filter(
+        (hw) =>
+          hw &&
+          hw.id &&
+          !(hw as any).deleted &&
+          !deletedSet.has(hw.id) &&
+          !deletedSet.has(sanitizeDocId(hw.id))
+      )
+      .slice(0, 150)
+      .map((hw) => normalizeHomeworkAssignment(hw));
     localStorage.setItem(LOCAL_ASSIGNMENTS_KEY, JSON.stringify(normalized));
   } catch {
     // Ignore storage quota errors
@@ -613,6 +668,13 @@ const activeFetchSubmissionsForAssignmentFromCloud = (id: string) =>
 
 export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): void {
   if (typeof window === 'undefined' || !hw || !hw.id) return;
+  if (isAssignmentDeletedLocally(hw.id) || (hw as any).deleted) {
+    if (!syncCloud) {
+      deleteAssignmentFromFirestore(hw.id).catch(() => {});
+      deleteSubmissionsForAssignmentFromFirestore(hw.id).catch(() => {});
+    }
+    return;
+  }
   const existing = getLocalAssignments().find((a) => a.id === hw.id);
   const normalizedHw = normalizeHomeworkAssignment({
     ...existing,
@@ -660,12 +722,25 @@ export async function saveAssignmentWithConfirmation(hw: HomeworkAssignment): Pr
 
 export function deleteLocalAssignment(assignmentId: string, syncCloud = true): void {
   if (typeof window === 'undefined' || !assignmentId) return;
+  const safeId = sanitizeDocId(assignmentId);
+  markAssignmentDeletedLocally(assignmentId);
   try {
-    const remainingAssignments = getLocalAssignments().filter((a) => a.id !== assignmentId);
+    const remainingAssignments = getLocalAssignments().filter(
+      (a) => a.id !== assignmentId && sanitizeDocId(a.id) !== safeId
+    );
     writeLocalAssignmentsList(remainingAssignments);
 
-    const remainingSubmissions = getLocalSubmissions().filter((s) => s.assignmentId !== assignmentId);
+    const remainingSubmissions = getLocalSubmissions().filter(
+      (s) => s.assignmentId !== assignmentId && sanitizeDocId(s.assignmentId) !== safeId
+    );
     writeLocalSubmissionsList(remainingSubmissions);
+
+    window.dispatchEvent(
+      new CustomEvent('gluck-homework-deleted', {
+        detail: { assignmentId, safeId, remainingAssignments, remainingSubmissions }
+      })
+    );
+    notifyHomeworkSyncStateChanged();
   } catch {
     // Ignore storage errors
   }
@@ -680,7 +755,15 @@ export function getLocalSubmissions(): HomeworkSubmission[] {
   try {
     const raw = localStorage.getItem(LOCAL_SUBMISSIONS_KEY);
     const parsed: HomeworkSubmission[] = raw ? JSON.parse(raw) : [];
-    return deduplicateSubmissions(parsed);
+    const deletedSet = getDeletedAssignmentIds();
+    const active = parsed.filter(
+      (s) =>
+        s &&
+        s.assignmentId &&
+        !deletedSet.has(s.assignmentId) &&
+        !deletedSet.has(sanitizeDocId(s.assignmentId))
+    );
+    return deduplicateSubmissions(active);
   } catch {
     return [];
   }
@@ -689,9 +772,17 @@ export function getLocalSubmissions(): HomeworkSubmission[] {
 function writeLocalSubmissionsList(list: HomeworkSubmission[]): void {
   if (typeof window === 'undefined') return;
   try {
+    const deletedSet = getDeletedAssignmentIds();
+    const filtered = list.filter(
+      (s) =>
+        s &&
+        s.assignmentId &&
+        !deletedSet.has(s.assignmentId) &&
+        !deletedSet.has(sanitizeDocId(s.assignmentId))
+    );
     localStorage.setItem(
       LOCAL_SUBMISSIONS_KEY,
-      JSON.stringify(deduplicateSubmissions(list).slice(0, 600))
+      JSON.stringify(deduplicateSubmissions(filtered).slice(0, 600))
     );
   } catch {
     // Ignore storage quota errors
@@ -700,6 +791,7 @@ function writeLocalSubmissionsList(list: HomeworkSubmission[]): void {
 
 export function saveLocalSubmission(sub: HomeworkSubmission, syncCloud = true): void {
   if (typeof window === 'undefined' || !sub || !sub.id) return;
+  if (isAssignmentDeletedLocally(sub.assignmentId)) return;
 
   // If the assignment exists locally, enforce audienceMode and group membership validation
   const matchingHw = getLocalAssignments().find((a) => a.id === sub.assignmentId);
@@ -888,8 +980,8 @@ export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: s
 export async function syncAndFetchTeacherAssignments(
   rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[]
 ): Promise<any[]> {
-  // 1. Flush any pending local-only writes first
-  await flushPendingHomeworkCloudWrites().catch(() => {});
+  // 1. Flush any pending local-only writes in the background without blocking UI rendering
+  flushPendingHomeworkCloudWrites().catch(() => {});
 
   // 2. Fetch from Firebase Firestore (Primary Cloud Source of Truth across Main App & Vercel)
   const [cloudAssignments, cloudSubmissions] = await Promise.all([
@@ -897,8 +989,18 @@ export async function syncAndFetchTeacherAssignments(
     fetchAllSubmissionsFromFirestore().catch(() => [] as HomeworkSubmission[])
   ]);
 
-  cloudAssignments.forEach((hw) => saveLocalAssignment({ ...hw, cloudSynced: true }, false));
-  cloudSubmissions.forEach((sub) => saveLocalSubmission({ ...sub, cloudSynced: true }, false));
+  cloudAssignments.forEach((hw) => {
+    if (isAssignmentDeletedLocally(hw.id) || (hw as any).deleted) {
+      deleteAssignmentFromFirestore(hw.id).catch(() => {});
+      deleteSubmissionsForAssignmentFromFirestore(hw.id).catch(() => {});
+      return;
+    }
+    saveLocalAssignment({ ...hw, cloudSynced: true }, false);
+  });
+  cloudSubmissions.forEach((sub) => {
+    if (isAssignmentDeletedLocally(sub.assignmentId)) return;
+    saveLocalSubmission({ ...sub, cloudSynced: true }, false);
+  });
 
   // Push any local assignments/submissions missing from cloud
   const localAssignments = getLocalAssignments();
@@ -1034,29 +1136,66 @@ export async function syncAndFetchTeacherAssignments(
   });
 }
 
+export function getLocalAssignmentDetails(
+  id: string,
+  rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[],
+  fallbackHw?: HomeworkAssignment | null
+): any | null {
+  const safeId = sanitizeDocId(id);
+  const rawHw =
+    getLocalAssignments().find((a) => a.id === id || sanitizeDocId(a.id) === safeId) ||
+    fallbackHw ||
+    null;
+  if (!rawHw) return null;
+  return computeAssignmentDetailsObject(rawHw, rosterStudents);
+}
+
 export async function fetchAssignmentDetailsWithSync(
   id: string,
-  rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[]
+  rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[],
+  fallbackHw?: HomeworkAssignment | null
 ): Promise<any | null> {
-  // 1. Fetch assignment + submissions from Firebase Firestore
+  // 1. Fetch assignment + submissions from Firebase Firestore with fast timeout so UI never hangs
+  const withFastTimeout = <T>(p: Promise<T>, fallback: T, ms = 3500): Promise<T> =>
+    Promise.race([
+      p.catch(() => fallback),
+      new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
+    ]);
+
   const [cloudHw, cloudSubs] = await Promise.all([
-    activeFetchAssignmentFromCloud(id).catch(() => null),
-    activeFetchSubmissionsForAssignmentFromCloud(id).catch(() => [] as HomeworkSubmission[])
+    withFastTimeout(activeFetchAssignmentFromCloud(id), null),
+    withFastTimeout(activeFetchSubmissionsForAssignmentFromCloud(id), [] as HomeworkSubmission[])
   ]);
 
-  if (cloudHw) {
+  if (cloudHw && !isAssignmentDeletedLocally(cloudHw.id)) {
     saveLocalAssignment({ ...cloudHw, cloudSynced: true }, false);
   }
   cloudSubs.forEach((sub) => saveLocalSubmission({ ...sub, cloudSynced: true }, false));
 
-  const rawHw = cloudHw || getLocalAssignments().find((a) => a.id === id);
+  const safeId = sanitizeDocId(id);
+  const rawHw =
+    cloudHw ||
+    getLocalAssignments().find((a) => a.id === id || sanitizeDocId(a.id) === safeId) ||
+    fallbackHw ||
+    null;
   if (!rawHw) return null;
 
+  return computeAssignmentDetailsObject(rawHw, rosterStudents);
+}
+
+function computeAssignmentDetailsObject(
+  rawHw: HomeworkAssignment,
+  rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[]
+): any {
+  const id = rawHw.id;
+  const safeId = sanitizeDocId(id);
   const hw = normalizeHomeworkAssignment(rawHw);
   const audienceMode = resolveAssignmentAudienceMode(hw);
 
   const allDeduplicatedSubs = deduplicateSubmissions(
-    getLocalSubmissions().filter((s) => s.assignmentId === id)
+    getLocalSubmissions().filter(
+      (s) => s.assignmentId === id || sanitizeDocId(s.assignmentId) === safeId
+    )
   ).map((s) => ({
     ...s,
     score: s.score ?? s.correctAnswersCount ?? 0,

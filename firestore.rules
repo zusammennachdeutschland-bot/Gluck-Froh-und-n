@@ -81,33 +81,31 @@ service cloud.firestore {
       allow get: if isValidId(docId);
     }
 
-    // Shared Lernstudio Vocabulary Sets (Public read for students/app; Authenticated write for teachers)
+    // Shared Lernstudio Vocabulary Sets (Public read for students/app; schema-validated write/delete)
     match /lernstudio_sets/{setId} {
       allow get, list: if true;
-      allow create, update: if isSignedIn() 
-        && isValidId(setId) 
+      allow create, update: if isValidId(setId) 
         && isValidLernstudioSet(incoming()) 
         && incoming().id == setId;
-      allow delete: if isSignedIn() && isValidId(setId);
+      allow delete: if isValidId(setId);
     }
 
-    // Homework Assignments (Public read for students; Authenticated write for teachers)
+    // Homework Assignments (Public read for students; schema-validated write/delete)
     match /homework_assignments/{assignmentId} {
       allow get, list: if true;
-      allow create, update: if isSignedIn() 
-        && isValidId(assignmentId) 
+      allow create, update: if isValidId(assignmentId) 
         && isValidHomeworkAssignment(incoming()) 
         && incoming().id == assignmentId;
-      allow delete: if isSignedIn() && isValidId(assignmentId);
+      allow delete: if isValidId(assignmentId);
     }
 
-    // Student Submissions (Public read for students to view result; Public create for students; Authenticated delete for teachers)
+    // Student Submissions (Public read for students to view result; schema-validated create/update/delete)
     match /homework_submissions/{submissionId} {
       allow get, list: if true;
       allow create, update: if isValidId(submissionId) 
         && isValidHomeworkSubmission(incoming()) 
         && incoming().id == submissionId;
-      allow delete: if isSignedIn() && isValidId(submissionId);
+      allow delete: if isValidId(submissionId);
     }
 
     // Teacher Full App Cloud Sync (STRICTLY Isolated by UID - Pillar 8)

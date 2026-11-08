@@ -18,6 +18,8 @@ import {
   saveLocalSubmission,
   syncAndFetchTeacherAssignments,
   fetchAssignmentDetailsWithSync,
+  getLocalAssignmentDetails,
+  isAssignmentDeletedLocally,
   getVercelPublicDomain,
   saveAssignmentWithConfirmation,
   flushPendingHomeworkCloudWrites,
@@ -97,7 +99,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [selectedGroupId, setSelectedGroupId] = useState<string>(() => groups[0]?.id || '');
   const [createError, setCreateError] = useState<string | null>(null);
   const [title, setTitle] = useState('');
-  const [flowMode, setFlowMode] = useState<HomeworkFlowMode>('teacher_then_quiz');
+  const flowMode: HomeworkFlowMode = 'teacher_then_quiz';
   const [questionTypes, setQuestionTypes] = useState<HomeworkQuestionType[]>(
     () => [...DEFAULT_HOMEWORK_QUESTION_TYPES]
   );
@@ -127,6 +129,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
   const [flushingPending, setFlushingPending] = useState<boolean>(false);
 
+  const modalBodyRef = useRef<HTMLDivElement | null>(null);
   const selectedDetailsIdRef = useRef<string | null>(null);
   useEffect(() => {
     selectedDetailsIdRef.current = selectedDetails?.assignment?.id || null;
@@ -203,7 +206,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     loadAllAssignments();
 
     const unsubAssignments = subscribeAssignmentsFromFirestore((cloudHwList) => {
-      cloudHwList.forEach((hw) => saveLocalAssignment({ ...hw, cloudSynced: true }, false));
+      cloudHwList.forEach((hw) => {
+        if (!isAssignmentDeletedLocally(hw.id)) {
+          saveLocalAssignment({ ...hw, cloudSynced: true }, false);
+        }
+      });
       syncAndFetchTeacherAssignments(studentsRef.current).then((list) => {
         setAssignmentsList(list);
         setPendingSyncCount(getPendingHomeworkSyncCount());
@@ -443,13 +450,33 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     setTimeout(() => setCopiedId(null), 2200);
   };
 
-  const handleOpenDetails = async (hwId: string) => {
-    setLoadingDetails(true);
+  const handleOpenDetails = async (hwId: string, fallbackHw?: HomeworkAssignment | null) => {
+    setActiveTab('results');
     setInspectingSubmission(null);
     setInspectingStudentAttempts([]);
+    setStudentStatusFilter('all');
+
+    const matchedHw =
+      fallbackHw ||
+      assignmentsList.find((a) => a.id === hwId) ||
+      (selectedDetails?.assignment?.id === hwId ? selectedDetails.assignment : null);
+
+    // 1. Open details view immediately using local data so the button responds in 0ms
+    const instantDetails = getLocalAssignmentDetails(hwId, studentsRef.current, matchedHw);
+    if (instantDetails) {
+      setSelectedDetails(instantDetails);
+    }
+    if (modalBodyRef.current) {
+      modalBodyRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // 2. Refresh from cloud in the background with bounded timeout
+    setLoadingDetails(true);
     try {
-      const details = await fetchAssignmentDetailsWithSync(hwId, studentsRef.current);
-      setSelectedDetails(details);
+      const details = await fetchAssignmentDetailsWithSync(hwId, studentsRef.current, matchedHw);
+      if (details) {
+        setSelectedDetails(details);
+      }
     } finally {
       setLoadingDetails(false);
     }
@@ -612,7 +639,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         )}
 
         {/* Modal Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4">
+        <div ref={modalBodyRef} className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4">
           
           {activeTab === 'create' ? (
             !createdShareLink ? (
@@ -781,36 +808,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 </div>
 
-                {/* 3. Flow Mode */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-text-main">نمط العرض والشرح:</label>
-                  <div className="grid grid-cols-2 gap-1 p-1 bg-surface-hover rounded-xl border border-surface-border">
-                    <button
-                      type="button"
-                      onClick={() => setFlowMode('teacher_then_quiz')}
-                      className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer text-center ${
-                        flowMode === 'teacher_then_quiz'
-                          ? 'bg-surface text-primary shadow-xs'
-                          : 'text-text-muted hover:text-text-main'
-                      }`}
-                    >
-                      📖 المرحلة ١: التعلم والنطق + مراحل الأسئلة
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFlowMode('quiz_only')}
-                      className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer text-center ${
-                        flowMode === 'quiz_only'
-                          ? 'bg-surface text-primary shadow-xs'
-                          : 'text-text-muted hover:text-text-main'
-                      }`}
-                    >
-                      🎯 مراحل الأسئلة مباشرة
-                    </button>
-                  </div>
-                </div>
-
-                {/* 4. Progressive Stages Grid (All 7 Active by Default) */}
+                {/* 3. Progressive Stages Grid (All 7 Active by Default, Preceded by Stage 1: Lernen) */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-text-main">
@@ -1020,7 +1018,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                     onClick={() => {
                       setActiveTab('results');
                       if (createdAssignment) {
-                        handleOpenDetails(createdAssignment.id);
+                        handleOpenDetails(createdAssignment.id, createdAssignment);
                       } else {
                         loadAllAssignments();
                       }
@@ -1068,7 +1066,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={() => handleOpenDetails(selectedDetails.assignment.id)}
+                        onClick={() => handleOpenDetails(selectedDetails.assignment.id, selectedDetails.assignment)}
                         className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${loadingDetails ? 'animate-spin' : ''}`} />
@@ -1124,11 +1122,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                           </span>
                         </div>
                         <p className="text-xs text-text-muted mt-0.5">
-                          {selectedDetails.assignment.setSnapshot?.title} ·{' '}
-                          {selectedDetails.assignment.flowMode === 'quiz_only'
-                            ? '🎯 أسئلة مباشرة'
-                            : '👨‍🏫 شرح معلّم + أسئلة'}{' '}
-                          ·{' '}
+                          {selectedDetails.assignment.setSnapshot?.title} · 📖 التعلم والنطق + مراحل الأسئلة ·{' '}
                           {selectedDetails.assignment.allowReplay === false || selectedDetails.assignment.maxAttempts === 1
                             ? 'محاولة واحدة'
                             : selectedDetails.assignment.maxAttempts > 1
@@ -1390,9 +1384,43 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       </div>
 
                       {filteredStudentRows.length === 0 ? (
-                        <div className="bg-surface-hover/50 border border-surface-border rounded-xl p-6 text-center space-y-1.5">
+                        <div className="bg-surface-hover/50 border border-surface-border rounded-xl p-6 text-center space-y-2">
                           <Users className="w-8 h-8 text-text-muted mx-auto opacity-50" />
-                          <p className="text-xs font-bold text-text-main">لا يوجد طلاب في هذا التصنيف حالياً</p>
+                          <p className="text-xs font-bold text-text-main">
+                            {studentStatusFilter === 'all'
+                              ? resolveAssignmentAudienceMode(selectedDetails.assignment) === 'open'
+                                ? 'لم يقم أي طالب بفتح رابط الواجب وتسجيل اسمه بعد'
+                                : 'لا يوجد طلاب مسجلين في هذه المجموعة حالياً'
+                              : 'لا يوجد طلاب في هذا التصنيف حالياً'}
+                          </p>
+                          {studentStatusFilter === 'all' &&
+                            resolveAssignmentAudienceMode(selectedDetails.assignment) === 'open' && (
+                              <div className="space-y-2 pt-1">
+                                <p className="text-[11px] text-text-muted max-w-md mx-auto">
+                                  هذا الواجب مفتوح لأي اسم — بمجرد أن يفتح أي طالب الرابط ويكتب اسمه ستظهر إجاباته ودرجته هنا لحظياً.
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleCopy(
+                                      buildHomeworkShareUrl(selectedDetails.assignment, vercelDomain),
+                                      `empty_${selectedDetails.assignment.id}`
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold cursor-pointer shadow-xs"
+                                >
+                                  {copiedId === `empty_${selectedDetails.assignment.id}` ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5" /> تم نسخ الرابط!
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5" /> نسخ رابط الواجب للطلاب
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            )}
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -1839,7 +1867,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
                               <button
                                 type="button"
-                                onClick={() => handleOpenDetails(hw.id)}
+                                onClick={() => handleOpenDetails(hw.id, hw)}
                                 className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-hover text-white font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs active:scale-95"
                               >
                                 <BarChart3 className="w-3.5 h-3.5" />

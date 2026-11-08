@@ -550,11 +550,25 @@ export async function saveAssignmentToFirestore(assignment: HomeworkAssignment):
   }
 }
 
+async function withFirestoreReadTimeout<T>(promise: Promise<T>, timeoutMs = 4000): Promise<T> {
+  let timer: any = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Firestore read timeout')), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function fetchAssignmentFromFirestore(assignmentId: string): Promise<HomeworkAssignment | null> {
   const safeId = sanitizeDocId(assignmentId);
   const path = `homework_assignments/${safeId}`;
   try {
-    const snap = await getDoc(doc(db, 'homework_assignments', safeId));
+    const snap = await withFirestoreReadTimeout(getDoc(doc(db, 'homework_assignments', safeId)), 4000);
     if (!snap.exists()) return null;
     const data = snap.data();
     if (data?.payloadJson) {
@@ -572,7 +586,7 @@ export async function fetchAllAssignmentsFromFirestore(): Promise<HomeworkAssign
   const path = 'homework_assignments';
   try {
     const q = query(collection(db, 'homework_assignments'), where('id', '>=', ''));
-    const snap = await getDocs(q);
+    const snap = await withFirestoreReadTimeout(getDocs(q), 5000);
     const list: HomeworkAssignment[] = [];
     snap.forEach((docSnap) => {
       try {
@@ -710,7 +724,7 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
       collection(db, 'homework_submissions'),
       where('assignmentId', '==', safeAssignmentId)
     );
-    const snap = await getDocs(q);
+    const snap = await withFirestoreReadTimeout(getDocs(q), 4000);
     const list: HomeworkSubmission[] = [];
     snap.forEach((docSnap) => {
       try {
@@ -737,7 +751,7 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
 export async function fetchAllSubmissionsFromFirestore(): Promise<HomeworkSubmission[]> {
   const path = 'homework_submissions';
   try {
-    const snap = await getDocs(collection(db, 'homework_submissions'));
+    const snap = await withFirestoreReadTimeout(getDocs(collection(db, 'homework_submissions')), 5000);
     const list: HomeworkSubmission[] = [];
     snap.forEach((docSnap) => {
       try {

@@ -273,7 +273,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         const setId = searchParams.get('s');
         if (setId) {
           const titleParam = searchParams.get('t') || 'واجب منزلي تفاعلي';
-          const flowModeParam = (searchParams.get('fm') as any) || 'teacher_then_quiz';
+          const flowModeParam: HomeworkFlowMode = 'teacher_then_quiz';
           const qtParam = searchParams.get('qt');
           const questionTypesParam = qtParam
             ? (qtParam.split(',') as HomeworkQuestionType[])
@@ -953,8 +953,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         setCloudSyncState('pending_retry');
       });
 
-    const flowMode: HomeworkFlowMode = assignment?.flowMode || 'teacher_then_quiz';
-    if (flowMode === 'teacher_then_quiz' && studyItems.length > 0) {
+    if (studyItems.length > 0) {
       setStudyIndex(0);
       setPhase('teacher_study');
     } else {
@@ -1351,7 +1350,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   // PHASE 0: LOBBY & STUDENT NAME ENTRY (Glück Minimal Student Landing Page)
   // ============================================================================
   if (phase === 'lobby') {
-    const flowMode: HomeworkFlowMode = assignment?.flowMode || 'teacher_then_quiz';
+    const flowMode: HomeworkFlowMode = 'teacher_then_quiz';
 
     return (
       <div className="min-h-screen bg-background text-text-main flex flex-col justify-between p-4 sm:p-6 font-sans" dir="rtl">
@@ -1529,7 +1528,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
         : 'bg-surface-hover border-surface-border text-text-muted';
 
-    const hasStudyStage = (assignment?.flowMode || 'teacher_then_quiz') === 'teacher_then_quiz';
+    const hasStudyStage = true;
     const stageBarItems = [
       ...(hasStudyStage ? [{ key: 'study', icon: '📖', title: '1. التعلم والنطق (Lernen)', isActive: true, isDone: false }] : []),
       ...activeQuestionTypes.map((qt, idx) => {
@@ -1850,7 +1849,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                     setFinalScore(null);
                     const nowIso = new Date().toISOString();
                     setStartTime(nowIso);
-                    setPhase(assignment?.flowMode === 'teacher_then_quiz' ? 'teacher_study' : 'quiz');
+                    setPhase(studyItems.length > 0 ? 'teacher_study' : 'quiz');
                   }}
                   className="w-full py-2.5 px-4 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-2xs"
                 >
@@ -1868,7 +1867,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   // ============================================================================
   // PHASE 2: MULTI-STAGE QUIZ & EVALUATION (7 Progressive Stages + Icon-Only Stage Bar)
   // ============================================================================
-  const hasStudyStage = (assignment?.flowMode || 'teacher_then_quiz') === 'teacher_then_quiz' && studyItems.length > 0;
+  const hasStudyStage = studyItems.length > 0;
   const currentStageIdx = currentQuestion?.stageIndex ?? 0;
   const quizStageBarItems = [
     ...(hasStudyStage
