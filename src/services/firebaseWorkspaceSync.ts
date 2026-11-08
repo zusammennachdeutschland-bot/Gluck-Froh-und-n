@@ -33,7 +33,9 @@ import {
   mergeEntities,
   mergeRecentlyDeleted,
   mergeDismissedDashboardLessons,
-  enforcePurgedTombstonesOnWorkspace
+  enforcePurgedTombstonesOnWorkspace,
+  stampFieldTimestamps,
+  mergeTeacherSettings
 } from './sync/mergeEngine';
 import { RecentlyDeletedData } from '../types';
 
@@ -114,7 +116,96 @@ const CHUNK_MAX_CHARS = 550000; // Safe margin below 750KB rule & 1MB Firestore 
 const DELTA_MAX_COMPACT_CHARS = 180000; // Compact delta threshold before folding into category
 
 export const SYNC_CONTROL_DOC_ID = 'sync_control_chunk_0';
+export const SYNC_CONTROL_CATEGORY_KEY = 'sync_control';
 export const LOCAL_ACTIVE_GENERATION_KEY = 'gluck_cloud_active_generation';
+
+/**
+ * Identifies synchronization control documents (`sync_control_chunk_0` or `categoryKey === 'sync_control'`)
+ * including legacy control documents that were previously written with `categoryKey: 'core_crm'`.
+ * Ensures control metadata is strictly isolated and never merged into user workspace categories.
+ */
+export function isSyncControlDocument(docOrData: any): boolean {
+  if (!docOrData || typeof docOrData !== 'object') return false;
+  const id = typeof docOrData.id === 'string' ? docOrData.id.trim() : '';
+  const categoryKey = typeof docOrData.categoryKey === 'string' ? docOrData.categoryKey.trim() : '';
+  if (
+    id === SYNC_CONTROL_DOC_ID ||
+    id.startsWith('sync_control') ||
+    categoryKey === SYNC_CONTROL_CATEGORY_KEY
+  ) {
+    return true;
+  }
+  if (typeof docOrData.payloadChunk === 'string' && docOrData.payloadChunk.length < 1024) {
+    try {
+      const parsed = JSON.parse(docOrData.payloadChunk);
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        ('isPaused' in parsed || 'syncGeneration' in parsed) &&
+        !('students' in parsed) &&
+        !('groups' in parsed) &&
+        !('lessons' in parsed) &&
+        !('payments' in parsed)
+      ) {
+        return true;
+      }
+    } catch {
+      // Ignore malformed JSON
+    }
+  }
+  return false;
+}
+
+export function sanitizeDeviceIdForDocId(deviceId: string): string {
+  const cleaned = String(deviceId || 'default_dev')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 64);
+  return cleaned || 'default_dev';
+}
+
+export function getDeviceDeltaDocId(deviceId: string): string {
+  return `delta_log_${sanitizeDeviceIdForDocId(deviceId)}_chunk_0`;
+}
+
+const inMemoryOpSeqByKey = new Map<string, number>();
+
+export function nextDeviceOperationMetadata(
+  uid: string,
+  deviceId: string,
+  nowMs: number = Date.now()
+): { opId: string; opSeq: number; deviceId: string; timestampMs: number } {
+  const safeDev = sanitizeDeviceIdForDocId(deviceId);
+  const storageKey = `gluck_cloud_op_seq_v2_${uid}_${safeDev}`;
+  let currentSeq = inMemoryOpSeqByKey.get(storageKey) || 0;
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = parseInt(localStorage.getItem(storageKey) || '0', 10);
+      if (!isNaN(stored) && stored > currentSeq) {
+        currentSeq = stored;
+      }
+    } catch {
+      // Ignore storage access errors
+    }
+  }
+  const nextSeq = currentSeq + 1;
+  inMemoryOpSeqByKey.set(storageKey, nextSeq);
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(storageKey, String(nextSeq));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+  const rand = Math.random().toString(36).substring(2, 8);
+  const opId = `op_${safeDev}_${nextSeq}_${nowMs.toString(36)}_${rand}`;
+  return {
+    opId,
+    opSeq: nextSeq,
+    deviceId,
+    timestampMs: nowMs
+  };
+}
 
 export interface CloudSyncControlState {
   isPaused: boolean;
@@ -207,7 +298,7 @@ export async function reactivateCloudSync(workspaceId: string): Promise<{ succes
 
   const chunkObj = {
     id: SYNC_CONTROL_DOC_ID,
-    categoryKey: 'core_crm',
+    categoryKey: SYNC_CONTROL_CATEGORY_KEY,
     chunkIndex: 0,
     totalChunks: 1,
     updatedAtMs: nowMs,
@@ -507,6 +598,185 @@ function saveDeltaAccumulator(uid: string, acc: Record<string, any>): void {
   }
 }
 
+const inMemoryEntityBaselineByUid = new Map<string, Record<string, any>>();
+
+function loadEntitySnapshots(uid: string): Record<string, any> {
+  return inMemoryEntityBaselineByUid.get(uid) || {};
+}
+
+function saveEntitySnapshots(uid: string, snapshots: Record<string, any>): void {
+  inMemoryEntityBaselineByUid.set(uid, snapshots);
+}
+
+const inMemoryAppliedDocTokensByUid = new Map<string, Map<string, string>>();
+const inMemoryLocalWrittenDocTokensByUid = new Map<string, Map<string, string>>();
+
+function getAppliedDocTokensMap(uid: string): Map<string, string> {
+  let map = inMemoryAppliedDocTokensByUid.get(uid);
+  if (!map) {
+    map = new Map<string, string>();
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(`gluck_cloud_applied_tokens_v2_${uid}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            for (const [k, v] of Object.entries(parsed)) {
+              if (typeof v === 'string') map.set(k, v);
+            }
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    inMemoryAppliedDocTokensByUid.set(uid, map);
+  }
+  return map;
+}
+
+function persistAppliedDocTokensMap(uid: string, map: Map<string, string>): void {
+  inMemoryAppliedDocTokensByUid.set(uid, map);
+  if (typeof window !== 'undefined') {
+    try {
+      const obj: Record<string, string> = {};
+      map.forEach((v, k) => {
+        obj[k] = v;
+      });
+      localStorage.setItem(`gluck_cloud_applied_tokens_v2_${uid}`, JSON.stringify(obj));
+    } catch {
+      // Ignore
+    }
+  }
+}
+
+function getLocalWrittenDocTokensMap(uid: string): Map<string, string> {
+  let map = inMemoryLocalWrittenDocTokensByUid.get(uid);
+  if (!map) {
+    map = new Map<string, string>();
+    inMemoryLocalWrittenDocTokensByUid.set(uid, map);
+  }
+  return map;
+}
+
+/**
+ * Computes a deterministic, clock-skew-safe revision token for a workspace chunk document.
+ * Incorporates document ID, categoryKey, deviceId, operation ID / sequence (if present), and payload digest.
+ */
+export function computeChunkRevisionToken(docData: any): string {
+  if (!docData || typeof docData !== 'object') return '';
+  const id = String(docData.id || '');
+  const categoryKey = String(docData.categoryKey || '');
+  const deviceId = String(docData.deviceId || '');
+  const payloadStr = typeof docData.payloadChunk === 'string' ? docData.payloadChunk : '';
+  const payloadDigest = fastHash(payloadStr);
+
+  let opId = typeof docData.opId === 'string' ? docData.opId : '';
+  let opSeq = typeof docData.opSeq === 'number' ? String(docData.opSeq) : '';
+  if (!opId && categoryKey === 'delta_log' && payloadStr.length > 0 && payloadStr.length < 300000) {
+    try {
+      const parsed = JSON.parse(payloadStr);
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.opId === 'string') opId = parsed.opId;
+        if (typeof parsed.opSeq === 'number') opSeq = String(parsed.opSeq);
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  return `${id}|${categoryKey}|${deviceId}|${opId}|${opSeq}|${payloadDigest}`;
+}
+
+function recordLocalWrittenChunk(uid: string, chunkObj: any): void {
+  if (!uid || !chunkObj || !chunkObj.id) return;
+  const token = computeChunkRevisionToken(chunkObj);
+  if (!token) return;
+  const localWritten = getLocalWrittenDocTokensMap(uid);
+  localWritten.set(chunkObj.id, token);
+  const applied = getAppliedDocTokensMap(uid);
+  applied.set(chunkObj.id, token);
+  persistAppliedDocTokensMap(uid, applied);
+}
+
+/**
+ * Evaluates incoming Firestore snapshot documents without relying on `lastLocalPushTimestampMs + 1500`
+ * or wall-clock comparisons that fail under clock skew or rapid cross-device updates.
+ * - Strictly ignores `sync_control` documents.
+ * - Suppresses exact duplicate snapshots already applied locally (`appliedDocTokens`).
+ * - Suppresses exact self-written echoes (`localWrittenDocTokens`).
+ * - Accepts any unapplied remote document change regardless of device clock skew, <1500ms timing, or out-of-order arrival.
+ */
+export function evaluateRemoteSnapshotChanges(
+  docs: any[],
+  options: {
+    localDeviceId: string;
+    appliedDocTokens: Map<string, string> | Record<string, string>;
+    localWrittenDocTokens?: Map<string, string> | Record<string, string>;
+  }
+): {
+  shouldProcess: boolean;
+  unappliedDocIds: string[];
+  nextDocTokens: Record<string, string>;
+  maxRemoteUpdatedAtMs: number;
+} {
+  const appliedMap =
+    options.appliedDocTokens instanceof Map
+      ? options.appliedDocTokens
+      : new Map<string, string>(Object.entries(options.appliedDocTokens || {}));
+  const localWrittenMap =
+    options.localWrittenDocTokens instanceof Map
+      ? options.localWrittenDocTokens
+      : new Map<string, string>(Object.entries(options.localWrittenDocTokens || {}));
+
+  const unappliedDocIds: string[] = [];
+  const nextDocTokens: Record<string, string> = {};
+  appliedMap.forEach((v, k) => {
+    nextDocTokens[k] = v;
+  });
+
+  let maxRemoteUpdatedAtMs = 0;
+  const safeDocs = Array.isArray(docs) ? docs : [];
+
+  for (const d of safeDocs) {
+    if (!d || typeof d !== 'object' || !d.id) continue;
+    if (isSyncControlDocument(d)) continue;
+
+    const token = computeChunkRevisionToken(d);
+    if (!token) continue;
+
+    const docUpdatedAt = typeof d.updatedAtMs === 'number' ? d.updatedAtMs : 0;
+    if (docUpdatedAt > maxRemoteUpdatedAtMs) {
+      maxRemoteUpdatedAtMs = docUpdatedAt;
+    }
+
+    const prevAppliedToken = appliedMap.get(d.id);
+    if (prevAppliedToken === token) {
+      // Exact document revision already applied locally (idempotent duplicate suppression)
+      nextDocTokens[d.id] = token;
+      continue;
+    }
+
+    const localWrittenToken = localWrittenMap.get(d.id);
+    if (d.deviceId && d.deviceId === options.localDeviceId && localWrittenToken === token) {
+      // Exact document revision written by this local device instance
+      nextDocTokens[d.id] = token;
+      continue;
+    }
+
+    // Genuine unapplied remote change (clock-skew-safe: accepted even if docUpdatedAt < local clock!)
+    nextDocTokens[d.id] = token;
+    unappliedDocIds.push(String(d.id));
+  }
+
+  return {
+    shouldProcess: unappliedDocIds.length > 0,
+    unappliedDocIds,
+    nextDocTokens,
+    maxRemoteUpdatedAtMs
+  };
+}
+
 /**
  * Computes P2P-style record-level delta between current state and last synced watermarks.
  */
@@ -521,6 +791,8 @@ function computeWorkspaceDelta(
   hasBaselineSeeded: boolean;
 } {
   const prevWatermarks = loadWatermarks(uid);
+  const prevEntitySnapshots = loadEntitySnapshots(uid);
+  const nextEntitySnapshots: Record<string, any> = {};
   const hasBaselineSeeded = prevWatermarks['__baseline_seeded__'] === '1';
   const nextWatermarks: Record<string, string> = {
     __baseline_seeded__: '1'
@@ -551,8 +823,13 @@ function computeWorkspaceDelta(
       nextWatermarks[wmKey] = itemHash;
 
       if (prevWatermarks[wmKey] !== itemHash) {
-        colChanged.push(item);
+        const prevItem = prevEntitySnapshots[wmKey];
+        const stampedItem = prevItem ? stampFieldTimestamps(prevItem, item, nowMs) : item;
+        nextEntitySnapshots[wmKey] = stampedItem;
+        colChanged.push(stampedItem);
         totalChangedCount++;
+      } else {
+        nextEntitySnapshots[wmKey] = prevEntitySnapshots[wmKey] || item;
       }
     }
 
@@ -598,6 +875,8 @@ function computeWorkspaceDelta(
       totalChangedCount++;
     }
   }
+
+  saveEntitySnapshots(uid, nextEntitySnapshots);
 
   return {
     changedEntities,
@@ -677,8 +956,6 @@ export function setLastCloudSyncTime(iso: string): void {
     // Ignore
   }
 }
-
-let lastLocalPushTimestampMs = 0;
 
 function splitStringIntoChunks(str: string, maxChars: number): string[] {
   if (!str || str.length <= maxChars) return [str || '{}'];
@@ -800,13 +1077,181 @@ async function fetchChunksFromRelayServer(workspaceId: string): Promise<any[]> {
 }
 
 /**
+ * Concurrency-safe merger for two delta payloads (e.g. existing remote delta document + incoming delta).
+ * Ensures neither device's incremental mutations, tombstones, or operation records are ever lost.
+ * Idempotent: if `incomingDelta.opId` is already present in `existingDelta.appliedOpIds`, returns `existingDelta` unchanged.
+ */
+export function mergeDeltaPayloads(existingDelta: any, incomingDelta: any): any {
+  if (!existingDelta || typeof existingDelta !== 'object' || Object.keys(existingDelta).length === 0) {
+    if (!incomingDelta || typeof incomingDelta !== 'object') return {};
+    const opIds = Array.from(
+      new Set([
+        ...(Array.isArray(incomingDelta.appliedOpIds) ? incomingDelta.appliedOpIds : []),
+        ...(typeof incomingDelta.opId === 'string' && incomingDelta.opId ? [incomingDelta.opId] : [])
+      ])
+    ).slice(-200);
+    return {
+      ...incomingDelta,
+      isCloudDelta: true,
+      appliedOpIds: opIds
+    };
+  }
+  if (!incomingDelta || typeof incomingDelta !== 'object' || Object.keys(incomingDelta).length === 0) {
+    return existingDelta;
+  }
+
+  const existingOpIds: string[] = Array.isArray(existingDelta.appliedOpIds)
+    ? existingDelta.appliedOpIds
+    : typeof existingDelta.opId === 'string' && existingDelta.opId
+    ? [existingDelta.opId]
+    : [];
+
+  // Idempotent guard: if this exact operation ID was already merged into the delta log, do not re-apply
+  if (
+    typeof incomingDelta.opId === 'string' &&
+    incomingDelta.opId &&
+    existingOpIds.includes(incomingDelta.opId)
+  ) {
+    return existingDelta;
+  }
+
+  const baseClone = JSON.parse(JSON.stringify(existingDelta));
+  applyDeltaOnWorkspace(baseClone, incomingDelta);
+
+  const combinedOpIds = Array.from(
+    new Set([
+      ...existingOpIds,
+      ...(Array.isArray(incomingDelta.appliedOpIds) ? incomingDelta.appliedOpIds : []),
+      ...(typeof incomingDelta.opId === 'string' && incomingDelta.opId ? [incomingDelta.opId] : [])
+    ])
+  ).slice(-200);
+
+  const existingOps = Array.isArray(existingDelta.operations) ? existingDelta.operations : [];
+  const incomingOps = Array.isArray(incomingDelta.operations) ? incomingDelta.operations : [];
+  const opsById = new Map<string, any>();
+  for (const op of [...existingOps, ...incomingOps]) {
+    if (op && typeof op.opId === 'string' && op.opId) {
+      opsById.set(op.opId, op);
+    }
+  }
+
+  const maxUpdatedAtMs = Math.max(
+    Number(existingDelta.updatedAtMs) || 0,
+    Number(incomingDelta.updatedAtMs) || 0,
+    Date.now()
+  );
+
+  baseClone.isCloudDelta = true;
+  baseClone.updatedAtMs = maxUpdatedAtMs;
+  baseClone.updatedAtIso = incomingDelta.updatedAtIso || new Date(maxUpdatedAtMs).toISOString();
+  baseClone.deviceId = incomingDelta.deviceId || existingDelta.deviceId;
+  baseClone.opId = incomingDelta.opId || existingDelta.opId;
+  baseClone.opSeq = Math.max(Number(existingDelta.opSeq) || 0, Number(incomingDelta.opSeq) || 0);
+  baseClone.appliedOpIds = combinedOpIds;
+  baseClone.operations = Array.from(opsById.values()).slice(-100);
+
+  return baseClone;
+}
+
+/**
+ * Executes a concurrency-safe transactional read-merge-write for a delta document.
+ * Reads any existing remote delta document inside the Firestore transaction, merges the incoming
+ * delta payload with the remote delta state via `mergeDeltaPayloads`, validates the sync generation,
+ * and commits atomically so concurrent Android & Vercel delta writes can never overwrite each other.
+ */
+export async function executeTransactionalDeltaWrite(
+  workspaceId: string,
+  expectedGeneration: string,
+  deltaDocId: string,
+  localDeltaObj: any,
+  ownerFields: Record<string, any>
+): Promise<{ chunkObj: any; mergedDelta: any }> {
+  const controlDocRef = doc(db, 'user_workspaces', workspaceId, 'categories', SYNC_CONTROL_DOC_ID);
+  const targetDocRef = doc(db, 'user_workspaces', workspaceId, 'categories', deltaDocId);
+
+  let committedChunkObj: any = null;
+  let committedMergedDelta: any = localDeltaObj;
+
+  await executeSafeFirestoreWrite(async () => {
+    await runTransaction(db, async (transaction) => {
+      const controlSnap = await transaction.get(controlDocRef);
+      if (controlSnap.exists()) {
+        const d = controlSnap.data();
+        let parsed: any = {};
+        if (d && typeof d.payloadChunk === 'string') {
+          try {
+            parsed = JSON.parse(d.payloadChunk);
+          } catch {
+            parsed = {};
+          }
+        }
+        if (parsed.isPaused) {
+          throw new Error('SYNC_ABORTED_PAUSED: Cloud synchronization is paused for this workspace.');
+        }
+        const activeCloudGen = parsed.syncGeneration || 'gen_initial';
+        if (expectedGeneration && activeCloudGen !== expectedGeneration) {
+          throw new Error(
+            `SYNC_ABORTED_GENERATION_MISMATCH: Cloud generation changed from ${expectedGeneration} to ${activeCloudGen}`
+          );
+        }
+      }
+
+      const existingSnap = await transaction.get(targetDocRef);
+      let existingDeltaObj: any = null;
+      if (existingSnap.exists()) {
+        const existingData = existingSnap.data();
+        if (existingData && typeof existingData.payloadChunk === 'string') {
+          try {
+            existingDeltaObj = JSON.parse(existingData.payloadChunk);
+          } catch {
+            existingDeltaObj = null;
+          }
+        }
+      }
+
+      const mergedDelta = existingDeltaObj
+        ? mergeDeltaPayloads(existingDeltaObj, localDeltaObj)
+        : mergeDeltaPayloads({}, localDeltaObj);
+
+      const mergedPayloadStr = JSON.stringify(mergedDelta);
+      if (mergedPayloadStr.length > CHUNK_MAX_CHARS) {
+        throw new Error('DELTA_COMPACTION_REQUIRED: Merged delta exceeds single-chunk threshold.');
+      }
+
+      const nowMs = Number(mergedDelta.updatedAtMs) || Date.now();
+      const nowIso = mergedDelta.updatedAtIso || new Date(nowMs).toISOString();
+      const chunkObj = {
+        id: deltaDocId,
+        categoryKey: 'delta_log',
+        chunkIndex: 0,
+        totalChunks: 1,
+        updatedAtMs: nowMs,
+        updatedAtIso: nowIso,
+        deviceId: String(localDeltaObj.deviceId || mergedDelta.deviceId || 'default_dev'),
+        payloadChunk: mergedPayloadStr,
+        ...ownerFields
+      };
+
+      transaction.set(targetDocRef, chunkObj);
+      committedChunkObj = chunkObj;
+      committedMergedDelta = mergedDelta;
+    });
+  });
+
+  return {
+    chunkObj: committedChunkObj,
+    mergedDelta: committedMergedDelta
+  };
+}
+
+/**
  * P2P-Style Delta Sync to Google Cloud Firestore (`/user_workspaces/{uid}/categories/{docId}`).
  * Sends ONLY the records that changed since the last sync!
  */
 export async function uploadWorkspaceToGoogleCloud(
   backupJsonStr: string,
   options?: { isManual?: boolean; forceFullBaseline?: boolean }
-): Promise<{ success: boolean; syncedAtIso: string; deltaCount?: number; error?: string }> {
+): Promise<{ success: boolean; syncedAtIso: string; deltaCount?: number; opId?: string; error?: string }> {
   const user = getActiveCloudUser();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
@@ -825,7 +1270,6 @@ export async function uploadWorkspaceToGoogleCloud(
 
   const uid = getPrimaryWorkspaceId(user);
   const deviceId = getCloudDeviceId();
-  lastLocalPushTimestampMs = nowMs;
 
   try {
     // Check Cloud-side pause and generation marker first (cross-device protection)
@@ -868,6 +1312,8 @@ export async function uploadWorkspaceToGoogleCloud(
       return { success: true, syncedAtIso: nowIso, deltaCount: 0 };
     }
 
+    const opMeta = nextDeviceOperationMetadata(uid, deviceId, nowMs);
+
     const ownerFields = {
       ownerUid: user.uid,
       ...(user.email ? { ownerEmail: user.email.trim().toLowerCase().slice(0, 120) } : {})
@@ -881,7 +1327,9 @@ export async function uploadWorkspaceToGoogleCloud(
         isCloudDelta: true,
         updatedAtMs: nowMs,
         updatedAtIso: nowIso,
-        deviceId
+        deviceId,
+        opId: opMeta.opId,
+        opSeq: opMeta.opSeq
       };
 
       // Merge changed singletons into the rolling delta accumulator
@@ -893,12 +1341,14 @@ export async function uploadWorkspaceToGoogleCloud(
           nextAcc.recentlyDeleted = mergeRecentlyDeleted(nextAcc.recentlyDeleted, sVal);
         } else if (sKey === 'dismissedDashboardLessons' && Array.isArray(sVal)) {
           nextAcc.dismissedDashboardLessons = mergeDismissedDashboardLessons(nextAcc.dismissedDashboardLessons, sVal, true);
+        } else if (sKey === 'profile' && nextAcc.profile && sVal) {
+          nextAcc.profile = { ...nextAcc.profile, ...sVal };
         } else {
           nextAcc[sKey] = sVal;
         }
       }
 
-      // Mergechanged entities into the rolling delta accumulator and sweep purged items so purged records cannot linger in nextAcc
+      // Merge changed entities into the rolling delta accumulator and sweep purged items so purged records cannot linger in nextAcc
       const accPurged = nextAcc.recentlyDeleted?.purgedRecords || parsed.recentlyDeleted?.purgedRecords || [];
       for (const [colKey, deltaItems] of Object.entries(changedEntities)) {
         const existingDeltaItems = Array.isArray(nextAcc[colKey]) ? nextAcc[colKey] : [];
@@ -908,25 +1358,29 @@ export async function uploadWorkspaceToGoogleCloud(
         }).merged;
       }
 
+      const prevOps = Array.isArray(nextAcc.operations) ? nextAcc.operations : [];
+      nextAcc.operations = [
+        ...prevOps.slice(-99),
+        {
+          opId: opMeta.opId,
+          opSeq: opMeta.opSeq,
+          deviceId,
+          timestampMs: nowMs,
+          entityKeys: Object.keys(changedEntities),
+          singletonKeys: Object.keys(changedSingletons)
+        }
+      ];
+      const prevAppliedOpIds = Array.isArray(nextAcc.appliedOpIds) ? nextAcc.appliedOpIds : [];
+      nextAcc.appliedOpIds = Array.from(new Set([...prevAppliedOpIds, opMeta.opId])).slice(-200);
+
       // Sweep any pre-existing entity arrays in the rolling delta accumulator against current tombstones
       enforcePurgedTombstonesOnWorkspace(nextAcc, accPurged);
 
       const deltaPayloadStr = JSON.stringify(nextAcc);
 
-      // If compact delta fits comfortably in a single fast packet (<180KB), write ONLY 1 delta doc!
+      // If compact delta fits comfortably in a single fast packet (<180KB), write ONLY 1 per-device delta doc transactionally!
       if (deltaPayloadStr.length <= DELTA_MAX_COMPACT_CHARS) {
-        const docId = 'delta_log_chunk_0';
-        const chunkObj = {
-          id: docId,
-          categoryKey: 'delta_log',
-          chunkIndex: 0,
-          totalChunks: 1,
-          updatedAtMs: nowMs,
-          updatedAtIso: nowIso,
-          deviceId,
-          payloadChunk: deltaPayloadStr,
-          ...ownerFields
-        };
+        const docId = getDeviceDeltaDocId(deviceId);
 
         if (isFirestoreWriteQuotaExhaustedToday()) {
           return {
@@ -936,16 +1390,37 @@ export async function uploadWorkspaceToGoogleCloud(
           };
         }
 
-        // CONFIRM FIRESTORE WRITE FIRST with Server-Enforced Generation Validation
-        await executeGenerationGuardedWrite(uid, targetGeneration, docId, chunkObj);
+        try {
+          // CONFIRM FIRESTORE WRITE FIRST with Transactional Read-Merge-Write & Server-Enforced Generation Validation
+          const { chunkObj, mergedDelta } = await executeTransactionalDeltaWrite(
+            uid,
+            targetGeneration,
+            docId,
+            nextAcc,
+            ownerFields
+          );
 
-        // ONLY post to Relay cache after Firestore write is confirmed
-        await postChunksToRelayServer(uid, [chunkObj]);
+          recordLocalWrittenChunk(uid, chunkObj);
 
-        saveDeltaAccumulator(uid, nextAcc);
-        saveWatermarks(uid, nextWatermarks);
-        setLastCloudSyncTime(nowIso);
-        return { success: true, syncedAtIso: nowIso, deltaCount: totalChangedCount };
+          // ONLY post to Relay cache after Firestore write is confirmed
+          await postChunksToRelayServer(uid, [chunkObj]);
+
+          saveDeltaAccumulator(uid, mergedDelta);
+          saveWatermarks(uid, nextWatermarks);
+          setLastCloudSyncTime(nowIso);
+          return {
+            success: true,
+            syncedAtIso: nowIso,
+            deltaCount: totalChangedCount,
+            opId: opMeta.opId
+          };
+        } catch (txErr: any) {
+          const txMsg = txErr?.message || '';
+          // If merged delta exceeded single chunk size, fall through to full category baseline compaction
+          if (!txMsg.includes('DELTA_COMPACTION_REQUIRED')) {
+            throw txErr;
+          }
+        }
       }
     }
 
@@ -992,6 +1467,7 @@ export async function uploadWorkspaceToGoogleCloud(
 
         // Write sequentially with Server-Enforced Generation Validation
         await executeGenerationGuardedWrite(uid, targetGeneration, docId, chunkObj);
+        recordLocalWrittenChunk(uid, chunkObj);
         lastUploadedChunkCache.set(cacheKey, chunkData);
       }
 
@@ -1004,6 +1480,10 @@ export async function uploadWorkspaceToGoogleCloud(
       lastUploadedChunkCount.set(countKey, chunks.length);
     }
 
+    // Safely clean up THIS device's own delta document after its state has been folded into baseline categories
+    const ownDeltaDocId = getDeviceDeltaDocId(deviceId);
+    await executeGenerationGuardedDelete(uid, targetGeneration, ownDeltaDocId).catch(() => {});
+
     if (relayChunks.length > 0) {
       await postChunksToRelayServer(uid, relayChunks);
     }
@@ -1012,7 +1492,12 @@ export async function uploadWorkspaceToGoogleCloud(
     saveDeltaAccumulator(uid, {});
     saveWatermarks(uid, nextWatermarks);
     setLastCloudSyncTime(nowIso);
-    return { success: true, syncedAtIso: nowIso, deltaCount: totalChangedCount };
+    return {
+      success: true,
+      syncedAtIso: nowIso,
+      deltaCount: totalChangedCount,
+      opId: opMeta.opId
+    };
   } catch (err: any) {
     const errMsg = err?.message || 'حدث خطأ أثناء مزامنة التغييرات مع السحابة.';
     console.warn('Workspace upload notice:', errMsg);
@@ -1026,14 +1511,18 @@ export async function uploadWorkspaceToGoogleCloud(
 
 /**
  * Reassembles chunks for a category deterministically without relying on a 5-second clock window.
+ * Strictly ignores any `sync_control` documents so control state never contaminates user data.
  */
 function reassembleCategoryChunks(chunkDocs: any[]): any | null {
   if (!Array.isArray(chunkDocs) || chunkDocs.length === 0) return null;
 
+  const validDocs = chunkDocs.filter((docData) => docData && !isSyncControlDocument(docData));
+  if (validDocs.length === 0) return null;
+
   const newestByIndex = new Map<number, any>();
   let latestHeaderDoc: any = null;
 
-  for (const docData of chunkDocs) {
+  for (const docData of validDocs) {
     const idx = Number(docData.chunkIndex);
     if (!Number.isInteger(idx) || idx < 0) continue;
     const existing = newestByIndex.get(idx);
@@ -1069,17 +1558,83 @@ function reassembleCategoryChunks(chunkDocs: any[]): any | null {
 }
 
 /**
+ * Reassembles all per-device and legacy `delta_log` documents without dropping concurrent device streams.
+ * Groups delta chunks by their stream prefix (e.g. `delta_log_dev_android`, `delta_log_dev_vercel`, `delta_log`),
+ * reassembles each stream independently, deduplicates by `opId`, and orders deterministically by
+ * `(updatedAtMs, opSeq, deviceId, opId)`.
+ */
+export function reassembleDeltaLogDocuments(deltaDocs: any[]): {
+  deltas: any[];
+  hasIncompleteStream: boolean;
+} {
+  if (!Array.isArray(deltaDocs) || deltaDocs.length === 0) {
+    return { deltas: [], hasIncompleteStream: false };
+  }
+
+  const streamGroups = new Map<string, any[]>();
+  for (const docData of deltaDocs) {
+    if (!docData || typeof docData !== 'object' || isSyncControlDocument(docData)) continue;
+    const rawId = typeof docData.id === 'string' ? docData.id.trim() : '';
+    const streamKey = rawId
+      ? rawId.replace(/_chunk_\d+$/, '')
+      : typeof docData.deviceId === 'string' && docData.deviceId.trim()
+      ? `delta_log_${sanitizeDeviceIdForDocId(docData.deviceId)}`
+      : 'delta_log';
+
+    const list = streamGroups.get(streamKey) || [];
+    list.push(docData);
+    streamGroups.set(streamKey, list);
+  }
+
+  const deltas: any[] = [];
+  let hasIncompleteStream = false;
+
+  for (const [, groupDocs] of streamGroups.entries()) {
+    try {
+      const parsed = reassembleCategoryChunks(groupDocs);
+      if (parsed && typeof parsed === 'object') {
+        deltas.push(parsed);
+      } else {
+        hasIncompleteStream = true;
+      }
+    } catch {
+      hasIncompleteStream = true;
+    }
+  }
+
+  deltas.sort((a, b) => {
+    const timeDiff = (Number(a.updatedAtMs) || 0) - (Number(b.updatedAtMs) || 0);
+    if (timeDiff !== 0) return timeDiff;
+    const seqDiff = (Number(a.opSeq) || 0) - (Number(b.opSeq) || 0);
+    if (seqDiff !== 0) return seqDiff;
+    const devCmp = String(a.deviceId || '').localeCompare(String(b.deviceId || ''));
+    if (devCmp !== 0) return devCmp;
+    return String(a.opId || '').localeCompare(String(b.opId || ''));
+  });
+
+  return { deltas, hasIncompleteStream };
+}
+
+/**
  * Applies a P2P/Cloud delta payload on top of a base workspace object using `mergeEntities`
  * and `enforcePurgedTombstonesOnWorkspace`.
  * Handles both directions:
  * - Incoming active records are checked against base + delta tombstones.
  * - Incoming tombstones immediately remove existing active records from `baseObj` even when
  *   the delta does not contain a non-empty array for that entity collection.
+ * - Idempotent: tracks applied `opId`s on `baseObj._appliedDeltaOpIds` so duplicate delta deliveries are no-ops.
  */
 export function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): any {
   if (!baseObj || typeof baseObj !== 'object') return baseObj;
   if (!deltaObj || typeof deltaObj !== 'object') {
     enforcePurgedTombstonesOnWorkspace(baseObj);
+    return baseObj;
+  }
+
+  const appliedSet = new Set<string>(
+    Array.isArray(baseObj._appliedDeltaOpIds) ? baseObj._appliedDeltaOpIds : []
+  );
+  if (typeof deltaObj.opId === 'string' && deltaObj.opId && appliedSet.has(deltaObj.opId)) {
     return baseObj;
   }
 
@@ -1110,7 +1665,33 @@ export function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): any {
   for (const sKey of SINGLETON_KEYS) {
     if (sKey !== 'recentlyDeleted' && sKey !== 'dismissedDashboardLessons' && sKey !== 'prunedLessonIds') {
       if (deltaObj[sKey] !== undefined) {
-        baseObj[sKey] = deltaObj[sKey];
+        if (sKey === 'profile' && baseObj.profile && typeof baseObj.profile === 'object' && typeof deltaObj.profile === 'object') {
+          const mergedSettings = mergeTeacherSettings(
+            {
+              id: 'singleton_teacher_settings',
+              profile: baseObj.profile,
+              updatedAt: Number(baseObj.updatedAtMs) || 1
+            } as any,
+            {
+              id: 'singleton_teacher_settings',
+              profile: deltaObj.profile,
+              updatedAt: Number(deltaObj.updatedAtMs) || Date.now()
+            } as any
+          );
+          baseObj.profile = mergedSettings.profile;
+        } else if (
+          sKey === 'schoolSettings' &&
+          baseObj.schoolSettings &&
+          typeof baseObj.schoolSettings === 'object' &&
+          typeof deltaObj.schoolSettings === 'object'
+        ) {
+          baseObj.schoolSettings = { ...baseObj.schoolSettings, ...deltaObj.schoolSettings };
+          if (baseObj.profile && typeof baseObj.profile === 'object') {
+            baseObj.profile = { ...baseObj.profile, schoolSettings: baseObj.schoolSettings };
+          }
+        } else {
+          baseObj[sKey] = deltaObj[sKey];
+        }
       }
     }
   }
@@ -1134,6 +1715,11 @@ export function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): any {
         purgedRecords: purgedList
       }).merged;
     }
+  }
+
+  if (typeof deltaObj.opId === 'string' && deltaObj.opId) {
+    appliedSet.add(deltaObj.opId);
+    baseObj._appliedDeltaOpIds = Array.from(appliedSet).slice(-200);
   }
 
   // 4. Final sweep to ensure cascade referential integrity across all collections
@@ -1173,8 +1759,10 @@ function getLocalKnownIdsForCollection(colKey: string): Set<string> {
 
 /**
  * Reassembles a complete or partial Cloud workspace snapshot from category chunk documents.
+ * - Strictly excludes `sync_control` documents from all categories.
  * - Reassembles `profile_settings` FIRST so authoritative `recentlyDeleted.purgedRecords` tombstones are known before any entity category (`core_crm`, `school_hod`, etc.) is merged.
  * - Always merges local `recentlyDeleted.purgedRecords` tombstones so local permanent deletions are enforced immediately.
+ * - Reassembles ALL per-device and legacy `delta_log` documents in deterministic order so concurrent Android and Vercel deltas never overwrite each other.
  * - If `profile_settings` is missing or incomplete in a partial snapshot, defers unknown conflicting remote active records until tombstone state is known, or filters them when `knownLocalIdsByCollection` is provided.
  * - Never overwrites a category when its chunks are incomplete (`reassembleCategoryChunks` returns null).
  */
@@ -1197,10 +1785,21 @@ export function reassembleWorkspaceSnapshot(
   deferredIds: string[];
   skippedIncompleteCategories: string[];
 } {
-  const categoryMap: Map<string, any[]> =
+  const rawCategoryMap: Map<string, any[]> =
     docsByCategory instanceof Map
       ? docsByCategory
       : new Map<string, any[]>(Object.entries(docsByCategory || {}));
+
+  // Strictly strip any synchronization control documents from every category bucket
+  const categoryMap = new Map<string, any[]>();
+  for (const [catKey, docsList] of rawCategoryMap.entries()) {
+    if (catKey === SYNC_CONTROL_CATEGORY_KEY || catKey === SYNC_CONTROL_DOC_ID) continue;
+    if (!Array.isArray(docsList)) continue;
+    const filtered = docsList.filter((d) => d && !isSyncControlDocument(d));
+    if (filtered.length > 0) {
+      categoryMap.set(catKey, filtered);
+    }
+  }
 
   const primaryId = options?.primaryId || '';
   const reassembled: any = {
@@ -1268,12 +1867,22 @@ export function reassembleWorkspaceSnapshot(
     }
   }
 
-  // Also support category maps keyed by direct entity collection name (e.g., `lessons`, `students`, `groups`)
+  // Also support category maps keyed by direct entity collection name or per-device delta keys
+  const extraDeltaDocs: any[] = [];
   for (const [customKey, chunkDocs] of categoryMap.entries()) {
-    if (customKey === 'profile_settings' || customKey === 'delta_log' || WORKSPACE_CATEGORY_KEYS.includes(customKey as any)) {
+    if (
+      customKey === 'profile_settings' ||
+      customKey === 'delta_log' ||
+      customKey === SYNC_CONTROL_CATEGORY_KEY ||
+      WORKSPACE_CATEGORY_KEYS.includes(customKey as any)
+    ) {
       continue;
     }
     if (!chunkDocs || chunkDocs.length === 0) continue;
+    if (customKey.startsWith('delta_log')) {
+      extraDeltaDocs.push(...chunkDocs);
+      continue;
+    }
     try {
       const parsedCat = reassembleCategoryChunks(chunkDocs);
       if (parsedCat && typeof parsedCat === 'object') {
@@ -1284,26 +1893,30 @@ export function reassembleWorkspaceSnapshot(
     }
   }
 
-  // 3. Apply P2P delta_log on top of baseline categories using applyDeltaOnWorkspace
-  const deltaChunks = categoryMap.get('delta_log');
-  if (deltaChunks && deltaChunks.length > 0) {
-    try {
-      const parsedDelta = reassembleCategoryChunks(deltaChunks);
+  // 3. Apply ALL P2P/per-device delta_log streams on top of baseline categories using applyDeltaOnWorkspace
+  const allDeltaDocs = [...(categoryMap.get('delta_log') || []), ...extraDeltaDocs];
+  if (allDeltaDocs.length > 0) {
+    const { deltas, hasIncompleteStream } = reassembleDeltaLogDocuments(allDeltaDocs);
+    if (hasIncompleteStream) {
+      skippedIncompleteCategories.push('delta_log');
+    }
+    let mergedDeltaAccumulator: any = {};
+    for (const parsedDelta of deltas) {
       if (parsedDelta && typeof parsedDelta === 'object') {
         if (parsedDelta.recentlyDeleted) {
           hasCompleteProfileSettings = true;
         }
         applyDeltaOnWorkspace(reassembled, parsedDelta);
-        if (primaryId) {
-          saveDeltaAccumulator(primaryId, parsedDelta);
-        }
-      } else {
-        skippedIncompleteCategories.push('delta_log');
+        mergedDeltaAccumulator = mergeDeltaPayloads(mergedDeltaAccumulator, parsedDelta);
       }
-    } catch (deltaErr) {
-      skippedIncompleteCategories.push('delta_log');
-      console.warn('Failed to parse cloud delta_log:', deltaErr);
     }
+    if (primaryId && Object.keys(mergedDeltaAccumulator).length > 0) {
+      saveDeltaAccumulator(primaryId, mergedDeltaAccumulator);
+    }
+  }
+
+  if (options?.maxUpdatedAtIso) {
+    reassembled.timestamp = options.maxUpdatedAtIso;
   }
 
   // 4. If tombstone metadata (`profile_settings`) was missing/incomplete in a partial snapshot,
@@ -1365,6 +1978,7 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
   remoteTimestampMs: number;
   remoteTimestampIso: string | null;
   summary: CloudSyncSummary | null;
+  docTokens?: Record<string, string>;
   error?: string;
 }> {
   const user = getActiveCloudUser();
@@ -1381,7 +1995,6 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
 
   const primaryId = getPrimaryWorkspaceId(user);
   const legacyId = user.email ? emailToWorkspaceId(user.email) : null;
-  const deviceId = getCloudDeviceId();
 
   try {
     const rawDocsMap = new Map<string, any>();
@@ -1393,7 +2006,7 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
     if (!uidSnap.empty) {
       uidSnap.forEach((docSnap: any) => {
         const d = docSnap.data();
-        if (d && d.id && verifyWorkspaceOwnership(user, d, primaryId)) {
+        if (d && d.id && !isSyncControlDocument(d) && verifyWorkspaceOwnership(user, d, primaryId)) {
           rawDocsMap.set(d.id, d);
         }
       });
@@ -1405,17 +2018,17 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
         isLegacyPath = true;
         legacySnap.forEach((docSnap: any) => {
           const d = docSnap.data();
-          if (d && d.id && verifyWorkspaceOwnership(user, d, legacyId)) {
+          if (d && d.id && !isSyncControlDocument(d) && verifyWorkspaceOwnership(user, d, legacyId)) {
             rawDocsMap.set(d.id, d);
           }
         });
       }
     }
 
-    // Merge any newer chunks/deltas from fast relay server
+    // Merge any newer chunks/deltas from fast relay server (excluding control docs)
     const relayDocs = await fetchChunksFromRelayServer(resolvedWorkspaceId);
     for (const rDoc of relayDocs) {
-      if (!rDoc || !rDoc.id) continue;
+      if (!rDoc || !rDoc.id || isSyncControlDocument(rDoc)) continue;
       const existing = rawDocsMap.get(rDoc.id);
       if (!existing || (Number(rDoc.updatedAtMs) || 0) >= (Number(existing.updatedAtMs) || 0)) {
         rawDocsMap.set(rDoc.id, rDoc);
@@ -1433,17 +2046,22 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
     }
 
     const docsByCategory = new Map<string, any[]>();
+    const downloadedDocTokens: Record<string, string> = {};
     let maxUpdatedAtMs = 0;
     let maxUpdatedAtIso: string | null = null;
 
     rawDocsMap.forEach((data) => {
-      if (!data || !data.categoryKey) return;
+      if (!data || !data.categoryKey || isSyncControlDocument(data)) return;
       if (!verifyWorkspaceOwnership(user, data, resolvedWorkspaceId)) {
         return;
       }
       const list = docsByCategory.get(data.categoryKey) || [];
       list.push(data);
       docsByCategory.set(data.categoryKey, list);
+      const token = computeChunkRevisionToken(data);
+      if (data.id && token) {
+        downloadedDocTokens[data.id] = token;
+      }
       if (typeof data.updatedAtMs === 'number' && data.updatedAtMs > maxUpdatedAtMs) {
         maxUpdatedAtMs = data.updatedAtMs;
         maxUpdatedAtIso = data.updatedAtIso || new Date(data.updatedAtMs).toISOString();
@@ -1465,8 +2083,13 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       maxUpdatedAtIso
     });
 
-    // 4. Seed local watermarks from the downloaded cloud state so unchanged records cost 0 writes
+    // 4. Seed local watermarks and applied doc tokens from the downloaded cloud state
     seedWatermarksFromData(primaryId, reassembled);
+    const appliedMap = getAppliedDocTokensMap(primaryId);
+    for (const [docId, token] of Object.entries(downloadedDocTokens)) {
+      appliedMap.set(docId, token);
+    }
+    persistAppliedDocTokensMap(primaryId, appliedMap);
 
     const activeStudents = Array.isArray(reassembled.students)
       ? reassembled.students.filter((s: any) => s && !s.deleted)
@@ -1527,7 +2150,8 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       backupJsonStr: JSON.stringify(reassembled),
       remoteTimestampMs: maxUpdatedAtMs,
       remoteTimestampIso: maxUpdatedAtIso,
-      summary
+      summary,
+      docTokens: downloadedDocTokens
     };
   } catch (err: any) {
     const primaryId = user ? getPrimaryWorkspaceId(user) : 'unknown';
@@ -1545,11 +2169,13 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
 
 /**
  * Subscribes in real time (`onSnapshot`) to the signed-in teacher's Google Cloud workspace.
- * Whenever another device uploads newer changes, triggers `onRemoteWorkspaceReady`.
+ * Uses operation-ID and payload-digest evaluation (`evaluateRemoteSnapshotChanges`) rather than
+ * unsafe wall-clock timestamp filtering (`lastLocalPushTimestampMs + 1500`), and serializes
+ * downloads so rapid or concurrent remote snapshots are never dropped.
  */
 export function subscribeToRemoteWorkspaceChanges(
   uid: string,
-  onRemoteWorkspaceReady: (backupJsonStr: string, updatedAtIso: string, summary: CloudSyncSummary) => void
+  onRemoteWorkspaceReady: (backupJsonStr: string, updatedAtIso: string, summary: CloudSyncSummary) => Promise<void> | void
 ): () => void {
   const activeUser = getActiveCloudUser();
   if (!activeUser || !verifyWorkspaceOwnership(activeUser)) {
@@ -1563,49 +2189,74 @@ export function subscribeToRemoteWorkspaceChanges(
 
   const deviceId = getCloudDeviceId();
   let debounceTimer: any = null;
-  let lastAppliedRemoteMs = 0;
+  let isDisposed = false;
+  let isDownloadInFlight = false;
+  let hasQueuedSnapshotWhileBusy = false;
+
+  const processPendingRemoteDownload = async () => {
+    if (isDisposed || !isAutoCloudSyncEnabled()) return;
+    if (isDownloadInFlight) {
+      hasQueuedSnapshotWhileBusy = true;
+      return;
+    }
+
+    isDownloadInFlight = true;
+    try {
+      do {
+        hasQueuedSnapshotWhileBusy = false;
+        if (isDisposed || !isAutoCloudSyncEnabled()) break;
+
+        const res = await downloadWorkspaceFromGoogleCloud();
+        if (isDisposed) break;
+
+        if (res.hasRemoteData && res.backupJsonStr && res.summary) {
+          const effectiveIso = res.remoteTimestampIso || new Date().toISOString();
+          setLastCloudSyncTime(effectiveIso);
+          await Promise.resolve(
+            onRemoteWorkspaceReady(res.backupJsonStr, effectiveIso, res.summary)
+          );
+        }
+      } while (hasQueuedSnapshotWhileBusy && !isDisposed);
+    } catch (err) {
+      console.warn('Remote workspace listener download error:', err);
+    } finally {
+      isDownloadInFlight = false;
+    }
+  };
 
   const colRef = collection(db, 'user_workspaces', targetWorkspaceId, 'categories');
   const unsub = onSnapshot(
     colRef,
     (snap) => {
-      if (snap.empty || !isAutoCloudSyncEnabled()) return;
+      if (isDisposed || snap.empty || !isAutoCloudSyncEnabled()) return;
 
-      let newestRemoteMs = 0;
-      let fromOtherDevice = false;
-
+      const snapshotDocs: any[] = [];
       snap.forEach((docSnap) => {
         const d = docSnap.data();
+        if (!d || isSyncControlDocument(d)) return;
         if (!verifyWorkspaceOwnership(activeUser, d, targetWorkspaceId)) return;
-        if (d && typeof d.updatedAtMs === 'number') {
-          if (d.updatedAtMs > newestRemoteMs) {
-            newestRemoteMs = d.updatedAtMs;
-          }
-          if (d.deviceId && d.deviceId !== deviceId && d.updatedAtMs > lastLocalPushTimestampMs + 1500) {
-            fromOtherDevice = true;
-          }
-        }
+        snapshotDocs.push(d);
       });
 
-      if (!fromOtherDevice || newestRemoteMs <= lastAppliedRemoteMs) {
+      if (snapshotDocs.length === 0) return;
+
+      const appliedTokens = getAppliedDocTokensMap(targetWorkspaceId);
+      const localWrittenTokens = getLocalWrittenDocTokensMap(targetWorkspaceId);
+      const evaluation = evaluateRemoteSnapshotChanges(snapshotDocs, {
+        localDeviceId: deviceId,
+        appliedDocTokens: appliedTokens,
+        localWrittenDocTokens: localWrittenTokens
+      });
+
+      if (!evaluation.shouldProcess) {
         return;
       }
 
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(async () => {
-        const res = await downloadWorkspaceFromGoogleCloud();
-        if (res.hasRemoteData && res.backupJsonStr && res.remoteTimestampMs > lastAppliedRemoteMs) {
-          lastAppliedRemoteMs = res.remoteTimestampMs;
-          setLastCloudSyncTime(res.remoteTimestampIso || new Date().toISOString());
-          if (res.summary) {
-            onRemoteWorkspaceReady(
-              res.backupJsonStr,
-              res.remoteTimestampIso || new Date().toISOString(),
-              res.summary
-            );
-          }
-        }
-      }, 1200);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        processPendingRemoteDownload();
+      }, 350);
     },
     (err) => {
       handleFirestoreError(err, OperationType.LIST, `user_workspaces/${targetWorkspaceId}/categories`);
@@ -1613,6 +2264,7 @@ export function subscribeToRemoteWorkspaceChanges(
   );
 
   return () => {
+    isDisposed = true;
     if (debounceTimer) clearTimeout(debounceTimer);
     unsub();
   };
@@ -1674,7 +2326,7 @@ export async function clearCloudWorkspaceData(): Promise<{
 
     const controlChunkObj = {
       id: SYNC_CONTROL_DOC_ID,
-      categoryKey: 'core_crm',
+      categoryKey: SYNC_CONTROL_CATEGORY_KEY,
       chunkIndex: 0,
       totalChunks: 1,
       updatedAtMs: nowMs,
@@ -1801,9 +2453,11 @@ export async function clearCloudWorkspaceData(): Promise<{
       try {
         localStorage.removeItem(`gluck_cloud_watermarks_v2_${primaryId}`);
         localStorage.removeItem(`gluck_cloud_delta_acc_v2_${primaryId}`);
+        localStorage.removeItem(`gluck_cloud_applied_tokens_v2_${primaryId}`);
         if (legacyId) {
           localStorage.removeItem(`gluck_cloud_watermarks_v2_${legacyId}`);
           localStorage.removeItem(`gluck_cloud_delta_acc_v2_${legacyId}`);
+          localStorage.removeItem(`gluck_cloud_applied_tokens_v2_${legacyId}`);
         }
         localStorage.removeItem(LAST_SYNC_TIME_KEY);
       } catch {
@@ -1814,6 +2468,9 @@ export async function clearCloudWorkspaceData(): Promise<{
     // Clear memory caches
     lastUploadedChunkCache.clear();
     lastUploadedChunkCount.clear();
+    inMemoryEntityBaselineByUid.delete(primaryId);
+    inMemoryAppliedDocTokensByUid.delete(primaryId);
+    inMemoryLocalWrittenDocTokensByUid.delete(primaryId);
 
     // 7. Verification check: ensure Firestore primary collection contains ONLY sync_control
     const verifySnap = await getDocs(collection(db, 'user_workspaces', primaryId, 'categories'));

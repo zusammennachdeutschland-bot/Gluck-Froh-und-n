@@ -228,12 +228,250 @@ export function mergeDismissedDashboardLessons(
   }
 }
 
-export interface MergeEntitiesOptions {
+export interface MergeEntitiesOptions<T extends SyncableRecord = any> {
   entityTypeName?: string;
   purgedRecords?: PurgedRecordTombstone[];
   recentlyDeleted?: RecentlyDeletedData;
   deferUnknownActiveIds?: boolean;
   knownLocalIds?: Set<string>;
+  baseArray?: T[];
+}
+
+const METADATA_KEYS = new Set<string>([
+  'id',
+  'updatedAt',
+  'createdAt',
+  'version',
+  'originRevision',
+  'originDeviceId',
+  'updatedByDeviceId',
+  'syncedAt',
+  'deleted',
+  '_fieldUpdatedAt',
+  '_baseSnapshot'
+]);
+
+function isPlainObject(val: unknown): val is Record<string, any> {
+  return Boolean(val) && typeof val === 'object' && !Array.isArray(val);
+}
+
+function isDeepValueEqual(a: any, b: any): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || a === undefined || b === undefined) return a === b;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object') return a === b;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stamps per-field modification timestamps by comparing `prevItem` and `nextItem`.
+ * Allows field-level conflict resolution when two devices concurrently modify different fields of the same record.
+ */
+export function stampFieldTimestamps<T extends Record<string, any>>(
+  prevItem: T | undefined | null,
+  nextItem: T,
+  timestampMs?: number
+): T {
+  if (!nextItem || typeof nextItem !== 'object') return nextItem;
+  const nowMs =
+    parseTimestampMs((nextItem as any).updatedAt) ||
+    (typeof timestampMs === 'number' && timestampMs > 0 ? timestampMs : Date.now());
+  const prevFields: Record<string, number> = isPlainObject((prevItem as any)?._fieldUpdatedAt)
+    ? { ...(prevItem as any)._fieldUpdatedAt }
+    : {};
+  const nextFields: Record<string, number> = isPlainObject((nextItem as any)._fieldUpdatedAt)
+    ? { ...prevFields, ...(nextItem as any)._fieldUpdatedAt }
+    : { ...prevFields };
+
+  if (prevItem && typeof prevItem === 'object') {
+    const allKeys = new Set<string>([...Object.keys(prevItem), ...Object.keys(nextItem)]);
+    for (const key of allKeys) {
+      if (METADATA_KEYS.has(key)) continue;
+      if (!isDeepValueEqual((prevItem as any)[key], (nextItem as any)[key])) {
+        nextFields[key] = nowMs;
+      }
+    }
+  } else {
+    for (const key of Object.keys(nextItem)) {
+      if (METADATA_KEYS.has(key)) continue;
+      if ((nextItem as any)[key] !== undefined && nextFields[key] === undefined) {
+        nextFields[key] = nowMs;
+      }
+    }
+  }
+
+  return {
+    ...nextItem,
+    _fieldUpdatedAt: nextFields
+  };
+}
+
+export function mergeConcurrentEntityFields<T extends SyncableRecord>(
+  localItem: T,
+  incomingItem: T,
+  winner: 'local' | 'remote',
+  baseItem?: T
+): { merged: T; usedFieldMerge: boolean } {
+  const primary = (winner === 'remote' ? incomingItem : localItem) as Record<string, any>;
+  const secondary = (winner === 'remote' ? localItem : incomingItem) as Record<string, any>;
+  const effectiveBase: Record<string, any> | undefined =
+    (baseItem as any) ||
+    (isPlainObject((localItem as any)._baseSnapshot) ? (localItem as any)._baseSnapshot : undefined) ||
+    (isPlainObject((incomingItem as any)._baseSnapshot) ? (incomingItem as any)._baseSnapshot : undefined);
+
+  const localFieldTimes: Record<string, number> = isPlainObject((localItem as any)._fieldUpdatedAt)
+    ? (localItem as any)._fieldUpdatedAt
+    : {};
+  const incomingFieldTimes: Record<string, number> = isPlainObject((incomingItem as any)._fieldUpdatedAt)
+    ? (incomingItem as any)._fieldUpdatedAt
+    : {};
+  const hasFieldTimestamps =
+    Object.keys(localFieldTimes).length > 0 || Object.keys(incomingFieldTimes).length > 0;
+
+  const result: Record<string, any> = {
+    ...secondary,
+    ...primary
+  };
+  let usedFieldMerge = false;
+
+  const domainKeys = new Set<string>([
+    ...Object.keys(localItem as any),
+    ...Object.keys(incomingItem as any)
+  ]);
+
+  for (const key of domainKeys) {
+    if (METADATA_KEYS.has(key)) continue;
+    const localVal = (localItem as any)[key];
+    const incomingVal = (incomingItem as any)[key];
+
+    if (isDeepValueEqual(localVal, incomingVal)) {
+      result[key] = primary[key] !== undefined ? primary[key] : secondary[key];
+      continue;
+    }
+
+    // 1. Explicit per-field timestamp comparison
+    const localFieldTs = typeof localFieldTimes[key] === 'number' ? localFieldTimes[key] : 0;
+    const incomingFieldTs = typeof incomingFieldTimes[key] === 'number' ? incomingFieldTimes[key] : 0;
+    if (localFieldTs > 0 || incomingFieldTs > 0) {
+      if (localFieldTs > incomingFieldTs) {
+        result[key] = localVal;
+        if (winner === 'remote') usedFieldMerge = true;
+        continue;
+      } else if (incomingFieldTs > localFieldTs) {
+        result[key] = incomingVal;
+        if (winner === 'local') usedFieldMerge = true;
+        continue;
+      }
+    }
+
+    // 2. Three-way base comparison when baseItem or _baseSnapshot is available
+    if (effectiveBase && key in effectiveBase) {
+      const baseVal = effectiveBase[key];
+      const localChanged = !isDeepValueEqual(localVal, baseVal);
+      const incomingChanged = !isDeepValueEqual(incomingVal, baseVal);
+      if (localChanged && !incomingChanged) {
+        result[key] = localVal;
+        if (winner === 'remote') usedFieldMerge = true;
+        continue;
+      } else if (incomingChanged && !localChanged) {
+        result[key] = incomingVal;
+        if (winner === 'local') usedFieldMerge = true;
+        continue;
+      } else if (localChanged && incomingChanged && isPlainObject(localVal) && isPlainObject(incomingVal)) {
+        const baseObj = isPlainObject(baseVal) ? baseVal : {};
+        const mergedNested: Record<string, any> = { ...secondary[key], ...primary[key] };
+        const subKeys = new Set<string>([...Object.keys(localVal), ...Object.keys(incomingVal)]);
+        for (const sk of subKeys) {
+          const lSubChanged = !isDeepValueEqual(localVal[sk], baseObj[sk]);
+          const rSubChanged = !isDeepValueEqual(incomingVal[sk], baseObj[sk]);
+          if (lSubChanged && !rSubChanged) {
+            mergedNested[sk] = localVal[sk];
+            if (winner === 'remote') usedFieldMerge = true;
+          } else if (rSubChanged && !lSubChanged) {
+            mergedNested[sk] = incomingVal[sk];
+            if (winner === 'local') usedFieldMerge = true;
+          }
+        }
+        result[key] = mergedNested;
+        continue;
+      }
+    }
+
+    // 3. Nested plain object merge (e.g. lesson.report) & non-empty field preservation
+    if (isPlainObject(localVal) && isPlainObject(incomingVal)) {
+      const mergedNested: Record<string, any> = {
+        ...(winner === 'remote' ? localVal : incomingVal),
+        ...(winner === 'remote' ? incomingVal : localVal)
+      };
+      const subKeys = new Set<string>([...Object.keys(localVal), ...Object.keys(incomingVal)]);
+      for (const sk of subKeys) {
+        const pSub = (winner === 'remote' ? incomingVal : localVal)[sk];
+        const sSub = (winner === 'remote' ? localVal : incomingVal)[sk];
+        if ((pSub === undefined || pSub === null || pSub === '') && sSub !== undefined && sSub !== null && sSub !== '') {
+          mergedNested[sk] = sSub;
+          usedFieldMerge = true;
+        }
+      }
+      result[key] = mergedNested;
+      continue;
+    }
+
+    const pVal = primary[key];
+    const sVal = secondary[key];
+    if ((pVal === undefined || pVal === null || pVal === '') && sVal !== undefined && sVal !== null && sVal !== '') {
+      result[key] = sVal;
+      usedFieldMerge = true;
+    }
+  }
+
+  // Ensure incoming or local active status progression takes precedence over 'scheduled'
+  const localStatus = (localItem as any).status;
+  const incomingStatus = (incomingItem as any).status;
+  if (
+    (incomingStatus === 'completed' || incomingStatus === 'cancelled' || incomingStatus === 'in_progress') &&
+    (localStatus === 'scheduled' || !localStatus)
+  ) {
+    result.status = incomingStatus;
+  } else if (
+    (localStatus === 'completed' || localStatus === 'cancelled' || localStatus === 'in_progress') &&
+    (incomingStatus === 'scheduled' || !incomingStatus)
+  ) {
+    result.status = localStatus;
+  }
+
+  if (result.certificateName === undefined || result.certificateName === '') {
+    result.certificateName = (localItem as any).certificateName || (incomingItem as any).certificateName || '';
+  }
+  if (!Array.isArray(result.documents) || result.documents.length === 0) {
+    const fallbackDocs =
+      Array.isArray((localItem as any).documents) && (localItem as any).documents.length > 0
+        ? (localItem as any).documents
+        : Array.isArray((incomingItem as any).documents)
+        ? (incomingItem as any).documents
+        : [];
+    if (result.documents !== undefined || fallbackDocs.length > 0) {
+      result.documents = fallbackDocs;
+    }
+  }
+  if (localStatus === 'archived' && !incomingStatus) {
+    result.status = 'archived';
+  }
+
+  if (hasFieldTimestamps) {
+    const mergedFieldTimes: Record<string, number> = { ...localFieldTimes };
+    for (const [k, ts] of Object.entries(incomingFieldTimes)) {
+      if (typeof ts === 'number' && ts > (mergedFieldTimes[k] || 0)) {
+        mergedFieldTimes[k] = ts;
+      }
+    }
+    result._fieldUpdatedAt = mergedFieldTimes;
+  }
+
+  return { merged: result as T, usedFieldMerge };
 }
 
 function isEntityCascadePurged(
@@ -281,14 +519,21 @@ function isEntityCascadePurged(
 export function mergeEntities<T extends SyncableRecord>(
   localArray: T[],
   incomingArray: T[],
-  entityTypeNameOrOptions?: string | MergeEntitiesOptions
+  entityTypeNameOrOptions?: string | MergeEntitiesOptions<T>
 ): MergeResult<T> {
-  const options: MergeEntitiesOptions = typeof entityTypeNameOrOptions === 'string'
+  const options: MergeEntitiesOptions<T> = typeof entityTypeNameOrOptions === 'string'
     ? { entityTypeName: entityTypeNameOrOptions }
     : (entityTypeNameOrOptions || {});
 
   const entityTypeName = options.entityTypeName || 'entity';
   const purgedList = mergePurgedTombstones(options.purgedRecords, options.recentlyDeleted?.purgedRecords);
+
+  const baseMap = new Map<string, T>();
+  if (Array.isArray(options.baseArray)) {
+    for (const b of options.baseArray) {
+      if (b && b.id) baseMap.set(b.id.trim(), b);
+    }
+  }
 
   const purgedMap = new Map<string, { purgedTime: number; tombstoneRev: number; type: string }>();
   const purgedGroupIds = new Set<string>();
@@ -387,9 +632,9 @@ export function mergeEntities<T extends SyncableRecord>(
         createdCount++;
       }
     } else {
-      // Conflict resolution based on Last-Write-Wins (LWW)
-      const incomingTime = incomingItem.updatedAt || 0;
-      const localTime = localItem.updatedAt || 0;
+      // Conflict resolution based on Last-Write-Wins (LWW) + Field-Level Merge
+      const incomingTime = parseTimestampMs(incomingItem.updatedAt);
+      const localTime = parseTimestampMs(localItem.updatedAt);
       const incomingRev = incomingItem.originRevision || 0;
       const localRev = localItem.originRevision || 0;
 
@@ -466,35 +711,15 @@ export function mergeEntities<T extends SyncableRecord>(
         shouldAcceptIncoming = false;
       }
 
+      const baseItem = baseMap.get(id);
+
       if (shouldAcceptIncoming) {
         let finalItem = incomingItem;
-        
-        // Field-level preservation for non-deleted items
         if (!incomingItem.deleted && !localItem.deleted) {
-          finalItem = {
-            ...localItem,
-            ...incomingItem
-          };
-          
-          // Ensure incoming completion/cancellation/in_progress status takes precedence if local was scheduled
-          if (
-            ((incomingItem as any).status === 'completed' || (incomingItem as any).status === 'cancelled' || (incomingItem as any).status === 'in_progress') &&
-            ((localItem as any).status === 'scheduled' || !(localItem as any).status)
-          ) {
-            (finalItem as any).status = (incomingItem as any).status;
-          }
-
-          // Specialized field preservation
-          if ((incomingItem as any).certificateName === undefined || (incomingItem as any).certificateName === '') {
-            (finalItem as any).certificateName = (localItem as any).certificateName || '';
-          }
-          if (!Array.isArray((incomingItem as any).documents) || (incomingItem as any).documents.length === 0) {
-            (finalItem as any).documents = (localItem as any).documents || [];
-          }
-          
-          // Preserve local student status if archived
-          if ((localItem as any).status === 'archived' && !(incomingItem as any).status) {
-            (finalItem as any).status = 'archived';
+          const fieldMergeRes = mergeConcurrentEntityFields(localItem, incomingItem, 'remote', baseItem);
+          finalItem = fieldMergeRes.merged;
+          if (fieldMergeRes.usedFieldMerge) {
+            resolutionStrategy = 'FIELD_MERGE';
           }
         }
 
@@ -504,7 +729,7 @@ export function mergeEntities<T extends SyncableRecord>(
         } else {
           updatedCount++;
         }
-        
+
         conflicts.push({
           entityType: entityTypeName,
           entityId: incomingItem.id,
@@ -515,16 +740,17 @@ export function mergeEntities<T extends SyncableRecord>(
           timestamp: Date.now()
         });
       } else {
-        // Local won. Backfill fields if local is missing something the remote has (and local isn't deleted)
+        // Local won primary envelope; apply non-conflicting field merge if neither record is deleted
         if (!localItem.deleted && !incomingItem.deleted) {
-          const localCertName = (localItem as any).certificateName;
-          const incomingCertName = (incomingItem as any).certificateName;
-          if ((!localCertName || localCertName.trim() === '') && incomingCertName && incomingCertName.trim() !== '') {
-            (localItem as any).certificateName = incomingCertName;
+          const fieldMergeRes = mergeConcurrentEntityFields(localItem, incomingItem, 'local', baseItem);
+          entityMap.set(localItem.id, fieldMergeRes.merged);
+          if (fieldMergeRes.usedFieldMerge) {
+            resolutionStrategy = 'FIELD_MERGE';
+            updatedCount++;
           }
         }
 
-        if (incomingTime !== localTime || incomingRev !== localRev) {
+        if (incomingTime !== localTime || incomingRev !== localRev || resolutionStrategy === 'FIELD_MERGE') {
           conflicts.push({
             entityType: entityTypeName,
             entityId: incomingItem.id,
@@ -848,6 +1074,55 @@ export function enforcePurgedTombstonesOnWorkspace<T extends WorkspaceMutableSta
       return !lesId || !purgedLessonIds.has(lesId);
     });
   }
+
+  // Reconcile cross-device restorations: if an item in workspace.{students,groups,lessons} is active (!deleted)
+  // and has an updatedAt strictly newer than its soft-deletion timestamp in mergedRec, remove the stale trash entry.
+  const activeStudentTimes = new Map<string, number>();
+  if (Array.isArray(workspace.students)) {
+    for (const s of workspace.students) {
+      if (s && s.id && !s.deleted) {
+        activeStudentTimes.set(s.id.trim(), parseTimestampMs(s.updatedAt));
+      }
+    }
+  }
+  const activeGroupTimes = new Map<string, number>();
+  if (Array.isArray(workspace.groups)) {
+    for (const g of workspace.groups) {
+      if (g && g.id && !g.deleted) {
+        activeGroupTimes.set(g.id.trim(), parseTimestampMs(g.updatedAt));
+      }
+    }
+  }
+  const activeLessonTimes = new Map<string, number>();
+  if (Array.isArray(workspace.lessons)) {
+    for (const l of workspace.lessons) {
+      if (l && l.id && !l.deleted) {
+        activeLessonTimes.set(l.id.trim(), parseTimestampMs(l.updatedAt));
+      }
+    }
+  }
+
+  mergedRec = {
+    ...mergedRec,
+    students: (mergedRec.students || []).filter(entry => {
+      if (!entry?.item?.id) return false;
+      const activeTs = activeStudentTimes.get(entry.item.id.trim());
+      const deletedTs = Math.max(parseTimestampMs(entry.deletedAt), parseTimestampMs((entry.item as any)?.updatedAt));
+      return activeTs === undefined || activeTs <= deletedTs;
+    }),
+    groups: (mergedRec.groups || []).filter(entry => {
+      if (!entry?.item?.id) return false;
+      const activeTs = activeGroupTimes.get(entry.item.id.trim());
+      const deletedTs = Math.max(parseTimestampMs(entry.deletedAt), parseTimestampMs((entry.item as any)?.updatedAt));
+      return activeTs === undefined || activeTs <= deletedTs;
+    }),
+    lessons: (mergedRec.lessons || []).filter(entry => {
+      if (!entry?.item?.id) return false;
+      const activeTs = activeLessonTimes.get(entry.item.id.trim());
+      const deletedTs = Math.max(parseTimestampMs(entry.deletedAt), parseTimestampMs((entry.item as any)?.updatedAt));
+      return activeTs === undefined || activeTs <= deletedTs;
+    })
+  };
 
   workspace.recentlyDeleted = mergedRec;
 

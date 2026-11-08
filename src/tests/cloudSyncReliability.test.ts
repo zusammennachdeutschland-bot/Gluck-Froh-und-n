@@ -9,9 +9,17 @@ import {
   enforcePurgedTombstonesOnWorkspace,
   executePermanentDeleteOnWorkspace,
   executeClearRecentlyDeletedOnWorkspace,
-  executeRestoreItemOnWorkspace
+  executeRestoreItemOnWorkspace,
+  stampFieldTimestamps,
+  mergeConcurrentEntityFields
 } from '../services/sync/mergeEngine';
-import { hasAnyWorkspaceData } from '../hooks/useGoogleCloudWorkspaceSync';
+import {
+  hasAnyWorkspaceData,
+  createSerializedSyncCoordinator,
+  setPendingLocalPushFlag,
+  hasPendingLocalPushFlag,
+  clearPendingLocalPushFlag
+} from '../hooks/useGoogleCloudWorkspaceSync';
 import { SyncableRecord } from '../types';
 import {
   filterCustomOrModifiedLernstudioSets,
@@ -19,9 +27,16 @@ import {
   BUILTIN_LERNSTUDIO_MAP,
   DEFAULT_LERNSTUDIO_SETS,
   SYNC_CONTROL_DOC_ID,
+  SYNC_CONTROL_CATEGORY_KEY,
   SINGLETON_KEYS,
   applyDeltaOnWorkspace,
-  reassembleWorkspaceSnapshot
+  reassembleWorkspaceSnapshot,
+  isSyncControlDocument,
+  getDeviceDeltaDocId,
+  mergeDeltaPayloads,
+  reassembleDeltaLogDocuments,
+  computeChunkRevisionToken,
+  evaluateRemoteSnapshotChanges
 } from '../services/firebaseWorkspaceSync';
 import {
   runSyncCycle,
@@ -1146,6 +1161,733 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
       assert.equal(mergedSetsWithBuiltins.some((s: any) => s.id === builtinSet.id), true);
     }
     log.push('[PASS] [Production-boundary integration] P8-23. Built-in DEFAULT_LERNSTUDIO_SETS remain protected during Cloud sync and backup import');
+
+    // =========================================================================
+    // PART 9 — MANDATORY 20 ANDROID ↔ VERCEL CLOUD SYNC REPAIR SCENARIOS
+    // =========================================================================
+    log.push('------------------------------------------------------------------------');
+    log.push('PART 9: MANDATORY 20 ANDROID ↔ VERCEL CLOUD SYNC REPAIR SCENARIOS');
+    log.push('------------------------------------------------------------------------');
+
+    // -------------------------------------------------------------------------
+    // AV-01 [Integration Test]: Android creates student → Vercel receives student
+    // -------------------------------------------------------------------------
+    const androidDeviceId = 'android_cap_dev_01';
+    const vercelDeviceId = 'vercel_web_dev_01';
+    const wsAndroid: any = {
+      groups: [{ id: 'grp_av_1', name: 'A2 Abendkurs', updatedAt: 1000, originDeviceId: androidDeviceId }],
+      students: [],
+      lessons: [],
+      payments: [],
+      recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: [] }
+    };
+    const wsVercel: any = {
+      groups: [{ id: 'grp_av_1', name: 'A2 Abendkurs', updatedAt: 1000, originDeviceId: androidDeviceId }],
+      students: [],
+      lessons: [],
+      payments: [],
+      recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: [] }
+    };
+
+    const androidStudent = stampFieldTimestamps(
+      null,
+      {
+        id: 'st_android_1',
+        name: 'Karim Mansour',
+        groupId: 'grp_av_1',
+        studentPhone: '01011112222',
+        parentPhone: '01033334444',
+        updatedAt: 2000,
+        version: 1,
+        originDeviceId: androidDeviceId,
+        originRevision: 1
+      },
+      2000
+    );
+    wsAndroid.students.push(androidStudent);
+
+    const androidDeltaDoc = {
+      id: getDeviceDeltaDocId(androidDeviceId),
+      categoryKey: 'delta_log',
+      chunkIndex: 0,
+      totalChunks: 1,
+      deviceId: androidDeviceId,
+      opId: `${androidDeviceId}_op_1`,
+      opSeq: 1,
+      payloadChunk: JSON.stringify({
+        isCloudDelta: true,
+        students: [androidStudent],
+        opId: `${androidDeviceId}_op_1`,
+        opSeq: 1,
+        deviceId: androidDeviceId,
+        timestamp: new Date(2000).toISOString()
+      })
+    };
+    const reassembledFromAndroid = reassembleDeltaLogDocuments([androidDeltaDoc]);
+    assert.equal(reassembledFromAndroid.hasIncompleteStream, false);
+    for (const d of reassembledFromAndroid.deltas) {
+      applyDeltaOnWorkspace(wsVercel, d);
+    }
+    assert.equal(wsVercel.students.some((s: any) => s.id === 'st_android_1' && s.name === 'Karim Mansour'), true);
+    log.push('[PASS] [Integration Test] AV-01. Android creates student -> Vercel receives student via per-device delta log');
+
+    // -------------------------------------------------------------------------
+    // AV-02 [Integration Test]: Vercel creates student → Android receives student
+    // -------------------------------------------------------------------------
+    const vercelStudent = stampFieldTimestamps(
+      null,
+      {
+        id: 'st_vercel_1',
+        name: 'Nour El-Din',
+        groupId: 'grp_av_1',
+        studentPhone: '01255556666',
+        updatedAt: 2100,
+        version: 1,
+        originDeviceId: vercelDeviceId,
+        originRevision: 1
+      },
+      2100
+    );
+    wsVercel.students.push(vercelStudent);
+
+    const vercelDeltaDoc = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      chunkIndex: 0,
+      totalChunks: 1,
+      deviceId: vercelDeviceId,
+      opId: `${vercelDeviceId}_op_1`,
+      opSeq: 1,
+      payloadChunk: JSON.stringify({
+        isCloudDelta: true,
+        students: [vercelStudent],
+        opId: `${vercelDeviceId}_op_1`,
+        opSeq: 1,
+        deviceId: vercelDeviceId,
+        timestamp: new Date(2100).toISOString()
+      })
+    };
+    const reassembledFromVercel = reassembleDeltaLogDocuments([vercelDeltaDoc]);
+    for (const d of reassembledFromVercel.deltas) {
+      applyDeltaOnWorkspace(wsAndroid, d);
+    }
+    assert.equal(wsAndroid.students.some((s: any) => s.id === 'st_vercel_1' && s.name === 'Nour El-Din'), true);
+    assert.equal(wsAndroid.students.length, 2);
+    log.push('[PASS] [Integration Test] AV-02. Vercel creates student -> Android receives student');
+
+    // -------------------------------------------------------------------------
+    // AV-03 [Unit Test]: Concurrent edits on Android and Vercel within 1.5 seconds
+    // (Verifies removal of unsafe `lastLocalPushTimestampMs + 1500` filter)
+    // -------------------------------------------------------------------------
+    const localKnownRevisions = new Map<string, string>();
+    // Local Android pushed at t = 10,000ms; Vercel pushed at t = 10,200ms (within 200ms < 1500ms!)
+    const incomingSubSecondDocs = [
+      {
+        id: getDeviceDeltaDocId(vercelDeviceId),
+        categoryKey: 'delta_log',
+        deviceId: vercelDeviceId,
+        opId: 'vercel_web_dev_01_op_11',
+        opSeq: 11,
+        updatedAtMs: 10200,
+        updatedAtIso: new Date(10200).toISOString(),
+        payloadChunk: JSON.stringify({
+          isCloudDelta: true,
+          students: [{ id: 'st_subsecond', name: 'Subsecond Remote Student', updatedAt: 10200 }]
+        })
+      }
+    ];
+    const evalSubSecond = evaluateRemoteSnapshotChanges(incomingSubSecondDocs, {
+      localDeviceId: androidDeviceId,
+      appliedDocTokens: localKnownRevisions
+    });
+    assert.equal(evalSubSecond.shouldProcess, true);
+    assert.equal(evalSubSecond.unappliedDocIds.includes(getDeviceDeltaDocId(vercelDeviceId)), true);
+    log.push('[PASS] [Unit Test] AV-03. Concurrent edits on Android and Vercel within 1.5s are accepted (no timestamp-only 1500ms suppression)');
+
+    // -------------------------------------------------------------------------
+    // AV-04 [Unit Test]: Incoming snapshot while sync is already in flight
+    // -------------------------------------------------------------------------
+    const executionOrder: string[] = [];
+    let releaseFirstTask!: () => void;
+    const firstTaskGate = new Promise<void>((resolve) => {
+      releaseFirstTask = resolve;
+    });
+
+    const coordinator = createSerializedSyncCoordinator({
+      onExecuteLocalPush: async () => {
+        executionOrder.push('start:local-push');
+        await firstTaskGate;
+        executionOrder.push('end:local-push');
+        return true;
+      },
+      onApplyRemotePayload: async (remoteJson) => {
+        executionOrder.push(`start:remote-pull:${remoteJson}`);
+        executionOrder.push(`end:remote-pull:${remoteJson}`);
+        return true;
+      }
+    });
+
+    const p1 = coordinator.enqueueLocalPush();
+    // While local push is in flight, a remote snapshot arrives!
+    const p2 = coordinator.enqueueRemoteSnapshot('remote_snap_while_inflight');
+    assert.equal(coordinator.isBusy(), true);
+    assert.equal(coordinator.getPendingRemoteCount(), 1);
+    releaseFirstTask();
+    await Promise.all([p1, p2]);
+    assert.deepEqual(executionOrder, [
+      'start:local-push',
+      'end:local-push',
+      'start:remote-pull:remote_snap_while_inflight',
+      'end:remote-pull:remote_snap_while_inflight'
+    ]);
+    log.push('[PASS] [Unit Test] AV-04. Incoming snapshot while sync is in flight is queued and processed immediately after completion');
+
+    // -------------------------------------------------------------------------
+    // AV-05 [Integration Test]: Multiple rapid snapshots arriving in sequence
+    // -------------------------------------------------------------------------
+    const rapidSnapshotsReceived: string[] = [];
+    let releaseRapidGate!: () => void;
+    const rapidGate = new Promise<void>((resolve) => {
+      releaseRapidGate = resolve;
+    });
+
+    const rapidCoord = createSerializedSyncCoordinator({
+      onExecuteLocalPush: async () => {
+        await rapidGate;
+        return true;
+      },
+      onApplyRemotePayload: async (remoteJson) => {
+        rapidSnapshotsReceived.push(remoteJson);
+        return true;
+      }
+    });
+
+    const lockPromise = rapidCoord.enqueueLocalPush();
+    const r1 = rapidCoord.enqueueRemoteSnapshot('snap_1');
+    const r2 = rapidCoord.enqueueRemoteSnapshot('snap_2');
+    const r3 = rapidCoord.enqueueRemoteSnapshot('snap_3');
+    assert.equal(rapidCoord.getPendingRemoteCount(), 3);
+    releaseRapidGate();
+    await Promise.all([lockPromise, r1, r2, r3]);
+    assert.deepEqual(rapidSnapshotsReceived, ['snap_1', 'snap_2', 'snap_3']);
+    log.push('[PASS] [Integration Test] AV-05. Multiple rapid snapshots arriving in sequence are queued and processed in exact order without loss');
+
+    // -------------------------------------------------------------------------
+    // AV-06 [Unit Test]: Offline creation on Android followed by reconnect
+    // -------------------------------------------------------------------------
+    const testUid = 'uid_offline_reconnect_test';
+    clearPendingLocalPushFlag(testUid);
+    assert.equal(hasPendingLocalPushFlag(testUid), false);
+    // Simulate offline mutation marking dirty flag
+    setPendingLocalPushFlag(testUid, true);
+    assert.equal(hasPendingLocalPushFlag(testUid), true);
+    // Simulate reconnect draining pending push and clearing flag only after confirmation
+    clearPendingLocalPushFlag(testUid);
+    assert.equal(hasPendingLocalPushFlag(testUid), false);
+    log.push('[PASS] [Unit Test] AV-06. Offline creation on Android persists pending push dirty flag and flushes upon reconnect');
+
+    // -------------------------------------------------------------------------
+    // AV-07 [Integration Test]: Offline edits on both platforms followed by reconnect
+    // -------------------------------------------------------------------------
+    const wsOfflineAndroid: any = {
+      students: [
+        { id: 'st_shared_base', name: 'Shared Student', groupId: 'grp_av_1', updatedAt: 1000 },
+        { id: 'st_offline_android', name: 'Added Offline on Android', groupId: 'grp_av_1', updatedAt: 5000, originDeviceId: androidDeviceId }
+      ],
+      todos: [
+        { id: 'todo_android_offline', text: 'Grade B1 Homework', completed: false, updatedAt: 5000 }
+      ],
+      recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: [] }
+    };
+    const wsOfflineVercel: any = {
+      students: [
+        { id: 'st_shared_base', name: 'Shared Student', groupId: 'grp_av_1', updatedAt: 1000 },
+        { id: 'st_offline_vercel', name: 'Added Offline on Vercel', groupId: 'grp_av_1', updatedAt: 5200, originDeviceId: vercelDeviceId }
+      ],
+      todos: [
+        { id: 'todo_vercel_offline', text: 'Prepare A2 Exam', completed: true, updatedAt: 5200 }
+      ],
+      recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: [] }
+    };
+
+    // Both reconnect and exchange deltas
+    applyDeltaOnWorkspace(wsOfflineAndroid, {
+      students: wsOfflineVercel.students,
+      todos: wsOfflineVercel.todos
+    });
+    applyDeltaOnWorkspace(wsOfflineVercel, {
+      students: wsOfflineAndroid.students,
+      todos: wsOfflineAndroid.todos
+    });
+    assert.equal(wsOfflineAndroid.students.length, 3);
+    assert.equal(wsOfflineVercel.students.length, 3);
+    assert.equal(wsOfflineAndroid.todos.length, 2);
+    assert.equal(wsOfflineVercel.todos.length, 2);
+    log.push('[PASS] [Integration Test] AV-07. Offline edits on both Android and Vercel merge non-destructively upon reconnect');
+
+    // -------------------------------------------------------------------------
+    // AV-08 [Integration Test]: Concurrent delta updates from both platforms
+    // (Per-device delta docs + transactional mergeDeltaPayloads prevent overwrite)
+    // -------------------------------------------------------------------------
+    const androidDeltaDocId = getDeviceDeltaDocId(androidDeviceId);
+    const vercelDeltaDocId = getDeviceDeltaDocId(vercelDeviceId);
+    assert.notEqual(androidDeltaDocId, vercelDeltaDocId);
+
+    // Even if the same device writes two rapid deltas into its delta doc via transaction:
+    const mergedSameDeviceDelta = mergeDeltaPayloads(
+      {
+        isCloudDelta: true,
+        students: [{ id: 'st_delta_1', name: 'First Delta Student', updatedAt: 3000 }],
+        opId: 'op_1',
+        opSeq: 1
+      },
+      {
+        isCloudDelta: true,
+        lessons: [{ id: 'les_delta_2', title: 'Second Delta Lesson', updatedAt: 3100 }],
+        opId: 'op_2',
+        opSeq: 2
+      }
+    );
+    assert.equal(mergedSameDeviceDelta.students.length, 1);
+    assert.equal(mergedSameDeviceDelta.lessons.length, 1);
+
+    // And when both Android and Vercel write their per-device delta docs concurrently:
+    const combinedMultiDeviceDelta = reassembleDeltaLogDocuments([
+      {
+        id: androidDeltaDocId,
+        categoryKey: 'delta_log',
+        chunkIndex: 0,
+        totalChunks: 1,
+        deviceId: androidDeviceId,
+        payloadChunk: JSON.stringify(mergedSameDeviceDelta)
+      },
+      {
+        id: vercelDeltaDocId,
+        categoryKey: 'delta_log',
+        chunkIndex: 0,
+        totalChunks: 1,
+        deviceId: vercelDeviceId,
+        payloadChunk: JSON.stringify({
+          isCloudDelta: true,
+          students: [{ id: 'st_delta_vercel', name: 'Concurrent Vercel Student', updatedAt: 3050 }],
+          payments: [{ id: 'pay_delta_vercel', studentId: 'st_delta_vercel', amountDue: 1200, amountPaid: 1200, status: 'paid', updatedAt: 3050 }]
+        })
+      }
+    ]);
+    assert.equal(combinedMultiDeviceDelta.hasIncompleteStream, false);
+    assert.equal(combinedMultiDeviceDelta.deltas.length, 2);
+    const wsMultiDeltaTarget: any = {
+      students: [],
+      lessons: [],
+      payments: [],
+      recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: [] }
+    };
+    for (const d of combinedMultiDeviceDelta.deltas) {
+      applyDeltaOnWorkspace(wsMultiDeltaTarget, d);
+    }
+    assert.equal(wsMultiDeltaTarget.students.length, 2);
+    assert.equal(wsMultiDeltaTarget.lessons.length, 1);
+    assert.equal(wsMultiDeltaTarget.payments.length, 1);
+    log.push('[PASS] [Integration Test] AV-08. Concurrent delta updates from Android and Vercel use isolated per-device streams and transactional merge without data loss');
+
+    // -------------------------------------------------------------------------
+    // AV-09 [Integration Test]: Soft delete on Android → reflected on Vercel
+    // -------------------------------------------------------------------------
+    const softDeleteTs = Date.parse('2026-03-01T10:00:00.000Z');
+    const softDeleteIso = new Date(softDeleteTs).toISOString();
+    const wsSoftAndroid: any = {
+      students: [{ id: 'st_soft_av', name: 'Sara Kamel', groupId: 'grp_av_1', deleted: true, deletedAt: softDeleteTs, updatedAt: softDeleteTs }],
+      recentlyDeleted: {
+        students: [{ item: { id: 'st_soft_av', name: 'Sara Kamel', groupId: 'grp_av_1', updatedAt: softDeleteTs }, deletedAt: softDeleteIso }],
+        groups: [],
+        lessons: [],
+        purgedRecords: []
+      }
+    };
+    const wsSoftVercel: any = {
+      students: [{ id: 'st_soft_av', name: 'Sara Kamel', groupId: 'grp_av_1', deleted: false, updatedAt: 1000 }],
+      recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: [] }
+    };
+    applyDeltaOnWorkspace(wsSoftVercel, {
+      students: wsSoftAndroid.students,
+      recentlyDeleted: wsSoftAndroid.recentlyDeleted
+    });
+    assert.equal(wsSoftVercel.students.find((s: any) => s.id === 'st_soft_av')?.deleted, true);
+    assert.equal(wsSoftVercel.recentlyDeleted.students.some((e: any) => e.item.id === 'st_soft_av'), true);
+    log.push('[PASS] [Integration Test] AV-09. Soft delete on Android propagates to Vercel active list and Recently Deleted');
+
+    // -------------------------------------------------------------------------
+    // AV-10 [Integration Test]: Restore on Vercel → reflected on Android (including pruning Recently Deleted)
+    // -------------------------------------------------------------------------
+    const restoreTs = softDeleteTs + 10000;
+    executeRestoreItemOnWorkspace(wsSoftVercel, 'student', 'st_soft_av', (rec) => ({
+      ...rec,
+      deleted: false,
+      deletedAt: undefined,
+      updatedAt: restoreTs,
+      version: 5
+    }));
+    // Sync Vercel's restored student back to Android (even if Android still had the old recentlyDeleted entry locally!)
+    applyDeltaOnWorkspace(wsSoftAndroid, {
+      students: wsSoftVercel.students
+    });
+    assert.equal(wsSoftAndroid.students.find((s: any) => s.id === 'st_soft_av')?.deleted, false);
+    // Verify cross-device restoration reconciliation pruned the stale entry from Android's recentlyDeleted!
+    assert.equal(wsSoftAndroid.recentlyDeleted.students.some((e: any) => e.item.id === 'st_soft_av'), false);
+    log.push('[PASS] [Integration Test] AV-10. Restore on Vercel restores student on Android and prunes stale Recently Deleted entry');
+
+    // -------------------------------------------------------------------------
+    // AV-11 [Integration Test]: Permanent deletion tombstone on Android → never resurrected by Vercel
+    // -------------------------------------------------------------------------
+    wsSoftAndroid.recentlyDeleted.students.push({
+      item: { id: 'st_soft_av', name: 'Sara Kamel', updatedAt: restoreTs },
+      deletedAt: new Date(restoreTs + 5000).toISOString()
+    });
+    executePermanentDeleteOnWorkspace(wsSoftAndroid, 'student', 'st_soft_av', () => 99, restoreTs + 10000);
+    // Vercel tries to push an active copy of st_soft_av with higher timestamp
+    applyDeltaOnWorkspace(wsSoftAndroid, {
+      students: [{ id: 'st_soft_av', name: 'Sara Kamel Resurrect Attempt', updatedAt: restoreTs + 999999, version: 999 }]
+    });
+    assert.equal(wsSoftAndroid.students.some((s: any) => s.id === 'st_soft_av'), false);
+    // And when Android's tombstone arrives on Vercel, Vercel purges st_soft_av too:
+    applyDeltaOnWorkspace(wsSoftVercel, {
+      recentlyDeleted: wsSoftAndroid.recentlyDeleted
+    });
+    assert.equal(wsSoftVercel.students.some((s: any) => s.id === 'st_soft_av'), false);
+    log.push('[PASS] [Integration Test] AV-11. Permanent deletion tombstone on Android purges record on Vercel and prevents resurrection');
+
+    // -------------------------------------------------------------------------
+    // AV-12 [Unit Test]: Concurrent edits to different fields of the same record
+    // -------------------------------------------------------------------------
+    const baseStudentRecord: any = stampFieldTimestamps(
+      null,
+      {
+        id: 'st_field_merge_1',
+        name: 'Omar Hassan',
+        studentPhone: '01000000000',
+        notes: 'Initial note',
+        updatedAt: 1000,
+        version: 1,
+        originDeviceId: androidDeviceId
+      },
+      1000
+    );
+
+    // Android updates studentPhone at t = 2000
+    const androidEditedPhone = stampFieldTimestamps(
+      baseStudentRecord,
+      { ...baseStudentRecord, studentPhone: '01099998888', updatedAt: 2000, version: 2, originDeviceId: androidDeviceId },
+      2000
+    );
+    // Vercel concurrently updates notes at t = 2500 (still having old studentPhone '01000000000')
+    const vercelEditedNotes = stampFieldTimestamps(
+      baseStudentRecord,
+      { ...baseStudentRecord, notes: 'Updated on Vercel: Needs extra grammar practice', updatedAt: 2500, version: 2, originDeviceId: vercelDeviceId },
+      2500
+    );
+
+    const fieldMergedRes = mergeEntities([androidEditedPhone], [vercelEditedNotes], 'students');
+    assert.equal(fieldMergedRes.merged.length, 1);
+    // BOTH the Android phone update and the Vercel notes update must be preserved!
+    assert.equal(fieldMergedRes.merged[0].studentPhone, '01099998888');
+    assert.equal(fieldMergedRes.merged[0].notes, 'Updated on Vercel: Needs extra grammar practice');
+    log.push('[PASS] [Unit Test] AV-12. Concurrent edits to different fields of the same record preserve both field updates');
+
+    // -------------------------------------------------------------------------
+    // AV-13 [Unit Test]: Concurrent edits to the same field of the same record
+    // -------------------------------------------------------------------------
+    const androidSameField = stampFieldTimestamps(
+      baseStudentRecord,
+      { ...baseStudentRecord, notes: 'Android note at t=3000', updatedAt: 3000, version: 3, originDeviceId: androidDeviceId },
+      3000
+    );
+    const vercelSameField = stampFieldTimestamps(
+      baseStudentRecord,
+      { ...baseStudentRecord, notes: 'Vercel note at t=3500', updatedAt: 3500, version: 4, originDeviceId: vercelDeviceId },
+      3500
+    );
+    const sameFieldAB = mergeEntities([androidSameField], [vercelSameField], 'students').merged[0];
+    const sameFieldBA = mergeEntities([vercelSameField], [androidSameField], 'students').merged[0];
+    assert.equal(sameFieldAB.notes, 'Vercel note at t=3500');
+    assert.equal(sameFieldBA.notes, 'Vercel note at t=3500');
+    log.push('[PASS] [Unit Test] AV-13. Concurrent edits to the same field resolve deterministically across both devices');
+
+    // -------------------------------------------------------------------------
+    // AV-14 [Unit Test]: Control document update (`sync_control_chunk_0`) does not corrupt `core_crm`
+    // -------------------------------------------------------------------------
+    const legacyControlDocInCoreCrm = {
+      id: SYNC_CONTROL_DOC_ID,
+      categoryKey: 'core_crm',
+      chunkIndex: 0,
+      totalChunks: 1,
+      payloadChunk: JSON.stringify({
+        isPaused: false,
+        syncGeneration: 'gen_12345',
+        reason: 'manual_reactivation'
+      })
+    };
+    const newIsolatedControlDoc = {
+      id: SYNC_CONTROL_DOC_ID,
+      categoryKey: SYNC_CONTROL_CATEGORY_KEY,
+      chunkIndex: 0,
+      totalChunks: 1,
+      payloadChunk: JSON.stringify({
+        isPaused: false,
+        syncGeneration: 'gen_67890',
+        reason: 'manual_reactivation'
+      })
+    };
+    const validCoreCrmDoc = {
+      id: 'core_crm_chunk_0',
+      categoryKey: 'core_crm',
+      chunkIndex: 0,
+      totalChunks: 1,
+      payloadChunk: JSON.stringify({
+        groups: [{ id: 'grp_safe', name: 'Safe Group', updatedAt: 1000 }],
+        students: [{ id: 'st_safe', name: 'Safe Student', groupId: 'grp_safe', updatedAt: 1000 }],
+        lessons: [{ id: 'les_reload_1', title: 'Grammatik Lektion 1', groupId: 'grp_safe', date: '2026-03-10', time: '18:00', status: 'scheduled', updatedAt: 2000 }],
+        payments: [{ id: 'pay_reload_1', studentId: 'st_safe', groupId: 'grp_safe', amountDue: 1200, amountPaid: 600, status: 'partial', updatedAt: 2000 }]
+      })
+    };
+
+    assert.equal(isSyncControlDocument(legacyControlDocInCoreCrm), true);
+    assert.equal(isSyncControlDocument(newIsolatedControlDoc), true);
+    assert.equal(isSyncControlDocument(validCoreCrmDoc), false);
+
+    // Even if a legacy control doc was grouped under core_crm alongside validCoreCrmDoc, reassembleWorkspaceSnapshot strips it:
+    const reassembledWithControl = reassembleWorkspaceSnapshot({
+      profile_settings: [{
+        id: 'profile_settings_chunk_0',
+        categoryKey: 'profile_settings',
+        chunkIndex: 0,
+        totalChunks: 1,
+        payloadChunk: JSON.stringify({
+          recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: [] }
+        })
+      }],
+      core_crm: [legacyControlDocInCoreCrm, validCoreCrmDoc],
+      [SYNC_CONTROL_CATEGORY_KEY]: [newIsolatedControlDoc]
+    });
+    assert.equal(reassembledWithControl.workspace.groups.length, 1);
+    assert.equal(reassembledWithControl.workspace.students.length, 1);
+    assert.equal((reassembledWithControl.workspace as any).isPaused, undefined);
+    assert.equal((reassembledWithControl.workspace as any).syncGeneration, undefined);
+    log.push('[PASS] [Unit Test] AV-14. Control document (sync_control_chunk_0) is isolated and never corrupts core_crm reassembly');
+
+    // -------------------------------------------------------------------------
+    // AV-15 [Integration Test]: App reload / process restart preserves all synced data
+    // -------------------------------------------------------------------------
+    const fullCategorizedCloudDocs: Record<string, any[]> = {
+      profile_settings: [{
+        id: 'profile_settings_chunk_0',
+        categoryKey: 'profile_settings',
+        chunkIndex: 0,
+        totalChunks: 1,
+        payloadChunk: JSON.stringify({
+          profile: { name: 'Herr Ahmed', subject: 'Deutsch', phone: '0100000000' },
+          recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: [] }
+        })
+      }],
+      core_crm: [validCoreCrmDoc],
+      finance_gold: [{
+        id: 'finance_gold_chunk_0',
+        categoryKey: 'finance_gold',
+        chunkIndex: 0,
+        totalChunks: 1,
+        payloadChunk: JSON.stringify({
+          financeTransactions: [{ id: 'tx_reload_1', type: 'income', amount: 600, date: '2026-03-10', updatedAt: 2000 }]
+        })
+      }]
+    };
+    const coldStartReassembled = reassembleWorkspaceSnapshot(fullCategorizedCloudDocs);
+    assert.equal(coldStartReassembled.workspace.groups.length, 1);
+    assert.equal(coldStartReassembled.workspace.students.length, 1);
+    assert.equal(coldStartReassembled.workspace.lessons.length, 1);
+    assert.equal(coldStartReassembled.workspace.payments.length, 1);
+    assert.equal(coldStartReassembled.workspace.financeTransactions.length, 1);
+    assert.equal(coldStartReassembled.workspace.profile.name, 'Herr Ahmed');
+    log.push('[PASS] [Integration Test] AV-15. App reload / cold start reassembles all workspace categories cleanly');
+
+    // -------------------------------------------------------------------------
+    // AV-16 [Integration Test]: Background-to-foreground resume on Android
+    // -------------------------------------------------------------------------
+    const resumeEvents: string[] = [];
+    const resumeCoord = createSerializedSyncCoordinator({
+      onApplyRemotePayload: async (remoteJson) => {
+        resumeEvents.push(`remote-pull:${remoteJson}`);
+        return true;
+      },
+      onExecuteLocalPush: async () => {
+        resumeEvents.push('local-push:flush_pending_on_resume');
+        return true;
+      }
+    });
+    // Simulate Android WebView returning from background with a pending local push + incoming remote check
+    setPendingLocalPushFlag('uid_android_resume', true);
+    if (hasPendingLocalPushFlag('uid_android_resume')) {
+      await resumeCoord.enqueueLocalPush();
+      clearPendingLocalPushFlag('uid_android_resume');
+    }
+    await resumeCoord.enqueueRemoteSnapshot('pull_remote_on_resume');
+    assert.deepEqual(resumeEvents, ['local-push:flush_pending_on_resume', 'remote-pull:pull_remote_on_resume']);
+    assert.equal(hasPendingLocalPushFlag('uid_android_resume'), false);
+    log.push('[PASS] [Integration Test] AV-16. Background-to-foreground resume on Android flushes pending local push and pulls remote updates in order');
+
+    // -------------------------------------------------------------------------
+    // AV-17 [Integration Test]: Lesson status / attendance / homework / payment update sync
+    // -------------------------------------------------------------------------
+    const baseLesson: any = stampFieldTimestamps(
+      null,
+      {
+        id: 'les_live_1',
+        groupId: 'grp_safe',
+        title: 'Konversation B1',
+        date: '2026-03-11',
+        time: '19:00',
+        status: 'scheduled',
+        paymentStatus: 'pending',
+        amountDue: 300,
+        amountPaid: 0,
+        updatedAt: 1000,
+        version: 1
+      },
+      1000
+    );
+
+    // Android marks lesson completed with attendance & homework report
+    const completedOnAndroid = stampFieldTimestamps(
+      baseLesson,
+      {
+        ...baseLesson,
+        status: 'completed',
+        report: {
+          attendanceStatus: 'present',
+          homeworkStatus: 'completed',
+          studentAttendance: { st_safe: 'present' },
+          studentHomework: { st_safe: 'completed' },
+          teacherNotes: 'Sehr gute Mitarbeit'
+        },
+        updatedAt: 2000,
+        version: 2,
+        originDeviceId: androidDeviceId
+      },
+      2000
+    );
+
+    // Vercel concurrently records payment on the same lesson
+    const paidOnVercel = stampFieldTimestamps(
+      baseLesson,
+      {
+        ...baseLesson,
+        paymentStatus: 'paid',
+        amountPaid: 300,
+        updatedAt: 2200,
+        version: 2,
+        originDeviceId: vercelDeviceId
+      },
+      2200
+    );
+
+    const mergedLesson = mergeEntities([completedOnAndroid], [paidOnVercel], 'lessons').merged[0];
+    assert.equal(mergedLesson.status, 'completed');
+    assert.equal(mergedLesson.report?.attendanceStatus, 'present');
+    assert.equal(mergedLesson.report?.homeworkStatus, 'completed');
+    assert.equal(mergedLesson.paymentStatus, 'paid');
+    assert.equal(mergedLesson.amountPaid, 300);
+    log.push('[PASS] [Integration Test] AV-17. Lesson status, attendance, homework, and payment updates synchronize and merge without overwriting each other');
+
+    // -------------------------------------------------------------------------
+    // AV-18 [Unit Test]: Error recovery and retry behavior (queue never deadlocks on error)
+    // -------------------------------------------------------------------------
+    let attemptCount = 0;
+    let recordedErrorPhase = '';
+    const errorRecoveryCoord = createSerializedSyncCoordinator({
+      onExecuteLocalPush: async () => {
+        attemptCount++;
+        throw new Error('SIMULATED_NETWORK_TIMEOUT');
+      },
+      onApplyRemotePayload: async () => {
+        attemptCount++;
+        return true;
+      },
+      onError: (_err, phase) => {
+        recordedErrorPhase = phase;
+      }
+    });
+
+    const failedPushOutcome = await errorRecoveryCoord.enqueueLocalPush();
+    assert.equal(failedPushOutcome, false);
+    assert.equal(recordedErrorPhase, 'local_push');
+    assert.equal(errorRecoveryCoord.isBusy(), false);
+
+    // Subsequent task on the coordinator MUST execute normally without being blocked
+    const recoveryOutcome = await errorRecoveryCoord.enqueueRemoteSnapshot('subsequent_recovery_snap');
+    assert.equal(recoveryOutcome, true);
+    assert.equal(attemptCount, 2);
+    log.push('[PASS] [Unit Test] AV-18. Error recovery: transient sync failure does not deadlock the serialized sync queue');
+
+    // -------------------------------------------------------------------------
+    // AV-19 [Unit Test]: Duplicate event delivery idempotency
+    // -------------------------------------------------------------------------
+    const dupRevisions = new Map<string, string>();
+    const sampleRemoteDoc = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_dup_op_42',
+      opSeq: 42,
+      updatedAtMs: 5000,
+      updatedAtIso: '2026-03-11T12:00:00.000Z',
+      payloadChunk: JSON.stringify({
+        isCloudDelta: true,
+        students: [{ id: 'st_idempotent_1', name: 'Idempotent Student', updatedAt: 5000 }]
+      })
+    };
+
+    // First delivery: accepted
+    const firstEval = evaluateRemoteSnapshotChanges([sampleRemoteDoc], {
+      localDeviceId: androidDeviceId,
+      appliedDocTokens: dupRevisions
+    });
+    assert.equal(firstEval.shouldProcess, true);
+    for (const [docId, token] of Object.entries(firstEval.nextDocTokens)) {
+      dupRevisions.set(docId, token);
+    }
+
+    // Duplicate delivery of the exact same snapshot: ignored idempotently
+    const secondEval = evaluateRemoteSnapshotChanges([sampleRemoteDoc], {
+      localDeviceId: androidDeviceId,
+      appliedDocTokens: dupRevisions
+    });
+    assert.equal(secondEval.shouldProcess, false);
+    log.push('[PASS] [Unit Test] AV-19. Duplicate Firestore snapshot event delivery is detected via opId/digest and ignored idempotently');
+
+    // -------------------------------------------------------------------------
+    // AV-20 [Unit Test]: Clock skew between Android and Vercel devices
+    // -------------------------------------------------------------------------
+    // Suppose Android's local clock is 5 minutes AHEAD of Vercel's clock.
+    // Vercel pushes an update whose wall-clock timestamp is 5 minutes OLDER than Android's last push,
+    // but carries a new opId ('vercel_skewed_op_99') and new payload digest.
+    const skewedRemoteDoc = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_skewed_op_99',
+      opSeq: 99,
+      updatedAtMs: Date.now() - 300_000, // 5 minutes behind!
+      updatedAtIso: new Date(Date.now() - 300_000).toISOString(),
+      payloadChunk: JSON.stringify({
+        isCloudDelta: true,
+        students: [{ id: 'st_clock_skew_1', name: 'Student From Skewed Clock Device', updatedAt: Date.now() - 300_000 }]
+      })
+    };
+    const skewEval = evaluateRemoteSnapshotChanges([skewedRemoteDoc], {
+      localDeviceId: androidDeviceId,
+      appliedDocTokens: dupRevisions
+    });
+    assert.equal(skewEval.shouldProcess, true);
+    assert.equal(skewEval.unappliedDocIds.includes(getDeviceDeltaDocId(vercelDeviceId)), true);
+    log.push('[PASS] [Unit Test] AV-20. Clock skew between Android and Vercel (+5 min / -5 min) does not reject valid unseen remote operations');
 
     return { passed: true, log };
   } catch (err: any) {

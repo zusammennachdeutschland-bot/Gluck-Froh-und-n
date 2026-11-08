@@ -20,6 +20,9 @@ import { SocialLogin } from '@capgo/capacitor-social-login';
 import {
   getFirestore,
   initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  memoryLocalCache,
   collection,
   doc,
   setDoc,
@@ -49,10 +52,33 @@ export const FIREBASE_CONFIG = {
 const app = getApps().length > 0 ? getApp() : initializeApp(FIREBASE_CONFIG);
 
 function initFirestoreDb() {
+  const hasIndexedDb =
+    typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined';
+
+  if (hasIndexedDb) {
+    try {
+      return initializeFirestore(
+        app,
+        {
+          localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager()
+          }),
+          experimentalAutoDetectLongPolling: true
+        },
+        FIREBASE_CONFIG.firestoreDatabaseId
+      );
+    } catch {
+      // Fall through if IndexedDB persistence is restricted or Firestore instance is already initialized
+    }
+  }
+
   try {
     return initializeFirestore(
       app,
-      { experimentalAutoDetectLongPolling: true },
+      {
+        localCache: memoryLocalCache(),
+        experimentalAutoDetectLongPolling: true
+      },
       FIREBASE_CONFIG.firestoreDatabaseId
     );
   } catch {

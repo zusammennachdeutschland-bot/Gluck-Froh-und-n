@@ -3295,10 +3295,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const deleteGroup = async (id: string) => {
     const targetGroup = groups.find(g => g.id === id);
     if (targetGroup) {
-      setRecentlyDeleted(prev => ({
-        ...prev,
-        groups: [{ item: targetGroup, deletedAt: new Date().toISOString() }, ...prev.groups]
-      }));
+      setRecentlyDeleted(prev => {
+        const next = {
+          ...prev,
+          groups: [{ item: targetGroup, deletedAt: new Date().toISOString() }, ...prev.groups]
+        };
+        recentlyDeletedRef.current = next;
+        storage.setItem('dl_recently_deleted', next);
+        return next;
+      });
     }
     setGroups(prev => prev.map(g => g.id === id ? wrapDeletion(g) : g));
 
@@ -3351,18 +3356,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const groupLessonIds = new Set(groupLessons.map(l => l.id));
 
     if (targetGroup) {
-      setRecentlyDeleted(prev => ({
-        ...prev,
-        groups: [{ item: targetGroup, deletedAt: new Date().toISOString() }, ...prev.groups],
-        students: [
-          ...groupStudents.map(s => ({ item: s, deletedAt: new Date().toISOString() })),
-          ...prev.students
-        ],
-        lessons: [
-          ...groupLessons.map(l => ({ item: l, deletedAt: new Date().toISOString() })),
-          ...prev.lessons
-        ]
-      }));
+      setRecentlyDeleted(prev => {
+        const next = {
+          ...prev,
+          groups: [{ item: targetGroup, deletedAt: new Date().toISOString() }, ...prev.groups],
+          students: [
+            ...groupStudents.map(s => ({ item: s, deletedAt: new Date().toISOString() })),
+            ...prev.students
+          ],
+          lessons: [
+            ...groupLessons.map(l => ({ item: l, deletedAt: new Date().toISOString() })),
+            ...prev.lessons
+          ]
+        };
+        recentlyDeletedRef.current = next;
+        storage.setItem('dl_recently_deleted', next);
+        return next;
+      });
     }
 
     setGroups(prev => prev.map(g => g.id === id ? wrapDeletion(g) : g));
@@ -3477,10 +3487,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const deleteStudent = (id: string) => {
     const targetStudent = students.find(s => s.id === id);
     if (targetStudent) {
-      setRecentlyDeleted(prev => ({
-        ...prev,
-        students: [{ item: targetStudent, deletedAt: new Date().toISOString() }, ...prev.students]
-      }));
+      setRecentlyDeleted(prev => {
+        const next = {
+          ...prev,
+          students: [{ item: targetStudent, deletedAt: new Date().toISOString() }, ...prev.students]
+        };
+        recentlyDeletedRef.current = next;
+        storage.setItem('dl_recently_deleted', next);
+        return next;
+      });
     }
     setStudents(prev => {
       const next = prev.map(s => {
@@ -3505,13 +3520,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const idSet = new Set(ids);
     const studentsToDelete = students.filter(s => idSet.has(s.id) && !s.deleted);
     if (studentsToDelete.length > 0) {
-      setRecentlyDeleted(prev => ({
-        ...prev,
-        students: [
-          ...studentsToDelete.map(item => ({ item, deletedAt: new Date().toISOString() })),
-          ...prev.students
-        ]
-      }));
+      setRecentlyDeleted(prev => {
+        const next = {
+          ...prev,
+          students: [
+            ...studentsToDelete.map(item => ({ item, deletedAt: new Date().toISOString() })),
+            ...prev.students
+          ]
+        };
+        recentlyDeletedRef.current = next;
+        storage.setItem('dl_recently_deleted', next);
+        return next;
+      });
       setStudents(prev => {
         const next = prev.map(s => {
           if (idSet.has(s.id)) {
@@ -3537,13 +3557,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const deleteStudentsByGroup = (groupId: string) => {
     const studentsToDelete = students.filter(s => s.groupId === groupId && !s.deleted);
     if (studentsToDelete.length > 0) {
-      setRecentlyDeleted(prev => ({
-        ...prev,
-        students: [
-          ...studentsToDelete.map(item => ({ item, deletedAt: new Date().toISOString() })),
-          ...prev.students
-        ]
-      }));
+      setRecentlyDeleted(prev => {
+        const next = {
+          ...prev,
+          students: [
+            ...studentsToDelete.map(item => ({ item, deletedAt: new Date().toISOString() })),
+            ...prev.students
+          ]
+        };
+        recentlyDeletedRef.current = next;
+        storage.setItem('dl_recently_deleted', next);
+        return next;
+      });
       setStudents(prev => {
         const next = prev.map(s => {
           if (s.groupId === groupId) {
@@ -4651,10 +4676,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const deleteLesson = (id: string) => {
     const targetLesson = (fullLessonsRef.current || lessons).find(l => l.id === id) || (selectedLesson?.id === id ? selectedLesson : null);
     if (targetLesson) {
-      setRecentlyDeleted(prev => ({
-        ...prev,
-        lessons: [{ item: targetLesson, deletedAt: new Date().toISOString() }, ...prev.lessons]
-      }));
+      setRecentlyDeleted(prev => {
+        const next = {
+          ...prev,
+          lessons: [{ item: targetLesson, deletedAt: new Date().toISOString() }, ...prev.lessons]
+        };
+        recentlyDeletedRef.current = next;
+        storage.setItem('dl_recently_deleted', next);
+        return next;
+      });
     }
     const updater = (allLessons: Lesson[]) => {
       let found = false;
@@ -6414,7 +6444,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const gold = (await storage.getItem<GoldHolding[]>('gluck_gold_holdings')) || [];
     const financeNotifs = (await storage.getItem<FinanceNotification[]>('dl_finance_notifications')) || [];
     const notes = (await storage.getItem<SchoolNote[]>('dl_school_notes')) || [];
-    const recDeleted = (await storage.getItem<any>('dl_recently_deleted')) || recentlyDeleted || { students: [], groups: [], lessons: [] };
+    const recDeleted = recentlyDeletedRef.current || (await storage.getItem<any>('dl_recently_deleted')) || recentlyDeleted || { students: [], groups: [], lessons: [], purgedRecords: [] };
     const dismissedLessons = (await storage.getItem<string[]>('dl_dismissed_dashboard_lessons')) || dismissedDashboardLessonIds || [];
 
     const backupObj: BackupData & { prunedLessonIds?: string[] } = {
@@ -6522,28 +6552,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           await storage.setItem('dl_profile', mergedProfile);
         }
       }
+      let finalGroupsForTrashReconcile = groups;
       if (hasGroups && data.groups) {
         const mergedGroups = mergeEntities(groups, data.groups, { entityTypeName: 'group', purgedRecords: activePurged }).merged;
+        finalGroupsForTrashReconcile = mergedGroups;
         setGroups(mergedGroups);
         await storage.setItem('dl_groups', mergedGroups);
       } else if (activePurged.length > 0 && groups.length > 0) {
         const sweptGroups = mergeEntities(groups, [], { entityTypeName: 'group', purgedRecords: activePurged }).merged;
+        finalGroupsForTrashReconcile = sweptGroups;
         if (sweptGroups.length !== groups.length) {
           setGroups(sweptGroups);
           await storage.setItem('dl_groups', sweptGroups);
         }
       }
+      let finalStudentsForTrashReconcile = students;
       if (hasStudents && data.students) {
         const mergedStudents = mergeEntities(students, data.students, { entityTypeName: 'student', purgedRecords: activePurged }).merged;
+        finalStudentsForTrashReconcile = mergedStudents;
         setStudents(mergedStudents);
         await storage.setItem('dl_students', mergedStudents);
       } else if (activePurged.length > 0 && students.length > 0) {
         const sweptStudents = mergeEntities(students, [], { entityTypeName: 'student', purgedRecords: activePurged }).merged;
+        finalStudentsForTrashReconcile = sweptStudents;
         if (sweptStudents.length !== students.length) {
           setStudents(sweptStudents);
           await storage.setItem('dl_students', sweptStudents);
         }
       }
+      let finalLessonsForTrashReconcile = fullLessonsRef.current || [];
       if (hasLessons && data.lessons) {
         const allLocalLessons = fullLessonsRef.current || [];
         const mergedRawLessons = mergeEntities(allLocalLessons, Array.isArray(data.lessons) ? data.lessons : [], {
@@ -6556,18 +6593,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           seenL.add(l.id);
           return true;
         });
+        finalLessonsForTrashReconcile = dedupedLessons;
         fullLessonsRef.current = dedupedLessons;
         await storage.setItem('dl_lessons', dedupedLessons);
         setLessons(filterActiveLessons(dedupedLessons));
       } else if (activePurged.length > 0 && (fullLessonsRef.current?.length || 0) > 0) {
         const allLocalLessons = fullLessonsRef.current || [];
         const sweptLessons = mergeEntities(allLocalLessons, [], { entityTypeName: 'lesson', purgedRecords: activePurged }).merged;
+        finalLessonsForTrashReconcile = sweptLessons;
         if (sweptLessons.length !== allLocalLessons.length) {
           fullLessonsRef.current = sweptLessons;
           await storage.setItem('dl_lessons', sweptLessons);
           setLessons(filterActiveLessons(sweptLessons));
         }
       }
+
+      // Cross-device restoration reconciliation: remove items from recentlyDeleted if they are active with updatedAt > deletedAt
+      if (mergedRecentlyDeleted) {
+        const pruneRestoredEntries = (entries: any[], activeEntities: any[]) => {
+          if (!Array.isArray(entries) || entries.length === 0) return [];
+          const activeMap = new Map<string, number>();
+          for (const item of activeEntities) {
+            if (item && item.id && !item.deleted) {
+              activeMap.set(item.id, typeof item.updatedAt === 'number' ? item.updatedAt : 0);
+            }
+          }
+          return entries.filter((entry: any) => {
+            const id = entry?.item?.id;
+            if (!id || !activeMap.has(id)) return true;
+            const activeUpdatedAt = activeMap.get(id) || 0;
+            const entryDeletedMs = entry.deletedAt ? new Date(entry.deletedAt).getTime() : 0;
+            const itemDeletedMs = typeof entry?.item?.deletedAt === 'number' ? entry.item.deletedAt : 0;
+            const effectiveDeletedMs = Math.max(
+              Number.isNaN(entryDeletedMs) ? 0 : entryDeletedMs,
+              itemDeletedMs
+            );
+            return !(activeUpdatedAt > effectiveDeletedMs);
+          });
+        };
+
+        const reconciledRecDeleted = {
+          ...mergedRecentlyDeleted,
+          students: pruneRestoredEntries(mergedRecentlyDeleted.students || [], finalStudentsForTrashReconcile),
+          groups: pruneRestoredEntries(mergedRecentlyDeleted.groups || [], finalGroupsForTrashReconcile),
+          lessons: pruneRestoredEntries(mergedRecentlyDeleted.lessons || [], finalLessonsForTrashReconcile),
+        };
+        if (
+          reconciledRecDeleted.students.length !== (mergedRecentlyDeleted.students || []).length ||
+          reconciledRecDeleted.groups.length !== (mergedRecentlyDeleted.groups || []).length ||
+          reconciledRecDeleted.lessons.length !== (mergedRecentlyDeleted.lessons || []).length
+        ) {
+          mergedRecentlyDeleted = reconciledRecDeleted;
+          recentlyDeletedRef.current = reconciledRecDeleted;
+          setRecentlyDeleted(reconciledRecDeleted);
+          await storage.setItem('dl_recently_deleted', reconciledRecDeleted);
+        }
+      }
+
       if (hasPayments && data.payments) {
         const allLocalPayments = fullPaymentsRef.current || [];
         const mergedRawPayments = mergeEntities(allLocalPayments, Array.isArray(data.payments) ? data.payments : [], {
@@ -6589,14 +6671,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_notifications', data.notifications);
       }
       if (hasBackupSection(parsed, 'certificates') && data.certificates) {
-        const mergedCerts = isCloudDelta && certificates.length > 0
+        const mergedCerts = certificates.length > 0
           ? mergeEntities(certificates, data.certificates, 'certificates').merged
           : data.certificates;
         setCertificates(mergedCerts);
         await storage.setItem('dl_certificates', mergedCerts);
       }
       if (hasBackupSection(parsed, 'todos') && data.todos) {
-        const mergedTodos = isCloudDelta && todos.length > 0
+        const mergedTodos = todos.length > 0
           ? mergeEntities(todos, data.todos, 'todos').merged
           : data.todos;
         setTodos(mergedTodos);
@@ -6622,28 +6704,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_inspiration_messages', data.inspirationMessages);
       }
       if (hasBackupSection(parsed, 'hodStudents') && data.hodStudents) {
-        const mergedHodSt = isCloudDelta && hodStudents.length > 0
+        const mergedHodSt = hodStudents.length > 0
           ? mergeEntities(hodStudents, data.hodStudents, 'hodStudents').merged
           : data.hodStudents;
         setHodStudents(mergedHodSt);
         await storage.setItem('hod_german_students', mergedHodSt);
       }
       if (hasBackupSection(parsed, 'hodComplaints') && data.hodComplaints) {
-        const mergedHodComp = isCloudDelta && hodComplaints.length > 0
+        const mergedHodComp = hodComplaints.length > 0
           ? mergeEntities(hodComplaints, data.hodComplaints, 'hodComplaints').merged
           : data.hodComplaints;
         setHodComplaints(mergedHodComp);
         await storage.setItem('hod_complaints', mergedHodComp);
       }
       if (hasBackupSection(parsed, 'hodActionPlans') && data.hodActionPlans) {
-        const mergedHodPlans = isCloudDelta && hodActionPlans.length > 0
+        const mergedHodPlans = hodActionPlans.length > 0
           ? mergeEntities(hodActionPlans, data.hodActionPlans, 'hodActionPlans').merged
           : data.hodActionPlans;
         setHodActionPlans(mergedHodPlans);
         await storage.setItem('hod_student_action_plans', mergedHodPlans);
       }
       if (hasBackupSection(parsed, 'hodVisits') && data.hodVisits) {
-        const mergedHodVisits = isCloudDelta && hodVisits.length > 0
+        const mergedHodVisits = hodVisits.length > 0
           ? mergeEntities(hodVisits, data.hodVisits, 'hodVisits').merged
           : data.hodVisits;
         setHodVisits(mergedHodVisits);
@@ -6651,42 +6733,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       if (hasBackupSection(parsed, 'schoolNotes') && data.schoolNotes) {
         const localNotes = (await storage.getItem<SchoolNote[]>('dl_school_notes')) || [];
-        const mergedNotes = isCloudDelta && localNotes.length > 0
+        const mergedNotes = localNotes.length > 0
           ? mergeEntities(localNotes, data.schoolNotes, 'schoolNotes').merged
           : data.schoolNotes;
         setSchoolNotes(mergedNotes);
         await storage.setItem('dl_school_notes', mergedNotes);
       }
       if (hasBackupSection(parsed, 'financeAccounts') && data.financeAccounts) {
-        const mergedAcc = isCloudDelta && financeAccounts.length > 0
+        const mergedAcc = financeAccounts.length > 0
           ? mergeEntities(financeAccounts, data.financeAccounts, 'financeAccounts').merged
           : data.financeAccounts;
         setFinanceAccounts(mergedAcc);
         await storage.setItem('dl_finance_accounts', mergedAcc);
       }
       if (hasBackupSection(parsed, 'financeCategories') && data.financeCategories) {
-        const mergedCats = isCloudDelta && financeCategories.length > 0
+        const mergedCats = financeCategories.length > 0
           ? mergeEntities(financeCategories, data.financeCategories, 'financeCategories').merged
           : data.financeCategories;
         setFinanceCategories(mergedCats);
         await storage.setItem('dl_finance_categories', mergedCats);
       }
       if (hasBackupSection(parsed, 'financeTransactions') && data.financeTransactions) {
-        const mergedTx = isCloudDelta && financeTransactions.length > 0
+        const mergedTx = financeTransactions.length > 0
           ? mergeEntities(financeTransactions, data.financeTransactions, 'financeTransactions').merged
           : data.financeTransactions;
         setFinanceTransactions(mergedTx);
         await storage.setItem('dl_finance_transactions', mergedTx);
       }
       if (hasBackupSection(parsed, 'financeRecurring') && data.financeRecurring) {
-        const mergedRec = isCloudDelta && financeRecurring.length > 0
+        const mergedRec = financeRecurring.length > 0
           ? mergeEntities(financeRecurring, data.financeRecurring, 'financeRecurring').merged
           : data.financeRecurring;
         setFinanceRecurring(mergedRec);
         await storage.setItem('dl_finance_recurring', mergedRec);
       }
       if (hasBackupSection(parsed, 'financeInstallments') && data.financeInstallments) {
-        const mergedInst = isCloudDelta && financeInstallments.length > 0
+        const mergedInst = financeInstallments.length > 0
           ? mergeEntities(financeInstallments, data.financeInstallments, 'financeInstallments').merged
           : data.financeInstallments;
         setFinanceInstallments(mergedInst);
@@ -6694,7 +6776,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       if (hasBackupSection(parsed, 'customAiBackgrounds') && data.customAiBackgrounds) {
         const localAi = (await storage.getItem<AICertificateBackground[]>('dl_custom_ai_backgrounds')) || [];
-        const mergedAi = isCloudDelta && localAi.length > 0
+        const mergedAi = localAi.length > 0
           ? mergeEntities(localAi, data.customAiBackgrounds, 'customAiBackgrounds').merged
           : data.customAiBackgrounds;
         await storage.setItem('dl_custom_ai_backgrounds', mergedAi);
@@ -6713,7 +6795,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await storage.setItem('dl_dismissed_dashboard_lessons', mergedDismissed);
       }
       if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings) {
-        const mergedGold = isCloudDelta && goldHoldings.length > 0
+        const mergedGold = goldHoldings.length > 0
           ? mergeEntities(goldHoldings, data.goldHoldings, 'goldHoldings').merged
           : data.goldHoldings;
         setGoldHoldings(mergedGold);
@@ -6721,7 +6803,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       if (hasBackupSection(parsed, 'financeNotifications') && data.financeNotifications) {
         const localFinNotif = (await storage.getItem<FinanceNotification[]>('dl_finance_notifications')) || [];
-        const mergedFinNotif = isCloudDelta && localFinNotif.length > 0
+        const mergedFinNotif = localFinNotif.length > 0
           ? mergeEntities(localFinNotif, data.financeNotifications, 'financeNotifications').merged
           : data.financeNotifications;
         setFinanceNotifications(mergedFinNotif);
@@ -6736,7 +6818,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const localCustomOnly = (lernstudioSets as any[]).filter(
           (s: any) => s && s.id && !DEFAULT_LERNSTUDIO_SETS.some((d) => d.id === s.id)
         );
-        const mergedCustom = isCloudDelta && localCustomOnly.length > 0
+        const mergedCustom = localCustomOnly.length > 0
           ? mergeEntities(localCustomOnly, incomingCustomOnly, 'lernstudioSets').merged
           : incomingCustomOnly;
 
