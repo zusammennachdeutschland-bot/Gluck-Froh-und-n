@@ -54,6 +54,240 @@ export function isGroupPerLesson(group?: Partial<Group> | null): boolean {
   );
 }
 
+export interface LessonCycleResolution {
+  sessionNumber: number;
+  totalCycleSessions: number;
+  cycleIndex: number;
+  sequenceIndex: number;
+  isPerLesson: boolean;
+  isExcluded: boolean;
+}
+
+export interface LessonCycleOptions {
+  group?: Partial<Group> | null;
+  student?: { id?: string; name?: string; groupId?: string; paymentPlan?: string; bundleSize?: number } | null;
+  students?: Array<{ id: string; name: string; groupId?: string; paymentPlan?: string; bundleSize?: number }>;
+  forceRecalculate?: boolean;
+}
+
+/**
+ * Deterministic chronological comparator for lessons:
+ * 1. Date (YYYY-MM-DD) + normalized time (HH:MM, fallback '00:00')
+ * 2. createdAt timestamp (if present on both records)
+ * 3. Lexical lesson ID tie-breaker
+ */
+export const compareLessonsChronologically = (
+  a: Partial<Lesson>,
+  b: Partial<Lesson>
+): number => {
+  const dateA = (a.date || '').trim();
+  const dateB = (b.date || '').trim();
+  const timeA = `${dateA}T${normalizeTime(a.time) || '00:00'}`;
+  const timeB = `${dateB}T${normalizeTime(b.time) || '00:00'}`;
+  if (timeA !== timeB) {
+    return timeA.localeCompare(timeB);
+  }
+
+  const rawCreatedA = (a as any).createdAt;
+  const rawCreatedB = (b as any).createdAt;
+  const createdA = typeof rawCreatedA === 'number' ? rawCreatedA : (rawCreatedA ? Date.parse(String(rawCreatedA)) : NaN);
+  const createdB = typeof rawCreatedB === 'number' ? rawCreatedB : (rawCreatedB ? Date.parse(String(rawCreatedB)) : NaN);
+  if (!Number.isNaN(createdA) && !Number.isNaN(createdB) && createdA !== createdB) {
+    return createdA - createdB;
+  }
+
+  return String(a.id || '').localeCompare(String(b.id || ''));
+};
+
+const doesLessonMatchScope = (
+  candidate: Partial<Lesson>,
+  targetLesson: Partial<Lesson>,
+  options?: LessonCycleOptions
+): boolean => {
+  const targetGroupId = (targetLesson.groupId || options?.group?.id || '').trim();
+  const targetGroupName = (options?.group?.name || targetLesson.groupName || '').trim().toLowerCase();
+  const targetStudentId = (targetLesson.studentId || options?.student?.id || '').trim();
+  const rawTargetStudentName = targetLesson.studentName || (targetLesson as any).quickStudentName || options?.student?.name;
+  const targetStudentName = rawTargetStudentName ? normalizeName(rawTargetStudentName) : '';
+
+  if (targetGroupId) {
+    if ((candidate.groupId || '').trim() === targetGroupId) return true;
+    if (!candidate.groupId && targetGroupName) {
+      const cGroupName = (candidate.groupName || '').trim().toLowerCase();
+      if (cGroupName && cGroupName === targetGroupName) return true;
+    }
+    return false;
+  }
+
+  if (targetGroupName) {
+    const cGroupName = (candidate.groupName || '').trim().toLowerCase();
+    if (cGroupName && cGroupName === targetGroupName) return true;
+  }
+
+  // Individual / private student scope (no group)
+  if (targetStudentId) {
+    if (!candidate.groupId && (candidate.studentId || '').trim() === targetStudentId) {
+      return true;
+    }
+    if (options?.students && candidate.groupId) {
+      const st = options.students.find(s => s.id === targetStudentId);
+      if (st?.groupId && st.groupId === candidate.groupId) {
+        return true;
+      }
+    }
+  }
+
+  if (targetStudentName && !candidate.groupId) {
+    const cName = normalizeName(candidate.studentName || (candidate as any).quickStudentName);
+    if (cName && (cName === targetStudentName || cName.includes(targetStudentName) || targetStudentName.includes(cName))) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+/**
+ * Single authoritative source of truth for resolving a lesson's sequential cycle number.
+ * Strictly excludes cancelled (status === 'cancelled') and deleted (deleted === true) lessons,
+ * orders active lessons deterministically by date/time/createdAt/id, and computes:
+ *   sessionNumber = ((startingSessionNumber - 1 + sequenceIndex) % totalCycleSessions) + 1
+ */
+export const resolveLessonCycleNumber = (
+  lesson: Partial<Lesson> | null | undefined,
+  allLessons: Lesson[],
+  options?: LessonCycleOptions
+): LessonCycleResolution => {
+  const isPerLesson = Boolean(
+    isGroupPerLesson(options?.group) ||
+    (!options?.group && options?.student && (options.student.paymentPlan === 'per_lesson' || options.student.bundleSize === 1)) ||
+    (!options?.group && !options?.student && lesson?.totalSessionsInPackage === 1)
+  );
+
+  const totalCycleSessions = isPerLesson
+    ? 1
+    : (options?.group?.sessionCount && options.group.sessionCount > 1)
+      ? options.group.sessionCount
+      : (options?.student?.bundleSize && options.student.bundleSize > 1)
+        ? options.student.bundleSize
+        : (lesson?.totalSessionsInPackage && lesson.totalSessionsInPackage > 1)
+          ? lesson.totalSessionsInPackage
+          : 4;
+
+  if (!lesson) {
+    return {
+      sessionNumber: 1,
+      totalCycleSessions,
+      cycleIndex: 0,
+      sequenceIndex: 0,
+      isPerLesson,
+      isExcluded: false
+    };
+  }
+
+  const isExcluded = Boolean(lesson.deleted || lesson.status === 'cancelled');
+
+  if (isPerLesson) {
+    return {
+      sessionNumber: isExcluded ? 0 : 1,
+      totalCycleSessions: 1,
+      cycleIndex: 0,
+      sequenceIndex: isExcluded ? -1 : 0,
+      isPerLesson: true,
+      isExcluded
+    };
+  }
+
+  if (isExcluded) {
+    return {
+      sessionNumber: 0,
+      totalCycleSessions,
+      cycleIndex: -1,
+      sequenceIndex: -1,
+      isPerLesson: false,
+      isExcluded: true
+    };
+  }
+
+  const startingSessionNumber = Math.min(
+    totalCycleSessions,
+    Math.max(1, options?.group?.startingSessionNumber || 1)
+  );
+
+  const safeAllLessons = Array.isArray(allLessons) ? allLessons : [];
+  const scopeLessons = safeAllLessons.filter(l => l && doesLessonMatchScope(l, lesson, options));
+
+  // Fallback only when no lesson collection was supplied at all (e.g. isolated preview with empty array)
+  if (scopeLessons.length === 0 && safeAllLessons.length === 0) {
+    const fallbackNum = (typeof lesson.sessionNumber === 'number' && lesson.sessionNumber >= 1)
+      ? (((lesson.sessionNumber - 1) % totalCycleSessions) + 1)
+      : startingSessionNumber;
+    return {
+      sessionNumber: fallbackNum,
+      totalCycleSessions,
+      cycleIndex: 0,
+      sequenceIndex: 0,
+      isPerLesson: false,
+      isExcluded: false
+    };
+  }
+
+  const activeScopeLessons = scopeLessons.filter(l => !l.deleted && l.status !== 'cancelled');
+
+  // Ensure the target lesson is represented in the chronological list even if it's an unsaved draft/probe
+  const hasTargetInList = Boolean(
+    lesson.id && activeScopeLessons.some(l => l.id === lesson.id)
+  );
+  const chronologicalList: Array<Partial<Lesson>> = hasTargetInList
+    ? [...activeScopeLessons]
+    : [...activeScopeLessons, lesson];
+
+  chronologicalList.sort(compareLessonsChronologically);
+
+  let sequenceIndex = -1;
+  if (lesson.id) {
+    sequenceIndex = chronologicalList.findIndex(l => l.id === lesson.id);
+  }
+  if (sequenceIndex === -1) {
+    sequenceIndex = chronologicalList.findIndex(l => l === lesson);
+  }
+  if (sequenceIndex === -1) {
+    sequenceIndex = 0;
+  }
+
+  const absoluteOffset = (startingSessionNumber - 1) + sequenceIndex;
+  const sessionNumber = (absoluteOffset % totalCycleSessions) + 1;
+  const cycleIndex = Math.floor(absoluteOffset / totalCycleSessions);
+
+  return {
+    sessionNumber,
+    totalCycleSessions,
+    cycleIndex,
+    sequenceIndex,
+    isPerLesson: false,
+    isExcluded: false
+  };
+};
+
+/**
+ * Given a target lesson and a teacher-selected session number M (1..totalCycleSessions),
+ * calculates the exact startingSessionNumber for the group so that the target lesson at
+ * chronological sequenceIndex k resolves to M and all other lessons stay in continuous sequence.
+ */
+export const computeStartingSessionNumberForTargetLesson = (
+  targetLesson: Partial<Lesson>,
+  desiredSessionNumber: number,
+  allLessons: Lesson[],
+  options?: LessonCycleOptions
+): number => {
+  const resolution = resolveLessonCycleNumber(targetLesson, allLessons, options);
+  if (resolution.isPerLesson || resolution.totalCycleSessions <= 1) return 1;
+  const S = resolution.totalCycleSessions;
+  const clampedDesired = Math.min(S, Math.max(1, desiredSessionNumber));
+  const k = Math.max(0, resolution.sequenceIndex);
+  return ((((clampedDesired - 1 - k) % S) + S) % S) + 1;
+};
+
 export const getGroupCycleInfo = (
   group: Partial<Group> | null | undefined,
   lessons?: Lesson[],
@@ -99,38 +333,26 @@ export const getGroupCycleInfo = (
     Math.max(1, group.startingSessionNumber || 1)
   );
 
-  const groupLessons = (lessons || []).filter(l => l.groupId === group.id && !l.deleted && l.status !== 'cancelled');
+  const groupLessons = (lessons || [])
+    .filter(l => (l.groupId === group.id || (!l.groupId && group.name && l.groupName && l.groupName.trim().toLowerCase() === group.name.trim().toLowerCase())) && !l.deleted && l.status !== 'cancelled')
+    .sort(compareLessonsChronologically);
 
-  const completedLessons = groupLessons
-    .filter(l => l.status === 'completed')
-    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
-
+  const completedLessons = groupLessons.filter(l => l.status === 'completed');
   const inProgressLesson = groupLessons.find(l => l.status === 'in_progress');
-
-  const upcomingScheduled = groupLessons
-    .filter(l => l.status === 'scheduled')
-    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+  const upcomingScheduled = groupLessons.filter(l => l.status === 'scheduled');
 
   let currentSessionNumber = startingSessionNumber;
-
-  if (inProgressLesson && typeof inProgressLesson.sessionNumber === 'number' && inProgressLesson.sessionNumber >= 1) {
-    currentSessionNumber = ((inProgressLesson.sessionNumber - 1) % sessionCount) + 1;
-  } else if (upcomingScheduled.length > 0 && typeof upcomingScheduled[0].sessionNumber === 'number' && upcomingScheduled[0].sessionNumber >= 1) {
-    currentSessionNumber = ((upcomingScheduled[0].sessionNumber - 1) % sessionCount) + 1;
-  } else if (inProgressLesson) {
-    currentSessionNumber = ((startingSessionNumber - 1 + completedLessons.length) % sessionCount) + 1;
+  if (inProgressLesson) {
+    currentSessionNumber = resolveLessonCycleNumber(inProgressLesson, groupLessons, { group }).sessionNumber;
+  } else if (upcomingScheduled.length > 0) {
+    currentSessionNumber = resolveLessonCycleNumber(upcomingScheduled[0], groupLessons, { group }).sessionNumber;
   } else if (completedLessons.length > 0) {
-    const lastCompleted = completedLessons[completedLessons.length - 1];
-    if (typeof lastCompleted?.sessionNumber === 'number' && lastCompleted.sessionNumber >= 1) {
-      currentSessionNumber = (lastCompleted.sessionNumber % sessionCount) + 1;
-    } else {
-      currentSessionNumber = ((startingSessionNumber - 1 + completedLessons.length) % sessionCount) + 1;
-    }
+    currentSessionNumber = ((startingSessionNumber - 1 + completedLessons.length) % sessionCount) + 1;
   }
 
   const completedInCycle = currentSessionNumber - 1;
   const progressPercent = Math.min(100, Math.round((completedInCycle / sessionCount) * 100));
-  const cycleNumber = Math.floor(completedLessons.length / sessionCount) + 1;
+  const cycleNumber = Math.floor(((startingSessionNumber - 1) + completedLessons.length) / sessionCount) + 1;
 
   const label = language === 'ar'
     ? `الحصة ${currentSessionNumber} من ${sessionCount}`
@@ -155,196 +377,69 @@ export const isPendingStatus = (status: string) => {
 };
 
 /**
- * Calculates the exact sequential session number for any lesson,
- * strictly prioritizing explicit lesson.sessionNumber when present,
- * and strictly excluding cancelled lessons (status === 'cancelled') and deleted lessons.
- * This guarantees consistent cycle numbers across Finance, Reports, History, and Modals.
+ * Calculates the exact sequential session number for any lesson using the single
+ * authoritative chronological numbering engine (resolveLessonCycleNumber).
+ * Cancelled and deleted lessons never consume a session number.
  */
 export const calculateSequentialSessionNumber = (
   lesson: Partial<Lesson> | null | undefined,
   allLessons: Lesson[],
-  options?: {
-    group?: Partial<Group> | null;
-    student?: { id?: string; name?: string; groupId?: string } | null;
-    students?: Array<{ id: string; name: string; groupId?: string }>;
-    forceRecalculate?: boolean;
-  }
+  options?: LessonCycleOptions
 ): number => {
   if (!lesson) return 1;
-
-  // Single lesson groups / per-lesson payments always have session number 1
-  const isPerLesson = isGroupPerLesson(options?.group);
-  if (isPerLesson) return 1;
-
-  const cycleTotalSessions = (options?.group?.sessionCount && options.group.sessionCount > 1)
-    ? options.group.sessionCount
-    : (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 ? lesson.totalSessionsInPackage : 4);
-
-  // Priority 1: If the lesson ALREADY has a valid session number explicitly set, respect it!
-  if (
-    !options?.forceRecalculate &&
-    typeof lesson.sessionNumber === 'number' &&
-    lesson.sessionNumber >= 1 &&
-    lesson.sessionNumber <= cycleTotalSessions
-  ) {
-    return lesson.sessionNumber;
-  }
-
-  const startingSessionNumber = Math.min(
-    cycleTotalSessions,
-    Math.max(1, options?.group?.startingSessionNumber || 1)
-  );
-
-  const targetGroupId = lesson.groupId || options?.group?.id || options?.student?.groupId;
-  const targetStudentId = lesson.studentId || options?.student?.id;
-  const rawTargetName = lesson.studentName || options?.student?.name;
-  const targetStudentName = rawTargetName ? normalizeName(rawTargetName) : '';
-
-  // Filter lessons belonging to this entity, EXCLUDING cancelled and deleted
-  const nonCancelledLessons = (allLessons || []).filter(l => {
-    if (l.deleted || l.status === 'cancelled') return false;
-
-    if (targetGroupId && l.groupId === targetGroupId) {
-      return true;
-    }
-    if (options?.group?.name) {
-      const gName = options.group.name.trim().toLowerCase();
-      if (l.groupName && l.groupName.trim().toLowerCase() === gName) return true;
-      if (l.title && l.title.toLowerCase().includes(gName)) return true;
-    }
-    if (!targetGroupId && targetStudentId && l.studentId === targetStudentId) {
-      return true;
-    }
-    if (!targetGroupId && targetStudentName) {
-      const lName = normalizeName(l.studentName || l.quickStudentName);
-      if (lName && (lName === targetStudentName || lName.includes(targetStudentName) || targetStudentName.includes(lName))) {
-        return true;
-      }
-    }
-    if (options?.students && targetStudentId && l.groupId) {
-      const st = options.students.find(s => s.id === targetStudentId);
-      if (st && st.groupId === l.groupId && (!targetGroupId || l.groupId === targetGroupId)) return true;
-    }
-    return false;
-  });
-
-  // Sort chronologically by date and normalized time
-  nonCancelledLessons.sort((a, b) => {
-    const timeA = `${a.date || ''}T${normalizeTime(a.time) || '00:00'}`;
-    const timeB = `${b.date || ''}T${normalizeTime(b.time) || '00:00'}`;
-    return timeA.localeCompare(timeB);
-  });
-
-  let index = -1;
-  if (lesson.id) {
-    index = nonCancelledLessons.findIndex(l => l.id === lesson.id);
-  }
-
-  // If lesson is not in the list (e.g. unsaved draft, in-progress modal, probe)
-  if (index === -1) {
-    const currentLessonTime = `${lesson.date || ''}T${normalizeTime(lesson.time) || '00:00'}`;
-    index = nonCancelledLessons.filter(l => {
-      const lTime = `${l.date || ''}T${normalizeTime(l.time) || '00:00'}`;
-      return lTime < currentLessonTime;
-    }).length;
-  }
-
-  // Check if any preceding lesson in the chain has a known sessionNumber
-  if (index > 0) {
-    for (let i = index - 1; i >= 0; i--) {
-      const prev = nonCancelledLessons[i];
-      if (typeof prev.sessionNumber === 'number' && prev.sessionNumber >= 1 && prev.id !== lesson.id) {
-        const offset = index - i;
-        const computed = ((prev.sessionNumber - 1 + offset) % cycleTotalSessions) + 1;
-        return Math.max(1, Math.min(cycleTotalSessions, computed));
-      }
-    }
-  }
-
-  const computedNum = ((startingSessionNumber - 1 + Math.max(0, index)) % cycleTotalSessions) + 1;
-  return Math.max(1, Math.min(cycleTotalSessions, computedNum));
+  const resolution = resolveLessonCycleNumber(lesson, allLessons, options);
+  return resolution.sessionNumber >= 1 ? resolution.sessionNumber : 1;
 };
 
 /**
- * Re-calculates sessionNumber (with forceRecalculate: true) ONLY for lessons of the same group
- * (or same private student when there is no group) that have status === 'scheduled' and come
- * AFTER the changed lesson in date/time order (or including changedLesson itself when un-cancelled back to 'scheduled').
- * Never modifies completed or in_progress lessons.
+ * Re-calculates and synchronizes sessionNumber and totalSessionsInPackage across all
+ * non-deleted, non-cancelled lessons of the same group (or private student) in chronological order.
  */
 export const resequenceScheduledLessonsAfterChange = (
   allLessons: Lesson[],
   changedLesson: Partial<Lesson> | null | undefined,
   options?: {
     group?: Partial<Group> | null;
-    student?: { id?: string; name?: string; groupId?: string } | null;
-    students?: Array<{ id: string; name: string; groupId?: string }>;
+    student?: { id?: string; name?: string; groupId?: string; paymentPlan?: string; bundleSize?: number } | null;
+    students?: Array<{ id: string; name: string; groupId?: string; paymentPlan?: string; bundleSize?: number }>;
     wrapMutation?: <T>(item: T) => T;
   }
 ): Lesson[] => {
   if (!changedLesson || !Array.isArray(allLessons)) return allLessons;
 
-  const targetGroupId = changedLesson.groupId || options?.group?.id;
-  const targetStudentId = changedLesson.studentId || options?.student?.id;
-  const targetStudentName = changedLesson.studentName || options?.student?.name;
   const grp = options?.group;
   const st = options?.student;
   const wrap = options?.wrapMutation || (<T>(item: T) => item);
 
-  const pivotTime = `${changedLesson.date || ''}T${normalizeTime(changedLesson.time) || '00:00'}`;
-  const includeSelf = changedLesson.status === 'scheduled' && !changedLesson.deleted;
-
   const result = [...allLessons];
-  const candidateIndices: number[] = [];
+  const scopeIndices: number[] = [];
 
   result.forEach((l, idx) => {
-    if (l.deleted || l.status !== 'scheduled') return;
-
-    const matchesGrp = targetGroupId
-      ? l.groupId === targetGroupId
-      : Boolean(grp?.id && l.groupId === grp.id);
-    const matchesSt = !targetGroupId && !grp?.id && (
-      (targetStudentId ? l.studentId === targetStudentId : Boolean(st?.id && l.studentId === st.id)) ||
-      (targetStudentName ? normalizeName(l.studentName || l.quickStudentName) === normalizeName(targetStudentName) : false)
-    );
-
-    if (!matchesGrp && !matchesSt) return;
-
-    if (l.id && changedLesson.id && l.id === changedLesson.id) {
-      if (includeSelf) candidateIndices.push(idx);
-      return;
-    }
-
-    const lTime = `${l.date || ''}T${normalizeTime(l.time) || '00:00'}`;
-    if (lTime >= pivotTime) {
-      candidateIndices.push(idx);
+    if (!l || l.deleted || l.status === 'cancelled') return;
+    if (doesLessonMatchScope(l, changedLesson, { group: grp, student: st, students: options?.students })) {
+      scopeIndices.push(idx);
     }
   });
 
-  candidateIndices.sort((idxA, idxB) => {
-    const a = result[idxA];
-    const b = result[idxB];
-    const timeA = `${a.date || ''}T${normalizeTime(a.time) || '00:00'}`;
-    const timeB = `${b.date || ''}T${normalizeTime(b.time) || '00:00'}`;
-    return timeA.localeCompare(timeB);
-  });
+  scopeIndices.sort((idxA, idxB) => compareLessonsChronologically(result[idxA], result[idxB]));
 
-  for (const idx of candidateIndices) {
+  for (const idx of scopeIndices) {
     const l = result[idx];
-    const expectedSessionNum = calculateSequentialSessionNumber(l, result, {
+    const resolution = resolveLessonCycleNumber(l, result, {
       group: grp,
       student: st,
       students: options?.students,
       forceRecalculate: true,
     });
-    const cycleCount = (grp?.sessionCount && grp.sessionCount > 1)
-      ? grp.sessionCount
-      : (l.totalSessionsInPackage || changedLesson.totalSessionsInPackage || 4);
 
-    if (l.sessionNumber !== expectedSessionNum || l.totalSessionsInPackage !== cycleCount) {
+    if (
+      l.sessionNumber !== resolution.sessionNumber ||
+      l.totalSessionsInPackage !== resolution.totalCycleSessions
+    ) {
       result[idx] = wrap({
         ...l,
-        sessionNumber: expectedSessionNum,
-        totalSessionsInPackage: cycleCount,
+        sessionNumber: resolution.sessionNumber,
+        totalSessionsInPackage: resolution.totalCycleSessions,
       });
     }
   }

@@ -1,4 +1,4 @@
-import { isPendingStatus, isGroupPerLesson, calculateSequentialSessionNumber } from "../utils/lessonUtils";
+import { isPendingStatus, isGroupPerLesson, calculateSequentialSessionNumber, resolveLessonCycleNumber } from "../utils/lessonUtils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group, Student, LessonReport, AttendanceStatus, PaymentStatus } from '../types';
@@ -144,17 +144,14 @@ export const TodaysProgressTimeline: React.FC = () => {
           ? targetGroup.sessionCount
           : (targetLesson.totalSessionsInPackage && targetLesson.totalSessionsInPackage > 1 ? targetLesson.totalSessionsInPackage : 4));
 
-    const autoSessionNum = calculateSequentialSessionNumber(targetLesson, lessons, {
+    const cycleRes = resolveLessonCycleNumber(targetLesson, lessons, {
       group: targetGroup,
       student: targetStudent,
       students
     });
-    const rawSessionNum = (typeof targetLesson.sessionNumber === 'number' && targetLesson.sessionNumber >= 1)
-      ? targetLesson.sessionNumber
-      : autoSessionNum;
     const finalSessionNumber = isPerLessonGroup
       ? 1
-      : (rawSessionNum > cycleTotalSessions ? (((rawSessionNum - 1) % cycleTotalSessions) + 1) : Math.max(1, rawSessionNum));
+      : (cycleRes.sessionNumber >= 1 ? cycleRes.sessionNumber : 1);
 
     const noHwLabel = language === 'de' ? 'Keine Hausaufgabe' : language === 'en' ? 'None assigned' : 'لا يوجد واجب';
     const reportData: LessonReport = {

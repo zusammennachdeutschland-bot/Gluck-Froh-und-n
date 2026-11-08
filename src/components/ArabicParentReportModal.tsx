@@ -6,7 +6,7 @@ import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cl
 import { getTeacherArabicName } from '../utils/teacherUtils';
 import { formatTimeDisplay, parseLocalDate, getLocalDateStr } from '../utils/timeUtils';
 import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString } from '../utils/genderUtils';
-import { calculateSequentialSessionNumber, resolveTaughtTodayTopic, resolveStudentReportAttendance, resolveReportHomework, resolvePreviousHomeworkStatusText } from '../utils/lessonUtils';
+import { calculateSequentialSessionNumber, resolveLessonCycleNumber, resolveTaughtTodayTopic, resolveStudentReportAttendance, resolveReportHomework, resolvePreviousHomeworkStatusText } from '../utils/lessonUtils';
 import { getTimeBasedGreeting, getCairoHour } from '../utils/greetingUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { 
@@ -180,16 +180,15 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const activeStudent = students.find(s => s.id === selectedStudentId) || initialResolvedStudent;
 
   // Dynamically compute the exact sequential session number strictly among NON-CANCELLED lessons
-  const currentSessionNumber = useMemo(() => {
-    if (typeof lesson.sessionNumber === 'number' && lesson.sessionNumber >= 1) {
-      return lesson.sessionNumber;
-    }
-    return calculateSequentialSessionNumber(lesson, lessons || [], {
+  const cycleResolution = useMemo(() => {
+    return resolveLessonCycleNumber(lesson, lessons || [], {
       group: associatedGroup,
       student: activeStudent,
       students
     });
   }, [lesson, lessons, associatedGroup, activeStudent, students]);
+
+  const currentSessionNumber = cycleResolution.sessionNumber >= 1 ? cycleResolution.sessionNumber : 1;
 
   // Helper to find previous homework from earlier lesson or lesson report
   const detectedPreviousHomework = React.useMemo(() => {

@@ -12,7 +12,7 @@ import { LessonReminderModal } from './LessonReminderModal';
 import { GroupForm, GroupFormData } from './GroupForm';
 import { AddStudentModal } from './AddStudentModal';
 import { StudentProfileModal } from './StudentProfileModal';
-import { getGroupCycleInfo, isGroupPerLesson } from '../utils/lessonUtils';
+import { getGroupCycleInfo, isGroupPerLesson, resolveLessonCycleNumber, compareLessonsChronologically, computeStartingSessionNumberForTargetLesson } from '../utils/lessonUtils';
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
 import { transliterateArabicNameToEnglish } from '../utils/nameUtils';
@@ -154,12 +154,12 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
   const upcomingScheduledLessons = useMemo(() => {
     return (lessons || [])
       .filter(l => l.groupId === group.id && !l.deleted && l.status === 'scheduled')
-      .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+      .sort(compareLessonsChronologically);
   }, [lessons, group.id]);
 
   const nearestUpcomingLesson = upcomingScheduledLessons[0];
-  const detectedNextSessionNum = nearestUpcomingLesson?.sessionNumber 
-    ? nearestUpcomingLesson.sessionNumber 
+  const detectedNextSessionNum = nearestUpcomingLesson
+    ? (resolveLessonCycleNumber(nearestUpcomingLesson, lessons || [], { group }).sessionNumber || 1)
     : (group.startingSessionNumber || 1);
 
   const [selectedUpcomingCycleNumber, setSelectedUpcomingCycleNumber] = useState<number>(detectedNextSessionNum);
@@ -173,10 +173,14 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
     if (chosenNum < 1 || chosenNum > cycleTotalSessions) return;
     setSelectedUpcomingCycleNumber(chosenNum);
 
-    // 1. Update the group startingSessionNumber
+    const newStartingNum = nearestUpcomingLesson
+      ? computeStartingSessionNumberForTargetLesson(nearestUpcomingLesson, chosenNum, lessons || [], { group })
+      : chosenNum;
+
+    // 1. Update the group startingSessionNumber (which also resequences all non-cancelled group lessons)
     updateGroup(group.id, {
       ...group,
-      startingSessionNumber: chosenNum
+      startingSessionNumber: newStartingNum
     });
 
     // 2. Synchronize all upcoming scheduled lessons

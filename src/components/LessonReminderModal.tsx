@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { Lesson, Group } from '../types';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getUpcomingGroupSchedule, isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
-import { getGroupCycleInfo, calculateSequentialSessionNumber } from '../utils/lessonUtils';
+import { getGroupCycleInfo, calculateSequentialSessionNumber, resolveLessonCycleNumber, compareLessonsChronologically, computeStartingSessionNumberForTargetLesson } from '../utils/lessonUtils';
 import { 
   X, Send, Copy, Check, MessageSquare, AlertTriangle, Clock, Link as LinkIcon, 
   MapPin, Video, Sparkles, Phone, Users, CheckCircle2, AtSign, Plus, Hash, BookOpen 
@@ -37,7 +37,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   recipientPhone,
   onClose,
 }) => {
-  const { groups, students, lessons, profile, updateGroup, updateProfile, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
+  const { groups, students, lessons, profile, updateGroup, updateLesson, updateProfile, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
 
   const currentMsgLang = reportLanguage || 'ar';
   const msgT = (ar: string, en: string, de?: string) => {
@@ -48,8 +48,12 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
 
   // Find associated group
   const targetGroup = group || (lesson?.groupId ? groups.find(g => g.id === lesson.groupId) : null);
-  // Find upcoming lesson if lesson is not directly passed
-  const upcomingLesson = lesson || (targetGroup ? (lessons || []).find(l => l.groupId === targetGroup.id && !l.deleted && (l.status === 'scheduled' || l.status === 'in_progress')) : null);
+  // Find nearest upcoming lesson chronologically if lesson is not directly passed
+  const upcomingLesson = lesson || (targetGroup
+    ? (lessons || [])
+        .filter(l => l.groupId === targetGroup.id && !l.deleted && (l.status === 'scheduled' || l.status === 'in_progress'))
+        .sort(compareLessonsChronologically)[0] || null
+    : null);
   
   const lessonDate = lesson?.date || upcomingLesson?.date;
   const groupStudents = targetGroup 
@@ -97,19 +101,20 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   });
   const initialPhone = resolvedContact.contact;
 
-  // Calculate Package Cycle information
+  // Calculate Package Cycle information from the single authoritative numbering engine
   const cycleInfo = targetGroup ? getGroupCycleInfo(targetGroup, lessons) : null;
-  const sessionCount = targetGroup?.sessionCount || cycleInfo?.sessionCount || lesson?.totalSessionsInPackage || 4;
-  const isPerLesson = targetGroup?.paymentCycle === 'per_lesson' || targetGroup?.paymentModel === 'per_session' || cycleInfo?.isPerLesson;
-  const hasCycle = !isPerLesson && sessionCount > 1;
   const currentTargetLesson = lesson || upcomingLesson;
-  const defaultSessionNumber = (typeof currentTargetLesson?.sessionNumber === 'number' && currentTargetLesson.sessionNumber >= 1)
-    ? currentTargetLesson.sessionNumber
-    : calculateSequentialSessionNumber(currentTargetLesson, lessons, {
-        group: targetGroup,
-        student: targetStudent,
-        students
-      });
+  const cycleResolution = resolveLessonCycleNumber(currentTargetLesson, lessons, {
+    group: targetGroup,
+    student: targetStudent,
+    students
+  });
+  const sessionCount = cycleResolution.totalCycleSessions || targetGroup?.sessionCount || cycleInfo?.sessionCount || lesson?.totalSessionsInPackage || 4;
+  const isPerLesson = cycleResolution.isPerLesson || targetGroup?.paymentCycle === 'per_lesson' || targetGroup?.paymentModel === 'per_session' || cycleInfo?.isPerLesson;
+  const hasCycle = !isPerLesson && sessionCount > 1;
+  const defaultSessionNumber = currentTargetLesson
+    ? (cycleResolution.sessionNumber >= 1 ? cycleResolution.sessionNumber : 1)
+    : (cycleInfo?.currentSessionNumber || 1);
 
   // Detect previous homework from previous lessons
   const detectedPreviousHomework = React.useMemo(() => {
@@ -205,6 +210,36 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   const [includeCycle, setIncludeCycle] = useState<boolean>(hasCycle);
   const [sessionNumber, setSessionNumber] = useState<number>(defaultSessionNumber);
   const [totalCycleSessions, setTotalCycleSessions] = useState<number>(sessionCount);
+
+  useEffect(() => {
+    setSessionNumber(defaultSessionNumber);
+    setTotalCycleSessions(sessionCount);
+    setIncludeCycle(hasCycle);
+  }, [currentTargetLesson?.id, defaultSessionNumber, sessionCount, hasCycle]);
+
+  const handleAdjustSessionNumber = (nextNumber: number) => {
+    const clamped = Math.min(totalCycleSessions, Math.max(1, nextNumber));
+    setSessionNumber(clamped);
+    setCustomMessage(null);
+
+    if (currentTargetLesson) {
+      if (targetGroup) {
+        const newStartingNum = computeStartingSessionNumberForTargetLesson(currentTargetLesson, clamped, lessons, {
+          group: targetGroup,
+          student: targetStudent,
+          students
+        });
+        updateGroup(targetGroup.id, {
+          ...targetGroup,
+          startingSessionNumber: newStartingNum
+        });
+      }
+      updateLesson(currentTargetLesson.id, {
+        sessionNumber: clamped,
+        totalSessionsInPackage: totalCycleSessions
+      });
+    }
+  };
 
   const [includeHomework, setIncludeHomework] = useState<boolean>(Boolean(detectedPreviousHomework));
   const [previousHomework, setPreviousHomework] = useState<string>(detectedPreviousHomework);
@@ -712,10 +747,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                     <div className="flex items-center border-r border-primary/25 pr-1 mr-0.5">
                       <button
                         type="button"
-                        onClick={() => {
-                          setSessionNumber(prev => Math.max(1, prev - 1));
-                          setCustomMessage(null);
-                        }}
+                        onClick={() => handleAdjustSessionNumber(sessionNumber - 1)}
                         disabled={sessionNumber <= 1}
                         className="w-4 h-4 rounded hover:bg-primary/20 flex items-center justify-center text-xs font-black disabled:opacity-30 cursor-pointer"
                         title={_t('الحصة السابقة', 'Previous Session', 'Vorherige Lektion')}
@@ -724,10 +756,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setSessionNumber(prev => Math.min(totalCycleSessions, prev + 1));
-                          setCustomMessage(null);
-                        }}
+                        onClick={() => handleAdjustSessionNumber(sessionNumber + 1)}
                         disabled={sessionNumber >= totalCycleSessions}
                         className="w-4 h-4 rounded hover:bg-primary/20 flex items-center justify-center text-xs font-black disabled:opacity-30 cursor-pointer"
                         title={_t('الحصة التالية', 'Next Session', 'Nächste Lektion')}

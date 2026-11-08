@@ -17,7 +17,7 @@ import { GroupProfileModal } from './GroupProfileModal';
 import { getPendingHomeworkFollowUps } from '../utils/homeworkFollowUpUtils';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUtils';
-import { calculateSequentialSessionNumber, isGroupPerLesson } from '../utils/lessonUtils';
+import { calculateSequentialSessionNumber, resolveLessonCycleNumber, computeStartingSessionNumberForTargetLesson, isGroupPerLesson } from '../utils/lessonUtils';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 
@@ -174,11 +174,7 @@ export const LessonControlModal: React.FC = () => {
   const [paymentToastMessage, setPaymentToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (selectedLesson?.sessionNumber && selectedLesson.sessionNumber >= 1) {
-      setCustomSessionNumber(selectedLesson.sessionNumber);
-    } else {
-      setCustomSessionNumber(null);
-    }
+    setCustomSessionNumber(null);
     setIsEditingSessionNumber(false);
     setCycleSaveToast(null);
   }, [selectedLesson?.id]);
@@ -496,19 +492,17 @@ export const LessonControlModal: React.FC = () => {
   
   // Dynamically compute the sequential session number among NON-CANCELLED lessons in the group/student
   const autoComputedSessionNumber = useMemo(() => {
-    return calculateSequentialSessionNumber(selectedLesson, lessons, {
+    return resolveLessonCycleNumber(selectedLesson, lessons, {
       group: targetGroup,
       student: targetStudent,
       students
-    });
+    }).sessionNumber || 1;
   }, [selectedLesson, lessons, targetGroup, targetStudent, students]);
 
   // Normalize session number strictly within 1 .. cycleTotalSessions
-  const rawSessionNumber = customSessionNumber !== null 
-    ? customSessionNumber 
-    : ((typeof selectedLesson?.sessionNumber === 'number' && selectedLesson.sessionNumber >= 1) 
-        ? selectedLesson.sessionNumber 
-        : autoComputedSessionNumber);
+  const rawSessionNumber = customSessionNumber !== null
+    ? customSessionNumber
+    : autoComputedSessionNumber;
   const currentSessionNumber = rawSessionNumber > cycleTotalSessions
     ? (((rawSessionNumber - 1) % cycleTotalSessions) + 1)
     : Math.max(1, rawSessionNumber);
@@ -528,29 +522,23 @@ export const LessonControlModal: React.FC = () => {
       });
     }
 
+    if (targetGroup) {
+      const newStartingNum = computeStartingSessionNumberForTargetLesson(selectedLesson, clampedNumber, lessons, {
+        group: targetGroup,
+        student: targetStudent,
+        students
+      });
+      updateGroup(targetGroup.id, {
+        ...targetGroup,
+        startingSessionNumber: newStartingNum
+      });
+    }
+
     updateLesson(selectedLesson.id, { 
       sessionNumber: clampedNumber,
       totalSessionsInPackage: cycleTotalSessions,
       ...(selectedLesson.report ? { report: { ...selectedLesson.report } } : {})
     });
-
-    // Synchronize subsequent scheduled lessons for this group so the sequence remains continuous
-    if (selectedLesson.groupId) {
-      const upcoming = lessons
-        .filter(l => l.groupId === selectedLesson.groupId && !l.deleted && l.status === 'scheduled' && l.id !== selectedLesson.id)
-        .filter(l => (l.date + (l.time || '')).localeCompare(selectedLesson.date + (selectedLesson.time || '')) > 0)
-        .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
-      
-      upcoming.forEach((upLesson, idx) => {
-        const nextSeqNum = (((clampedNumber - 1 + idx + 1) % cycleTotalSessions) + 1);
-        if (upLesson.sessionNumber !== nextSeqNum || upLesson.totalSessionsInPackage !== cycleTotalSessions) {
-          updateLesson(upLesson.id, {
-            sessionNumber: nextSeqNum,
-            totalSessionsInPackage: cycleTotalSessions
-          });
-        }
-      });
-    }
 
     setCycleSaveToast(_t(
       `✓ تم حفظ تعديل الحصة (${clampedNumber} من ${cycleTotalSessions}) وتطبيق التسلسل على جميع الحصص بنجاح`,

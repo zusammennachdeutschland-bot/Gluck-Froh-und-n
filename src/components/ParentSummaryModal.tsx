@@ -6,7 +6,7 @@ import { ArabicParentReportModal } from './ArabicParentReportModal';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getTeacherEnglishName, getTeacherArabicName } from '../utils/teacherUtils';
-import { calculateSequentialSessionNumber } from '../utils/lessonUtils';
+import { calculateSequentialSessionNumber, resolveLessonCycleNumber } from '../utils/lessonUtils';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
 
 interface ParentSummaryModalProps {
@@ -44,18 +44,22 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
   const isStudentUsername = isWhatsAppUsername(rawStudentPhone);
   const studentPhone = rawStudentPhone.trim();
 
-  // Dynamically compute exact session number excluding cancelled lessons
-  const currentSessionNumber = useMemo(() => {
-    if (typeof lesson.sessionNumber === 'number' && lesson.sessionNumber >= 1) {
-      return lesson.sessionNumber;
-    }
-    const grp = lesson.groupId ? groups.find(g => g.id === lesson.groupId) : undefined;
-    return calculateSequentialSessionNumber(lesson, lessons || [], {
-      group: grp,
+  const associatedGroup = useMemo(() => {
+    return lesson.groupId
+      ? groups.find(g => g.id === lesson.groupId)
+      : (activeStudent?.groupId ? groups.find(g => g.id === activeStudent.groupId) : undefined);
+  }, [lesson.groupId, activeStudent?.groupId, groups]);
+
+  const cycleResolution = useMemo(() => {
+    return resolveLessonCycleNumber(lesson, lessons || [], {
+      group: associatedGroup,
       student: activeStudent,
       students
     });
-  }, [lesson, lessons, groups, activeStudent, students]);
+  }, [lesson, lessons, associatedGroup, activeStudent, students]);
+
+  // Dynamically compute exact session number excluding cancelled lessons
+  const currentSessionNumber = cycleResolution.sessionNumber >= 1 ? cycleResolution.sessionNumber : 1;
 
   // Generate multilingual educational lesson summary message
   const generateSummaryText = () => {
@@ -63,15 +67,8 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
     const recLink1 = report?.recordingLink || lesson.recordingLink;
     const recLink2 = report?.recordingLink2 || lesson.recordingLink2;
     
-    const grp = lesson.groupId 
-      ? groups.find(g => g.id === lesson.groupId) 
-      : (activeStudent?.groupId ? groups.find(g => g.id === activeStudent.groupId) : undefined);
-    const totalCycleCount = (grp?.sessionCount && grp.sessionCount > 1) 
-      ? grp.sessionCount 
-      : (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 ? lesson.totalSessionsInPackage : 4);
-    const isPerLessonGroup = Boolean(
-      grp && (grp.paymentCycle === 'per_lesson' || grp.paymentModel === 'per_session' || (grp.sessionCount !== undefined && grp.sessionCount <= 1))
-    );
+    const totalCycleCount = cycleResolution.totalCycleSessions;
+    const isPerLessonGroup = cycleResolution.isPerLesson;
     const hasCycleSession = !isPerLessonGroup && totalCycleCount > 1;
 
     const englishStudentName = activeStudent?.certificateName || activeStudent?.displayNameEn || activeStudent?.nameEn;
