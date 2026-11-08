@@ -102,18 +102,32 @@ export function adaptOutboundPayloadForPeer(
   negotiatedVersion: number,
   agreedCapabilities: SyncCapability[]
 ): SyncDeltaPayload {
+  const settingsRecord = Array.isArray(payload.records?.settings)
+    ? payload.records.settings.find(s => s && s.id === 'singleton_teacher_settings')
+    : undefined;
+  const fallbackPurged = settingsRecord?.recentlyDeleted?.purgedRecords;
+  const authoritativePurged = Array.isArray(payload.purgedRecords)
+    ? payload.purgedRecords
+    : Array.isArray(fallbackPurged)
+    ? fallbackPurged
+    : [];
+
   const adaptedPayload: SyncDeltaPayload = {
     header: createProtocolHeader(agreedCapabilities),
     senderDeviceId: payload.senderDeviceId,
     senderDeviceName: payload.senderDeviceName,
     peerWatermarks: payload.peerWatermarks,
     records: { ...payload.records },
+    purgedRecords: authoritativePurged,
+    hasAuthoritativeTombstones: payload.hasAuthoritativeTombstones ?? true,
+    ...(payload.syncEvents ? { syncEvents: payload.syncEvents } : {}),
     metadata: {
       totalEntitiesCount: Object.values(payload.records).reduce((acc, curr) => acc + (curr ? curr.length : 0), 0)
     }
   };
 
-  // If settings_sync is not supported by the peer, exclude settings to prevent peer ingestion errors
+  // If settings_sync is not supported by the peer, exclude settings to prevent peer ingestion errors,
+  // while keeping top-level `purgedRecords` intact so tombstones are NEVER stripped!
   if (!isCapabilitySupported(agreedCapabilities, 'settings_sync') && adaptedPayload.records.settings) {
     delete adaptedPayload.records.settings;
   }

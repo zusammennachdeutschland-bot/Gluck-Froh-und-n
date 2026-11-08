@@ -53,12 +53,20 @@ export function buildOutboundDelta(
     }
   }
 
+  const settingsList = Array.isArray(localData['settings']) ? (localData['settings'] as TeacherSettingsRecord[]) : [];
+  const teacherSettings = settingsList.find(s => s && s.id === 'singleton_teacher_settings');
+  const purgedRecords = Array.isArray(teacherSettings?.recentlyDeleted?.purgedRecords)
+    ? teacherSettings!.recentlyDeleted!.purgedRecords!
+    : [];
+
   return {
     header: createProtocolHeader(),
     senderDeviceId: localDevice.id,
     senderDeviceName: localDevice.name,
     peerWatermarks: JSON.parse(JSON.stringify(watermarkTable || {})), // Pass a safe copy
     records,
+    purgedRecords,
+    hasAuthoritativeTombstones: true,
     metadata: {
       totalEntitiesCount: totalCount
     }

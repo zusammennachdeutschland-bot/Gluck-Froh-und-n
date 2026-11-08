@@ -71,13 +71,14 @@ export function hasAnyWorkspaceData(jsonStr: string | null): boolean {
       }
     }
 
-    // 2. Check recentlyDeleted
+    // 2. Check recentlyDeleted (including permanent purge tombstones!)
     const rec = p.recentlyDeleted;
     if (rec && typeof rec === 'object') {
       if (
         (Array.isArray(rec.students) && rec.students.length > 0) ||
         (Array.isArray(rec.groups) && rec.groups.length > 0) ||
-        (Array.isArray(rec.lessons) && rec.lessons.length > 0)
+        (Array.isArray(rec.lessons) && rec.lessons.length > 0) ||
+        (Array.isArray(rec.purgedRecords) && rec.purgedRecords.length > 0)
       ) {
         return true;
       }
@@ -154,6 +155,7 @@ export function useGoogleCloudWorkspaceSync(): void {
     financeInstallments,
     goldHoldings,
     lernstudioSets,
+    recentlyDeleted,
     performBackup,
     importBackupFile
   } = useApp();
@@ -464,6 +466,7 @@ export function useGoogleCloudWorkspaceSync(): void {
     financeInstallments,
     goldHoldings,
     lernstudioSets,
+    recentlyDeleted,
     localMutationTick,
     performBackup
   ]);

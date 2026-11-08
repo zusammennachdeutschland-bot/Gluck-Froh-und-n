@@ -4,10 +4,20 @@ import {
   CertificateRecord, SchoolSettings, StageManager, StageSecretary, VisitRecord, BookletObservation,
   WeeklyPlanStatusRecord, StageReportRecord, StageFollowUpRecord, Complaint, StudentActionPlan,
   Teacher, ParentComplaint, HodGermanStudent, AICertificateBackground, SchoolNote,
-  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment
+  FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment,
+  RecentlyDeletedData, PurgedRecordTombstone
 } from '../types';
 import { LernstudioSet } from '../types/lernstudio';
 import { formatLocalDate } from './timeUtils';
+import { DEFAULT_LERNSTUDIO_SETS } from '../data/defaultLernstudioSets';
+import {
+  mergeEntities,
+  mergeRecentlyDeleted,
+  mergePurgedTombstones,
+  mergeDismissedDashboardLessons,
+  enforcePurgedTombstonesOnWorkspace,
+  WorkspaceMutableState
+} from '../services/sync/mergeEngine';
 
 export const MAX_BACKUP_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB max backup file size (#14)
 
@@ -454,6 +464,9 @@ export interface ValidationResult {
     inspirationMessages?: InspirationMessage[];
     todos?: TodoItem[];
     certificates?: CertificateRecord[];
+    [key: string]: any;
+  };
+  sanitizedData?: {
     [key: string]: any;
   };
 }
@@ -1069,36 +1082,84 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     schoolSettings: sanitizedSchool || data.profile.schoolSettings
   } : undefined;
 
+  // Sanitize RecentlyDeleted & PurgedRecordTombstone entries
+  let sanitizedRecentlyDeleted: RecentlyDeletedData | undefined = undefined;
+  const rawRec = data.recentlyDeleted || data.profile?.recentlyDeleted;
+  if (rawRec && typeof rawRec === 'object' && !Array.isArray(rawRec)) {
+    const rawPurged: any[] = Array.isArray(rawRec.purgedRecords) ? rawRec.purgedRecords : [];
+    const sanitizedPurged: PurgedRecordTombstone[] = [];
+    for (const p of rawPurged) {
+      if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !p.id.trim()) continue;
+      const validType: 'student' | 'group' | 'lesson' =
+        p.type === 'group' || p.type === 'lesson' || p.type === 'student' ? p.type : 'student';
+      const updatedAt = sanitizeNumber(p.updatedAt, Date.now());
+      sanitizedPurged.push({
+        id: p.id.trim(),
+        type: validType,
+        purgedAt: typeof p.purgedAt === 'string' && p.purgedAt.trim() ? p.purgedAt : new Date(updatedAt).toISOString(),
+        updatedAt,
+        originRevision: sanitizeNumber(p.originRevision, 1)
+      });
+    }
+
+    const sanitizeDeletedEntries = <T extends { id: string }>(arr: any[]): { item: T; deletedAt: string }[] => {
+      if (!Array.isArray(arr)) return [];
+      return arr
+        .filter(e => e && typeof e === 'object' && e.item && typeof e.item.id === 'string' && e.item.id.trim())
+        .map(e => ({
+          item: { ...e.item, id: e.item.id.trim() } as T,
+          deletedAt: typeof e.deletedAt === 'string' && e.deletedAt.trim() ? e.deletedAt : new Date().toISOString()
+        }));
+    };
+
+    sanitizedRecentlyDeleted = mergeRecentlyDeleted(
+      { students: [], groups: [], lessons: [], purgedRecords: [] },
+      {
+        students: sanitizeDeletedEntries<Student>(rawRec.students),
+        groups: sanitizeDeletedEntries<Group>(rawRec.groups),
+        lessons: sanitizeDeletedEntries<Lesson>(rawRec.lessons),
+        purgedRecords: mergePurgedTombstones([], sanitizedPurged)
+      }
+    );
+  }
+
+  const sanitizedPayloadData = {
+    ...data,
+    students: sanitizedStudents,
+    groups: sanitizedGroups,
+    lessons: sanitizedLessons,
+    payments: sanitizedPayments,
+    notifications: sanitizedNotifications,
+    certificates: sanitizedCertificates,
+    hodStudents: sanitizedHodStudents,
+    hodComplaints: sanitizedHodComplaints,
+    hodActionPlans: sanitizedHodActionPlans,
+    hodVisits: sanitizedHodVisits,
+    customAiBackgrounds: sanitizedCustomBg,
+    schoolNotes: sanitizedSchoolNotes,
+    lernstudioSets: sanitizedLernstudioSets,
+    financeAccounts: sanitizedFinanceAccounts,
+    financeCategories: sanitizedFinanceCategories,
+    financeTransactions: sanitizedFinanceTransactions,
+    financeRecurring: sanitizedFinanceRecurring,
+    financeInstallments: sanitizedFinanceInstallments,
+    schoolSettings: sanitizedSchool,
+    profile: sanitizedProfile,
+    recentlyDeleted: sanitizedRecentlyDeleted,
+    dismissedDashboardLessons: Array.isArray(data.dismissedDashboardLessons)
+      ? data.dismissedDashboardLessons.filter((id: any) => typeof id === 'string' && id.trim())
+      : undefined,
+    notificationSettings: data.notificationSettings && typeof data.notificationSettings === 'object' ? data.notificationSettings : undefined,
+    inspirationSettings: data.inspirationSettings && typeof data.inspirationSettings === 'object' ? data.inspirationSettings : undefined,
+    inspirationMessages: Array.isArray(data.inspirationMessages) ? data.inspirationMessages : undefined,
+    todos: Array.isArray(data.todos) ? data.todos : undefined
+  };
+
   return {
     isValid: true,
     version,
-    data: {
-      ...data,
-      students: sanitizedStudents,
-      groups: sanitizedGroups,
-      lessons: sanitizedLessons,
-      payments: sanitizedPayments,
-      notifications: sanitizedNotifications,
-      certificates: sanitizedCertificates,
-      hodStudents: sanitizedHodStudents,
-      hodComplaints: sanitizedHodComplaints,
-      hodActionPlans: sanitizedHodActionPlans,
-      hodVisits: sanitizedHodVisits,
-      customAiBackgrounds: sanitizedCustomBg,
-      schoolNotes: sanitizedSchoolNotes,
-      lernstudioSets: sanitizedLernstudioSets,
-      financeAccounts: sanitizedFinanceAccounts,
-      financeCategories: sanitizedFinanceCategories,
-      financeTransactions: sanitizedFinanceTransactions,
-      financeRecurring: sanitizedFinanceRecurring,
-      financeInstallments: sanitizedFinanceInstallments,
-      schoolSettings: sanitizedSchool,
-      profile: sanitizedProfile,
-      notificationSettings: data.notificationSettings && typeof data.notificationSettings === 'object' ? data.notificationSettings : undefined,
-      inspirationSettings: data.inspirationSettings && typeof data.inspirationSettings === 'object' ? data.inspirationSettings : undefined,
-      inspirationMessages: Array.isArray(data.inspirationMessages) ? data.inspirationMessages : undefined,
-      todos: Array.isArray(data.todos) ? data.todos : undefined
-    }
+    data: sanitizedPayloadData,
+    sanitizedData: sanitizedPayloadData
   };
 }
 
@@ -1599,4 +1660,140 @@ export function analyzeBackupPayload(
     };
   }
 }
+
+/**
+ * Production backup import merge boundary.
+ * Validates and sanitizes a raw backup payload (JSON string or parsed object),
+ * merges it with an existing local workspace without wiping unrelated local active records,
+ * enforces all local and imported PurgedRecordTombstones (including cascade rules),
+ * and preserves built-in DEFAULT_LERNSTUDIO_SETS.
+ */
+export function mergeBackupPayloadIntoWorkspace(
+  localWorkspace: WorkspaceMutableState,
+  rawBackupInput: string | any
+): {
+  isValid: boolean;
+  errorMessage?: string;
+  mergedWorkspace: WorkspaceMutableState;
+  workspace: WorkspaceMutableState;
+} {
+  try {
+    const parsed = typeof rawBackupInput === 'string' ? JSON.parse(rawBackupInput) : rawBackupInput;
+    const validation = validateAndSanitizeBackupPayload(parsed);
+    if (!validation.isValid) {
+      return {
+        isValid: false,
+        errorMessage: validation.errorMessage || 'Invalid backup file.',
+        mergedWorkspace: localWorkspace,
+        workspace: localWorkspace
+      };
+    }
+
+    const data = validation.data;
+    const nextWorkspace: WorkspaceMutableState = { ...localWorkspace };
+
+    // 1. Merge recentlyDeleted first so both local and backup tombstones are active
+    const mergedRec = mergeRecentlyDeleted(
+      localWorkspace.recentlyDeleted,
+      hasBackupSection(parsed, 'recentlyDeleted') ? data.recentlyDeleted : undefined
+    );
+    nextWorkspace.recentlyDeleted = mergedRec;
+    const activePurged = mergedRec.purgedRecords || [];
+
+    // 2. Merge core and extended collections while preserving existing local active records
+    if (hasBackupSection(parsed, 'groups') && Array.isArray(data.groups)) {
+      nextWorkspace.groups = mergeEntities(localWorkspace.groups || [], data.groups, {
+        entityTypeName: 'group',
+        purgedRecords: activePurged
+      }).merged;
+    }
+
+    if (hasBackupSection(parsed, 'students') && Array.isArray(data.students)) {
+      nextWorkspace.students = mergeEntities(localWorkspace.students || [], data.students, {
+        entityTypeName: 'student',
+        purgedRecords: activePurged
+      }).merged;
+    }
+
+    if (hasBackupSection(parsed, 'lessons') && Array.isArray(data.lessons)) {
+      nextWorkspace.lessons = mergeEntities(localWorkspace.lessons || [], data.lessons, {
+        entityTypeName: 'lesson',
+        purgedRecords: activePurged
+      }).merged;
+    }
+
+    if (hasBackupSection(parsed, 'payments') && Array.isArray(data.payments)) {
+      nextWorkspace.payments = mergeEntities(localWorkspace.payments || [], data.payments, {
+        entityTypeName: 'payment',
+        purgedRecords: activePurged
+      }).merged;
+    }
+
+    const otherCollections = [
+      'notifications',
+      'certificates',
+      'todos',
+      'hodStudents',
+      'hodComplaints',
+      'hodActionPlans',
+      'hodVisits',
+      'schoolNotes',
+      'financeAccounts',
+      'financeCategories',
+      'financeTransactions',
+      'financeRecurring',
+      'financeInstallments',
+      'financeNotifications',
+      'goldHoldings',
+      'homeworkAssignments',
+      'homeworkSubmissions'
+    ];
+
+    for (const colKey of otherCollections) {
+      if (hasBackupSection(parsed, colKey) && Array.isArray((data as any)[colKey])) {
+        nextWorkspace[colKey] = mergeEntities((localWorkspace as any)[colKey] || [], (data as any)[colKey], {
+          entityTypeName: colKey,
+          purgedRecords: activePurged
+        }).merged;
+      }
+    }
+
+    if (hasBackupSection(parsed, 'lernstudioSets') && Array.isArray(data.lernstudioSets)) {
+      const incomingCustomOnly = (data.lernstudioSets as any[]).filter(
+        (s: any) => s && s.id && !DEFAULT_LERNSTUDIO_SETS.some(d => d.id === s.id)
+      );
+      const localCustomOnly = ((localWorkspace.lernstudioSets as any[]) || []).filter(
+        (s: any) => s && s.id && !DEFAULT_LERNSTUDIO_SETS.some(d => d.id === s.id)
+      );
+      const mergedCustom = mergeEntities(localCustomOnly, incomingCustomOnly, 'lernstudioSets').merged;
+      const customActive = mergedCustom.filter((s: any) => s && !s.deleted);
+      nextWorkspace.lernstudioSets = [...customActive, ...DEFAULT_LERNSTUDIO_SETS];
+    }
+
+    if (hasBackupSection(parsed, 'dismissedDashboardLessons') && Array.isArray(data.dismissedDashboardLessons)) {
+      nextWorkspace.dismissedDashboardLessons = mergeDismissedDashboardLessons(
+        localWorkspace.dismissedDashboardLessons,
+        data.dismissedDashboardLessons,
+        true
+      );
+    }
+
+    // 3. Enforce reverse tombstone sweep and cascade cleanup across the merged workspace
+    enforcePurgedTombstonesOnWorkspace(nextWorkspace, activePurged);
+
+    return {
+      isValid: true,
+      mergedWorkspace: nextWorkspace,
+      workspace: nextWorkspace
+    };
+  } catch (err: any) {
+    return {
+      isValid: false,
+      errorMessage: err?.message || 'Failed to merge backup payload.',
+      mergedWorkspace: localWorkspace,
+      workspace: localWorkspace
+    };
+  }
+}
+
 

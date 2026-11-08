@@ -1,4 +1,4 @@
-import { SyncableRecord, SyncConflictRecord, SyncEntityDiff, TeacherSettingsRecord, DeletedItem, RecentlyDeletedData } from '../../types';
+import { SyncableRecord, SyncConflictRecord, SyncEntityDiff, TeacherSettingsRecord, DeletedItem, RecentlyDeletedData, PurgedRecordTombstone, Student, Group, Lesson, SchoolNote, NotificationItem } from '../../types';
 
 export interface MergeResult<T extends SyncableRecord> {
   merged: T[];
@@ -7,6 +7,7 @@ export interface MergeResult<T extends SyncableRecord> {
   deletedCount: number;
   conflicts: SyncConflictRecord[];
   diff: SyncEntityDiff;
+  deferredIds?: string[];
 }
 
 export function parseTimestampMs(val: any): number {
@@ -88,28 +89,45 @@ export function mergeDeletedItems<T extends { id: string }>(
 
 /**
  * Merge and deduplicate PurgedRecordTombstone records by item ID.
+ * Preserves valid tombstones even when timestamps are missing or clock-skewed.
  */
 export function mergePurgedTombstones(
-  localPurged: import('../../types').PurgedRecordTombstone[] | undefined | null,
-  incomingPurged: import('../../types').PurgedRecordTombstone[] | undefined | null
-): import('../../types').PurgedRecordTombstone[] {
+  localPurged: PurgedRecordTombstone[] | undefined | null,
+  incomingPurged: PurgedRecordTombstone[] | undefined | null
+): PurgedRecordTombstone[] {
   const localArr = Array.isArray(localPurged) ? localPurged : [];
   const incomingArr = Array.isArray(incomingPurged) ? incomingPurged : [];
   if (localArr.length === 0 && incomingArr.length === 0) return [];
 
-  const map = new Map<string, import('../../types').PurgedRecordTombstone>();
+  const map = new Map<string, PurgedRecordTombstone>();
   for (const t of [...localArr, ...incomingArr]) {
-    if (!t || !t.id || typeof t.id !== 'string') continue;
+    if (!t || !t.id || typeof t.id !== 'string' || !t.id.trim()) continue;
     const id = t.id.trim();
+    const validType: 'student' | 'group' | 'lesson' =
+      t.type === 'group' || t.type === 'lesson' || t.type === 'student' ? t.type : 'student';
+    const rawTime = Math.max(parseTimestampMs(t.updatedAt), parseTimestampMs(t.purgedAt), 1);
+    const normalized: PurgedRecordTombstone = {
+      id,
+      type: validType,
+      purgedAt: typeof t.purgedAt === 'string' && t.purgedAt.trim() ? t.purgedAt : new Date(rawTime).toISOString(),
+      updatedAt: rawTime,
+      originRevision: typeof t.originRevision === 'number' ? t.originRevision : 1
+    };
+
     const existing = map.get(id);
     if (!existing) {
-      map.set(id, t);
+      map.set(id, normalized);
     } else {
-      const existingTime = parseTimestampMs(existing.updatedAt || existing.purgedAt);
-      const newTime = parseTimestampMs(t.updatedAt || t.purgedAt);
-      if (newTime >= existingTime) {
-        map.set(id, t);
-      }
+      const existingTime = Math.max(parseTimestampMs(existing.updatedAt), parseTimestampMs(existing.purgedAt), 1);
+      const maxTime = Math.max(existingTime, rawTime);
+      const maxRev = Math.max(existing.originRevision || 1, normalized.originRevision || 1);
+      map.set(id, {
+        id,
+        type: normalized.type || existing.type,
+        purgedAt: rawTime >= existingTime ? normalized.purgedAt : existing.purgedAt,
+        updatedAt: maxTime,
+        originRevision: maxRev
+      });
     }
   }
   return Array.from(map.values());
@@ -117,6 +135,7 @@ export function mergePurgedTombstones(
 
 /**
  * Dedicated, type-safe merge for RecentlyDeletedData containing wrapper objects and purged tombstones.
+ * Permanent purge tombstones are terminal for their IDs regardless of device clock differences.
  */
 export function mergeRecentlyDeleted(
   localRec: RecentlyDeletedData | undefined | null,
@@ -130,21 +149,49 @@ export function mergeRecentlyDeleted(
   const mergedGroups = mergeDeletedItems(local.groups, incoming.groups);
   const mergedLessons = mergeDeletedItems(local.lessons, incoming.lessons);
 
-  const purgedMap = new Map<string, number>();
+  const purgedIds = new Set<string>();
+  const purgedGroupIds = new Set<string>();
+  const purgedStudentIds = new Set<string>();
+
   for (const p of mergedPurged) {
-    if (p && p.id) {
-      const pTime = Math.max(parseTimestampMs(p.purgedAt), parseTimestampMs(p.updatedAt));
-      purgedMap.set(p.id.trim(), Math.max(purgedMap.get(p.id.trim()) || 0, pTime));
+    if (p && p.id && typeof p.id === 'string') {
+      const pid = p.id.trim();
+      if (pid) {
+        purgedIds.add(pid);
+        if (p.type === 'group') purgedGroupIds.add(pid);
+        if (p.type === 'student') purgedStudentIds.add(pid);
+      }
+    }
+  }
+
+  // Cascade: any soft-deleted student belonging to a purged group is also considered purged
+  for (const entry of mergedStudents) {
+    if (entry && entry.item && entry.item.id) {
+      const grpId = (entry.item.groupId || entry.item.archivedGroupId || '').trim();
+      if (grpId && purgedGroupIds.has(grpId)) {
+        purgedIds.add(entry.item.id.trim());
+        purgedStudentIds.add(entry.item.id.trim());
+      }
+    }
+  }
+
+  // Cascade: any soft-deleted lesson belonging to a purged group or purged student is also considered purged
+  for (const entry of mergedLessons) {
+    if (entry && entry.item && entry.item.id) {
+      const grpId = (entry.item.groupId || '').trim();
+      const stId = (entry.item.studentId || '').trim();
+      if ((grpId && purgedGroupIds.has(grpId)) || (stId && purgedStudentIds.has(stId))) {
+        purgedIds.add(entry.item.id.trim());
+      }
     }
   }
 
   const filterSoftDeleted = <T extends { id: string }>(items: DeletedItem<T>[]): DeletedItem<T>[] => {
     return items.filter(entry => {
       if (!entry || !entry.item || !entry.item.id) return false;
-      const purgedTime = purgedMap.get(entry.item.id.trim());
-      if (!purgedTime) return true;
-      const softDelTime = parseTimestampMs(entry.deletedAt || (entry.item as any)?.updatedAt);
-      return softDelTime > purgedTime;
+      const id = entry.item.id.trim();
+      // Terminal tombstone precedence: once an ID is in purgedIds, it never re-enters soft-deleted trash regardless of timestamps
+      return !purgedIds.has(id);
     });
   };
 
@@ -183,8 +230,52 @@ export function mergeDismissedDashboardLessons(
 
 export interface MergeEntitiesOptions {
   entityTypeName?: string;
-  purgedRecords?: import('../../types').PurgedRecordTombstone[];
+  purgedRecords?: PurgedRecordTombstone[];
   recentlyDeleted?: RecentlyDeletedData;
+  deferUnknownActiveIds?: boolean;
+  knownLocalIds?: Set<string>;
+}
+
+function isEntityCascadePurged(
+  item: any,
+  entityTypeName: string,
+  purgedGroupIds: Set<string>,
+  purgedStudentIds: Set<string>,
+  purgedLessonIds: Set<string>
+): boolean {
+  if (!item || typeof item !== 'object') return false;
+  const normType = (entityTypeName || '').toLowerCase();
+  const groupId = typeof item.groupId === 'string' ? item.groupId.trim() : '';
+  const archivedGroupId = typeof item.archivedGroupId === 'string' ? item.archivedGroupId.trim() : '';
+  const studentId = typeof item.studentId === 'string' ? item.studentId.trim() : '';
+  const lessonId = typeof item.lessonId === 'string' ? item.lessonId.trim() : '';
+
+  if (normType === 'student' || normType === 'students') {
+    if ((groupId && purgedGroupIds.has(groupId)) || (archivedGroupId && purgedGroupIds.has(archivedGroupId))) {
+      return true;
+    }
+  } else if (normType === 'lesson' || normType === 'lessons') {
+    if ((groupId && purgedGroupIds.has(groupId)) || (studentId && purgedStudentIds.has(studentId))) {
+      return true;
+    }
+  } else if (normType === 'schoolnotes' || normType === 'schoolnote') {
+    if ((studentId && purgedStudentIds.has(studentId)) || (lessonId && purgedLessonIds.has(lessonId))) {
+      return true;
+    }
+  } else if (normType === 'homeworkassignments' || normType === 'homeworksubmissions') {
+    if (
+      (groupId && purgedGroupIds.has(groupId)) ||
+      (studentId && purgedStudentIds.has(studentId)) ||
+      (lessonId && purgedLessonIds.has(lessonId))
+    ) {
+      return true;
+    }
+  } else if (normType === 'notifications' || normType === 'notification') {
+    if (lessonId && purgedLessonIds.has(lessonId)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function mergeEntities<T extends SyncableRecord>(
@@ -197,73 +288,98 @@ export function mergeEntities<T extends SyncableRecord>(
     : (entityTypeNameOrOptions || {});
 
   const entityTypeName = options.entityTypeName || 'entity';
-  const purgedList = options.purgedRecords || options.recentlyDeleted?.purgedRecords || [];
+  const purgedList = mergePurgedTombstones(options.purgedRecords, options.recentlyDeleted?.purgedRecords);
 
-  const purgedMap = new Map<string, { purgedTime: number; tombstoneRev: number }>();
-  if (Array.isArray(purgedList)) {
-    for (const p of purgedList) {
-      if (p && p.id) {
-        const pTime = Math.max(parseTimestampMs(p.purgedAt), parseTimestampMs(p.updatedAt));
-        const existing = purgedMap.get(p.id.trim());
-        const maxTime = Math.max(existing?.purgedTime || 0, pTime);
-        const maxRev = Math.max(existing?.tombstoneRev || 0, p.originRevision || 0);
-        purgedMap.set(p.id.trim(), { purgedTime: maxTime, tombstoneRev: maxRev });
-      }
+  const purgedMap = new Map<string, { purgedTime: number; tombstoneRev: number; type: string }>();
+  const purgedGroupIds = new Set<string>();
+  const purgedStudentIds = new Set<string>();
+  const purgedLessonIds = new Set<string>();
+
+  for (const p of purgedList) {
+    if (p && p.id && typeof p.id === 'string') {
+      const pid = p.id.trim();
+      if (!pid) continue;
+      const pTime = Math.max(parseTimestampMs(p.purgedAt), parseTimestampMs(p.updatedAt), 1);
+      const existing = purgedMap.get(pid);
+      const maxTime = Math.max(existing?.purgedTime || 0, pTime);
+      const maxRev = Math.max(existing?.tombstoneRev || 0, p.originRevision || 1);
+      purgedMap.set(pid, { purgedTime: maxTime, tombstoneRev: maxRev, type: p.type });
+      if (p.type === 'group') purgedGroupIds.add(pid);
+      if (p.type === 'student') purgedStudentIds.add(pid);
+      if (p.type === 'lesson') purgedLessonIds.add(pid);
     }
   }
 
   const entityMap = new Map<string, T>();
-  
-  // Populate initial map with local entities
-  for (const localItem of localArray) {
+  let deletedCount = 0;
+
+  // Populate initial map with local entities, sweeping any local record that matches a purge tombstone or cascade parent!
+  const safeLocalArray = Array.isArray(localArray) ? localArray : [];
+  for (const localItem of safeLocalArray) {
     if (localItem && localItem.id) {
-      entityMap.set(localItem.id, localItem);
+      const lid = localItem.id.trim();
+      if (
+        purgedMap.has(lid) ||
+        isEntityCascadePurged(localItem, entityTypeName, purgedGroupIds, purgedStudentIds, purgedLessonIds)
+      ) {
+        deletedCount++;
+        continue;
+      }
+      entityMap.set(lid, localItem);
     }
   }
 
-  // If incoming is empty or not an array, return local state as is (Safety Rule: Empty != Delete)
+  // If incoming is empty or not an array, return local state (with any newly purged local items removed)
   if (!Array.isArray(incomingArray) || incomingArray.length === 0) {
     return {
       merged: Array.from(entityMap.values()),
       createdCount: 0,
       updatedCount: 0,
-      deletedCount: 0,
+      deletedCount,
       conflicts: [],
-      diff: { created: 0, updated: 0, deleted: 0, conflicts: 0 }
+      diff: { created: 0, updated: 0, deleted: deletedCount, conflicts: 0 },
+      deferredIds: []
     };
   }
 
   let createdCount = 0;
   let updatedCount = 0;
-  let deletedCount = 0;
   const conflicts: SyncConflictRecord[] = [];
+  const deferredIds: string[] = [];
 
   for (const incomingItem of incomingArray) {
     if (!incomingItem || !incomingItem.id) continue;
     const id = incomingItem.id.trim();
     const localItem = entityMap.get(id);
 
-    // Purge tombstone suppression check
+    // 1. Authoritative Purge Tombstone & Cascade Suppression Check (Clock-Independent, Terminal)
     const purgedInfo = purgedMap.get(id);
-    if (purgedInfo && purgedInfo.purgedTime > 0) {
+    const isCascadePurged = isEntityCascadePurged(incomingItem, entityTypeName, purgedGroupIds, purgedStudentIds, purgedLessonIds);
+    if (purgedInfo || isCascadePurged) {
       const incomingTime = parseTimestampMs(incomingItem.updatedAt);
-      if (incomingTime <= purgedInfo.purgedTime) {
-        // REJECT / SUPPRESS incoming active or soft-deleted record resurrection because an authoritative purge tombstone exists!
-        conflicts.push({
-          entityType: entityTypeName,
-          entityId: id,
-          localUpdatedAt: purgedInfo.purgedTime,
-          remoteUpdatedAt: incomingTime,
-          winner: 'local',
-          resolutionStrategy: 'LWW',
-          timestamp: Date.now()
-        });
-        continue;
-      }
+      const localPurgeTime = purgedInfo?.purgedTime || Date.now();
+      conflicts.push({
+        entityType: entityTypeName,
+        entityId: id,
+        localUpdatedAt: localPurgeTime,
+        remoteUpdatedAt: incomingTime,
+        winner: 'local',
+        resolutionStrategy: 'LWW',
+        timestamp: Date.now()
+      });
+      continue;
     }
 
+    // 2. Partial Snapshot / Missing Tombstone Metadata Guard:
+    // If deletion metadata is incomplete/unknown, do not insert unknown remote active records until tombstone state is known
     if (!localItem) {
-      // Incoming record does not exist locally, insert it
+      const isKnownLocally = options.knownLocalIds ? options.knownLocalIds.has(id) : false;
+      if (options.deferUnknownActiveIds && !incomingItem.deleted && !isKnownLocally) {
+        deferredIds.push(id);
+        continue;
+      }
+
+      // Incoming record does not exist locally and is allowed -> insert it
       entityMap.set(id, incomingItem);
       if (incomingItem.deleted) {
         deletedCount++;
@@ -341,8 +457,12 @@ export function mergeEntities<T extends SyncableRecord>(
         }
       }
 
-      // Preserve local deletion tombstones against remote non-deleted items unless remote has strictly newer timestamp AND strictly higher version
-      if (localItem.deleted && !incomingItem.deleted && !(incomingTime > localTime && incomingVer > localVer)) {
+      // Preserve local soft-deletion tombstones against stale remote non-deleted items unless remote has strictly newer timestamp
+      if (
+        localItem.deleted &&
+        !incomingItem.deleted &&
+        !(incomingTime > localTime && (incomingVer >= localVer || incomingRev > localRev))
+      ) {
         shouldAcceptIncoming = false;
       }
 
@@ -430,7 +550,8 @@ export function mergeEntities<T extends SyncableRecord>(
       updated: updatedCount,
       deleted: deletedCount,
       conflicts: conflicts.length
-    }
+    },
+    deferredIds
   };
 }
 
@@ -535,3 +656,515 @@ export function mergeTeacherSettings(
     syncedAt: Date.now()
   };
 }
+
+export interface WorkspaceMutableState {
+  groups?: Group[];
+  students?: Student[];
+  lessons?: Lesson[];
+  payments?: any[];
+  financeTransactions?: any[];
+  schoolNotes?: SchoolNote[];
+  homeworkAssignments?: any[];
+  homeworkSubmissions?: any[];
+  notifications?: NotificationItem[];
+  recentlyDeleted?: RecentlyDeletedData;
+  settings?: TeacherSettingsRecord[];
+  [key: string]: any;
+}
+
+/**
+ * Centralized reverse-direction tombstone enforcement across an entire workspace object.
+ * - Merges all available tombstones from `workspace.recentlyDeleted`, `workspace.settings[0].recentlyDeleted`, and `extraPurgedRecords`.
+ * - Sweeps existing active and soft-deleted records in `groups`, `students`, `lessons`, `recentlyDeleted`, `schoolNotes`, `homeworkAssignments`, `homeworkSubmissions`, and `notifications`.
+ * - Propagates cascade purge tombstones for any dependent students/lessons referencing a purged group or student.
+ * - Preserves `payments` and `financeTransactions` intact for financial audit integrity.
+ */
+export function enforcePurgedTombstonesOnWorkspace<T extends WorkspaceMutableState>(
+  workspace: T,
+  extraPurgedRecords?: PurgedRecordTombstone[]
+): T {
+  if (!workspace || typeof workspace !== 'object') return workspace;
+
+  const settingsRec = Array.isArray(workspace.settings)
+    ? workspace.settings.find(s => s && s.id === 'singleton_teacher_settings')
+    : undefined;
+
+  let mergedRec = mergeRecentlyDeleted(workspace.recentlyDeleted, settingsRec?.recentlyDeleted);
+  if (Array.isArray(extraPurgedRecords) && extraPurgedRecords.length > 0) {
+    mergedRec = mergeRecentlyDeleted(mergedRec, {
+      students: [],
+      groups: [],
+      lessons: [],
+      purgedRecords: extraPurgedRecords
+    });
+  }
+
+  const nowStr = new Date().toISOString();
+  const nowMs = Date.now();
+  const initialPurged = mergedRec.purgedRecords || [];
+
+  const purgedGroupIds = new Set<string>();
+  const purgedStudentIds = new Set<string>();
+  const purgedLessonIds = new Set<string>();
+  let maxRev = 1;
+
+  for (const p of initialPurged) {
+    if (!p || !p.id) continue;
+    const pid = p.id.trim();
+    if (p.type === 'group') purgedGroupIds.add(pid);
+    if (p.type === 'student') purgedStudentIds.add(pid);
+    if (p.type === 'lesson') purgedLessonIds.add(pid);
+    if (typeof p.originRevision === 'number' && p.originRevision > maxRev) {
+      maxRev = p.originRevision;
+    }
+  }
+
+  const derivedTombstones: PurgedRecordTombstone[] = [];
+
+  // Discover any active/soft-deleted students belonging to a purged group so they also get explicit tombstones
+  const allStudentsToInspect: Student[] = [
+    ...(Array.isArray(workspace.students) ? workspace.students : []),
+    ...(Array.isArray(mergedRec.students) ? mergedRec.students.map(d => d.item) : [])
+  ];
+  for (const st of allStudentsToInspect) {
+    if (!st || !st.id) continue;
+    const sid = st.id.trim();
+    const grpId = (st.groupId || st.archivedGroupId || '').trim();
+    if (grpId && purgedGroupIds.has(grpId) && !purgedStudentIds.has(sid)) {
+      purgedStudentIds.add(sid);
+      derivedTombstones.push({
+        id: sid,
+        type: 'student',
+        purgedAt: nowStr,
+        updatedAt: nowMs,
+        originRevision: maxRev
+      });
+    }
+  }
+
+  // Discover any active/soft-deleted lessons belonging to a purged group or purged student so they also get explicit tombstones
+  const allLessonsToInspect: Lesson[] = [
+    ...(Array.isArray(workspace.lessons) ? workspace.lessons : []),
+    ...(Array.isArray(mergedRec.lessons) ? mergedRec.lessons.map(d => d.item) : [])
+  ];
+  for (const les of allLessonsToInspect) {
+    if (!les || !les.id) continue;
+    const lid = les.id.trim();
+    const grpId = (les.groupId || '').trim();
+    const stId = (les.studentId || '').trim();
+    if (((grpId && purgedGroupIds.has(grpId)) || (stId && purgedStudentIds.has(stId))) && !purgedLessonIds.has(lid)) {
+      purgedLessonIds.add(lid);
+      derivedTombstones.push({
+        id: lid,
+        type: 'lesson',
+        purgedAt: nowStr,
+        updatedAt: nowMs,
+        originRevision: maxRev
+      });
+    }
+  }
+
+  if (derivedTombstones.length > 0) {
+    mergedRec = mergeRecentlyDeleted(mergedRec, {
+      students: [],
+      groups: [],
+      lessons: [],
+      purgedRecords: derivedTombstones
+    });
+  }
+
+  const finalPurged = mergedRec.purgedRecords || [];
+  const allPurgedIds = new Set<string>(finalPurged.map(p => p.id.trim()));
+
+  if (Array.isArray(workspace.groups)) {
+    workspace.groups = workspace.groups.filter(g => g && g.id && !allPurgedIds.has(g.id.trim()) && !purgedGroupIds.has(g.id.trim()));
+  }
+
+  if (Array.isArray(workspace.students)) {
+    workspace.students = workspace.students.filter(s => {
+      if (!s || !s.id) return false;
+      const sid = s.id.trim();
+      const grpId = (s.groupId || s.archivedGroupId || '').trim();
+      return !allPurgedIds.has(sid) && !purgedStudentIds.has(sid) && (!grpId || !purgedGroupIds.has(grpId));
+    });
+  }
+
+  if (Array.isArray(workspace.lessons)) {
+    workspace.lessons = workspace.lessons.filter(l => {
+      if (!l || !l.id) return false;
+      const lid = l.id.trim();
+      const grpId = (l.groupId || '').trim();
+      const stId = (l.studentId || '').trim();
+      return (
+        !allPurgedIds.has(lid) &&
+        !purgedLessonIds.has(lid) &&
+        (!grpId || !purgedGroupIds.has(grpId)) &&
+        (!stId || !purgedStudentIds.has(stId))
+      );
+    });
+  }
+
+  if (Array.isArray(workspace.schoolNotes)) {
+    workspace.schoolNotes = workspace.schoolNotes.filter(n => {
+      if (!n || !n.id) return false;
+      const stId = (n.studentId || '').trim();
+      const lesId = (n.lessonId || '').trim();
+      return (!stId || !purgedStudentIds.has(stId)) && (!lesId || !purgedLessonIds.has(lesId));
+    });
+  }
+
+  if (Array.isArray(workspace.homeworkAssignments)) {
+    workspace.homeworkAssignments = workspace.homeworkAssignments.filter((hw: any) => {
+      if (!hw || !hw.id) return false;
+      const grpId = (hw.groupId || '').trim();
+      const stId = (hw.studentId || '').trim();
+      const lesId = (hw.lessonId || '').trim();
+      return (
+        (!grpId || !purgedGroupIds.has(grpId)) &&
+        (!stId || !purgedStudentIds.has(stId)) &&
+        (!lesId || !purgedLessonIds.has(lesId))
+      );
+    });
+  }
+
+  if (Array.isArray(workspace.homeworkSubmissions)) {
+    workspace.homeworkSubmissions = workspace.homeworkSubmissions.filter((sub: any) => {
+      if (!sub || !sub.id) return false;
+      const grpId = (sub.groupId || '').trim();
+      const stId = (sub.studentId || '').trim();
+      const lesId = (sub.lessonId || '').trim();
+      return (
+        (!grpId || !purgedGroupIds.has(grpId)) &&
+        (!stId || !purgedStudentIds.has(stId)) &&
+        (!lesId || !purgedLessonIds.has(lesId))
+      );
+    });
+  }
+
+  if (Array.isArray(workspace.notifications)) {
+    workspace.notifications = workspace.notifications.filter(notif => {
+      if (!notif || !notif.id) return false;
+      const lesId = (notif.lessonId || '').trim();
+      return !lesId || !purgedLessonIds.has(lesId);
+    });
+  }
+
+  workspace.recentlyDeleted = mergedRec;
+
+  if (Array.isArray(workspace.settings) && workspace.settings.length > 0) {
+    workspace.settings = workspace.settings.map(s =>
+      s && s.id === 'singleton_teacher_settings'
+        ? { ...s, recentlyDeleted: mergedRec }
+        : s
+    );
+  }
+
+  return workspace;
+}
+
+/**
+ * Executes an authoritative permanent deletion on a workspace state object with full cascade integrity.
+ * - Creates terminal PurgedRecordTombstone entries for the target item and all dependent students/lessons.
+ * - Sweeps active and soft-deleted collections (`groups`, `students`, `lessons`, `recentlyDeleted`, `schoolNotes`, `homeworkAssignments`, `homeworkSubmissions`, `notifications`).
+ * - Preserves `payments` and `financeTransactions` intact.
+ */
+export function executePermanentDeleteOnWorkspace<T extends WorkspaceMutableState>(
+  workspace: T,
+  type: 'student' | 'group' | 'lesson',
+  id: string,
+  nextRevision?: number | (() => number),
+  nowMsOverride?: number
+): { workspace: T; addedTombstones: PurgedRecordTombstone[]; createdTombstones: PurgedRecordTombstone[] } {
+  const targetId = (id || '').trim();
+  const nowMs = typeof nowMsOverride === 'number' ? nowMsOverride : Date.now();
+  const nowStr = new Date(nowMs).toISOString();
+  const resolvedRev = typeof nextRevision === 'function' ? nextRevision() : nextRevision;
+  const rev = typeof resolvedRev === 'number' && resolvedRev > 0 ? resolvedRev : 1;
+
+  const newTombstones: PurgedRecordTombstone[] = [
+    { id: targetId, type, purgedAt: nowStr, updatedAt: nowMs, originRevision: rev }
+  ];
+
+  const currentRec = workspace.recentlyDeleted || { students: [], groups: [], lessons: [], purgedRecords: [] };
+  const allStudents: Student[] = [
+    ...(Array.isArray(workspace.students) ? workspace.students : []),
+    ...(Array.isArray(currentRec.students) ? currentRec.students.map(d => d.item) : [])
+  ];
+  const allLessons: Lesson[] = [
+    ...(Array.isArray(workspace.lessons) ? workspace.lessons : []),
+    ...(Array.isArray(currentRec.lessons) ? currentRec.lessons.map(d => d.item) : [])
+  ];
+
+  if (type === 'group') {
+    const cascadedStudentIds = new Set<string>();
+    for (const s of allStudents) {
+      if (!s || !s.id) continue;
+      if (s.groupId === targetId || s.archivedGroupId === targetId) {
+        cascadedStudentIds.add(s.id.trim());
+        newTombstones.push({
+          id: s.id.trim(),
+          type: 'student',
+          purgedAt: nowStr,
+          updatedAt: nowMs,
+          originRevision: rev
+        });
+      }
+    }
+    for (const l of allLessons) {
+      if (!l || !l.id) continue;
+      if (l.groupId === targetId || (l.studentId && cascadedStudentIds.has(l.studentId.trim()))) {
+        newTombstones.push({
+          id: l.id.trim(),
+          type: 'lesson',
+          purgedAt: nowStr,
+          updatedAt: nowMs,
+          originRevision: rev
+        });
+      }
+    }
+  } else if (type === 'student') {
+    for (const l of allLessons) {
+      if (!l || !l.id) continue;
+      if (l.studentId === targetId) {
+        newTombstones.push({
+          id: l.id.trim(),
+          type: 'lesson',
+          purgedAt: nowStr,
+          updatedAt: nowMs,
+          originRevision: rev
+        });
+      }
+    }
+  }
+
+  enforcePurgedTombstonesOnWorkspace(workspace, newTombstones);
+  return { workspace, addedTombstones: newTombstones, createdTombstones: newTombstones };
+}
+
+/**
+ * Executes `clearRecentlyDeleted` across a workspace state object, creating terminal tombstones
+ * for all items in `recentlyDeleted` plus any cascade children, and sweeping all active/soft-deleted collections.
+ */
+export function executeClearRecentlyDeletedOnWorkspace<T extends WorkspaceMutableState>(
+  workspace: T,
+  nextRevision?: number | (() => number),
+  nowMsOverride?: number
+): { workspace: T; addedTombstones: PurgedRecordTombstone[]; createdTombstones: PurgedRecordTombstone[] } {
+  const nowMs = typeof nowMsOverride === 'number' ? nowMsOverride : Date.now();
+  const nowStr = new Date(nowMs).toISOString();
+  const resolvedRev = typeof nextRevision === 'function' ? nextRevision() : nextRevision;
+  const rev = typeof resolvedRev === 'number' && resolvedRev > 0 ? resolvedRev : 1;
+  const currentRec = workspace.recentlyDeleted || { students: [], groups: [], lessons: [], purgedRecords: [] };
+
+  const purgedGroupIds = new Set<string>(
+    Array.isArray(currentRec.groups) ? currentRec.groups.filter(g => g?.item?.id).map(g => g.item.id.trim()) : []
+  );
+  const purgedStudentIds = new Set<string>(
+    Array.isArray(currentRec.students) ? currentRec.students.filter(s => s?.item?.id).map(s => s.item.id.trim()) : []
+  );
+
+  const allStudents: Student[] = [
+    ...(Array.isArray(workspace.students) ? workspace.students : []),
+    ...(Array.isArray(currentRec.students) ? currentRec.students.map(d => d.item) : [])
+  ];
+  for (const s of allStudents) {
+    if (!s || !s.id) continue;
+    const grpId = (s.groupId || s.archivedGroupId || '').trim();
+    if (grpId && purgedGroupIds.has(grpId)) {
+      purgedStudentIds.add(s.id.trim());
+    }
+  }
+
+  const purgedLessonIds = new Set<string>(
+    Array.isArray(currentRec.lessons) ? currentRec.lessons.filter(l => l?.item?.id).map(l => l.item.id.trim()) : []
+  );
+  const allLessons: Lesson[] = [
+    ...(Array.isArray(workspace.lessons) ? workspace.lessons : []),
+    ...(Array.isArray(currentRec.lessons) ? currentRec.lessons.map(d => d.item) : [])
+  ];
+  for (const l of allLessons) {
+    if (!l || !l.id) continue;
+    const grpId = (l.groupId || '').trim();
+    const stId = (l.studentId || '').trim();
+    if ((grpId && purgedGroupIds.has(grpId)) || (stId && purgedStudentIds.has(stId))) {
+      purgedLessonIds.add(l.id.trim());
+    }
+  }
+
+  const newTombstones: PurgedRecordTombstone[] = [
+    ...Array.from(purgedGroupIds).map(gid => ({
+      id: gid,
+      type: 'group' as const,
+      purgedAt: nowStr,
+      updatedAt: nowMs,
+      originRevision: rev
+    })),
+    ...Array.from(purgedStudentIds).map(sid => ({
+      id: sid,
+      type: 'student' as const,
+      purgedAt: nowStr,
+      updatedAt: nowMs,
+      originRevision: rev
+    })),
+    ...Array.from(purgedLessonIds).map(lid => ({
+      id: lid,
+      type: 'lesson' as const,
+      purgedAt: nowStr,
+      updatedAt: nowMs,
+      originRevision: rev
+    }))
+  ];
+
+  workspace.recentlyDeleted = {
+    students: [],
+    groups: [],
+    lessons: [],
+    purgedRecords: mergePurgedTombstones(currentRec.purgedRecords, newTombstones)
+  };
+
+  enforcePurgedTombstonesOnWorkspace(workspace, newTombstones);
+  return { workspace, addedTombstones: newTombstones, createdTombstones: newTombstones };
+}
+
+/**
+ * Executes safe restoration of a soft-deleted item from `recentlyDeleted` on a workspace state object.
+ * - Strictly refuses to restore any item whose ID (or parent group/student ID) exists in `recentlyDeleted.purgedRecords`.
+ * - NEVER removes any tombstone from `purgedRecords`.
+ */
+export function executeRestoreItemOnWorkspace<T extends WorkspaceMutableState>(
+  workspace: T,
+  type: 'student' | 'group' | 'lesson',
+  id: string,
+  wrapMutationFn?: <R extends SyncableRecord>(item: R) => R
+): { workspace: T; restored: boolean } {
+  const targetId = (id || '').trim();
+  const currentRec = workspace.recentlyDeleted || { students: [], groups: [], lessons: [], purgedRecords: [] };
+  const purgedList = Array.isArray(currentRec.purgedRecords) ? currentRec.purgedRecords : [];
+  const purgedIds = new Set<string>(purgedList.filter(p => p && p.id).map(p => p.id.trim()));
+  const purgedGroupIds = new Set<string>(purgedList.filter(p => p && p.id && p.type === 'group').map(p => p.id.trim()));
+  const purgedStudentIds = new Set<string>(purgedList.filter(p => p && p.id && p.type === 'student').map(p => p.id.trim()));
+
+  // Terminal Purge Rule: if the item itself is permanently purged, restoration is strictly forbidden
+  if (purgedIds.has(targetId)) {
+    enforcePurgedTombstonesOnWorkspace(workspace);
+    return { workspace, restored: false };
+  }
+
+  const mutate = <R extends SyncableRecord>(item: R): R => {
+    if (wrapMutationFn) return wrapMutationFn(item);
+    return {
+      ...item,
+      deleted: false,
+      updatedAt: Date.now(),
+      version: ((item as any).version || 1) + 1,
+      originRevision: (item.originRevision || 1) + 1
+    };
+  };
+
+  if (type === 'student') {
+    const target = (currentRec.students || []).find(d => d?.item?.id === targetId);
+    if (!target) return { workspace, restored: false };
+    const parentGrp = (target.item.groupId || target.item.archivedGroupId || '').trim();
+    if (parentGrp && purgedGroupIds.has(parentGrp)) {
+      return { workspace, restored: false };
+    }
+
+    const restoredStudent = mutate({ ...target.item, deleted: false } as Student);
+    const prevStudents = Array.isArray(workspace.students) ? workspace.students : [];
+    const exists = prevStudents.some(s => s.id === targetId);
+    workspace.students = exists
+      ? prevStudents.map(s => (s.id === targetId ? restoredStudent : s))
+      : [...prevStudents, restoredStudent];
+
+    workspace.recentlyDeleted = {
+      ...currentRec,
+      students: (currentRec.students || []).filter(d => d?.item?.id !== targetId),
+      purgedRecords: purgedList // NEVER remove tombstones from purgedRecords
+    };
+    return { workspace, restored: true };
+  } else if (type === 'group') {
+    const target = (currentRec.groups || []).find(d => d?.item?.id === targetId);
+    if (!target) return { workspace, restored: false };
+
+    const restoredGroup = mutate({ ...target.item, deleted: false } as Group);
+    const prevGroups = Array.isArray(workspace.groups) ? workspace.groups : [];
+    const exists = prevGroups.some(g => g.id === targetId);
+    workspace.groups = exists
+      ? prevGroups.map(g => (g.id === targetId ? restoredGroup : g))
+      : [...prevGroups, restoredGroup];
+
+    // Restore linked non-purged soft-deleted students belonging to this group
+    const linkedStudents = (currentRec.students || []).filter(
+      d => d?.item && (d.item.groupId === targetId || d.item.archivedGroupId === targetId) && !purgedIds.has(d.item.id.trim())
+    );
+    const linkedStudentIds = new Set(linkedStudents.map(d => d.item.id));
+    if (linkedStudents.length > 0) {
+      const prevStudents = Array.isArray(workspace.students) ? workspace.students : [];
+      const existingIds = new Set(prevStudents.map(s => s.id));
+      const newlyRestored = linkedStudents
+        .filter(d => !existingIds.has(d.item.id))
+        .map(d => mutate({ ...d.item, groupId: targetId, deleted: false } as Student));
+      workspace.students = [
+        ...prevStudents.map(s =>
+          linkedStudentIds.has(s.id) ? mutate({ ...s, groupId: targetId, deleted: false } as Student) : s
+        ),
+        ...newlyRestored
+      ];
+    }
+
+    // Restore linked non-purged soft-deleted lessons belonging to this group
+    const linkedLessons = (currentRec.lessons || []).filter(
+      d =>
+        d?.item &&
+        d.item.groupId === targetId &&
+        !purgedIds.has(d.item.id.trim()) &&
+        (!d.item.studentId || !purgedStudentIds.has(d.item.studentId.trim()))
+    );
+    const linkedLessonIds = new Set(linkedLessons.map(d => d.item.id));
+    if (linkedLessons.length > 0) {
+      const prevLessons = Array.isArray(workspace.lessons) ? workspace.lessons : [];
+      const existingIds = new Set(prevLessons.map(l => l.id));
+      const newlyRestored = linkedLessons
+        .filter(d => !existingIds.has(d.item.id))
+        .map(d => mutate({ ...d.item, deleted: false } as Lesson));
+      workspace.lessons = [
+        ...prevLessons.map(l => (linkedLessonIds.has(l.id) ? mutate({ ...l, deleted: false } as Lesson) : l)),
+        ...newlyRestored
+      ];
+    }
+
+    workspace.recentlyDeleted = {
+      ...currentRec,
+      groups: (currentRec.groups || []).filter(d => d?.item?.id !== targetId),
+      students: (currentRec.students || []).filter(d => !linkedStudentIds.has(d?.item?.id)),
+      lessons: (currentRec.lessons || []).filter(d => !linkedLessonIds.has(d?.item?.id)),
+      purgedRecords: purgedList // NEVER remove tombstones from purgedRecords
+    };
+    return { workspace, restored: true };
+  } else if (type === 'lesson') {
+    const target = (currentRec.lessons || []).find(d => d?.item?.id === targetId);
+    if (!target) return { workspace, restored: false };
+    const parentGrp = (target.item.groupId || '').trim();
+    const parentSt = (target.item.studentId || '').trim();
+    if ((parentGrp && purgedGroupIds.has(parentGrp)) || (parentSt && purgedStudentIds.has(parentSt))) {
+      return { workspace, restored: false };
+    }
+
+    const restoredLesson = mutate({ ...target.item, deleted: false } as Lesson);
+    const prevLessons = Array.isArray(workspace.lessons) ? workspace.lessons : [];
+    const exists = prevLessons.some(l => l.id === targetId);
+    workspace.lessons = exists
+      ? prevLessons.map(l => (l.id === targetId ? restoredLesson : l))
+      : [...prevLessons, restoredLesson];
+
+    workspace.recentlyDeleted = {
+      ...currentRec,
+      lessons: (currentRec.lessons || []).filter(d => d?.item?.id !== targetId),
+      purgedRecords: purgedList // NEVER remove tombstones from purgedRecords
+    };
+    return { workspace, restored: true };
+  }
+
+  return { workspace, restored: false };
+}
+

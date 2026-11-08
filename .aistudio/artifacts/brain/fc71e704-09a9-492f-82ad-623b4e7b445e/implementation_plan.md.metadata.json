@@ -1,6 +1,6 @@
 {
-  "summary":  "خطة الإصلاح المباشر والنهائي لنظام المزامنة السحابية وفق متطلبات Glück: حماية أطقم Lernstudio المضمنة من الحذف أو الاستبدال في أي استرجاع، توثيق وتأكيد مسح السحابة دون تجاهل الأخطاء أو المسح الصامت، آلية إيقاف ومؤشر جيل سحابي يمنع أي جهاز من إعادة ملء السحابة تلقائياً بعد المسح، تصحيح ترتيب Firestore وRelay، وإعادة المحاولة التلقائية عند فشل الإقلاع، مع 12 سيناريو اختبار حقيقي يستدعي دوال الإنتاج.",
-  "updatedAt":  "2026-11-07T12:07:19.859701497Z",
+  "summary":  "Comprehensive architectural implementation plan for terminal permanent deletion dominance, reverse active-record purging, clock-independent tombstone enforcement, partial Cloud/P2P deferral, backup import/export safety, referential integrity, and 23+ production-boundary regression tests.",
+  "updatedAt":  "2026-11-07T20:25:43.791748938Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

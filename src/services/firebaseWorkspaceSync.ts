@@ -29,7 +29,13 @@ import {
   executeSafeFirestoreWrite
 } from '../shared/firebaseCloudSync';
 import { DEFAULT_LERNSTUDIO_SETS } from '../data/defaultLernstudioSets';
-import { mergeEntities, mergeRecentlyDeleted, mergeDismissedDashboardLessons } from './sync/mergeEngine';
+import {
+  mergeEntities,
+  mergeRecentlyDeleted,
+  mergeDismissedDashboardLessons,
+  enforcePurgedTombstonesOnWorkspace
+} from './sync/mergeEngine';
+import { RecentlyDeletedData } from '../types';
 
 export {
   signInTeacherWithGoogle,
@@ -878,21 +884,32 @@ export async function uploadWorkspaceToGoogleCloud(
         deviceId
       };
 
-      // Merge changed entities into the rolling delta accumulator using P2P mergeEngine
-      for (const [colKey, deltaItems] of Object.entries(changedEntities)) {
-        const existingDeltaItems = Array.isArray(nextAcc[colKey]) ? nextAcc[colKey] : [];
-        nextAcc[colKey] = mergeEntities(existingDeltaItems, deltaItems, colKey).merged;
-      }
-
       // Merge changed singletons into the rolling delta accumulator
       for (const [sKey, sVal] of Object.entries(changedSingletons)) {
         if (sKey === 'prunedLessonIds' && Array.isArray(sVal)) {
           const prevPruned = Array.isArray(nextAcc.prunedLessonIds) ? nextAcc.prunedLessonIds : [];
           nextAcc.prunedLessonIds = Array.from(new Set([...prevPruned, ...sVal]));
+        } else if (sKey === 'recentlyDeleted') {
+          nextAcc.recentlyDeleted = mergeRecentlyDeleted(nextAcc.recentlyDeleted, sVal);
+        } else if (sKey === 'dismissedDashboardLessons' && Array.isArray(sVal)) {
+          nextAcc.dismissedDashboardLessons = mergeDismissedDashboardLessons(nextAcc.dismissedDashboardLessons, sVal, true);
         } else {
           nextAcc[sKey] = sVal;
         }
       }
+
+      // Mergechanged entities into the rolling delta accumulator and sweep purged items so purged records cannot linger in nextAcc
+      const accPurged = nextAcc.recentlyDeleted?.purgedRecords || parsed.recentlyDeleted?.purgedRecords || [];
+      for (const [colKey, deltaItems] of Object.entries(changedEntities)) {
+        const existingDeltaItems = Array.isArray(nextAcc[colKey]) ? nextAcc[colKey] : [];
+        nextAcc[colKey] = mergeEntities(existingDeltaItems, deltaItems, {
+          entityTypeName: colKey,
+          purgedRecords: accPurged
+        }).merged;
+      }
+
+      // Sweep any pre-existing entity arrays in the rolling delta accumulator against current tombstones
+      enforcePurgedTombstonesOnWorkspace(nextAcc, accPurged);
 
       const deltaPayloadStr = JSON.stringify(nextAcc);
 
@@ -1052,17 +1069,38 @@ function reassembleCategoryChunks(chunkDocs: any[]): any | null {
 }
 
 /**
- * Applies a P2P delta payload on top of a base workspace object using `mergeEntities`.
+ * Applies a P2P/Cloud delta payload on top of a base workspace object using `mergeEntities`
+ * and `enforcePurgedTombstonesOnWorkspace`.
+ * Handles both directions:
+ * - Incoming active records are checked against base + delta tombstones.
+ * - Incoming tombstones immediately remove existing active records from `baseObj` even when
+ *   the delta does not contain a non-empty array for that entity collection.
  */
-function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): void {
-  if (!deltaObj || typeof deltaObj !== 'object') return;
+export function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): any {
+  if (!baseObj || typeof baseObj !== 'object') return baseObj;
+  if (!deltaObj || typeof deltaObj !== 'object') {
+    enforcePurgedTombstonesOnWorkspace(baseObj);
+    return baseObj;
+  }
 
   // 1. First merge recentlyDeleted and singletons so authoritative purge tombstones are available
-  if (deltaObj.recentlyDeleted) {
+  if (deltaObj.recentlyDeleted || baseObj.recentlyDeleted) {
     baseObj.recentlyDeleted = mergeRecentlyDeleted(baseObj.recentlyDeleted, deltaObj.recentlyDeleted);
   }
+  if (Array.isArray(deltaObj.purgedRecords) && deltaObj.purgedRecords.length > 0) {
+    baseObj.recentlyDeleted = mergeRecentlyDeleted(baseObj.recentlyDeleted, {
+      students: [],
+      groups: [],
+      lessons: [],
+      purgedRecords: deltaObj.purgedRecords
+    });
+  }
   if (deltaObj.dismissedDashboardLessons !== undefined) {
-    baseObj.dismissedDashboardLessons = mergeDismissedDashboardLessons(baseObj.dismissedDashboardLessons, deltaObj.dismissedDashboardLessons, true);
+    baseObj.dismissedDashboardLessons = mergeDismissedDashboardLessons(
+      baseObj.dismissedDashboardLessons,
+      deltaObj.dismissedDashboardLessons,
+      true
+    );
   }
   if (Array.isArray(deltaObj.prunedLessonIds)) {
     const existingPruned = Array.isArray(baseObj.prunedLessonIds) ? baseObj.prunedLessonIds : [];
@@ -1077,19 +1115,244 @@ function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): void {
     }
   }
 
+  // 2. Sweep existing baseObj collections immediately against merged tombstones (handles tombstone-only deltas!)
+  enforcePurgedTombstonesOnWorkspace(baseObj);
   const purgedList = baseObj.recentlyDeleted?.purgedRecords || [];
 
-  // 2. Process entity collections with centralized purge tombstone protection
+  // 3. Process entity collections with centralized purge tombstone protection
   for (const colKey of ENTITY_COLLECTION_KEYS) {
     const incomingItems = deltaObj[colKey];
+    const existingItems = Array.isArray(baseObj[colKey]) ? baseObj[colKey] : [];
     if (Array.isArray(incomingItems) && incomingItems.length > 0) {
-      const existingItems = Array.isArray(baseObj[colKey]) ? baseObj[colKey] : [];
       baseObj[colKey] = mergeEntities(existingItems, incomingItems, {
+        entityTypeName: colKey,
+        purgedRecords: purgedList
+      }).merged;
+    } else if (existingItems.length > 0 && purgedList.length > 0) {
+      baseObj[colKey] = mergeEntities(existingItems, [], {
         entityTypeName: colKey,
         purgedRecords: purgedList
       }).merged;
     }
   }
+
+  // 4. Final sweep to ensure cascade referential integrity across all collections
+  enforcePurgedTombstonesOnWorkspace(baseObj);
+  return baseObj;
+}
+
+function getLocalStoredRecentlyDeleted(): RecentlyDeletedData | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const raw = localStorage.getItem('dl_recently_deleted');
+    return raw ? JSON.parse(raw) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getLocalKnownIdsForCollection(colKey: string): Set<string> {
+  const keyMap: Record<string, string> = {
+    groups: 'dl_groups',
+    students: 'dl_students',
+    lessons: 'dl_lessons',
+    payments: 'dl_payments'
+  };
+  const storageKey = keyMap[colKey];
+  if (!storageKey || typeof window === 'undefined') return new Set<string>();
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return new Set<string>();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set<string>();
+    return new Set(parsed.filter((x: any) => x && typeof x.id === 'string').map((x: any) => x.id.trim()));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+/**
+ * Reassembles a complete or partial Cloud workspace snapshot from category chunk documents.
+ * - Reassembles `profile_settings` FIRST so authoritative `recentlyDeleted.purgedRecords` tombstones are known before any entity category (`core_crm`, `school_hod`, etc.) is merged.
+ * - Always merges local `recentlyDeleted.purgedRecords` tombstones so local permanent deletions are enforced immediately.
+ * - If `profile_settings` is missing or incomplete in a partial snapshot, defers unknown conflicting remote active records until tombstone state is known, or filters them when `knownLocalIdsByCollection` is provided.
+ * - Never overwrites a category when its chunks are incomplete (`reassembleCategoryChunks` returns null).
+ */
+export function reassembleWorkspaceSnapshot(
+  docsByCategory: Map<string, any[]> | Record<string, any[]>,
+  options?: {
+    primaryId?: string;
+    maxUpdatedAtIso?: string | null;
+    localRecentlyDeleted?: RecentlyDeletedData;
+    localWorkspace?: Record<string, any>;
+    knownLocalIdsByCollection?: Record<string, Set<string>>;
+    deferUnknownWhenProfileSettingsMissing?: boolean;
+  }
+): {
+  reassembled: any;
+  workspace: any;
+  hasCompleteProfileSettings: boolean;
+  hasAuthoritativeTombstones: boolean;
+  deferredEntityIds: Record<string, string[]>;
+  deferredIds: string[];
+  skippedIncompleteCategories: string[];
+} {
+  const categoryMap: Map<string, any[]> =
+    docsByCategory instanceof Map
+      ? docsByCategory
+      : new Map<string, any[]>(Object.entries(docsByCategory || {}));
+
+  const primaryId = options?.primaryId || '';
+  const reassembled: any = {
+    timestamp: options?.maxUpdatedAtIso || new Date().toISOString(),
+    version: '2.0.0',
+    isCloudDelta: true
+  };
+
+  const skippedIncompleteCategories: string[] = [];
+  const deferredEntityIds: Record<string, string[]> = {};
+
+  // 1. Reassemble `profile_settings` FIRST so remote tombstones are loaded before any entity categories
+  let hasCompleteProfileSettings = false;
+  const profileChunks = categoryMap.get('profile_settings');
+  if (profileChunks && profileChunks.length > 0) {
+    try {
+      const parsedProfileCat = reassembleCategoryChunks(profileChunks);
+      if (parsedProfileCat && typeof parsedProfileCat === 'object') {
+        Object.assign(reassembled, parsedProfileCat);
+        hasCompleteProfileSettings = Boolean(parsedProfileCat.recentlyDeleted);
+        if (primaryId) {
+          const catStr = JSON.stringify(parsedProfileCat);
+          const chunks = splitStringIntoChunks(catStr, CHUNK_MAX_CHARS);
+          lastUploadedChunkCount.set(`${primaryId}:profile_settings`, chunks.length);
+          chunks.forEach((c, idx) => {
+            lastUploadedChunkCache.set(`${primaryId}:profile_settings_chunk_${idx}:${chunks.length}`, c);
+          });
+        }
+      } else {
+        skippedIncompleteCategories.push('profile_settings');
+      }
+    } catch (err) {
+      skippedIncompleteCategories.push('profile_settings');
+      console.warn('Failed to parse cloud profile_settings category:', err);
+    }
+  }
+
+  // Merge local tombstones immediately so local permanent deletions always take precedence
+  const localRec = options?.localRecentlyDeleted ?? getLocalStoredRecentlyDeleted();
+  reassembled.recentlyDeleted = mergeRecentlyDeleted(localRec, reassembled.recentlyDeleted);
+
+  // 2. Reassemble remaining baseline categories in deterministic order
+  const remainingCategories = WORKSPACE_CATEGORY_KEYS.filter(k => k !== 'profile_settings');
+  for (const categoryKey of remainingCategories) {
+    const chunkDocs = categoryMap.get(categoryKey);
+    if (!chunkDocs || chunkDocs.length === 0) continue;
+    try {
+      const parsedCat = reassembleCategoryChunks(chunkDocs);
+      if (parsedCat && typeof parsedCat === 'object') {
+        Object.assign(reassembled, parsedCat);
+        if (primaryId) {
+          const catStr = JSON.stringify(parsedCat);
+          const chunks = splitStringIntoChunks(catStr, CHUNK_MAX_CHARS);
+          lastUploadedChunkCount.set(`${primaryId}:${categoryKey}`, chunks.length);
+          chunks.forEach((c, idx) => {
+            lastUploadedChunkCache.set(`${primaryId}:category_${categoryKey}_chunk_${idx}:${chunks.length}`, c);
+          });
+        }
+      } else {
+        skippedIncompleteCategories.push(categoryKey);
+      }
+    } catch (parseErr) {
+      skippedIncompleteCategories.push(categoryKey);
+      console.warn('Failed to parse reassembled cloud category:', parseErr);
+    }
+  }
+
+  // Also support category maps keyed by direct entity collection name (e.g., `lessons`, `students`, `groups`)
+  for (const [customKey, chunkDocs] of categoryMap.entries()) {
+    if (customKey === 'profile_settings' || customKey === 'delta_log' || WORKSPACE_CATEGORY_KEYS.includes(customKey as any)) {
+      continue;
+    }
+    if (!chunkDocs || chunkDocs.length === 0) continue;
+    try {
+      const parsedCat = reassembleCategoryChunks(chunkDocs);
+      if (parsedCat && typeof parsedCat === 'object') {
+        Object.assign(reassembled, parsedCat);
+      }
+    } catch {
+      skippedIncompleteCategories.push(customKey);
+    }
+  }
+
+  // 3. Apply P2P delta_log on top of baseline categories using applyDeltaOnWorkspace
+  const deltaChunks = categoryMap.get('delta_log');
+  if (deltaChunks && deltaChunks.length > 0) {
+    try {
+      const parsedDelta = reassembleCategoryChunks(deltaChunks);
+      if (parsedDelta && typeof parsedDelta === 'object') {
+        if (parsedDelta.recentlyDeleted) {
+          hasCompleteProfileSettings = true;
+        }
+        applyDeltaOnWorkspace(reassembled, parsedDelta);
+        if (primaryId) {
+          saveDeltaAccumulator(primaryId, parsedDelta);
+        }
+      } else {
+        skippedIncompleteCategories.push('delta_log');
+      }
+    } catch (deltaErr) {
+      skippedIncompleteCategories.push('delta_log');
+      console.warn('Failed to parse cloud delta_log:', deltaErr);
+    }
+  }
+
+  // 4. If tombstone metadata (`profile_settings`) was missing/incomplete in a partial snapshot,
+  // apply local tombstones immediately and defer unknown conflicting remote active records
+  const activePurged = reassembled.recentlyDeleted?.purgedRecords || [];
+  if (!hasCompleteProfileSettings) {
+    for (const colKey of ['groups', 'students', 'lessons'] as const) {
+      if (Array.isArray(reassembled[colKey]) && reassembled[colKey].length > 0) {
+        let knownIds = options?.knownLocalIdsByCollection?.[colKey];
+        if (!knownIds && options?.localWorkspace && Array.isArray(options.localWorkspace[colKey])) {
+          knownIds = new Set<string>(
+            options.localWorkspace[colKey]
+              .filter((item: any) => item && typeof item.id === 'string')
+              .map((item: any) => item.id.trim())
+          );
+        }
+        if (!knownIds) {
+          knownIds = getLocalKnownIdsForCollection(colKey);
+        }
+        const res = mergeEntities([], reassembled[colKey], {
+          entityTypeName: colKey,
+          purgedRecords: activePurged,
+          deferUnknownActiveIds: true,
+          knownLocalIds: knownIds
+        });
+        reassembled[colKey] = res.merged;
+        if (res.deferredIds && res.deferredIds.length > 0) {
+          deferredEntityIds[colKey] = res.deferredIds;
+        }
+      }
+    }
+  }
+
+  // 5. Enforce reverse-direction tombstones and cascade integrity across the entire reassembled snapshot
+  enforcePurgedTombstonesOnWorkspace(reassembled, activePurged);
+
+  // 6. Re-attach built-in Lernstudio sets so the full 297+ curriculum is preserved locally
+  reassembled.lernstudioSets = mergeWithBuiltinLernstudioSets(reassembled.lernstudioSets || []);
+
+  const flatDeferredIds = Object.values(deferredEntityIds).flat();
+  return {
+    reassembled,
+    workspace: reassembled,
+    hasCompleteProfileSettings,
+    hasAuthoritativeTombstones: hasCompleteProfileSettings,
+    deferredEntityIds,
+    deferredIds: flatDeferredIds,
+    skippedIncompleteCategories
+  };
 }
 
 /**
@@ -1197,48 +1460,10 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       };
     }
 
-    const reassembled: any = {
-      timestamp: maxUpdatedAtIso || new Date().toISOString(),
-      version: '2.0.0',
-      isCloudDelta: true
-    };
-
-    // 1. Reassemble baseline categories first
-    for (const categoryKey of WORKSPACE_CATEGORY_KEYS) {
-      const chunkDocs = docsByCategory.get(categoryKey);
-      if (!chunkDocs) continue;
-      try {
-        const parsedCat = reassembleCategoryChunks(chunkDocs);
-        if (parsedCat && typeof parsedCat === 'object') {
-          Object.assign(reassembled, parsedCat);
-          const catStr = JSON.stringify(parsedCat);
-          const chunks = splitStringIntoChunks(catStr, CHUNK_MAX_CHARS);
-          lastUploadedChunkCount.set(`${primaryId}:${categoryKey}`, chunks.length);
-          chunks.forEach((c, idx) => {
-            lastUploadedChunkCache.set(`${primaryId}:${categoryKey}_chunk_${idx}:${chunks.length}`, c);
-          });
-        }
-      } catch (parseErr) {
-        console.warn('Failed to parse reassembled cloud category:', parseErr);
-      }
-    }
-
-    // 2. Apply P2P delta_log on top of baseline categories using mergeEntities
-    const deltaChunks = docsByCategory.get('delta_log');
-    if (deltaChunks && deltaChunks.length > 0) {
-      try {
-        const parsedDelta = reassembleCategoryChunks(deltaChunks);
-        if (parsedDelta && typeof parsedDelta === 'object') {
-          applyDeltaOnWorkspace(reassembled, parsedDelta);
-          saveDeltaAccumulator(primaryId, parsedDelta);
-        }
-      } catch (deltaErr) {
-        console.warn('Failed to parse cloud delta_log:', deltaErr);
-      }
-    }
-
-    // 3. Re-attach built-in Lernstudio sets so the full 297+ curriculum is preserved locally
-    reassembled.lernstudioSets = mergeWithBuiltinLernstudioSets(reassembled.lernstudioSets || []);
+    const { reassembled } = reassembleWorkspaceSnapshot(docsByCategory, {
+      primaryId,
+      maxUpdatedAtIso
+    });
 
     // 4. Seed local watermarks from the downloaded cloud state so unchanged records cost 0 writes
     seedWatermarksFromData(primaryId, reassembled);

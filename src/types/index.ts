@@ -147,6 +147,8 @@ export interface SyncDeltaPayload {
     financeInstallments?: FinanceInstallment[];
     lernstudioSets?: LernstudioSet[];
   };
+  purgedRecords?: PurgedRecordTombstone[];
+  hasAuthoritativeTombstones?: boolean;
   syncEvents?: Array<{
     id: string;
     type: string;
