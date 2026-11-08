@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import confetti from 'canvas-confetti';
 import {
   Volume2,
@@ -10,18 +10,12 @@ import {
   ArrowRight,
   ArrowLeft,
   RotateCcw,
-  Clock,
-  Sparkles,
   Flame,
   Coins,
-  GraduationCap,
-  Gift,
   Check,
   X,
-  Cloud,
   CloudOff,
-  RefreshCw,
-  Award
+  RefreshCw
 } from 'lucide-react';
 import { speakGermanText } from '../shared/audioSpeechUtils';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../shared/lernstudioAudioUtils';
@@ -31,8 +25,8 @@ import {
   HomeworkQuestionResponse,
   HomeworkQuestionType,
   HomeworkFlowMode,
-  HomeworkBlooketMode,
-  HomeworkSubmission
+  HomeworkSubmission,
+  DEFAULT_HOMEWORK_QUESTION_TYPES
 } from '../shared/homeworkTypes';
 import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
 import {
@@ -40,7 +34,7 @@ import {
   getLocalSubmissions,
   saveLocalAssignment,
   saveLocalSubmission,
-  QUESTION_TYPE_META,
+  getQuestionTypeMeta,
   fetchAssignmentFromFirestore,
   fetchLernstudioSetFromFirestore,
   saveAssignmentToFirestore,
@@ -54,15 +48,25 @@ import {
   getOrCreateOpenParticipantId,
   validateHomeworkSubmissionIdentity
 } from '../shared/homeworkStorageSync';
+import {
+  splitGermanIntoSyllables,
+  splitGermanArticleAndWord
+} from '../shared/components/LernstudioTeachModal';
 
 interface Props {
   assignmentId?: string;
+}
+
+interface HomeworkTileChoice {
+  id: string;
+  text: string;
 }
 
 interface GeneratedQuizQuestion {
   id: string;
   itemId: string;
   type: HomeworkQuestionType;
+  stageIndex: number;
   stageLabelAr: string;
   stageBadgeEmoji: string;
   germanWord: string;
@@ -74,7 +78,21 @@ interface GeneratedQuizQuestion {
   hideGermanText?: boolean;
   options: string[];
   correctAnswer: string;
+  // Interactive word/letter/syllable puzzle fields
+  article?: string;
+  wordOnly?: string;
+  chars?: string[];
+  missingIndex?: number;
+  missingChar?: string;
+  missingIndices?: number[];
+  expectedChars?: string[];
+  expectedSyllables?: string[];
+  tileChoices?: HomeworkTileChoice[];
 }
+
+const GERMAN_DISTRACTOR_LETTERS = [
+  'A', 'B', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'W', 'Z', 'Ä', 'Ö', 'Ü', 'ß'
+];
 
 function stripLeadingArticle(german: string): { article: 'der' | 'die' | 'das' | null; baseWord: string } {
   const trimmed = (german || '').trim();
@@ -88,15 +106,15 @@ function stripLeadingArticle(german: string): { article: 'der' | 'die' | 'das' |
   return { article: null, baseWord: trimmed };
 }
 
-function buildMaskedWord(baseWord: string): { masked: string; missingChar: string } {
-  const clean = baseWord.trim();
-  if (clean.length <= 2) {
-    return { masked: clean[0] + '_', missingChar: clean[clean.length - 1] || 'e' };
+function deterministicShuffle<T>(arr: T[], seedOffset: number): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.abs((i * 31 + seedOffset * 17 + 7) % (i + 1));
+    const tmp = copy[i];
+    copy[i] = copy[j];
+    copy[j] = tmp;
   }
-  const idx = Math.max(1, Math.min(clean.length - 2, Math.floor(clean.length / 2)));
-  const missingChar = clean[idx];
-  const masked = clean.slice(0, idx) + ' _ ' + clean.slice(idx + 1);
-  return { masked, missingChar };
+  return copy;
 }
 
 export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) => {
@@ -133,20 +151,22 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   const [studyIndex, setStudyIndex] = useState(0);
   const [completedStudyPhase, setCompletedStudyPhase] = useState(false);
 
-  // Quiz & Blooket State
+  // Quiz & Multi-Step Interactive Stage State
   const [currentIdx, setCurrentIdx] = useState(0);
   const [responses, setResponses] = useState<HomeworkQuestionResponse[]>([]);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
+  const [, setFeedback] = useState<'correct' | 'wrong' | null>(null);
   const [gold, setGold] = useState(0);
   const [streak, setStreak] = useState(0);
   const [maxStreak, setMaxStreak] = useState(0);
   const [questionStartMs, setQuestionStartMs] = useState<number>(Date.now());
 
-  // Blooket Gold Chest Bonus Modal
-  const [showChestBonus, setShowChestBonus] = useState(false);
-  const [chestOptions, setChestOptions] = useState<{ label: string; apply: (g: number) => number; bonusText: string }[]>([]);
-  const [openedChestIndex, setOpenedChestIndex] = useState<number | null>(null);
+  // Multi-step puzzle state (for syllables, missing_two_letters, full_word)
+  const [multiStepIdx, setMultiStepIdx] = useState<number>(0);
+  const [filledSlots, setFilledSlots] = useState<Record<number, string>>({});
+  const [usedTileIds, setUsedTileIds] = useState<string[]>([]);
+  const [errorTileId, setErrorTileId] = useState<string | null>(null);
+  const [wrongStepsCount, setWrongStepsCount] = useState<number>(0);
 
   const [submitting, setSubmitting] = useState(false);
   const [finalScore, setFinalScore] = useState<any | null>(null);
@@ -255,7 +275,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           const titleParam = searchParams.get('t') || 'واجب منزلي تفاعلي';
           const flowModeParam = (searchParams.get('fm') as any) || 'teacher_then_quiz';
           const qtParam = searchParams.get('qt');
-          const questionTypesParam = qtParam ? (qtParam.split(',') as any) : ['mc_de_ar', 'true_false'];
+          const questionTypesParam = qtParam
+            ? (qtParam.split(',') as HomeworkQuestionType[])
+            : [...DEFAULT_HOMEWORK_QUESTION_TYPES];
           const idsParam = searchParams.get('ids');
           const selectedIds = idsParam ? idsParam.split(',') : [];
 
@@ -295,8 +317,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               selectedItemIds: selectedIds,
               flowMode: flowModeParam,
               questionTypes: questionTypesParam,
-              blooketMode: 'gold_quest',
-              allowedGameModes: ['gold_quest'],
+              blooketMode: 'classic_quiz',
+              allowedGameModes: ['classic_quiz'],
               questionCount: (items.length > 0 ? items : foundSet.items).length * questionTypesParam.length,
               maxAttempts: 3,
               allowReplay: true,
@@ -332,26 +354,33 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     return all;
   }, [assignment]);
 
+  // Active question types ordered as stored on the assignment (or all 7 stages by default)
+  const activeQuestionTypes = useMemo<HomeworkQuestionType[]>(() => {
+    if (Array.isArray(assignment?.questionTypes) && assignment.questionTypes.length > 0) {
+      return assignment.questionTypes;
+    }
+    return [...DEFAULT_HOMEWORK_QUESTION_TYPES];
+  }, [assignment?.questionTypes]);
+
   // Build progressive multi-stage question list based on teacher's chosen questionTypes
   const quizQuestions = useMemo<GeneratedQuizQuestion[]>(() => {
     if (studyItems.length === 0) return [];
     const allSetItems: any[] = assignment?.setSnapshot?.items || studyItems;
-    const types: HomeworkQuestionType[] =
-      Array.isArray(assignment?.questionTypes) && assignment.questionTypes.length > 0
-        ? assignment.questionTypes
-        : ['mc_de_ar', 'true_false'];
+    const types = activeQuestionTypes;
 
     const list: GeneratedQuizQuestion[] = [];
 
     types.forEach((qType, stageIdx) => {
-      const meta = QUESTION_TYPE_META.find((m) => m.id === qType);
+      const meta = getQuestionTypeMeta(qType);
       const stageTitle = `المرحلة ${stageIdx + 1}: ${meta?.labelAr || 'سؤال تفاعلي'}`;
       const stageEmoji = meta?.badgeEmoji || '🎯';
 
       studyItems.forEach((item, itemIdx) => {
         const qId = `${item.id}_${qType}_${itemIdx}`;
         const otherItems = allSetItems.filter((x) => x.id !== item.id);
+        const seed = stageIdx * 97 + itemIdx * 31 + (item.german?.length || 5);
 
+        // 1. Stage: true_false (صح أم خطأ — Richtig / Falsch)
         if (qType === 'true_false') {
           const isTrue = (itemIdx + stageIdx) % 2 === 0 || otherItems.length === 0;
           const wrongItem = otherItems[(itemIdx + 1) % Math.max(1, otherItems.length)];
@@ -362,6 +391,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             id: qId,
             itemId: item.id,
             type: 'true_false',
+            stageIndex: stageIdx,
             stageLabelAr: stageTitle,
             stageBadgeEmoji: stageEmoji,
             germanWord: item.german,
@@ -376,11 +406,255 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           return;
         }
 
+        // 2. Stage: choice_2 (الاختيار من 2 — Zwei Optionen)
+        if (qType === 'choice_2') {
+          const correctOpt = item.german;
+          const distractorItem = otherItems[(itemIdx + stageIdx) % Math.max(1, otherItems.length)];
+          const distractorOpt =
+            distractorItem && distractorItem.german !== correctOpt
+              ? distractorItem.german
+              : correctOpt === 'das Buch'
+              ? 'die Schule'
+              : 'das Buch';
+          const options = deterministicShuffle([correctOpt, distractorOpt], seed);
+
+          list.push({
+            id: qId,
+            itemId: item.id,
+            type: 'choice_2',
+            stageIndex: stageIdx,
+            stageLabelAr: stageTitle,
+            stageBadgeEmoji: stageEmoji,
+            germanWord: item.german,
+            arabicMeaning: item.arabic,
+            emoji: item.emoji,
+            promptTitleAr: 'اختر الكلمة الألمانية الصحيحة من الاختيارين:',
+            promptMainText: item.arabic,
+            hideGermanText: true,
+            options,
+            correctAnswer: correctOpt
+          });
+          return;
+        }
+
+        // 3. Stage: choice_all (الاختيار من الكل — Alle Wörter)
+        if (qType === 'choice_all') {
+          const correctOpt = item.german;
+          const uniqueGermanWords: string[] = [];
+          for (const stItem of allSetItems) {
+            if (stItem?.german && !uniqueGermanWords.includes(stItem.german)) {
+              uniqueGermanWords.push(stItem.german);
+            }
+          }
+          if (!uniqueGermanWords.includes(correctOpt)) {
+            uniqueGermanWords.unshift(correctOpt);
+          }
+          const fallbacks = ['das Buch', 'der Apfel', 'die Schule', 'das Haus'];
+          for (const fb of fallbacks) {
+            if (uniqueGermanWords.length < 3 && !uniqueGermanWords.includes(fb)) {
+              uniqueGermanWords.push(fb);
+            }
+          }
+          const options = deterministicShuffle(uniqueGermanWords, seed);
+
+          list.push({
+            id: qId,
+            itemId: item.id,
+            type: 'choice_all',
+            stageIndex: stageIdx,
+            stageLabelAr: stageTitle,
+            stageBadgeEmoji: stageEmoji,
+            germanWord: item.german,
+            arabicMeaning: item.arabic,
+            emoji: item.emoji,
+            promptTitleAr: 'اختر الكلمة الألمانية الصحيحة من بين جميع كلمات الدرس:',
+            promptMainText: item.arabic,
+            hideGermanText: true,
+            options,
+            correctAnswer: correctOpt
+          });
+          return;
+        }
+
+        // 4. Stage: syllables (النصين والمقاطع — Silben zusammensetzen)
+        if (qType === 'syllables') {
+          const { article, wordOnly } = splitGermanArticleAndWord(item.german);
+          const expectedSyllables =
+            item.syllables && Array.isArray(item.syllables) && item.syllables.length >= 2
+              ? item.syllables
+              : splitGermanIntoSyllables(wordOnly);
+
+          const tileChoices: HomeworkTileChoice[] = deterministicShuffle(
+            expectedSyllables.map((syl: string, idx: number) => ({
+              id: `syl_${qId}_${idx}`,
+              text: syl
+            })),
+            seed
+          );
+
+          list.push({
+            id: qId,
+            itemId: item.id,
+            type: 'syllables',
+            stageIndex: stageIdx,
+            stageLabelAr: stageTitle,
+            stageBadgeEmoji: stageEmoji,
+            germanWord: item.german,
+            arabicMeaning: item.arabic,
+            emoji: item.emoji,
+            promptTitleAr: 'اختر نصفي الكلمة أو مقاطعها الصوتية بالترتيب الصحيح:',
+            promptMainText: item.arabic,
+            hideGermanText: true,
+            options: expectedSyllables,
+            correctAnswer: item.german,
+            article,
+            wordOnly,
+            expectedSyllables,
+            tileChoices
+          });
+          return;
+        }
+
+        // 5. Stage: missing_letter (الحرف الناقص — Fehlender Buchstabe)
+        if (qType === 'missing_letter') {
+          const { article, wordOnly } = splitGermanArticleAndWord(item.german);
+          const chars = wordOnly.split('');
+          const validIndices: number[] = [];
+          for (let i = 0; i < chars.length; i++) {
+            if (/[a-zA-ZäöüÄÖÜß]/.test(chars[i])) {
+              validIndices.push(i);
+            }
+          }
+          const missingIndex =
+            validIndices.length > 0
+              ? validIndices[(itemIdx + stageIdx) % validIndices.length]
+              : 0;
+          const missingChar = wordOnly[missingIndex] || 'A';
+          const correctUpper = missingChar.toUpperCase();
+          const distractorPool = GERMAN_DISTRACTOR_LETTERS.filter((c) => c !== correctUpper);
+          const distractors = deterministicShuffle(distractorPool, seed).slice(0, 4);
+          const options = deterministicShuffle([correctUpper, ...distractors], seed + 3);
+
+          list.push({
+            id: qId,
+            itemId: item.id,
+            type: 'missing_letter',
+            stageIndex: stageIdx,
+            stageLabelAr: stageTitle,
+            stageBadgeEmoji: stageEmoji,
+            germanWord: item.german,
+            arabicMeaning: item.arabic,
+            emoji: item.emoji,
+            promptTitleAr: 'اختر الحرف الناقص لإكمال الكلمة الألمانية:',
+            promptMainText: item.arabic,
+            hideGermanText: true,
+            options,
+            correctAnswer: correctUpper,
+            article,
+            wordOnly,
+            chars,
+            missingIndex,
+            missingChar: correctUpper
+          });
+          return;
+        }
+
+        // 6. Stage: missing_two_letters (الحرفين المتتاليين — Buchstabenfolge)
+        if (qType === 'missing_two_letters') {
+          const { article, wordOnly } = splitGermanArticleAndWord(item.german);
+          const chars = wordOnly.split('');
+          const len = chars.length;
+          const seqLen = len >= 6 ? 3 : len <= 2 ? Math.max(1, len) : 2;
+          const maxStart = Math.max(0, len - seqLen);
+          const startIdx = maxStart > 0 ? (itemIdx + stageIdx) % (maxStart + 1) : 0;
+
+          const missingIndices: number[] = [];
+          for (let i = 0; i < seqLen; i++) {
+            if (startIdx + i < len) {
+              missingIndices.push(startIdx + i);
+            }
+          }
+          const expectedChars = missingIndices.map((idx) => chars[idx]);
+          const expectedChoices: HomeworkTileChoice[] = expectedChars.map((ch, idx) => ({
+            id: `seq_exp_${qId}_${idx}`,
+            text: ch.toUpperCase()
+          }));
+          const expSet = new Set(expectedChars.map((c) => c.toUpperCase()));
+          const distractorPool = GERMAN_DISTRACTOR_LETTERS.filter((c) => !expSet.has(c));
+          const distractorChoices: HomeworkTileChoice[] = deterministicShuffle(distractorPool, seed)
+            .slice(0, 3)
+            .map((ch, idx) => ({
+              id: `seq_dist_${qId}_${idx}`,
+              text: ch
+            }));
+
+          const tileChoices = deterministicShuffle([...expectedChoices, ...distractorChoices], seed + 5);
+
+          list.push({
+            id: qId,
+            itemId: item.id,
+            type: 'missing_two_letters',
+            stageIndex: stageIdx,
+            stageLabelAr: stageTitle,
+            stageBadgeEmoji: stageEmoji,
+            germanWord: item.german,
+            arabicMeaning: item.arabic,
+            emoji: item.emoji,
+            promptTitleAr: 'اختر الحروف المتتالية الناقصة بالترتيب الصحيح:',
+            promptMainText: item.arabic,
+            hideGermanText: true,
+            options: expectedChars,
+            correctAnswer: item.german,
+            article,
+            wordOnly,
+            chars,
+            missingIndices,
+            expectedChars,
+            tileChoices
+          });
+          return;
+        }
+
+        // 7. Stage: full_word (الكلمة كلها — Wort vervollständigen)
+        if (qType === 'full_word') {
+          const { article, wordOnly } = splitGermanArticleAndWord(item.german);
+          const chars = wordOnly.split('');
+          const tileChoices: HomeworkTileChoice[] = deterministicShuffle(
+            chars.map((ch, idx) => ({
+              id: `fw_${qId}_${idx}`,
+              text: ch.toUpperCase()
+            })),
+            seed + 11
+          );
+
+          list.push({
+            id: qId,
+            itemId: item.id,
+            type: 'full_word',
+            stageIndex: stageIdx,
+            stageLabelAr: stageTitle,
+            stageBadgeEmoji: stageEmoji,
+            germanWord: item.german,
+            arabicMeaning: item.arabic,
+            emoji: item.emoji,
+            promptTitleAr: 'رتب حروف الكلمة الألمانية من البداية للنهاية:',
+            promptMainText: item.arabic,
+            hideGermanText: true,
+            options: chars,
+            correctAnswer: item.german,
+            article,
+            wordOnly,
+            chars,
+            expectedChars: chars,
+            tileChoices
+          });
+          return;
+        }
+
+        // Legacy: listen_choose
         if (qType === 'listen_choose') {
           const correctOpt = `${item.german} — (${item.arabic})`;
-          const distractors = otherItems
-            .slice()
-            .sort(() => 0.5 - Math.random())
+          const distractors = deterministicShuffle(otherItems, seed)
             .slice(0, 3)
             .map((d) => `${d.german} — (${d.arabic})`);
           const fallbacks = [
@@ -401,6 +675,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             id: qId,
             itemId: item.id,
             type: 'listen_choose',
+            stageIndex: stageIdx,
             stageLabelAr: stageTitle,
             stageBadgeEmoji: stageEmoji,
             germanWord: item.german,
@@ -409,17 +684,19 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             promptTitleAr: 'استمع جيداً لنطق الكلمة الألمانية واختر الإجابة الصحيحة:',
             promptMainText: '🔊 اضغط للاستماع للكلمة',
             hideGermanText: true,
-            options: [correctOpt, ...distractors].sort(() => 0.5 - Math.random()),
+            options: deterministicShuffle([correctOpt, ...distractors], seed),
             correctAnswer: correctOpt
           });
           return;
         }
 
+        // Legacy: mc_ar_de
         if (qType === 'mc_ar_de') {
           const correctOpt = item.german;
-          const distractors = otherItems
-            .filter((d) => d.german !== correctOpt)
-            .sort(() => 0.5 - Math.random())
+          const distractors = deterministicShuffle(
+            otherItems.filter((d) => d.german !== correctOpt),
+            seed
+          )
             .slice(0, 3)
             .map((d) => d.german);
           const fallbacks = ['das Buch', 'der Apfel', 'die Schule', 'das Haus', 'die Katze'];
@@ -435,6 +712,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             id: qId,
             itemId: item.id,
             type: 'mc_ar_de',
+            stageIndex: stageIdx,
             stageLabelAr: stageTitle,
             stageBadgeEmoji: stageEmoji,
             germanWord: item.german,
@@ -443,12 +721,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             promptTitleAr: 'اختر الكلمة الألمانية الصحيحة لهذا المعنى:',
             promptMainText: item.arabic,
             hideGermanText: true,
-            options: [correctOpt, ...distractors].sort(() => 0.5 - Math.random()),
+            options: deterministicShuffle([correctOpt, ...distractors], seed),
             correctAnswer: correctOpt
           });
           return;
         }
 
+        // Legacy: article_quiz
         if (qType === 'article_quiz') {
           const parsed = stripLeadingArticle(item.german);
           const actualArticle = item.article || parsed.article;
@@ -457,6 +736,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               id: qId,
               itemId: item.id,
               type: 'article_quiz',
+              stageIndex: stageIdx,
               stageLabelAr: stageTitle,
               stageBadgeEmoji: stageEmoji,
               germanWord: item.german,
@@ -472,47 +752,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           }
         }
 
-        if (qType === 'missing_letter') {
-          const parsed = stripLeadingArticle(item.german);
-          const { masked } = buildMaskedWord(parsed.baseWord);
-          const fullWord = item.german;
-          const distractors = otherItems
-            .filter((d) => d.german !== fullWord)
-            .sort(() => 0.5 - Math.random())
-            .slice(0, 3)
-            .map((d) => d.german);
-          const fallbacks = ['das Buch', 'der Apfel', 'die Schule', 'das Haus'];
-          let f = 0;
-          while (distractors.length < 3 && f < fallbacks.length) {
-            if (fallbacks[f] !== fullWord && !distractors.includes(fallbacks[f])) {
-              distractors.push(fallbacks[f]);
-            }
-            f++;
-          }
-
-          list.push({
-            id: qId,
-            itemId: item.id,
-            type: 'missing_letter',
-            stageLabelAr: stageTitle,
-            stageBadgeEmoji: stageEmoji,
-            germanWord: item.german,
-            arabicMeaning: item.arabic,
-            emoji: item.emoji,
-            promptTitleAr: 'أكمل الكلمة الألمانية بالشكل الصحيح:',
-            promptMainText: parsed.article ? `${parsed.article} ${masked}` : masked,
-            promptSubText: item.arabic,
-            options: [fullWord, ...distractors].sort(() => 0.5 - Math.random()),
-            correctAnswer: fullWord
-          });
-          return;
-        }
-
-        // Default: mc_de_ar (German -> Arabic)
+        // Legacy fallback: mc_de_ar (German -> Arabic)
         const correctOpt = item.arabic;
-        const distractors = otherItems
-          .filter((d) => d.arabic !== correctOpt)
-          .sort(() => 0.5 - Math.random())
+        const distractors = deterministicShuffle(
+          otherItems.filter((d) => d.arabic !== correctOpt),
+          seed
+        )
           .slice(0, 3)
           .map((d) => d.arabic);
         const fallbacks = ['الكتاب', 'التفاحة', 'المدرسة', 'المنزل', 'القطة'];
@@ -528,6 +773,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           id: qId,
           itemId: item.id,
           type: 'mc_de_ar',
+          stageIndex: stageIdx,
           stageLabelAr: stageTitle,
           stageBadgeEmoji: stageEmoji,
           germanWord: item.german,
@@ -535,19 +781,19 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           emoji: item.emoji,
           promptTitleAr: 'ما معنى هذه الكلمة الألمانية بالعربية؟',
           promptMainText: item.german,
-          options: [correctOpt, ...distractors].sort(() => 0.5 - Math.random()),
+          options: deterministicShuffle([correctOpt, ...distractors], seed),
           correctAnswer: correctOpt
         });
       });
     });
 
     return list;
-  }, [studyItems, assignment]);
+  }, [studyItems, assignment, activeQuestionTypes]);
 
   const currentQuestion = quizQuestions[currentIdx];
   const currentStudyItem = studyItems[studyIndex];
 
-  // Auto-pronounce word when entering Teacher Study card or Listening Question
+  // Auto-pronounce word when entering Teacher Study card or Question
   useEffect(() => {
     if (phase === 'teacher_study' && currentStudyItem?.german) {
       const timer = setTimeout(() => {
@@ -560,12 +806,15 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   useEffect(() => {
     if (phase === 'quiz' && currentQuestion) {
       setQuestionStartMs(Date.now());
-      if (currentQuestion.type === 'listen_choose' || currentQuestion.type === 'mc_de_ar' || currentQuestion.type === 'true_false') {
-        const timer = setTimeout(() => {
-          speakGermanText(currentQuestion.germanWord, 0.9);
-        }, 250);
-        return () => clearTimeout(timer);
-      }
+      setMultiStepIdx(0);
+      setFilledSlots({});
+      setUsedTileIds([]);
+      setErrorTileId(null);
+      setWrongStepsCount(0);
+      const timer = setTimeout(() => {
+        speakGermanText(currentQuestion.germanWord, 0.9);
+      }, 250);
+      return () => clearTimeout(timer);
     }
   }, [phase, currentIdx, currentQuestion]);
 
@@ -714,23 +963,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     }
   };
 
-  const prepareChestBonus = () => {
-    const pool = [
-      { label: '+100 ذهب 💰', apply: (g: number) => g + 100, bonusText: '+100 ذهب!' },
-      { label: '+250 ذهب 🏆', apply: (g: number) => g + 250, bonusText: '+250 ذهب!' },
-      { label: 'مضاعفة الذهب x2 ⚡', apply: (g: number) => Math.max(200, g * 2), bonusText: 'مضاعفة الذهب x2!' },
-      { label: '+500 كنز ذهبي 👑', apply: (g: number) => g + 500, bonusText: '+500 كنز أسطوري!' }
-    ].sort(() => 0.5 - Math.random());
-
-    setChestOptions(pool.slice(0, 3));
-    setOpenedChestIndex(null);
-    setShowChestBonus(true);
-  };
-
   const advanceToNextQuestion = (nextResponses: HomeworkQuestionResponse[], currentGold: number, currentMaxStreak: number) => {
     setSelectedChoice(null);
     setFeedback(null);
-    setShowChestBonus(false);
+    setMultiStepIdx(0);
+    setFilledSlots({});
+    setUsedTileIds([]);
+    setErrorTileId(null);
+    setWrongStepsCount(0);
 
     if (currentIdx + 1 < quizQuestions.length) {
       setCurrentIdx(currentIdx + 1);
@@ -739,11 +979,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     }
   };
 
-  const handleSelectOption = (chosenOption: string) => {
-    if (selectedChoice !== null || !currentQuestion) return;
-    setSelectedChoice(chosenOption);
-
-    const isCorrect = chosenOption.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
+  const recordQuestionCompletion = (studentAnswerStr: string, isCorrect: boolean) => {
+    if (!currentQuestion) return;
     setFeedback(isCorrect ? 'correct' : 'wrong');
 
     let nextGold = gold;
@@ -773,7 +1010,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       questionType: currentQuestion.type,
       germanWord: currentQuestion.germanWord,
       promptText: `${currentQuestion.stageLabelAr} — ${currentQuestion.germanWord}`,
-      studentAnswer: chosenOption,
+      studentAnswer: studentAnswerStr,
       correctAnswer: currentQuestion.correctAnswer,
       isCorrect,
       timeSpentSeconds: elapsedSec
@@ -782,18 +1019,110 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const nextResponses = [...responses, newResponse];
     setResponses(nextResponses);
 
-    // Sync progress answer-by-answer in real-time to Firestore so the teacher sees live question-by-question student progress!
+    // Sync progress answer-by-answer in real-time to Firestore so the teacher sees live question-by-question student progress
     syncLiveProgressToFirestore(nextResponses, nextGold, nextMaxStreak);
 
-    const blooketMode: HomeworkBlooketMode = assignment?.blooketMode || 'gold_quest';
-    if (isCorrect && blooketMode === 'gold_quest') {
-      setTimeout(() => {
-        prepareChestBonus();
-      }, 900);
-    } else {
-      setTimeout(() => {
-        advanceToNextQuestion(nextResponses, nextGold, nextMaxStreak);
-      }, 1200);
+    setTimeout(() => {
+      advanceToNextQuestion(nextResponses, nextGold, nextMaxStreak);
+    }, 1050);
+  };
+
+  const handleSelectOption = (chosenOption: string) => {
+    if (selectedChoice !== null || !currentQuestion) return;
+    setSelectedChoice(chosenOption);
+    const isCorrect = chosenOption.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
+    recordQuestionCompletion(chosenOption, isCorrect);
+  };
+
+  const handleTileClick = (tile: HomeworkTileChoice) => {
+    if (!currentQuestion || selectedChoice !== null || usedTileIds.includes(tile.id)) return;
+
+    if (currentQuestion.type === 'syllables') {
+      const expectedSyllables = currentQuestion.expectedSyllables || [];
+      const expectedSyl = expectedSyllables[multiStepIdx];
+      if (!expectedSyl) return;
+
+      if (tile.text === expectedSyl) {
+        const nextStep = multiStepIdx + 1;
+        const nextUsed = [...usedTileIds, tile.id];
+        const nextFilled = { ...filledSlots, [multiStepIdx]: tile.text };
+        setUsedTileIds(nextUsed);
+        setFilledSlots(nextFilled);
+        setMultiStepIdx(nextStep);
+        setErrorTileId(null);
+
+        if (nextStep >= expectedSyllables.length) {
+          setSelectedChoice(currentQuestion.germanWord);
+          recordQuestionCompletion(currentQuestion.germanWord, wrongStepsCount === 0);
+        } else {
+          playLernstudioSound('correct');
+        }
+      } else {
+        setWrongStepsCount((c) => c + 1);
+        playLernstudioSound('wrong');
+        setErrorTileId(tile.id);
+        setTimeout(() => setErrorTileId(null), 550);
+      }
+      return;
+    }
+
+    if (currentQuestion.type === 'missing_two_letters') {
+      const expectedChars = currentQuestion.expectedChars || [];
+      const missingIndices = currentQuestion.missingIndices || [];
+      const expectedChar = expectedChars[multiStepIdx];
+      if (!expectedChar) return;
+
+      if (tile.text.toUpperCase() === expectedChar.toUpperCase()) {
+        const nextStep = multiStepIdx + 1;
+        const nextUsed = [...usedTileIds, tile.id];
+        const targetCharIndex = missingIndices[multiStepIdx];
+        const nextFilled = { ...filledSlots, [targetCharIndex]: expectedChar };
+        setUsedTileIds(nextUsed);
+        setFilledSlots(nextFilled);
+        setMultiStepIdx(nextStep);
+        setErrorTileId(null);
+
+        if (nextStep >= expectedChars.length) {
+          setSelectedChoice(currentQuestion.germanWord);
+          recordQuestionCompletion(currentQuestion.germanWord, wrongStepsCount === 0);
+        } else {
+          playLernstudioSound('correct');
+        }
+      } else {
+        setWrongStepsCount((c) => c + 1);
+        playLernstudioSound('wrong');
+        setErrorTileId(tile.id);
+        setTimeout(() => setErrorTileId(null), 550);
+      }
+      return;
+    }
+
+    if (currentQuestion.type === 'full_word') {
+      const expectedChars = currentQuestion.expectedChars || currentQuestion.chars || [];
+      const expectedChar = expectedChars[multiStepIdx];
+      if (!expectedChar) return;
+
+      if (tile.text.toUpperCase() === expectedChar.toUpperCase()) {
+        const nextStep = multiStepIdx + 1;
+        const nextUsed = [...usedTileIds, tile.id];
+        const nextFilled = { ...filledSlots, [multiStepIdx]: expectedChar };
+        setUsedTileIds(nextUsed);
+        setFilledSlots(nextFilled);
+        setMultiStepIdx(nextStep);
+        setErrorTileId(null);
+
+        if (nextStep >= expectedChars.length) {
+          setSelectedChoice(currentQuestion.germanWord);
+          recordQuestionCompletion(currentQuestion.germanWord, wrongStepsCount === 0);
+        } else {
+          playLernstudioSound('correct');
+        }
+      } else {
+        setWrongStepsCount((c) => c + 1);
+        playLernstudioSound('wrong');
+        setErrorTileId(tile.id);
+        setTimeout(() => setErrorTileId(null), 550);
+      }
     }
   };
 
@@ -844,19 +1173,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       .catch(() => {
         setCloudSyncState('pending_retry');
       });
-  };
-
-  const handlePickChest = (idx: number) => {
-    if (openedChestIndex !== null) return;
-    setOpenedChestIndex(idx);
-    playLernstudioSound('powerup_star');
-    const chosen = chestOptions[idx];
-    const updatedGold = chosen ? chosen.apply(gold) : gold + 100;
-    setGold(updatedGold);
-
-    setTimeout(() => {
-      advanceToNextQuestion(responses, updatedGold, maxStreak);
-    }, 1100);
   };
 
   const handleFinishHomework = async (
@@ -1213,26 +1529,54 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
         : 'bg-surface-hover border-surface-border text-text-muted';
 
+    const hasStudyStage = (assignment?.flowMode || 'teacher_then_quiz') === 'teacher_then_quiz';
+    const stageBarItems = [
+      ...(hasStudyStage ? [{ key: 'study', icon: '📖', title: '1. التعلم والنطق (Lernen)', isActive: true, isDone: false }] : []),
+      ...activeQuestionTypes.map((qt, idx) => {
+        const meta = getQuestionTypeMeta(qt);
+        return {
+          key: qt,
+          icon: meta?.badgeEmoji || '🎯',
+          title: `${hasStudyStage ? idx + 2 : idx + 1}. ${meta?.labelAr || qt}`,
+          isActive: false,
+          isDone: false
+        };
+      })
+    ];
+
     return (
       <div className="min-h-screen bg-background text-text-main flex flex-col p-4 sm:p-6 font-sans" dir="rtl">
+        {/* Icon-Only Stage Bar (Zero Side-Scrolling) */}
+        <div className="max-w-2xl w-full mx-auto bg-surface border border-surface-border rounded-2xl p-1.5 mb-3 shadow-2xs">
+          <div className="flex items-center gap-1 w-full">
+            {stageBarItems.map((stg) => (
+              <div
+                key={stg.key}
+                title={stg.title}
+                aria-label={stg.title}
+                className={`flex-1 h-9 rounded-xl text-sm sm:text-base font-black transition-all flex items-center justify-center border select-none ${
+                  stg.isActive
+                    ? 'bg-primary text-white border-primary shadow-xs scale-[1.03]'
+                    : stg.isDone
+                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                    : 'bg-surface-hover/60 text-text-muted border-surface-border opacity-70'
+                }`}
+              >
+                <span>{stg.isDone ? '✓' : stg.icon}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Top Bar */}
         <div className="max-w-2xl w-full mx-auto flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <span className="px-3 py-1 rounded-lg bg-surface border border-surface-border text-primary text-xs font-bold flex items-center gap-1.5 shadow-2xs">
-              <GraduationCap className="w-3.5 h-3.5" />
-              <span>مرحلة المعلّم الناطق: {studyIndex + 1} / {studyItems.length}</span>
+              <span>📖</span>
+              <span>التعلم والنطق: {studyIndex + 1} / {studyItems.length}</span>
             </span>
           </div>
-          <button
-            onClick={() => {
-              setCompletedStudyPhase(true);
-              setCurrentIdx(0);
-              setPhase('quiz');
-            }}
-            className="px-3 py-1 rounded-lg bg-surface-hover hover:bg-surface text-text-muted hover:text-text-main border border-surface-border text-xs font-semibold cursor-pointer transition-colors"
-          >
-            تخطي للأسئلة ←
-          </button>
+          <span className="text-xs font-medium text-text-muted">👤 {studentName}</span>
         </div>
 
         {/* Progress Bar */}
@@ -1522,17 +1866,57 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   }
 
   // ============================================================================
-  // PHASE 2: MULTI-STAGE QUIZ & EVALUATION
+  // PHASE 2: MULTI-STAGE QUIZ & EVALUATION (7 Progressive Stages + Icon-Only Stage Bar)
   // ============================================================================
+  const hasStudyStage = (assignment?.flowMode || 'teacher_then_quiz') === 'teacher_then_quiz' && studyItems.length > 0;
+  const currentStageIdx = currentQuestion?.stageIndex ?? 0;
+  const quizStageBarItems = [
+    ...(hasStudyStage
+      ? [{ key: 'study', icon: '📖', title: '1. التعلم والنطق (Lernen)', isActive: false, isDone: true }]
+      : []),
+    ...activeQuestionTypes.map((qt, idx) => {
+      const meta = getQuestionTypeMeta(qt);
+      return {
+        key: qt,
+        icon: meta?.badgeEmoji || '🎯',
+        title: `${hasStudyStage ? idx + 2 : idx + 1}. ${meta?.labelAr || qt}`,
+        isActive: idx === currentStageIdx,
+        isDone: idx < currentStageIdx
+      };
+    })
+  ];
+
   return (
     <div className="min-h-screen bg-background text-text-main flex flex-col p-4 sm:p-6 font-sans" dir="rtl">
+      {/* Icon-Only Sequential Stage Bar (Zero Horizontal Side-Scrolling) */}
+      <div className="max-w-3xl w-full mx-auto bg-surface border border-surface-border rounded-2xl p-1.5 mb-3 shadow-2xs">
+        <div className="flex items-center gap-1 w-full">
+          {quizStageBarItems.map((stg) => (
+            <div
+              key={stg.key}
+              title={stg.title}
+              aria-label={stg.title}
+              className={`flex-1 h-9 rounded-xl text-sm sm:text-base font-black transition-all flex items-center justify-center border select-none ${
+                stg.isActive
+                  ? 'bg-primary text-white border-primary shadow-xs scale-[1.03]'
+                  : stg.isDone
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                  : 'bg-surface-hover/60 text-text-muted border-surface-border opacity-70'
+              }`}
+            >
+              <span>{stg.isDone ? '✓' : stg.icon}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Top HUD Bar */}
       <div className="max-w-3xl w-full mx-auto flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2">
           <span className="px-3 py-1 rounded-lg bg-surface border border-surface-border text-primary text-xs font-bold shadow-2xs">
             {currentQuestion?.stageBadgeEmoji} {currentQuestion?.stageLabelAr}
           </span>
-          <span className="px-3 py-1 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold text-text-main">
+          <span className="px-3 py-1 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold text-text-main tabular-nums">
             السؤال {currentIdx + 1} / {quizQuestions.length}
           </span>
         </div>
@@ -1543,7 +1927,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               <Flame className="w-3.5 h-3.5" /> x{Math.min(3, streak)}
             </span>
           )}
-          <span className="px-3 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5">
+          <span className="px-3 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5 tabular-nums">
             <Coins className="w-3.5 h-3.5" />
             <span>{gold} نقطة</span>
           </span>
@@ -1552,14 +1936,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       </div>
 
       {/* Progress Bar */}
-      <div className="max-w-3xl w-full mx-auto h-2 bg-surface-border rounded-full overflow-hidden mb-6">
+      <div className="max-w-3xl w-full mx-auto h-2 bg-surface-border rounded-full overflow-hidden mb-5">
         <div
           className="h-full bg-primary transition-all duration-300"
           style={{ width: `${((currentIdx + 1) / Math.max(1, quizQuestions.length)) * 100}%` }}
         />
       </div>
 
-      {/* Question Card */}
+      {/* Question Card & Interactive Stage Controls */}
       {currentQuestion && (
         <div className="flex-1 flex flex-col justify-center max-w-2xl w-full mx-auto space-y-4">
           <motion.div
@@ -1588,7 +1972,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             ) : (
               <h2
                 className="text-xl sm:text-3xl font-bold text-text-main tracking-wide"
-                dir={currentQuestion.type === 'mc_ar_de' ? 'rtl' : 'ltr'}
+                dir={currentQuestion.hideGermanText ? 'rtl' : 'ltr'}
               >
                 {currentQuestion.promptMainText}
               </h2>
@@ -1600,29 +1984,169 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               </div>
             )}
 
-            {!currentQuestion.hideGermanText && (
-              <div className="flex items-center justify-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => speakGermanText(currentQuestion.germanWord, 0.9)}
-                  className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                >
-                  <Volume2 className="w-3.5 h-3.5 text-primary" />
-                  <span>استمع</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => speakGermanText(currentQuestion.germanWord, 0.55)}
-                  className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-text-muted hover:text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                >
-                  <Snail className="w-3.5 h-3.5" />
-                  <span>بطيء</span>
-                </button>
+            {/* Stage 5: Syllables Slot Boxes */}
+            {currentQuestion.type === 'syllables' && currentQuestion.expectedSyllables && (
+              <div className="pt-2 pb-1 flex items-center justify-center gap-2 font-mono text-xl sm:text-2xl font-black tracking-wider flex-wrap" dir="ltr">
+                {currentQuestion.article && (
+                  <span className="text-primary font-serif font-semibold text-xl sm:text-2xl mr-2">
+                    {currentQuestion.article}
+                  </span>
+                )}
+                {currentQuestion.expectedSyllables.map((_, i) => {
+                  const filledSyl = filledSlots[i];
+                  const isCurrentTarget = i === multiStepIdx && selectedChoice === null;
+                  return (
+                    <span
+                      key={i}
+                      className={`inline-flex items-center justify-center px-3.5 h-11 sm:h-13 min-w-[3.5rem] rounded-xl border-2 font-black transition-all ${
+                        filledSyl
+                          ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs scale-105'
+                          : isCurrentTarget
+                          ? 'bg-amber-500/10 border-amber-500 border-dashed text-amber-500 animate-pulse scale-105'
+                          : 'bg-surface-hover/50 border-dashed border-surface-border text-text-muted'
+                      }`}
+                    >
+                      {filledSyl || '...'}
+                    </span>
+                  );
+                })}
               </div>
             )}
+
+            {/* Stage 6: Missing 1 Letter Character Boxes */}
+            {currentQuestion.type === 'missing_letter' && currentQuestion.chars && (
+              <div className="pt-2 pb-1 flex items-center justify-center gap-1.5 font-mono text-2xl sm:text-3xl font-black tracking-wider flex-wrap" dir="ltr">
+                {currentQuestion.article && (
+                  <span className="text-primary font-serif font-semibold text-xl sm:text-2xl mr-2">
+                    {currentQuestion.article}
+                  </span>
+                )}
+                {currentQuestion.chars.map((ch, i) => {
+                  const isMissing = i === currentQuestion.missingIndex;
+                  if (isMissing) {
+                    const isRight =
+                      selectedChoice !== null &&
+                      selectedChoice.toUpperCase() === (currentQuestion.missingChar || '').toUpperCase();
+                    return (
+                      <span
+                        key={i}
+                        className={`inline-flex items-center justify-center w-9 h-11 sm:w-11 sm:h-13 rounded-xl border-2 border-dashed font-black transition-all ${
+                          selectedChoice !== null
+                            ? isRight
+                              ? 'bg-emerald-500 text-white border-emerald-500 scale-105 shadow-xs'
+                              : 'bg-rose-500 text-white border-rose-500'
+                            : 'bg-primary/10 border-primary text-primary animate-pulse'
+                        }`}
+                      >
+                        {selectedChoice !== null ? selectedChoice : '_'}
+                      </span>
+                    );
+                  }
+                  return (
+                    <span
+                      key={i}
+                      className="inline-flex items-center justify-center w-8 h-10 sm:w-10 sm:h-12 bg-surface-hover/80 text-text-main rounded-xl border border-surface-border"
+                    >
+                      {ch}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Stage 7: Missing Consecutive Letters Character Boxes */}
+            {currentQuestion.type === 'missing_two_letters' && currentQuestion.chars && currentQuestion.missingIndices && (
+              <div className="pt-2 pb-1 flex items-center justify-center gap-1.5 font-mono text-2xl sm:text-3xl font-black tracking-wider flex-wrap" dir="ltr">
+                {currentQuestion.article && (
+                  <span className="text-primary font-serif font-semibold text-xl sm:text-2xl mr-2">
+                    {currentQuestion.article}
+                  </span>
+                )}
+                {currentQuestion.chars.map((ch, i) => {
+                  const isMissingSlot = currentQuestion.missingIndices!.includes(i);
+                  const filledChar = filledSlots[i];
+                  const isCurrentTarget =
+                    currentQuestion.missingIndices![multiStepIdx] === i && selectedChoice === null;
+
+                  if (isMissingSlot) {
+                    return (
+                      <span
+                        key={i}
+                        className={`inline-flex items-center justify-center w-9 h-11 sm:w-11 sm:h-13 rounded-xl border-2 font-black transition-all ${
+                          filledChar
+                            ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs'
+                            : isCurrentTarget
+                            ? 'bg-amber-500/10 border-amber-500 border-dashed text-amber-500 animate-pulse scale-105'
+                            : 'bg-surface-hover/50 border-dashed border-surface-border text-text-muted'
+                        }`}
+                      >
+                        {filledChar || '_'}
+                      </span>
+                    );
+                  }
+                  return (
+                    <span
+                      key={i}
+                      className="inline-flex items-center justify-center w-8 h-10 sm:w-10 sm:h-12 bg-surface-hover/80 text-text-main rounded-xl border border-surface-border"
+                    >
+                      {ch}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Stage 8: Full Word Character Boxes */}
+            {currentQuestion.type === 'full_word' && currentQuestion.chars && (
+              <div className="pt-2 pb-1 flex items-center justify-center gap-1.5 font-mono text-2xl sm:text-3xl font-black tracking-wider flex-wrap" dir="ltr">
+                {currentQuestion.article && (
+                  <span className="text-primary font-serif font-semibold text-xl sm:text-2xl mr-2">
+                    {currentQuestion.article}
+                  </span>
+                )}
+                {currentQuestion.chars.map((_, slotIdx) => {
+                  const filledChar = filledSlots[slotIdx];
+                  const isCurrentTarget = multiStepIdx === slotIdx && selectedChoice === null;
+                  return (
+                    <span
+                      key={slotIdx}
+                      className={`inline-flex items-center justify-center w-9 h-11 sm:w-11 sm:h-13 rounded-xl border-2 font-black transition-all ${
+                        filledChar
+                          ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs'
+                          : isCurrentTarget
+                          ? 'bg-primary/10 border-primary border-dashed text-primary animate-pulse scale-105'
+                          : 'bg-surface-hover/40 border-dashed border-surface-border text-text-muted'
+                      }`}
+                    >
+                      {filledChar || '_'}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Audio Pronunciation Helper */}
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => speakGermanText(currentQuestion.germanWord, 0.9)}
+                className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <Volume2 className="w-3.5 h-3.5 text-primary" />
+                <span>استمع</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => speakGermanText(currentQuestion.germanWord, 0.55)}
+                className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-text-muted hover:text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <Snail className="w-3.5 h-3.5" />
+                <span>بطيء</span>
+              </button>
+            </div>
           </motion.div>
 
-          {/* Answer Options */}
+          {/* Answer Options by Stage Type */}
           {currentQuestion.type === 'true_false' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {currentQuestion.options.map((opt, idx) => {
@@ -1656,10 +2180,75 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                 );
               })}
             </div>
+          ) : currentQuestion.type === 'missing_letter' ? (
+            <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-md mx-auto">
+              {currentQuestion.options.map((choiceChar, idx) => {
+                const isSelected = selectedChoice === choiceChar;
+                const isRightOption = choiceChar.toUpperCase() === currentQuestion.correctAnswer.toUpperCase();
+
+                let btnStyle = 'bg-surface hover:bg-surface-hover text-text-main border-surface-border hover:border-primary/40';
+                if (selectedChoice !== null) {
+                  if (isRightOption) {
+                    btnStyle = 'bg-emerald-500 text-white border-emerald-500 scale-105 shadow-xs';
+                  } else if (isSelected) {
+                    btnStyle = 'bg-rose-500 text-white border-rose-500';
+                  } else {
+                    btnStyle = 'bg-surface border-surface-border opacity-40';
+                  }
+                }
+
+                return (
+                  <button
+                    key={`${choiceChar}_${idx}`}
+                    type="button"
+                    disabled={selectedChoice !== null}
+                    onClick={() => handleSelectOption(choiceChar)}
+                    className={`w-12 h-13 sm:w-14 sm:h-15 rounded-2xl text-xl sm:text-2xl font-black font-mono border transition-all cursor-pointer flex items-center justify-center shadow-2xs active:scale-95 ${btnStyle}`}
+                  >
+                    {choiceChar}
+                  </button>
+                );
+              })}
+            </div>
+          ) : currentQuestion.type === 'syllables' ||
+            currentQuestion.type === 'missing_two_letters' ||
+            currentQuestion.type === 'full_word' ? (
+            <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-md mx-auto">
+              {(currentQuestion.tileChoices || []).map((tile) => {
+                const isUsed = usedTileIds.includes(tile.id);
+                const isError = errorTileId === tile.id;
+                const isSyllable = currentQuestion.type === 'syllables';
+
+                return (
+                  <button
+                    key={tile.id}
+                    type="button"
+                    disabled={isUsed || selectedChoice !== null}
+                    onClick={() => handleTileClick(tile)}
+                    dir="ltr"
+                    className={`${
+                      isSyllable ? 'px-4 h-12 sm:h-14 text-lg sm:text-xl' : 'w-12 h-13 sm:w-14 sm:h-15 text-xl sm:text-2xl'
+                    } rounded-2xl font-black font-mono border transition-all cursor-pointer flex items-center justify-center shadow-2xs ${
+                      isUsed
+                        ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 opacity-40 cursor-not-allowed'
+                        : isError
+                        ? 'bg-rose-500 text-white border-rose-500 animate-bounce'
+                        : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border hover:border-primary/40 active:scale-95'
+                    }`}
+                  >
+                    {tile.text}
+                  </button>
+                );
+              })}
+            </div>
           ) : (
             <div
               className={`grid gap-2.5 ${
-                currentQuestion.options.length === 3 ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'
+                currentQuestion.type === 'choice_all'
+                  ? 'grid-cols-2 sm:grid-cols-3'
+                  : currentQuestion.options.length === 3
+                  ? 'grid-cols-1 sm:grid-cols-3'
+                  : 'grid-cols-1 sm:grid-cols-2'
               }`}
             >
               {currentQuestion.options.map((choice, idx) => {
@@ -1696,58 +2285,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           )}
         </div>
       )}
-
-      {/* Bonus Box Modal */}
-      <AnimatePresence>
-        {showChestBonus && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
-            dir="rtl"
-          >
-            <motion.div
-              initial={{ scale: 0.95, y: 10 }}
-              animate={{ scale: 1, y: 0 }}
-              className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-6 text-center space-y-4 shadow-xl text-text-main"
-            >
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                <Gift className="w-3.5 h-3.5" />
-                <span>إجابة صحيحة! مكافأة إضافية</span>
-              </div>
-              <h3 className="text-base sm:text-lg font-bold">اختر صندوقاً واحداً لمضاعفة نقاطك! 🎁</h3>
-
-              <div className="grid grid-cols-3 gap-2.5 pt-1">
-                {chestOptions.map((c, i) => {
-                  const isOpened = openedChestIndex === i;
-                  const isOther = openedChestIndex !== null && openedChestIndex !== i;
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      disabled={openedChestIndex !== null}
-                      onClick={() => handlePickChest(i)}
-                      className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                        isOpened
-                          ? 'bg-primary/10 border-primary scale-105 shadow-xs'
-                          : isOther
-                          ? 'bg-surface border-surface-border opacity-40'
-                          : 'bg-surface hover:bg-surface-hover border-surface-border hover:scale-105'
-                      }`}
-                    >
-                      <span className="text-3xl sm:text-4xl select-none">{isOpened ? '👑' : '🎁'}</span>
-                      <span className="text-xs font-bold text-text-main">
-                        {openedChestIndex !== null ? c.bonusText : `صندوق ${i + 1}`}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

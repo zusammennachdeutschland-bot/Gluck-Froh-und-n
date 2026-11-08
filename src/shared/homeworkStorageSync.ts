@@ -53,26 +53,73 @@ const LOCAL_ASSIGNMENTS_KEY = 'glueck_hw_assignments_v2';
 const LOCAL_SUBMISSIONS_KEY = 'glueck_hw_submissions_v2';
 const OPEN_PARTICIPANT_PREFIX = 'glueck_hw_open_pid_';
 
-export const QUESTION_TYPE_META: {
+export interface QuestionTypeMetaItem {
   id: HomeworkQuestionType;
   labelAr: string;
   labelDe: string;
   descAr: string;
   badgeEmoji: string;
-}[] = [
+}
+
+export const QUESTION_TYPE_META: QuestionTypeMetaItem[] = [
+  {
+    id: 'true_false',
+    labelAr: 'صح أم خطأ (Richtig / Falsch)',
+    labelDe: 'Richtig oder Falsch',
+    descAr: 'يعرض الكلمة ومعنى مقترح، والطالب يحدد (صح ✔️) أم (غلط ✖️)',
+    badgeEmoji: '✔️'
+  },
+  {
+    id: 'choice_2',
+    labelAr: 'الاختيار من 2 (Zwei Optionen)',
+    labelDe: 'Zwei Optionen',
+    descAr: 'يختار الطالب الكلمة الألمانية الصحيحة من بين خيارين اثنين',
+    badgeEmoji: '✌️'
+  },
+  {
+    id: 'choice_all',
+    labelAr: 'الاختيار من الكل (Alle Wörter)',
+    labelDe: 'Alle Wörter',
+    descAr: 'يختار الطالب الكلمة الألمانية الصحيحة من بين جميع كلمات المجموعة',
+    badgeEmoji: '🎯'
+  },
+  {
+    id: 'syllables',
+    labelAr: 'النصين والمقاطع (Silben)',
+    labelDe: 'Silben zusammensetzen',
+    descAr: 'يركب الطالب نصفي الكلمة أو مقاطعها الصوتية بالترتيب الصحيح',
+    badgeEmoji: '🧩'
+  },
+  {
+    id: 'missing_letter',
+    labelAr: 'الحرف الناقص (Fehlender Buchstabe)',
+    labelDe: 'Fehlender Buchstabe',
+    descAr: 'يكمل الطالب الحرف الواحد الناقص من داخل الكلمة الألمانية',
+    badgeEmoji: '🔤'
+  },
+  {
+    id: 'missing_two_letters',
+    labelAr: 'الحرفين المتتاليين (Buchstabenfolge)',
+    labelDe: 'Buchstabenfolge',
+    descAr: 'يكمل الطالب حرفين أو حروفاً متتالية ناقصة بالترتيب الصحيح',
+    badgeEmoji: '🔡'
+  },
+  {
+    id: 'full_word',
+    labelAr: 'الكلمة كلها (Wort vervollständigen)',
+    labelDe: 'Wort vervollständigen',
+    descAr: 'يرتب الطالب حروف الكلمة الألمانية كاملة من البداية للنهاية',
+    badgeEmoji: '✍️'
+  }
+];
+
+export const LEGACY_QUESTION_TYPE_META: QuestionTypeMetaItem[] = [
   {
     id: 'mc_de_ar',
     labelAr: 'اختيار من متعدد (ألماني ← عربي)',
     labelDe: 'Multiple Choice (DE → AR)',
     descAr: 'يعرض الكلمة الألمانية وينطقها، والطالب يختار المعنى العربي الصحيح',
     badgeEmoji: '🎯'
-  },
-  {
-    id: 'true_false',
-    labelAr: 'صح أم خطأ (Richtig / Falsch)',
-    labelDe: 'Richtig oder Falsch',
-    descAr: 'يعرض الكلمة الألمانية مع ترجمة مقترحة، والطالب يحدد (صح ✅) أم (خطأ ❌)',
-    badgeEmoji: '⚖️'
   },
   {
     id: 'listen_choose',
@@ -94,15 +141,21 @@ export const QUESTION_TYPE_META: {
     labelDe: 'Artikel wählen (der/die/das)',
     descAr: 'يختار الطالب الأداة الصحيحة للكلمة الألمانية (مذكر / مؤنث / محايد)',
     badgeEmoji: '🏷️'
-  },
-  {
-    id: 'missing_letter',
-    labelAr: 'تكملة الحرف الناقص (الإملاء)',
-    labelDe: 'Buchstaben ergänzen',
-    descAr: 'يكمل الطالب الحرف الناقص من الكلمة الألمانية لتثبيت الحفظ والإملاء',
-    badgeEmoji: '✍️'
   }
 ];
+
+export function getQuestionTypeMeta(id: HomeworkQuestionType): QuestionTypeMetaItem {
+  return (
+    QUESTION_TYPE_META.find((m) => m.id === id) ||
+    LEGACY_QUESTION_TYPE_META.find((m) => m.id === id) || {
+      id,
+      labelAr: 'سؤال تفاعلي',
+      labelDe: 'Übung',
+      descAr: 'تمرين تفاعلي',
+      badgeEmoji: '🎯'
+    }
+  );
+}
 
 function simpleStringHash(input: string): string {
   const clean = (input || '').trim().toLowerCase();

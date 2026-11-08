@@ -928,7 +928,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
         { num: 4, title: '4. Alle Wörter', icon: '🎯', desc: 'Gesamten Wortschatz üben' },
         { num: 5, title: '5. Silben zusammensetzen', icon: '🧩', desc: 'Silben in richtiger Reihenfolge' },
         { num: 6, title: '6. Fehlender Buchstabe', icon: '🔤', desc: 'Ein fehlender Buchstabe' },
-        { num: 7, title: '7. Buchstabenfolge', icon: '🧩', desc: 'Aufeinanderfolgende Buchstaben' },
+        { num: 7, title: '7. Buchstabenfolge', icon: '🔡', desc: 'Aufeinanderfolgende Buchstaben' },
         { num: 8, title: '8. Wort vervollständigen', icon: '✍️', desc: 'Ganzes Wort vervollständigen' },
         { num: 9, title: '9. Spiele', icon: '🏆', desc: 'Glückwunsch & Spiele' }
       ];
@@ -940,7 +940,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
         { num: 4, title: '4. All Words', icon: '🎯', desc: 'Practice all vocabulary' },
         { num: 5, title: '5. Syllable Puzzle', icon: '🧩', desc: 'Assemble syllables in order' },
         { num: 6, title: '6. One Missing Letter', icon: '🔤', desc: 'Find 1 missing letter' },
-        { num: 7, title: '7. Missing Sequence', icon: '🧩', desc: 'Find consecutive letters' },
+        { num: 7, title: '7. Missing Sequence', icon: '🔡', desc: 'Find consecutive letters' },
         { num: 8, title: '8. Complete Word', icon: '✍️', desc: 'Spell full word' },
         { num: 9, title: '9. Games', icon: '🏆', desc: 'Congratulations & games' }
       ];
@@ -952,7 +952,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
       { num: 4, title: '٤. كل الكلمات', icon: '🎯', desc: 'الاختيار من كل المجموعة' },
       { num: 5, title: '٥. تركيب المقاطع', icon: '🧩', desc: 'تركيب المقاطع الصوتية بالترتيب' },
       { num: 6, title: '٦. حرف ناقص', icon: '🔤', desc: 'تحديد الحرف الناقص الواحد' },
-      { num: 7, title: '٧. حروف متتالية', icon: '🧩', desc: 'تحديد الحروف المتتالية الناقصة' },
+      { num: 7, title: '٧. حروف متتالية', icon: '🔡', desc: 'تحديد الحروف المتتالية الناقصة' },
       { num: 8, title: '٨. إكمال الكلمة', icon: '✍️', desc: 'تركيب الكلمة كاملة بالترتيب' },
       { num: 9, title: '٩. الألعاب', icon: '🏆', desc: 'تهانينا واختيار اللعبة' }
     ];
@@ -1037,9 +1037,9 @@ export const LernstudioTeachModal: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Stages Stepper Nav - Horizontally Scrollable compact segmented buttons */}
-        <div className="bg-surface-hover border-b border-surface-border px-2 py-1.5 shrink-0 overflow-x-auto scrollbar-none">
-          <div className="flex items-center gap-1 min-w-max">
+        {/* Stages Stepper Nav - Icon-Only Single Row (Zero Horizontal Scrolling) */}
+        <div className="bg-surface-hover border-b border-surface-border px-2.5 py-2 shrink-0">
+          <div className="grid grid-cols-9 gap-1 w-full">
             {stagesList.map((stg) => {
               const isActive = currentStage === stg.num;
               const isDone = completedStages.includes(stg.num);
@@ -1054,17 +1054,17 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                     resetAnswerState();
                     setShuffleKey((k) => k + 1);
                   }}
-                  className={`flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
+                  className={`flex items-center justify-center h-9 rounded-xl text-sm font-bold transition-all cursor-pointer border ${
                     isActive
-                      ? 'bg-primary text-white border-primary shadow-xs'
+                      ? 'bg-primary text-white border-primary shadow-xs scale-[1.03]'
                       : isDone
                       ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
                       : 'bg-surface text-text-muted hover:text-text-main border-surface-border'
                   }`}
-                  title={stg.desc}
+                  title={`${stg.title} — ${stg.desc}`}
+                  aria-label={stg.title}
                 >
-                  <span className="text-xs shrink-0">{isDone ? '✓' : stg.icon}</span>
-                  <span>{stg.title}</span>
+                  <span className="text-sm leading-none select-none">{isDone ? '✓' : stg.icon}</span>
                 </button>
               );
             })}

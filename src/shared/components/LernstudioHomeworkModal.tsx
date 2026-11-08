@@ -7,7 +7,8 @@ import {
   HomeworkFlowMode,
   HomeworkQuestionType,
   HomeworkBlooketMode,
-  HomeworkSubmission
+  HomeworkSubmission,
+  DEFAULT_HOMEWORK_QUESTION_TYPES
 } from '../homeworkTypes';
 import {
   QUESTION_TYPE_META,
@@ -97,12 +98,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [createError, setCreateError] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [flowMode, setFlowMode] = useState<HomeworkFlowMode>('teacher_then_quiz');
-  const [questionTypes, setQuestionTypes] = useState<HomeworkQuestionType[]>([
-    'mc_de_ar',
-    'true_false',
-    'listen_choose'
-  ]);
-  const [blooketMode, setBlooketMode] = useState<HomeworkBlooketMode>('gold_quest');
+  const [questionTypes, setQuestionTypes] = useState<HomeworkQuestionType[]>(
+    () => [...DEFAULT_HOMEWORK_QUESTION_TYPES]
+  );
+  const [blooketMode] = useState<HomeworkBlooketMode>('classic_quiz');
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [maxAttempts, setMaxAttempts] = useState(0);
   const [hasDeadline] = useState(false);
@@ -270,10 +269,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const toggleQuestionType = (type: HomeworkQuestionType) => {
     setQuestionTypes((prev) => {
       if (prev.includes(type)) {
-        if (prev.length === 1) return prev; // Keep at least 1 question type
+        if (prev.length === 1) return prev; // Keep at least 1 stage
         return prev.filter((t) => t !== type);
       }
-      return [...prev, type];
+      const next = [...prev, type];
+      const canonicalOrder = QUESTION_TYPE_META.map((m) => m.id);
+      return next.sort((a, b) => canonicalOrder.indexOf(a) - canonicalOrder.indexOf(b));
     });
   };
 
@@ -780,59 +781,57 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 </div>
 
-                {/* 3. Flow Mode & Reward Mode */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-text-main">نمط العرض والشرح:</label>
-                    <div className="grid grid-cols-2 gap-1 p-1 bg-surface-hover rounded-xl border border-surface-border">
-                      <button
-                        type="button"
-                        onClick={() => setFlowMode('teacher_then_quiz')}
-                        className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer text-center ${
-                          flowMode === 'teacher_then_quiz'
-                            ? 'bg-surface text-primary shadow-xs'
-                            : 'text-text-muted hover:text-text-main'
-                        }`}
-                      >
-                        👨‍🏫 شرح + اختبار
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFlowMode('quiz_only')}
-                        className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer text-center ${
-                          flowMode === 'quiz_only'
-                            ? 'bg-surface text-primary shadow-xs'
-                            : 'text-text-muted hover:text-text-main'
-                        }`}
-                      >
-                        🎯 اختبار مباشر
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-text-main">طابع المكافآت والألعاب:</label>
-                    <select
-                      value={blooketMode}
-                      onChange={(e) => setBlooketMode(e.target.value as HomeworkBlooketMode)}
-                      className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
+                {/* 3. Flow Mode */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-text-main">نمط العرض والشرح:</label>
+                  <div className="grid grid-cols-2 gap-1 p-1 bg-surface-hover rounded-xl border border-surface-border">
+                    <button
+                      type="button"
+                      onClick={() => setFlowMode('teacher_then_quiz')}
+                      className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer text-center ${
+                        flowMode === 'teacher_then_quiz'
+                          ? 'bg-surface text-primary shadow-xs'
+                          : 'text-text-muted hover:text-text-main'
+                      }`}
                     >
-                      <option value="gold_quest">🎁 صناديق الذهب (Gold Quest — 3 صناديق بعد الإجابة)</option>
-                      <option value="classic_quiz">🎯 اختبار سريع مع نقاط وسلسلة انتصارات</option>
-                    </select>
+                      📖 المرحلة ١: التعلم والنطق + مراحل الأسئلة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFlowMode('quiz_only')}
+                      className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer text-center ${
+                        flowMode === 'quiz_only'
+                          ? 'bg-surface text-primary shadow-xs'
+                          : 'text-text-muted hover:text-text-main'
+                      }`}
+                    >
+                      🎯 مراحل الأسئلة مباشرة
+                    </button>
                   </div>
                 </div>
 
-                {/* 4. Question Types Grid */}
+                {/* 4. Progressive Stages Grid (All 7 Active by Default) */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-text-main flex items-center justify-between">
-                    <span>مراحل وأنواع الأسئلة المطلوب تضمينها:</span>
-                    <span className="text-[10px] text-text-muted font-bold tabular-nums">
-                      محدد: {questionTypes.length} من {QUESTION_TYPE_META.length}
-                    </span>
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-text-main">
+                      مراحل التدريب المتدرجة في رابط الواجب ({questionTypes.length} من {QUESTION_TYPE_META.length}):
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (questionTypes.length === QUESTION_TYPE_META.length) {
+                          setQuestionTypes([QUESTION_TYPE_META[0].id]);
+                        } else {
+                          setQuestionTypes(QUESTION_TYPE_META.map((m) => m.id));
+                        }
+                      }}
+                      className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+                    >
+                      {questionTypes.length === QUESTION_TYPE_META.length ? 'مرحلة واحدة فقط' : 'تحديد كل المراحل'}
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {QUESTION_TYPE_META.map((meta) => {
+                    {QUESTION_TYPE_META.map((meta, idx) => {
                       const active = questionTypes.includes(meta.id);
                       return (
                         <button
@@ -847,10 +846,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                         >
                           <div className="min-w-0">
                             <div className="text-xs font-bold truncate">
-                              {meta.badgeEmoji} {meta.labelAr.split('(')[0]}
+                              {meta.badgeEmoji} {idx + 1}. {meta.labelAr}
                             </div>
                             <div className="text-[10px] text-text-muted truncate">
-                              {meta.descAr.slice(0, 30)}...
+                              {meta.descAr}
                             </div>
                           </div>
                           <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${

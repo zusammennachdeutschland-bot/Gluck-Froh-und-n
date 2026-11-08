@@ -1,17 +1,33 @@
 export type HomeworkQuestionType =
-  | 'mc_de_ar'       // اختيار من متعدد (ألماني ← عربي)
-  | 'true_false'     // صح أم خطأ (Richtig / Falsch)
-  | 'listen_choose'  // استمع للنطق واختر الكلمة (صوتي)
-  | 'mc_ar_de'       // اختيار من متعدد (عربي ← ألماني)
-  | 'article_quiz'   // اختيار الأداة (der / die / das)
-  | 'missing_letter';// تكملة الحرف الناقص (إملاء)
+  | 'true_false'          // صح أم خطأ (Richtig / Falsch)
+  | 'choice_2'            // الاختيار من 2 (Zwei Optionen)
+  | 'choice_all'          // الاختيار من الكل (Alle Wörter)
+  | 'syllables'           // النصين / تركيب المقاطع (Silben zusammensetzen)
+  | 'missing_letter'      // الحرف الناقص (Fehlender Buchstabe)
+  | 'missing_two_letters' // الحرفين المتتاليين (Buchstabenfolge)
+  | 'full_word'           // الكلمة كلها (Wort vervollständigen)
+  // Legacy question types kept for backward compatibility with older assignments
+  | 'mc_de_ar'            // اختيار من متعدد (ألماني ← عربي)
+  | 'listen_choose'       // استمع للنطق واختر الكلمة (صوتي)
+  | 'mc_ar_de'            // اختيار من متعدد (عربي ← ألماني)
+  | 'article_quiz';       // اختيار الأداة (der / die / das)
+
+export const DEFAULT_HOMEWORK_QUESTION_TYPES: HomeworkQuestionType[] = [
+  'true_false',
+  'choice_2',
+  'choice_all',
+  'syllables',
+  'missing_letter',
+  'missing_two_letters',
+  'full_word'
+];
 
 export type HomeworkFlowMode =
   | 'teacher_then_quiz' // يبدأ بالمعلّم (نطق الكلمات والشرح) ثم الأسئلة المتدرجة ثم التقييم
   | 'quiz_only';        // يبدأ بالأسئلة مباشرة ثم التقييم
 
 export type HomeworkBlooketMode =
-  | 'gold_quest'    // صناديق الذهب (Blooket Gold Quest)
+  | 'gold_quest'    // (Legacy) صناديق الذهب
   | 'tower_energy'  // طاقة الأبطال (Tower Defense / Energy)
   | 'classic_quiz'; // اختبار مباشر كلاسيكي
 
@@ -103,4 +119,3 @@ export interface HomeworkSummaryStats {
     accuracyPercentage: number;
   }[];
 }
-
