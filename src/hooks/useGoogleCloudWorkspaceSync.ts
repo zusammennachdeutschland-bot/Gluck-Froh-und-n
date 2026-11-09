@@ -299,15 +299,22 @@ export async function saveDurablePendingRemoteQueue(
 ): Promise<boolean> {
   if (!uid) return false;
   const key = `${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`;
-  if (!Array.isArray(queue) || queue.length === 0) {
-    try {
-      await storage.removeItem(key);
-      const isRemoved = await storage.verifyDurableRemoved(key);
-      if (!isRemoved) {
-        return false;
-      }
-      inMemoryDurablePendingQueueByUid.delete(uid);
-      inMemoryDurableStorageFallback.delete(key);
+  const safeQueue = Array.isArray(queue) ? queue : [];
+
+  try {
+    // 1. Persist pending remote queue payloads (including empty queue representation []) using IndexedDB/localforage storageService
+    await storage.setItem(key, safeQueue);
+
+    // 2. Await writes and verify actual read-back equality before reporting persistence success
+    const verified = await storage.verifyDurableReadBackValue(key, safeQueue);
+    if (!verified) {
+      console.warn(`[saveDurablePendingRemoteQueue] Read-back verification failed for ${key}`);
+      return false;
+    }
+
+    if (safeQueue.length === 0) {
+      inMemoryDurablePendingQueueByUid.set(uid, []);
+      inMemoryDurableStorageFallback.set(key, JSON.stringify([]));
       if (hasLocalStorageRuntime()) {
         try {
           localStorage.removeItem(key);
@@ -315,28 +322,13 @@ export async function saveDurablePendingRemoteQueue(
           // ignore
         }
       }
-      return true;
-    } catch {
-      return false;
+    } else {
+      inMemoryDurablePendingQueueByUid.set(
+        uid,
+        safeQueue.map((item) => ({ ...item }))
+      );
+      inMemoryDurableStorageFallback.set(key, JSON.stringify(safeQueue));
     }
-  }
-
-  try {
-    // 1. Persist pending remote queue payloads using existing IndexedDB/localforage-backed storageService
-    await storage.setItem(key, queue);
-
-    // 2. Await writes and verify actual read-back equality before reporting persistence success
-    const verified = await storage.verifyDurableReadBackValue(key, queue);
-    if (!verified) {
-      console.warn(`[saveDurablePendingRemoteQueue] Read-back verification failed for ${key}`);
-      return false;
-    }
-
-    inMemoryDurablePendingQueueByUid.set(
-      uid,
-      queue.map((item) => ({ ...item }))
-    );
-    inMemoryDurableStorageFallback.set(key, JSON.stringify(queue));
     return true;
   } catch (err) {
     console.warn(`[saveDurablePendingRemoteQueue] Failed to persist queue for ${key}:`, err);
@@ -439,6 +431,18 @@ export async function clearDurablePendingRemoteQueueForTestsAsync(uid: string): 
     } catch {
       // Ignore
     }
+  }
+}
+
+export function clearInMemorySyncQueueCachesForTests(uid?: string): void {
+  if (uid) {
+    inMemoryDurablePendingQueueByUid.delete(uid);
+    inMemoryDurableStorageFallback.delete(`${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`);
+    inMemoryPendingPushByUid.delete(uid);
+  } else {
+    inMemoryDurablePendingQueueByUid.clear();
+    inMemoryDurableStorageFallback.clear();
+    inMemoryPendingPushByUid.clear();
   }
 }
 

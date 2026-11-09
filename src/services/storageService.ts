@@ -80,6 +80,12 @@ export function __setSimulatePrimaryDbForTests(enabled: boolean): void {
   }
 }
 
+export function __clearMemoryStoreOnlyForTests(): void {
+  for (const key in memoryStore) {
+    delete memoryStore[key];
+  }
+}
+
 const hasLocalStorageRuntime = (): boolean => {
   if (isLocalStorageSupported) return true;
   try {

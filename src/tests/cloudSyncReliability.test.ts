@@ -25,7 +25,8 @@ import {
   enqueueDurablePendingRemoteItem,
   removeDurablePendingRemoteItem,
   clearDurablePendingRemoteQueueForTests,
-  clearDurablePendingRemoteQueueForTestsAsync
+  clearDurablePendingRemoteQueueForTestsAsync,
+  clearInMemorySyncQueueCachesForTests
 } from '../hooks/useGoogleCloudWorkspaceSync';
 import { SyncableRecord } from '../types';
 import {
@@ -55,7 +56,8 @@ import {
 import {
   storage,
   __setStorageFailureHookForTests,
-  __setSimulatePrimaryDbForTests
+  __setSimulatePrimaryDbForTests,
+  __clearMemoryStoreOnlyForTests
 } from '../services/storageService';
 import {
   runSyncCycle,
@@ -3215,10 +3217,10 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     };
     const raToken23 = computeChunkRevisionToken(raDoc23);
 
-    // Set storage failure hook ONLY on 'remove' operation for queue key
+    let failQueuePersistOnClear = false;
     __setStorageFailureHookForTests((op, key) => {
-      if (op === 'remove' && key.includes('gluck_cloud_pending_remote_queue_v2_')) {
-        throw new Error('Simulated IndexedDB remove failure');
+      if (failQueuePersistOnClear && (op === 'set' || op === 'remove') && key.includes('gluck_cloud_pending_remote_queue_v2_')) {
+        throw new Error('Simulated IndexedDB queue persistence failure during clearing');
       }
     });
 
@@ -3229,6 +3231,7 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
       onApplyRemotePayload: async (remoteJson, docTokens) => {
         const parsed = JSON.parse(remoteJson);
         applyDeltaOnWorkspace(ra23Workspace, parsed);
+        failQueuePersistOnClear = true;
         return acknowledgeAppliedRemoteRevisions(raUid23, docTokens, ra23Workspace);
       }
     });
@@ -3348,6 +3351,153 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     assert.equal(ra24Workspace.financeTransactions[0].amount, 500);
     coord24.dispose();
     log.push('[PASS] [Unit Test] RA-24. IndexedDB read failure during removal verification returns false, preserves queue, and retry is idempotent without data duplication');
+
+    // -------------------------------------------------------------------------
+    // RA-25: Empty queue persistence [] survives process restart; failed import survives process restart from primary storage
+    // -------------------------------------------------------------------------
+    const raUid25 = 'uid_ra_25_restart_recovery';
+    resetAppliedDocTokensForTests(raUid25);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid25);
+
+    const ra25Workspace: any = { students: [] };
+    const raDoc25 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra25_op_1',
+      opSeq: 1,
+      updatedAtMs: 45000,
+      payloadChunk: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra25_1', name: 'Student 25 First' }] })
+    };
+    const raToken25 = computeChunkRevisionToken(raDoc25);
+
+    const coord25Session1 = createSerializedSyncCoordinator({
+      uid: raUid25,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra25Workspace, parsed);
+        return acknowledgeAppliedRemoteRevisions(raUid25, docTokens, ra25Workspace);
+      }
+    });
+
+    const outcome25_1 = await coord25Session1.enqueueRemoteSnapshot(
+      JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra25_1', name: 'Student 25 First' }] }),
+      { [raDoc25.id]: raToken25 }
+    );
+    assert.equal(outcome25_1, true);
+    assert.equal(coord25Session1.getPendingRemoteCount(), 0);
+    coord25Session1.dispose();
+
+    // Clear ALL in-memory stores to simulate a REAL application restart
+    clearInMemorySyncQueueCachesForTests(raUid25);
+    __clearMemoryStoreOnlyForTests();
+
+    // Verify empty queue [] is loaded cleanly from durable primary storage after restart
+    const loadedAfterRestart1 = await loadDurablePendingRemoteQueueAsync(raUid25);
+    assert.equal(loadedAfterRestart1.length, 0);
+
+    // Now enqueue a snapshot that FAILS to apply
+    let failImport25 = true;
+    const raDoc25_2 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra25_op_2',
+      opSeq: 2,
+      updatedAtMs: 46000,
+      payloadChunk: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra25_2', name: 'Student 25 Second' }] })
+    };
+    const raToken25_2 = computeChunkRevisionToken(raDoc25_2);
+
+    const coord25Session2 = createSerializedSyncCoordinator({
+      uid: raUid25,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        if (failImport25) return false;
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra25Workspace, parsed);
+        return acknowledgeAppliedRemoteRevisions(raUid25, docTokens, ra25Workspace);
+      }
+    });
+
+    await coord25Session2.enqueueRemoteSnapshot(
+      JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra25_2', name: 'Student 25 Second' }] }),
+      { [raDoc25_2.id]: raToken25_2 }
+    );
+    assert.equal(coord25Session2.getPendingRemoteCount(), 1);
+    coord25Session2.dispose();
+
+    // Clear ALL in-memory stores to simulate a REAL process restart while snapshot is unapplied
+    clearInMemorySyncQueueCachesForTests(raUid25);
+    __clearMemoryStoreOnlyForTests();
+
+    // Session 3 after restart: verify queue is recovered from primary store, and resumePendingWork applies it
+    failImport25 = false;
+    const coord25Session3 = createSerializedSyncCoordinator({
+      uid: raUid25,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra25Workspace, parsed);
+        return acknowledgeAppliedRemoteRevisions(raUid25, docTokens, ra25Workspace);
+      }
+    });
+
+    const resume25Outcome = await coord25Session3.resumePendingWork();
+    assert.equal(resume25Outcome, true);
+    assert.equal(ra25Workspace.students.some((s: any) => s.id === 'st_ra25_2'), true);
+    assert.equal(coord25Session3.getPendingRemoteCount(), 0);
+    assert.equal((await loadDurablePendingRemoteQueueAsync(raUid25)).length, 0);
+    coord25Session3.dispose();
+    log.push('[PASS] [Integration Test] RA-25. Empty queue persistence [] survives process restart; failed import survives process restart from primary storage');
+
+    // -------------------------------------------------------------------------
+    // RA-26: Empty queue read-back mismatch rejects persistence and returns false
+    // -------------------------------------------------------------------------
+    const raUid26 = 'uid_ra_26_empty_mismatch';
+    resetAppliedDocTokensForTests(raUid26);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid26);
+
+    const origVerify26 = storage.verifyDurableReadBackValue;
+    storage.verifyDurableReadBackValue = async (key: string, val: any) => {
+      if (key.includes(raUid26) && Array.isArray(val) && val.length === 0) {
+        return false; // Force empty queue read-back mismatch
+      }
+      return origVerify26.call(storage, key, val);
+    };
+
+    try {
+      const saved26 = await saveDurablePendingRemoteQueue(raUid26, []);
+      assert.equal(saved26, false);
+      log.push('[PASS] [Unit Test] RA-26. Empty queue read-back mismatch rejects persistence and returns false');
+    } finally {
+      storage.verifyDurableReadBackValue = origVerify26;
+    }
+
+    // -------------------------------------------------------------------------
+    // RA-27: IndexedDB read failure during queue loading handles errors gracefully without crashing
+    // -------------------------------------------------------------------------
+    const raUid27 = 'uid_ra_27_read_fail';
+    resetAppliedDocTokensForTests(raUid27);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid27);
+
+    __setStorageFailureHookForTests((op, key) => {
+      if (op === 'get' && key.includes(raUid27)) {
+        throw new Error('Simulated IndexedDB read failure during queue loading');
+      }
+    });
+
+    try {
+      const loaded27 = await loadDurablePendingRemoteQueueAsync(raUid27);
+      assert.equal(Array.isArray(loaded27), true);
+      log.push('[PASS] [Unit Test] RA-27. IndexedDB read failure during queue loading handles errors gracefully without crashing');
+    } finally {
+      __setStorageFailureHookForTests(null);
+    }
 
     return { passed: true, log };
   } catch (err: any) {
