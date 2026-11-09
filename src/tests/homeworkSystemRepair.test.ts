@@ -17,6 +17,7 @@ import {
   fetchAssignmentDetailsWithSync,
   flushPendingHomeworkCloudWrites,
   getPendingHomeworkSyncCount,
+  getHomeworkSummaryStats,
   __setHomeworkSyncTransportForTests
 } from '../shared/homeworkStorageSync';
 
@@ -1132,7 +1133,64 @@ async function runTests() {
     }
   });
 
-  console.log(`\n🎉 All ${passed}/33 Homework System Repair scenarios passed!`);
+  await runScenario(34, 'Homework monitoring badge stats return 0 when no active assignments exist even if orphaned submissions are present', async () => {
+    // 5 orphaned submissions exist in storage, but 0 active assignments exist
+    mockStorage.setItem(
+      'glueck_hw_submissions_v2',
+      JSON.stringify([
+        makeSubmission({ id: 'orphan-1', assignmentId: 'old-deleted-hw-1', studentName: 'طالب 1', status: 'in_progress', completedAt: '' }),
+        makeSubmission({ id: 'orphan-2', assignmentId: 'old-deleted-hw-1', studentName: 'طالب 2', status: 'completed' }),
+        makeSubmission({ id: 'orphan-3', assignmentId: 'old-deleted-hw-2', studentName: 'طالب 3', status: 'completed' }),
+        makeSubmission({ id: 'orphan-4', assignmentId: 'old-deleted-hw-3', studentName: 'طالب 4', status: 'in_progress', completedAt: '' }),
+        makeSubmission({ id: 'orphan-5', assignmentId: 'old-deleted-hw-4', studentName: 'طالب 5', status: 'completed' })
+      ])
+    );
+
+    const emptyStats = getHomeworkSummaryStats(sampleStudents);
+    assert.equal(emptyStats.assignmentsCount, 0);
+    assert.equal(emptyStats.submissionsCount, 0);
+    assert.equal(emptyStats.inProgressCount, 0);
+    assert.equal(getPendingHomeworkSyncCount(), 0);
+
+    // Create 1 active assignment and 1 valid submission -> badge reflects only the active assignment
+    saveLocalAssignment(
+      normalizeHomeworkAssignment(
+        makeAssignment({
+          id: 'hw-active-34',
+          title: 'واجب فعلي',
+          audienceMode: 'open',
+          cloudSynced: true
+        })
+      ),
+      false
+    );
+    saveLocalSubmission(
+      makeSubmission({
+        id: 'valid-sub-34',
+        assignmentId: 'hw-active-34',
+        participantId: 'pid-34-1',
+        studentName: 'يوسف',
+        audienceMode: 'open',
+        status: 'in_progress',
+        completedAt: ''
+      }),
+      false
+    );
+
+    const activeStats = getHomeworkSummaryStats(sampleStudents);
+    assert.equal(activeStats.assignmentsCount, 1);
+    assert.equal(activeStats.submissionsCount, 0);
+    assert.equal(activeStats.inProgressCount, 1);
+
+    // Delete the active assignment -> badge immediately drops back to 0
+    deleteLocalAssignment('hw-active-34', false);
+    const afterDeleteStats = getHomeworkSummaryStats(sampleStudents);
+    assert.equal(afterDeleteStats.assignmentsCount, 0);
+    assert.equal(afterDeleteStats.submissionsCount, 0);
+    assert.equal(afterDeleteStats.inProgressCount, 0);
+  });
+
+  console.log(`\n🎉 All ${passed}/34 Homework System Repair scenarios passed!`);
 }
 
 runTests().catch((err) => {

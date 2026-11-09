@@ -6541,12 +6541,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const localTimestamp = new Date(lastBackupTime || 0).getTime();
       const isIncomingNewer = incomingTimestamp >= localTimestamp;
 
+      const writtenStorageKeys = new Set<string>();
+      const writeAndTrack = async (storageKey: string, val: any) => {
+        await storage.setItem(storageKey, val);
+        writtenStorageKeys.add(storageKey);
+      };
+
       let mergedRecentlyDeleted = recentlyDeletedRef.current || recentlyDeleted || { students: [], groups: [], lessons: [], purgedRecords: [] };
       if (hasBackupSection(parsed, 'recentlyDeleted') && data.recentlyDeleted) {
         mergedRecentlyDeleted = mergeRecentlyDeleted(mergedRecentlyDeleted, data.recentlyDeleted);
         recentlyDeletedRef.current = mergedRecentlyDeleted;
         setRecentlyDeleted(mergedRecentlyDeleted);
-        await storage.setItem('dl_recently_deleted', mergedRecentlyDeleted);
+        await writeAndTrack('dl_recently_deleted', mergedRecentlyDeleted);
       }
       const activePurged = mergedRecentlyDeleted?.purgedRecords || [];
       for (const p of activePurged) {
@@ -6562,7 +6568,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const mergedSchoolSettings = (hasSchoolSettings && data.schoolSettings) ? data.schoolSettings : baseProfile.schoolSettings;
           const mergedProfile = { ...baseProfile, schoolSettings: mergedSchoolSettings };
           setProfile(mergedProfile);
-          await storage.setItem('dl_profile', mergedProfile);
+          await writeAndTrack('dl_profile', mergedProfile);
         }
       }
       let finalGroupsForTrashReconcile = groups;
@@ -6570,13 +6576,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const mergedGroups = mergeEntities(groups, data.groups, { entityTypeName: 'group', purgedRecords: activePurged }).merged;
         finalGroupsForTrashReconcile = mergedGroups;
         setGroups(mergedGroups);
-        await storage.setItem('dl_groups', mergedGroups);
+        await writeAndTrack('dl_groups', mergedGroups);
       } else if (activePurged.length > 0 && groups.length > 0) {
         const sweptGroups = mergeEntities(groups, [], { entityTypeName: 'group', purgedRecords: activePurged }).merged;
         finalGroupsForTrashReconcile = sweptGroups;
         if (sweptGroups.length !== groups.length) {
           setGroups(sweptGroups);
-          await storage.setItem('dl_groups', sweptGroups);
+          await writeAndTrack('dl_groups', sweptGroups);
         }
       }
       let finalStudentsForTrashReconcile = students;
@@ -6584,13 +6590,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const mergedStudents = mergeEntities(students, data.students, { entityTypeName: 'student', purgedRecords: activePurged }).merged;
         finalStudentsForTrashReconcile = mergedStudents;
         setStudents(mergedStudents);
-        await storage.setItem('dl_students', mergedStudents);
+        await writeAndTrack('dl_students', mergedStudents);
       } else if (activePurged.length > 0 && students.length > 0) {
         const sweptStudents = mergeEntities(students, [], { entityTypeName: 'student', purgedRecords: activePurged }).merged;
         finalStudentsForTrashReconcile = sweptStudents;
         if (sweptStudents.length !== students.length) {
           setStudents(sweptStudents);
-          await storage.setItem('dl_students', sweptStudents);
+          await writeAndTrack('dl_students', sweptStudents);
         }
       }
       let finalLessonsForTrashReconcile = fullLessonsRef.current || [];
@@ -6608,7 +6614,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
         finalLessonsForTrashReconcile = dedupedLessons;
         fullLessonsRef.current = dedupedLessons;
-        await storage.setItem('dl_lessons', dedupedLessons);
+        await writeAndTrack('dl_lessons', dedupedLessons);
         setLessons(filterActiveLessons(dedupedLessons));
       } else if (activePurged.length > 0 && (fullLessonsRef.current?.length || 0) > 0) {
         const allLocalLessons = fullLessonsRef.current || [];
@@ -6616,7 +6622,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         finalLessonsForTrashReconcile = sweptLessons;
         if (sweptLessons.length !== allLocalLessons.length) {
           fullLessonsRef.current = sweptLessons;
-          await storage.setItem('dl_lessons', sweptLessons);
+          await writeAndTrack('dl_lessons', sweptLessons);
           setLessons(filterActiveLessons(sweptLessons));
         }
       }
@@ -6659,7 +6665,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           mergedRecentlyDeleted = reconciledRecDeleted;
           recentlyDeletedRef.current = reconciledRecDeleted;
           setRecentlyDeleted(reconciledRecDeleted);
-          await storage.setItem('dl_recently_deleted', reconciledRecDeleted);
+          await writeAndTrack('dl_recently_deleted', reconciledRecDeleted);
         }
       }
 
@@ -6676,73 +6682,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return true;
         });
         fullPaymentsRef.current = dedupedPayments;
-        await storage.setItem('dl_payments', dedupedPayments);
+        await writeAndTrack('dl_payments', dedupedPayments);
         setPayments(filterActivePayments(dedupedPayments));
       }
       if (hasBackupSection(parsed, 'notifications') && data.notifications) {
         setNotifications(data.notifications);
-        await storage.setItem('dl_notifications', data.notifications);
+        await writeAndTrack('dl_notifications', data.notifications);
       }
       if (hasBackupSection(parsed, 'certificates') && data.certificates) {
         const mergedCerts = certificates.length > 0
           ? mergeEntities(certificates, data.certificates, 'certificates').merged
           : data.certificates;
         setCertificates(mergedCerts);
-        await storage.setItem('dl_certificates', mergedCerts);
+        await writeAndTrack('dl_certificates', mergedCerts);
       }
       if (hasBackupSection(parsed, 'todos') && data.todos) {
         const mergedTodos = todos.length > 0
           ? mergeEntities(todos, data.todos, 'todos').merged
           : data.todos;
         setTodos(mergedTodos);
-        await storage.setItem('dl_quick_todos', mergedTodos);
+        await writeAndTrack('dl_quick_todos', mergedTodos);
       }
       if (hasBackupSection(parsed, 'theme') && data.theme && isIncomingNewer) {
         setTheme(data.theme);
-        await storage.setItem('dl_theme', data.theme);
+        await writeAndTrack('dl_theme', data.theme);
       }
       if (hasBackupSection(parsed, 'accentColor') && data.accentColor && isIncomingNewer) {
         setAccentColor(data.accentColor);
+        await writeAndTrack('dl_accent_color', data.accentColor);
       }
       if (hasBackupSection(parsed, 'notificationSettings') && data.notificationSettings && isIncomingNewer) {
         setNotificationSettings(data.notificationSettings);
-        await storage.setItem('dl_notification_settings', data.notificationSettings);
+        await writeAndTrack('dl_notification_settings', data.notificationSettings);
       }
       if (hasBackupSection(parsed, 'inspirationSettings') && data.inspirationSettings && isIncomingNewer) {
         setInspirationSettings(data.inspirationSettings);
-        await storage.setItem('dl_inspiration_settings', data.inspirationSettings);
+        await writeAndTrack('dl_inspiration_settings', data.inspirationSettings);
       }
       if (hasBackupSection(parsed, 'inspirationMessages') && data.inspirationMessages && isIncomingNewer) {
         setInspirationMessages(data.inspirationMessages);
-        await storage.setItem('dl_inspiration_messages', data.inspirationMessages);
+        await writeAndTrack('dl_inspiration_messages', data.inspirationMessages);
       }
       if (hasBackupSection(parsed, 'hodStudents') && data.hodStudents) {
         const mergedHodSt = hodStudents.length > 0
           ? mergeEntities(hodStudents, data.hodStudents, 'hodStudents').merged
           : data.hodStudents;
         setHodStudents(mergedHodSt);
-        await storage.setItem('hod_german_students', mergedHodSt);
+        await writeAndTrack('hod_german_students', mergedHodSt);
       }
       if (hasBackupSection(parsed, 'hodComplaints') && data.hodComplaints) {
         const mergedHodComp = hodComplaints.length > 0
           ? mergeEntities(hodComplaints, data.hodComplaints, 'hodComplaints').merged
           : data.hodComplaints;
         setHodComplaints(mergedHodComp);
-        await storage.setItem('hod_complaints', mergedHodComp);
+        await writeAndTrack('hod_complaints', mergedHodComp);
       }
       if (hasBackupSection(parsed, 'hodActionPlans') && data.hodActionPlans) {
         const mergedHodPlans = hodActionPlans.length > 0
           ? mergeEntities(hodActionPlans, data.hodActionPlans, 'hodActionPlans').merged
           : data.hodActionPlans;
         setHodActionPlans(mergedHodPlans);
-        await storage.setItem('hod_student_action_plans', mergedHodPlans);
+        await writeAndTrack('hod_student_action_plans', mergedHodPlans);
       }
       if (hasBackupSection(parsed, 'hodVisits') && data.hodVisits) {
         const mergedHodVisits = hodVisits.length > 0
           ? mergeEntities(hodVisits, data.hodVisits, 'hodVisits').merged
           : data.hodVisits;
         setHodVisits(mergedHodVisits);
-        await storage.setItem('hod_visit_records', mergedHodVisits);
+        await writeAndTrack('hod_visit_records', mergedHodVisits);
       }
       if (hasBackupSection(parsed, 'schoolNotes') && data.schoolNotes) {
         const localNotes = (await storage.getItem<SchoolNote[]>('dl_school_notes')) || [];
@@ -6750,69 +6757,69 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           ? mergeEntities(localNotes, data.schoolNotes, 'schoolNotes').merged
           : data.schoolNotes;
         setSchoolNotes(mergedNotes);
-        await storage.setItem('dl_school_notes', mergedNotes);
+        await writeAndTrack('dl_school_notes', mergedNotes);
       }
       if (hasBackupSection(parsed, 'financeAccounts') && data.financeAccounts) {
         const mergedAcc = financeAccounts.length > 0
           ? mergeEntities(financeAccounts, data.financeAccounts, 'financeAccounts').merged
           : data.financeAccounts;
         setFinanceAccounts(mergedAcc);
-        await storage.setItem('dl_finance_accounts', mergedAcc);
+        await writeAndTrack('dl_finance_accounts', mergedAcc);
       }
       if (hasBackupSection(parsed, 'financeCategories') && data.financeCategories) {
         const mergedCats = financeCategories.length > 0
           ? mergeEntities(financeCategories, data.financeCategories, 'financeCategories').merged
           : data.financeCategories;
         setFinanceCategories(mergedCats);
-        await storage.setItem('dl_finance_categories', mergedCats);
+        await writeAndTrack('dl_finance_categories', mergedCats);
       }
       if (hasBackupSection(parsed, 'financeTransactions') && data.financeTransactions) {
         const mergedTx = financeTransactions.length > 0
           ? mergeEntities(financeTransactions, data.financeTransactions, 'financeTransactions').merged
           : data.financeTransactions;
         setFinanceTransactions(mergedTx);
-        await storage.setItem('dl_finance_transactions', mergedTx);
+        await writeAndTrack('dl_finance_transactions', mergedTx);
       }
       if (hasBackupSection(parsed, 'financeRecurring') && data.financeRecurring) {
         const mergedRec = financeRecurring.length > 0
           ? mergeEntities(financeRecurring, data.financeRecurring, 'financeRecurring').merged
           : data.financeRecurring;
         setFinanceRecurring(mergedRec);
-        await storage.setItem('dl_finance_recurring', mergedRec);
+        await writeAndTrack('dl_finance_recurring', mergedRec);
       }
       if (hasBackupSection(parsed, 'financeInstallments') && data.financeInstallments) {
         const mergedInst = financeInstallments.length > 0
           ? mergeEntities(financeInstallments, data.financeInstallments, 'financeInstallments').merged
           : data.financeInstallments;
         setFinanceInstallments(mergedInst);
-        await storage.setItem('dl_finance_installments', mergedInst);
+        await writeAndTrack('dl_finance_installments', mergedInst);
       }
       if (hasBackupSection(parsed, 'customAiBackgrounds') && data.customAiBackgrounds) {
         const localAi = (await storage.getItem<AICertificateBackground[]>('dl_custom_ai_backgrounds')) || [];
         const mergedAi = localAi.length > 0
           ? mergeEntities(localAi, data.customAiBackgrounds, 'customAiBackgrounds').merged
           : data.customAiBackgrounds;
-        await storage.setItem('dl_custom_ai_backgrounds', mergedAi);
+        await writeAndTrack('dl_custom_ai_backgrounds', mergedAi);
       }
       if (hasBackupSection(parsed, 'prunedLessonIds') && Array.isArray((parsed as any).prunedLessonIds)) {
         const incomingIds = (parsed as any).prunedLessonIds as string[];
         if (incomingIds.length > 0) {
           addPrunedLessonIds(incomingIds);
-          await storage.setItem('dl_pruned_lesson_ids', Array.from(getPrunedLessonIds()));
+          await writeAndTrack('dl_pruned_lesson_ids', Array.from(getPrunedLessonIds()));
         }
       }
       if (hasBackupSection(parsed, 'dismissedDashboardLessons') && Array.isArray(data.dismissedDashboardLessons)) {
         const currentDismissed = dismissedDashboardLessonIds || [];
         const mergedDismissed = mergeDismissedDashboardLessons(currentDismissed, data.dismissedDashboardLessons, isCloudDelta);
         setDismissedDashboardLessonIds(mergedDismissed);
-        await storage.setItem('dl_dismissed_dashboard_lessons', mergedDismissed);
+        await writeAndTrack('dl_dismissed_dashboard_lessons', mergedDismissed);
       }
       if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings) {
         const mergedGold = goldHoldings.length > 0
           ? mergeEntities(goldHoldings, data.goldHoldings, 'goldHoldings').merged
           : data.goldHoldings;
         setGoldHoldings(mergedGold);
-        await storage.setItem('gluck_gold_holdings', mergedGold);
+        await writeAndTrack('gluck_gold_holdings', mergedGold);
       }
       if (hasBackupSection(parsed, 'financeNotifications') && data.financeNotifications) {
         const localFinNotif = (await storage.getItem<FinanceNotification[]>('dl_finance_notifications')) || [];
@@ -6820,7 +6827,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           ? mergeEntities(localFinNotif, data.financeNotifications, 'financeNotifications').merged
           : data.financeNotifications;
         setFinanceNotifications(mergedFinNotif);
-        await storage.setItem('dl_finance_notifications', mergedFinNotif);
+        await writeAndTrack('dl_finance_notifications', mergedFinNotif);
       }
       if (hasBackupSection(parsed, 'lernstudioSets') && data.lernstudioSets) {
         // Enforce protection: built-in sets must never be wiped or overwritten.
@@ -6840,7 +6847,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const finalSets = [...customActive, ...DEFAULT_LERNSTUDIO_SETS];
 
         setLernstudioSets(finalSets as LernstudioSet[]);
-        await storage.setItem('dl_lernstudio_sets', finalSets);
+        await writeAndTrack('dl_lernstudio_sets', finalSets);
       }
       if (hasBackupSection(parsed, 'homeworkAssignments') && data.homeworkAssignments) {
         const localHw = (() => {
@@ -6854,7 +6861,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           purgedRecords: activePurged
         }).merged.filter((hw: any) => hw && hw.id && !hw.deleted && !isAssignmentDeletedLocally(hw.id));
         localStorage.setItem('glueck_hw_assignments_v2', JSON.stringify(mergedHw));
-        await storage.setItem('glueck_hw_assignments_v2', mergedHw);
+        await writeAndTrack('glueck_hw_assignments_v2', mergedHw);
       }
       if (hasBackupSection(parsed, 'homeworkSubmissions') && data.homeworkSubmissions) {
         const localSub = (() => {
@@ -6868,7 +6875,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           purgedRecords: activePurged
         }).merged.filter((sub: any) => sub && sub.assignmentId && !isAssignmentDeletedLocally(sub.assignmentId));
         localStorage.setItem('glueck_hw_submissions_v2', JSON.stringify(mergedSub));
-        await storage.setItem('glueck_hw_submissions_v2', mergedSub);
+        await writeAndTrack('glueck_hw_submissions_v2', mergedSub);
       }
       if (hasBackupSection(parsed, 'pickerNames') && data.pickerNames) {
         const localPicker = (() => {
@@ -6879,7 +6886,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         })();
         // Unique union merge for pickerNames
         const combined = Array.from(new Set([...localPicker, ...data.pickerNames]));
-        await storage.setItem('glueck_picker_custom_names', combined);
+        await writeAndTrack('glueck_picker_custom_names', combined);
       }
 
       // Reconcile and safeguard synchronization metadata
@@ -6911,6 +6918,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setSyncState(reconciledState);
         syncStateRef.current = reconciledState;
         syncRevisionRef.current = reconciledState.localRevisionCounter;
+        writtenStorageKeys.add('dl_sync_state');
+      }
+
+      const importedAtIso = new Date().toISOString();
+      await writeAndTrack('dl_last_backup_time', importedAtIso);
+      setLastBackupTime(importedAtIso);
+
+      await storage.flushPendingWrites();
+      const verifiedDurable = await storage.verifyDurableReadBack(Array.from(writtenStorageKeys));
+      if (!verifiedDurable) {
+        console.error('importBackupFile failed durable read-back verification');
+        return false;
       }
 
       // Rebuild notification schedules immediately using restored data to prevent duplicates or orphaned timers
@@ -7522,81 +7541,96 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           break;
         }
         case 'financeAccounts': {
-          setFinanceAccounts(prevAccounts => {
-            const currentTxs = (financeTransactions && Array.isArray(financeTransactions)) ? financeTransactions : [];
-            const recalculated = recalculateAllAccountBalances(data, currentTxs);
-            storage.setItem('dl_finance_accounts', recalculated);
-            return recalculated;
-          });
+          const currentTxs = (financeTransactions && Array.isArray(financeTransactions)) ? financeTransactions : [];
+          const recalculated = recalculateAllAccountBalances(data, currentTxs);
+          await storage.setItem('dl_finance_accounts', recalculated);
+          const verified = await storage.verifyDurableReadBack(['dl_finance_accounts']);
+          if (!verified) {
+            throw new Error('Failed durable read-back verification for dl_finance_accounts');
+          }
+          setFinanceAccounts(recalculated);
           break;
         }
         case 'financeCategories': {
-          setFinanceCategories(data);
           await storage.setItem('dl_finance_categories', data);
+          setFinanceCategories(data);
           break;
         }
         case 'financeTransactions': {
-          setFinanceTransactions(data);
           await storage.setItem('dl_finance_transactions', data);
-          setFinanceAccounts(prevAccounts => {
-            const currentAccs = (prevAccounts && prevAccounts.length > 0) ? prevAccounts : (financeAccounts || []);
-            const recalculated = recalculateAllAccountBalances(currentAccs, data);
-            storage.setItem('dl_finance_accounts', recalculated);
-            return recalculated;
-          });
+          setFinanceTransactions(data);
+          const currentAccs = (localDataRef.current?.financeAccounts && localDataRef.current.financeAccounts.length > 0)
+            ? localDataRef.current.financeAccounts
+            : (financeAccounts || []);
+          const recalculated = recalculateAllAccountBalances(currentAccs, data);
+          await storage.setItem('dl_finance_accounts', recalculated);
+          const verified = await storage.verifyDurableReadBack(['dl_finance_transactions', 'dl_finance_accounts']);
+          if (!verified) {
+            throw new Error('Failed durable read-back verification for financeTransactions');
+          }
+          setFinanceAccounts(recalculated);
           break;
         }
         case 'financeRecurring': {
-          setFinanceRecurring(data);
           await storage.setItem('dl_finance_recurring', data);
+          setFinanceRecurring(data);
           break;
         }
         case 'financeInstallments': {
-          setFinanceInstallments(data);
           await storage.setItem('dl_finance_installments', data);
+          setFinanceInstallments(data);
           break;
         }
         case 'financeNotifications': {
-          setFinanceNotifications(data);
           await storage.setItem('dl_finance_notifications', data);
+          setFinanceNotifications(data);
           break;
         }
         case 'lernstudioSets': {
-          setLernstudioSets(data);
           await storage.setItem('dl_lernstudio_sets', data);
+          setLernstudioSets(data);
           break;
         }
         case 'settings': {
           if (Array.isArray(data) && data.length > 0) {
             const incoming = data[0];
+            const settingsKeys: string[] = ['dl_settings'];
             if (incoming?.profile) {
               const incomingProfile = incoming.profile;
+              await storage.setItem('dl_profile', incomingProfile);
+              settingsKeys.push('dl_profile');
               setProfile(incomingProfile);
               if (incomingProfile.language && ['ar', 'en', 'de'].includes(incomingProfile.language)) {
                 setLanguageState(incomingProfile.language);
               }
-              await storage.setItem('dl_profile', incomingProfile);
               setExternalDataVersion(v => v + 1);
             }
             if (incoming?.recentlyDeleted) {
               const mergedRec = mergeRecentlyDeleted(recentlyDeletedRef.current, incoming.recentlyDeleted);
+              await storage.setItem('dl_recently_deleted', mergedRec);
+              settingsKeys.push('dl_recently_deleted');
               recentlyDeletedRef.current = mergedRec;
               setRecentlyDeleted(mergedRec);
-              await storage.setItem('dl_recently_deleted', mergedRec);
               const incomingPurged = mergedRec.purgedRecords || [];
               if (incomingPurged.length > 0) {
                 applyCascadePurgeTombstonesToAppState(incomingPurged);
               }
             }
             if (incoming?.dismissedDashboardLessons) {
-              setDismissedDashboardLessonIds(incoming.dismissedDashboardLessons);
               await storage.setItem('dl_dismissed_dashboard_lessons', incoming.dismissedDashboardLessons);
+              settingsKeys.push('dl_dismissed_dashboard_lessons');
+              setDismissedDashboardLessonIds(incoming.dismissedDashboardLessons);
             }
             await storage.setItem('dl_settings', data);
+            const verified = await storage.verifyDurableReadBack(settingsKeys);
+            if (!verified) {
+              throw new Error('Failed durable read-back verification for settings');
+            }
           }
           break;
         }
       }
+      await storage.flushPendingWrites();
     },
     updateSyncState: async (newState: SyncStateMetadata) => {
       setSyncState(newState);

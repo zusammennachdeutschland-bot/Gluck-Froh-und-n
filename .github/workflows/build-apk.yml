@@ -23,6 +23,9 @@ jobs:
         run: |
           echo "Verifying Application ID..."
           grep -q "applicationId \"com.glueck.teacher\"" android/app/build.gradle || (echo "ERROR: Missing/Incorrect applicationId" && exit 1)
+
+          echo "Verifying compileSdkVersion is 36..."
+          grep -q "compileSdkVersion = 36" android/variables.gradle || (echo "ERROR: compileSdkVersion must be 36 in android/variables.gradle" && exit 1)
           
           echo "Verifying Version Code Auto-Increment..."
           grep -q "GITHUB_RUN_NUMBER" android/app/build.gradle || (echo "ERROR: Missing GITHUB_RUN_NUMBER for versionCode" && exit 1)
@@ -47,6 +50,30 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
           cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK Platform 36 & Build-Tools
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          SDKMANAGER=""
+          if [ -n "$SDK_ROOT" ] && [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          elif command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          else
+            echo "ERROR: sdkmanager not found in ANDROID_HOME or PATH"
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
+          if [ -n "$SDK_ROOT" ] && [ ! -d "$SDK_ROOT/platforms/android-36" ]; then
+            echo "ERROR: Android SDK Platform 36 was not installed at $SDK_ROOT/platforms/android-36"
+            exit 1
+          fi
+          echo "Android SDK Platform 36 verified."
 
       - name: Restore & Verify Release Keystore from Secrets
         env:

@@ -57,12 +57,28 @@ export const isQuotaExceededError = (err: unknown): boolean => {
   );
 };
 
+export type StorageFailureHook = ((op: 'get' | 'set' | 'remove', key: string) => void) | null;
+let storageFailureHookForTests: StorageFailureHook = null;
+
+export function __setStorageFailureHookForTests(hook: StorageFailureHook): void {
+  storageFailureHookForTests = hook;
+}
+
+const hasLocalStorageRuntime = (): boolean => {
+  if (isLocalStorageSupported) return true;
+  try {
+    return typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function';
+  } catch {
+    return false;
+  }
+};
+
 export const safeLocalStorageSetItem = (
   key: string,
   valStr: string,
   savedInPrimaryDb: boolean = false
 ): boolean => {
-  if (!isLocalStorageSupported) return false;
+  if (!hasLocalStorageRuntime()) return false;
 
   // Skip mirroring massive backup snapshots into 5MB localStorage if already persisted in IndexedDB
   if (savedInPrimaryDb && (LOCALFORAGE_ONLY_HEAVY_KEYS.has(key) || valStr.length > MAX_LOCALSTORAGE_MIRROR_BYTES)) {
@@ -109,20 +125,28 @@ const writeDebounceTimers: Record<string, any> = {};
 
 export const storage = {
   async getItem<T>(key: string): Promise<T | null> {
+    if (storageFailureHookForTests) {
+      storageFailureHookForTests('get', key);
+    }
+
     try {
       if (isLocalforageSupported) {
         const val = await localforage.getItem<T>(key);
-        if (val !== null) {
+        if (val !== null && val !== undefined) {
           memoryStore[key] = val;
           return val;
         }
       }
-    } catch (e) {
-      console.warn('Error reading from localforage:', key, e);
+    } catch (e: any) {
+      if (typeof e?.message === 'string' && e.message.includes('No available storage method')) {
+        isLocalforageSupported = false;
+      } else {
+        console.warn('Error reading from localforage:', key, e);
+      }
     }
 
     try {
-      if (isLocalStorageSupported) {
+      if (hasLocalStorageRuntime()) {
         const val = localStorage.getItem(key);
         if (val !== null) {
           try {
@@ -143,42 +167,110 @@ export const storage = {
   },
 
   async setItem<T>(key: string, value: T): Promise<void> {
-    // Keep memory store updated synchronously in O(1)
-    memoryStore[key] = value;
+    if (storageFailureHookForTests) {
+      storageFailureHookForTests('set', key);
+    }
+
+    if (writeDebounceTimers[key]) {
+      clearTimeout(writeDebounceTimers[key]);
+      delete writeDebounceTimers[key];
+    }
 
     let savedInForage = false;
+    let forageError: unknown = null;
     try {
       if (isLocalforageSupported) {
         await localforage.setItem(key, value);
         savedInForage = true;
       }
-    } catch (e) {
-      console.warn('Error writing to localforage:', key, e);
+    } catch (e: any) {
+      if (typeof e?.message === 'string' && e.message.includes('No available storage method')) {
+        isLocalforageSupported = false;
+      } else {
+        forageError = e;
+        console.warn('Error writing to localforage:', key, e);
+      }
     }
 
-    // Defer synchronous localStorage serialization to requestIdleCallback/setTimeout
-    // to keep UI thread 100% smooth and non-blocking
-    if (isLocalStorageSupported) {
-      if (writeDebounceTimers[key]) {
-        clearTimeout(writeDebounceTimers[key]);
+    let savedInLocalStorage = false;
+    if (hasLocalStorageRuntime()) {
+      try {
+        const valStr = typeof value === 'string' ? value : JSON.stringify(value);
+        savedInLocalStorage = safeLocalStorageSetItem(key, valStr, savedInForage);
+      } catch (e) {
+        console.warn('Error serializing for localStorage:', key, e);
       }
+    }
 
-      const isHeavy = HEAVY_EVICTABLE_LOCALSTORAGE_KEYS.includes(key);
-      const delay = isHeavy ? 200 : 30;
+    // If a persistent backing store is active in this environment and both failed, propagate the error
+    if ((isLocalforageSupported || hasLocalStorageRuntime()) && !savedInForage && !savedInLocalStorage) {
+      throw forageError instanceof Error
+        ? forageError
+        : new Error(`Durable storage write failed for key: ${key}`);
+    }
 
-      writeDebounceTimers[key] = setTimeout(() => {
-        delete writeDebounceTimers[key];
-        try {
-          const valStr = typeof value === 'string' ? value : JSON.stringify(value);
-          safeLocalStorageSetItem(key, valStr, savedInForage);
-        } catch (e) {
-          console.warn('Error serializing for localStorage:', key, e);
-        }
-      }, delay);
+    // Update memory store only after durable write succeeded
+    memoryStore[key] = value;
+  },
+
+  async flushPendingWrites(): Promise<void> {
+    for (const k of Object.keys(writeDebounceTimers)) {
+      clearTimeout(writeDebounceTimers[k]);
+      delete writeDebounceTimers[k];
     }
   },
 
+  async verifyDurableReadBack(keys: string[]): Promise<boolean> {
+    await this.flushPendingWrites();
+    for (const key of keys) {
+      try {
+        if (storageFailureHookForTests) {
+          storageFailureHookForTests('get', key);
+        }
+        let verified = false;
+        if (isLocalforageSupported) {
+          try {
+            const forageVal = await localforage.getItem(key);
+            if (forageVal !== null && forageVal !== undefined) {
+              verified = true;
+            }
+          } catch (e: any) {
+            if (typeof e?.message === 'string' && e.message.includes('No available storage method')) {
+              isLocalforageSupported = false;
+            }
+          }
+        }
+        if (!verified && hasLocalStorageRuntime()) {
+          try {
+            const raw = localStorage.getItem(key);
+            if (raw !== null) {
+              verified = true;
+            }
+          } catch {
+            // Fall through
+          }
+        }
+        if (!verified && !isLocalforageSupported && !hasLocalStorageRuntime()) {
+          verified = memoryStore[key] !== undefined && memoryStore[key] !== null;
+        }
+        if (!verified) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  },
+
   async removeItem(key: string): Promise<void> {
+    if (storageFailureHookForTests) {
+      storageFailureHookForTests('remove', key);
+    }
+    if (writeDebounceTimers[key]) {
+      clearTimeout(writeDebounceTimers[key]);
+      delete writeDebounceTimers[key];
+    }
     delete memoryStore[key];
 
     try {
@@ -190,7 +282,7 @@ export const storage = {
     }
 
     try {
-      if (isLocalStorageSupported) {
+      if (hasLocalStorageRuntime()) {
         localStorage.removeItem(key);
       }
     } catch (e) {
@@ -199,6 +291,10 @@ export const storage = {
   },
 
   async clear(): Promise<void> {
+    for (const k of Object.keys(writeDebounceTimers)) {
+      clearTimeout(writeDebounceTimers[k]);
+      delete writeDebounceTimers[k];
+    }
     // Clear memory store
     for (const key in memoryStore) {
       delete memoryStore[key];
@@ -213,7 +309,7 @@ export const storage = {
     }
 
     try {
-      if (isLocalStorageSupported) {
+      if (hasLocalStorageRuntime()) {
         localStorage.clear();
       }
     } catch (e) {
@@ -221,3 +317,4 @@ export const storage = {
     }
   }
 };
+

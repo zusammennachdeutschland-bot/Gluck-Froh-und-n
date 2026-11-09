@@ -69,7 +69,9 @@ import {
   saveLocalAssignment,
   saveLocalSubmission,
   getLocalAssignments,
-  getLocalSubmissions
+  getHomeworkSummaryStats,
+  isAssignmentDeletedLocally,
+  sanitizeDocId
 } from '../homeworkStorageSync';
 import { RandomStudentPickerModal } from '../RandomStudentPickerModal';
 
@@ -176,43 +178,61 @@ export const LernstudioView: React.FC<Props> = ({
   const [isHomeworkModalOpen, setIsHomeworkModalOpen] = useState(false);
   const [selectedSetForHomework, setSelectedSetForHomework] = useState<LernstudioSet | null>(null);
   const [homeworkModalInitialTab, setHomeworkModalInitialTab] = useState<'create' | 'results'>('create');
-  const [homeworkStats, setHomeworkStats] = useState<{ assignmentsCount: number; submissionsCount: number; inProgressCount: number }>(() => {
-    const a = getLocalAssignments();
-    const s = getLocalSubmissions();
-    return {
-      assignmentsCount: a.length,
-      submissionsCount: s.filter((x) => x.status === 'completed' || Boolean(x.completedAt)).length,
-      inProgressCount: s.filter((x) => x.status === 'in_progress' && !x.completedAt).length
-    };
-  });
+  const studentsRef = React.useRef(students);
+  React.useEffect(() => {
+    studentsRef.current = students;
+  }, [students]);
 
-  // Real-time Firestore subscriptions for Homework Monitoring inside Lernstudio
+  const [homeworkStats, setHomeworkStats] = useState<{ assignmentsCount: number; submissionsCount: number; inProgressCount: number }>(() =>
+    getHomeworkSummaryStats(students)
+  );
+
+  // Real-time Firestore subscriptions & local event listeners for Homework Monitoring inside Lernstudio
   React.useEffect(() => {
     const refreshStats = () => {
-      const a = getLocalAssignments();
-      const s = getLocalSubmissions();
-      setHomeworkStats({
-        assignmentsCount: a.length,
-        submissionsCount: s.filter((x) => x.status === 'completed' || Boolean(x.completedAt)).length,
-        inProgressCount: s.filter((x) => x.status === 'in_progress' && !x.completedAt).length
-      });
+      setHomeworkStats(getHomeworkSummaryStats(studentsRef.current));
     };
 
+    refreshStats();
+
     const unsubHw = subscribeAssignmentsFromFirestore((cloudAssignments) => {
-      cloudAssignments.forEach((hw) => saveLocalAssignment({ ...hw, cloudSynced: true }, false));
+      cloudAssignments.forEach((hw) => {
+        if (!isAssignmentDeletedLocally(hw.id)) {
+          saveLocalAssignment({ ...hw, cloudSynced: true }, false);
+        }
+      });
       refreshStats();
     });
 
     const unsubSubs = subscribeSubmissionsFromFirestore(null, (cloudSubs) => {
-      cloudSubs.forEach((sub) => saveLocalSubmission({ ...sub, cloudSynced: true }, false));
+      const activeIds = new Set(
+        getLocalAssignments().flatMap((a) => [a.id, sanitizeDocId(a.id)])
+      );
+      cloudSubs.forEach((sub) => {
+        if (
+          !isAssignmentDeletedLocally(sub.assignmentId) &&
+          (activeIds.has(sub.assignmentId) || activeIds.has(sanitizeDocId(sub.assignmentId)))
+        ) {
+          saveLocalSubmission({ ...sub, cloudSynced: true }, false);
+        }
+      });
       refreshStats();
     });
+
+    window.addEventListener('gluck-homework-deleted', refreshStats);
+    window.addEventListener('glueck-homework-sync-updated', refreshStats);
 
     return () => {
       unsubHw();
       unsubSubs();
+      window.removeEventListener('gluck-homework-deleted', refreshStats);
+      window.removeEventListener('glueck-homework-sync-updated', refreshStats);
     };
   }, []);
+
+  React.useEffect(() => {
+    setHomeworkStats(getHomeworkSummaryStats(students));
+  }, [isHomeworkModalOpen, students]);
 
   // Copy Set Code State
   const [copiedSetId, setCopiedSetId] = useState<string | null>(null);

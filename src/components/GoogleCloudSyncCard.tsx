@@ -16,8 +16,13 @@ import {
   CloudSyncSummary,
   getVercelPublicDomain,
   setVercelPublicDomain,
-  DEFAULT_VERCEL_DOMAIN
+  DEFAULT_VERCEL_DOMAIN,
+  acknowledgeAppliedRemoteRevisions
 } from '../services/firebaseWorkspaceSync';
+import {
+  enqueueDurablePendingRemoteItem,
+  removeDurablePendingRemoteItem
+} from '../hooks/useGoogleCloudWorkspaceSync';
 import {
   Cloud,
   RefreshCw,
@@ -197,8 +202,24 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
           setLastSyncTime(upRes.syncedAtIso);
         }
       } else if (remote.hasRemoteData && remote.backupJsonStr && !localHasData) {
-        await importBackupFile(remote.backupJsonStr);
-        setLastSyncTime(remote.remoteTimestampIso);
+        const uid = remote.workspaceId || user?.uid || '';
+        const queuedItem = uid
+          ? enqueueDurablePendingRemoteItem(uid, remote.backupJsonStr, remote.docTokens)
+          : null;
+        const imported = await importBackupFile(remote.backupJsonStr);
+        if (imported) {
+          const postSnap = await performBackup();
+          const ackOk =
+            !uid ||
+            !remote.docTokens ||
+            acknowledgeAppliedRemoteRevisions(uid, remote.docTokens, postSnap);
+          if (ackOk && uid && queuedItem) {
+            removeDurablePendingRemoteItem(uid, queuedItem.id);
+          }
+          if (ackOk) {
+            setLastSyncTime(remote.remoteTimestampIso);
+          }
+        }
       }
 
       setFeedbackMsg({
@@ -320,8 +341,23 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
         return;
       }
 
+      const uid = res.workspaceId || firebaseUser?.uid || '';
+      const queuedItem = uid
+        ? enqueueDurablePendingRemoteItem(uid, res.backupJsonStr, res.docTokens)
+        : null;
       const imported = await importBackupFile(res.backupJsonStr);
+      let ackOk = false;
       if (imported) {
+        const postSnap = await performBackup();
+        ackOk =
+          !uid ||
+          !res.docTokens ||
+          acknowledgeAppliedRemoteRevisions(uid, res.docTokens, postSnap);
+        if (ackOk && uid && queuedItem) {
+          removeDurablePendingRemoteItem(uid, queuedItem.id);
+        }
+      }
+      if (imported && ackOk) {
         setSyncStatus('synced');
         if (res.summary) setCloudSummary(res.summary);
         const nowIso = res.remoteTimestampIso || new Date().toISOString();

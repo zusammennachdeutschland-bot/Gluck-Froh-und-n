@@ -560,8 +560,16 @@ function fastHash(str: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36) + '_' + str.length.toString(36);
 }
 
+function hasLocalStorage(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function';
+  } catch {
+    return false;
+  }
+}
+
 function loadWatermarks(uid: string): Record<string, string> {
-  if (typeof window === 'undefined') return {};
+  if (!hasLocalStorage()) return {};
   try {
     const raw = localStorage.getItem(`gluck_cloud_watermarks_v2_${uid}`);
     return raw ? JSON.parse(raw) : {};
@@ -571,7 +579,7 @@ function loadWatermarks(uid: string): Record<string, string> {
 }
 
 function saveWatermarks(uid: string, watermarks: Record<string, string>): void {
-  if (typeof window === 'undefined') return;
+  if (!hasLocalStorage()) return;
   try {
     localStorage.setItem(`gluck_cloud_watermarks_v2_${uid}`, JSON.stringify(watermarks));
   } catch {
@@ -580,7 +588,7 @@ function saveWatermarks(uid: string, watermarks: Record<string, string>): void {
 }
 
 function loadDeltaAccumulator(uid: string): Record<string, any> {
-  if (typeof window === 'undefined') return {};
+  if (!hasLocalStorage()) return {};
   try {
     const raw = localStorage.getItem(`gluck_cloud_delta_acc_v2_${uid}`);
     return raw ? JSON.parse(raw) : {};
@@ -590,7 +598,7 @@ function loadDeltaAccumulator(uid: string): Record<string, any> {
 }
 
 function saveDeltaAccumulator(uid: string, acc: Record<string, any>): void {
-  if (typeof window === 'undefined') return;
+  if (!hasLocalStorage()) return;
   try {
     localStorage.setItem(`gluck_cloud_delta_acc_v2_${uid}`, JSON.stringify(acc));
   } catch {
@@ -610,12 +618,17 @@ function saveEntitySnapshots(uid: string, snapshots: Record<string, any>): void 
 
 const inMemoryAppliedDocTokensByUid = new Map<string, Map<string, string>>();
 const inMemoryLocalWrittenDocTokensByUid = new Map<string, Map<string, string>>();
+let acknowledgeStorageFailureForTests = false;
+
+export function __setAcknowledgeStorageFailureForTests(shouldFail: boolean): void {
+  acknowledgeStorageFailureForTests = shouldFail;
+}
 
 function getAppliedDocTokensMap(uid: string): Map<string, string> {
   let map = inMemoryAppliedDocTokensByUid.get(uid);
   if (!map) {
     map = new Map<string, string>();
-    if (typeof window !== 'undefined') {
+    if (hasLocalStorage()) {
       try {
         const raw = localStorage.getItem(`gluck_cloud_applied_tokens_v2_${uid}`);
         if (raw) {
@@ -635,15 +648,48 @@ function getAppliedDocTokensMap(uid: string): Map<string, string> {
   return map;
 }
 
-function persistAppliedDocTokensMap(uid: string, map: Map<string, string>): void {
-  inMemoryAppliedDocTokensByUid.set(uid, map);
-  if (typeof window !== 'undefined') {
+function persistAppliedDocTokensMap(uid: string, map: Map<string, string>): boolean {
+  if (acknowledgeStorageFailureForTests) {
+    return false;
+  }
+  const obj: Record<string, string> = {};
+  map.forEach((v, k) => {
+    obj[k] = v;
+  });
+  const serialized = JSON.stringify(obj);
+
+  if (hasLocalStorage()) {
     try {
-      const obj: Record<string, string> = {};
-      map.forEach((v, k) => {
-        obj[k] = v;
-      });
-      localStorage.setItem(`gluck_cloud_applied_tokens_v2_${uid}`, JSON.stringify(obj));
+      const storageKey = `gluck_cloud_applied_tokens_v2_${uid}`;
+      localStorage.setItem(storageKey, serialized);
+      const readBack = localStorage.getItem(storageKey);
+      if (readBack !== serialized) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  inMemoryAppliedDocTokensByUid.set(uid, new Map(map));
+  return true;
+}
+
+export function getAppliedDocTokens(uid: string): Record<string, string> {
+  const map = getAppliedDocTokensMap(uid);
+  const out: Record<string, string> = {};
+  map.forEach((v, k) => {
+    out[k] = v;
+  });
+  return out;
+}
+
+export function resetAppliedDocTokensForTests(uid: string): void {
+  inMemoryAppliedDocTokensByUid.delete(uid);
+  inMemoryLocalWrittenDocTokensByUid.delete(uid);
+  if (hasLocalStorage()) {
+    try {
+      localStorage.removeItem(`gluck_cloud_applied_tokens_v2_${uid}`);
     } catch {
       // Ignore
     }
@@ -659,9 +705,19 @@ function getLocalWrittenDocTokensMap(uid: string): Map<string, string> {
   return map;
 }
 
+export interface ParsedChunkRevisionToken {
+  id: string;
+  categoryKey: string;
+  deviceId: string;
+  opId: string;
+  opSeq: number | null;
+  payloadDigest: string;
+  updatedAtMs: number | null;
+}
+
 /**
  * Computes a deterministic, clock-skew-safe revision token for a workspace chunk document.
- * Incorporates document ID, categoryKey, deviceId, operation ID / sequence (if present), and payload digest.
+ * Incorporates document ID, categoryKey, deviceId, operation ID / sequence (if present), payload digest, and updatedAtMs.
  */
 export function computeChunkRevisionToken(docData: any): string {
   if (!docData || typeof docData !== 'object') return '';
@@ -685,7 +741,146 @@ export function computeChunkRevisionToken(docData: any): string {
     }
   }
 
-  return `${id}|${categoryKey}|${deviceId}|${opId}|${opSeq}|${payloadDigest}`;
+  const updatedAtMsStr =
+    typeof docData.updatedAtMs === 'number' && Number.isFinite(docData.updatedAtMs)
+      ? String(docData.updatedAtMs)
+      : '';
+
+  return `${id}|${categoryKey}|${deviceId}|${opId}|${opSeq}|${payloadDigest}|${updatedAtMsStr}`;
+}
+
+export function parseChunkRevisionToken(token: string): ParsedChunkRevisionToken {
+  const parts = (token || '').split('|');
+  const id = parts[0] || '';
+  const categoryKey = parts[1] || '';
+  const deviceId = parts[2] || '';
+  const opId = parts[3] || '';
+  const rawSeq = parts[4] || '';
+  const payloadDigest = parts[5] || '';
+  const rawUpdatedAt = parts[6] || '';
+
+  let opSeq: number | null = rawSeq !== '' && Number.isFinite(Number(rawSeq)) ? Number(rawSeq) : null;
+  if (opSeq === null && opId) {
+    const m = opId.match(/_(\d+)$/);
+    if (m) {
+      opSeq = Number(m[1]);
+    }
+  }
+  const updatedAtMs: number | null =
+    rawUpdatedAt !== '' && Number.isFinite(Number(rawUpdatedAt)) ? Number(rawUpdatedAt) : null;
+
+  return {
+    id,
+    categoryKey,
+    deviceId,
+    opId,
+    opSeq,
+    payloadDigest,
+    updatedAtMs
+  };
+}
+
+/**
+ * Returns true if `candidateToken` is strictly older than `existingToken` for the same document.
+ * Prevents an older delayed/retried snapshot from overwriting a newer acknowledged revision.
+ */
+export function isCandidateTokenOlderThanExisting(
+  existingToken: string,
+  candidateToken: string
+): boolean {
+  if (!existingToken || !candidateToken || existingToken === candidateToken) return false;
+  const existing = parseChunkRevisionToken(existingToken);
+  const candidate = parseChunkRevisionToken(candidateToken);
+
+  if (existing.opSeq !== null && candidate.opSeq !== null) {
+    if (candidate.opSeq < existing.opSeq) return true;
+    if (candidate.opSeq > existing.opSeq) return false;
+  }
+
+  if (
+    existing.opSeq === null &&
+    candidate.opSeq === null &&
+    existing.updatedAtMs !== null &&
+    candidate.updatedAtMs !== null
+  ) {
+    if (candidate.updatedAtMs < existing.updatedAtMs) return true;
+    if (candidate.updatedAtMs > existing.updatedAtMs) return false;
+  }
+
+  return false;
+}
+
+export function extractDocTokensFromBackupJson(backupJsonStr: string | null | undefined): {
+  workspaceId?: string;
+  docTokens?: Record<string, string>;
+} {
+  if (!backupJsonStr || typeof backupJsonStr !== 'string') return {};
+  try {
+    const parsed = JSON.parse(backupJsonStr);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const docTokens =
+      parsed._cloudDocTokens && typeof parsed._cloudDocTokens === 'object'
+        ? (parsed._cloudDocTokens as Record<string, string>)
+        : undefined;
+    const workspaceId =
+      typeof parsed._cloudWorkspaceId === 'string' ? parsed._cloudWorkspaceId : undefined;
+    return { workspaceId, docTokens };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Explicitly acknowledges remote document revisions ONLY after local import and durable storage persistence have succeeded.
+ * - Never overwrites a newer acknowledged revision with an older revision token.
+ * - Verifies durable storage write of appliedDocTokens before returning true.
+ * - Updates local watermarks and chunk caches only after appliedDocTokens persistence succeeds.
+ */
+export function acknowledgeAppliedRemoteRevisions(
+  uid: string,
+  docTokens: Record<string, string> | undefined | null,
+  appliedWorkspaceData?: any
+): boolean {
+  if (!uid || !docTokens || typeof docTokens !== 'object') {
+    return false;
+  }
+  const entries = Object.entries(docTokens).filter(
+    ([docId, token]) => Boolean(docId) && typeof token === 'string' && token.length > 0
+  );
+  if (entries.length === 0) {
+    return true;
+  }
+
+  const currentMap = new Map(getAppliedDocTokensMap(uid));
+  for (const [docId, candidateToken] of entries) {
+    const existingToken = currentMap.get(docId);
+    if (existingToken && isCandidateTokenOlderThanExisting(existingToken, candidateToken)) {
+      // Protect newer acknowledged revision against older snapshot overwrite
+      continue;
+    }
+    currentMap.set(docId, candidateToken);
+  }
+
+  const persisted = persistAppliedDocTokensMap(uid, currentMap);
+  if (!persisted) {
+    return false;
+  }
+
+  if (appliedWorkspaceData) {
+    try {
+      const parsedData =
+        typeof appliedWorkspaceData === 'string'
+          ? JSON.parse(appliedWorkspaceData)
+          : appliedWorkspaceData;
+      if (parsedData && typeof parsedData === 'object') {
+        seedWatermarksFromData(uid, parsedData);
+      }
+    } catch {
+      // Watermark seeding is secondary to token acknowledgement
+    }
+  }
+
+  return true;
 }
 
 function recordLocalWrittenChunk(uid: string, chunkObj: any): void {
@@ -694,7 +889,7 @@ function recordLocalWrittenChunk(uid: string, chunkObj: any): void {
   if (!token) return;
   const localWritten = getLocalWrittenDocTokensMap(uid);
   localWritten.set(chunkObj.id, token);
-  const applied = getAppliedDocTokensMap(uid);
+  const applied = new Map(getAppliedDocTokensMap(uid));
   applied.set(chunkObj.id, token);
   persistAppliedDocTokensMap(uid, applied);
 }
@@ -704,6 +899,7 @@ function recordLocalWrittenChunk(uid: string, chunkObj: any): void {
  * or wall-clock comparisons that fail under clock skew or rapid cross-device updates.
  * - Strictly ignores `sync_control` documents.
  * - Suppresses exact duplicate snapshots already applied locally (`appliedDocTokens`).
+ * - Suppresses older snapshots whose revision is strictly older than an already-acknowledged revision.
  * - Suppresses exact self-written echoes (`localWrittenDocTokens`).
  * - Accepts any unapplied remote document change regardless of device clock skew, <1500ms timing, or out-of-order arrival.
  */
@@ -754,6 +950,12 @@ export function evaluateRemoteSnapshotChanges(
     if (prevAppliedToken === token) {
       // Exact document revision already applied locally (idempotent duplicate suppression)
       nextDocTokens[d.id] = token;
+      continue;
+    }
+
+    if (prevAppliedToken && isCandidateTokenOlderThanExisting(prevAppliedToken, token)) {
+      // Incoming document revision is strictly older than the already-acknowledged revision
+      nextDocTokens[d.id] = prevAppliedToken;
       continue;
     }
 
@@ -1820,14 +2022,6 @@ export function reassembleWorkspaceSnapshot(
       if (parsedProfileCat && typeof parsedProfileCat === 'object') {
         Object.assign(reassembled, parsedProfileCat);
         hasCompleteProfileSettings = Boolean(parsedProfileCat.recentlyDeleted);
-        if (primaryId) {
-          const catStr = JSON.stringify(parsedProfileCat);
-          const chunks = splitStringIntoChunks(catStr, CHUNK_MAX_CHARS);
-          lastUploadedChunkCount.set(`${primaryId}:profile_settings`, chunks.length);
-          chunks.forEach((c, idx) => {
-            lastUploadedChunkCache.set(`${primaryId}:profile_settings_chunk_${idx}:${chunks.length}`, c);
-          });
-        }
       } else {
         skippedIncompleteCategories.push('profile_settings');
       }
@@ -1850,14 +2044,6 @@ export function reassembleWorkspaceSnapshot(
       const parsedCat = reassembleCategoryChunks(chunkDocs);
       if (parsedCat && typeof parsedCat === 'object') {
         Object.assign(reassembled, parsedCat);
-        if (primaryId) {
-          const catStr = JSON.stringify(parsedCat);
-          const chunks = splitStringIntoChunks(catStr, CHUNK_MAX_CHARS);
-          lastUploadedChunkCount.set(`${primaryId}:${categoryKey}`, chunks.length);
-          chunks.forEach((c, idx) => {
-            lastUploadedChunkCache.set(`${primaryId}:category_${categoryKey}_chunk_${idx}:${chunks.length}`, c);
-          });
-        }
       } else {
         skippedIncompleteCategories.push(categoryKey);
       }
@@ -1900,18 +2086,13 @@ export function reassembleWorkspaceSnapshot(
     if (hasIncompleteStream) {
       skippedIncompleteCategories.push('delta_log');
     }
-    let mergedDeltaAccumulator: any = {};
     for (const parsedDelta of deltas) {
       if (parsedDelta && typeof parsedDelta === 'object') {
         if (parsedDelta.recentlyDeleted) {
           hasCompleteProfileSettings = true;
         }
         applyDeltaOnWorkspace(reassembled, parsedDelta);
-        mergedDeltaAccumulator = mergeDeltaPayloads(mergedDeltaAccumulator, parsedDelta);
       }
-    }
-    if (primaryId && Object.keys(mergedDeltaAccumulator).length > 0) {
-      saveDeltaAccumulator(primaryId, mergedDeltaAccumulator);
     }
   }
 
@@ -1971,6 +2152,12 @@ export function reassembleWorkspaceSnapshot(
 /**
  * Downloads and reassembles the application workspace (base categories + P2P delta log)
  * from Google Cloud Firestore and relay for the currently signed-in Google account.
+ *
+ * CRITICAL GUARANTEE:
+ * Downloading a Firestore snapshot NEVER automatically marks its document revisions as applied
+ * and NEVER seeds local watermarks before `importBackupFile()` has durably succeeded.
+ * Callers must invoke `acknowledgeAppliedRemoteRevisions(uid, docTokens, mergedData)` ONLY after
+ * local import and durable storage persistence have succeeded.
  */
 export async function downloadWorkspaceFromGoogleCloud(): Promise<{
   hasRemoteData: boolean;
@@ -1979,6 +2166,7 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
   remoteTimestampIso: string | null;
   summary: CloudSyncSummary | null;
   docTokens?: Record<string, string>;
+  workspaceId?: string;
   error?: string;
 }> {
   const user = getActiveCloudUser();
@@ -2083,13 +2271,10 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       maxUpdatedAtIso
     });
 
-    // 4. Seed local watermarks and applied doc tokens from the downloaded cloud state
-    seedWatermarksFromData(primaryId, reassembled);
-    const appliedMap = getAppliedDocTokensMap(primaryId);
-    for (const [docId, token] of Object.entries(downloadedDocTokens)) {
-      appliedMap.set(docId, token);
-    }
-    persistAppliedDocTokensMap(primaryId, appliedMap);
+    // Attach downloaded revision tokens and workspaceId inside the snapshot envelope
+    // so downstream import coordinators can acknowledge the exact revisions ONLY after durable import succeeds.
+    reassembled._cloudDocTokens = downloadedDocTokens;
+    reassembled._cloudWorkspaceId = primaryId;
 
     const activeStudents = Array.isArray(reassembled.students)
       ? reassembled.students.filter((s: any) => s && !s.deleted)
@@ -2151,7 +2336,8 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       remoteTimestampMs: maxUpdatedAtMs,
       remoteTimestampIso: maxUpdatedAtIso,
       summary,
-      docTokens: downloadedDocTokens
+      docTokens: downloadedDocTokens,
+      workspaceId: primaryId
     };
   } catch (err: any) {
     const primaryId = user ? getPrimaryWorkspaceId(user) : 'unknown';
@@ -2175,7 +2361,12 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
  */
 export function subscribeToRemoteWorkspaceChanges(
   uid: string,
-  onRemoteWorkspaceReady: (backupJsonStr: string, updatedAtIso: string, summary: CloudSyncSummary) => Promise<void> | void
+  onRemoteWorkspaceReady: (
+    backupJsonStr: string,
+    updatedAtIso: string,
+    summary: CloudSyncSummary,
+    docTokens?: Record<string, string>
+  ) => Promise<void> | void
 ): () => void {
   const activeUser = getActiveCloudUser();
   if (!activeUser || !verifyWorkspaceOwnership(activeUser)) {
@@ -2211,9 +2402,8 @@ export function subscribeToRemoteWorkspaceChanges(
 
         if (res.hasRemoteData && res.backupJsonStr && res.summary) {
           const effectiveIso = res.remoteTimestampIso || new Date().toISOString();
-          setLastCloudSyncTime(effectiveIso);
           await Promise.resolve(
-            onRemoteWorkspaceReady(res.backupJsonStr, effectiveIso, res.summary)
+            onRemoteWorkspaceReady(res.backupJsonStr, effectiveIso, res.summary, res.docTokens)
           );
         }
       } while (hasQueuedSnapshotWhileBusy && !isDisposed);

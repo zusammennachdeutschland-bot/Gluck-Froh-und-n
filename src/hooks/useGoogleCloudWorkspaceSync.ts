@@ -8,11 +8,17 @@ import {
   subscribeToRemoteWorkspaceChanges,
   isFirestoreWriteQuotaExhaustedToday,
   BUILTIN_LERNSTUDIO_MAP,
-  getCloudSyncControlState
+  getCloudSyncControlState,
+  acknowledgeAppliedRemoteRevisions,
+  extractDocTokensFromBackupJson,
+  setLastCloudSyncTime
 } from '../services/firebaseWorkspaceSync';
 
 function stripSnapshotTimestamp(jsonStr: string): string {
-  return (jsonStr || '').replace(/"timestamp":"[^"]*",?/, '');
+  return (jsonStr || '')
+    .replace(/"timestamp":"[^"]*",?/, '')
+    .replace(/,"_cloudDocTokens":\{[^}]*\}/, '')
+    .replace(/,"_cloudWorkspaceId":"[^"]*"/, '');
 }
 
 /**
@@ -129,77 +135,256 @@ export function hasAnyWorkspaceData(jsonStr: string | null): boolean {
   }
 }
 
-const inMemoryPendingPushByUid = new Map<string, boolean>();
-
-export function setPendingLocalPushFlag(uid: string, pending: boolean): void {
-  if (!uid) return;
-  if (pending) {
-    inMemoryPendingPushByUid.set(uid, true);
-  } else {
-    inMemoryPendingPushByUid.delete(uid);
+function hasLocalStorageRuntime(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function';
+  } catch {
+    return false;
   }
-  if (typeof window !== 'undefined') {
+}
+
+const inMemoryPendingPushByUid = new Map<string, boolean>();
+const inMemoryDurableStorageFallback = new Map<string, string>();
+
+function readDurableString(key: string): string | null {
+  if (hasLocalStorageRuntime()) {
     try {
-      const key = `gluck_cloud_pending_local_push_${uid}`;
-      if (pending) {
-        localStorage.setItem(key, '1');
-      } else {
-        localStorage.removeItem(key);
-      }
+      const val = localStorage.getItem(key);
+      if (val !== null) return val;
+    } catch {
+      // Fall through
+    }
+  }
+  return inMemoryDurableStorageFallback.get(key) ?? null;
+}
+
+function writeDurableString(key: string, value: string): void {
+  inMemoryDurableStorageFallback.set(key, value);
+  if (hasLocalStorageRuntime()) {
+    try {
+      localStorage.setItem(key, value);
     } catch {
       // Ignore storage errors
     }
   }
 }
 
+function removeDurableString(key: string): void {
+  inMemoryDurableStorageFallback.delete(key);
+  if (hasLocalStorageRuntime()) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Ignore storage errors
+    }
+  }
+}
+
+export function setPendingLocalPushFlag(uid: string, pending: boolean): void {
+  if (!uid) return;
+  if (pending) {
+    inMemoryPendingPushByUid.set(uid, true);
+    writeDurableString(`gluck_cloud_pending_local_push_${uid}`, '1');
+  } else {
+    inMemoryPendingPushByUid.delete(uid);
+    removeDurableString(`gluck_cloud_pending_local_push_${uid}`);
+  }
+}
+
 export function hasPendingLocalPushFlag(uid: string): boolean {
   if (!uid) return false;
   if (inMemoryPendingPushByUid.get(uid)) return true;
-  if (typeof window !== 'undefined') {
-    try {
-      return localStorage.getItem(`gluck_cloud_pending_local_push_${uid}`) === '1';
-    } catch {
-      return false;
-    }
-  }
-  return false;
+  return readDurableString(`gluck_cloud_pending_local_push_${uid}`) === '1';
 }
 
 export function clearPendingLocalPushFlag(uid: string): void {
   setPendingLocalPushFlag(uid, false);
 }
 
+export interface PendingRemoteQueueItem {
+  id: string;
+  remoteJsonStr: string;
+  docTokens?: Record<string, string>;
+  enqueuedAtMs: number;
+  attemptCount: number;
+}
+
+const PENDING_REMOTE_QUEUE_KEY_PREFIX = 'gluck_cloud_pending_remote_queue_v2_';
+
+export function loadDurablePendingRemoteQueue(uid: string): PendingRemoteQueueItem[] {
+  if (!uid) return [];
+  const raw = readDurableString(`${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item: any) =>
+        item &&
+        typeof item === 'object' &&
+        typeof item.remoteJsonStr === 'string' &&
+        item.remoteJsonStr.length > 0
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function saveDurablePendingRemoteQueue(
+  uid: string,
+  queue: PendingRemoteQueueItem[]
+): void {
+  if (!uid) return;
+  const key = `${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`;
+  if (!Array.isArray(queue) || queue.length === 0) {
+    removeDurableString(key);
+    return;
+  }
+  writeDurableString(key, JSON.stringify(queue));
+}
+
+function areDocTokensEqual(
+  a?: Record<string, string>,
+  b?: Record<string, string>
+): boolean {
+  if (!a || !b) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length === 0 || aKeys.length !== bKeys.length) return false;
+  for (const k of aKeys) {
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+}
+
+export function enqueueDurablePendingRemoteItem(
+  uid: string,
+  remoteJsonStr: string,
+  docTokens?: Record<string, string>
+): PendingRemoteQueueItem {
+  const extracted = extractDocTokensFromBackupJson(remoteJsonStr);
+  const effectiveTokens = docTokens || extracted.docTokens;
+  const queue = loadDurablePendingRemoteQueue(uid);
+  const last = queue.length > 0 ? queue[queue.length - 1] : null;
+  if (
+    last &&
+    (last.remoteJsonStr === remoteJsonStr ||
+      (effectiveTokens && areDocTokensEqual(last.docTokens, effectiveTokens)))
+  ) {
+    if (effectiveTokens) {
+      last.docTokens = { ...(last.docTokens || {}), ...effectiveTokens };
+    }
+    saveDurablePendingRemoteQueue(uid, queue);
+    return last;
+  }
+  const newItem: PendingRemoteQueueItem = {
+    id: `rem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    remoteJsonStr,
+    docTokens: effectiveTokens,
+    enqueuedAtMs: Date.now(),
+    attemptCount: 0
+  };
+  queue.push(newItem);
+  saveDurablePendingRemoteQueue(uid, queue);
+  return newItem;
+}
+
+export function removeDurablePendingRemoteItem(uid: string, itemId: string): void {
+  if (!uid || !itemId) return;
+  const queue = loadDurablePendingRemoteQueue(uid);
+  const next = queue.filter((item) => item.id !== itemId);
+  saveDurablePendingRemoteQueue(uid, next);
+}
+
+export function clearDurablePendingRemoteQueueForTests(uid: string): void {
+  if (!uid) return;
+  removeDurableString(`${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`);
+}
+
 export interface SerializedSyncCoordinatorOptions {
-  onApplyRemotePayload: (remoteJsonStr: string) => Promise<boolean>;
+  uid?: string;
+  onApplyRemotePayload: (
+    remoteJsonStr: string,
+    docTokens?: Record<string, string>
+  ) => Promise<boolean>;
   onExecuteLocalPush: () => Promise<boolean>;
   onError?: (err: unknown, phase: 'remote_pull' | 'local_push') => void;
+  initialRetryDelayMs?: number;
+  maxRetryDelayMs?: number;
+  maxAutoRetries?: number;
+  autoRetryEnabled?: boolean;
 }
 
 export interface SerializedSyncCoordinator {
-  enqueueRemoteSnapshot: (remoteJsonStr: string) => Promise<boolean>;
+  enqueueRemoteSnapshot: (
+    remoteJsonStr: string,
+    docTokens?: Record<string, string>
+  ) => Promise<boolean>;
   enqueueLocalPush: () => Promise<boolean>;
+  resumePendingWork: () => Promise<boolean>;
   isBusy: () => boolean;
   getPendingRemoteCount: () => number;
+  getPendingRemoteItems: () => PendingRemoteQueueItem[];
   hasPendingLocal: () => boolean;
   dispose: () => void;
 }
 
 /**
- * Serialized, non-dropping synchronization coordinator.
+ * Serialized, zero-loss synchronization coordinator with durable pending queue and bounded retry.
  * Guarantees:
- * - Incoming remote snapshots arriving while another sync is in flight are queued and processed in order immediately after the current operation completes.
- * - Local pushes requested while a remote import or upload is in flight are queued and executed after pending remote snapshots have been merged.
- * - Errors in any single operation are caught and reported via `onError` without permanently blocking the queue.
- * - Disposing the coordinator prevents stale callbacks after unmount.
+ * - Never removes a pending remote snapshot before `onApplyRemotePayload` succeeds.
+ * - Persists pending remote snapshots durably (when `uid` is provided) so failed or interrupted imports survive app restarts.
+ * - Automatically retries failed remote imports with bounded exponential backoff without requiring a new Firestore snapshot.
+ * - Does not allow a failed remote import to permanently block unrelated local pushes, and does not allow local push failures to erase pending remote work.
+ * - Deduplicates identical snapshots while preserving distinct ordered revisions.
  */
 export function createSerializedSyncCoordinator(
   options: SerializedSyncCoordinatorOptions
 ): SerializedSyncCoordinator {
+  const uid = options.uid || '';
+  const initialRetryDelayMs = options.initialRetryDelayMs ?? 1000;
+  const maxRetryDelayMs = options.maxRetryDelayMs ?? 15000;
+  const maxAutoRetries = options.maxAutoRetries ?? 5;
+  const autoRetryEnabled = options.autoRetryEnabled ?? true;
+
   let isRunning = false;
   let isDisposed = false;
-  const pendingRemoteQueue: string[] = [];
-  let pendingLocalPush = false;
+  const pendingRemoteQueue: PendingRemoteQueueItem[] = uid
+    ? loadDurablePendingRemoteQueue(uid)
+    : [];
+  let pendingLocalPush = uid ? hasPendingLocalPushFlag(uid) : false;
   let activeDrainPromise: Promise<boolean> | null = null;
+  let retryTimerId: any = null;
+
+  const persistQueueIfNeeded = () => {
+    if (uid) {
+      saveDurablePendingRemoteQueue(uid, pendingRemoteQueue);
+    }
+  };
+
+  const clearRetryTimer = () => {
+    if (retryTimerId !== null) {
+      clearTimeout(retryTimerId);
+      retryTimerId = null;
+    }
+  };
+
+  const scheduleBoundedRetry = (attemptCount: number) => {
+    if (isDisposed || !autoRetryEnabled || attemptCount > maxAutoRetries) {
+      return;
+    }
+    clearRetryTimer();
+    const delay = Math.min(
+      maxRetryDelayMs,
+      initialRetryDelayMs * Math.pow(2, Math.max(0, attemptCount - 1))
+    );
+    retryTimerId = setTimeout(() => {
+      retryTimerId = null;
+      if (!isDisposed && pendingRemoteQueue.length > 0) {
+        drain().catch(() => {});
+      }
+    }, delay);
+  };
 
   const drain = (): Promise<boolean> => {
     if (isDisposed) return Promise.resolve(false);
@@ -207,22 +392,60 @@ export function createSerializedSyncCoordinator(
       return activeDrainPromise;
     }
 
+    clearRetryTimer();
     isRunning = true;
     activeDrainPromise = (async () => {
       let lastOutcome = true;
       try {
         while (!isDisposed && (pendingRemoteQueue.length > 0 || pendingLocalPush)) {
-          // Always process queued remote snapshots first so local state merges remote changes before pushing
+          // Process queued remote snapshots first so local state merges remote changes before pushing
           if (pendingRemoteQueue.length > 0) {
-            const nextRemoteJson = pendingRemoteQueue.shift()!;
+            // CRITICAL: Peek the head item; NEVER remove it until onApplyRemotePayload succeeds!
+            const headItem = pendingRemoteQueue[0];
+            let appliedOk = false;
             try {
-              const ok = await options.onApplyRemotePayload(nextRemoteJson);
-              if (!ok) lastOutcome = false;
+              appliedOk = await options.onApplyRemotePayload(
+                headItem.remoteJsonStr,
+                headItem.docTokens
+              );
             } catch (err) {
-              lastOutcome = false;
+              appliedOk = false;
               options.onError?.(err, 'remote_pull');
             }
-            continue;
+
+            if (appliedOk) {
+              // Remove ONLY the specific headItem that succeeded, preserving any newer snapshots enqueued during import
+              const idx = pendingRemoteQueue.findIndex((item) => item.id === headItem.id);
+              if (idx !== -1) {
+                pendingRemoteQueue.splice(idx, 1);
+              }
+              persistQueueIfNeeded();
+              continue;
+            } else {
+              lastOutcome = false;
+              headItem.attemptCount += 1;
+              persistQueueIfNeeded();
+
+              // Do NOT allow a failed remote import to permanently block a pending local push
+              if (!isDisposed && pendingLocalPush) {
+                pendingLocalPush = false;
+                try {
+                  const pushOk = await options.onExecuteLocalPush();
+                  if (!pushOk) {
+                    lastOutcome = false;
+                    if (uid) setPendingLocalPushFlag(uid, true);
+                  }
+                } catch (pushErr) {
+                  lastOutcome = false;
+                  if (uid) setPendingLocalPushFlag(uid, true);
+                  options.onError?.(pushErr, 'local_push');
+                }
+              }
+
+              // Schedule bounded exponential backoff retry for the unapplied remote item
+              scheduleBoundedRetry(headItem.attemptCount);
+              break;
+            }
           }
 
           if (pendingLocalPush) {
@@ -231,9 +454,11 @@ export function createSerializedSyncCoordinator(
               const ok = await options.onExecuteLocalPush();
               if (!ok) {
                 lastOutcome = false;
+                if (uid) setPendingLocalPushFlag(uid, true);
               }
             } catch (err) {
               lastOutcome = false;
+              if (uid) setPendingLocalPushFlag(uid, true);
               options.onError?.(err, 'local_push');
             }
           }
@@ -249,19 +474,68 @@ export function createSerializedSyncCoordinator(
   };
 
   return {
-    enqueueRemoteSnapshot(remoteJsonStr: string): Promise<boolean> {
+    enqueueRemoteSnapshot(
+      remoteJsonStr: string,
+      docTokens?: Record<string, string>
+    ): Promise<boolean> {
       if (isDisposed || !remoteJsonStr) return Promise.resolve(false);
-      // Coalesce identical consecutive payloads in the pending queue while preserving distinct snapshots in order
+      const extracted = extractDocTokensFromBackupJson(remoteJsonStr);
+      const effectiveTokens = docTokens || extracted.docTokens;
+
+      // Coalesce identical consecutive payloads in the pending queue while preserving distinct revisions in order
       const lastQueued =
-        pendingRemoteQueue.length > 0 ? pendingRemoteQueue[pendingRemoteQueue.length - 1] : null;
-      if (lastQueued !== remoteJsonStr) {
-        pendingRemoteQueue.push(remoteJsonStr);
+        pendingRemoteQueue.length > 0
+          ? pendingRemoteQueue[pendingRemoteQueue.length - 1]
+          : null;
+      const isDuplicateOfTail =
+        lastQueued !== null &&
+        (lastQueued.remoteJsonStr === remoteJsonStr ||
+          (effectiveTokens && areDocTokensEqual(lastQueued.docTokens, effectiveTokens)));
+
+      if (!isDuplicateOfTail) {
+        pendingRemoteQueue.push({
+          id: `rem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          remoteJsonStr,
+          docTokens: effectiveTokens,
+          enqueuedAtMs: Date.now(),
+          attemptCount: 0
+        });
+        persistQueueIfNeeded();
+      } else if (lastQueued && effectiveTokens) {
+        lastQueued.docTokens = { ...(lastQueued.docTokens || {}), ...effectiveTokens };
+        persistQueueIfNeeded();
       }
+
       return drain();
     },
     enqueueLocalPush(): Promise<boolean> {
       if (isDisposed) return Promise.resolve(false);
       pendingLocalPush = true;
+      if (uid) {
+        setPendingLocalPushFlag(uid, true);
+      }
+      return drain();
+    },
+    resumePendingWork(): Promise<boolean> {
+      if (isDisposed) return Promise.resolve(false);
+      if (uid) {
+        const persisted = loadDurablePendingRemoteQueue(uid);
+        for (const item of persisted) {
+          const exists = pendingRemoteQueue.some(
+            (existing) =>
+              existing.id === item.id || existing.remoteJsonStr === item.remoteJsonStr
+          );
+          if (!exists) {
+            pendingRemoteQueue.push(item);
+          }
+        }
+        if (hasPendingLocalPushFlag(uid)) {
+          pendingLocalPush = true;
+        }
+      }
+      if (pendingRemoteQueue.length === 0 && !pendingLocalPush) {
+        return Promise.resolve(true);
+      }
       return drain();
     },
     isBusy(): boolean {
@@ -270,13 +544,15 @@ export function createSerializedSyncCoordinator(
     getPendingRemoteCount(): number {
       return pendingRemoteQueue.length;
     },
+    getPendingRemoteItems(): PendingRemoteQueueItem[] {
+      return pendingRemoteQueue.map((item) => ({ ...item }));
+    },
     hasPendingLocal(): boolean {
       return pendingLocalPush;
     },
     dispose(): void {
       isDisposed = true;
-      pendingRemoteQueue.length = 0;
-      pendingLocalPush = false;
+      clearRetryTimer();
     }
   };
 }
@@ -397,57 +673,84 @@ export function useGoogleCloudWorkspaceSync(): void {
     return res.success;
   }, []);
 
-  const applyRemoteSnapshotPass = useCallback(async (remoteBackupJson: string): Promise<boolean> => {
-    const uid = currentUserUidRef.current;
-    if (!uid || !isAutoCloudSyncEnabled()) return false;
+  const applyRemoteSnapshotPass = useCallback(
+    async (
+      remoteBackupJson: string,
+      explicitDocTokens?: Record<string, string>
+    ): Promise<boolean> => {
+      const uid = currentUserUidRef.current;
+      if (!uid || !isAutoCloudSyncEnabled()) return false;
 
-    const preImportSnap = await performBackupRef.current();
-    const preImportNormalized = stripSnapshotTimestamp(preImportSnap);
-    const hadUnpushedLocalChanges =
-      hasPendingLocalPushFlag(uid) ||
-      (lastUploadedSnapshotRef.current !== null &&
-        preImportNormalized !== lastUploadedSnapshotRef.current);
+      const extracted = extractDocTokensFromBackupJson(remoteBackupJson);
+      const effectiveDocTokens = explicitDocTokens || extracted.docTokens;
+      const targetAckId = extracted.workspaceId || uid;
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
-      );
-    }
+      const preImportSnap = await performBackupRef.current();
+      const preImportNormalized = stripSnapshotTimestamp(preImportSnap);
+      const hadUnpushedLocalChanges =
+        hasPendingLocalPushFlag(uid) ||
+        (lastUploadedSnapshotRef.current !== null &&
+          preImportNormalized !== lastUploadedSnapshotRef.current);
 
-    isApplyingRemoteRef.current = true;
-    let success = false;
-    try {
-      success = await importBackupFileRef.current(remoteBackupJson);
-      if (success) {
-        const postSnap = await performBackupRef.current();
-        const postNormalized = stripSnapshotTimestamp(postSnap);
-        if (!hadUnpushedLocalChanges) {
-          lastUploadedSnapshotRef.current = postNormalized;
-          syncBaselineAfterRemoteImportRef.current = true;
-          clearPendingLocalPushFlag(uid);
-        } else {
-          // Local had unpushed changes that were merged with remote; ensure merged result is pushed
-          setPendingLocalPushFlag(uid, true);
-        }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
+        );
       }
-    } finally {
-      isApplyingRemoteRef.current = false;
-    }
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('gluck-cloud-sync-status', {
-          detail: { status: success ? 'synced' : 'error' }
-        })
-      );
-    }
+      isApplyingRemoteRef.current = true;
+      let success = false;
+      try {
+        const importOk = await importBackupFileRef.current(remoteBackupJson);
+        if (importOk) {
+          const postSnap = await performBackupRef.current();
+          const postNormalized = stripSnapshotTimestamp(postSnap);
 
-    if (success && hadUnpushedLocalChanges && coordinatorRef.current) {
-      coordinatorRef.current.enqueueLocalPush();
-    }
+          // Explicitly acknowledge remote revisions ONLY after local merge and durable storage persistence succeeded
+          let ackOk = true;
+          if (effectiveDocTokens && Object.keys(effectiveDocTokens).length > 0) {
+            ackOk = acknowledgeAppliedRemoteRevisions(
+              targetAckId,
+              effectiveDocTokens,
+              postSnap
+            );
+          }
 
-    return success;
-  }, []);
+          if (ackOk) {
+            success = true;
+            setLastCloudSyncTime(new Date().toISOString());
+            if (!hadUnpushedLocalChanges) {
+              lastUploadedSnapshotRef.current = postNormalized;
+              syncBaselineAfterRemoteImportRef.current = true;
+              clearPendingLocalPushFlag(uid);
+            } else {
+              // Local had unpushed changes that were merged with remote; ensure merged result is pushed
+              setPendingLocalPushFlag(uid, true);
+            }
+          } else {
+            success = false;
+          }
+        }
+      } finally {
+        isApplyingRemoteRef.current = false;
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('gluck-cloud-sync-status', {
+            detail: { status: success ? 'synced' : 'error' }
+          })
+        );
+      }
+
+      if (success && hadUnpushedLocalChanges && coordinatorRef.current) {
+        coordinatorRef.current.enqueueLocalPush();
+      }
+
+      return success;
+    },
+    []
+  );
 
   // 1. Auth listener + real-time remote changes listener (`onSnapshot`) + initial cloud bootstrap + Android/WebView lifecycle handlers
   useEffect(() => {
@@ -455,20 +758,29 @@ export function useGoogleCloudWorkspaceSync(): void {
     let isCancelled = false;
     let retryTimeoutId: any = null;
 
-    const coordinator = createSerializedSyncCoordinator({
-      onApplyRemotePayload: applyRemoteSnapshotPass,
-      onExecuteLocalPush: executeLocalPushPass,
-      onError: (err) => {
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(
-            new CustomEvent('gluck-cloud-sync-status', {
-              detail: { status: 'error', error: (err as any)?.message || String(err) }
-            })
-          );
-        }
+    const createCoordinatorForUser = (uid?: string) => {
+      if (coordinatorRef.current) {
+        coordinatorRef.current.dispose();
       }
-    });
-    coordinatorRef.current = coordinator;
+      const coord = createSerializedSyncCoordinator({
+        uid,
+        onApplyRemotePayload: applyRemoteSnapshotPass,
+        onExecuteLocalPush: executeLocalPushPass,
+        onError: (err) => {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('gluck-cloud-sync-status', {
+                detail: { status: 'error', error: (err as any)?.message || String(err) }
+              })
+            );
+          }
+        }
+      });
+      coordinatorRef.current = coord;
+      return coord;
+    };
+
+    let coordinator = createCoordinatorForUser();
 
     const runBootstrap = async (uid: string, attempt = 1) => {
       if (
@@ -486,6 +798,11 @@ export function useGoogleCloudWorkspaceSync(): void {
           window.dispatchEvent(
             new CustomEvent('gluck-cloud-sync-status', { detail: { status: 'syncing' } })
           );
+        }
+
+        // First: if there are unacknowledged remote revisions persisted from a prior session/crash, drain them now
+        if (loadDurablePendingRemoteQueue(uid).length > 0) {
+          await coordinator.resumePendingWork();
         }
 
         // Check Cloud-side pause and generation marker FIRST
@@ -534,23 +851,22 @@ export function useGoogleCloudWorkspaceSync(): void {
         let finalError: string | undefined;
 
         if (remoteHasActualData && !localHasData && cloudRes.backupJsonStr) {
-          // Fresh device: automatically restore from Google Cloud
-          isApplyingRemoteRef.current = true;
-          let success = false;
-          try {
-            success = await importBackupFileRef.current(cloudRes.backupJsonStr);
-          } finally {
-            isApplyingRemoteRef.current = false;
-          }
+          // Fresh device: persist in durable queue first, then import, verify, and acknowledge
+          const queuedItem = enqueueDurablePendingRemoteItem(
+            uid,
+            cloudRes.backupJsonStr,
+            cloudRes.docTokens
+          );
+          const success = await applyRemoteSnapshotPass(
+            cloudRes.backupJsonStr,
+            cloudRes.docTokens
+          );
           if (success) {
+            removeDurablePendingRemoteItem(uid, queuedItem.id);
             try {
               localStorage.setItem('dl_setup_completed', 'true');
               window.dispatchEvent(new CustomEvent('close-setup-wizard'));
             } catch {}
-            const postImportSnap = await performBackupRef.current();
-            lastUploadedSnapshotRef.current = stripSnapshotTimestamp(postImportSnap);
-            syncBaselineAfterRemoteImportRef.current = true;
-            clearPendingLocalPushFlag(uid);
           } else {
             finalStatus = 'error';
             finalError = 'تعذر استيراد البيانات السحابية.';
@@ -566,27 +882,32 @@ export function useGoogleCloudWorkspaceSync(): void {
             finalError = res.error;
           }
         } else if (localHasData && remoteHasActualData && cloudRes.backupJsonStr) {
-          // Both have data: Perform a real two-way merge
-          isApplyingRemoteRef.current = true;
-          let success = false;
-          try {
-            success = await importBackupFileRef.current(cloudRes.backupJsonStr);
-          } finally {
-            isApplyingRemoteRef.current = false;
-          }
+          // Both have data: persist in durable queue first, perform two-way merge, verify, and acknowledge
+          const queuedItem = enqueueDurablePendingRemoteItem(
+            uid,
+            cloudRes.backupJsonStr,
+            cloudRes.docTokens
+          );
+          const success = await applyRemoteSnapshotPass(
+            cloudRes.backupJsonStr,
+            cloudRes.docTokens
+          );
           if (!success) {
             finalStatus = 'error';
             finalError = 'تعذر دمج البيانات السحابية.';
-          } else if (!isFirestoreWriteQuotaExhaustedToday()) {
-            const mergedSnapStr = await performBackupRef.current();
-            const uploadRes = await uploadWorkspaceToGoogleCloud(mergedSnapStr);
-            if (uploadRes.success) {
-              lastUploadedSnapshotRef.current = stripSnapshotTimestamp(mergedSnapStr);
-              syncBaselineAfterRemoteImportRef.current = true;
-              clearPendingLocalPushFlag(uid);
-            } else {
-              finalStatus = 'error';
-              finalError = uploadRes.error;
+          } else {
+            removeDurablePendingRemoteItem(uid, queuedItem.id);
+            if (!isFirestoreWriteQuotaExhaustedToday()) {
+              const mergedSnapStr = await performBackupRef.current();
+              const uploadRes = await uploadWorkspaceToGoogleCloud(mergedSnapStr);
+              if (uploadRes.success) {
+                lastUploadedSnapshotRef.current = stripSnapshotTimestamp(mergedSnapStr);
+                syncBaselineAfterRemoteImportRef.current = true;
+                clearPendingLocalPushFlag(uid);
+              } else {
+                finalStatus = 'error';
+                finalError = uploadRes.error;
+              }
             }
           }
         } else if (localHasData) {
@@ -596,6 +917,13 @@ export function useGoogleCloudWorkspaceSync(): void {
         // Only mark initial check completed if bootstrap actually completed without error
         if (finalStatus === 'synced') {
           hasCompletedInitialCheckRef.current = true;
+        } else if (!isCancelled && attempt <= 5) {
+          const delay = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
+          retryTimeoutId = setTimeout(() => {
+            if (!isCancelled && !hasCompletedInitialCheckRef.current) {
+              runBootstrap(uid, attempt + 1);
+            }
+          }, delay);
         }
 
         if (typeof window !== 'undefined') {
@@ -623,14 +951,9 @@ export function useGoogleCloudWorkspaceSync(): void {
         }
       } finally {
         isBootstrapInFlightRef.current = false;
-        // If any local changes were flagged before/during bootstrap, drain them now
-        if (
-          !isCancelled &&
-          hasCompletedInitialCheckRef.current &&
-          currentUserUidRef.current &&
-          hasPendingLocalPushFlag(currentUserUidRef.current)
-        ) {
-          coordinator.enqueueLocalPush();
+        // If any pending remote or local work remains after bootstrap, drain it via the coordinator
+        if (!isCancelled && currentUserUidRef.current) {
+          coordinator.resumePendingWork();
         }
       }
     };
@@ -648,20 +971,22 @@ export function useGoogleCloudWorkspaceSync(): void {
       if (!user) {
         currentUserUidRef.current = null;
         hasCompletedInitialCheckRef.current = false;
+        coordinator = createCoordinatorForUser(undefined);
         return;
       }
 
       currentUserUidRef.current = user.uid;
+      coordinator = createCoordinatorForUser(user.uid);
       await runBootstrap(user.uid);
       if (isCancelled) return;
 
       // Attach live `onSnapshot` listener for real-time multi-device sync
-      // Never drops snapshots when busy: enqueues into the serialized coordinator!
+      // Never drops snapshots when busy: enqueues into the durable serialized coordinator!
       unsubRemote = subscribeToRemoteWorkspaceChanges(
         user.uid,
-        async (remoteBackupJson) => {
+        async (remoteBackupJson, _updatedAtIso, _summary, docTokens) => {
           if (isCancelled || !isAutoCloudSyncEnabled()) return;
-          await coordinator.enqueueRemoteSnapshot(remoteBackupJson);
+          await coordinator.enqueueRemoteSnapshot(remoteBackupJson, docTokens);
         }
       );
     });
@@ -670,6 +995,9 @@ export function useGoogleCloudWorkspaceSync(): void {
     const handleResumeOrOnline = async () => {
       const uid = currentUserUidRef.current;
       if (!uid || isCancelled || !isAutoCloudSyncEnabled()) return;
+
+      // Always resume any durable pending remote work first
+      await coordinator.resumePendingWork();
 
       if (!hasCompletedInitialCheckRef.current) {
         await runBootstrap(uid);
@@ -680,7 +1008,10 @@ export function useGoogleCloudWorkspaceSync(): void {
       try {
         const remoteRes = await downloadWorkspaceFromGoogleCloud();
         if (!isCancelled && remoteRes.hasRemoteData && remoteRes.backupJsonStr) {
-          await coordinator.enqueueRemoteSnapshot(remoteRes.backupJsonStr);
+          await coordinator.enqueueRemoteSnapshot(
+            remoteRes.backupJsonStr,
+            remoteRes.docTokens
+          );
         }
       } catch {
         // Ignore transient offline read error

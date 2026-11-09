@@ -13,6 +13,7 @@ import {
 import {
   QUESTION_TYPE_META,
   buildHomeworkShareUrl,
+  getLocalAssignments,
   saveLocalAssignment,
   deleteLocalAssignment,
   saveLocalSubmission,
@@ -20,6 +21,7 @@ import {
   fetchAssignmentDetailsWithSync,
   getLocalAssignmentDetails,
   isAssignmentDeletedLocally,
+  sanitizeDocId,
   getVercelPublicDomain,
   saveAssignmentWithConfirmation,
   flushPendingHomeworkCloudWrites,
@@ -218,7 +220,17 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     });
 
     const unsubSubmissions = subscribeSubmissionsFromFirestore(null, (cloudSubs) => {
-      cloudSubs.forEach((sub) => saveLocalSubmission({ ...sub, cloudSynced: true }, false));
+      const activeIds = new Set(
+        getLocalAssignments().flatMap((a) => [a.id, sanitizeDocId(a.id)])
+      );
+      cloudSubs.forEach((sub) => {
+        if (
+          !isAssignmentDeletedLocally(sub.assignmentId) &&
+          (activeIds.has(sub.assignmentId) || activeIds.has(sanitizeDocId(sub.assignmentId)))
+        ) {
+          saveLocalSubmission({ ...sub, cloudSynced: true }, false);
+        }
+      });
       syncAndFetchTeacherAssignments(studentsRef.current).then((list) => {
         setAssignmentsList(list);
         setPendingSyncCount(getPendingHomeworkSyncCount());

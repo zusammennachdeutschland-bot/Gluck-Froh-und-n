@@ -17,8 +17,13 @@ import {
   subscribeTeacherAuth,
   getActiveCloudUser,
   downloadWorkspaceFromGoogleCloud,
-  uploadWorkspaceToGoogleCloud
+  uploadWorkspaceToGoogleCloud,
+  acknowledgeAppliedRemoteRevisions
 } from '../services/firebaseWorkspaceSync';
+import {
+  enqueueDurablePendingRemoteItem,
+  removeDurablePendingRemoteItem
+} from '../hooks/useGoogleCloudWorkspaceSync';
 
 const PRESET_AVATARS = [
   { id: 'av_man_teacher', label: 'Herr (Teacher)', icon: '👨‍🏫' },
@@ -100,6 +105,7 @@ export const SetupWizard: React.FC = () => {
   });
 
   const applySignedInCloudUser = async (user: {
+    uid?: string | null;
     displayName?: string | null;
     email?: string | null;
     photoURL?: string | null;
@@ -157,14 +163,28 @@ export const SetupWizard: React.FC = () => {
       }
 
       if (remoteHasActualData && cloudRes.backupJsonStr) {
+        const uid = cloudRes.workspaceId || user?.uid || '';
+        const queuedItem = uid
+          ? enqueueDurablePendingRemoteItem(uid, cloudRes.backupJsonStr, cloudRes.docTokens)
+          : null;
         const success = await importBackupFile(cloudRes.backupJsonStr);
         if (success) {
-          localStorage.setItem('dl_setup_completed', 'true');
-          setIsOpen(false);
-          alert(
-            `أهلاً بك يا ${nameToUse || 'المعلم'}! تم جلب بياناتك السحابية وجميع طلابك ومجموعاتك بنجاح 🌟`
-          );
-          return;
+          const postSnap = await performBackup();
+          const ackOk =
+            !uid ||
+            !cloudRes.docTokens ||
+            acknowledgeAppliedRemoteRevisions(uid, cloudRes.docTokens, postSnap);
+          if (ackOk) {
+            if (uid && queuedItem) {
+              removeDurablePendingRemoteItem(uid, queuedItem.id);
+            }
+            localStorage.setItem('dl_setup_completed', 'true');
+            setIsOpen(false);
+            alert(
+              `أهلاً بك يا ${nameToUse || 'المعلم'}! تم جلب بياناتك السحابية وجميع طلابك ومجموعاتك بنجاح 🌟`
+            );
+            return;
+          }
         }
       } else {
         // No remote actual data: protect local data and push to cloud if local data exists

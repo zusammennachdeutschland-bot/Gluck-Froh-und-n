@@ -915,7 +915,12 @@ export async function flushPendingHomeworkCloudWrites(): Promise<{
       }
     }
 
-    const localSubs = getLocalSubmissions();
+    const activeIds = new Set(
+      getLocalAssignments().flatMap((a) => [a.id, sanitizeDocId(a.id)])
+    );
+    const localSubs = getLocalSubmissions().filter(
+      (s) => activeIds.has(s.assignmentId) || activeIds.has(sanitizeDocId(s.assignmentId))
+    );
     for (const sub of localSubs) {
       if (sub.cloudSynced === false) {
         const ok = await activeSaveSubmissionToCloud(sub);
@@ -940,9 +945,113 @@ export async function flushPendingHomeworkCloudWrites(): Promise<{
 }
 
 export function getPendingHomeworkSyncCount(): number {
-  const pendingHw = getLocalAssignments().filter((a) => a.cloudSynced === false).length;
-  const pendingSubs = getLocalSubmissions().filter((s) => s.cloudSynced === false).length;
+  const activeAssignments = getLocalAssignments();
+  const activeIds = new Set(
+    activeAssignments.flatMap((a) => [a.id, sanitizeDocId(a.id)])
+  );
+  const pendingHw = activeAssignments.filter((a) => a.cloudSynced === false).length;
+  const pendingSubs = getLocalSubmissions().filter(
+    (s) =>
+      s.cloudSynced === false &&
+      (activeIds.has(s.assignmentId) || activeIds.has(sanitizeDocId(s.assignmentId)))
+  ).length;
   return pendingHw + pendingSubs;
+}
+
+export function getHomeworkSummaryStats(
+  rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[]
+): {
+  assignmentsCount: number;
+  submissionsCount: number;
+  inProgressCount: number;
+} {
+  const activeAssignments = getLocalAssignments();
+  if (activeAssignments.length === 0) {
+    return {
+      assignmentsCount: 0,
+      submissionsCount: 0,
+      inProgressCount: 0
+    };
+  }
+
+  const allSubs = getLocalSubmissions();
+  let totalCompleted = 0;
+  let totalInProgress = 0;
+
+  for (const rawHw of activeAssignments) {
+    const hw = normalizeHomeworkAssignment(rawHw);
+    const safeHwId = sanitizeDocId(hw.id);
+    const mode = resolveAssignmentAudienceMode(hw);
+    const allHwSubs = allSubs.filter(
+      (s) => s.assignmentId === hw.id || sanitizeDocId(s.assignmentId) === safeHwId
+    );
+
+    if (mode === 'group') {
+      const groupRoster = getAuthorizedGroupStudentsForAssignment(hw, rosterStudents);
+      const rosterIds = new Set(groupRoster.map((st) => st.id));
+      const nameCounts = new Map<string, number>();
+      groupRoster.forEach((st) => {
+        const key = st.name.trim().toLowerCase();
+        nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+      });
+
+      const validGroupSubs = allHwSubs.filter((s) => {
+        if (s.studentId && rosterIds.has(s.studentId.trim())) return true;
+        if (!s.studentId && !s.participantId) {
+          const cleanName = (s.studentName || '').trim().toLowerCase();
+          return nameCounts.get(cleanName) === 1;
+        }
+        return false;
+      });
+
+      const resolveSubStudentId = (s: HomeworkSubmission): string => {
+        if (s.studentId && rosterIds.has(s.studentId.trim())) return s.studentId.trim();
+        const cleanName = (s.studentName || '').trim().toLowerCase();
+        const matched = groupRoster.find((st) => st.name.trim().toLowerCase() === cleanName);
+        return matched ? matched.id : s.id;
+      };
+
+      const completedSubs = validGroupSubs.filter(
+        (s) => s.status === 'completed' || (!s.status && Boolean(s.completedAt))
+      );
+      const inProgressSubs = validGroupSubs.filter(
+        (s) => s.status === 'in_progress' && !s.completedAt
+      );
+
+      const uniqueCompletedStudents = new Set(completedSubs.map(resolveSubStudentId));
+      const uniqueInProgressStudents = new Set(
+        inProgressSubs.map(resolveSubStudentId).filter((id) => !uniqueCompletedStudents.has(id))
+      );
+
+      totalCompleted += uniqueCompletedStudents.size;
+      totalInProgress += uniqueInProgressStudents.size;
+    } else {
+      const completedSubs = allHwSubs.filter(
+        (s) => s.status === 'completed' || (!s.status && Boolean(s.completedAt))
+      );
+      const inProgressSubs = allHwSubs.filter(
+        (s) => s.status === 'in_progress' && !s.completedAt
+      );
+
+      const uniqueCompletedParticipants = new Set(
+        completedSubs.map((s) => getSubmissionIdentityKey(s))
+      );
+      const uniqueInProgressParticipants = new Set(
+        inProgressSubs
+          .map((s) => getSubmissionIdentityKey(s))
+          .filter((k) => !uniqueCompletedParticipants.has(k))
+      );
+
+      totalCompleted += uniqueCompletedParticipants.size;
+      totalInProgress += uniqueInProgressParticipants.size;
+    }
+  }
+
+  return {
+    assignmentsCount: activeAssignments.length,
+    submissionsCount: totalCompleted,
+    inProgressCount: totalInProgress
+  };
 }
 
 if (typeof window !== 'undefined') {
@@ -997,14 +1106,31 @@ export async function syncAndFetchTeacherAssignments(
     }
     saveLocalAssignment({ ...hw, cloudSynced: true }, false);
   });
+
+  // Push any local assignments missing from cloud
+  const localAssignments = getLocalAssignments();
+  const activeAssignmentIds = new Set(
+    localAssignments.flatMap((a) => [a.id, sanitizeDocId(a.id)])
+  );
+
   cloudSubmissions.forEach((sub) => {
     if (isAssignmentDeletedLocally(sub.assignmentId)) return;
+    if (
+      !activeAssignmentIds.has(sub.assignmentId) &&
+      !activeAssignmentIds.has(sanitizeDocId(sub.assignmentId))
+    ) {
+      return;
+    }
     saveLocalSubmission({ ...sub, cloudSynced: true }, false);
   });
 
-  // Push any local assignments/submissions missing from cloud
-  const localAssignments = getLocalAssignments();
-  const localSubmissions = getLocalSubmissions();
+  // Prune any orphaned local submissions whose assignment no longer exists
+  const validLocalSubmissions = getLocalSubmissions().filter(
+    (s) =>
+      activeAssignmentIds.has(s.assignmentId) ||
+      activeAssignmentIds.has(sanitizeDocId(s.assignmentId))
+  );
+  writeLocalSubmissionsList(validLocalSubmissions);
 
   const cloudAssignmentIds = new Set(cloudAssignments.map((a) => a.id));
   for (const localHw of localAssignments) {
@@ -1017,7 +1143,7 @@ export async function syncAndFetchTeacherAssignments(
   }
 
   const cloudSubmissionIds = new Set(cloudSubmissions.map((s) => s.id));
-  for (const localSub of localSubmissions) {
+  for (const localSub of validLocalSubmissions) {
     if (!cloudSubmissionIds.has(localSub.id) || localSub.cloudSynced === false) {
       const ok = await saveSubmissionToFirestore(localSub).catch(() => false);
       if (ok) {
@@ -1027,12 +1153,19 @@ export async function syncAndFetchTeacherAssignments(
   }
 
   const mergedAssignments = getLocalAssignments();
-  const mergedSubmissions = getLocalSubmissions();
+  const mergedSubmissions = getLocalSubmissions().filter(
+    (s) =>
+      activeAssignmentIds.has(s.assignmentId) ||
+      activeAssignmentIds.has(sanitizeDocId(s.assignmentId))
+  );
 
   return mergedAssignments.map((rawHw) => {
     const hw = normalizeHomeworkAssignment(rawHw);
+    const safeHwId = sanitizeDocId(hw.id);
     const mode = resolveAssignmentAudienceMode(hw);
-    const allHwSubs = mergedSubmissions.filter((s) => s.assignmentId === hw.id);
+    const allHwSubs = mergedSubmissions.filter(
+      (s) => s.assignmentId === hw.id || sanitizeDocId(s.assignmentId) === safeHwId
+    );
 
     if (mode === 'group') {
       const groupRoster = getAuthorizedGroupStudentsForAssignment(hw, rosterStudents);
