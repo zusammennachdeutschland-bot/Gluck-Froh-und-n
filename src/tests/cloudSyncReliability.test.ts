@@ -3499,6 +3499,111 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
       __setStorageFailureHookForTests(null);
     }
 
+    // -------------------------------------------------------------------------
+    // RA-28: Queue removal verification failure prevents false completion, survives memory clearance, and retries idempotently without duplicate lessons, payments, or finance transactions
+    // [Simulated Node.js storage integration test - not a real Android device test]
+    // -------------------------------------------------------------------------
+    const raUid28 = 'uid_ra_28_removal_verify_fail';
+    resetAppliedDocTokensForTests(raUid28);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid28);
+
+    const ra28Workspace: any = {
+      students: [],
+      lessons: [{ id: 'les_28_1', title: 'Lesson 28 Original', updatedAt: 1000 }],
+      payments: [{ id: 'pay_28_1', amountPaid: 150, updatedAt: 1000 }],
+      financeTransactions: [{ id: 'tx_28_1', amount: 150, updatedAt: 1000 }]
+    };
+
+    const raDoc28 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra28_op_1',
+      opSeq: 1,
+      updatedAtMs: 48000,
+      payloadChunk: JSON.stringify({
+        isCloudDelta: true,
+        lessons: [{ id: 'les_28_1', title: 'Lesson 28 Updated', updatedAt: 2000 }],
+        payments: [{ id: 'pay_28_1', amountPaid: 300, updatedAt: 2000 }],
+        financeTransactions: [{ id: 'tx_28_1', amount: 300, updatedAt: 2000 }]
+      })
+    };
+    const raToken28 = computeChunkRevisionToken(raDoc28);
+
+    let failVerifyRead28 = false;
+    const origVerify28 = storage.verifyDurableReadBackValue;
+    storage.verifyDurableReadBackValue = async (key: string, val: any) => {
+      if (failVerifyRead28 && key.includes(raUid28)) {
+        return false; // Force verification read failure after empty queue persist write
+      }
+      return origVerify28.call(storage, key, val);
+    };
+
+    const coord28Session1 = createSerializedSyncCoordinator({
+      uid: raUid28,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra28Workspace, parsed);
+        failVerifyRead28 = true; // Trigger verification failure right before queue persistence verification
+        return acknowledgeAppliedRemoteRevisions(raUid28, docTokens, ra28Workspace);
+      }
+    });
+
+    try {
+      const outcome28 = await coord28Session1.enqueueRemoteSnapshot(
+        JSON.stringify({
+          isCloudDelta: true,
+          lessons: [{ id: 'les_28_1', title: 'Lesson 28 Updated', updatedAt: 2000 }],
+          payments: [{ id: 'pay_28_1', amountPaid: 300, updatedAt: 2000 }],
+          financeTransactions: [{ id: 'tx_28_1', amount: 300, updatedAt: 2000 }]
+        }),
+        { [raDoc28.id]: raToken28 }
+      );
+
+      // Coordinator returns false because verification read failed; durable empty state was not confirmed!
+      assert.equal(outcome28, false);
+      assert.equal(coord28Session1.getPendingRemoteCount(), 1);
+      assert.equal(getAppliedDocTokens(raUid28)[raDoc28.id], raToken28);
+      coord28Session1.dispose();
+
+      // Clear all in-memory caches to simulate memory flush / session restart
+      failVerifyRead28 = false;
+      clearInMemorySyncQueueCachesForTests(raUid28);
+      __clearMemoryStoreOnlyForTests();
+
+      // Recreate coordinator from simulated persistent store
+      const coord28Session2 = createSerializedSyncCoordinator({
+        uid: raUid28,
+        autoRetryEnabled: false,
+        onExecuteLocalPush: async () => true,
+        onApplyRemotePayload: async (remoteJson, docTokens) => {
+          const parsed = JSON.parse(remoteJson);
+          applyDeltaOnWorkspace(ra28Workspace, parsed);
+          return acknowledgeAppliedRemoteRevisions(raUid28, docTokens, ra28Workspace);
+        }
+      });
+
+      const resume28Outcome = await coord28Session2.resumePendingWork();
+      assert.equal(resume28Outcome, true);
+      assert.equal(coord28Session2.getPendingRemoteCount(), 0);
+      assert.equal((await loadDurablePendingRemoteQueueAsync(raUid28)).length, 0);
+
+      // Verify idempotency: lessons, payments, and finance transactions were NOT duplicated!
+      assert.equal(ra28Workspace.lessons.length, 1);
+      assert.equal(ra28Workspace.payments.length, 1);
+      assert.equal(ra28Workspace.financeTransactions.length, 1);
+      assert.equal(ra28Workspace.lessons[0].title, 'Lesson 28 Updated');
+      assert.equal(ra28Workspace.payments[0].amountPaid, 300);
+      assert.equal(ra28Workspace.financeTransactions[0].amount, 300);
+      coord28Session2.dispose();
+
+      log.push('[PASS] [Simulated Node.js storage integration test - not a real Android device test] RA-28. Queue removal verification failure prevents false completion, survives memory clearance, and retries idempotently without duplicate lessons, payments, or finance transactions');
+    } finally {
+      storage.verifyDurableReadBackValue = origVerify28;
+    }
+
     return { passed: true, log };
   } catch (err: any) {
     __setStorageFailureHookForTests(null);
