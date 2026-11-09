@@ -204,7 +204,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
       } else if (remote.hasRemoteData && remote.backupJsonStr && !localHasData) {
         const uid = remote.workspaceId || user?.uid || '';
         const queuedItem = uid
-          ? enqueueDurablePendingRemoteItem(uid, remote.backupJsonStr, remote.docTokens)
+          ? await enqueueDurablePendingRemoteItem(uid, remote.backupJsonStr, remote.docTokens)
           : null;
         const imported = await importBackupFile(remote.backupJsonStr);
         if (imported) {
@@ -214,7 +214,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
             !remote.docTokens ||
             acknowledgeAppliedRemoteRevisions(uid, remote.docTokens, postSnap);
           if (ackOk && uid && queuedItem) {
-            removeDurablePendingRemoteItem(uid, queuedItem.id);
+            await removeDurablePendingRemoteItem(uid, queuedItem.id);
           }
           if (ackOk) {
             setLastSyncTime(remote.remoteTimestampIso);
@@ -343,7 +343,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
 
       const uid = res.workspaceId || firebaseUser?.uid || '';
       const queuedItem = uid
-        ? enqueueDurablePendingRemoteItem(uid, res.backupJsonStr, res.docTokens)
+        ? await enqueueDurablePendingRemoteItem(uid, res.backupJsonStr, res.docTokens)
         : null;
       const imported = await importBackupFile(res.backupJsonStr);
       let ackOk = false;
@@ -354,7 +354,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
           !res.docTokens ||
           acknowledgeAppliedRemoteRevisions(uid, res.docTokens, postSnap);
         if (ackOk && uid && queuedItem) {
-          removeDurablePendingRemoteItem(uid, queuedItem.id);
+          await removeDurablePendingRemoteItem(uid, queuedItem.id);
         }
       }
       if (imported && ackOk) {

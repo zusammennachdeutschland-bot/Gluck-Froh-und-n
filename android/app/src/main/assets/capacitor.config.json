@@ -21,6 +21,11 @@
 			"backgroundColor": "#ffffff",
 			"androidSplashResourceName": "splash",
 			"showSpinner": false
+		},
+		"SocialLogin": {
+			"google": {
+				"webClientId": "REPLACE_WITH_GOOGLE_CLIENT_ID_FOR_WEB"
+			}
 		}
 	}
 }

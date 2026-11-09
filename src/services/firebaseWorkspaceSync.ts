@@ -652,23 +652,31 @@ function persistAppliedDocTokensMap(uid: string, map: Map<string, string>): bool
   if (acknowledgeStorageFailureForTests) {
     return false;
   }
+  if (!uid) return false;
+
   const obj: Record<string, string> = {};
   map.forEach((v, k) => {
     obj[k] = v;
   });
   const serialized = JSON.stringify(obj);
 
+  let persisted = false;
   if (hasLocalStorage()) {
     try {
       const storageKey = `gluck_cloud_applied_tokens_v2_${uid}`;
       localStorage.setItem(storageKey, serialized);
       const readBack = localStorage.getItem(storageKey);
-      if (readBack !== serialized) {
-        return false;
+      if (readBack === serialized) {
+        persisted = true;
       }
     } catch {
-      return false;
+      persisted = false;
     }
+  }
+
+  if (!persisted) {
+    // Never treat an in-memory-only map as durable acknowledgement
+    return false;
   }
 
   inMemoryAppliedDocTokensByUid.set(uid, new Map(map));

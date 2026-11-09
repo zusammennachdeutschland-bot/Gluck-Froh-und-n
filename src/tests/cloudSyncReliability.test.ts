@@ -20,10 +20,12 @@ import {
   hasPendingLocalPushFlag,
   clearPendingLocalPushFlag,
   loadDurablePendingRemoteQueue,
+  loadDurablePendingRemoteQueueAsync,
   saveDurablePendingRemoteQueue,
   enqueueDurablePendingRemoteItem,
   removeDurablePendingRemoteItem,
-  clearDurablePendingRemoteQueueForTests
+  clearDurablePendingRemoteQueueForTests,
+  clearDurablePendingRemoteQueueForTestsAsync
 } from '../hooks/useGoogleCloudWorkspaceSync';
 import { SyncableRecord } from '../types';
 import {
@@ -52,7 +54,8 @@ import {
 } from '../services/firebaseWorkspaceSync';
 import {
   storage,
-  __setStorageFailureHookForTests
+  __setStorageFailureHookForTests,
+  __setSimulatePrimaryDbForTests
 } from '../services/storageService';
 import {
   runSyncCycle,
@@ -79,6 +82,28 @@ interface TestEntity extends SyncableRecord {
 
 export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean; log: string[] }> {
   const log: string[] = [];
+
+  if (typeof (globalThis as any).localStorage === 'undefined') {
+    const memStore = new Map<string, string>();
+    (globalThis as any).localStorage = {
+      getItem: (key: string) => memStore.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        memStore.set(key, String(value));
+      },
+      removeItem: (key: string) => {
+        memStore.delete(key);
+      },
+      clear: () => {
+        memStore.clear();
+      },
+      get length() {
+        return memStore.size;
+      },
+      key: (index: number) => Array.from(memStore.keys())[index] ?? null
+    };
+  }
+
+  __setSimulatePrimaryDbForTests(true);
 
   try {
     log.push('========================================================================');
@@ -2479,7 +2504,7 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     const raUid10 = 'uid_ra_10_push_fail';
     clearDurablePendingRemoteQueueForTests(raUid10);
     clearPendingLocalPushFlag(raUid10);
-    enqueueDurablePendingRemoteItem(raUid10, JSON.stringify({ rev: 'RemotePending10' }), {
+    await enqueueDurablePendingRemoteItem(raUid10, JSON.stringify({ rev: 'RemotePending10' }), {
       doc_10: 'tok_10'
     });
     let applyRemote10Allow = false;
@@ -2764,6 +2789,401 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     assert.equal(loadDurablePendingRemoteQueue(raUid15).length, 0);
     coord15.dispose();
     log.push('[PASS] [Unit Test] RA-15. Acknowledgement storage failure returns false, prevents in-memory token poisoning, and retains item in retry queue');
+
+    // -------------------------------------------------------------------------
+    // RA-16: A pending backup larger than 5MB persists durably in IndexedDB without quota failure and drains cleanly
+    // -------------------------------------------------------------------------
+    const raUid16 = 'uid_ra_16_heavy_payload';
+    resetAppliedDocTokensForTests(raUid16);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid16);
+
+    // Construct a realistic payload > 5MB (e.g. 5.2 MB)
+    const largePad = 'X'.repeat(5500); // 5.5 KB per item
+    const heavyStudents: any[] = [];
+    for (let i = 0; i < 1000; i++) {
+      heavyStudents.push({
+        id: `st_heavy_${i}`,
+        name: `Student Large ${i}`,
+        notes: largePad,
+        updatedAt: 30000 + i
+      });
+    }
+    const heavyPayloadStr = JSON.stringify({
+      isCloudDelta: true,
+      students: heavyStudents
+    });
+    assert.equal(heavyPayloadStr.length > 5 * 1024 * 1024, true);
+
+    const raDoc16 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra16_op_1',
+      opSeq: 1,
+      updatedAtMs: 35000,
+      payloadChunk: JSON.stringify({ isCloudDelta: true, count: 1000 })
+    };
+    const raToken16 = computeChunkRevisionToken(raDoc16);
+    const raTokensMap16 = { [raDoc16.id]: raToken16 };
+
+    const ra16Workspace: any = { students: [] };
+    const coord16 = createSerializedSyncCoordinator({
+      uid: raUid16,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra16Workspace, parsed);
+        return acknowledgeAppliedRemoteRevisions(raUid16, docTokens, ra16Workspace);
+      }
+    });
+
+    const enqueueHeavyOk = await coord16.enqueueRemoteSnapshot(heavyPayloadStr, raTokensMap16);
+    assert.equal(enqueueHeavyOk, true);
+    assert.equal(ra16Workspace.students.length, 1000);
+    assert.equal(getAppliedDocTokens(raUid16)[raDoc16.id], raToken16);
+    assert.equal(coord16.getPendingRemoteCount(), 0);
+    assert.equal(loadDurablePendingRemoteQueue(raUid16).length, 0);
+
+    // Verify localStorage was never poisoned with the >5MB payload
+    if (typeof localStorage !== 'undefined') {
+      const lsVal = localStorage.getItem(`gluck_cloud_pending_remote_queue_v2_${raUid16}`);
+      assert.equal(lsVal, null);
+    }
+    coord16.dispose();
+    log.push('[PASS] [Integration Test] RA-16. A pending backup larger than 5MB persists durably in IndexedDB without quota failure and drains cleanly');
+
+    // -------------------------------------------------------------------------
+    // RA-17: localStorage quota failure does not break durable queue persistence in IndexedDB
+    // -------------------------------------------------------------------------
+    const raUid17 = 'uid_ra_17_ls_quota_fail';
+    resetAppliedDocTokensForTests(raUid17);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid17);
+
+    const originalSetItem = typeof localStorage !== 'undefined' ? localStorage.setItem : null;
+    let quotaThrew = false;
+    if (typeof localStorage !== 'undefined' && originalSetItem) {
+      localStorage.setItem = (k: string, v: string) => {
+        if (k.startsWith('gluck_cloud_pending_remote_queue_v2_')) {
+          quotaThrew = true;
+          const quotaErr = new Error('QuotaExceededError: DOM Exception 22');
+          (quotaErr as any).name = 'QuotaExceededError';
+          (quotaErr as any).code = 22;
+          throw quotaErr;
+        }
+        return originalSetItem.call(localStorage, k, v);
+      };
+    }
+
+    try {
+      const ra17Workspace: any = { students: [] };
+      const coord17 = createSerializedSyncCoordinator({
+        uid: raUid17,
+        autoRetryEnabled: false,
+        onExecuteLocalPush: async () => true,
+        onApplyRemotePayload: async (remoteJson, docTokens) => {
+          const parsed = JSON.parse(remoteJson);
+          applyDeltaOnWorkspace(ra17Workspace, parsed);
+          return acknowledgeAppliedRemoteRevisions(raUid17, docTokens, ra17Workspace);
+        }
+      });
+
+      const raDoc17 = {
+        id: getDeviceDeltaDocId(vercelDeviceId),
+        categoryKey: 'delta_log',
+        deviceId: vercelDeviceId,
+        opId: 'vercel_ra17_op_1',
+        opSeq: 1,
+        updatedAtMs: 37000,
+        payloadChunk: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra17_1', name: 'Student 17' }] })
+      };
+      const raToken17 = computeChunkRevisionToken(raDoc17);
+      const outcome17 = await coord17.enqueueRemoteSnapshot(
+        JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra17_1', name: 'Student 17', updatedAt: 37000 }] }),
+        { [raDoc17.id]: raToken17 }
+      );
+
+      assert.equal(outcome17, true);
+      assert.equal(ra17Workspace.students.length, 1);
+      assert.equal(coord17.getPendingRemoteCount(), 0);
+      coord17.dispose();
+      log.push('[PASS] [Integration Test] RA-17. localStorage quota failure does not break durable queue persistence in IndexedDB');
+    } finally {
+      if (typeof localStorage !== 'undefined' && originalSetItem) {
+        localStorage.setItem = originalSetItem;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // RA-18: IndexedDB write failure aborts queue persistence, does not falsely claim queued state, and prevents revision acknowledgement
+    // -------------------------------------------------------------------------
+    const raUid18 = 'uid_ra_18_idb_write_fail';
+    resetAppliedDocTokensForTests(raUid18);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid18);
+
+    __setStorageFailureHookForTests((op, key) => {
+      if (op === 'set' && key.includes('gluck_cloud_pending_remote_queue_v2_')) {
+        throw new Error('Simulated IndexedDB failure');
+      }
+    });
+
+    const raDoc18 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra18_op_1',
+      opSeq: 1,
+      updatedAtMs: 38000,
+      payloadChunk: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra18', name: 'Student 18' }] })
+    };
+    const raToken18 = computeChunkRevisionToken(raDoc18);
+
+    const coord18 = createSerializedSyncCoordinator({
+      uid: raUid18,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async () => true
+    });
+
+    const outcome18 = await coord18.enqueueRemoteSnapshot(
+      JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra18', name: 'Student 18' }] }),
+      { [raDoc18.id]: raToken18 }
+    );
+
+    // Persistence failed: must return false, must not leave item in queue, must not acknowledge
+    assert.equal(outcome18, false);
+    assert.equal(coord18.getPendingRemoteCount(), 0);
+    assert.equal(loadDurablePendingRemoteQueue(raUid18).length, 0);
+    assert.equal(getAppliedDocTokens(raUid18)[raDoc18.id], undefined);
+
+    __setStorageFailureHookForTests(null);
+    coord18.dispose();
+    log.push('[PASS] [Unit Test] RA-18. IndexedDB write failure aborts queue persistence, rolls back item, and prevents false acknowledgement');
+
+    // -------------------------------------------------------------------------
+    // RA-19: Process restart after a failed import restores queue from durable storage and resumes cleanly
+    // -------------------------------------------------------------------------
+    const raUid19 = 'uid_ra_19_restart_recovery';
+    resetAppliedDocTokensForTests(raUid19);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid19);
+
+    const raDoc19 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra19_op_1',
+      opSeq: 1,
+      updatedAtMs: 39000,
+      payloadChunk: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra19_restart', name: 'Restart Student' }] })
+    };
+    const raToken19 = computeChunkRevisionToken(raDoc19);
+    const raTokensMap19 = { [raDoc19.id]: raToken19 };
+
+    // Session 1: Enqueue snapshot, but import fails (e.g. database locked/crashing)
+    const coord19Session1 = createSerializedSyncCoordinator({
+      uid: raUid19,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async () => false
+    });
+
+    const s1Outcome = await coord19Session1.enqueueRemoteSnapshot(
+      JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra19_restart', name: 'Restart Student', updatedAt: 39000 }] }),
+      raTokensMap19
+    );
+    assert.equal(s1Outcome, false);
+    assert.equal(coord19Session1.getPendingRemoteCount(), 1);
+    coord19Session1.dispose();
+
+    // Verify durable storage holds the pending payload
+    const queueBeforeRestart = await loadDurablePendingRemoteQueueAsync(raUid19);
+    assert.equal(queueBeforeRestart.length, 1);
+    assert.equal(queueBeforeRestart[0].docTokens?.[raDoc19.id], raToken19);
+
+    // Session 2 after process restart: create fresh coordinator and resume pending work
+    const ra19Workspace: any = { students: [] };
+    const coord19Session2 = createSerializedSyncCoordinator({
+      uid: raUid19,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra19Workspace, parsed);
+        return acknowledgeAppliedRemoteRevisions(raUid19, docTokens, ra19Workspace);
+      }
+    });
+
+    const s2Outcome = await coord19Session2.resumePendingWork();
+    assert.equal(s2Outcome, true);
+    assert.equal(ra19Workspace.students.some((s: any) => s.id === 'st_ra19_restart'), true);
+    assert.equal(getAppliedDocTokens(raUid19)[raDoc19.id], raToken19);
+    assert.equal(coord19Session2.getPendingRemoteCount(), 0);
+    assert.equal((await loadDurablePendingRemoteQueueAsync(raUid19)).length, 0);
+    coord19Session2.dispose();
+    log.push('[PASS] [Integration Test] RA-19. Process restart after a failed import restores queue from durable storage and resumes cleanly');
+
+    // -------------------------------------------------------------------------
+    // RA-20: Queue read-back mismatch rejects persistence, rolls back item, and does not acknowledge revision
+    // -------------------------------------------------------------------------
+    const raUid20 = 'uid_ra_20_readback_mismatch';
+    resetAppliedDocTokensForTests(raUid20);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid20);
+
+    const origVerify = storage.verifyDurableReadBackValue;
+    storage.verifyDurableReadBackValue = async (key: string) => {
+      if (key.includes(raUid20)) {
+        return false; // Force read-back inequality
+      }
+      return origVerify.call(storage, key as any, null as any);
+    };
+
+    try {
+      const raDoc20 = {
+        id: getDeviceDeltaDocId(vercelDeviceId),
+        categoryKey: 'delta_log',
+        deviceId: vercelDeviceId,
+        opId: 'vercel_ra20_op_1',
+        opSeq: 1,
+        updatedAtMs: 40000,
+        payloadChunk: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra20', name: 'Student 20' }] })
+      };
+      const raToken20 = computeChunkRevisionToken(raDoc20);
+
+      const coord20 = createSerializedSyncCoordinator({
+        uid: raUid20,
+        autoRetryEnabled: false,
+        onExecuteLocalPush: async () => true,
+        onApplyRemotePayload: async () => true
+      });
+
+      const outcome20 = await coord20.enqueueRemoteSnapshot(
+        JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra20', name: 'Student 20' }] }),
+        { [raDoc20.id]: raToken20 }
+      );
+
+      assert.equal(outcome20, false);
+      assert.equal(coord20.getPendingRemoteCount(), 0);
+      assert.equal(getAppliedDocTokens(raUid20)[raDoc20.id], undefined);
+      coord20.dispose();
+      log.push('[PASS] [Unit Test] RA-20. Queue read-back mismatch rejects persistence, rolls back item, and does not acknowledge revision');
+    } finally {
+      storage.verifyDurableReadBackValue = origVerify;
+    }
+
+    // -------------------------------------------------------------------------
+    // RA-21: Acknowledgement storage failure prevents revision acknowledgement and retains payload in durable queue
+    // -------------------------------------------------------------------------
+    const raUid21 = 'uid_ra_21_ack_storage_failure';
+    resetAppliedDocTokensForTests(raUid21);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid21);
+
+    const raDoc21 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra21_op_1',
+      opSeq: 1,
+      updatedAtMs: 41000,
+      payloadChunk: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra21', name: 'Student 21' }] })
+    };
+    const raToken21 = computeChunkRevisionToken(raDoc21);
+
+    const ra21Workspace: any = { students: [] };
+    const coord21 = createSerializedSyncCoordinator({
+      uid: raUid21,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra21Workspace, parsed);
+        return acknowledgeAppliedRemoteRevisions(raUid21, docTokens, ra21Workspace);
+      }
+    });
+
+    __setAcknowledgeStorageFailureForTests(true);
+
+    const outcome21 = await coord21.enqueueRemoteSnapshot(
+      JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra21', name: 'Student 21', updatedAt: 41000 }] }),
+      { [raDoc21.id]: raToken21 }
+    );
+
+    assert.equal(outcome21, false);
+    assert.equal(getAppliedDocTokens(raUid21)[raDoc21.id], undefined);
+    assert.equal(coord21.getPendingRemoteCount(), 1);
+    assert.equal((await loadDurablePendingRemoteQueueAsync(raUid21)).length, 1);
+
+    // Restore ack storage and resume work
+    __setAcknowledgeStorageFailureForTests(false);
+    const resume21Outcome = await coord21.resumePendingWork();
+    assert.equal(resume21Outcome, true);
+    assert.equal(getAppliedDocTokens(raUid21)[raDoc21.id], raToken21);
+    assert.equal(coord21.getPendingRemoteCount(), 0);
+    assert.equal((await loadDurablePendingRemoteQueueAsync(raUid21)).length, 0);
+    coord21.dispose();
+    log.push('[PASS] [Unit Test] RA-21. Acknowledgement storage failure prevents revision acknowledgement and retains payload in durable queue');
+
+    // -------------------------------------------------------------------------
+    // RA-22: Retry after restart without a new cloud snapshot drains queue and synchronizes local workspace
+    // -------------------------------------------------------------------------
+    const raUid22 = 'uid_ra_22_retry_without_snapshot';
+    resetAppliedDocTokensForTests(raUid22);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid22);
+
+    const raDoc22 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra22_op_1',
+      opSeq: 1,
+      updatedAtMs: 42000,
+      payloadChunk: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra22_offline', name: 'Offline Student' }] })
+    };
+    const raToken22 = computeChunkRevisionToken(raDoc22);
+
+    // Initial session: Import fails
+    let failImport22 = true;
+    const ra22Workspace: any = { students: [] };
+    const coord22Session1 = createSerializedSyncCoordinator({
+      uid: raUid22,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        if (failImport22) return false;
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra22Workspace, parsed);
+        return acknowledgeAppliedRemoteRevisions(raUid22, docTokens, ra22Workspace);
+      }
+    });
+
+    await coord22Session1.enqueueRemoteSnapshot(
+      JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_ra22_offline', name: 'Offline Student', updatedAt: 42000 }] }),
+      { [raDoc22.id]: raToken22 }
+    );
+    assert.equal(coord22Session1.getPendingRemoteCount(), 1);
+    coord22Session1.dispose();
+
+    // App restarts: No new Firestore event arrives from network.
+    failImport22 = false;
+    const coord22Session2 = createSerializedSyncCoordinator({
+      uid: raUid22,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra22Workspace, parsed);
+        return acknowledgeAppliedRemoteRevisions(raUid22, docTokens, ra22Workspace);
+      }
+    });
+
+    // Device reopens and immediately calls resumePendingWork()
+    const retry22Outcome = await coord22Session2.resumePendingWork();
+    assert.equal(retry22Outcome, true);
+    assert.equal(ra22Workspace.students.some((s: any) => s.id === 'st_ra22_offline'), true);
+    assert.equal(getAppliedDocTokens(raUid22)[raDoc22.id], raToken22);
+    assert.equal(coord22Session2.getPendingRemoteCount(), 0);
+    assert.equal((await loadDurablePendingRemoteQueueAsync(raUid22)).length, 0);
+    coord22Session2.dispose();
+    log.push('[PASS] [Integration Test] RA-22. Retry after restart without a new cloud snapshot drains queue and synchronizes local workspace');
 
     return { passed: true, log };
   } catch (err: any) {

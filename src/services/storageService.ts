@@ -43,6 +43,13 @@ const LOCALFORAGE_ONLY_HEAVY_KEYS = new Set([
   'dl_local_backup_data'
 ]);
 
+export const isHeavyStorageKey = (key: string): boolean => {
+  if (!key || typeof key !== 'string') return false;
+  if (LOCALFORAGE_ONLY_HEAVY_KEYS.has(key)) return true;
+  if (key.startsWith('gluck_cloud_pending_remote_queue_v2_')) return true;
+  return false;
+};
+
 const MAX_LOCALSTORAGE_MIRROR_BYTES = 512 * 1024; // 512 KB cap per key when localforage is active
 
 export const isQuotaExceededError = (err: unknown): boolean => {
@@ -59,9 +66,18 @@ export const isQuotaExceededError = (err: unknown): boolean => {
 
 export type StorageFailureHook = ((op: 'get' | 'set' | 'remove', key: string) => void) | null;
 let storageFailureHookForTests: StorageFailureHook = null;
+let simulatePrimaryDbForTests = false;
+const simulatedPrimaryDbStore = new Map<string, any>();
 
 export function __setStorageFailureHookForTests(hook: StorageFailureHook): void {
   storageFailureHookForTests = hook;
+}
+
+export function __setSimulatePrimaryDbForTests(enabled: boolean): void {
+  simulatePrimaryDbForTests = enabled;
+  if (!enabled) {
+    simulatedPrimaryDbStore.clear();
+  }
 }
 
 const hasLocalStorageRuntime = (): boolean => {
@@ -80,8 +96,8 @@ export const safeLocalStorageSetItem = (
 ): boolean => {
   if (!hasLocalStorageRuntime()) return false;
 
-  // Skip mirroring massive backup snapshots into 5MB localStorage if already persisted in IndexedDB
-  if (savedInPrimaryDb && (LOCALFORAGE_ONLY_HEAVY_KEYS.has(key) || valStr.length > MAX_LOCALSTORAGE_MIRROR_BYTES)) {
+  // Skip mirroring massive backup snapshots or pending queues into 5MB localStorage if already persisted in IndexedDB
+  if (savedInPrimaryDb && (isHeavyStorageKey(key) || valStr.length > MAX_LOCALSTORAGE_MIRROR_BYTES)) {
     try {
       localStorage.removeItem(key);
     } catch {
@@ -130,7 +146,13 @@ export const storage = {
     }
 
     try {
-      if (isLocalforageSupported) {
+      if (simulatePrimaryDbForTests) {
+        if (simulatedPrimaryDbStore.has(key)) {
+          const val = simulatedPrimaryDbStore.get(key);
+          memoryStore[key] = val;
+          return val;
+        }
+      } else if (isLocalforageSupported) {
         const val = await localforage.getItem<T>(key);
         if (val !== null && val !== undefined) {
           memoryStore[key] = val;
@@ -179,7 +201,10 @@ export const storage = {
     let savedInForage = false;
     let forageError: unknown = null;
     try {
-      if (isLocalforageSupported) {
+      if (simulatePrimaryDbForTests) {
+        simulatedPrimaryDbStore.set(key, value);
+        savedInForage = true;
+      } else if (isLocalforageSupported) {
         await localforage.setItem(key, value);
         savedInForage = true;
       }
@@ -228,7 +253,11 @@ export const storage = {
           storageFailureHookForTests('get', key);
         }
         let verified = false;
-        if (isLocalforageSupported) {
+        if (simulatePrimaryDbForTests) {
+          if (simulatedPrimaryDbStore.has(key)) {
+            verified = true;
+          }
+        } else if (isLocalforageSupported) {
           try {
             const forageVal = await localforage.getItem(key);
             if (forageVal !== null && forageVal !== undefined) {
@@ -250,7 +279,7 @@ export const storage = {
             // Fall through
           }
         }
-        if (!verified && !isLocalforageSupported && !hasLocalStorageRuntime()) {
+        if (!verified && !isLocalforageSupported && !hasLocalStorageRuntime() && !simulatePrimaryDbForTests) {
           verified = memoryStore[key] !== undefined && memoryStore[key] !== null;
         }
         if (!verified) {
@@ -261,6 +290,119 @@ export const storage = {
       }
     }
     return true;
+  },
+
+  async verifyDurableReadBackValue<T>(
+    key: string,
+    expectedValue: T,
+    equalityFn?: (a: T, b: T) => boolean
+  ): Promise<boolean> {
+    await this.flushPendingWrites();
+    try {
+      if (storageFailureHookForTests) {
+        storageFailureHookForTests('get', key);
+      }
+      let found = false;
+      let readVal: any = null;
+
+      if (simulatePrimaryDbForTests) {
+        if (simulatedPrimaryDbStore.has(key)) {
+          readVal = simulatedPrimaryDbStore.get(key);
+          found = true;
+        }
+      } else if (isLocalforageSupported) {
+        try {
+          const forageVal = await localforage.getItem<T>(key);
+          if (forageVal !== null && forageVal !== undefined) {
+            readVal = forageVal;
+            found = true;
+          }
+        } catch (e: any) {
+          if (typeof e?.message === 'string' && e.message.includes('No available storage method')) {
+            isLocalforageSupported = false;
+          }
+        }
+      }
+
+      if (!found && hasLocalStorageRuntime()) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw !== null) {
+            try {
+              readVal = JSON.parse(raw);
+            } catch {
+              readVal = raw;
+            }
+            found = true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!found && !isLocalforageSupported && !hasLocalStorageRuntime() && !simulatePrimaryDbForTests) {
+        if (memoryStore[key] !== undefined && memoryStore[key] !== null) {
+          readVal = memoryStore[key];
+          found = true;
+        }
+      }
+
+      if (!found || readVal === null || readVal === undefined) {
+        return false;
+      }
+
+      if (equalityFn) {
+        return equalityFn(expectedValue, readVal);
+      }
+
+      if (Array.isArray(expectedValue)) {
+        if (!Array.isArray(readVal)) return false;
+        if (expectedValue.length !== readVal.length) return false;
+        return JSON.stringify(expectedValue) === JSON.stringify(readVal);
+      }
+
+      const expStr = typeof expectedValue === 'string' ? expectedValue : JSON.stringify(expectedValue);
+      const actStr = typeof readVal === 'string' ? readVal : JSON.stringify(readVal);
+      return expStr === actStr;
+    } catch {
+      return false;
+    }
+  },
+
+  async verifyDurableRemoved(key: string): Promise<boolean> {
+    await this.flushPendingWrites();
+    try {
+      if (storageFailureHookForTests) {
+        storageFailureHookForTests('get', key);
+      }
+      if (simulatePrimaryDbForTests) {
+        if (simulatedPrimaryDbStore.has(key)) {
+          return false;
+        }
+      } else if (isLocalforageSupported) {
+        try {
+          const forageVal = await localforage.getItem(key);
+          if (forageVal !== null && forageVal !== undefined) {
+            return false;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (hasLocalStorageRuntime()) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw !== null) {
+            return false;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
   },
 
   async removeItem(key: string): Promise<void> {
@@ -274,7 +416,9 @@ export const storage = {
     delete memoryStore[key];
 
     try {
-      if (isLocalforageSupported) {
+      if (simulatePrimaryDbForTests) {
+        simulatedPrimaryDbStore.delete(key);
+      } else if (isLocalforageSupported) {
         await localforage.removeItem(key);
       }
     } catch (e) {

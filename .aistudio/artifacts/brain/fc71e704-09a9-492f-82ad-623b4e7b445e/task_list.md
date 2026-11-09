@@ -1,26 +1,30 @@
-# Task List — Glück Smart Data Cleanup & Lesson Optimization
+# Task List — Glück Cloud Sync Reliability & Android CI Fix
 
-- [x] **1. Architecture & Safeguard Service**
-  - [x] Created `src/services/lessonCleanupService.ts` with 30-day historical retention rules, 14-day future rolling window logic, and 100% financial invariance auditor (`preUnpaidBalancesTotal === postUnpaidBalancesTotal`).
-  - [x] Implemented local JSON archive export (`exportPrunedLessonsBackupJson`) and tombstone tracker (`getPrunedLessonIds`, `addPrunedLessonIds`) to prevent cloud sync resurrection.
+- [x] **1. Android GitHub Actions CI Fix (`.github/workflows/build-apk.yml`)**
+  - [x] Removed dependency on obsolete `android-actions/setup-android@v3` (which was crashing on `sdkmanager "tools"`).
+  - [x] Configured native runner Android SDK paths (`$ANDROID_SDK_ROOT`, `$ANDROID_HOME`, `cmdline-tools/latest/bin`).
+  - [x] Verified installation of `platforms;android-36` and `build-tools;36.0.0`.
+  - [x] Verified `compileSdkVersion = 36` in `android/variables.gradle` and `android/app/build.gradle`.
 
-- [x] **2. Generator & Sync Deduplication Optimization**
-  - [x] Capped future recurring lesson generation loop in `src/context/AppContext.tsx` to 14 days (`ROLLING_FUTURE_WINDOW_DAYS = 14`), eliminating ~2400 bloated recurring placeholders.
-  - [x] Filtered out tombstoned pruned lessons in `initialLessonDeduplication` and `syncLessons` to guarantee pruned records never return from old storage chunks or Firebase caches.
-  - [x] Configured automated daily and on-startup cleanup check in `AppContext.tsx`.
+- [x] **2. Actual Durable Queue Persistence & Read-Back Verification**
+  - [x] Configured `gluck_cloud_pending_remote_queue_v2_` as heavy keys stored exclusively in IndexedDB (`localforage`), bypassing 5MB `localStorage`.
+  - [x] Added `storage.verifyDurableReadBackValue<T>()` and `storage.verifyDurableRemoved()` for verified persistence.
+  - [x] Updated `saveDurablePendingRemoteQueue` to await writes, verify read-back equality, and return boolean persistence status.
+  - [x] Enforced rollback in `enqueueRemoteSnapshot` if durable persistence fails (never falsely claims queued or acknowledges revision).
+  - [x] Enforced verified removal in `drain()` with automatic restoration if removal persistence fails.
+  - [x] Hardened `persistAppliedDocTokensMap()` to return false and reject in-memory poisoning when durable storage fails.
+  - [x] Added `loadDurablePendingRemoteQueueAsync()` with backward compatibility for legacy queues.
 
-- [x] **3. UI & Control Surface**
-  - [x] Built `src/components/SmartDataCleanupCard.tsx` following Glück's minimalist design: unboxed metadata metrics (`·`), financial invariant verification shield, one-click preview modal with sample lessons list, and JSON archive download.
-  - [x] Integrated `SmartDataCleanupCard` into **Smart Backup Center** (`src/components/SmartBackupCenter.tsx`), **Teacher Profile** (`src/components/TeacherProfileSection.tsx`), and **Settings** (`src/components/SettingsView.tsx`).
+- [x] **3. Automated Test Scenarios (`src/tests/cloudSyncReliability.test.ts`)**
+  - [x] `RA-16`: Pending backup >5MB persists durably in IndexedDB without quota failure, bypasses localStorage, and drains cleanly.
+  - [x] `RA-17`: Simulated localStorage `QuotaExceededError` does not break durable queue persistence in IndexedDB.
+  - [x] `RA-18`: IndexedDB write failure aborts queue persistence, rolls back item, and prevents false acknowledgement.
+  - [x] `RA-19`: Process restart after a failed import restores queue from durable storage and resumes cleanly upon reopening.
+  - [x] `RA-20`: Queue read-back mismatch rejects persistence, rolls back item, and does not acknowledge revision.
+  - [x] `RA-21`: Acknowledgement storage failure prevents revision acknowledgement and retains payload in durable queue.
+  - [x] `RA-22`: Retry after restart without a new cloud snapshot drains queue and synchronizes local workspace.
 
-- [x] **4. Verification & Testing**
-  - [x] Verified build with `compile_applet` (Clean compilation).
-  - [x] Verified types and linter with `lint_applet` (`tsc --noEmit` passed with 0 errors).
-  - [x] Verified full production bundle with `npm run build` (Succeeded).
-  - [x] Dev server restarted cleanly on port 3000.
-- [ ] **5. Google Auth & Sync Repair**
-  - [ ] Transition to Native Capacitor Google Sign-In for Android.
-  - [ ] Hardening `executeSafeFirestoreWrite` and sync reports.
-  - [ ] Implementing UID validation in `firestore.rules`.
-  - [ ] Adding Sync Status indicators and Android Keystore tool to Settings.
-  - [ ] Verification across 12 test scenarios.
+- [x] **4. Compilation, Linting & Android Sync**
+  - [x] `compile_applet`: Clean build.
+  - [x] `lint_applet` (`tsc --noEmit`): 0 errors.
+  - [x] `npx cap sync android`: Succeeded in 0.28s.

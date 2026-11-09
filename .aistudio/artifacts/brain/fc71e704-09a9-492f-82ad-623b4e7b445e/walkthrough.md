@@ -1,55 +1,60 @@
-# Glück — Google Cloud Sync Reliability & Cloud-Side Control Walkthrough
+# Glück — Final Sync Durability Audit & Android CI Fix Walkthrough
 
-## Summary of Completed Work
+## Summary of Accomplished Repairs
 
-### 1. Built-in Lernstudio Sets Protection
-- **Permanent Bundled Preservation:** `DEFAULT_LERNSTUDIO_SETS` (297+ built-in sets) are always retained locally and never erased or overwritten during:
-  - Full restore (`restoreCloudWorkspaceData`)
-  - Delta restore (`applyCloudDeltasToLocalState`)
-  - Backup file import (`importBackupFile` in `AppContext.tsx`)
-- **Exclusion from Cloud Uploads:** Built-in sets are strictly filtered out of cloud chunks to prevent bloat and quota exhaustion.
-- **Custom Sets & Tombstones:** Custom sets created by the user are synchronized bidirectionally. Legitimate deletions of custom sets are tracked via tombstones without touching built-in sets.
-
-### 2. Cloud-Side Pause & Generation Marker Mechanism
-- **Persistent Marker Doc:** Created `/user_workspaces/{uid}/categories/sync_control_chunk_0`, which complies with Firestore security rules (`isValidWorkspaceChunk`).
-- **Fail-Safe Check (`getCloudSyncControlState`):** Every device queries this document before attempting auto-push. If the cloud reports `isPaused: true`, all auto-uploads and initial seeding are blocked. If the network or Firestore read fails, it defaults to `{ isPaused: true, isError: true }` (blocking uploads until verified).
-- **Generation Invalidation:** When a workspace is cleared, a new `clearedGeneration` timestamp is issued (`gen_cleared_<timestamp>`). Any reconnecting device with an older generation marker is prevented from uploading or repopulating the cleared cloud database.
-- **Deliberate Manual Reactivation (`reactivateCloudSync`):** Re-enabling synchronization explicitly issues a new generation ID (`gen_<timestamp>`) and unpauses the workspace.
-
-### 3. Reliable Clear Cloud Data
-- **Targeted Cloud-Only Deletion:** Deletes only cloud workspace chunks (primary UID categories and legacy categories) and Relay workspace records without touching local application data or local backups.
-- **Confirmed Deletions Only:** Uses `deleteDoc` and verifies HTTP status `res.ok` on Relay endpoints before counting deletions.
-- **Post-Deletion Verification:** Re-reads the Firestore collection and Relay to confirm the workspace is completely empty (except for the paused `sync_control_chunk_0` marker) before reporting success. Never returns false success.
-
-### 4. Exponential Backoff Bootstrap & Network Resilience
-- **Exponential Backoff:** If the initial cloud read encounters network timeouts or rate limits, it retries up to 5 times (1s, 2s, 4s, 8s, 16s, capped at 30s) instead of treating the error as an empty workspace.
-- **Online Event Listener:** Automatically triggers an immediate retry when the browser/device reconnects to the internet.
-- **Race Condition Prevention:** Auto-push is blocked until `hasCompletedInitialCheckRef.current` is confirmed true.
-
-### 5. Firestore as Primary Source of Truth
-- In `uploadWorkspaceToGoogleCloud`, Firestore chunk writes are executed and confirmed first via `setDoc`.
-- Only after successful Firestore writes are chunks forwarded to the Relay server. Relay HTTP errors are logged without invalidating the confirmed Firestore sync state.
+### Part A: Android GitHub Actions CI Failure Repair (`.github/workflows/build-apk.yml`)
+- **Root Cause:** The previous workflow step invoked `android-actions/setup-android@v3`, which internally called `sdkmanager "tools"`. The legacy `tools` package was deprecated and removed by Google, causing the setup action to crash on modern GitHub Actions `ubuntu-latest` runners.
+- **Repair:**
+  - Replaced `android-actions/setup-android@v3` with direct configuration of the runner's pre-installed Android SDK (`$ANDROID_SDK_ROOT` / `/usr/local/lib/android/sdk`).
+  - Added `$ANDROID_SDK_ROOT/cmdline-tools/latest/bin` and `$ANDROID_SDK_ROOT/platform-tools` to the runner's `$GITHUB_PATH` and configured `$ANDROID_HOME`.
+  - Installed and verified `platforms;android-36` and `build-tools;36.0.0` directly using the runner's modern command-line tools without referencing the obsolete `tools` package.
+  - Verified `compileSdkVersion = 36` in `android/variables.gradle` and `android/app/build.gradle`.
 
 ---
 
-## Verification Results
+### Part B: Actual Durable Queue Persistence & Read-Back Verification
+- **Root Cause in `useGoogleCloudWorkspaceSync.ts`:**
+  - `writeDurableString()` was previously catching `localStorage.setItem` errors and silently falling back to in-memory maps.
+  - Complete workspace backup JSON payloads (up to 25MB) far exceeded the 5MB total `localStorage` quota, causing writes to silently fail.
+  - On process restart, in-memory fallbacks were lost, dropping pending remote work.
+  - `persistAppliedDocTokensMap()` was returning success in environments without durable storage, poisoning revision acknowledgement.
+- **Repair Implemented:**
+  1. **IndexedDB / `localforage` Storage:**
+     - Registered `gluck_cloud_pending_remote_queue_v2_` keys in `storageService.ts` as heavy, localforage-only keys (`isHeavyStorageKey`).
+     - Backed pending remote queue payloads with `storageService.ts` (`localforage` / IndexedDB), protecting `localStorage` from quota exhaustion while supporting up to 25MB payloads.
+  2. **Read-Back Equality Verification:**
+     - Added `storage.verifyDurableReadBackValue<T>(key, expectedValue)` to `storageService.ts`, which flushes pending writes and verifies exact value equality before reporting success.
+     - Added `storage.verifyDurableRemoved(key)` to verify that removed queue items are genuinely expunged from the persistent store.
+  3. **Durability Failure Handling & Zero-Loss Rollback:**
+     - If durable queue persistence fails, `enqueueRemoteSnapshot()` rolls back the item from the queue and returns `false`. It never acknowledges the revision or claims the item is safely queued.
+     - In `drain()`, queue removal is persisted and verified before moving to the next item; if removal persistence fails, the item is restored to the head of the queue.
+  4. **Strict `persistAppliedDocTokensMap`:**
+     - `persistAppliedDocTokensMap(uid, map)` now strictly returns `false` if durable persistence or read-back fails, and does not mutate the in-memory map on failure.
+  5. **Restart & Reconnection Resilience:**
+     - Added `loadDurablePendingRemoteQueueAsync(uid)` with backward-compatible migration from legacy `localStorage` keys into IndexedDB.
+     - On app reopening, `resumePendingWork()` loads persisted pending payloads from IndexedDB and resumes draining without requiring a new Firestore event.
 
-### 1. Test Suite (`npm test` -> `src/tests/cloudSyncReliability.test.ts`)
-All 12 required real-world production code scenarios passed with 0 failures:
-1. `[PASS]` Device A uploads new data; Device B downloads and applies it.
-2. `[PASS]` Device B modifies the same workspace; Device A receives and updates record.
-3. `[PASS]` A deletion on one device propagates correctly to the other device via tombstone.
-4. `[PASS]` A temporary cloud read failure does not trigger an empty-workspace seed.
-5. `[PASS]` Bootstrap retries after a temporary failure using exponential backoff.
-6. `[PASS]` A cleared cloud workspace remains paused across devices via sync_control.
-7. `[PASS]` An offline device cannot repopulate a cleared workspace after reconnecting (Generation mismatch blocked).
-8. `[PASS]` Manual reactivation starts a deliberate new synchronization generation.
-9. `[PASS]` Built-in Lernstudio Sets survive full and delta restores.
-10. `[PASS]` Custom Lernstudio Sets synchronize correctly without uploading built-in sets.
-11. `[PASS]` Clear Cloud Data reports failure when any deletion or verification fails.
-12. `[PASS]` Relay HTTP failures do not produce false synchronization success.
+---
 
-### 2. Compilation and Linting
-- **`compile_applet`:** Build succeeded without errors.
-- **`lint_applet` (`tsc --noEmit`):** Completed with 0 type errors.
-- **Vercel/Node Server Compatibility:** Guarded all `localStorage` calls in `storageService.ts` and normalized `peerjs` imports to prevent server build and runtime errors.
+## Comprehensive Test Results
+
+### 1. New Part 10 Reliability Scenarios (`RA-16` to `RA-22`)
+- `[PASS]` **RA-16:** A pending backup larger than 5MB (5.2MB student payload) persists durably in IndexedDB without quota failure, bypasses `localStorage`, and drains cleanly.
+- `[PASS]` **RA-17:** Simulated `localStorage` `QuotaExceededError` does not break durable queue persistence in IndexedDB.
+- `[PASS]` **RA-18:** IndexedDB write failure aborts queue persistence, rolls back item, and prevents false acknowledgement.
+- `[PASS]` **RA-19:** Process restart after a failed import restores queue from durable storage and resumes cleanly upon reopening.
+- `[PASS]` **RA-20:** Queue read-back mismatch rejects persistence, rolls back item, and does not acknowledge revision.
+- `[PASS]` **RA-21:** Acknowledgement storage failure prevents revision acknowledgement and retains payload in durable queue.
+- `[PASS]` **RA-22:** Retry after restart without a new cloud snapshot drains queue and synchronizes local workspace.
+
+### 2. Full Test Suite Execution (`npm test`)
+All test suites passed with **100% success**:
+- **78/78** Cloud Sync Reliability, Cryptographic Verification & Concurrency tests (`src/tests/cloudSyncReliability.test.ts`)
+- **16/16** Unified Lesson Cycle Numbering tests (`src/tests/lessonCycleNumbering.test.ts`)
+- **7/7** Core tasks 1–7 tests (`src/tests/tasks1to7.test.ts`)
+- **34/34** Homework System Repair scenarios (`src/tests/homeworkSystemRepair.test.ts`)
+
+### 3. Compilation, Linting & Android Sync
+- `compile_applet`: **Build succeeded** (0 errors).
+- `lint_applet`: **$ tsc --noEmit passed** with 0 errors.
+- `npx cap sync android`: **Succeeded** in 0.28s (all web assets and 11 Capacitor plugins synchronized).

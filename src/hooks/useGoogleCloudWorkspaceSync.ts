@@ -13,6 +13,7 @@ import {
   extractDocTokensFromBackupJson,
   setLastCloudSyncTime
 } from '../services/firebaseWorkspaceSync';
+import { storage } from '../services/storageService';
 
 function stripSnapshotTimestamp(jsonStr: string): string {
   return (jsonStr || '')
@@ -145,6 +146,7 @@ function hasLocalStorageRuntime(): boolean {
 
 const inMemoryPendingPushByUid = new Map<string, boolean>();
 const inMemoryDurableStorageFallback = new Map<string, string>();
+const inMemoryDurablePendingQueueByUid = new Map<string, PendingRemoteQueueItem[]>();
 
 function readDurableString(key: string): string | null {
   if (hasLocalStorageRuntime()) {
@@ -209,38 +211,137 @@ export interface PendingRemoteQueueItem {
   attemptCount: number;
 }
 
-const PENDING_REMOTE_QUEUE_KEY_PREFIX = 'gluck_cloud_pending_remote_queue_v2_';
+export const PENDING_REMOTE_QUEUE_KEY_PREFIX = 'gluck_cloud_pending_remote_queue_v2_';
 
 export function loadDurablePendingRemoteQueue(uid: string): PendingRemoteQueueItem[] {
   if (!uid) return [];
-  const raw = readDurableString(`${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`);
+  const inMem = inMemoryDurablePendingQueueByUid.get(uid);
+  if (inMem && Array.isArray(inMem)) {
+    return inMem.map((item) => ({ ...item }));
+  }
+
+  const key = `${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`;
+  const raw = readDurableString(key);
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
+    const valid = parsed.filter(
       (item: any) =>
         item &&
         typeof item === 'object' &&
         typeof item.remoteJsonStr === 'string' &&
         item.remoteJsonStr.length > 0
     );
+    inMemoryDurablePendingQueueByUid.set(uid, valid);
+    return valid.map((item: any) => ({ ...item }));
   } catch {
     return [];
   }
 }
 
-export function saveDurablePendingRemoteQueue(
+export async function loadDurablePendingRemoteQueueAsync(
+  uid: string
+): Promise<PendingRemoteQueueItem[]> {
+  if (!uid) return [];
+  const key = `${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`;
+  try {
+    let raw = await storage.getItem<any>(key);
+
+    // Backward compatibility: If not in storageService yet, check legacy localStorage
+    if (!raw && hasLocalStorageRuntime()) {
+      try {
+        const legacyRaw = localStorage.getItem(key);
+        if (legacyRaw) {
+          raw = JSON.parse(legacyRaw);
+          if (raw) {
+            await storage.setItem(key, raw);
+            try {
+              localStorage.removeItem(key);
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!raw) {
+      inMemoryDurablePendingQueueByUid.set(uid, []);
+      return [];
+    }
+
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(parsed)) {
+      inMemoryDurablePendingQueueByUid.set(uid, []);
+      return [];
+    }
+    const filtered: PendingRemoteQueueItem[] = parsed.filter(
+      (item: any) =>
+        item &&
+        typeof item === 'object' &&
+        typeof item.remoteJsonStr === 'string' &&
+        item.remoteJsonStr.length > 0
+    );
+    inMemoryDurablePendingQueueByUid.set(uid, filtered);
+    return filtered.map((item) => ({ ...item }));
+  } catch (err) {
+    console.warn(`[loadDurablePendingRemoteQueueAsync] Failed to load queue for ${key}:`, err);
+    return loadDurablePendingRemoteQueue(uid);
+  }
+}
+
+export async function saveDurablePendingRemoteQueue(
   uid: string,
   queue: PendingRemoteQueueItem[]
-): void {
-  if (!uid) return;
+): Promise<boolean> {
+  if (!uid) return false;
   const key = `${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`;
   if (!Array.isArray(queue) || queue.length === 0) {
-    removeDurableString(key);
-    return;
+    try {
+      await storage.removeItem(key);
+      const isRemoved = await storage.verifyDurableRemoved(key);
+      if (!isRemoved) {
+        return false;
+      }
+      inMemoryDurablePendingQueueByUid.delete(uid);
+      inMemoryDurableStorageFallback.delete(key);
+      if (hasLocalStorageRuntime()) {
+        try {
+          localStorage.removeItem(key);
+        } catch {
+          // ignore
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
-  writeDurableString(key, JSON.stringify(queue));
+
+  try {
+    // 1. Persist pending remote queue payloads using existing IndexedDB/localforage-backed storageService
+    await storage.setItem(key, queue);
+
+    // 2. Await writes and verify actual read-back equality before reporting persistence success
+    const verified = await storage.verifyDurableReadBackValue(key, queue);
+    if (!verified) {
+      console.warn(`[saveDurablePendingRemoteQueue] Read-back verification failed for ${key}`);
+      return false;
+    }
+
+    inMemoryDurablePendingQueueByUid.set(
+      uid,
+      queue.map((item) => ({ ...item }))
+    );
+    inMemoryDurableStorageFallback.set(key, JSON.stringify(queue));
+    return true;
+  } catch (err) {
+    console.warn(`[saveDurablePendingRemoteQueue] Failed to persist queue for ${key}:`, err);
+    return false;
+  }
 }
 
 function areDocTokensEqual(
@@ -257,14 +358,17 @@ function areDocTokensEqual(
   return true;
 }
 
-export function enqueueDurablePendingRemoteItem(
+export async function enqueueDurablePendingRemoteItem(
   uid: string,
   remoteJsonStr: string,
   docTokens?: Record<string, string>
-): PendingRemoteQueueItem {
+): Promise<PendingRemoteQueueItem | null> {
+  if (!uid || !remoteJsonStr) return null;
   const extracted = extractDocTokensFromBackupJson(remoteJsonStr);
   const effectiveTokens = docTokens || extracted.docTokens;
-  const queue = loadDurablePendingRemoteQueue(uid);
+
+  const inMem = inMemoryDurablePendingQueueByUid.get(uid);
+  const queue = inMem ? [...inMem] : await loadDurablePendingRemoteQueueAsync(uid);
   const last = queue.length > 0 ? queue[queue.length - 1] : null;
   if (
     last &&
@@ -274,8 +378,9 @@ export function enqueueDurablePendingRemoteItem(
     if (effectiveTokens) {
       last.docTokens = { ...(last.docTokens || {}), ...effectiveTokens };
     }
-    saveDurablePendingRemoteQueue(uid, queue);
-    return last;
+    inMemoryDurablePendingQueueByUid.set(uid, queue);
+    const saved = await saveDurablePendingRemoteQueue(uid, queue);
+    return saved ? last : null;
   }
   const newItem: PendingRemoteQueueItem = {
     id: `rem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -285,20 +390,56 @@ export function enqueueDurablePendingRemoteItem(
     attemptCount: 0
   };
   queue.push(newItem);
-  saveDurablePendingRemoteQueue(uid, queue);
+  inMemoryDurablePendingQueueByUid.set(uid, queue);
+  const saved = await saveDurablePendingRemoteQueue(uid, queue);
+  if (!saved) {
+    inMemoryDurablePendingQueueByUid.set(
+      uid,
+      queue.filter((item) => item.id !== newItem.id)
+    );
+    return null;
+  }
   return newItem;
 }
 
-export function removeDurablePendingRemoteItem(uid: string, itemId: string): void {
-  if (!uid || !itemId) return;
-  const queue = loadDurablePendingRemoteQueue(uid);
+export async function removeDurablePendingRemoteItem(
+  uid: string,
+  itemId: string
+): Promise<boolean> {
+  if (!uid || !itemId) return false;
+  const queue = await loadDurablePendingRemoteQueueAsync(uid);
   const next = queue.filter((item) => item.id !== itemId);
-  saveDurablePendingRemoteQueue(uid, next);
+  return await saveDurablePendingRemoteQueue(uid, next);
 }
 
 export function clearDurablePendingRemoteQueueForTests(uid: string): void {
   if (!uid) return;
-  removeDurableString(`${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`);
+  const key = `${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`;
+  inMemoryDurablePendingQueueByUid.delete(uid);
+  inMemoryDurableStorageFallback.delete(key);
+  storage.removeItem(key).catch(() => {});
+  if (hasLocalStorageRuntime()) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Ignore
+    }
+  }
+}
+
+export async function clearDurablePendingRemoteQueueForTestsAsync(uid: string): Promise<void> {
+  if (!uid) return;
+  const key = `${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`;
+  inMemoryDurablePendingQueueByUid.delete(uid);
+  inMemoryDurableStorageFallback.delete(key);
+  await storage.removeItem(key);
+  if (hasLocalStorageRuntime()) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Ignore
+    }
+  }
 }
 
 export interface SerializedSyncCoordinatorOptions {
@@ -356,10 +497,11 @@ export function createSerializedSyncCoordinator(
   let activeDrainPromise: Promise<boolean> | null = null;
   let retryTimerId: any = null;
 
-  const persistQueueIfNeeded = () => {
+  const persistQueueIfNeeded = async (): Promise<boolean> => {
     if (uid) {
-      saveDurablePendingRemoteQueue(uid, pendingRemoteQueue);
+      return await saveDurablePendingRemoteQueue(uid, pendingRemoteQueue);
     }
+    return true;
   };
 
   const clearRetryTimer = () => {
@@ -419,12 +561,20 @@ export function createSerializedSyncCoordinator(
               if (idx !== -1) {
                 pendingRemoteQueue.splice(idx, 1);
               }
-              persistQueueIfNeeded();
+              const removalPersisted = await persistQueueIfNeeded();
+              if (!removalPersisted) {
+                // If durable removal fails, restore the item to queue so it is not lost or corrupt
+                if (idx !== -1) {
+                  pendingRemoteQueue.splice(idx, 0, headItem);
+                }
+                lastOutcome = false;
+                break;
+              }
               continue;
             } else {
               lastOutcome = false;
               headItem.attemptCount += 1;
-              persistQueueIfNeeded();
+              await persistQueueIfNeeded();
 
               // Do NOT allow a failed remote import to permanently block a pending local push
               if (!isDisposed && pendingLocalPush) {
@@ -474,11 +624,11 @@ export function createSerializedSyncCoordinator(
   };
 
   return {
-    enqueueRemoteSnapshot(
+    async enqueueRemoteSnapshot(
       remoteJsonStr: string,
       docTokens?: Record<string, string>
     ): Promise<boolean> {
-      if (isDisposed || !remoteJsonStr) return Promise.resolve(false);
+      if (isDisposed || !remoteJsonStr) return false;
       const extracted = extractDocTokensFromBackupJson(remoteJsonStr);
       const effectiveTokens = docTokens || extracted.docTokens;
 
@@ -493,17 +643,30 @@ export function createSerializedSyncCoordinator(
           (effectiveTokens && areDocTokensEqual(lastQueued.docTokens, effectiveTokens)));
 
       if (!isDuplicateOfTail) {
-        pendingRemoteQueue.push({
+        const newItem: PendingRemoteQueueItem = {
           id: `rem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           remoteJsonStr,
           docTokens: effectiveTokens,
           enqueuedAtMs: Date.now(),
           attemptCount: 0
-        });
-        persistQueueIfNeeded();
+        };
+        pendingRemoteQueue.push(newItem);
+        const persisted = await persistQueueIfNeeded();
+        if (!persisted) {
+          const idx = pendingRemoteQueue.findIndex((item) => item.id === newItem.id);
+          if (idx !== -1) {
+            pendingRemoteQueue.splice(idx, 1);
+          }
+          return false;
+        }
       } else if (lastQueued && effectiveTokens) {
+        const prevTokens = lastQueued.docTokens;
         lastQueued.docTokens = { ...(lastQueued.docTokens || {}), ...effectiveTokens };
-        persistQueueIfNeeded();
+        const persisted = await persistQueueIfNeeded();
+        if (!persisted) {
+          lastQueued.docTokens = prevTokens;
+          return false;
+        }
       }
 
       return drain();
@@ -516,10 +679,10 @@ export function createSerializedSyncCoordinator(
       }
       return drain();
     },
-    resumePendingWork(): Promise<boolean> {
-      if (isDisposed) return Promise.resolve(false);
+    async resumePendingWork(): Promise<boolean> {
+      if (isDisposed) return false;
       if (uid) {
-        const persisted = loadDurablePendingRemoteQueue(uid);
+        const persisted = await loadDurablePendingRemoteQueueAsync(uid);
         for (const item of persisted) {
           const exists = pendingRemoteQueue.some(
             (existing) =>
@@ -534,7 +697,7 @@ export function createSerializedSyncCoordinator(
         }
       }
       if (pendingRemoteQueue.length === 0 && !pendingLocalPush) {
-        return Promise.resolve(true);
+        return true;
       }
       return drain();
     },
@@ -801,7 +964,8 @@ export function useGoogleCloudWorkspaceSync(): void {
         }
 
         // First: if there are unacknowledged remote revisions persisted from a prior session/crash, drain them now
-        if (loadDurablePendingRemoteQueue(uid).length > 0) {
+        const persistedAtStart = await loadDurablePendingRemoteQueueAsync(uid);
+        if (persistedAtStart.length > 0) {
           await coordinator.resumePendingWork();
         }
 
@@ -852,24 +1016,29 @@ export function useGoogleCloudWorkspaceSync(): void {
 
         if (remoteHasActualData && !localHasData && cloudRes.backupJsonStr) {
           // Fresh device: persist in durable queue first, then import, verify, and acknowledge
-          const queuedItem = enqueueDurablePendingRemoteItem(
+          const queuedItem = await enqueueDurablePendingRemoteItem(
             uid,
             cloudRes.backupJsonStr,
             cloudRes.docTokens
           );
-          const success = await applyRemoteSnapshotPass(
-            cloudRes.backupJsonStr,
-            cloudRes.docTokens
-          );
-          if (success) {
-            removeDurablePendingRemoteItem(uid, queuedItem.id);
-            try {
-              localStorage.setItem('dl_setup_completed', 'true');
-              window.dispatchEvent(new CustomEvent('close-setup-wizard'));
-            } catch {}
-          } else {
+          if (!queuedItem) {
             finalStatus = 'error';
-            finalError = 'تعذر استيراد البيانات السحابية.';
+            finalError = 'تعذر حفظ البيانات في التخزين الدائم.';
+          } else {
+            const success = await applyRemoteSnapshotPass(
+              cloudRes.backupJsonStr,
+              cloudRes.docTokens
+            );
+            if (success) {
+              await removeDurablePendingRemoteItem(uid, queuedItem.id);
+              try {
+                localStorage.setItem('dl_setup_completed', 'true');
+                window.dispatchEvent(new CustomEvent('close-setup-wizard'));
+              } catch {}
+            } else {
+              finalStatus = 'error';
+              finalError = 'تعذر استيراد البيانات السحابية.';
+            }
           }
         } else if (!remoteHasActualData && localHasData && !isFirestoreWriteQuotaExhaustedToday()) {
           // Cloud is genuinely verified as completely empty and local has data: seed cloud once
@@ -883,30 +1052,35 @@ export function useGoogleCloudWorkspaceSync(): void {
           }
         } else if (localHasData && remoteHasActualData && cloudRes.backupJsonStr) {
           // Both have data: persist in durable queue first, perform two-way merge, verify, and acknowledge
-          const queuedItem = enqueueDurablePendingRemoteItem(
+          const queuedItem = await enqueueDurablePendingRemoteItem(
             uid,
             cloudRes.backupJsonStr,
             cloudRes.docTokens
           );
-          const success = await applyRemoteSnapshotPass(
-            cloudRes.backupJsonStr,
-            cloudRes.docTokens
-          );
-          if (!success) {
+          if (!queuedItem) {
             finalStatus = 'error';
-            finalError = 'تعذر دمج البيانات السحابية.';
+            finalError = 'تعذر حفظ البيانات في التخزين الدائم.';
           } else {
-            removeDurablePendingRemoteItem(uid, queuedItem.id);
-            if (!isFirestoreWriteQuotaExhaustedToday()) {
-              const mergedSnapStr = await performBackupRef.current();
-              const uploadRes = await uploadWorkspaceToGoogleCloud(mergedSnapStr);
-              if (uploadRes.success) {
-                lastUploadedSnapshotRef.current = stripSnapshotTimestamp(mergedSnapStr);
-                syncBaselineAfterRemoteImportRef.current = true;
-                clearPendingLocalPushFlag(uid);
-              } else {
-                finalStatus = 'error';
-                finalError = uploadRes.error;
+            const success = await applyRemoteSnapshotPass(
+              cloudRes.backupJsonStr,
+              cloudRes.docTokens
+            );
+            if (!success) {
+              finalStatus = 'error';
+              finalError = 'تعذر دمج البيانات السحابية.';
+            } else {
+              await removeDurablePendingRemoteItem(uid, queuedItem.id);
+              if (!isFirestoreWriteQuotaExhaustedToday()) {
+                const mergedSnapStr = await performBackupRef.current();
+                const uploadRes = await uploadWorkspaceToGoogleCloud(mergedSnapStr);
+                if (uploadRes.success) {
+                  lastUploadedSnapshotRef.current = stripSnapshotTimestamp(mergedSnapStr);
+                  syncBaselineAfterRemoteImportRef.current = true;
+                  clearPendingLocalPushFlag(uid);
+                } else {
+                  finalStatus = 'error';
+                  finalError = uploadRes.error;
+                }
               }
             }
           }

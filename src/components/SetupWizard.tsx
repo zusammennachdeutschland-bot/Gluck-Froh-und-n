@@ -165,7 +165,7 @@ export const SetupWizard: React.FC = () => {
       if (remoteHasActualData && cloudRes.backupJsonStr) {
         const uid = cloudRes.workspaceId || user?.uid || '';
         const queuedItem = uid
-          ? enqueueDurablePendingRemoteItem(uid, cloudRes.backupJsonStr, cloudRes.docTokens)
+          ? await enqueueDurablePendingRemoteItem(uid, cloudRes.backupJsonStr, cloudRes.docTokens)
           : null;
         const success = await importBackupFile(cloudRes.backupJsonStr);
         if (success) {
@@ -176,7 +176,7 @@ export const SetupWizard: React.FC = () => {
             acknowledgeAppliedRemoteRevisions(uid, cloudRes.docTokens, postSnap);
           if (ackOk) {
             if (uid && queuedItem) {
-              removeDurablePendingRemoteItem(uid, queuedItem.id);
+              await removeDurablePendingRemoteItem(uid, queuedItem.id);
             }
             localStorage.setItem('dl_setup_completed', 'true');
             setIsOpen(false);
