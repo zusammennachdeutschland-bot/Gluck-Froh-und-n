@@ -45,7 +45,20 @@ import { autoSyncEngine } from '../services/sync/autoSyncEngine';
 import { syncHistoryService } from '../services/sync/syncHistoryService';
 import { syncEventQueue } from '../services/sync/syncEventQueue';
 import { applyRestoreSyncSafeguards } from '../services/sync/backupSafetyService';
-import { isAssignmentDeletedLocally, markAssignmentDeletedLocally } from '../shared/homeworkStorageSync';
+import {
+  isAssignmentDeletedLocally,
+  markAssignmentDeletedLocally,
+  getLocalAssignments,
+  getLocalSubmissions,
+  writeLocalAssignmentsForScope,
+  writeLocalSubmissionsForScope,
+  getAssignmentsStorageKey,
+  getSubmissionsStorageKey,
+  getCurrentHomeworkOwnerUid,
+  getCurrentHomeworkOwnerEmail,
+  canAccountClaimLegacyHomework,
+  sanitizeDocId
+} from '../shared/homeworkStorageSync';
 import { SyncStateMetadata, PairedPeer, DevicePresenceState, SyncConnectionState } from '../types';
 
 import { 
@@ -4395,38 +4408,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return filtered;
     });
 
-    // Clean dependent homework assignments & submissions in localStorage
+    // Clean dependent homework assignments & submissions in UID-scoped localStorage
     try {
-      const rawHw = localStorage.getItem('glueck_hw_assignments_v2');
-      if (rawHw) {
-        const parsedHw = JSON.parse(rawHw);
-        if (Array.isArray(parsedHw)) {
-          const filteredHw = parsedHw.filter((hw: any) => {
-            if (!hw || !hw.id) return false;
-            const grpId = (hw.groupId || '').trim();
-            const stId = (hw.studentId || '').trim();
-            const lesId = (hw.lessonId || '').trim();
-            return (!grpId || !purgedGroupIds.has(grpId)) && (!stId || !purgedStudentIds.has(stId)) && (!lesId || !purgedLessonIds.has(lesId));
-          });
-          if (filteredHw.length !== parsedHw.length) {
-            storage.setItem('glueck_hw_assignments_v2', filteredHw);
-          }
+      const parsedHw = getLocalAssignments();
+      if (Array.isArray(parsedHw) && parsedHw.length > 0) {
+        const filteredHw = parsedHw.filter((hw: any) => {
+          if (!hw || !hw.id) return false;
+          const grpId = (hw.groupId || '').trim();
+          const stId = (hw.studentId || '').trim();
+          const lesId = (hw.lessonId || '').trim();
+          return (!grpId || !purgedGroupIds.has(grpId)) && (!stId || !purgedStudentIds.has(stId)) && (!lesId || !purgedLessonIds.has(lesId));
+        });
+        if (filteredHw.length !== parsedHw.length) {
+          writeLocalAssignmentsForScope(filteredHw);
+          storage.setItem(getAssignmentsStorageKey(), filteredHw);
         }
       }
-      const rawSub = localStorage.getItem('glueck_hw_submissions_v2');
-      if (rawSub) {
-        const parsedSub = JSON.parse(rawSub);
-        if (Array.isArray(parsedSub)) {
-          const filteredSub = parsedSub.filter((sub: any) => {
-            if (!sub || !sub.id) return false;
-            const grpId = (sub.groupId || '').trim();
-            const stId = (sub.studentId || '').trim();
-            const lesId = (sub.lessonId || '').trim();
-            return (!grpId || !purgedGroupIds.has(grpId)) && (!stId || !purgedStudentIds.has(stId)) && (!lesId || !purgedLessonIds.has(lesId));
-          });
-          if (filteredSub.length !== parsedSub.length) {
-            storage.setItem('glueck_hw_submissions_v2', filteredSub);
-          }
+      const parsedSub = getLocalSubmissions();
+      if (Array.isArray(parsedSub) && parsedSub.length > 0) {
+        const filteredSub = parsedSub.filter((sub: any) => {
+          if (!sub || !sub.id) return false;
+          const grpId = (sub.groupId || '').trim();
+          const stId = (sub.studentId || '').trim();
+          const lesId = (sub.lessonId || '').trim();
+          return (!grpId || !purgedGroupIds.has(grpId)) && (!stId || !purgedStudentIds.has(stId)) && (!lesId || !purgedLessonIds.has(lesId));
+        });
+        if (filteredSub.length !== parsedSub.length) {
+          writeLocalSubmissionsForScope(filteredSub);
+          storage.setItem(getSubmissionsStorageKey(), filteredSub);
         }
       }
     } catch {}
@@ -6415,29 +6424,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // BACKUP & SYNC VERIFICATION SYSTEM
   const performBackup = async (): Promise<string> => {
-    const hwAssignments = (() => {
-      try {
-        const raw = localStorage.getItem('glueck_hw_assignments_v2');
-        const parsed = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed)
-          ? parsed.filter((hw: any) => hw && hw.id && !hw.deleted && !isAssignmentDeletedLocally(hw.id))
-          : [];
-      } catch {
-        return [];
-      }
-    })();
-
-    const hwSubmissions = (() => {
-      try {
-        const raw = localStorage.getItem('glueck_hw_submissions_v2');
-        const parsed = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed)
-          ? parsed.filter((sub: any) => sub && sub.assignmentId && !isAssignmentDeletedLocally(sub.assignmentId))
-          : [];
-      } catch {
-        return [];
-      }
-    })();
+    const hwAssignments = getLocalAssignments();
+    const hwSubmissions = getLocalSubmissions();
 
     const pickerNames = (() => {
       try {
@@ -6850,32 +6838,78 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await writeAndTrack('dl_lernstudio_sets', finalSets);
       }
       if (hasBackupSection(parsed, 'homeworkAssignments') && data.homeworkAssignments) {
-        const localHw = (() => {
-          try {
-            const raw = localStorage.getItem('glueck_hw_assignments_v2');
-            return raw ? JSON.parse(raw) : [];
-          } catch { return []; }
-        })();
-        const mergedHw = mergeEntities(localHw, data.homeworkAssignments, {
+        const activeUid = getCurrentHomeworkOwnerUid();
+        const activeEmail = getCurrentHomeworkOwnerEmail();
+        const localHw = getLocalAssignments();
+        const ownedGroupIds = new Set<string>(
+          (hasGroups ? (data.groups || []) : groups)
+            .map((g: any) => String(g?.id || '').trim())
+            .filter(Boolean)
+        );
+        const ownedSetIds = new Set<string>(
+          (hasBackupSection(parsed, 'lernstudioSets') && Array.isArray(data.lernstudioSets)
+            ? data.lernstudioSets
+            : lernstudioSets
+          )
+            .map((s: any) => String(s?.id || '').trim())
+            .filter(Boolean)
+        );
+        const ownedStudentIds = new Set<string>(
+          (hasStudents ? (data.students || []) : students)
+            .map((st: any) => String(st?.id || '').trim())
+            .filter(Boolean)
+        );
+
+        const incomingHw = (Array.isArray(data.homeworkAssignments) ? data.homeworkAssignments : []).filter((hw: any) => {
+          if (!hw || !hw.id) return false;
+          if (activeUid) {
+            const claim = canAccountClaimLegacyHomework(hw, {
+              uid: activeUid,
+              email: activeEmail,
+              ownedGroupIds,
+              ownedSetIds,
+              ownedStudentIds
+            });
+            return claim.provableForTarget && !claim.belongsToDifferentAccount;
+          }
+          return !hw.ownerUid;
+        });
+        const mergedHw = mergeEntities(localHw, incomingHw, {
           entityTypeName: 'homeworkAssignments',
           purgedRecords: activePurged
-        }).merged.filter((hw: any) => hw && hw.id && !hw.deleted && !isAssignmentDeletedLocally(hw.id));
-        localStorage.setItem('glueck_hw_assignments_v2', JSON.stringify(mergedHw));
-        await writeAndTrack('glueck_hw_assignments_v2', mergedHw);
+        }).merged
+          .filter((hw: any) => hw && hw.id && !hw.deleted && !isAssignmentDeletedLocally(hw.id))
+          .map((hw: any) => (activeUid ? { ...hw, ownerUid: activeUid } : hw));
+        writeLocalAssignmentsForScope(mergedHw);
+        await writeAndTrack(getAssignmentsStorageKey(), mergedHw);
       }
       if (hasBackupSection(parsed, 'homeworkSubmissions') && data.homeworkSubmissions) {
-        const localSub = (() => {
-          try {
-            const raw = localStorage.getItem('glueck_hw_submissions_v2');
-            return raw ? JSON.parse(raw) : [];
-          } catch { return []; }
-        })();
-        const mergedSub = mergeEntities(localSub, data.homeworkSubmissions, {
+        const activeUid = getCurrentHomeworkOwnerUid();
+        const localSub = getLocalSubmissions();
+        const ownedHwIds = new Set<string>(
+          getLocalAssignments().flatMap((a) => [a.id, sanitizeDocId(a.id)])
+        );
+        const incomingSub = (Array.isArray(data.homeworkSubmissions) ? data.homeworkSubmissions : []).filter((sub: any) => {
+          if (!sub || !sub.assignmentId) return false;
+          const subOwner = String(sub.ownerUid || '').trim();
+          if (activeUid) {
+            if (subOwner && subOwner !== activeUid && !subOwner.startsWith('legacy_unclaimed_')) {
+              return false;
+            }
+            const belongsToOwnedHw =
+              ownedHwIds.has(sub.assignmentId) || ownedHwIds.has(sanitizeDocId(sub.assignmentId));
+            return subOwner === activeUid || belongsToOwnedHw;
+          }
+          return !subOwner;
+        });
+        const mergedSub = mergeEntities(localSub, incomingSub, {
           entityTypeName: 'homeworkSubmissions',
           purgedRecords: activePurged
-        }).merged.filter((sub: any) => sub && sub.assignmentId && !isAssignmentDeletedLocally(sub.assignmentId));
-        localStorage.setItem('glueck_hw_submissions_v2', JSON.stringify(mergedSub));
-        await writeAndTrack('glueck_hw_submissions_v2', mergedSub);
+        }).merged
+          .filter((sub: any) => sub && sub.assignmentId && !isAssignmentDeletedLocally(sub.assignmentId))
+          .map((sub: any) => (activeUid ? { ...sub, ownerUid: activeUid } : sub));
+        writeLocalSubmissionsForScope(mergedSub);
+        await writeAndTrack(getSubmissionsStorageKey(), mergedSub);
       }
       if (hasBackupSection(parsed, 'pickerNames') && data.pickerNames) {
         const localPicker = (() => {
@@ -6971,8 +7005,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         ? detail.remainingSubmissions
         : [];
 
-      storage.setItem('glueck_hw_assignments_v2', remainingAssignments).catch(() => {});
-      storage.setItem('glueck_hw_submissions_v2', remainingSubmissions).catch(() => {});
+      storage.setItem(getAssignmentsStorageKey(), remainingAssignments).catch(() => {});
+      storage.setItem(getSubmissionsStorageKey(), remainingSubmissions).catch(() => {});
 
       const newTombstone: PurgedRecordTombstone = {
         id: assignmentId,

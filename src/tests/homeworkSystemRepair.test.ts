@@ -1,5 +1,41 @@
 import assert from 'node:assert/strict';
-import expressApp, { resetHomeworkStoresForTesting } from '../api/expressApp';
+import crypto from 'node:crypto';
+import expressApp, {
+  resetHomeworkStoresForTesting,
+  setGooglePublicCertsCacheForTesting
+} from '../api/expressApp';
+
+const repairRsaKeyPair = crypto.generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+});
+
+setGooglePublicCertsCacheForTesting(
+  { valid_test_kid_repair: repairRsaKeyPair.publicKey },
+  Date.now() + 86400000
+);
+
+function makeRepairTestBearerToken(uid: string): string {
+  const header = { alg: 'RS256', kid: 'valid_test_kid_repair', typ: 'JWT' };
+  const nowSec = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: 'https://securetoken.google.com/glueck-c8621',
+    aud: 'glueck-c8621',
+    sub: uid,
+    iat: nowSec - 10,
+    auth_time: nowSec - 10,
+    exp: nowSec + 3600
+  };
+  const b64Header = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const b64Payload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const unsigned = `${b64Header}.${b64Payload}`;
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(unsigned);
+  const signature = signer.sign(repairRsaKeyPair.privateKey, 'base64url');
+  return `${unsigned}.${signature}`;
+}
+
 import { HomeworkAssignment, HomeworkSubmission } from '../shared/homeworkTypes';
 import {
   resolveAssignmentAudienceMode,
@@ -18,6 +54,7 @@ import {
   flushPendingHomeworkCloudWrites,
   getPendingHomeworkSyncCount,
   getHomeworkSummaryStats,
+  getSubmissionsStorageKey,
   __setHomeworkSyncTransportForTests
 } from '../shared/homeworkStorageSync';
 
@@ -1023,7 +1060,7 @@ async function runTests() {
     assert.equal(legacyGroupHw.audienceMode, 'group');
 
     mockStorage.setItem(
-      'glueck_hw_submissions_v2',
+      getSubmissionsStorageKey(),
       JSON.stringify([
         makeSubmission({
           id: 'legacy-sub-1',
@@ -1080,13 +1117,17 @@ async function runTests() {
       const port = typeof addr === 'object' && addr ? addr.port : 0;
       const baseUrl = `http://127.0.0.1:${port}`;
 
-      // Create group assignment on Express API
+      // Create group assignment on Express API (requires ownerUid for account isolation)
       const createRes = await fetch(`${baseUrl}/api/teacher/assignments`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${makeRepairTestBearerToken('teacher-uid-33')}`
+        },
         body: JSON.stringify(
           makeAssignment({
             id: 'api-grp-hw',
+            ownerUid: 'teacher-uid-33',
             title: 'واجب جروب عبر السيرفر',
             audienceMode: 'group',
             groupId: 'grp-1',
@@ -1136,7 +1177,7 @@ async function runTests() {
   await runScenario(34, 'Homework monitoring badge stats return 0 when no active assignments exist even if orphaned submissions are present', async () => {
     // 5 orphaned submissions exist in storage, but 0 active assignments exist
     mockStorage.setItem(
-      'glueck_hw_submissions_v2',
+      getSubmissionsStorageKey(),
       JSON.stringify([
         makeSubmission({ id: 'orphan-1', assignmentId: 'old-deleted-hw-1', studentName: 'طالب 1', status: 'in_progress', completedAt: '' }),
         makeSubmission({ id: 'orphan-2', assignmentId: 'old-deleted-hw-1', studentName: 'طالب 2', status: 'completed' }),

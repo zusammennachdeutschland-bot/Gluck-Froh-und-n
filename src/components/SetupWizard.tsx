@@ -201,6 +201,7 @@ export const SetupWizard: React.FC = () => {
   };
 
   const handleGoogleSetupSignIn = async () => {
+    if (isGoogleSigningIn) return;
     setIsGoogleSigningIn(true);
     setGoogleSignInError(null);
     setShowUnauthorizedDomainHelper(false);
@@ -209,14 +210,27 @@ export const SetupWizard: React.FC = () => {
       if (user) {
         await applySignedInCloudUser(user);
       }
+      // If user is null, user cancelled account selection; return quietly to unchanged screen
     } catch (err: any) {
-      const code = err?.code || '';
-      const msg = err?.message || String(err);
-      if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
+      const code = String(err?.code || '');
+      const msg = String(err?.message || err || '');
+      const isNative =
+        typeof window !== 'undefined' &&
+        ((window as any).Capacitor?.isNativePlatform?.() ||
+          window.location?.protocol === 'capacitor:' ||
+          window.location?.protocol === 'file:');
+
+      if (!isNative && (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain'))) {
         setShowUnauthorizedDomainHelper(true);
         setGoogleSignInError(null);
+      } else if (code === 'NO_GOOGLE_ACCOUNT') {
+        setGoogleSignInError(
+          'لا يوجد حساب Google مسجل على هذا الهاتف حالياً، أو يلزم تفعيل بصمة شهادة التطبيق (SHA-1) في Firebase.'
+        );
+      } else if (code === 'auth/network-request-failed' || msg.toLowerCase().includes('network')) {
+        setGoogleSignInError('تعذر الاتصال بالإنترنت لإتمام تسجيل الدخول. يرجى التحقق من الشبكة.');
       } else {
-        setGoogleSignInError(msg || 'Google sign-in failed');
+        setGoogleSignInError('تعذر إتمام تسجيل الدخول بحساب Google حالياً. يرجى المحاولة مرة أخرى.');
       }
     } finally {
       setIsGoogleSigningIn(false);

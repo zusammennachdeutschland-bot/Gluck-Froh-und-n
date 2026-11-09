@@ -236,6 +236,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
   };
 
   const handleGoogleSignIn = async () => {
+    if (actionLoading !== null) return;
     setActionLoading('login');
     setFeedbackMsg(null);
     setShowUnauthorizedDomainHelper(false);
@@ -244,30 +245,44 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
       if (user) {
         await executePostLoginSync(user);
       }
+      // If user is null, the user cancelled the native account chooser or popup; return quietly to unchanged login state
     } catch (err: any) {
-      const code = err?.code || '';
-      const msg = err?.message || String(err);
-      if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
+      const code = String(err?.code || '');
+      const msg = String(err?.message || err || '');
+      const isNative =
+        typeof window !== 'undefined' &&
+        ((window as any).Capacitor?.isNativePlatform?.() ||
+          window.location?.protocol === 'capacitor:' ||
+          window.location?.protocol === 'file:');
+
+      if (!isNative && (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain'))) {
         setShowUnauthorizedDomainHelper(true);
-      } else if (msg.includes('missing initial state') || msg.includes('sessionStorage')) {
+      } else if (code === 'NO_GOOGLE_ACCOUNT') {
         setFeedbackMsg({
           type: 'error',
           text: _t(
-            'تنبيه: المتصفح يمنع وصول الـ Session Storage. تم تفعيل التزامن الذكي، اضغط على زر تسجيل الدخول بجوجل مرة أخرى الآن.',
-            'Browser restricted sessionStorage. Adaptive mode enabled, click Google sign-in again.',
-            'Anmeldung fehlgeschlagen. Bitte erneut versuchen.'
+            'لا يوجد حساب Google مفعّل على هذا الجهاز حالياً، أو يلزم إضافة بصمة شهادة التطبيق (SHA-1) في إعدادات Firebase.',
+            'No Google account available on this device, or app signing SHA-1 needs to be registered in Firebase.',
+            'Kein Google-Konto auf diesem Gerät verfügbar.'
+          )
+        });
+      } else if (code === 'auth/network-request-failed' || msg.toLowerCase().includes('network')) {
+        setFeedbackMsg({
+          type: 'error',
+          text: _t(
+            'تعذر الاتصال بالإنترنت لإتمام تسجيل الدخول. يرجى التحقق من الشبكة والمحاولة مرة أخرى.',
+            'Network connection unavailable. Please check your internet connection and try again.',
+            'Netzwerkfehler. Bitte überprüfen Sie Ihre Internetverbindung.'
           )
         });
       } else {
         setFeedbackMsg({
           type: 'error',
-          text:
-            err?.message ||
-            _t(
-              'تعذر تسجيل الدخول بحساب Google. يرجى التأكد من السماح بالنوافذ المنبثقة.',
-              'Failed to sign in with Google. Please allow popups.',
-              'Google-Anmeldung fehlgeschlagen.'
-            )
+          text: _t(
+            'تعذر إتمام تسجيل الدخول بحساب Google حالياً. يرجى المحاولة مرة أخرى.',
+            'Could not complete Google Sign-In. Please try again.',
+            'Google-Anmeldung fehlgeschlagen. Bitte erneut versuchen.'
+          )
         });
       }
     } finally {

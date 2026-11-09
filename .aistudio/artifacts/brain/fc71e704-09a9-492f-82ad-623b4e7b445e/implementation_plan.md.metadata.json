@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for converting the Lernstudio stage stepper to a zero-scroll icon-only bar, adding all 7 interactive Lernstudio practice stages (True/False, 2 Options, All Words, Half-Word/Syllables, 1 Missing Letter, 2+ Consecutive Letters, Full Word Completion) to Student Homework links in sequential stage-by-stage order, and removing the Gold Chest bonus popup.",
-  "updatedAt":  "2026-11-08T12:44:47.484711689Z",
+  "summary":  "Implementation plan for replacing the Android browser redirect OAuth flow with a native AndroidX Credential Manager Google Sign-In dialog over the Glück app, removing Capacitor 6 peer dependency conflicts, and preserving Firebase session state across Android, Web, and Desktop.",
+  "updatedAt":  "2026-11-09T08:32:17.053643079Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

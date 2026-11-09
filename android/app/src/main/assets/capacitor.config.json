@@ -22,10 +22,8 @@
 			"androidSplashResourceName": "splash",
 			"showSpinner": false
 		},
-		"SocialLogin": {
-			"google": {
-				"webClientId": "REPLACE_WITH_GOOGLE_CLIENT_ID_FOR_WEB"
-			}
+		"GoogleCredentialAuth": {
+			"serverClientId": "874458026984-3ai954q2p8ga6h4b2b15is2gdjbi9768.apps.googleusercontent.com"
 		}
 	}
 }

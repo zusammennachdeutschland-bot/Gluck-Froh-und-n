@@ -1017,6 +1017,10 @@ function computeWorkspaceDelta(
     const rawArr: any[] =
       colKey === 'lernstudioSets'
         ? filterCustomOrModifiedLernstudioSets(sanitizedData.lernstudioSets || [])
+        : colKey === 'homeworkAssignments' || colKey === 'homeworkSubmissions'
+        ? (Array.isArray(sanitizedData[colKey]) ? sanitizedData[colKey] : [])
+            .filter((rec: any) => rec && (!rec.ownerUid || String(rec.ownerUid).trim() === '' || String(rec.ownerUid).trim() === uid))
+            .map((rec: any) => ({ ...rec, ownerUid: uid }))
         : Array.isArray(sanitizedData[colKey])
         ? sanitizedData[colKey]
         : [];
@@ -1176,7 +1180,14 @@ function splitStringIntoChunks(str: string, maxChars: number): string[] {
   return chunks;
 }
 
-function partitionBackupPayload(fullData: any): Record<Exclude<WorkspaceCategoryKey, 'delta_log'>, any> {
+function partitionBackupPayload(fullData: any, ownerUid?: string): Record<Exclude<WorkspaceCategoryKey, 'delta_log'>, any> {
+  const filterHomeworkForOwner = (items: any[]) => {
+    if (!Array.isArray(items)) return [];
+    if (!ownerUid) return items;
+    return items
+      .filter((rec: any) => rec && (!rec.ownerUid || String(rec.ownerUid).trim() === '' || String(rec.ownerUid).trim() === ownerUid))
+      .map((rec: any) => ({ ...rec, ownerUid }));
+  };
   return {
     core_crm: {
       groups: fullData.groups || [],
@@ -1218,8 +1229,8 @@ function partitionBackupPayload(fullData: any): Record<Exclude<WorkspaceCategory
     },
     lernstudio_data: {
       lernstudioSets: filterCustomOrModifiedLernstudioSets(fullData.lernstudioSets || []),
-      homeworkAssignments: fullData.homeworkAssignments || [],
-      homeworkSubmissions: fullData.homeworkSubmissions || [],
+      homeworkAssignments: filterHomeworkForOwner(fullData.homeworkAssignments || []),
+      homeworkSubmissions: filterHomeworkForOwner(fullData.homeworkSubmissions || []),
       pickerNames: fullData.pickerNames || []
     }
   };
@@ -1635,7 +1646,7 @@ export async function uploadWorkspaceToGoogleCloud(
     }
 
     // 3. Category-Level Sync (Initial baseline seed or when delta accumulator compacts into categories)
-    const categories = partitionBackupPayload(parsed);
+    const categories = partitionBackupPayload(parsed, uid);
     const relayChunks: any[] = [];
 
     if (isFirestoreWriteQuotaExhaustedToday()) {

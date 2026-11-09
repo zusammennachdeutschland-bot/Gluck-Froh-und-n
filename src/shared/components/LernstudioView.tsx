@@ -66,6 +66,10 @@ import {
 import {
   subscribeAssignmentsFromFirestore,
   subscribeSubmissionsFromFirestore,
+  subscribeTeacherAuth,
+  getCurrentHomeworkOwnerUid,
+  migrateLegacyHomeworkForAccount,
+  backfillLegacyCloudHomeworkForAccount,
   saveLocalAssignment,
   saveLocalSubmission,
   getLocalAssignments,
@@ -136,19 +140,23 @@ export const LernstudioView: React.FC<Props> = ({
     deleteLernstudioSetFromFirestore(setId).catch(() => {});
   };
 
+  const [activeAuthUid, setActiveAuthUid] = useState<string | null>(() => getCurrentHomeworkOwnerUid());
+
   React.useEffect(() => {
+    if (!activeAuthUid) return;
     const unsub = subscribeLernstudioSetsFromFirestore((cloudSets) => {
       if (cloudSets.length > 0) {
         const existingIds = new Set(sets.map((s) => s.id));
         cloudSets.forEach((cs) => {
+          if ((cs as any).ownerUid && (cs as any).ownerUid !== activeAuthUid) return;
           if (!existingIds.has(cs.id)) {
             onSaveSet(cs);
           }
         });
       }
-    });
+    }, activeAuthUid);
     return () => unsub();
-  }, [sets.length]);
+  }, [sets.length, activeAuthUid]);
 
   // Theme State
   const [currentThemeId, setCurrentThemeId] = useState<LernstudioThemeId>('neutral');
@@ -187,7 +195,27 @@ export const LernstudioView: React.FC<Props> = ({
     getHomeworkSummaryStats(students)
   );
 
-  // Real-time Firestore subscriptions & local event listeners for Homework Monitoring inside Lernstudio
+  React.useEffect(() => {
+    const unsubAuth = subscribeTeacherAuth((user) => {
+      const nextUid = user?.uid?.trim() || null;
+      if (nextUid && user) {
+        const migOpts = {
+          uid: nextUid,
+          email: user.email,
+          ownedGroupIds: groups.map((g) => g.id),
+          ownedSetIds: sets.map((s) => s.id),
+          ownedStudentIds: (studentsRef.current || []).map((st) => st.id)
+        };
+        migrateLegacyHomeworkForAccount(migOpts);
+        backfillLegacyCloudHomeworkForAccount(migOpts).catch(() => {});
+      }
+      setActiveAuthUid(nextUid);
+      setHomeworkStats(getHomeworkSummaryStats(studentsRef.current));
+    });
+    return () => unsubAuth();
+  }, [groups.length, sets.length]);
+
+  // Real-time Firestore subscriptions & local event listeners for Homework Monitoring inside Lernstudio (strictly scoped by activeAuthUid)
   React.useEffect(() => {
     const refreshStats = () => {
       setHomeworkStats(getHomeworkSummaryStats(studentsRef.current));
@@ -195,29 +223,44 @@ export const LernstudioView: React.FC<Props> = ({
 
     refreshStats();
 
+    if (!activeAuthUid) {
+      window.addEventListener('gluck-homework-deleted', refreshStats);
+      window.addEventListener('glueck-homework-sync-updated', refreshStats);
+      return () => {
+        window.removeEventListener('gluck-homework-deleted', refreshStats);
+        window.removeEventListener('glueck-homework-sync-updated', refreshStats);
+      };
+    }
+
     const unsubHw = subscribeAssignmentsFromFirestore((cloudAssignments) => {
       cloudAssignments.forEach((hw) => {
-        if (!isAssignmentDeletedLocally(hw.id)) {
-          saveLocalAssignment({ ...hw, cloudSynced: true }, false);
+        if (hw.ownerUid && hw.ownerUid !== activeAuthUid) return;
+        if (!isAssignmentDeletedLocally(hw.id, activeAuthUid)) {
+          saveLocalAssignment({ ...hw, ownerUid: activeAuthUid, cloudSynced: true }, false);
         }
       });
       refreshStats();
-    });
+    }, activeAuthUid);
 
-    const unsubSubs = subscribeSubmissionsFromFirestore(null, (cloudSubs) => {
-      const activeIds = new Set(
-        getLocalAssignments().flatMap((a) => [a.id, sanitizeDocId(a.id)])
-      );
-      cloudSubs.forEach((sub) => {
-        if (
-          !isAssignmentDeletedLocally(sub.assignmentId) &&
-          (activeIds.has(sub.assignmentId) || activeIds.has(sanitizeDocId(sub.assignmentId)))
-        ) {
-          saveLocalSubmission({ ...sub, cloudSynced: true }, false);
-        }
-      });
-      refreshStats();
-    });
+    const unsubSubs = subscribeSubmissionsFromFirestore(
+      null,
+      (cloudSubs) => {
+        const activeIds = new Set(
+          getLocalAssignments(activeAuthUid).flatMap((a) => [a.id, sanitizeDocId(a.id)])
+        );
+        cloudSubs.forEach((sub) => {
+          if (sub.ownerUid && sub.ownerUid !== activeAuthUid) return;
+          if (
+            !isAssignmentDeletedLocally(sub.assignmentId, activeAuthUid) &&
+            (activeIds.has(sub.assignmentId) || activeIds.has(sanitizeDocId(sub.assignmentId)))
+          ) {
+            saveLocalSubmission({ ...sub, ownerUid: activeAuthUid, cloudSynced: true }, false);
+          }
+        });
+        refreshStats();
+      },
+      activeAuthUid
+    );
 
     window.addEventListener('gluck-homework-deleted', refreshStats);
     window.addEventListener('glueck-homework-sync-updated', refreshStats);
@@ -228,11 +271,11 @@ export const LernstudioView: React.FC<Props> = ({
       window.removeEventListener('gluck-homework-deleted', refreshStats);
       window.removeEventListener('glueck-homework-sync-updated', refreshStats);
     };
-  }, []);
+  }, [activeAuthUid]);
 
   React.useEffect(() => {
     setHomeworkStats(getHomeworkSummaryStats(students));
-  }, [isHomeworkModalOpen, students]);
+  }, [isHomeworkModalOpen, students, activeAuthUid]);
 
   // Copy Set Code State
   const [copiedSetId, setCopiedSetId] = useState<string | null>(null);

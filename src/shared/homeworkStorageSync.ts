@@ -24,7 +24,10 @@ import {
   fetchLernstudioSetFromFirestore,
   signInTeacherWithGoogle,
   signOutTeacherFirebase,
-  subscribeTeacherAuth
+  subscribeTeacherAuth,
+  getCurrentHomeworkOwnerUid,
+  getCurrentHomeworkOwnerEmail,
+  __setHomeworkAuthUserForTests
 } from './firebaseCloudSync';
 
 export {
@@ -46,12 +49,30 @@ export {
   fetchLernstudioSetFromFirestore,
   signInTeacherWithGoogle,
   signOutTeacherFirebase,
-  subscribeTeacherAuth
+  subscribeTeacherAuth,
+  getCurrentHomeworkOwnerUid,
+  getCurrentHomeworkOwnerEmail,
+  __setHomeworkAuthUserForTests
 };
 
-const LOCAL_ASSIGNMENTS_KEY = 'glueck_hw_assignments_v2';
-const LOCAL_SUBMISSIONS_KEY = 'glueck_hw_submissions_v2';
+export const LEGACY_ASSIGNMENTS_KEY = 'glueck_hw_assignments_v2';
+export const LEGACY_SUBMISSIONS_KEY = 'glueck_hw_submissions_v2';
+export const LEGACY_DELETED_ASSIGNMENTS_KEY = 'glueck_hw_deleted_ids_v2';
+export const QUARANTINED_LEGACY_HOMEWORK_KEY = 'glueck_hw_quarantined_legacy_v3';
+export const UNAUTHENTICATED_HOMEWORK_SCOPE = 'local_unauthenticated';
 const OPEN_PARTICIPANT_PREFIX = 'glueck_hw_open_pid_';
+const STUDENT_DEVICE_TOKEN_PREFIX = 'glueck_hw_dev_tok_';
+const STUDENT_ATTEMPT_SECRET_PREFIX = 'glueck_hw_att_sec_';
+
+export function isHomeworkAssignmentOpenForStudents(
+  hw: Partial<HomeworkAssignment> | null | undefined
+): boolean {
+  if (!hw || !hw.id) return false;
+  if ((hw as any).deleted) return false;
+  if (hw.isActive === false) return false;
+  if (hw.status === 'closed') return false;
+  return true;
+}
 
 export interface QuestionTypeMetaItem {
   id: HomeworkQuestionType;
@@ -432,9 +453,67 @@ export function validateHomeworkSubmissionIdentity(
 }
 
 /**
- * Generates a deterministic submission ID per (assignmentId, studentId/participantId, attemptNumber)
+ * Generates or retrieves a per-device student session token for (assignmentId, studentToken)
+ * so two different devices cannot collide on the same deterministic submission document ID,
+ * while the same student device produces consistent IDs across live progress and retries.
+ */
+export function getOrCreateStudentDeviceToken(
+  assignmentId: string,
+  studentToken: string
+): string {
+  const safeHw = sanitizeDocId(assignmentId || 'hw').slice(0, 32);
+  const safeSt = sanitizeDocId(studentToken || 'st').slice(0, 32);
+  const storageKey = `${STUDENT_DEVICE_TOKEN_PREFIX}${safeHw}_${safeSt}`;
+
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const existing = window.localStorage.getItem(storageKey);
+      if (existing && existing.trim()) {
+        return existing.trim();
+      }
+      const generated = `dt${Date.now().toString(36).slice(-4)}${Math.random()
+        .toString(36)
+        .slice(2, 7)}`;
+      window.localStorage.setItem(storageKey, generated);
+      return generated;
+    } catch {
+      // Fall through if localStorage is unavailable
+    }
+  }
+  return `dt${ simpleStringHash(`${safeHw}_${safeSt}`) }`;
+}
+
+/**
+ * Generates or retrieves a per-attempt secret token stored on the originating student device.
+ * Used by Firestore rules and backend endpoints to verify that in-progress updates originate
+ * from the same student session that created the submission attempt.
+ */
+export function getOrCreateStudentAttemptSecret(submissionId: string): string {
+  const safeSubId = sanitizeDocId(submissionId || 'sub').slice(0, 80);
+  const storageKey = `${STUDENT_ATTEMPT_SECRET_PREFIX}${safeSubId}`;
+
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const existing = window.localStorage.getItem(storageKey);
+      if (existing && existing.trim()) {
+        return existing.trim();
+      }
+      const generated = `sec_${Date.now().toString(36)}_${Math.random()
+        .toString(36)
+        .slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+      window.localStorage.setItem(storageKey, generated);
+      return generated;
+    } catch {
+      // Fall through if localStorage is unavailable
+    }
+  }
+  return `sec_${simpleStringHash(safeSubId)}_fallback`;
+}
+
+/**
+ * Generates a deterministic submission ID per (assignmentId, studentId/participantId, deviceToken, attemptNumber)
  * so live in-progress updates, retries, and final completion update the exact same document
- * without creating duplicate submissions or merging distinct people who share a name.
+ * without creating duplicate submissions or allowing another device to overwrite a student's submission.
  */
 export function buildDeterministicSubmissionId(
   assignmentId: string,
@@ -443,18 +522,19 @@ export function buildDeterministicSubmissionId(
   attemptNumber: number,
   participantId?: string
 ): string {
-  const safeHw = sanitizeDocId(assignmentId).slice(0, 40);
+  const safeHw = sanitizeDocId(assignmentId).slice(0, 36);
   const rawKey =
     studentId && studentId.trim()
       ? `sid_${studentId.trim()}`
       : participantId && participantId.trim()
       ? `pid_${participantId.trim()}`
       : (studentName || 'student').trim().toLowerCase();
-  const safeAscii = rawKey.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 28);
+  const safeAscii = rawKey.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
   const hashPart = simpleStringHash(rawKey);
   const studentToken = safeAscii ? `${safeAscii}_${hashPart}` : `st_${hashPart}`;
+  const devToken = getOrCreateStudentDeviceToken(safeHw, studentToken);
   const att = Math.max(1, Number(attemptNumber) || 1);
-  return sanitizeDocId(`sub_${safeHw}_${studentToken}_a${att}`);
+  return sanitizeDocId(`sub_${safeHw}_${studentToken}_${devToken}_a${att}`);
 }
 
 /**
@@ -553,12 +633,245 @@ function notifyHomeworkSyncStateChanged(): void {
   }
 }
 
-const LOCAL_DELETED_ASSIGNMENTS_KEY = 'glueck_hw_deleted_ids_v2';
+export function getActiveHomeworkScopeUid(explicitUid?: string | null): string {
+  if (explicitUid !== undefined) {
+    const clean = explicitUid?.trim() || '';
+    return clean.length > 0 ? clean : UNAUTHENTICATED_HOMEWORK_SCOPE;
+  }
+  const activeUid = getCurrentHomeworkOwnerUid();
+  return activeUid || UNAUTHENTICATED_HOMEWORK_SCOPE;
+}
 
-export function getDeletedAssignmentIds(): Set<string> {
+export function getAssignmentsStorageKey(explicitUid?: string | null): string {
+  const scope = sanitizeDocId(getActiveHomeworkScopeUid(explicitUid));
+  return `glueck_hw_assignments_v3_${scope}`;
+}
+
+export function getSubmissionsStorageKey(explicitUid?: string | null): string {
+  const scope = sanitizeDocId(getActiveHomeworkScopeUid(explicitUid));
+  return `glueck_hw_submissions_v3_${scope}`;
+}
+
+export function getDeletedAssignmentsStorageKey(explicitUid?: string | null): string {
+  const scope = sanitizeDocId(getActiveHomeworkScopeUid(explicitUid));
+  return `glueck_hw_deleted_ids_v3_${scope}`;
+}
+
+export interface LegacyHomeworkMigrationOptions {
+  uid: string;
+  email?: string | null;
+  ownedGroupIds?: Iterable<string>;
+  ownedSetIds?: Iterable<string>;
+  ownedStudentIds?: Iterable<string>;
+}
+
+export interface QuarantinedLegacyHomeworkEntry {
+  assignment: HomeworkAssignment;
+  submissions: HomeworkSubmission[];
+  reason: string;
+  quarantinedAt: string;
+}
+
+export function getQuarantinedLegacyHomework(): QuarantinedLegacyHomeworkEntry[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(QUARANTINED_LEGACY_HOMEWORK_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Deterministic ownership evaluator used by local legacy migration, cloud legacy backfill,
+ * and backup import verification. Never guesses or claims ownership based on first login.
+ */
+export function canAccountClaimLegacyHomework(
+  hw: Partial<HomeworkAssignment> | null | undefined,
+  options: LegacyHomeworkMigrationOptions
+): {
+  provableForTarget: boolean;
+  belongsToDifferentAccount: boolean;
+} {
+  if (!hw || !hw.id || !options?.uid?.trim()) {
+    return { provableForTarget: false, belongsToDifferentAccount: false };
+  }
+  const targetUid = options.uid.trim();
+  const targetEmail = (options.email || '').trim().toLowerCase();
+  const groupSet = new Set(Array.from(options.ownedGroupIds || []).map((id) => id.trim()).filter(Boolean));
+  const setIds = new Set(Array.from(options.ownedSetIds || []).map((id) => id.trim()).filter(Boolean));
+  const studentIds = new Set(Array.from(options.ownedStudentIds || []).map((id) => id.trim()).filter(Boolean));
+
+  const recUid = (hw.ownerUid || '').trim();
+  const recEmail = (hw.ownerEmail || '').trim().toLowerCase();
+
+  if (recUid) {
+    if (recUid === targetUid) {
+      return { provableForTarget: true, belongsToDifferentAccount: false };
+    }
+    return { provableForTarget: false, belongsToDifferentAccount: true };
+  }
+
+  if (recEmail) {
+    if (targetEmail && recEmail === targetEmail) {
+      return { provableForTarget: true, belongsToDifferentAccount: false };
+    }
+    return { provableForTarget: false, belongsToDifferentAccount: true };
+  }
+
+  const hwGroupId = (hw.groupId || '').trim();
+  const hwSetId = (hw.setSnapshot?.id ? String(hw.setSnapshot.id) : '').trim();
+  const hwStudents = Array.isArray(hw.assignedStudents) ? hw.assignedStudents : [];
+
+  const matchesGroup = Boolean(hwGroupId && hwGroupId !== 'all' && groupSet.has(hwGroupId));
+  const matchesSet = Boolean(hwSetId && setIds.has(hwSetId));
+  const matchesStudents =
+    hwStudents.length > 0 &&
+    hwStudents.every((st) => st?.id && studentIds.has(String(st.id).trim()));
+
+  if (matchesGroup || matchesSet || matchesStudents) {
+    return { provableForTarget: true, belongsToDifferentAccount: false };
+  }
+
+  return { provableForTarget: false, belongsToDifferentAccount: false };
+}
+
+/**
+ * Safely inspects legacy unscoped homework keys (`glueck_hw_assignments_v2` / `glueck_hw_submissions_v2`).
+ * Never blindly assigns legacy homework to whichever account logs in first.
+ * Only migrates a legacy assignment to `options.uid` if ownership can be deterministically proven via:
+ * 1. Matching `ownerUid`
+ * 2. Matching verified email (`ownerEmail`) when `ownerUid` is absent
+ * 3. Matching workspace entity ownership (`groupId`, `setSnapshot.id`, or `assignedStudents`) when both `ownerUid` and `ownerEmail` are absent.
+ * Ambiguous records are non-destructively isolated in `glueck_hw_quarantined_legacy_v3` and never exposed or uploaded to another account.
+ */
+export function migrateLegacyHomeworkForAccount(options: LegacyHomeworkMigrationOptions): {
+  migratedAssignments: number;
+  migratedSubmissions: number;
+  quarantinedAssignments: number;
+} {
+  if (typeof window === 'undefined' || !options?.uid?.trim()) {
+    return { migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
+  }
+  const targetUid = options.uid.trim();
+  const targetEmail = (options.email || '').trim().toLowerCase();
+
+  try {
+    const rawLegacyHw = localStorage.getItem(LEGACY_ASSIGNMENTS_KEY);
+    if (!rawLegacyHw) {
+      return { migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
+    }
+    const legacyAssignments: HomeworkAssignment[] = JSON.parse(rawLegacyHw);
+    if (!Array.isArray(legacyAssignments) || legacyAssignments.length === 0) {
+      return { migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
+    }
+
+    const rawLegacySubs = localStorage.getItem(LEGACY_SUBMISSIONS_KEY);
+    const legacySubmissions: HomeworkSubmission[] = rawLegacySubs ? JSON.parse(rawLegacySubs) : [];
+    const safeLegacySubs = Array.isArray(legacySubmissions) ? legacySubmissions : [];
+
+    const existingScopedHw = getLocalAssignments(targetUid);
+    const existingScopedHwIds = new Set(existingScopedHw.map((a) => a.id));
+    const existingScopedSubs = getLocalSubmissions(targetUid);
+    const existingScopedSubIds = new Set(existingScopedSubs.map((s) => s.id));
+
+    const quarantinedList = getQuarantinedLegacyHomework();
+    const quarantinedById = new Map<string, QuarantinedLegacyHomeworkEntry>(
+      quarantinedList.map((entry) => [entry.assignment.id, entry])
+    );
+
+    const remainingLegacyHw: HomeworkAssignment[] = [];
+    const migratedHwIds = new Set<string>();
+    let migratedAssignments = 0;
+    let migratedSubmissions = 0;
+    let quarantinedAssignments = 0;
+
+    for (const hw of legacyAssignments) {
+      if (!hw || !hw.id) continue;
+      const { provableForTarget, belongsToDifferentAccount } = canAccountClaimLegacyHomework(hw, options);
+
+      if (provableForTarget) {
+        const neededBackfill = (hw.ownerUid || '').trim() !== targetUid;
+        const stampedHw: HomeworkAssignment = normalizeHomeworkAssignment({
+          ...hw,
+          ownerUid: targetUid,
+          ...(targetEmail && !hw.ownerEmail ? { ownerEmail: targetEmail } : {}),
+          cloudSynced: neededBackfill ? false : hw.cloudSynced
+        });
+        if (!existingScopedHwIds.has(stampedHw.id)) {
+          existingScopedHw.push(stampedHw);
+          existingScopedHwIds.add(stampedHw.id);
+          migratedAssignments++;
+        }
+        migratedHwIds.add(hw.id);
+        migratedHwIds.add(sanitizeDocId(hw.id));
+        quarantinedById.delete(hw.id);
+      } else if (belongsToDifferentAccount) {
+        // Keep in legacy store for the actual owner account when they sign in; do NOT expose to targetUid
+        remainingLegacyHw.push(hw);
+      } else {
+        // Ambiguous unowned record: quarantine so it is never blindly claimed or leaked across accounts
+        const relatedSubs = safeLegacySubs.filter(
+          (s) => s && (s.assignmentId === hw.id || sanitizeDocId(s.assignmentId) === sanitizeDocId(hw.id))
+        );
+        if (!quarantinedById.has(hw.id)) {
+          quarantinedAssignments++;
+        }
+        quarantinedById.set(hw.id, {
+          assignment: hw,
+          submissions: relatedSubs,
+          reason: 'Ambiguous legacy homework without provable ownerUid, ownerEmail, or workspace entity match',
+          quarantinedAt: new Date().toISOString()
+        });
+      }
+    }
+
+    if (migratedHwIds.size > 0) {
+      const remainingLegacySubs: HomeworkSubmission[] = [];
+      for (const sub of safeLegacySubs) {
+        if (!sub || !sub.id || !sub.assignmentId) continue;
+        if (
+          migratedHwIds.has(sub.assignmentId) ||
+          migratedHwIds.has(sanitizeDocId(sub.assignmentId))
+        ) {
+          const neededSubBackfill = (sub.ownerUid || '').trim() !== targetUid;
+          const stampedSub: HomeworkSubmission = {
+            ...sub,
+            ownerUid: targetUid,
+            cloudSynced: neededSubBackfill ? false : sub.cloudSynced
+          };
+          if (!existingScopedSubIds.has(stampedSub.id)) {
+            existingScopedSubs.push(stampedSub);
+            existingScopedSubIds.add(stampedSub.id);
+            migratedSubmissions++;
+          }
+        } else {
+          remainingLegacySubs.push(sub);
+        }
+      }
+      writeLocalAssignmentsList(existingScopedHw, targetUid);
+      writeLocalSubmissionsList(existingScopedSubs, targetUid);
+      localStorage.setItem(LEGACY_SUBMISSIONS_KEY, JSON.stringify(remainingLegacySubs));
+    }
+
+    localStorage.setItem(LEGACY_ASSIGNMENTS_KEY, JSON.stringify(remainingLegacyHw));
+    localStorage.setItem(
+      QUARANTINED_LEGACY_HOMEWORK_KEY,
+      JSON.stringify(Array.from(quarantinedById.values()))
+    );
+
+    return { migratedAssignments, migratedSubmissions, quarantinedAssignments };
+  } catch {
+    return { migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
+  }
+}
+
+export function getDeletedAssignmentIds(explicitUid?: string | null): Set<string> {
   if (typeof window === 'undefined') return new Set();
   try {
-    const raw = localStorage.getItem(LOCAL_DELETED_ASSIGNMENTS_KEY);
+    const key = getDeletedAssignmentsStorageKey(explicitUid);
+    const raw = localStorage.getItem(key);
     const parsed: string[] = raw ? JSON.parse(raw) : [];
     return new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string' && id.length > 0) : []);
   } catch {
@@ -566,64 +879,89 @@ export function getDeletedAssignmentIds(): Set<string> {
   }
 }
 
-export function isAssignmentDeletedLocally(assignmentId?: string | null): boolean {
+export function isAssignmentDeletedLocally(assignmentId?: string | null, explicitUid?: string | null): boolean {
   if (!assignmentId) return false;
-  const deletedSet = getDeletedAssignmentIds();
+  const deletedSet = getDeletedAssignmentIds(explicitUid);
   if (deletedSet.has(assignmentId)) return true;
   const safeId = sanitizeDocId(assignmentId);
   return deletedSet.has(safeId);
 }
 
-export function markAssignmentDeletedLocally(assignmentId: string): void {
+export function markAssignmentDeletedLocally(assignmentId: string, explicitUid?: string | null): void {
   if (typeof window === 'undefined' || !assignmentId) return;
   try {
-    const deletedSet = getDeletedAssignmentIds();
+    const key = getDeletedAssignmentsStorageKey(explicitUid);
+    const deletedSet = getDeletedAssignmentIds(explicitUid);
     deletedSet.add(assignmentId);
     deletedSet.add(sanitizeDocId(assignmentId));
     const list = Array.from(deletedSet).slice(-500);
-    localStorage.setItem(LOCAL_DELETED_ASSIGNMENTS_KEY, JSON.stringify(list));
+    localStorage.setItem(key, JSON.stringify(list));
   } catch {
     // Ignore storage quota errors
   }
 }
 
-export function getLocalAssignments(): HomeworkAssignment[] {
+export function getLocalAssignments(explicitUid?: string | null): HomeworkAssignment[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(LOCAL_ASSIGNMENTS_KEY);
+    const scopeUid = getActiveHomeworkScopeUid(explicitUid);
+    const isAuthenticatedScope = scopeUid !== UNAUTHENTICATED_HOMEWORK_SCOPE;
+    const raw = localStorage.getItem(getAssignmentsStorageKey(scopeUid));
     const parsed: HomeworkAssignment[] = raw ? JSON.parse(raw) : [];
-    const deletedSet = getDeletedAssignmentIds();
+    const deletedSet = getDeletedAssignmentIds(scopeUid);
     return parsed
-      .filter(
-        (hw) =>
-          hw &&
-          hw.id &&
-          !(hw as any).deleted &&
-          !deletedSet.has(hw.id) &&
-          !deletedSet.has(sanitizeDocId(hw.id))
-      )
-      .map((hw) => normalizeHomeworkAssignment(hw));
+      .filter((hw) => {
+        if (!hw || !hw.id || (hw as any).deleted) return false;
+        if (deletedSet.has(hw.id) || deletedSet.has(sanitizeDocId(hw.id))) return false;
+        const recOwner = hw.ownerUid?.trim() || '';
+        // Strict cross-account guard: never return a record belonging to another UID
+        if (isAuthenticatedScope) {
+          if (recOwner && recOwner !== scopeUid) return false;
+        }
+        return true;
+      })
+      .map((hw) =>
+        normalizeHomeworkAssignment({
+          ...hw,
+          ...(isAuthenticatedScope && !hw.ownerUid ? { ownerUid: scopeUid } : {})
+        })
+      );
   } catch {
     return [];
   }
 }
 
-function writeLocalAssignmentsList(list: HomeworkAssignment[]): void {
+export function writeLocalAssignmentsForScope(
+  list: HomeworkAssignment[],
+  explicitUid?: string | null
+): void {
+  writeLocalAssignmentsList(list, explicitUid);
+}
+
+function writeLocalAssignmentsList(list: HomeworkAssignment[], explicitUid?: string | null): void {
   if (typeof window === 'undefined') return;
   try {
-    const deletedSet = getDeletedAssignmentIds();
+    const scopeUid = getActiveHomeworkScopeUid(explicitUid);
+    const isAuthenticatedScope = scopeUid !== UNAUTHENTICATED_HOMEWORK_SCOPE;
+    const deletedSet = getDeletedAssignmentIds(scopeUid);
     const normalized = list
-      .filter(
-        (hw) =>
-          hw &&
-          hw.id &&
-          !(hw as any).deleted &&
-          !deletedSet.has(hw.id) &&
-          !deletedSet.has(sanitizeDocId(hw.id))
-      )
+      .filter((hw) => {
+        if (!hw || !hw.id || (hw as any).deleted) return false;
+        if (deletedSet.has(hw.id) || deletedSet.has(sanitizeDocId(hw.id))) return false;
+        const recOwner = hw.ownerUid?.trim() || '';
+        if (isAuthenticatedScope && recOwner && recOwner !== scopeUid) {
+          return false;
+        }
+        return true;
+      })
       .slice(0, 150)
-      .map((hw) => normalizeHomeworkAssignment(hw));
-    localStorage.setItem(LOCAL_ASSIGNMENTS_KEY, JSON.stringify(normalized));
+      .map((hw) =>
+        normalizeHomeworkAssignment({
+          ...hw,
+          ...(isAuthenticatedScope ? { ownerUid: scopeUid } : {})
+        })
+      );
+    localStorage.setItem(getAssignmentsStorageKey(scopeUid), JSON.stringify(normalized));
   } catch {
     // Ignore storage quota errors
   }
@@ -634,8 +972,10 @@ export interface HomeworkCloudTransportOverride {
   saveSubmission?: (sub: HomeworkSubmission) => Promise<boolean>;
   fetchAssignment?: (id: string) => Promise<HomeworkAssignment | null>;
   fetchSubmissionsForAssignment?: (id: string) => Promise<HomeworkSubmission[]>;
-  fetchAllAssignments?: () => Promise<HomeworkAssignment[]>;
-  fetchAllSubmissions?: () => Promise<HomeworkSubmission[]>;
+  fetchAllAssignments?: (ownerUid?: string) => Promise<HomeworkAssignment[]>;
+  fetchAllSubmissions?: (ownerUid?: string) => Promise<HomeworkSubmission[]>;
+  deleteAssignment?: (id: string, ownerUid?: string) => Promise<boolean>;
+  deleteSubmissionsForAssignment?: (id: string, ownerUid?: string) => Promise<boolean>;
 }
 
 let testCloudTransport: HomeworkCloudTransportOverride | null = null;
@@ -646,10 +986,15 @@ export function __setHomeworkSyncTransportForTests(
   testCloudTransport = transport;
 }
 
-const activeSaveAssignmentToCloud = (hw: HomeworkAssignment) =>
-  testCloudTransport?.saveAssignment
+const activeSaveAssignmentToCloud = (hw: HomeworkAssignment) => {
+  const activeUid = getCurrentHomeworkOwnerUid();
+  if (activeUid && hw.ownerUid && hw.ownerUid.trim() !== '' && hw.ownerUid.trim() !== activeUid) {
+    return Promise.resolve(false);
+  }
+  return testCloudTransport?.saveAssignment
     ? testCloudTransport.saveAssignment(hw)
     : saveAssignmentToFirestore(hw);
+};
 
 const activeSaveSubmissionToCloud = (sub: HomeworkSubmission) =>
   testCloudTransport?.saveSubmission
@@ -666,39 +1011,83 @@ const activeFetchSubmissionsForAssignmentFromCloud = (id: string) =>
     ? testCloudTransport.fetchSubmissionsForAssignment(id)
     : fetchSubmissionsForAssignmentFromFirestore(id);
 
+const activeFetchAllAssignmentsFromCloud = (ownerUid?: string) =>
+  testCloudTransport?.fetchAllAssignments
+    ? testCloudTransport.fetchAllAssignments(ownerUid)
+    : fetchAllAssignmentsFromFirestore(ownerUid);
+
+const activeFetchAllSubmissionsFromCloud = (ownerUid?: string) =>
+  testCloudTransport?.fetchAllSubmissions
+    ? testCloudTransport.fetchAllSubmissions(ownerUid)
+    : fetchAllSubmissionsFromFirestore(ownerUid);
+
+const activeDeleteAssignmentFromCloud = (id: string, ownerUid?: string) =>
+  testCloudTransport?.deleteAssignment
+    ? testCloudTransport.deleteAssignment(id, ownerUid)
+    : deleteAssignmentFromFirestore(id, ownerUid);
+
+const activeDeleteSubmissionsForAssignmentFromCloud = (id: string, ownerUid?: string) =>
+  testCloudTransport?.deleteSubmissionsForAssignment
+    ? testCloudTransport.deleteSubmissionsForAssignment(id, ownerUid)
+    : deleteSubmissionsForAssignmentFromFirestore(id, ownerUid);
+
 export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): void {
   if (typeof window === 'undefined' || !hw || !hw.id) return;
-  if (isAssignmentDeletedLocally(hw.id) || (hw as any).deleted) {
+  const activeUid = getCurrentHomeworkOwnerUid();
+  const scopeUid = getActiveHomeworkScopeUid();
+  const recordOwnerUid = hw.ownerUid?.trim() || '';
+
+  // Reject cross-account writes: Account B can never save or overwrite an assignment owned by Account A
+  if (activeUid && recordOwnerUid && recordOwnerUid !== activeUid) {
+    return;
+  }
+
+  if (isAssignmentDeletedLocally(hw.id, scopeUid) || (hw as any).deleted) {
     if (!syncCloud) {
-      deleteAssignmentFromFirestore(hw.id).catch(() => {});
-      deleteSubmissionsForAssignmentFromFirestore(hw.id).catch(() => {});
+      activeDeleteAssignmentFromCloud(hw.id, activeUid || undefined).catch(() => {});
+      activeDeleteSubmissionsForAssignmentFromCloud(hw.id, activeUid || undefined).catch(() => {});
     }
     return;
   }
-  const existing = getLocalAssignments().find((a) => a.id === hw.id);
+
+  const currentList = getLocalAssignments(scopeUid);
+  const existing = currentList.find((a) => a.id === hw.id);
+  // Prevent mutating ownerUid on an already-owned assignment
+  if (existing?.ownerUid && recordOwnerUid && existing.ownerUid !== recordOwnerUid) {
+    return;
+  }
+
+  const resolvedOwnerUid = activeUid || recordOwnerUid || existing?.ownerUid || undefined;
+  const resolvedOwnerEmail =
+    hw.ownerEmail?.trim() || getCurrentHomeworkOwnerEmail() || existing?.ownerEmail || undefined;
+
   const normalizedHw = normalizeHomeworkAssignment({
     ...existing,
-    ...hw
+    ...hw,
+    ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
+    ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {})
   });
   const initialRecord: HomeworkAssignment = {
     ...normalizedHw,
     cloudSynced: syncCloud ? false : (hw.cloudSynced ?? existing?.cloudSynced ?? true)
   };
 
-  const current = getLocalAssignments().filter((a) => a.id !== hw.id);
+  const current = currentList.filter((a) => a.id !== hw.id);
   current.unshift(initialRecord);
-  writeLocalAssignmentsList(current);
+  writeLocalAssignmentsList(current, scopeUid);
 
   if (syncCloud) {
+    const scopeAtStart = scopeUid;
     activeSaveAssignmentToCloud(initialRecord)
       .then((ok) => {
-        if (ok) {
-          const updated = getLocalAssignments().map((a) =>
-            a.id === hw.id ? { ...a, cloudSynced: true } : a
-          );
-          writeLocalAssignmentsList(updated);
-          notifyHomeworkSyncStateChanged();
-        }
+        if (!ok) return;
+        // Abort if account switched while cloud write was in flight
+        if (getActiveHomeworkScopeUid() !== scopeAtStart) return;
+        const updated = getLocalAssignments(scopeAtStart).map((a) =>
+          a.id === hw.id ? { ...a, cloudSynced: true } : a
+        );
+        writeLocalAssignmentsList(updated, scopeAtStart);
+        notifyHomeworkSyncStateChanged();
       })
       .catch(() => {});
   }
@@ -708,36 +1097,71 @@ export async function saveAssignmentWithConfirmation(hw: HomeworkAssignment): Pr
   assignment: HomeworkAssignment;
   cloudSynced: boolean;
 }> {
-  const normalizedHw = normalizeHomeworkAssignment(hw);
+  const activeUid = getCurrentHomeworkOwnerUid();
+  const scopeAtStart = getActiveHomeworkScopeUid();
+  const recordOwnerUid = hw.ownerUid?.trim() || '';
+
+  if (activeUid && recordOwnerUid && recordOwnerUid !== activeUid) {
+    throw new Error('لا يمكن حفظ أو تعديل واجب تابع لحساب آخر.');
+  }
+
+  const existing = getLocalAssignments(scopeAtStart).find((a) => a.id === hw.id);
+  if (existing?.ownerUid && recordOwnerUid && existing.ownerUid !== recordOwnerUid) {
+    throw new Error('لا يمكن تغيير ملكية الواجب بعد إنشائه.');
+  }
+
+  const resolvedOwnerUid = activeUid || recordOwnerUid || existing?.ownerUid || undefined;
+  const resolvedOwnerEmail =
+    hw.ownerEmail?.trim() || getCurrentHomeworkOwnerEmail() || existing?.ownerEmail || undefined;
+
+  const normalizedHw = normalizeHomeworkAssignment({
+    ...existing,
+    ...hw,
+    ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
+    ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {})
+  });
+
   saveLocalAssignment({ ...normalizedHw, cloudSynced: false }, false);
   const cloudOk = await activeSaveAssignmentToCloud(normalizedHw);
   const finalHw: HomeworkAssignment = {
     ...normalizedHw,
     cloudSynced: cloudOk
   };
-  saveLocalAssignment(finalHw, false);
-  notifyHomeworkSyncStateChanged();
+  if (getActiveHomeworkScopeUid() === scopeAtStart) {
+    saveLocalAssignment(finalHw, false);
+    notifyHomeworkSyncStateChanged();
+  }
   return { assignment: finalHw, cloudSynced: cloudOk };
 }
 
 export function deleteLocalAssignment(assignmentId: string, syncCloud = true): void {
   if (typeof window === 'undefined' || !assignmentId) return;
+  const activeUid = getCurrentHomeworkOwnerUid();
+  const scopeUid = getActiveHomeworkScopeUid();
   const safeId = sanitizeDocId(assignmentId);
-  markAssignmentDeletedLocally(assignmentId);
+
+  const existing = getLocalAssignments(scopeUid).find(
+    (a) => a.id === assignmentId || sanitizeDocId(a.id) === safeId
+  );
+  if (activeUid && existing?.ownerUid && existing.ownerUid !== activeUid) {
+    return;
+  }
+
+  markAssignmentDeletedLocally(assignmentId, scopeUid);
   try {
-    const remainingAssignments = getLocalAssignments().filter(
+    const remainingAssignments = getLocalAssignments(scopeUid).filter(
       (a) => a.id !== assignmentId && sanitizeDocId(a.id) !== safeId
     );
-    writeLocalAssignmentsList(remainingAssignments);
+    writeLocalAssignmentsList(remainingAssignments, scopeUid);
 
-    const remainingSubmissions = getLocalSubmissions().filter(
+    const remainingSubmissions = getLocalSubmissions(scopeUid).filter(
       (s) => s.assignmentId !== assignmentId && sanitizeDocId(s.assignmentId) !== safeId
     );
-    writeLocalSubmissionsList(remainingSubmissions);
+    writeLocalSubmissionsList(remainingSubmissions, scopeUid);
 
     window.dispatchEvent(
       new CustomEvent('gluck-homework-deleted', {
-        detail: { assignmentId, safeId, remainingAssignments, remainingSubmissions }
+        detail: { assignmentId, safeId, remainingAssignments, remainingSubmissions, ownerUid: activeUid }
       })
     );
     notifyHomeworkSyncStateChanged();
@@ -745,43 +1169,58 @@ export function deleteLocalAssignment(assignmentId: string, syncCloud = true): v
     // Ignore storage errors
   }
   if (syncCloud) {
-    deleteAssignmentFromFirestore(assignmentId).catch(() => {});
-    deleteSubmissionsForAssignmentFromFirestore(assignmentId).catch(() => {});
+    activeDeleteAssignmentFromCloud(assignmentId, activeUid || undefined).catch(() => {});
+    activeDeleteSubmissionsForAssignmentFromCloud(assignmentId, activeUid || undefined).catch(() => {});
   }
 }
 
-export function getLocalSubmissions(): HomeworkSubmission[] {
+export function getLocalSubmissions(explicitUid?: string | null): HomeworkSubmission[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(LOCAL_SUBMISSIONS_KEY);
+    const scopeUid = getActiveHomeworkScopeUid(explicitUid);
+    const isAuthenticatedScope = scopeUid !== UNAUTHENTICATED_HOMEWORK_SCOPE;
+    const raw = localStorage.getItem(getSubmissionsStorageKey(scopeUid));
     const parsed: HomeworkSubmission[] = raw ? JSON.parse(raw) : [];
-    const deletedSet = getDeletedAssignmentIds();
-    const active = parsed.filter(
-      (s) =>
-        s &&
-        s.assignmentId &&
-        !deletedSet.has(s.assignmentId) &&
-        !deletedSet.has(sanitizeDocId(s.assignmentId))
-    );
+    const deletedSet = getDeletedAssignmentIds(scopeUid);
+    const active = parsed.filter((s) => {
+      if (!s || !s.assignmentId) return false;
+      if (deletedSet.has(s.assignmentId) || deletedSet.has(sanitizeDocId(s.assignmentId))) return false;
+      const recOwner = s.ownerUid?.trim() || '';
+      if (isAuthenticatedScope && recOwner && recOwner !== scopeUid) {
+        return false;
+      }
+      return true;
+    });
     return deduplicateSubmissions(active);
   } catch {
     return [];
   }
 }
 
-function writeLocalSubmissionsList(list: HomeworkSubmission[]): void {
+export function writeLocalSubmissionsForScope(
+  list: HomeworkSubmission[],
+  explicitUid?: string | null
+): void {
+  writeLocalSubmissionsList(list, explicitUid);
+}
+
+function writeLocalSubmissionsList(list: HomeworkSubmission[], explicitUid?: string | null): void {
   if (typeof window === 'undefined') return;
   try {
-    const deletedSet = getDeletedAssignmentIds();
-    const filtered = list.filter(
-      (s) =>
-        s &&
-        s.assignmentId &&
-        !deletedSet.has(s.assignmentId) &&
-        !deletedSet.has(sanitizeDocId(s.assignmentId))
-    );
+    const scopeUid = getActiveHomeworkScopeUid(explicitUid);
+    const isAuthenticatedScope = scopeUid !== UNAUTHENTICATED_HOMEWORK_SCOPE;
+    const deletedSet = getDeletedAssignmentIds(scopeUid);
+    const filtered = list.filter((s) => {
+      if (!s || !s.assignmentId) return false;
+      if (deletedSet.has(s.assignmentId) || deletedSet.has(sanitizeDocId(s.assignmentId))) return false;
+      const recOwner = s.ownerUid?.trim() || '';
+      if (isAuthenticatedScope && recOwner && recOwner !== scopeUid) {
+        return false;
+      }
+      return true;
+    });
     localStorage.setItem(
-      LOCAL_SUBMISSIONS_KEY,
+      getSubmissionsStorageKey(scopeUid),
       JSON.stringify(deduplicateSubmissions(filtered).slice(0, 600))
     );
   } catch {
@@ -789,13 +1228,107 @@ function writeLocalSubmissionsList(list: HomeworkSubmission[]): void {
   }
 }
 
+/**
+ * Returns local submissions visible to a student on this device for a specific assignment,
+ * merging the unauthenticated student scope and any known assignment ownerUid scope.
+ */
+export function getStudentLocalSubmissions(
+  assignmentId?: string,
+  ownerUidHint?: string | null
+): HomeworkSubmission[] {
+  const unauthSubs = getLocalSubmissions(UNAUTHENTICATED_HOMEWORK_SCOPE);
+  const activeScope = getActiveHomeworkScopeUid();
+  const activeSubs =
+    activeScope !== UNAUTHENTICATED_HOMEWORK_SCOPE ? getLocalSubmissions(activeScope) : [];
+  const ownerSubs =
+    ownerUidHint &&
+    ownerUidHint.trim() &&
+    ownerUidHint.trim() !== UNAUTHENTICATED_HOMEWORK_SCOPE &&
+    ownerUidHint.trim() !== activeScope
+      ? getLocalSubmissions(ownerUidHint.trim())
+      : [];
+
+  const merged = deduplicateSubmissions([...unauthSubs, ...activeSubs, ...ownerSubs]);
+  if (!assignmentId) return merged;
+  const safeId = sanitizeDocId(assignmentId);
+  return merged.filter(
+    (s) => s.assignmentId === assignmentId || sanitizeDocId(s.assignmentId) === safeId
+  );
+}
+
 export function saveLocalSubmission(sub: HomeworkSubmission, syncCloud = true): void {
   if (typeof window === 'undefined' || !sub || !sub.id) return;
-  if (isAssignmentDeletedLocally(sub.assignmentId)) return;
+  const activeUid = getCurrentHomeworkOwnerUid();
+  const subOwnerUid = sub.ownerUid?.trim() || '';
 
-  // If the assignment exists locally, enforce audienceMode and group membership validation
-  const matchingHw = getLocalAssignments().find((a) => a.id === sub.assignmentId);
-  let validatedSub: HomeworkSubmission = { ...sub };
+  // Determine the target storage scope: if submission explicitly belongs to a teacher UID, scope to that UID
+  const targetScopeUid = subOwnerUid || getActiveHomeworkScopeUid();
+  if (isAssignmentDeletedLocally(sub.assignmentId, targetScopeUid)) return;
+
+  // Look up assignment in the target scope
+  const matchingHw = getLocalAssignments(targetScopeUid).find(
+    (a) => a.id === sub.assignmentId || sanitizeDocId(a.id) === sanitizeDocId(sub.assignmentId)
+  );
+  // If we are in an authenticated teacher session and the submission belongs to a different teacher, do NOT pollute activeUid's local store
+  if (activeUid && matchingHw?.ownerUid && matchingHw.ownerUid !== activeUid) {
+    return;
+  }
+
+  // V-05: Reject new/updated student submissions to inactive or closed assignments
+  if (matchingHw && !isHomeworkAssignmentOpenForStudents(matchingHw) && syncCloud) {
+    return;
+  }
+
+  const resolvedOwnerUid =
+    subOwnerUid || matchingHw?.ownerUid?.trim() || activeUid || undefined;
+
+  const storageScope = resolvedOwnerUid || targetScopeUid;
+  const currentAll = getLocalSubmissions(storageScope);
+  const unauthAll = !activeUid ? getLocalSubmissions(UNAUTHENTICATED_HOMEWORK_SCOPE) : [];
+  const existing =
+    currentAll.find((s) => s.id === sub.id) ||
+    unauthAll.find((s) => s.id === sub.id);
+
+  // V-01: Enforce submission immutability & anti-spoofing on existing submission IDs
+  if (existing) {
+    const existingName = (existing.studentName || '').trim().toLowerCase();
+    const incomingName = (sub.studentName || '').trim().toLowerCase();
+    if (existingName && incomingName && existingName !== incomingName) {
+      return;
+    }
+    if (existing.attemptSecret && sub.attemptSecret && existing.attemptSecret !== sub.attemptSecret) {
+      return;
+    }
+    const existingIsCompleted =
+      existing.status === 'completed' || (!existing.status && Boolean(existing.completedAt));
+    if (existingIsCompleted) {
+      const incomingIsCompleted =
+        sub.status === 'completed' || (!sub.status && Boolean(sub.completedAt));
+      // Never allow a completed submission to be downgraded or overwritten with different answers/scores
+      if (!incomingIsCompleted) {
+        return;
+      }
+      if (
+        existing.score !== sub.score ||
+        existing.completedAt !== sub.completedAt ||
+        (Array.isArray(existing.responses) ? existing.responses.length : 0) !==
+          (Array.isArray(sub.responses) ? sub.responses.length : 0)
+      ) {
+        return;
+      }
+    }
+  }
+
+  const resolvedAttemptSecret =
+    sub.attemptSecret?.trim() ||
+    existing?.attemptSecret?.trim() ||
+    getOrCreateStudentAttemptSecret(sub.id);
+
+  let validatedSub: HomeworkSubmission = {
+    ...sub,
+    ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
+    attemptSecret: resolvedAttemptSecret
+  };
   if (matchingHw) {
     const check = validateHomeworkSubmissionIdentity(matchingHw, sub);
     if (!check.valid) {
@@ -803,7 +1336,7 @@ export function saveLocalSubmission(sub: HomeworkSubmission, syncCloud = true): 
       return;
     }
     validatedSub = {
-      ...sub,
+      ...validatedSub,
       audienceMode: check.audienceMode,
       studentId: check.normalizedStudentId,
       participantId: check.normalizedParticipantId,
@@ -812,8 +1345,6 @@ export function saveLocalSubmission(sub: HomeworkSubmission, syncCloud = true): 
     };
   }
 
-  const currentAll = getLocalSubmissions();
-  const existing = currentAll.find((s) => s.id === validatedSub.id);
   const mergedRecord: HomeworkSubmission = existing
     ? pickBetterSubmission(existing, {
         ...validatedSub,
@@ -830,17 +1361,33 @@ export function saveLocalSubmission(sub: HomeworkSubmission, syncCloud = true): 
 
   const others = currentAll.filter((s) => s.id !== mergedRecord.id);
   others.unshift(mergedRecord);
-  writeLocalSubmissionsList(others);
+  writeLocalSubmissionsList(others, storageScope);
+
+  // V-01 & V-02: When unauthenticated (student mode), also persist in UNAUTHENTICATED_HOMEWORK_SCOPE
+  // so student replay tracking and unauthenticated offline queue flushing work reliably.
+  if (!activeUid && storageScope !== UNAUTHENTICATED_HOMEWORK_SCOPE) {
+    const unauthOthers = unauthAll.filter((s) => s.id !== mergedRecord.id);
+    unauthOthers.unshift(mergedRecord);
+    writeLocalSubmissionsList(unauthOthers, UNAUTHENTICATED_HOMEWORK_SCOPE);
+  }
 
   if (syncCloud) {
     activeSaveSubmissionToCloud(mergedRecord)
       .then((ok) => {
         if (ok) {
-          const updated = getLocalSubmissions().map((s) =>
+          const updated = getLocalSubmissions(storageScope).map((s) =>
             s.id === mergedRecord.id ? { ...s, cloudSynced: true } : s
           );
-          writeLocalSubmissionsList(updated);
-          notifyHomeworkSyncStateChanged();
+          writeLocalSubmissionsList(updated, storageScope);
+          if (!activeUid && storageScope !== UNAUTHENTICATED_HOMEWORK_SCOPE) {
+            const updatedUnauth = getLocalSubmissions(UNAUTHENTICATED_HOMEWORK_SCOPE).map((s) =>
+              s.id === mergedRecord.id ? { ...s, cloudSynced: true } : s
+            );
+            writeLocalSubmissionsList(updatedUnauth, UNAUTHENTICATED_HOMEWORK_SCOPE);
+          }
+          if (getActiveHomeworkScopeUid() === storageScope || !activeUid) {
+            notifyHomeworkSyncStateChanged();
+          }
         }
       })
       .catch(() => {});
@@ -854,15 +1401,65 @@ export async function saveSubmissionWithConfirmation(
   submission: HomeworkSubmission;
   cloudSynced: boolean;
 }> {
-  const hw = assignmentContext || getLocalAssignments().find((a) => a.id === sub.assignmentId);
-  let normalizedSub: HomeworkSubmission = { ...sub };
+  const hw =
+    assignmentContext ||
+    getLocalAssignments().find(
+      (a) => a.id === sub.assignmentId || sanitizeDocId(a.id) === sanitizeDocId(sub.assignmentId)
+    );
+
+  // V-05: Reject submissions to closed or inactive assignments
+  if (hw && !isHomeworkAssignmentOpenForStudents(hw)) {
+    throw new Error('هذا الواجب مغلق أو غير نشط حالياً ولا يقبل إجابات جديدة.');
+  }
+
+  const resolvedOwnerUid =
+    hw?.ownerUid?.trim() || sub.ownerUid?.trim() || getCurrentHomeworkOwnerUid() || undefined;
+
+  // V-01: Verify against existing local submission with the same ID
+  const existing = getStudentLocalSubmissions(sub.assignmentId, resolvedOwnerUid).find(
+    (s) => s.id === sub.id
+  );
+  if (existing) {
+    const existingName = (existing.studentName || '').trim().toLowerCase();
+    const incomingName = (sub.studentName || '').trim().toLowerCase();
+    if (existingName && incomingName && existingName !== incomingName) {
+      throw new Error('لا يمكن تعديل اسم الطالب لمحاولة مسجلة مسبقاً.');
+    }
+    if (existing.attemptSecret && sub.attemptSecret && existing.attemptSecret !== sub.attemptSecret) {
+      throw new Error('غير مصرح بتعديل هذه المحاولة من جلسة مختلفة.');
+    }
+    const existingIsCompleted =
+      existing.status === 'completed' || (!existing.status && Boolean(existing.completedAt));
+    if (existingIsCompleted) {
+      const incomingIsCompleted =
+        sub.status === 'completed' || (!sub.status && Boolean(sub.completedAt));
+      if (
+        !incomingIsCompleted ||
+        existing.score !== sub.score ||
+        existing.completedAt !== sub.completedAt
+      ) {
+        throw new Error('تم إنهاء هذه المحاولة مسبقاً ولا يمكن الكتابة فوقها.');
+      }
+    }
+  }
+
+  const resolvedAttemptSecret =
+    sub.attemptSecret?.trim() ||
+    existing?.attemptSecret?.trim() ||
+    getOrCreateStudentAttemptSecret(sub.id);
+
+  let normalizedSub: HomeworkSubmission = {
+    ...sub,
+    ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
+    attemptSecret: resolvedAttemptSecret
+  };
   if (hw && hw.id) {
     const validation = validateHomeworkSubmissionIdentity(hw, sub);
     if (!validation.valid) {
       throw new Error(validation.error || 'فشل التحقق من هوية الطالب لهذا الواجب.');
     }
     normalizedSub = {
-      ...sub,
+      ...normalizedSub,
       audienceMode: validation.audienceMode,
       studentId: validation.normalizedStudentId,
       participantId: validation.normalizedParticipantId,
@@ -884,7 +1481,8 @@ export async function saveSubmissionWithConfirmation(
 
 /**
  * Retries any locally saved homework assignments or student submissions
- * whose Firestore write previously failed (e.g. while offline).
+ * whose Firestore write previously failed (e.g. while offline), strictly scoped to the active account
+ * or to unauthenticated student submissions in student mode (V-02).
  */
 let isFlushingPendingHw = false;
 export async function flushPendingHomeworkCloudWrites(): Promise<{
@@ -899,34 +1497,83 @@ export async function flushPendingHomeworkCloudWrites(): Promise<{
     return { syncedAssignments: 0, syncedSubmissions: 0, remainingPending: getPendingHomeworkSyncCount() };
   }
 
+  const scopeAtStart = getActiveHomeworkScopeUid();
+  const authUidAtStart = getCurrentHomeworkOwnerUid();
+
   isFlushingPendingHw = true;
   let syncedAssignments = 0;
   let syncedSubmissions = 0;
 
   try {
-    const localHw = getLocalAssignments();
-    for (const hw of localHw) {
-      if (hw.cloudSynced === false) {
-        const ok = await activeSaveAssignmentToCloud(hw);
-        if (ok) {
-          syncedAssignments++;
-          saveLocalAssignment({ ...hw, cloudSynced: true }, false);
+    // 1. Teacher assignments are only flushed when an authenticated teacher (or test transport) is active
+    if (authUidAtStart || testCloudTransport) {
+      const localHw = getLocalAssignments(scopeAtStart);
+      for (const hw of localHw) {
+        if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+          break;
+        }
+        if (authUidAtStart && hw.ownerUid && hw.ownerUid !== authUidAtStart) {
+          continue;
+        }
+        if (hw.cloudSynced === false) {
+          const ok = await activeSaveAssignmentToCloud(hw);
+          if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+            break;
+          }
+          if (ok) {
+            syncedAssignments++;
+            saveLocalAssignment({ ...hw, cloudSynced: true }, false);
+          }
         }
       }
     }
 
-    const activeIds = new Set(
-      getLocalAssignments().flatMap((a) => [a.id, sanitizeDocId(a.id)])
-    );
-    const localSubs = getLocalSubmissions().filter(
-      (s) => activeIds.has(s.assignmentId) || activeIds.has(sanitizeDocId(s.assignmentId))
-    );
-    for (const sub of localSubs) {
-      if (sub.cloudSynced === false) {
-        const ok = await activeSaveSubmissionToCloud(sub);
-        if (ok) {
-          syncedSubmissions++;
-          saveLocalSubmission({ ...sub, cloudSynced: true }, false);
+    // 2. Flush pending submissions:
+    // - If authenticated as a teacher: flush submissions belonging to active assignments of that teacher.
+    // - If unauthenticated (student mode, V-02): flush pending student submissions in UNAUTHENTICATED_HOMEWORK_SCOPE
+    //   without requiring teacher authentication or local teacher assignment documents.
+    if (getActiveHomeworkScopeUid() === scopeAtStart && getCurrentHomeworkOwnerUid() === authUidAtStart) {
+      if (authUidAtStart) {
+        const activeIds = new Set(
+          getLocalAssignments(scopeAtStart).flatMap((a) => [a.id, sanitizeDocId(a.id)])
+        );
+        const localSubs = getLocalSubmissions(scopeAtStart).filter(
+          (s) => activeIds.has(s.assignmentId) || activeIds.has(sanitizeDocId(s.assignmentId))
+        );
+        for (const sub of localSubs) {
+          if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+            break;
+          }
+          if (sub.ownerUid && sub.ownerUid !== authUidAtStart) {
+            continue;
+          }
+          if (sub.cloudSynced === false) {
+            const ok = await activeSaveSubmissionToCloud(sub);
+            if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+              break;
+            }
+            if (ok) {
+              syncedSubmissions++;
+              saveLocalSubmission({ ...sub, cloudSynced: true }, false);
+            }
+          }
+        }
+      } else {
+        const studentPendingSubs = getLocalSubmissions(UNAUTHENTICATED_HOMEWORK_SCOPE).filter(
+          (s) => s.cloudSynced === false
+        );
+        for (const sub of studentPendingSubs) {
+          if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+            break;
+          }
+          const ok = await activeSaveSubmissionToCloud(sub);
+          if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+            break;
+          }
+          if (ok) {
+            syncedSubmissions++;
+            saveLocalSubmission({ ...sub, cloudSynced: true }, false);
+          }
         }
       }
     }
@@ -944,13 +1591,23 @@ export async function flushPendingHomeworkCloudWrites(): Promise<{
   };
 }
 
-export function getPendingHomeworkSyncCount(): number {
-  const activeAssignments = getLocalAssignments();
+export function getPendingHomeworkSyncCount(explicitUid?: string | null): number {
+  const scopeUid = getActiveHomeworkScopeUid(explicitUid);
+  if (scopeUid === UNAUTHENTICATED_HOMEWORK_SCOPE) {
+    const pendingHw = getLocalAssignments(UNAUTHENTICATED_HOMEWORK_SCOPE).filter(
+      (a) => a.cloudSynced === false
+    ).length;
+    const pendingStudentSubs = getLocalSubmissions(UNAUTHENTICATED_HOMEWORK_SCOPE).filter(
+      (s) => s.cloudSynced === false
+    ).length;
+    return pendingHw + pendingStudentSubs;
+  }
+  const activeAssignments = getLocalAssignments(scopeUid);
   const activeIds = new Set(
     activeAssignments.flatMap((a) => [a.id, sanitizeDocId(a.id)])
   );
   const pendingHw = activeAssignments.filter((a) => a.cloudSynced === false).length;
-  const pendingSubs = getLocalSubmissions().filter(
+  const pendingSubs = getLocalSubmissions(scopeUid).filter(
     (s) =>
       s.cloudSynced === false &&
       (activeIds.has(s.assignmentId) || activeIds.has(sanitizeDocId(s.assignmentId)))
@@ -1054,6 +1711,16 @@ export function getHomeworkSummaryStats(
   };
 }
 
+let lastTrackedAuthUid: string | null = getCurrentHomeworkOwnerUid();
+subscribeTeacherAuth((user) => {
+  const nextUid = user?.uid?.trim() || null;
+  if (nextUid !== lastTrackedAuthUid) {
+    lastTrackedAuthUid = nextUid;
+    isFlushingPendingHw = false;
+    notifyHomeworkSyncStateChanged();
+  }
+});
+
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
     flushPendingHomeworkCloudWrites().catch(() => {});
@@ -1086,74 +1753,246 @@ export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: s
   return `${baseDomain}/homework/${hw.id}?${params.toString()}`;
 }
 
+/**
+ * Deterministically backfills legacy cloud homework assignments and their submissions
+ * when ownership can be proven for `options.uid` (V-03).
+ * Never claims an assignment without deterministic proof (`ownerUid`, `ownerEmail`, or workspace entity match).
+ */
+export async function backfillLegacyCloudHomeworkForAccount(
+  options: LegacyHomeworkMigrationOptions & {
+    candidateAssignmentIds?: Iterable<string>;
+  }
+): Promise<{
+  backfilledAssignments: number;
+  backfilledSubmissions: number;
+}> {
+  if (!options?.uid?.trim()) {
+    return { backfilledAssignments: 0, backfilledSubmissions: 0 };
+  }
+  const targetUid = options.uid.trim();
+  const activeUid = getCurrentHomeworkOwnerUid();
+  if (activeUid && activeUid !== targetUid) {
+    return { backfilledAssignments: 0, backfilledSubmissions: 0 };
+  }
+
+  let backfilledAssignments = 0;
+  let backfilledSubmissions = 0;
+
+  const candidateIds = new Set<string>(
+    [
+      ...getLocalAssignments(targetUid).map((a) => a.id),
+      ...Array.from(options.candidateAssignmentIds || [])
+    ]
+      .map((id) => (id || '').trim())
+      .filter(Boolean)
+  );
+
+  for (const hwId of candidateIds) {
+    if (getCurrentHomeworkOwnerUid() && getCurrentHomeworkOwnerUid() !== targetUid) {
+      break;
+    }
+    if (isAssignmentDeletedLocally(hwId, targetUid)) continue;
+
+    const localHw = getLocalAssignments(targetUid).find(
+      (a) => a.id === hwId || sanitizeDocId(a.id) === sanitizeDocId(hwId)
+    );
+    const cloudHw = await activeFetchAssignmentFromCloud(hwId).catch(() => null);
+    const sourceHw = cloudHw || localHw;
+    if (!sourceHw) continue;
+
+    // Verify ownership deterministically using cloudHw (if present) or localHw
+    const checkSource = cloudHw && !cloudHw.ownerUid && localHw ? { ...cloudHw, ...localHw, ownerUid: cloudHw.ownerUid } : sourceHw;
+    const { provableForTarget, belongsToDifferentAccount } = canAccountClaimLegacyHomework(
+      checkSource,
+      options
+    );
+    if (belongsToDifferentAccount || !provableForTarget) {
+      continue;
+    }
+
+    const cloudNeedsBackfill = !cloudHw || (cloudHw.ownerUid || '').trim() !== targetUid;
+    const stampedHw: HomeworkAssignment = normalizeHomeworkAssignment({
+      ...localHw,
+      ...cloudHw,
+      ownerUid: targetUid,
+      cloudSynced: true
+    });
+
+    if (cloudNeedsBackfill) {
+      const ok = await activeSaveAssignmentToCloud(stampedHw).catch(() => false);
+      if (ok) {
+        backfilledAssignments++;
+        saveLocalAssignment({ ...stampedHw, cloudSynced: true }, false);
+      }
+    } else if (!localHw) {
+      saveLocalAssignment({ ...stampedHw, cloudSynced: true }, false);
+    }
+
+    // Inspect submissions for this owned assignment (including legacy_unclaimed_<assignmentId>)
+    const cloudSubsForHw = await activeFetchSubmissionsForAssignmentFromCloud(stampedHw.id).catch(
+      () => [] as HomeworkSubmission[]
+    );
+    for (const sub of cloudSubsForHw) {
+      const subOwner = (sub.ownerUid || '').trim();
+      const safeId = sanitizeDocId(stampedHw.id);
+      if (
+        !subOwner ||
+        subOwner === `legacy_unclaimed_${safeId}` ||
+        subOwner === `legacy_unclaimed_${stampedHw.id}`
+      ) {
+        const backfilledSub: HomeworkSubmission = {
+          ...sub,
+          ownerUid: targetUid,
+          cloudSynced: true
+        };
+        const subOk = await activeSaveSubmissionToCloud(backfilledSub).catch(() => false);
+        if (subOk) {
+          backfilledSubmissions++;
+          saveLocalSubmission(backfilledSub, false);
+        }
+      } else if (subOwner === targetUid) {
+        saveLocalSubmission({ ...sub, ownerUid: targetUid, cloudSynced: true }, false);
+      }
+    }
+  }
+
+  return { backfilledAssignments, backfilledSubmissions };
+}
+
 export async function syncAndFetchTeacherAssignments(
   rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[]
 ): Promise<any[]> {
+  const scopeAtStart = getActiveHomeworkScopeUid();
+  const authUidAtStart = getCurrentHomeworkOwnerUid();
+
   // 1. Flush any pending local-only writes in the background without blocking UI rendering
   flushPendingHomeworkCloudWrites().catch(() => {});
 
-  // 2. Fetch from Firebase Firestore (Primary Cloud Source of Truth across Main App & Vercel)
-  const [cloudAssignments, cloudSubmissions] = await Promise.all([
-    fetchAllAssignmentsFromFirestore().catch(() => [] as HomeworkAssignment[]),
-    fetchAllSubmissionsFromFirestore().catch(() => [] as HomeworkSubmission[])
-  ]);
+  // 2. Fetch from Firebase Firestore strictly scoped to the authenticated ownerUid
+  const [cloudAssignments, cloudSubmissions] = authUidAtStart
+    ? await Promise.all([
+        activeFetchAllAssignmentsFromCloud(authUidAtStart).catch(() => [] as HomeworkAssignment[]),
+        activeFetchAllSubmissionsFromCloud(authUidAtStart).catch(() => [] as HomeworkSubmission[])
+      ])
+    : [[] as HomeworkAssignment[], [] as HomeworkSubmission[]];
+
+  // Guard against stale async completion after account switch or logout
+  if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+    return [];
+  }
 
   cloudAssignments.forEach((hw) => {
-    if (isAssignmentDeletedLocally(hw.id) || (hw as any).deleted) {
-      deleteAssignmentFromFirestore(hw.id).catch(() => {});
-      deleteSubmissionsForAssignmentFromFirestore(hw.id).catch(() => {});
+    if (authUidAtStart && hw.ownerUid && hw.ownerUid !== authUidAtStart) {
       return;
     }
-    saveLocalAssignment({ ...hw, cloudSynced: true }, false);
+    if (isAssignmentDeletedLocally(hw.id, scopeAtStart) || (hw as any).deleted) {
+      activeDeleteAssignmentFromCloud(hw.id, authUidAtStart || undefined).catch(() => {});
+      activeDeleteSubmissionsForAssignmentFromCloud(hw.id, authUidAtStart || undefined).catch(() => {});
+      return;
+    }
+    saveLocalAssignment({ ...hw, ...(authUidAtStart ? { ownerUid: authUidAtStart } : {}), cloudSynced: true }, false);
   });
 
-  // Push any local assignments missing from cloud
-  const localAssignments = getLocalAssignments();
+  // Push any local assignments missing from cloud ONLY if they belong to the currently authenticated UID
+  const localAssignments = getLocalAssignments(scopeAtStart);
   const activeAssignmentIds = new Set(
     localAssignments.flatMap((a) => [a.id, sanitizeDocId(a.id)])
   );
 
   cloudSubmissions.forEach((sub) => {
-    if (isAssignmentDeletedLocally(sub.assignmentId)) return;
+    if (authUidAtStart && sub.ownerUid && sub.ownerUid !== authUidAtStart) {
+      return;
+    }
+    if (isAssignmentDeletedLocally(sub.assignmentId, scopeAtStart)) return;
     if (
       !activeAssignmentIds.has(sub.assignmentId) &&
       !activeAssignmentIds.has(sanitizeDocId(sub.assignmentId))
     ) {
       return;
     }
-    saveLocalSubmission({ ...sub, cloudSynced: true }, false);
+    saveLocalSubmission({ ...sub, ...(authUidAtStart ? { ownerUid: authUidAtStart } : {}), cloudSynced: true }, false);
   });
 
   // Prune any orphaned local submissions whose assignment no longer exists
-  const validLocalSubmissions = getLocalSubmissions().filter(
+  const validLocalSubmissions = getLocalSubmissions(scopeAtStart).filter(
     (s) =>
       activeAssignmentIds.has(s.assignmentId) ||
       activeAssignmentIds.has(sanitizeDocId(s.assignmentId))
   );
-  writeLocalSubmissionsList(validLocalSubmissions);
+  writeLocalSubmissionsList(validLocalSubmissions, scopeAtStart);
 
-  const cloudAssignmentIds = new Set(cloudAssignments.map((a) => a.id));
-  for (const localHw of localAssignments) {
-    if (!cloudAssignmentIds.has(localHw.id)) {
-      const ok = await saveAssignmentToFirestore(localHw).catch(() => false);
-      if (ok) {
-        saveLocalAssignment({ ...localHw, cloudSynced: true }, false);
+  if (authUidAtStart) {
+    const cloudAssignmentIds = new Set(cloudAssignments.map((a) => a.id));
+    for (const localHw of localAssignments) {
+      if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+        return [];
+      }
+      // Never upload an assignment unless its ownerUid matches the authenticated account
+      if (localHw.ownerUid !== authUidAtStart) {
+        continue;
+      }
+      if (!cloudAssignmentIds.has(localHw.id) || localHw.cloudSynced === false) {
+        const ok = await activeSaveAssignmentToCloud(localHw).catch(() => false);
+        if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+          return [];
+        }
+        if (ok) {
+          saveLocalAssignment({ ...localHw, ownerUid: authUidAtStart, cloudSynced: true }, false);
+        }
+      }
+
+      // V-03: Also check if any legacy/unclaimed submissions exist for this owned assignment and backfill them
+      const assignmentSubs = await activeFetchSubmissionsForAssignmentFromCloud(localHw.id).catch(
+        () => [] as HomeworkSubmission[]
+      );
+      for (const sub of assignmentSubs) {
+        if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+          return [];
+        }
+        const subOwner = (sub.ownerUid || '').trim();
+        const safeId = sanitizeDocId(localHw.id);
+        if (
+          !subOwner ||
+          subOwner === `legacy_unclaimed_${safeId}` ||
+          subOwner === `legacy_unclaimed_${localHw.id}`
+        ) {
+          const backfilledSub: HomeworkSubmission = {
+            ...sub,
+            ownerUid: authUidAtStart,
+            cloudSynced: true
+          };
+          const subOk = await activeSaveSubmissionToCloud(backfilledSub).catch(() => false);
+          if (subOk) {
+            saveLocalSubmission(backfilledSub, false);
+          }
+        } else if (subOwner === authUidAtStart) {
+          saveLocalSubmission({ ...sub, ownerUid: authUidAtStart, cloudSynced: true }, false);
+        }
+      }
+    }
+
+    const cloudSubmissionIds = new Set(cloudSubmissions.map((s) => s.id));
+    for (const localSub of validLocalSubmissions) {
+      if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+        return [];
+      }
+      if (localSub.ownerUid && localSub.ownerUid !== authUidAtStart) {
+        continue;
+      }
+      if (!cloudSubmissionIds.has(localSub.id) || localSub.cloudSynced === false) {
+        const ok = await activeSaveSubmissionToCloud({ ...localSub, ownerUid: authUidAtStart }).catch(() => false);
+        if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+          return [];
+        }
+        if (ok) {
+          saveLocalSubmission({ ...localSub, ownerUid: authUidAtStart, cloudSynced: true }, false);
+        }
       }
     }
   }
 
-  const cloudSubmissionIds = new Set(cloudSubmissions.map((s) => s.id));
-  for (const localSub of validLocalSubmissions) {
-    if (!cloudSubmissionIds.has(localSub.id) || localSub.cloudSynced === false) {
-      const ok = await saveSubmissionToFirestore(localSub).catch(() => false);
-      if (ok) {
-        saveLocalSubmission({ ...localSub, cloudSynced: true }, false);
-      }
-    }
-  }
-
-  const mergedAssignments = getLocalAssignments();
-  const mergedSubmissions = getLocalSubmissions().filter(
+  const mergedAssignments = getLocalAssignments(scopeAtStart);
+  const mergedSubmissions = getLocalSubmissions(scopeAtStart).filter(
     (s) =>
       activeAssignmentIds.has(s.assignmentId) ||
       activeAssignmentIds.has(sanitizeDocId(s.assignmentId))
@@ -1274,12 +2113,16 @@ export function getLocalAssignmentDetails(
   rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[],
   fallbackHw?: HomeworkAssignment | null
 ): any | null {
+  const activeUid = getCurrentHomeworkOwnerUid();
   const safeId = sanitizeDocId(id);
   const rawHw =
     getLocalAssignments().find((a) => a.id === id || sanitizeDocId(a.id) === safeId) ||
     fallbackHw ||
     null;
   if (!rawHw) return null;
+  if (activeUid && rawHw.ownerUid && rawHw.ownerUid !== activeUid) {
+    return null;
+  }
   return computeAssignmentDetailsObject(rawHw, rosterStudents);
 }
 
@@ -1288,6 +2131,9 @@ export async function fetchAssignmentDetailsWithSync(
   rosterStudents?: { id: string; name: string; code?: string; groupId?: string; deleted?: boolean; status?: string }[],
   fallbackHw?: HomeworkAssignment | null
 ): Promise<any | null> {
+  const scopeAtStart = getActiveHomeworkScopeUid();
+  const authUidAtStart = getCurrentHomeworkOwnerUid();
+
   // 1. Fetch assignment + submissions from Firebase Firestore with fast timeout so UI never hangs
   const withFastTimeout = <T>(p: Promise<T>, fallback: T, ms = 3500): Promise<T> =>
     Promise.race([
@@ -1300,18 +2146,33 @@ export async function fetchAssignmentDetailsWithSync(
     withFastTimeout(activeFetchSubmissionsForAssignmentFromCloud(id), [] as HomeworkSubmission[])
   ]);
 
-  if (cloudHw && !isAssignmentDeletedLocally(cloudHw.id)) {
+  if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+    return null;
+  }
+
+  // Enforce ownership in teacher view: if signed in as authUidAtStart and cloudHw belongs to another teacher, reject it
+  if (authUidAtStart && cloudHw?.ownerUid && cloudHw.ownerUid !== authUidAtStart) {
+    return null;
+  }
+
+  if (cloudHw && !isAssignmentDeletedLocally(cloudHw.id, scopeAtStart)) {
     saveLocalAssignment({ ...cloudHw, cloudSynced: true }, false);
   }
-  cloudSubs.forEach((sub) => saveLocalSubmission({ ...sub, cloudSynced: true }, false));
+  cloudSubs.forEach((sub) => {
+    if (authUidAtStart && sub.ownerUid && sub.ownerUid !== authUidAtStart) return;
+    saveLocalSubmission({ ...sub, cloudSynced: true }, false);
+  });
 
   const safeId = sanitizeDocId(id);
   const rawHw =
     cloudHw ||
-    getLocalAssignments().find((a) => a.id === id || sanitizeDocId(a.id) === safeId) ||
+    getLocalAssignments(scopeAtStart).find((a) => a.id === id || sanitizeDocId(a.id) === safeId) ||
     fallbackHw ||
     null;
   if (!rawHw) return null;
+  if (authUidAtStart && rawHw.ownerUid && rawHw.ownerUid !== authUidAtStart) {
+    return null;
+  }
 
   return computeAssignmentDetailsObject(rawHw, rosterStudents);
 }

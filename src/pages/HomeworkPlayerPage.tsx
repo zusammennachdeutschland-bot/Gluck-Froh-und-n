@@ -31,7 +31,7 @@ import {
 import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
 import {
   getLocalAssignments,
-  getLocalSubmissions,
+  getStudentLocalSubmissions,
   saveLocalAssignment,
   saveLocalSubmission,
   getQuestionTypeMeta,
@@ -40,6 +40,9 @@ import {
   saveAssignmentToFirestore,
   subscribeSubmissionsFromFirestore,
   buildDeterministicSubmissionId,
+  getOrCreateStudentAttemptSecret,
+  isHomeworkAssignmentOpenForStudents,
+  getCurrentHomeworkOwnerUid,
   saveSubmissionWithConfirmation,
   flushPendingHomeworkCloudWrites,
   resolveAssignmentAudienceMode,
@@ -188,32 +191,40 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     return () => window.removeEventListener('online', handleOnline);
   }, []);
 
-  // Subscribe to live Firestore class leaderboard for this assignment
+  // Subscribe to live Firestore class leaderboard only when authenticated as the owning teacher
   useEffect(() => {
     if (!assignmentId) return;
-    const unsub = subscribeSubmissionsFromFirestore(assignmentId, (subs) => {
-      setAllSubmissions(subs);
-      if (subs.length > 0) {
-        const sorted = [...subs]
-          .sort(
-            (a, b) =>
-              (b.goldEarned || 0) - (a.goldEarned || 0) ||
-              (b.scorePercentage || b.accuracyPercent || 0) - (a.scorePercentage || a.accuracyPercent || 0)
-          )
-          .slice(0, 15)
-          .map((s) => ({
-            studentName: s.studentName,
-            scorePercentage: s.scorePercentage ?? s.accuracyPercent ?? s.accuracy ?? 0,
-            correctAnswersCount: s.correctAnswersCount ?? s.score ?? 0,
-            totalQuestions: s.totalQuestions || 10,
-            timeSpentSeconds: s.timeSpentSeconds || 0,
-            goldEarned: s.goldEarned ?? (s.correctAnswersCount || s.score || 0) * 100
-          }));
-        setLeaderboard(sorted);
-      }
-    });
+    const activeTeacherUid = getCurrentHomeworkOwnerUid();
+    if (!activeTeacherUid || (assignment?.ownerUid && assignment.ownerUid !== activeTeacherUid)) {
+      return;
+    }
+    const unsub = subscribeSubmissionsFromFirestore(
+      assignmentId,
+      (subs) => {
+        setAllSubmissions(subs);
+        if (subs.length > 0) {
+          const sorted = [...subs]
+            .sort(
+              (a, b) =>
+                (b.goldEarned || 0) - (a.goldEarned || 0) ||
+                (b.scorePercentage || b.accuracyPercent || 0) - (a.scorePercentage || a.accuracyPercent || 0)
+            )
+            .slice(0, 15)
+            .map((s) => ({
+              studentName: s.studentName,
+              scorePercentage: s.scorePercentage ?? s.accuracyPercent ?? s.accuracy ?? 0,
+              correctAnswersCount: s.correctAnswersCount ?? s.score ?? 0,
+              totalQuestions: s.totalQuestions || 10,
+              timeSpentSeconds: s.timeSpentSeconds || 0,
+              goldEarned: s.goldEarned ?? (s.correctAnswersCount || s.score || 0) * 100
+            }));
+          setLeaderboard(sorted);
+        }
+      },
+      activeTeacherUid
+    );
     return () => unsub();
-  }, [assignmentId]);
+  }, [assignmentId, assignment?.ownerUid]);
 
   // Load Assignment (Primary: Firebase Firestore -> Secondary: API -> Fallback: Local/URL for open mode only)
   useEffect(() => {
@@ -225,6 +236,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         // 1. Check Firebase Firestore first (works seamlessly between Main App & Vercel!)
         const cloudHw = await fetchAssignmentFromFirestore(assignmentId).catch(() => null);
         if (cloudHw && cloudHw.setSnapshot) {
+          if (!isHomeworkAssignmentOpenForStudents(cloudHw)) {
+            setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
+            return;
+          }
           setAssignment(normalizeHomeworkAssignment(cloudHw));
           return;
         }
@@ -239,13 +254,20 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           } catch {
             data = {};
           }
+          if (res.status === 403) {
+            setError(data?.error || 'هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
+            return;
+          }
           if (res.ok && data && data.setSnapshot) {
+            if (!isHomeworkAssignmentOpenForStudents(data)) {
+              setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
+              return;
+            }
             const normalized = normalizeHomeworkAssignment(data);
             setAssignment(normalized);
             if (Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
               setLeaderboard(data.leaderboard);
             }
-            saveAssignmentToFirestore(normalized).catch(() => {});
             return;
           }
         }
@@ -253,6 +275,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         // 3. Check local assignments cache
         const localFound = getLocalAssignments().find((a) => a.id === assignmentId);
         if (localFound && localFound.setSnapshot) {
+          if (!isHomeworkAssignmentOpenForStudents(localFound)) {
+            setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
+            return;
+          }
           setAssignment(normalizeHomeworkAssignment(localFound));
           return;
         }
@@ -328,7 +354,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               createdBy: 'Teacher'
             };
             setAssignment(fallbackHw);
-            saveLocalAssignment(fallbackHw, false);
             return;
           }
         }
@@ -818,10 +843,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     }
   }, [phase, currentIdx, currentQuestion]);
 
-  // Merged submissions (Cloud + Local) for accurate attempt tracking and enforcement
+  // Merged submissions (Cloud + Local student scope) for accurate attempt tracking and enforcement
   const mergedSubmissionsForAssignment = useMemo(() => {
     const map = new Map<string, HomeworkSubmission>();
-    const localSubs = getLocalSubmissions().filter((s) => s.assignmentId === assignmentId);
+    const localSubs = getStudentLocalSubmissions(assignmentId, assignment?.ownerUid);
     for (const s of localSubs) {
       if (s && s.id) map.set(s.id, s);
     }
@@ -829,7 +854,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       if (s && s.id) map.set(s.id, s);
     }
     return Array.from(map.values());
-  }, [allSubmissions, assignmentId, phase, finalScore]);
+  }, [allSubmissions, assignmentId, assignment?.ownerUid, phase, finalScore]);
 
   const resolvedOpenPid = useMemo(() => {
     if (audienceMode !== 'open') return '';
@@ -875,6 +900,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   const handleStartHomework = (e: React.FormEvent) => {
     e.preventDefault();
     setIdentityError(null);
+    if (!isHomeworkAssignmentOpenForStudents(assignment)) {
+      setIdentityError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
+      return;
+    }
     if (isAttemptLimitReached) return;
 
     const candidateSub: Partial<HomeworkSubmission> = {
@@ -913,6 +942,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       finalParticipantId
     );
     activeSubmissionIdRef.current = deterministicId;
+    const attemptSecret = getOrCreateStudentAttemptSecret(deterministicId);
 
     const nowIso = new Date().toISOString();
     setStartTime(nowIso);
@@ -922,6 +952,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const initialInProgress: HomeworkSubmission = {
       id: deterministicId,
       assignmentId,
+      ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
+      attemptSecret,
       audienceMode: check.audienceMode,
       studentId: finalStudentId,
       participantId: finalParticipantId,
@@ -1138,9 +1170,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const startMs = startTime ? new Date(startTime).getTime() : Date.now() - currResponses.length * 4000;
     const timeSpentSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
 
+    const attemptSecret = getOrCreateStudentAttemptSecret(activeSubmissionIdRef.current);
+
     const liveSubmissionObj: HomeworkSubmission = {
       id: activeSubmissionIdRef.current,
       assignmentId,
+      ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
+      attemptSecret,
       audienceMode,
       studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
       participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
@@ -1180,6 +1216,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     finalMaxStreak: number
   ) => {
     if (isSubmittingRef.current) return;
+    if (!isHomeworkAssignmentOpenForStudents(assignment)) {
+      setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
+      return;
+    }
     isSubmittingRef.current = true;
 
     setPhase('completed');
@@ -1193,10 +1233,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const completedAtIso = new Date().toISOString();
     const startMs = startTime ? new Date(startTime).getTime() : Date.now() - totalQ * 4000;
     const timeSpentSeconds = Math.max(5, Math.round((Date.now() - startMs) / 1000));
+    const attemptSecret = getOrCreateStudentAttemptSecret(activeSubmissionIdRef.current);
 
     const localSubmissionObj: HomeworkSubmission = {
       id: activeSubmissionIdRef.current,
       assignmentId,
+      ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
+      attemptSecret,
       audienceMode,
       studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
       participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
@@ -1236,6 +1279,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         body: JSON.stringify({
           id: activeSubmissionIdRef.current,
           assignmentId,
+          ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
+          attemptSecret,
           audienceMode,
           studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
           participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
@@ -1247,8 +1292,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           completedAt: completedAtIso,
           goldEarned: finalGoldValue,
           maxStreak: finalMaxStreak,
-          completedStudyPhase,
-          assignmentFallback: assignment
+          completedStudyPhase
         })
       });
 

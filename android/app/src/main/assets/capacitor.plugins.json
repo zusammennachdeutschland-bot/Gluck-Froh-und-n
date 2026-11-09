@@ -38,9 +38,5 @@
 	{
 		"pkg": "@capacitor/toast",
 		"classpath": "com.capacitorjs.plugins.toast.ToastPlugin"
-	},
-	{
-		"pkg": "@capgo/capacitor-social-login",
-		"classpath": "ee.forgr.capacitor.social.login.SocialLoginPlugin"
 	}
 ]

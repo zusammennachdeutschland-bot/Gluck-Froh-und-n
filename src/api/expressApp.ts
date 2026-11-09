@@ -235,6 +235,22 @@ function normalizeServerAssignment(hw: any): any {
   };
 }
 
+function isServerAssignmentOpen(hw: any): boolean {
+  if (!hw || !hw.id) return false;
+  if (hw.deleted === true) return false;
+  if (hw.isActive === false) return false;
+  if (hw.status === 'closed') return false;
+  return true;
+}
+
+function sanitizePublicAssignmentInfo(hw: any): any {
+  const normalized = normalizeServerAssignment(hw);
+  if (!normalized || typeof normalized !== 'object') return normalized;
+  const copy = { ...normalized };
+  delete copy.ownerEmail;
+  return copy;
+}
+
 function validateServerSubmission(hw: any, body: any): {
   valid: boolean;
   status?: number;
@@ -246,17 +262,20 @@ function validateServerSubmission(hw: any, body: any): {
   normalizedGroupId?: string;
 } {
   const cleanSubmittedName = String(body?.studentName || '').trim();
-  if (!hw) {
-    if (!cleanSubmittedName) {
-      return { valid: false, status: 400, error: 'Missing studentName', audienceMode: 'open' };
-    }
+  if (!hw || !hw.id) {
     return {
-      valid: true,
-      audienceMode: body?.audienceMode === 'group' ? 'group' : 'open',
-      normalizedStudentId: body?.studentId ? String(body.studentId).trim() : undefined,
-      normalizedParticipantId: body?.participantId ? String(body.participantId).trim() : undefined,
-      normalizedStudentName: cleanSubmittedName,
-      normalizedGroupId: body?.groupId ? String(body.groupId).trim() : undefined
+      valid: false,
+      status: 404,
+      error: 'Assignment not found',
+      audienceMode: 'open'
+    };
+  }
+  if (!isServerAssignmentOpen(hw)) {
+    return {
+      valid: false,
+      status: 403,
+      error: 'Assignment is closed or inactive and no longer accepts submissions',
+      audienceMode: resolveServerAudienceMode(hw)
     };
   }
 
@@ -348,12 +367,49 @@ function validateServerSubmission(hw: any, body: any): {
   };
 }
 
-app.all('/api/teacher/assignments', (req, res) => {
-  if (req.method === 'GET') {
-    return res.json({ assignments: localAssignmentsStore.map(normalizeServerAssignment) });
+app.all('/api/teacher/assignments', async (req, res) => {
+  const authHeader = String(req.headers.authorization || '');
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+  if (!bearerToken) {
+    return res.status(401).json({
+      error: 'Unauthorized: Firebase Bearer token is required to access teacher assignments',
+      assignments: []
+    });
   }
+
+  const verification = await verifyFirebaseIdToken(bearerToken);
+  if (!verification.isValid || !verification.payload) {
+    return res.status(401).json({
+      error: `Unauthorized: ${verification.error || 'Invalid Firebase ID token'}`,
+      assignments: []
+    });
+  }
+  const verifiedUid = verification.payload.sub;
+
+  if (req.method === 'GET') {
+    const requestedOwnerUid = String(req.query.ownerUid || req.headers['x-owner-uid'] || '').trim();
+    if (requestedOwnerUid && requestedOwnerUid !== verifiedUid) {
+      return res.status(403).json({
+        error: 'Forbidden: ownerUid does not match authenticated Firebase token',
+        assignments: []
+      });
+    }
+    const ownerUid = verifiedUid;
+    const filtered = localAssignmentsStore.filter((a) => String(a.ownerUid || '').trim() === ownerUid);
+    return res.json({ assignments: filtered.map(normalizeServerAssignment) });
+  }
+
   if (req.method === 'POST') {
     const body = req.body || {};
+    const bodyOwnerUid = String(body.ownerUid || req.headers['x-owner-uid'] || '').trim();
+    if (bodyOwnerUid && bodyOwnerUid !== verifiedUid) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Assignment ownerUid does not match authenticated Firebase token'
+      });
+    }
+    const effectiveOwnerUid = verifiedUid;
     if (body.audienceMode === 'group') {
       const gid = String(body.groupId || '').trim();
       if (!gid || gid === 'all') {
@@ -363,14 +419,29 @@ app.all('/api/teacher/assignments', (req, res) => {
         });
       }
     }
-    const normalized = normalizeServerAssignment(body);
+    const normalized = normalizeServerAssignment({
+      ...body,
+      ownerUid: effectiveOwnerUid
+    });
+    delete normalized.ownerEmail;
+
     if (normalized.id) {
       const idx = localAssignmentsStore.findIndex((a) => a.id === normalized.id);
       if (idx >= 0) {
+        const existingOwner = String(localAssignmentsStore[idx].ownerUid || '').trim();
+        const incomingOwner = String(normalized.ownerUid || '').trim();
+        if (existingOwner && incomingOwner !== existingOwner) {
+          return res.status(403).json({
+            success: false,
+            error: 'Cannot overwrite or change ownership of an assignment belonging to another account.'
+          });
+        }
         localAssignmentsStore[idx] = normalizeServerAssignment({
           ...localAssignmentsStore[idx],
-          ...normalized
+          ...normalized,
+          ownerUid: existingOwner || incomingOwner
         });
+        delete localAssignmentsStore[idx].ownerEmail;
       } else {
         localAssignmentsStore.unshift(normalized);
       }
@@ -380,18 +451,78 @@ app.all('/api/teacher/assignments', (req, res) => {
   return res.json({ success: true });
 });
 
-app.all('/api/homework/submissions', (req, res) => {
+app.all('/api/homework/submissions', async (req, res) => {
   if (req.method === 'GET') {
-    const assignmentId = req.query.assignmentId ? String(req.query.assignmentId) : null;
-    const list = assignmentId
-      ? localSubmissionsStore.filter((s) => s.assignmentId === assignmentId)
-      : localSubmissionsStore;
+    const authHeader = String(req.headers.authorization || '');
+    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+    if (!bearerToken) {
+      return res.status(401).json({
+        error: 'Unauthorized: Firebase Bearer token is required to list submissions',
+        submissions: []
+      });
+    }
+
+    const verification = await verifyFirebaseIdToken(bearerToken);
+    if (!verification.isValid || !verification.payload) {
+      return res.status(401).json({
+        error: `Unauthorized: ${verification.error || 'Invalid Firebase ID token'}`,
+        submissions: []
+      });
+    }
+    const verifiedUid = verification.payload.sub;
+
+    const assignmentId = req.query.assignmentId ? String(req.query.assignmentId).trim() : null;
+    const requestedOwnerUid = String(req.query.ownerUid || req.headers['x-owner-uid'] || '').trim();
+
+    if (requestedOwnerUid && requestedOwnerUid !== verifiedUid) {
+      return res.status(403).json({
+        error: 'Forbidden: ownerUid does not match authenticated Firebase token',
+        submissions: []
+      });
+    }
+    const ownerUid = verifiedUid;
+
+    if (assignmentId) {
+      const targetHw = localAssignmentsStore.find((a) => a.id === assignmentId);
+      if (targetHw && targetHw.ownerUid && String(targetHw.ownerUid).trim() !== ownerUid) {
+        return res.status(403).json({
+          error: 'Forbidden: Assignment belongs to another teacher account',
+          submissions: []
+        });
+      }
+    }
+    const list = localSubmissionsStore.filter((s) => {
+      if (assignmentId && s.assignmentId !== assignmentId) return false;
+      if (String(s.ownerUid || '').trim() !== ownerUid) return false;
+      return true;
+    });
     return res.json({ submissions: list });
   }
   if (req.method === 'POST') {
     const body = req.body || {};
-    const targetHw =
-      localAssignmentsStore.find((a) => a.id === body.assignmentId) || body.assignmentFallback || null;
+    // V-05: Never trust client-supplied body.assignmentFallback; require a server-known assignment
+    const targetHw = localAssignmentsStore.find((a) => a.id === body.assignmentId) || null;
+    if (!targetHw) {
+      return res.status(404).json({
+        success: false,
+        error: 'Assignment not found'
+      });
+    }
+    if (!isServerAssignmentOpen(targetHw)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Assignment is closed or inactive and no longer accepts submissions'
+      });
+    }
+    const hwOwnerUid = String(targetHw?.ownerUid || '').trim();
+    const bodyOwnerUid = String(body?.ownerUid || '').trim();
+    if (hwOwnerUid && bodyOwnerUid && hwOwnerUid !== bodyOwnerUid) {
+      return res.status(403).json({
+        success: false,
+        error: 'Submission ownerUid does not match assignment ownerUid'
+      });
+    }
     const check = validateServerSubmission(targetHw, body);
     if (!check.valid) {
       return res.status(check.status || 403).json({
@@ -399,18 +530,55 @@ app.all('/api/homework/submissions', (req, res) => {
         error: check.error || 'Submission validation failed'
       });
     }
+    const resolvedOwnerUid = hwOwnerUid || bodyOwnerUid || undefined;
     const cleanSub = {
       ...body,
+      ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
       audienceMode: check.audienceMode,
       studentId: check.normalizedStudentId,
       participantId: check.normalizedParticipantId,
       groupId: check.normalizedGroupId,
       studentName: check.normalizedStudentName
     };
+    delete cleanSub.assignmentFallback;
+
     if (cleanSub.id) {
       const idx = localSubmissionsStore.findIndex((s) => s.id === cleanSub.id);
       if (idx >= 0) {
-        localSubmissionsStore[idx] = { ...localSubmissionsStore[idx], ...cleanSub };
+        const existing = localSubmissionsStore[idx];
+        const existingOwner = String(existing.ownerUid || '').trim();
+        if (existingOwner && resolvedOwnerUid && existingOwner !== resolvedOwnerUid) {
+          return res.status(403).json({
+            success: false,
+            error: 'Cannot overwrite submission belonging to another account'
+          });
+        }
+        const existingName = String(existing.studentName || '').trim().toLowerCase();
+        const incomingName = String(cleanSub.studentName || '').trim().toLowerCase();
+        if (existingName && incomingName && existingName !== incomingName) {
+          return res.status(403).json({
+            success: false,
+            error: 'Cannot change studentName on an existing submission'
+          });
+        }
+        if (
+          existing.attemptSecret &&
+          String(body.attemptSecret || '').trim() !== String(existing.attemptSecret).trim()
+        ) {
+          return res.status(403).json({
+            success: false,
+            error: 'Invalid attemptSecret for existing submission'
+          });
+        }
+        const existingCompleted =
+          existing.status === 'completed' || (!existing.status && Boolean(existing.completedAt));
+        if (existingCompleted) {
+          return res.status(409).json({
+            success: false,
+            error: 'Completed submission is locked and cannot be overwritten'
+          });
+        }
+        localSubmissionsStore[idx] = { ...existing, ...cleanSub };
       } else {
         localSubmissionsStore.unshift(cleanSub);
       }
@@ -426,13 +594,36 @@ app.get('/api/homework/info', (req, res) => {
   if (!found) {
     return res.status(404).json({ error: 'Assignment not found in local relay' });
   }
-  return res.json(normalizeServerAssignment(found));
+  if (!isServerAssignmentOpen(found)) {
+    return res.status(403).json({ error: 'Assignment is closed or inactive' });
+  }
+  return res.json(sanitizePublicAssignmentInfo(found));
 });
 
 app.post('/api/homework/submit', (req, res) => {
   const body = req.body || {};
-  const targetHw =
-    localAssignmentsStore.find((a) => a.id === body.assignmentId) || body.assignmentFallback || null;
+  // V-05: Never accept untrusted client-supplied body.assignmentFallback
+  const targetHw = localAssignmentsStore.find((a) => a.id === body.assignmentId) || null;
+  if (!targetHw) {
+    return res.status(404).json({
+      success: false,
+      error: 'Assignment not found'
+    });
+  }
+  if (!isServerAssignmentOpen(targetHw)) {
+    return res.status(403).json({
+      success: false,
+      error: 'Assignment is closed or inactive and no longer accepts submissions'
+    });
+  }
+  const hwOwnerUid = String(targetHw?.ownerUid || '').trim();
+  const bodyOwnerUid = String(body?.ownerUid || '').trim();
+  if (hwOwnerUid && bodyOwnerUid && hwOwnerUid !== bodyOwnerUid) {
+    return res.status(403).json({
+      success: false,
+      error: 'Submission ownerUid does not match assignment ownerUid'
+    });
+  }
   const check = validateServerSubmission(targetHw, body);
   if (!check.valid) {
     return res.status(check.status || 403).json({
@@ -448,10 +639,13 @@ app.post('/api/homework/submit', (req, res) => {
   const nowIso = new Date().toISOString();
   const startMs = body.startedAt ? new Date(body.startedAt).getTime() : Date.now() - totalQ * 4000;
   const timeSpentSeconds = Math.max(5, Math.round((Date.now() - startMs) / 1000));
+  const resolvedOwnerUid = hwOwnerUid || bodyOwnerUid || undefined;
 
-  const submission = {
+  const submission: any = {
     id: body.id || `sub_${body.assignmentId || 'hw'}_${Date.now()}`,
     assignmentId: body.assignmentId,
+    ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
+    ...(body.attemptSecret ? { attemptSecret: String(body.attemptSecret).trim() } : {}),
     audienceMode: check.audienceMode,
     studentId: check.normalizedStudentId,
     participantId: check.normalizedParticipantId,
@@ -477,7 +671,40 @@ app.post('/api/homework/submit', (req, res) => {
 
   const idx = localSubmissionsStore.findIndex((s) => s.id === submission.id);
   if (idx >= 0) {
-    localSubmissionsStore[idx] = { ...localSubmissionsStore[idx], ...submission };
+    const existing = localSubmissionsStore[idx];
+    const existingOwner = String(existing.ownerUid || '').trim();
+    if (existingOwner && resolvedOwnerUid && existingOwner !== resolvedOwnerUid) {
+      return res.status(403).json({
+        success: false,
+        error: 'Cannot overwrite submission belonging to another account'
+      });
+    }
+    const existingName = String(existing.studentName || '').trim().toLowerCase();
+    const incomingName = String(submission.studentName || '').trim().toLowerCase();
+    if (existingName && incomingName && existingName !== incomingName) {
+      return res.status(403).json({
+        success: false,
+        error: 'Cannot change studentName on an existing submission'
+      });
+    }
+    if (
+      existing.attemptSecret &&
+      String(body.attemptSecret || '').trim() !== String(existing.attemptSecret).trim()
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: 'Invalid attemptSecret for existing submission'
+      });
+    }
+    const existingCompleted =
+      existing.status === 'completed' || (!existing.status && Boolean(existing.completedAt));
+    if (existingCompleted) {
+      return res.status(409).json({
+        success: false,
+        error: 'Completed submission is locked and cannot be overwritten'
+      });
+    }
+    localSubmissionsStore[idx] = { ...existing, ...submission };
   } else {
     localSubmissionsStore.unshift(submission);
   }

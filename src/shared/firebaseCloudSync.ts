@@ -16,7 +16,13 @@ import {
   inMemoryPersistence,
   User
 } from 'firebase/auth';
-import { SocialLogin } from '@capgo/capacitor-social-login';
+import {
+  GOOGLE_WEB_CLIENT_ID,
+  getResolvedGoogleWebClientId,
+  isAndroidNativePlatform,
+  invokeNativeGoogleCredentialSignIn,
+  invokeNativeGoogleCredentialSignOut
+} from './googleCredentialAuthPlugin';
 import {
   getFirestore,
   initializeFirestore,
@@ -300,18 +306,36 @@ export function setVercelPublicDomain(domainUrl: string): string {
 // ============================================================================
 // FIREBASE AUTHENTICATION (Unified Teacher Login across Main App & Vercel)
 // ============================================================================
-// Initialize default persistence & handle redirect results on load
+export { GOOGLE_WEB_CLIENT_ID };
+
+export interface FirebaseAuthTestOverrides {
+  signInWithGoogleIdToken?: (idToken: string) => Promise<User | null>;
+  signInWithPopup?: () => Promise<User | null>;
+  signOutFirebase?: () => Promise<void>;
+}
+
+let firebaseAuthTestOverrides: FirebaseAuthTestOverrides | null = null;
+
+export function __setFirebaseAuthTestOverrides(overrides: FirebaseAuthTestOverrides | null): void {
+  firebaseAuthTestOverrides = overrides;
+}
+
+// Initialize default persistence & handle redirect results on load (Web only)
 if (typeof window !== 'undefined') {
   setPersistence(auth, browserLocalPersistence).catch(() => {
     setPersistence(auth, inMemoryPersistence).catch(() => {});
   });
-  getRedirectResult(auth).then((res) => {
-    if (res?.user) {
-      console.log('Redirect sign-in success:', res.user.email);
-    }
-  }).catch((e) => {
-    console.warn('Redirect result notice:', e);
-  });
+  if (!isAndroidNativePlatform()) {
+    getRedirectResult(auth)
+      .then((res) => {
+        if (res?.user) {
+          console.log('Redirect sign-in success:', res.user.email);
+        }
+      })
+      .catch((e) => {
+        console.warn('Redirect result notice:', e);
+      });
+  }
 }
 
 export function emailToWorkspaceId(email: string): string {
@@ -331,96 +355,128 @@ export function getActiveCloudUser(): User | null {
   return auth.currentUser;
 }
 
-export async function signInTeacherWithGoogle(): Promise<User | null> {
-  const isCapacitorNative =
-    (window as any).Capacitor?.isNativePlatform?.() ||
-    window.location.protocol === 'capacitor:' ||
-    window.location.protocol === 'file:';
+let activeGoogleSignInPromise: Promise<User | null> | null = null;
 
-  // 1. On Capacitor Android native, use the Native SDK for a seamless experience
-  if (isCapacitorNative) {
+export function isUserCancellationError(err: any): boolean {
+  if (!err) return false;
+  const code = String(err?.code || '').toLowerCase();
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    code === 'user_cancelled' ||
+    code === 'auth/popup-closed-by-user' ||
+    code === 'auth/cancelled-popup-request' ||
+    msg.includes('user cancelled') ||
+    msg.includes('user canceled') ||
+    msg.includes('getcredentialcancellationexception') ||
+    msg.includes('popup-closed-by-user') ||
+    msg.includes('cancelled-popup-request')
+  );
+}
+
+async function executeGoogleSignInInternal(): Promise<User | null> {
+  // 1. ANDROID NATIVE: Exclusively use AndroidX Credential Manager dialog over MainActivity.
+  // Strictly forbidden: external browser, Custom Tabs, signInWithRedirect, or localhost callbacks.
+  if (isAndroidNativePlatform()) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      const netErr: any = new Error('لا يوجد اتصال بالإنترنت. يرجى التحقق من الشبكة والمحاولة مرة أخرى.');
+      netErr.code = 'auth/network-request-failed';
+      throw netErr;
+    }
+
     try {
-      // 1.1 Ensure plugin is initialized with the Web Client ID (Required for all platforms)
-      const webClientId = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID || "REPLACE_WITH_GOOGLE_CLIENT_ID_FOR_WEB";
-      
-      try {
-        await SocialLogin.initialize({
-          google: {
-            webClientId: webClientId
-          }
-        });
-      } catch (initErr) {
-        // May already be initialized or config-based
-        console.log('SocialLogin initialization notice:', initErr);
-      }
-
-      // 1.2 Perform native login
-      const result = await SocialLogin.login({
-        provider: 'google',
-        options: {
-          scopes: ['profile', 'email']
-        }
+      const nativeResult = await invokeNativeGoogleCredentialSignIn({
+        serverClientId: getResolvedGoogleWebClientId()
       });
 
-      if (result.result?.responseType === 'online' && result.result.idToken) {
-        return await signInWithGoogleIdToken(result.result.idToken);
-      }
-      throw new Error('Native Google Sign-In failed to return an ID token or was in offline mode.');
-    } catch (err: any) {
-      console.warn('Capacitor native Google sign-in error:', err);
-      // Fallback to standard redirect if native plugin fails
-      try {
-        await signInWithRedirect(auth, googleProvider);
+      if (!nativeResult || nativeResult.cancelled === true) {
         return null;
-      } catch (redirectErr) {
-        throw err;
       }
+
+      const rawToken = typeof nativeResult.idToken === 'string' ? nativeResult.idToken.trim() : '';
+      if (!rawToken || rawToken.split('.').length < 2) {
+        const tokenErr: any = new Error('تعذر التحقق من رمز حساب Google المستلم. يرجى المحاولة مرة أخرى.');
+        tokenErr.code = 'INVALID_ID_TOKEN';
+        throw tokenErr;
+      }
+
+      return await signInWithGoogleIdToken(rawToken);
+    } catch (err: any) {
+      if (isUserCancellationError(err)) {
+        return null;
+      }
+
+      const code = String(err?.code || '');
+      const msg = String(err?.message || err || '');
+
+      if (code === 'NO_GOOGLE_ACCOUNT' || msg.toLowerCase().includes('nocredentialexception')) {
+        const noAccErr: any = new Error(
+          'لا يوجد حساب Google مسجل على هذا الهاتف حالياً، أو أن شهادة التطبيق (SHA-1) غير مضافة في إعدادات Firebase.'
+        );
+        noAccErr.code = 'NO_GOOGLE_ACCOUNT';
+        throw noAccErr;
+      }
+
+      if (
+        code === 'NETWORK_OR_INTERRUPTED' ||
+        code === 'auth/network-request-failed' ||
+        msg.toLowerCase().includes('network')
+      ) {
+        const netErr: any = new Error('تعذر الاتصال بخدمات Google. يرجى التحقق من اتصال الإنترنت والمحاولة مجدداً.');
+        netErr.code = 'auth/network-request-failed';
+        throw netErr;
+      }
+
+      throw err;
     }
   }
 
-  // 2. Set persistence explicitly
+  // 2. WEB & ELECTRON DESKTOP: Preserve existing supported popup flow
   try {
     await setPersistence(auth, browserLocalPersistence);
   } catch {
-    // Ignore
+    // Ignore persistence fallback errors
   }
 
-  // 3. Primary popup sign-in attempt
   try {
+    if (firebaseAuthTestOverrides?.signInWithPopup) {
+      return await firebaseAuthTestOverrides.signInWithPopup();
+    }
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   } catch (err: any) {
-    const errCode = err?.code || '';
-    const errMsg = err?.message || String(err);
-    console.warn('Google sign-in primary attempt notice:', errMsg);
-
-    if (
-      errCode === 'auth/unauthorized-domain' ||
-      errCode === 'auth/popup-closed-by-user' ||
-      errCode === 'auth/cancelled-popup-request'
-    ) {
-      throw err;
-    }
-
-    // 4. Fallback to signInWithRedirect
-    try {
-      await signInWithRedirect(auth, googleProvider);
+    if (isUserCancellationError(err)) {
       return null;
-    } catch (redirectErr: any) {
-      console.warn('Redirect fallback sign-in failed:', redirectErr);
     }
-
     throw err;
   }
 }
 
+export async function signInTeacherWithGoogle(): Promise<User | null> {
+  if (activeGoogleSignInPromise) {
+    return activeGoogleSignInPromise;
+  }
+  activeGoogleSignInPromise = executeGoogleSignInInternal().finally(() => {
+    activeGoogleSignInPromise = null;
+  });
+  return activeGoogleSignInPromise;
+}
+
 export async function signInWithGoogleIdToken(idToken: string): Promise<User | null> {
+  const cleanToken = typeof idToken === 'string' ? idToken.trim() : '';
+  if (!cleanToken || cleanToken.split('.').length < 2) {
+    const err: any = new Error('Invalid Google ID token format.');
+    err.code = 'INVALID_ID_TOKEN';
+    throw err;
+  }
+  if (firebaseAuthTestOverrides?.signInWithGoogleIdToken) {
+    return await firebaseAuthTestOverrides.signInWithGoogleIdToken(cleanToken);
+  }
   try {
-    const credential = GoogleAuthProvider.credential(idToken);
+    const credential = GoogleAuthProvider.credential(cleanToken);
     const result = await signInWithCredential(auth, credential);
     return result.user;
   } catch (err) {
-    console.warn('Google ID token sign-in notice:', err);
+    console.warn('Google ID token sign-in notice:', err instanceof Error ? err.message : 'Auth error');
     throw err;
   }
 }
@@ -434,17 +490,16 @@ export async function signInTeacherWithEmailPassword(email: string, pass: string
 
 export async function signOutTeacherFirebase(): Promise<void> {
   try {
-    const isCapacitorNative =
-      (window as any).Capacitor?.isNativePlatform?.() ||
-      window.location.protocol === 'capacitor:' ||
-      window.location.protocol === 'file:';
-
-    if (isCapacitorNative) {
+    if (isAndroidNativePlatform()) {
       try {
-        await SocialLogin.logout({ provider: 'google' });
+        await invokeNativeGoogleCredentialSignOut();
       } catch (logoutErr) {
-        console.warn('Native logout notice:', logoutErr);
+        console.warn('Native credential state clear notice:', logoutErr);
       }
+    }
+    if (firebaseAuthTestOverrides?.signOutFirebase) {
+      await firebaseAuthTestOverrides.signOutFirebase();
+      return;
     }
     await signOut(auth);
   } catch (err) {
@@ -452,12 +507,60 @@ export async function signOutTeacherFirebase(): Promise<void> {
   }
 }
 
+export interface HomeworkTestAuthUser {
+  uid: string;
+  email?: string | null;
+}
+
+let testHomeworkAuthUser: HomeworkTestAuthUser | null | undefined = undefined;
+const teacherAuthSubscribers = new Set<(user: User | null) => void>();
+
+export function __setHomeworkAuthUserForTests(
+  user: HomeworkTestAuthUser | null | undefined
+): void {
+  testHomeworkAuthUser = user;
+  const effectiveUser =
+    user === undefined ? auth.currentUser : (user as unknown as User | null);
+  teacherAuthSubscribers.forEach((cb) => {
+    try {
+      cb(effectiveUser);
+    } catch {
+      // Ignore subscriber callback errors
+    }
+  });
+}
+
+export function getCurrentHomeworkOwnerUid(): string | null {
+  if (testHomeworkAuthUser !== undefined) {
+    const clean = testHomeworkAuthUser?.uid?.trim() || '';
+    return clean.length > 0 ? clean : null;
+  }
+  const clean = auth.currentUser?.uid?.trim() || '';
+  return clean.length > 0 ? clean : null;
+}
+
+export function getCurrentHomeworkOwnerEmail(): string | null {
+  if (testHomeworkAuthUser !== undefined) {
+    const clean = testHomeworkAuthUser?.email?.trim() || '';
+    return clean.length > 0 ? clean : null;
+  }
+  const clean = auth.currentUser?.email?.trim() || '';
+  return clean.length > 0 ? clean : null;
+}
+
 export function subscribeTeacherAuth(cb: (user: User | null) => void): () => void {
-  cb(auth.currentUser);
+  teacherAuthSubscribers.add(cb);
+  const initialUser =
+    testHomeworkAuthUser !== undefined
+      ? (testHomeworkAuthUser as unknown as User | null)
+      : auth.currentUser;
+  cb(initialUser);
   const unsubFirebase = onAuthStateChanged(auth, (u) => {
+    if (testHomeworkAuthUser !== undefined) return;
     cb(u || null);
   });
   return () => {
+    teacherAuthSubscribers.delete(cb);
     unsubFirebase();
   };
 }
@@ -513,32 +616,48 @@ export async function executeConfirmedFirestoreWrite<T>(
 }
 
 // ============================================================================
-// FIRESTORE HOMEWORK ASSIGNMENTS
+// FIRESTORE HOMEWORK ASSIGNMENTS (STRICTLY SCOPED BY TEACHER ownerUid)
 // ============================================================================
 export function sanitizeDocId(rawId: string): string {
   return (rawId || 'hw_default').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
 }
 
-export async function saveAssignmentToFirestore(assignment: HomeworkAssignment): Promise<boolean> {
+export async function saveAssignmentToFirestore(
+  assignment: HomeworkAssignment,
+  explicitOwnerUid?: string
+): Promise<boolean> {
   if (!assignment || !assignment.id) return false;
+  const activeUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
+  const recordOwnerUid = assignment.ownerUid?.trim() || '';
+
+  // Require an authenticated ownerUid; never allow Account B to upload or overwrite Account A's assignment
+  if (!activeUid) return false;
+  if (recordOwnerUid && recordOwnerUid !== activeUid) {
+    return false;
+  }
+
+  const ownerUid = activeUid.slice(0, 128);
   const safeId = sanitizeDocId(assignment.id);
   const path = `homework_assignments/${safeId}`;
   try {
+    // Privacy hardening (V-06): strip personal teacher ownerEmail before writing to public student-accessible homework_assignments document
     const cleanAssignment: HomeworkAssignment = {
       ...assignment,
       id: safeId,
+      ownerUid,
       cloudSynced: true
     };
+    delete cleanAssignment.ownerEmail;
     const payloadJson = JSON.stringify(cleanAssignment).slice(0, 490000);
     await executeConfirmedFirestoreWrite(
       () =>
         setDoc(doc(db, 'homework_assignments', safeId), {
           id: safeId,
+          ownerUid,
           title: (assignment.title || 'Hausaufgabe').slice(0, 290),
           createdAt: (assignment.createdAt || new Date().toISOString()).slice(0, 60),
           isActive: assignment.isActive !== false,
-          payloadJson,
-          ...(auth.currentUser?.email ? { ownerEmail: auth.currentUser.email.slice(0, 120) } : {})
+          payloadJson
         }),
       12000,
       2
@@ -564,7 +683,10 @@ async function withFirestoreReadTimeout<T>(promise: Promise<T>, timeoutMs = 4000
   }
 }
 
-export async function fetchAssignmentFromFirestore(assignmentId: string): Promise<HomeworkAssignment | null> {
+export async function fetchAssignmentFromFirestore(
+  assignmentId: string,
+  options?: { requireOwnerUid?: string }
+): Promise<HomeworkAssignment | null> {
   const safeId = sanitizeDocId(assignmentId);
   const path = `homework_assignments/${safeId}`;
   try {
@@ -573,7 +695,18 @@ export async function fetchAssignmentFromFirestore(assignmentId: string): Promis
     const data = snap.data();
     if (data?.payloadJson) {
       const parsed = JSON.parse(data.payloadJson) as HomeworkAssignment;
-      return { ...parsed, cloudSynced: true };
+      const docOwnerUid = (typeof data.ownerUid === 'string' && data.ownerUid.trim()) || parsed.ownerUid?.trim() || undefined;
+      const docOwnerEmail = (typeof data.ownerEmail === 'string' && data.ownerEmail.trim()) || parsed.ownerEmail?.trim() || undefined;
+      if (options?.requireOwnerUid && docOwnerUid !== options.requireOwnerUid.trim()) {
+        return null;
+      }
+      return {
+        ...parsed,
+        ...(docOwnerUid ? { ownerUid: docOwnerUid } : {}),
+        ...(docOwnerEmail ? { ownerEmail: docOwnerEmail } : {}),
+        isActive: typeof data.isActive === 'boolean' ? data.isActive : parsed.isActive !== false,
+        cloudSynced: true
+      };
     }
     return null;
   } catch (error) {
@@ -582,18 +715,37 @@ export async function fetchAssignmentFromFirestore(assignmentId: string): Promis
   }
 }
 
-export async function fetchAllAssignmentsFromFirestore(): Promise<HomeworkAssignment[]> {
+export async function fetchAllAssignmentsFromFirestore(
+  explicitOwnerUid?: string
+): Promise<HomeworkAssignment[]> {
+  const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
+  if (!ownerUid) {
+    return [];
+  }
   const path = 'homework_assignments';
   try {
-    const q = query(collection(db, 'homework_assignments'), where('id', '>=', ''));
+    const q = query(collection(db, 'homework_assignments'), where('ownerUid', '==', ownerUid));
     const snap = await withFirestoreReadTimeout(getDocs(q), 5000);
+    // Guard against stale async completion after account switch
+    if (!explicitOwnerUid && getCurrentHomeworkOwnerUid() !== ownerUid) {
+      return [];
+    }
     const list: HomeworkAssignment[] = [];
     snap.forEach((docSnap) => {
       try {
         const data = docSnap.data();
         if (data?.payloadJson) {
-          const parsed = JSON.parse(data.payloadJson);
-          list.push({ ...parsed, cloudSynced: true });
+          const parsed = JSON.parse(data.payloadJson) as HomeworkAssignment;
+          const docOwnerUid = (typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '') || (parsed.ownerUid?.trim() || '');
+          if (docOwnerUid !== ownerUid) {
+            return;
+          }
+          list.push({
+            ...parsed,
+            ownerUid,
+            ...(typeof data.ownerEmail === 'string' && data.ownerEmail ? { ownerEmail: data.ownerEmail } : {}),
+            cloudSynced: true
+          });
         }
       } catch {
         // Ignore malformed doc
@@ -607,18 +759,37 @@ export async function fetchAllAssignmentsFromFirestore(): Promise<HomeworkAssign
 }
 
 export function subscribeAssignmentsFromFirestore(
-  onUpdate: (assignments: HomeworkAssignment[]) => void
+  onUpdate: (assignments: HomeworkAssignment[]) => void,
+  explicitOwnerUid?: string
 ): () => void {
+  const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
+  if (!ownerUid) {
+    onUpdate([]);
+    return () => {};
+  }
+  const q = query(collection(db, 'homework_assignments'), where('ownerUid', '==', ownerUid));
   return onSnapshot(
-    collection(db, 'homework_assignments'),
+    q,
     (snap) => {
+      if (!explicitOwnerUid && getCurrentHomeworkOwnerUid() !== ownerUid) {
+        return;
+      }
       const list: HomeworkAssignment[] = [];
       snap.forEach((docSnap) => {
         try {
           const data = docSnap.data();
           if (data?.payloadJson) {
-            const parsed = JSON.parse(data.payloadJson);
-            list.push({ ...parsed, cloudSynced: true });
+            const parsed = JSON.parse(data.payloadJson) as HomeworkAssignment;
+            const docOwnerUid = (typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '') || (parsed.ownerUid?.trim() || '');
+            if (docOwnerUid !== ownerUid) {
+              return;
+            }
+            list.push({
+              ...parsed,
+              ownerUid,
+              ...(typeof data.ownerEmail === 'string' && data.ownerEmail ? { ownerEmail: data.ownerEmail } : {}),
+              cloudSynced: true
+            });
           }
         } catch {
           // Ignore
@@ -633,11 +804,31 @@ export function subscribeAssignmentsFromFirestore(
   );
 }
 
-export async function deleteAssignmentFromFirestore(assignmentId: string): Promise<boolean> {
+export async function deleteAssignmentFromFirestore(
+  assignmentId: string,
+  explicitOwnerUid?: string
+): Promise<boolean> {
   if (!assignmentId) return false;
+  const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
+  if (!ownerUid) return false;
   const safeId = sanitizeDocId(assignmentId);
   const path = `homework_assignments/${safeId}`;
   try {
+    const existingSnap = await withFirestoreReadTimeout(getDoc(doc(db, 'homework_assignments', safeId)), 4000).catch(() => null);
+    if (existingSnap && existingSnap.exists()) {
+      const data = existingSnap.data();
+      let docOwnerUid = typeof data?.ownerUid === 'string' ? data.ownerUid.trim() : '';
+      if (!docOwnerUid && data?.payloadJson) {
+        try {
+          docOwnerUid = (JSON.parse(data.payloadJson)?.ownerUid || '').trim();
+        } catch {
+          // Ignore
+        }
+      }
+      if (docOwnerUid && docOwnerUid !== ownerUid) {
+        return false;
+      }
+    }
     await executeConfirmedFirestoreWrite(() => deleteDoc(doc(db, 'homework_assignments', safeId)));
     return true;
   } catch (error) {
@@ -646,18 +837,26 @@ export async function deleteAssignmentFromFirestore(assignmentId: string): Promi
   }
 }
 
-export async function deleteSubmissionsForAssignmentFromFirestore(assignmentId: string): Promise<boolean> {
+export async function deleteSubmissionsForAssignmentFromFirestore(
+  assignmentId: string,
+  explicitOwnerUid?: string
+): Promise<boolean> {
   if (!assignmentId) return false;
+  const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
+  if (!ownerUid) return false;
   const safeAssignmentId = sanitizeDocId(assignmentId);
   const path = 'homework_submissions';
   try {
     const q = query(
       collection(db, 'homework_submissions'),
-      where('assignmentId', '==', safeAssignmentId)
+      where('assignmentId', '==', safeAssignmentId),
+      where('ownerUid', '==', ownerUid)
     );
     const snap = await getDocs(q);
     const deletePromises: Promise<any>[] = [];
     snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data?.ownerUid && data.ownerUid !== ownerUid) return;
       deletePromises.push(executeConfirmedFirestoreWrite(() => deleteDoc(docSnap.ref)));
     });
     if (deletePromises.length > 0) {
@@ -671,37 +870,80 @@ export async function deleteSubmissionsForAssignmentFromFirestore(assignmentId: 
 }
 
 // ============================================================================
-// FIRESTORE STUDENT SUBMISSIONS
+// FIRESTORE STUDENT SUBMISSIONS (LINKED TO PARENT ASSIGNMENT ownerUid)
 // ============================================================================
-export async function saveSubmissionToFirestore(submission: HomeworkSubmission): Promise<boolean> {
+export async function saveSubmissionToFirestore(
+  submission: HomeworkSubmission,
+  explicitOwnerUid?: string
+): Promise<boolean> {
   if (!submission || !submission.id || !submission.assignmentId) return false;
   const safeId = sanitizeDocId(submission.id);
   const safeAssignmentId = sanitizeDocId(submission.assignmentId);
   const path = `homework_submissions/${safeId}`;
   try {
-    const isCompleted = submission.status === 'completed';
+    let resolvedOwnerUid =
+      submission.ownerUid?.trim() ||
+      explicitOwnerUid?.trim() ||
+      '';
+
+    if (!resolvedOwnerUid) {
+      const parentHw = await fetchAssignmentFromFirestore(safeAssignmentId).catch(() => null);
+      if (parentHw) {
+        if (parentHw.isActive === false || parentHw.status === 'closed') {
+          return false;
+        }
+        if (parentHw.ownerUid && parentHw.ownerUid.trim()) {
+          resolvedOwnerUid = parentHw.ownerUid.trim();
+        } else {
+          // V-03: Legacy assignment in Firestore without ownerUid yet; use deterministic legacy sentinel
+          resolvedOwnerUid = `legacy_unclaimed_${safeAssignmentId}`;
+        }
+      } else {
+        resolvedOwnerUid = getCurrentHomeworkOwnerUid() || '';
+      }
+    }
+
+    if (!resolvedOwnerUid) {
+      return false;
+    }
+
+    const ownerUid = resolvedOwnerUid.slice(0, 128);
+    const isCompleted = submission.status === 'completed' || (!submission.status && Boolean(submission.completedAt));
+    const statusValue = isCompleted ? 'completed' : 'in_progress';
     const nowIso = new Date().toISOString();
+    const completedAtValue = isCompleted ? (submission.completedAt || nowIso).slice(0, 60) : '';
+    const attemptSecret = submission.attemptSecret?.trim()
+      ? submission.attemptSecret.trim().slice(0, 120)
+      : undefined;
+
     const normalized: HomeworkSubmission = {
       ...submission,
       id: safeId,
       assignmentId: safeAssignmentId,
-      completedAt: isCompleted ? (submission.completedAt || nowIso) : '',
+      ownerUid,
+      status: statusValue,
+      ...(attemptSecret ? { attemptSecret } : {}),
+      completedAt: completedAtValue,
       updatedAt: nowIso,
       cloudSynced: true
     };
+    delete normalized.ownerEmail;
     const payloadJson = JSON.stringify(normalized).slice(0, 490000);
     await executeConfirmedFirestoreWrite(
       () =>
         setDoc(doc(db, 'homework_submissions', safeId), {
           id: safeId,
           assignmentId: safeAssignmentId,
+          ownerUid,
           studentName: (submission.studentName || 'طالب').slice(0, 140),
           score: Math.max(0, Math.min(100000, Number(submission.score ?? submission.correctAnswersCount) || 0)),
           accuracyPercent: Math.max(
             0,
             Math.min(100, Number(submission.accuracyPercent ?? submission.scorePercentage ?? submission.accuracy) || 0)
           ),
-          completedAt: (normalized.completedAt || submission.startedAt || nowIso).slice(0, 60),
+          completedAt: completedAtValue,
+          status: statusValue,
+          ...(attemptSecret ? { attemptSecret } : {}),
           payloadJson
         }),
       12000,
@@ -715,23 +957,39 @@ export async function saveSubmissionToFirestore(submission: HomeworkSubmission):
 }
 
 export async function fetchSubmissionsForAssignmentFromFirestore(
-  assignmentId: string
+  assignmentId: string,
+  explicitOwnerUid?: string
 ): Promise<HomeworkSubmission[]> {
   const safeAssignmentId = sanitizeDocId(assignmentId);
+  const requiredOwnerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid() || undefined;
   const path = 'homework_submissions';
   try {
-    const q = query(
-      collection(db, 'homework_submissions'),
-      where('assignmentId', '==', safeAssignmentId)
-    );
+    const q = requiredOwnerUid
+      ? query(
+          collection(db, 'homework_submissions'),
+          where('assignmentId', '==', safeAssignmentId),
+          where('ownerUid', '==', requiredOwnerUid)
+        )
+      : query(
+          collection(db, 'homework_submissions'),
+          where('assignmentId', '==', safeAssignmentId)
+        );
     const snap = await withFirestoreReadTimeout(getDocs(q), 4000);
     const list: HomeworkSubmission[] = [];
     snap.forEach((docSnap) => {
       try {
         const data = docSnap.data();
         if (data?.payloadJson) {
-          const parsed = JSON.parse(data.payloadJson);
-          list.push({ ...parsed, cloudSynced: true });
+          const parsed = JSON.parse(data.payloadJson) as HomeworkSubmission;
+          const docOwnerUid = (typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '') || (parsed.ownerUid?.trim() || '');
+          if (requiredOwnerUid && docOwnerUid && docOwnerUid !== requiredOwnerUid && docOwnerUid !== `legacy_unclaimed_${safeAssignmentId}`) {
+            return;
+          }
+          list.push({
+            ...parsed,
+            ...(requiredOwnerUid ? { ownerUid: requiredOwnerUid } : docOwnerUid ? { ownerUid: docOwnerUid } : {}),
+            cloudSynced: true
+          });
         }
       } catch {
         // Ignore
@@ -748,17 +1006,35 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
   }
 }
 
-export async function fetchAllSubmissionsFromFirestore(): Promise<HomeworkSubmission[]> {
+export async function fetchAllSubmissionsFromFirestore(
+  explicitOwnerUid?: string
+): Promise<HomeworkSubmission[]> {
+  const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
+  if (!ownerUid) {
+    return [];
+  }
   const path = 'homework_submissions';
   try {
-    const snap = await withFirestoreReadTimeout(getDocs(collection(db, 'homework_submissions')), 5000);
+    const q = query(collection(db, 'homework_submissions'), where('ownerUid', '==', ownerUid));
+    const snap = await withFirestoreReadTimeout(getDocs(q), 5000);
+    if (!explicitOwnerUid && getCurrentHomeworkOwnerUid() !== ownerUid) {
+      return [];
+    }
     const list: HomeworkSubmission[] = [];
     snap.forEach((docSnap) => {
       try {
         const data = docSnap.data();
         if (data?.payloadJson) {
-          const parsed = JSON.parse(data.payloadJson);
-          list.push({ ...parsed, cloudSynced: true });
+          const parsed = JSON.parse(data.payloadJson) as HomeworkSubmission;
+          const docOwnerUid = (typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '') || (parsed.ownerUid?.trim() || '');
+          if (docOwnerUid !== ownerUid) {
+            return;
+          }
+          list.push({
+            ...parsed,
+            ownerUid,
+            cloudSynced: true
+          });
         }
       } catch {
         // Ignore
@@ -777,22 +1053,44 @@ export async function fetchAllSubmissionsFromFirestore(): Promise<HomeworkSubmis
 
 export function subscribeSubmissionsFromFirestore(
   assignmentId: string | null,
-  onUpdate: (submissions: HomeworkSubmission[]) => void
+  onUpdate: (submissions: HomeworkSubmission[]) => void,
+  explicitOwnerUid?: string
 ): () => void {
+  const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
+  if (!ownerUid) {
+    onUpdate([]);
+    return () => {};
+  }
+
   const q = assignmentId
-    ? query(collection(db, 'homework_submissions'), where('assignmentId', '==', sanitizeDocId(assignmentId)))
-    : collection(db, 'homework_submissions');
+    ? query(
+        collection(db, 'homework_submissions'),
+        where('assignmentId', '==', sanitizeDocId(assignmentId)),
+        where('ownerUid', '==', ownerUid)
+      )
+    : query(collection(db, 'homework_submissions'), where('ownerUid', '==', ownerUid));
 
   return onSnapshot(
     q,
     (snap) => {
+      if (!explicitOwnerUid && ownerUid && getCurrentHomeworkOwnerUid() !== ownerUid) {
+        return;
+      }
       const list: HomeworkSubmission[] = [];
       snap.forEach((docSnap) => {
         try {
           const data = docSnap.data();
           if (data?.payloadJson) {
-            const parsed = JSON.parse(data.payloadJson);
-            list.push({ ...parsed, cloudSynced: true });
+            const parsed = JSON.parse(data.payloadJson) as HomeworkSubmission;
+            const docOwnerUid = (typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '') || (parsed.ownerUid?.trim() || '');
+            if (ownerUid && docOwnerUid !== ownerUid) {
+              return;
+            }
+            list.push({
+              ...parsed,
+              ...(docOwnerUid ? { ownerUid: docOwnerUid } : {}),
+              cloudSynced: true
+            });
           }
         } catch {
           // Ignore
@@ -812,22 +1110,24 @@ export function subscribeSubmissionsFromFirestore(
 }
 
 // ============================================================================
-// FIRESTORE LERNSTUDIO SETS SYNC (Main App <-> Vercel)
+// FIRESTORE LERNSTUDIO SETS SYNC (Main App <-> Vercel, Scoped by ownerUid)
 // ============================================================================
 export async function saveLernstudioSetToFirestore(setItem: LernstudioSet): Promise<boolean> {
   if (!setItem || !setItem.id) return false;
+  const ownerUid = getCurrentHomeworkOwnerUid() || auth.currentUser?.uid || '';
+  if (!ownerUid) return false;
   const safeId = sanitizeDocId(setItem.id);
   const path = `lernstudio_sets/${safeId}`;
   try {
-    const payloadJson = JSON.stringify(setItem).slice(0, 490000);
+    const payloadJson = JSON.stringify({ ...setItem, ownerUid }).slice(0, 490000);
     await executeConfirmedFirestoreWrite(() =>
       setDoc(doc(db, 'lernstudio_sets', safeId), {
         id: safeId,
+        ownerUid: ownerUid.slice(0, 128),
         title: (setItem.title || 'Set').slice(0, 290),
         category: ((setItem as any).category || (setItem as any).topic || 'general').slice(0, 110),
         payloadJson,
-        updatedAtIso: new Date().toISOString(),
-        ...(auth.currentUser?.email ? { ownerEmail: auth.currentUser.email.slice(0, 120) } : {})
+        updatedAtIso: new Date().toISOString()
       })
     );
     return true;
@@ -839,6 +1139,8 @@ export async function saveLernstudioSetToFirestore(setItem: LernstudioSet): Prom
 
 export async function deleteLernstudioSetFromFirestore(setId: string): Promise<boolean> {
   if (!setId) return false;
+  const ownerUid = getCurrentHomeworkOwnerUid() || auth.currentUser?.uid || '';
+  if (!ownerUid) return false;
   const safeId = sanitizeDocId(setId);
   const path = `lernstudio_sets/${safeId}`;
   try {
@@ -869,9 +1171,15 @@ export async function fetchLernstudioSetFromFirestore(setId: string): Promise<Le
 }
 
 export function subscribeLernstudioSetsFromFirestore(
-  onUpdate: (sets: LernstudioSet[]) => void
+  onUpdate: (sets: LernstudioSet[]) => void,
+  explicitOwnerUid?: string
 ): () => void {
-  const q = query(collection(db, 'lernstudio_sets'), where('id', '>=', ''));
+  const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid() || auth.currentUser?.uid || '';
+  if (!ownerUid) {
+    onUpdate([]);
+    return () => {};
+  }
+  const q = query(collection(db, 'lernstudio_sets'), where('ownerUid', '==', ownerUid));
   return onSnapshot(
     q,
     (snap) => {
@@ -879,6 +1187,7 @@ export function subscribeLernstudioSetsFromFirestore(
       snap.forEach((docSnap) => {
         try {
           const data = docSnap.data();
+          if (data?.ownerUid && data.ownerUid !== ownerUid) return;
           if (data?.payloadJson) {
             list.push(JSON.parse(data.payloadJson));
           }

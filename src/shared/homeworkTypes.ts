@@ -56,12 +56,15 @@ export interface HomeworkQuestionResponse {
 export interface HomeworkSubmission {
   id: string; // e.g. "sub_abc123"
   assignmentId: string;
+  ownerUid?: string; // Teacher Firebase Auth UID who owns the parent assignment
+  ownerEmail?: string; // Optional audit/display email (never used as security authority)
   audienceMode?: HomeworkAudienceMode; // 'open' | 'group'
   studentId?: string; // Real student ID from Glück roster (required in 'group' mode)
   participantId?: string; // Stable per-device participant ID for 'open' mode
   groupId?: string; // Group ID when submitted under 'group' mode
   studentName: string;
   attemptNumber: number;
+  attemptSecret?: string; // Per-attempt unguessable token preventing cross-student overwrite
   status?: 'in_progress' | 'completed' | string;
   startedAt: string;
   completedAt: string;
@@ -82,6 +85,9 @@ export interface HomeworkSubmission {
 
 export interface HomeworkAssignment {
   id: string; // e.g. "hw_abc123"
+  ownerUid?: string; // Teacher Firebase Auth UID (mandatory security authority for cloud sync)
+  ownerEmail?: string; // Optional teacher email (display/audit only)
+  shareToken?: string; // Public student share token
   title: string;
   setSnapshot: any; // LernstudioSet snapshot
   selectedItemIds?: string[]; // Specific word IDs selected by teacher

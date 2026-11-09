@@ -30,8 +30,13 @@ import {
   subscribeAssignmentsFromFirestore,
   subscribeSubmissionsFromFirestore,
   subscribeTeacherAuth,
+  getCurrentHomeworkOwnerUid,
+  getCurrentHomeworkOwnerEmail,
+  migrateLegacyHomeworkForAccount,
+  backfillLegacyCloudHomeworkForAccount,
   resolveAssignmentAudienceMode
 } from '../homeworkStorageSync';
+import { auth } from '../firebaseCloudSync';
 import {
   Sparkles,
   X,
@@ -152,8 +157,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   }, [audienceMode, selectedGroupId, students]);
 
   // Firebase Auth + Vercel Public Domain State
-  const [, setFirebaseUser] = useState<any | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<any | null>(null);
   const [vercelDomain] = useState<string>(() => getVercelPublicDomain());
+  const activeAuthUid = (firebaseUser?.uid || getCurrentHomeworkOwnerUid() || '').trim() || null;
 
   const currentSet = useMemo(
     () => sets.find((s) => s.id === selectedSetId) || defaultSet || sets[0],
@@ -187,9 +193,30 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   }, [defaultSet?.id]);
 
   useEffect(() => {
-    const unsubAuth = subscribeTeacherAuth((u) => setFirebaseUser(u));
+    const unsubAuth = subscribeTeacherAuth((u) => {
+      setFirebaseUser(u);
+      // Clear previous account UI state immediately on account switch or logout
+      setAssignmentsList([]);
+      setSelectedDetails(null);
+      setInspectingSubmission(null);
+      setInspectingStudentAttempts([]);
+      setCreatedAssignment(null);
+      setCreatedShareLink(null);
+      if (u?.uid) {
+        const migOpts = {
+          uid: u.uid,
+          email: u.email,
+          ownedGroupIds: groups.map((g) => g.id),
+          ownedSetIds: sets.map((s) => s.id),
+          ownedStudentIds: (studentsRef.current || []).map((st) => st.id)
+        };
+        migrateLegacyHomeworkForAccount(migOpts);
+        backfillLegacyCloudHomeworkForAccount(migOpts).catch(() => {});
+      }
+      setPendingSyncCount(getPendingHomeworkSyncCount(u?.uid || null));
+    });
     return () => unsubAuth();
-  }, []);
+  }, [groups.length, sets.length]);
 
   const loadAllAssignments = async () => {
     setLoadingResults(true);
@@ -202,73 +229,83 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
   };
 
-  // Real-time Firestore listener while modal is open
+  // Real-time Firestore listener while modal is open (strictly scoped by activeAuthUid)
   useEffect(() => {
     if (!isOpen) return;
     loadAllAssignments();
 
+    if (!activeAuthUid) {
+      return;
+    }
+
     const unsubAssignments = subscribeAssignmentsFromFirestore((cloudHwList) => {
       cloudHwList.forEach((hw) => {
-        if (!isAssignmentDeletedLocally(hw.id)) {
-          saveLocalAssignment({ ...hw, cloudSynced: true }, false);
+        if (hw.ownerUid && hw.ownerUid !== activeAuthUid) return;
+        if (!isAssignmentDeletedLocally(hw.id, activeAuthUid)) {
+          saveLocalAssignment({ ...hw, ownerUid: activeAuthUid, cloudSynced: true }, false);
         }
       });
       syncAndFetchTeacherAssignments(studentsRef.current).then((list) => {
         setAssignmentsList(list);
-        setPendingSyncCount(getPendingHomeworkSyncCount());
+        setPendingSyncCount(getPendingHomeworkSyncCount(activeAuthUid));
       });
-    });
+    }, activeAuthUid);
 
-    const unsubSubmissions = subscribeSubmissionsFromFirestore(null, (cloudSubs) => {
-      const activeIds = new Set(
-        getLocalAssignments().flatMap((a) => [a.id, sanitizeDocId(a.id)])
-      );
-      cloudSubs.forEach((sub) => {
-        if (
-          !isAssignmentDeletedLocally(sub.assignmentId) &&
-          (activeIds.has(sub.assignmentId) || activeIds.has(sanitizeDocId(sub.assignmentId)))
-        ) {
-          saveLocalSubmission({ ...sub, cloudSynced: true }, false);
-        }
-      });
-      syncAndFetchTeacherAssignments(studentsRef.current).then((list) => {
-        setAssignmentsList(list);
-        setPendingSyncCount(getPendingHomeworkSyncCount());
-      });
-      const currentDetailId = selectedDetailsIdRef.current;
-      if (currentDetailId) {
-        fetchAssignmentDetailsWithSync(currentDetailId, studentsRef.current).then((d) => {
-          if (d) {
-            setSelectedDetails(d);
-            // Keep open student answer inspector live-updated if new answers arrive
-            setInspectingSubmission((prevSub) => {
-              if (!prevSub) return null;
-              const updatedMatch = (d.submissions || []).find((s: HomeworkSubmission) => s.id === prevSub.id);
-              return updatedMatch || prevSub;
-            });
-            setInspectingStudentAttempts((prevAttempts) => {
-              if (prevAttempts.length === 0) return prevAttempts;
-              const first = prevAttempts[0];
-              const studentMatch = (d.studentStatusSummary || []).find((st: any) => {
-                if (first.studentId && st.studentId === first.studentId) return true;
-                if (first.participantId && st.participantId === first.participantId) return true;
-                if (!first.studentId && !first.participantId) {
-                  return (st.studentName || '').trim().toLowerCase() === (first.studentName || '').trim().toLowerCase();
-                }
-                return false;
-              });
-              return studentMatch?.attempts || prevAttempts;
-            });
+    const unsubSubmissions = subscribeSubmissionsFromFirestore(
+      null,
+      (cloudSubs) => {
+        const activeIds = new Set(
+          getLocalAssignments(activeAuthUid).flatMap((a) => [a.id, sanitizeDocId(a.id)])
+        );
+        cloudSubs.forEach((sub) => {
+          if (sub.ownerUid && sub.ownerUid !== activeAuthUid) return;
+          if (
+            !isAssignmentDeletedLocally(sub.assignmentId, activeAuthUid) &&
+            (activeIds.has(sub.assignmentId) || activeIds.has(sanitizeDocId(sub.assignmentId)))
+          ) {
+            saveLocalSubmission({ ...sub, ownerUid: activeAuthUid, cloudSynced: true }, false);
           }
         });
-      }
-    });
+        syncAndFetchTeacherAssignments(studentsRef.current).then((list) => {
+          setAssignmentsList(list);
+          setPendingSyncCount(getPendingHomeworkSyncCount(activeAuthUid));
+        });
+        const currentDetailId = selectedDetailsIdRef.current;
+        if (currentDetailId) {
+          fetchAssignmentDetailsWithSync(currentDetailId, studentsRef.current).then((d) => {
+            if (d) {
+              setSelectedDetails(d);
+              // Keep open student answer inspector live-updated if new answers arrive
+              setInspectingSubmission((prevSub) => {
+                if (!prevSub) return null;
+                const updatedMatch = (d.submissions || []).find((s: HomeworkSubmission) => s.id === prevSub.id);
+                return updatedMatch || prevSub;
+              });
+              setInspectingStudentAttempts((prevAttempts) => {
+                if (prevAttempts.length === 0) return prevAttempts;
+                const first = prevAttempts[0];
+                const studentMatch = (d.studentStatusSummary || []).find((st: any) => {
+                  if (first.studentId && st.studentId === first.studentId) return true;
+                  if (first.participantId && st.participantId === first.participantId) return true;
+                  if (!first.studentId && !first.participantId) {
+                    return (st.studentName || '').trim().toLowerCase() === (first.studentName || '').trim().toLowerCase();
+                  }
+                  return false;
+                });
+                return studentMatch?.attempts || prevAttempts;
+              });
+            }
+          });
+        }
+      },
+      activeAuthUid
+    );
 
     return () => {
       unsubAssignments();
       unsubSubmissions();
     };
-  }, [isOpen]);
+  }, [isOpen, activeAuthUid]);
 
   const handleFlushPendingSync = async () => {
     setFlushingPending(true);
@@ -327,6 +364,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
 
     setIsCreating(true);
+    const resolvedOwnerUid = activeAuthUid || getCurrentHomeworkOwnerUid() || undefined;
+    const resolvedOwnerEmail = firebaseUser?.email || getCurrentHomeworkOwnerEmail() || undefined;
     try {
       const chosenItems = currentSet.items.filter((it) => selectedItemIds.includes(it.id));
       const finalItems = chosenItems.length > 0 ? chosenItems : currentSet.items;
@@ -344,6 +383,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
       const payload: HomeworkAssignment = {
         id: generatedId,
+        ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
+        ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
         title: title.trim() || `واجب: ${currentSet.title}`,
         setSnapshot: {
           id: currentSet.id,
@@ -377,9 +418,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       // Save locally and verify Firestore persistence
       const confirmRes = await saveAssignmentWithConfirmation(payload);
 
+      const token = await auth?.currentUser?.getIdToken().catch(() => null);
       const res = await fetch('/api/teacher/assignments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         credentials: 'include',
         body: JSON.stringify(payload)
       }).catch(() => null);
@@ -396,7 +441,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
       const finalAssignment: HomeworkAssignment =
         res && res.ok && data?.assignment
-          ? { ...payload, ...data.assignment, id: payload.id, audienceMode, cloudSynced: confirmRes.cloudSynced }
+          ? {
+              ...payload,
+              ...data.assignment,
+              id: payload.id,
+              ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
+              audienceMode,
+              cloudSynced: confirmRes.cloudSynced
+            }
           : { ...payload, cloudSynced: confirmRes.cloudSynced };
 
       if (!confirmRes.cloudSynced) {
@@ -425,6 +477,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
         const fallbackHw: HomeworkAssignment = {
           id: 'hw_' + Math.random().toString(36).substring(2, 8),
+          ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
+          ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
           title: title.trim() || `واجب: ${currentSet.title}`,
           setSnapshot: { ...currentSet, items: finalItems },
           selectedItemIds: finalItems.map((it) => it.id),

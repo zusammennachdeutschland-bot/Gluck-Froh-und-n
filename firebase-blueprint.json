@@ -25,19 +25,35 @@
         "updatedAtIso": {
           "type": "string",
           "maxLength": 64
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 120
         }
       },
       "required": ["id", "title", "payloadJson", "updatedAtIso"]
     },
     "HomeworkAssignmentDoc": {
       "title": "HomeworkAssignmentDoc",
-      "description": "Interactive Blooket-style homework assignment created by the teacher",
+      "description": "Interactive Blooket-style homework assignment created by the teacher and strictly owned by ownerUid",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 120
         },
         "title": {
           "type": "string",
@@ -55,11 +71,11 @@
           "maxLength": 500000
         }
       },
-      "required": ["id", "title", "createdAt", "isActive", "payloadJson"]
+      "required": ["id", "ownerUid", "title", "createdAt", "isActive", "payloadJson"]
     },
     "HomeworkSubmissionDoc": {
       "title": "HomeworkSubmissionDoc",
-      "description": "Student homework submission with score, Blooket gold, and per-question responses",
+      "description": "Student homework submission linked to assignmentId and teacher ownerUid",
       "type": "object",
       "properties": {
         "id": {
@@ -71,6 +87,10 @@
           "type": "string",
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128
         },
         "studentName": {
           "type": "string",
@@ -86,12 +106,20 @@
           "type": "string",
           "maxLength": 64
         },
+        "status": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "attemptSecret": {
+          "type": "string",
+          "maxLength": 128
+        },
         "payloadJson": {
           "type": "string",
           "maxLength": 500000
         }
       },
-      "required": ["id", "assignmentId", "studentName", "score", "accuracyPercent", "completedAt", "payloadJson"]
+      "required": ["id", "assignmentId", "ownerUid", "studentName", "score", "accuracyPercent", "completedAt", "payloadJson"]
     },
     "UserWorkspaceCategoryChunkDoc": {
       "title": "UserWorkspaceCategoryChunkDoc",
