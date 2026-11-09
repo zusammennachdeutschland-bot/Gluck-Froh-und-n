@@ -1,60 +1,44 @@
-# Glück — Final Sync Durability Audit & Android CI Fix Walkthrough
+# Glück — Final IndexedDB Queue Removal Integrity & CI Repair Walkthrough
 
 ## Summary of Accomplished Repairs
 
-### Part A: Android GitHub Actions CI Failure Repair (`.github/workflows/build-apk.yml`)
-- **Root Cause:** The previous workflow step invoked `android-actions/setup-android@v3`, which internally called `sdkmanager "tools"`. The legacy `tools` package was deprecated and removed by Google, causing the setup action to crash on modern GitHub Actions `ubuntu-latest` runners.
-- **Repair:**
-  - Replaced `android-actions/setup-android@v3` with direct configuration of the runner's pre-installed Android SDK (`$ANDROID_SDK_ROOT` / `/usr/local/lib/android/sdk`).
-  - Added `$ANDROID_SDK_ROOT/cmdline-tools/latest/bin` and `$ANDROID_SDK_ROOT/platform-tools` to the runner's `$GITHUB_PATH` and configured `$ANDROID_HOME`.
-  - Installed and verified `platforms;android-36` and `build-tools;36.0.0` directly using the runner's modern command-line tools without referencing the obsolete `tools` package.
-  - Verified `compileSdkVersion = 36` in `android/variables.gradle` and `android/app/build.gradle`.
+### Part 1: IndexedDB Queue Removal Integrity Repair (`src/services/storageService.ts`)
+- **Root Cause Identified:**
+  1. `removeItem()` caught and swallowed IndexedDB/localforage removal errors with `console.warn`, leaving callers unaware when a durable queue entry failed to be removed from persistent storage.
+  2. `verifyDurableRemoved()` swallowed IndexedDB `getItem()` errors in an inner `try...catch` block and returned `true` if `localStorage.getItem` was null, falsely reporting that an item was removed when IndexedDB state was actually unknown due to a read error.
+- **Repairs Implemented:**
+  - **Observable Removal Failures:** Updated `storage.removeItem()` in `src/services/storageService.ts` to propagate removal errors from the primary store (`localforage` / IndexedDB). If removal fails, `storage.removeItem()` throws the exception so the caller (`saveDurablePendingRemoteQueue`) knows removal failed.
+  - **Memory Store Guard:** `delete memoryStore[key]` in `storage.removeItem()` is now executed only after durable removal succeeds.
+  - **Strict Absence Verification:** Removed the inner swallow `try...catch` in `storage.verifyDurableRemoved()`. If any error occurs reading from IndexedDB during removal verification, `verifyDurableRemoved()` catches it at the top level and strictly returns `false`.
+  - **Observable Queue Clearing:** In `useGoogleCloudWorkspaceSync.ts`, `saveDurablePendingRemoteQueue()` catches removal & verification failures and returns `false`. If queue removal cannot be verified durably, `drain()` restores the original `headItem` back to the queue without corrupting queue state.
+  - **Idempotent Retry Safety:** Retrying a payload that was successfully applied locally but failed durable queue removal executes idempotently without duplicating students, lessons, payments, or finance transactions.
 
 ---
 
-### Part B: Actual Durable Queue Persistence & Read-Back Verification
-- **Root Cause in `useGoogleCloudWorkspaceSync.ts`:**
-  - `writeDurableString()` was previously catching `localStorage.setItem` errors and silently falling back to in-memory maps.
-  - Complete workspace backup JSON payloads (up to 25MB) far exceeded the 5MB total `localStorage` quota, causing writes to silently fail.
-  - On process restart, in-memory fallbacks were lost, dropping pending remote work.
-  - `persistAppliedDocTokensMap()` was returning success in environments without durable storage, poisoning revision acknowledgement.
-- **Repair Implemented:**
-  1. **IndexedDB / `localforage` Storage:**
-     - Registered `gluck_cloud_pending_remote_queue_v2_` keys in `storageService.ts` as heavy, localforage-only keys (`isHeavyStorageKey`).
-     - Backed pending remote queue payloads with `storageService.ts` (`localforage` / IndexedDB), protecting `localStorage` from quota exhaustion while supporting up to 25MB payloads.
-  2. **Read-Back Equality Verification:**
-     - Added `storage.verifyDurableReadBackValue<T>(key, expectedValue)` to `storageService.ts`, which flushes pending writes and verifies exact value equality before reporting success.
-     - Added `storage.verifyDurableRemoved(key)` to verify that removed queue items are genuinely expunged from the persistent store.
-  3. **Durability Failure Handling & Zero-Loss Rollback:**
-     - If durable queue persistence fails, `enqueueRemoteSnapshot()` rolls back the item from the queue and returns `false`. It never acknowledges the revision or claims the item is safely queued.
-     - In `drain()`, queue removal is persisted and verified before moving to the next item; if removal persistence fails, the item is restored to the head of the queue.
-  4. **Strict `persistAppliedDocTokensMap`:**
-     - `persistAppliedDocTokensMap(uid, map)` now strictly returns `false` if durable persistence or read-back fails, and does not mutate the in-memory map on failure.
-  5. **Restart & Reconnection Resilience:**
-     - Added `loadDurablePendingRemoteQueueAsync(uid)` with backward-compatible migration from legacy `localStorage` keys into IndexedDB.
-     - On app reopening, `resumePendingWork()` loads persisted pending payloads from IndexedDB and resumes draining without requiring a new Firestore event.
+### Part 2: Android GitHub Actions CI Repair (`.github/workflows/build-apk.yml`)
+- **Root Cause:** The previous workflow step invoked `android-actions/setup-android@v3`, which internally called `sdkmanager "tools"`. The legacy `tools` package was deprecated and removed by Google, causing setup to crash on modern GitHub Actions `ubuntu-latest` runners.
+- **Repair:**
+  - Configured native runner Android SDK environment (`$ANDROID_SDK_ROOT` / `/usr/local/lib/android/sdk`).
+  - Added `$ANDROID_SDK_ROOT/cmdline-tools/latest/bin` and `$ANDROID_SDK_ROOT/platform-tools` to `$GITHUB_PATH`.
+  - Installed and verified `platforms;android-36` and `build-tools;36.0.0` directly using modern SDK tools.
+  - Verified `compileSdkVersion = 36` in `android/variables.gradle` and `android/app/build.gradle`.
 
 ---
 
 ## Comprehensive Test Results
 
-### 1. New Part 10 Reliability Scenarios (`RA-16` to `RA-22`)
-- `[PASS]` **RA-16:** A pending backup larger than 5MB (5.2MB student payload) persists durably in IndexedDB without quota failure, bypasses `localStorage`, and drains cleanly.
-- `[PASS]` **RA-17:** Simulated `localStorage` `QuotaExceededError` does not break durable queue persistence in IndexedDB.
-- `[PASS]` **RA-18:** IndexedDB write failure aborts queue persistence, rolls back item, and prevents false acknowledgement.
-- `[PASS]` **RA-19:** Process restart after a failed import restores queue from durable storage and resumes cleanly upon reopening.
-- `[PASS]` **RA-20:** Queue read-back mismatch rejects persistence, rolls back item, and does not acknowledge revision.
-- `[PASS]` **RA-21:** Acknowledgement storage failure prevents revision acknowledgement and retains payload in durable queue.
-- `[PASS]` **RA-22:** Retry after restart without a new cloud snapshot drains queue and synchronizes local workspace.
+### 1. New Removal Integrity Test Scenarios (`RA-23` & `RA-24`)
+- `[PASS]` **RA-23 (Simulated Unit Test):** IndexedDB remove failure during queue clearing preserves payload, returns `false`, and retry is idempotent without duplicating lessons, payments, or finance transactions.
+- `[PASS]` **RA-24 (Simulated Unit Test):** IndexedDB read failure during removal verification returns `false`, preserves queue recoverability, and retry is idempotent without data duplication.
 
-### 2. Full Test Suite Execution (`npm test`)
-All test suites passed with **100% success**:
-- **78/78** Cloud Sync Reliability, Cryptographic Verification & Concurrency tests (`src/tests/cloudSyncReliability.test.ts`)
+### 2. Full Test Suite Summary (`npm test`)
+- **80/80** Cloud Sync Reliability, Cryptographic Verification & Concurrency Control tests (`src/tests/cloudSyncReliability.test.ts`)
 - **16/16** Unified Lesson Cycle Numbering tests (`src/tests/lessonCycleNumbering.test.ts`)
 - **7/7** Core tasks 1–7 tests (`src/tests/tasks1to7.test.ts`)
 - **34/34** Homework System Repair scenarios (`src/tests/homeworkSystemRepair.test.ts`)
 
-### 3. Compilation, Linting & Android Sync
+### 3. Build & Android Release Verification
 - `compile_applet`: **Build succeeded** (0 errors).
-- `lint_applet`: **$ tsc --noEmit passed** with 0 errors.
-- `npx cap sync android`: **Succeeded** in 0.28s (all web assets and 11 Capacitor plugins synchronized).
+- `lint_applet`: **$ tsc --noEmit passed** (0 errors).
+- `npm run build`: **Production web build succeeded** (`dist/index.html` and `dist/server.cjs` generated).
+- `npx cap sync android`: **Succeeded** in 0.23s (web assets & 11 Capacitor plugins synchronized).

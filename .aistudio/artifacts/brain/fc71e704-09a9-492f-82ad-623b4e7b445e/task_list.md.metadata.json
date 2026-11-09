@@ -1,5 +1,5 @@
 {
-  "summary":  "Updated task list reflecting completion of Android CI workflow fix and final durable queue persistence with read-back verification.",
-  "updatedAt":  "2026-11-09T03:36:38.100230330Z",
+  "summary":  "Updated task list for IndexedDB Queue Removal Integrity Repair and tests RA-23 and RA-24.",
+  "updatedAt":  "2026-11-09T04:05:52.161036777Z",
   "userFacing":  true
 }

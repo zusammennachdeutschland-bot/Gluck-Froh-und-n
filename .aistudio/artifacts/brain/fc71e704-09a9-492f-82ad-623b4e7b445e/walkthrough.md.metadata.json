@@ -1,5 +1,5 @@
 {
-  "summary":  "Comprehensive documentation of the Android GitHub Actions CI fix, IndexedDB-backed durable remote queue persistence with read-back verification, and verification of tests RA-01 through RA-22.",
-  "updatedAt":  "2026-11-09T03:36:14.421879800Z",
+  "summary":  "Updated walkthrough artifact documenting the IndexedDB queue removal integrity repair, observable removal error handling, verifyDurableRemoved read error guards, and tests RA-23 & RA-24.",
+  "updatedAt":  "2026-11-09T04:05:45.715106132Z",
   "userFacing":  true
 }

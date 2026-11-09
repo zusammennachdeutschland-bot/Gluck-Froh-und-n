@@ -3185,6 +3185,170 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     coord22Session2.dispose();
     log.push('[PASS] [Integration Test] RA-22. Retry after restart without a new cloud snapshot drains queue and synchronizes local workspace');
 
+    // -------------------------------------------------------------------------
+    // RA-23: IndexedDB remove failure during queue clearing preserves payload, returns false, and retry is idempotent without data duplication
+    // -------------------------------------------------------------------------
+    const raUid23 = 'uid_ra_23_remove_failure';
+    resetAppliedDocTokensForTests(raUid23);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid23);
+
+    const ra23Workspace: any = {
+      students: [],
+      lessons: [{ id: 'les_23_1', title: 'Lesson 23', updatedAt: 1000 }],
+      payments: [{ id: 'pay_23_1', amountPaid: 100, updatedAt: 1000 }],
+      financeTransactions: [{ id: 'tx_23_1', amount: 100, updatedAt: 1000 }]
+    };
+
+    const raDoc23 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra23_op_1',
+      opSeq: 1,
+      updatedAtMs: 43000,
+      payloadChunk: JSON.stringify({
+        isCloudDelta: true,
+        lessons: [{ id: 'les_23_1', title: 'Lesson 23 Updated', updatedAt: 2000 }],
+        payments: [{ id: 'pay_23_1', amountPaid: 200, updatedAt: 2000 }],
+        financeTransactions: [{ id: 'tx_23_1', amount: 200, updatedAt: 2000 }]
+      })
+    };
+    const raToken23 = computeChunkRevisionToken(raDoc23);
+
+    // Set storage failure hook ONLY on 'remove' operation for queue key
+    __setStorageFailureHookForTests((op, key) => {
+      if (op === 'remove' && key.includes('gluck_cloud_pending_remote_queue_v2_')) {
+        throw new Error('Simulated IndexedDB remove failure');
+      }
+    });
+
+    const coord23 = createSerializedSyncCoordinator({
+      uid: raUid23,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra23Workspace, parsed);
+        return acknowledgeAppliedRemoteRevisions(raUid23, docTokens, ra23Workspace);
+      }
+    });
+
+    // Enqueue snapshot: import succeeds locally and revisions are acknowledged, BUT durable removal fails!
+    const outcome23 = await coord23.enqueueRemoteSnapshot(
+      JSON.stringify({
+        isCloudDelta: true,
+        lessons: [{ id: 'les_23_1', title: 'Lesson 23 Updated', updatedAt: 2000 }],
+        payments: [{ id: 'pay_23_1', amountPaid: 200, updatedAt: 2000 }],
+        financeTransactions: [{ id: 'tx_23_1', amount: 200, updatedAt: 2000 }]
+      }),
+      { [raDoc23.id]: raToken23 }
+    );
+
+    // Durable removal failed -> enqueueRemoteSnapshot returns false, headItem is restored in queue
+    assert.equal(outcome23, false);
+    assert.equal(coord23.getPendingRemoteCount(), 1);
+    assert.equal(getAppliedDocTokens(raUid23)[raDoc23.id], raToken23); // Revisions were applied & acknowledged
+
+    // Reset failure hook and retry (simulating retry of unremoved snapshot)
+    __setStorageFailureHookForTests(null);
+    const retry23Outcome = await coord23.resumePendingWork();
+    assert.equal(retry23Outcome, true);
+    assert.equal(coord23.getPendingRemoteCount(), 0);
+    assert.equal((await loadDurablePendingRemoteQueueAsync(raUid23)).length, 0);
+
+    // Verify idempotency: lessons, payments, and finance transactions were NOT duplicated!
+    assert.equal(ra23Workspace.lessons.length, 1);
+    assert.equal(ra23Workspace.payments.length, 1);
+    assert.equal(ra23Workspace.financeTransactions.length, 1);
+    assert.equal(ra23Workspace.lessons[0].title, 'Lesson 23 Updated');
+    assert.equal(ra23Workspace.payments[0].amountPaid, 200);
+    assert.equal(ra23Workspace.financeTransactions[0].amount, 200);
+    coord23.dispose();
+    log.push('[PASS] [Unit Test] RA-23. IndexedDB remove failure during queue clearing preserves payload, returns false, and retry is idempotent without data duplication');
+
+    // -------------------------------------------------------------------------
+    // RA-24: IndexedDB read failure during removal verification returns false, preserves queue, and retry is idempotent
+    // -------------------------------------------------------------------------
+    const raUid24 = 'uid_ra_24_verify_read_failure';
+    resetAppliedDocTokensForTests(raUid24);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid24);
+
+    const ra24Workspace: any = {
+      students: [],
+      lessons: [{ id: 'les_24_1', title: 'Lesson 24', updatedAt: 1000 }],
+      payments: [{ id: 'pay_24_1', amountPaid: 300, updatedAt: 1000 }],
+      financeTransactions: [{ id: 'tx_24_1', amount: 300, updatedAt: 1000 }]
+    };
+
+    const raDoc24 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra24_op_1',
+      opSeq: 1,
+      updatedAtMs: 44000,
+      payloadChunk: JSON.stringify({
+        isCloudDelta: true,
+        lessons: [{ id: 'les_24_1', title: 'Lesson 24 Final', updatedAt: 3000 }],
+        payments: [{ id: 'pay_24_1', amountPaid: 500, updatedAt: 3000 }],
+        financeTransactions: [{ id: 'tx_24_1', amount: 500, updatedAt: 3000 }]
+      })
+    };
+    const raToken24 = computeChunkRevisionToken(raDoc24);
+
+    let failVerifyRead24 = false;
+    __setStorageFailureHookForTests((op, key) => {
+      if (failVerifyRead24 && op === 'get' && key.includes('gluck_cloud_pending_remote_queue_v2_')) {
+        throw new Error('Simulated IndexedDB read failure during removal verification');
+      }
+    });
+
+    const coord24 = createSerializedSyncCoordinator({
+      uid: raUid24,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra24Workspace, parsed);
+        // Turn on read failure hook right before durable removal verification
+        failVerifyRead24 = true;
+        return acknowledgeAppliedRemoteRevisions(raUid24, docTokens, ra24Workspace);
+      }
+    });
+
+    const outcome24 = await coord24.enqueueRemoteSnapshot(
+      JSON.stringify({
+        isCloudDelta: true,
+        lessons: [{ id: 'les_24_1', title: 'Lesson 24 Final', updatedAt: 3000 }],
+        payments: [{ id: 'pay_24_1', amountPaid: 500, updatedAt: 3000 }],
+        financeTransactions: [{ id: 'tx_24_1', amount: 500, updatedAt: 3000 }]
+      }),
+      { [raDoc24.id]: raToken24 }
+    );
+
+    // Because removal verification read failed, verifyDurableRemoved returned false -> enqueueRemoteSnapshot returns false, headItem restored in queue
+    assert.equal(outcome24, false);
+    assert.equal(coord24.getPendingRemoteCount(), 1);
+
+    // Disable read failure hook and resume work
+    failVerifyRead24 = false;
+    __setStorageFailureHookForTests(null);
+
+    const retry24Outcome = await coord24.resumePendingWork();
+    assert.equal(retry24Outcome, true);
+    assert.equal(coord24.getPendingRemoteCount(), 0);
+    assert.equal((await loadDurablePendingRemoteQueueAsync(raUid24)).length, 0);
+
+    // Verify idempotency: no duplicates created
+    assert.equal(ra24Workspace.lessons.length, 1);
+    assert.equal(ra24Workspace.payments.length, 1);
+    assert.equal(ra24Workspace.financeTransactions.length, 1);
+    assert.equal(ra24Workspace.lessons[0].title, 'Lesson 24 Final');
+    assert.equal(ra24Workspace.payments[0].amountPaid, 500);
+    assert.equal(ra24Workspace.financeTransactions[0].amount, 500);
+    coord24.dispose();
+    log.push('[PASS] [Unit Test] RA-24. IndexedDB read failure during removal verification returns false, preserves queue, and retry is idempotent without data duplication');
+
     return { passed: true, log };
   } catch (err: any) {
     __setStorageFailureHookForTests(null);

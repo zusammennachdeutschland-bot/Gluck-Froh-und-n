@@ -380,23 +380,20 @@ export const storage = {
           return false;
         }
       } else if (isLocalforageSupported) {
-        try {
-          const forageVal = await localforage.getItem(key);
-          if (forageVal !== null && forageVal !== undefined) {
-            return false;
-          }
-        } catch {
-          // ignore
+        const forageVal = await localforage.getItem(key);
+        if (forageVal !== null && forageVal !== undefined) {
+          return false;
         }
       }
       if (hasLocalStorageRuntime()) {
-        try {
-          const raw = localStorage.getItem(key);
-          if (raw !== null) {
-            return false;
-          }
-        } catch {
-          // ignore
+        const raw = localStorage.getItem(key);
+        if (raw !== null) {
+          return false;
+        }
+      }
+      if (!simulatePrimaryDbForTests && !isLocalforageSupported && !hasLocalStorageRuntime()) {
+        if (memoryStore[key] !== undefined && memoryStore[key] !== null) {
+          return false;
         }
       }
       return true;
@@ -413,25 +410,42 @@ export const storage = {
       clearTimeout(writeDebounceTimers[key]);
       delete writeDebounceTimers[key];
     }
-    delete memoryStore[key];
+
+    let removedFromPrimary = false;
+    let primaryError: unknown = null;
 
     try {
       if (simulatePrimaryDbForTests) {
         simulatedPrimaryDbStore.delete(key);
+        removedFromPrimary = true;
       } else if (isLocalforageSupported) {
         await localforage.removeItem(key);
+        removedFromPrimary = true;
       }
-    } catch (e) {
-      console.warn('Error removing from localforage:', key, e);
+    } catch (e: any) {
+      if (typeof e?.message === 'string' && e.message.includes('No available storage method')) {
+        isLocalforageSupported = false;
+      } else {
+        primaryError = e;
+        console.warn('Error removing from localforage:', key, e);
+      }
     }
 
-    try {
-      if (hasLocalStorageRuntime()) {
+    if (hasLocalStorageRuntime()) {
+      try {
         localStorage.removeItem(key);
+      } catch (e) {
+        console.warn('Error removing from localStorage:', key, e);
       }
-    } catch (e) {
-      console.warn('Error removing from localStorage:', key, e);
     }
+
+    if ((simulatePrimaryDbForTests || isLocalforageSupported) && !removedFromPrimary) {
+      throw primaryError instanceof Error
+        ? primaryError
+        : new Error(`Durable storage remove failed for key: ${key}`);
+    }
+
+    delete memoryStore[key];
   },
 
   async clear(): Promise<void> {
