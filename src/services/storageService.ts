@@ -86,6 +86,10 @@ export function __clearMemoryStoreOnlyForTests(): void {
   }
 }
 
+export function __getSimulatedPrimaryDbValueForTests(key: string): any {
+  return simulatedPrimaryDbStore.get(key);
+}
+
 const hasLocalStorageRuntime = (): boolean => {
   if (isLocalStorageSupported) return true;
   try {

@@ -293,13 +293,23 @@ export async function loadDurablePendingRemoteQueueAsync(
   }
 }
 
-export async function saveDurablePendingRemoteQueue(
+const saveQueueMutexByUid = new Map<string, Promise<any>>();
+
+async function executeSaveDurablePendingRemoteQueue(
   uid: string,
   queue: PendingRemoteQueueItem[]
 ): Promise<boolean> {
   if (!uid) return false;
   const key = `${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`;
   const safeQueue = Array.isArray(queue) ? queue : [];
+
+  let previousDurableVal: any = null;
+  try {
+    previousDurableVal = await storage.getItem<any>(key);
+  } catch (readErr) {
+    console.warn(`[saveDurablePendingRemoteQueue] Cannot read previous durable queue for ${key}, aborting overwrite:`, readErr);
+    return false;
+  }
 
   try {
     // 1. Persist pending remote queue payloads (including empty queue representation []) using IndexedDB/localforage storageService
@@ -309,6 +319,14 @@ export async function saveDurablePendingRemoteQueue(
     const verified = await storage.verifyDurableReadBackValue(key, safeQueue);
     if (!verified) {
       console.warn(`[saveDurablePendingRemoteQueue] Read-back verification failed for ${key}`);
+      if (previousDurableVal !== null && previousDurableVal !== undefined) {
+        try {
+          await storage.setItem(key, previousDurableVal);
+          await storage.verifyDurableReadBackValue(key, previousDurableVal);
+        } catch (rollbackErr) {
+          console.error(`[saveDurablePendingRemoteQueue] CRITICAL: Rollback persistence failed for ${key}:`, rollbackErr);
+        }
+      }
       return false;
     }
 
@@ -332,8 +350,29 @@ export async function saveDurablePendingRemoteQueue(
     return true;
   } catch (err) {
     console.warn(`[saveDurablePendingRemoteQueue] Failed to persist queue for ${key}:`, err);
+    if (previousDurableVal !== null && previousDurableVal !== undefined) {
+      try {
+        await storage.setItem(key, previousDurableVal);
+      } catch (rollbackErr) {
+        console.error(`[saveDurablePendingRemoteQueue] CRITICAL: Exception rollback failed for ${key}:`, rollbackErr);
+      }
+    }
     return false;
   }
+}
+
+export function saveDurablePendingRemoteQueue(
+  uid: string,
+  queue: PendingRemoteQueueItem[]
+): Promise<boolean> {
+  if (!uid) return Promise.resolve(false);
+  const prevPromise = saveQueueMutexByUid.get(uid) || Promise.resolve();
+  const currentPromise = prevPromise
+    .then(() => executeSaveDurablePendingRemoteQueue(uid, queue))
+    .catch(() => executeSaveDurablePendingRemoteQueue(uid, queue));
+
+  saveQueueMutexByUid.set(uid, currentPromise);
+  return currentPromise;
 }
 
 function areDocTokensEqual(
@@ -439,10 +478,12 @@ export function clearInMemorySyncQueueCachesForTests(uid?: string): void {
     inMemoryDurablePendingQueueByUid.delete(uid);
     inMemoryDurableStorageFallback.delete(`${PENDING_REMOTE_QUEUE_KEY_PREFIX}${uid}`);
     inMemoryPendingPushByUid.delete(uid);
+    saveQueueMutexByUid.delete(uid);
   } else {
     inMemoryDurablePendingQueueByUid.clear();
     inMemoryDurableStorageFallback.clear();
     inMemoryPendingPushByUid.clear();
+    saveQueueMutexByUid.clear();
   }
 }
 

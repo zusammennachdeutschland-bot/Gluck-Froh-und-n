@@ -26,7 +26,8 @@ import {
   removeDurablePendingRemoteItem,
   clearDurablePendingRemoteQueueForTests,
   clearDurablePendingRemoteQueueForTestsAsync,
-  clearInMemorySyncQueueCachesForTests
+  clearInMemorySyncQueueCachesForTests,
+  PendingRemoteQueueItem
 } from '../hooks/useGoogleCloudWorkspaceSync';
 import { SyncableRecord } from '../types';
 import {
@@ -57,7 +58,8 @@ import {
   storage,
   __setStorageFailureHookForTests,
   __setSimulatePrimaryDbForTests,
-  __clearMemoryStoreOnlyForTests
+  __clearMemoryStoreOnlyForTests,
+  __getSimulatedPrimaryDbValueForTests
 } from '../services/storageService';
 import {
   runSyncCycle,
@@ -3566,12 +3568,26 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
       assert.equal(outcome28, false);
       assert.equal(coord28Session1.getPendingRemoteCount(), 1);
       assert.equal(getAppliedDocTokens(raUid28)[raDoc28.id], raToken28);
+
+      // Direct store assertion 1: Verify the persistent backing store was rolled back and still holds the non-empty queue [item1]
+      const queueKey28 = `gluck_cloud_pending_remote_queue_v2_${raUid28}`;
+      const dbValAfterFail = __getSimulatedPrimaryDbValueForTests(queueKey28);
+      assert.equal(Array.isArray(dbValAfterFail), true);
+      assert.equal(dbValAfterFail.length, 1);
+      assert.equal(dbValAfterFail[0].docTokens?.[raDoc28.id], raToken28);
+
       coord28Session1.dispose();
 
       // Clear all in-memory caches to simulate memory flush / session restart
       failVerifyRead28 = false;
       clearInMemorySyncQueueCachesForTests(raUid28);
       __clearMemoryStoreOnlyForTests();
+
+      // Direct store assertion 2: Verify the persistent backing store STILL holds [item1] when all memory maps are empty
+      const dbValAfterMemClear = __getSimulatedPrimaryDbValueForTests(queueKey28);
+      assert.equal(Array.isArray(dbValAfterMemClear), true);
+      assert.equal(dbValAfterMemClear.length, 1);
+      assert.equal(dbValAfterMemClear[0].docTokens?.[raDoc28.id], raToken28);
 
       // Recreate coordinator from simulated persistent store
       const coord28Session2 = createSerializedSyncCoordinator({
@@ -3603,6 +3619,150 @@ export async function runCloudSyncReliabilityTests(): Promise<{ passed: boolean;
     } finally {
       storage.verifyDurableReadBackValue = origVerify28;
     }
+
+    // -------------------------------------------------------------------------
+    // RA-29: Previous-value read failure aborts write without attempting overwrite
+    // -------------------------------------------------------------------------
+    const raUid29 = 'uid_ra_29_read_prev_fail';
+    resetAppliedDocTokensForTests(raUid29);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid29);
+
+    const raItem29: PendingRemoteQueueItem = {
+      id: 'rem_29_1',
+      remoteJsonStr: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_29', name: 'Student 29' }] }),
+      enqueuedAtMs: Date.now(),
+      attemptCount: 0
+    };
+    await storage.setItem(`gluck_cloud_pending_remote_queue_v2_${raUid29}`, [raItem29]);
+
+    let failReadPrev29 = true;
+    __setStorageFailureHookForTests((op, key) => {
+      if (failReadPrev29 && op === 'get' && key.includes(raUid29)) {
+        throw new Error('Simulated IndexedDB error during previous-value read');
+      }
+    });
+
+    try {
+      const outcome29 = await saveDurablePendingRemoteQueue(raUid29, []);
+      assert.equal(outcome29, false);
+
+      failReadPrev29 = false;
+      __setStorageFailureHookForTests(null);
+
+      const dbValAfter29 = __getSimulatedPrimaryDbValueForTests(`gluck_cloud_pending_remote_queue_v2_${raUid29}`);
+      assert.equal(Array.isArray(dbValAfter29), true);
+      assert.equal(dbValAfter29.length, 1);
+      assert.equal(dbValAfter29[0].id, 'rem_29_1');
+      log.push('[PASS] [Unit Test] RA-29. Previous-value read failure aborts write without attempting overwrite');
+    } finally {
+      failReadPrev29 = false;
+      __setStorageFailureHookForTests(null);
+    }
+
+    // -------------------------------------------------------------------------
+    // RA-30: Rollback failure returns false and retains queue in memory for session retry
+    // -------------------------------------------------------------------------
+    const raUid30 = 'uid_ra_30_rollback_fail';
+    resetAppliedDocTokensForTests(raUid30);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid30);
+
+    const ra30Workspace: any = { students: [] };
+    const raDoc30 = {
+      id: getDeviceDeltaDocId(vercelDeviceId),
+      categoryKey: 'delta_log',
+      deviceId: vercelDeviceId,
+      opId: 'vercel_ra30_op_1',
+      opSeq: 1,
+      updatedAtMs: 50000,
+      payloadChunk: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_30', name: 'Student 30' }] })
+    };
+    const raToken30 = computeChunkRevisionToken(raDoc30);
+
+    let failRollback30 = false;
+    const origVerify30 = storage.verifyDurableReadBackValue;
+    storage.verifyDurableReadBackValue = async (key: string, val: any) => {
+      if (failRollback30 && key.includes(raUid30)) {
+        return false;
+      }
+      return origVerify30.call(storage, key, val);
+    };
+
+    __setStorageFailureHookForTests((op, key) => {
+      if (failRollback30 && op === 'set' && key.includes(raUid30)) {
+        throw new Error('Simulated IndexedDB error during rollback setItem');
+      }
+    });
+
+    const coord30 = createSerializedSyncCoordinator({
+      uid: raUid30,
+      autoRetryEnabled: false,
+      onExecuteLocalPush: async () => true,
+      onApplyRemotePayload: async (remoteJson, docTokens) => {
+        const parsed = JSON.parse(remoteJson);
+        applyDeltaOnWorkspace(ra30Workspace, parsed);
+        failRollback30 = true;
+        return acknowledgeAppliedRemoteRevisions(raUid30, docTokens, ra30Workspace);
+      }
+    });
+
+    try {
+      const outcome30 = await coord30.enqueueRemoteSnapshot(
+        JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_30', name: 'Student 30' }] }),
+        { [raDoc30.id]: raToken30 }
+      );
+      assert.equal(outcome30, false);
+      assert.equal(coord30.getPendingRemoteCount(), 1);
+
+      failRollback30 = false;
+      __setStorageFailureHookForTests(null);
+      storage.verifyDurableReadBackValue = origVerify30;
+
+      const resume30Outcome = await coord30.resumePendingWork();
+      assert.equal(resume30Outcome, true);
+      assert.equal(coord30.getPendingRemoteCount(), 0);
+      assert.equal(ra30Workspace.students.length, 1);
+      assert.equal(ra30Workspace.students[0].id, 'st_30');
+      coord30.dispose();
+      log.push('[PASS] [Unit Test] RA-30. Rollback failure returns false and retains queue in memory for session retry');
+    } finally {
+      failRollback30 = false;
+      storage.verifyDurableReadBackValue = origVerify30;
+      __setStorageFailureHookForTests(null);
+    }
+
+    // -------------------------------------------------------------------------
+    // RA-31: Concurrent queue persistence operations run serially without out-of-order overwrites
+    // -------------------------------------------------------------------------
+    const raUid31 = 'uid_ra_31_concurrent';
+    resetAppliedDocTokensForTests(raUid31);
+    await clearDurablePendingRemoteQueueForTestsAsync(raUid31);
+
+    const item31_A: PendingRemoteQueueItem = {
+      id: 'rem_31_A',
+      remoteJsonStr: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_31_A' }] }),
+      enqueuedAtMs: Date.now(),
+      attemptCount: 0
+    };
+    const item31_B: PendingRemoteQueueItem = {
+      id: 'rem_31_B',
+      remoteJsonStr: JSON.stringify({ isCloudDelta: true, students: [{ id: 'st_31_B' }] }),
+      enqueuedAtMs: Date.now() + 1,
+      attemptCount: 0
+    };
+
+    const p31_1 = saveDurablePendingRemoteQueue(raUid31, [item31_A]);
+    const p31_2 = saveDurablePendingRemoteQueue(raUid31, [item31_A, item31_B]);
+
+    const [res31_1, res31_2] = await Promise.all([p31_1, p31_2]);
+    assert.equal(res31_1, true);
+    assert.equal(res31_2, true);
+
+    const finalVal31 = __getSimulatedPrimaryDbValueForTests(`gluck_cloud_pending_remote_queue_v2_${raUid31}`);
+    assert.equal(Array.isArray(finalVal31), true);
+    assert.equal(finalVal31.length, 2);
+    assert.equal(finalVal31[0].id, 'rem_31_A');
+    assert.equal(finalVal31[1].id, 'rem_31_B');
+    log.push('[PASS] [Unit Test] RA-31. Concurrent queue persistence operations run serially without out-of-order overwrites');
 
     return { passed: true, log };
   } catch (err: any) {
