@@ -240,8 +240,8 @@ class FirestoreHomeworkRulesEvaluator {
       'firestore.rules must require ownerUid on HomeworkSubmission'
     );
     assert.ok(
-      this.rulesSource.includes('allow list: if isSignedIn() && existing().ownerUid == request.auth.uid;'),
-      'firestore.rules must restrict list queries to existing().ownerUid == request.auth.uid'
+      this.rulesSource.includes('allow get: if isSignedIn() && isValidId(assignmentId) && existing().ownerUid == request.auth.uid;'),
+      'firestore.rules must restrict get on homework_assignments to owning teacher'
     );
     assert.ok(
       this.rulesSource.includes('incoming().ownerUid == request.auth.uid'),
@@ -361,10 +361,7 @@ class FirestoreHomeworkRulesEvaluator {
   canGetAssignment(auth: { uid: string } | null, assignmentId: string): boolean {
     const existing = this.assignments.get(assignmentId);
     if (!existing || !this.isValidId(assignmentId)) return false;
-    return (
-      (auth !== null && existing.ownerUid === auth.uid) ||
-      existing.isActive === true
-    );
+    return auth !== null && existing.ownerUid === auth.uid;
   }
 
   canListAssignment(auth: { uid: string } | null, docData: Record<string, any>): boolean {
@@ -681,8 +678,9 @@ async function runAllIsolationTests() {
     };
     rules.assignments.set('hw_shared_active', sharedHw);
 
-    // Unauthenticated student can fetch single active assignment by ID
-    assert.equal(rules.canGetAssignment(null, 'hw_shared_active'), true);
+    // Unauthenticated student cannot read raw assignment document via Firestore get (must use secure Express API DTO)
+    assert.equal(rules.canGetAssignment(null, 'hw_shared_active'), false);
+    assert.equal(rules.canGetAssignment({ uid: UID_TEACHER_A }, 'hw_shared_active'), true);
 
     const validInProgressSub = {
       id: 'sub_student_1',
@@ -1169,7 +1167,7 @@ async function runAllIsolationTests() {
       assert.equal(studentInfoRes.status, 200);
       const studentHw = await studentInfoRes.json();
       assert.equal(studentHw.id, 'api_hw_a');
-      assert.equal(studentHw.ownerUid, UID_TEACHER_A);
+      assert.equal(studentHw.ownerUid, undefined);
 
       // Student submits attempt to /api/homework/submit -> succeeds and attaches ownerUid = UID_TEACHER_A
       const submitRes = await fetch(`${baseUrl}/api/homework/submit`, {
@@ -1542,11 +1540,16 @@ async function runAllIsolationTests() {
       };
       rules.assignments.set(activeHw.id, activeHw);
 
-      // Student opens /homework/hw_v04_public_link while signed into Google Account B in the browser
+      // Student opens /homework/hw_v04_public_link while signed into Google Account B in the browser -> raw Firestore get is blocked (fetched via secure Express API DTO)
       assert.equal(
         rules.canGetAssignment({ uid: UID_TEACHER_B }, activeHw.id),
+        false,
+        'Non-owner cannot read raw assignment document from Firestore directly'
+      );
+      assert.equal(
+        rules.canGetAssignment({ uid: UID_TEACHER_A }, activeHw.id),
         true,
-        'Single-document get on active assignment must succeed regardless of browser auth state'
+        'Owning teacher can read raw assignment document from Firestore'
       );
 
       const studentSubWhileSignedInB = {

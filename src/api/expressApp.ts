@@ -243,12 +243,46 @@ function isServerAssignmentOpen(hw: any): boolean {
   return true;
 }
 
-function sanitizePublicAssignmentInfo(hw: any): any {
+export function toPublicAssignmentDto(hw: any): any {
+  if (!hw || typeof hw !== 'object') return hw;
   const normalized = normalizeServerAssignment(hw);
-  if (!normalized || typeof normalized !== 'object') return normalized;
-  const copy = { ...normalized };
-  delete copy.ownerEmail;
-  return copy;
+  const mode = resolveServerAudienceMode(normalized);
+
+  const publicDto: any = {
+    id: String(normalized.id || ''),
+    title: String(normalized.title || ''),
+    createdAt: String(normalized.createdAt || ''),
+    isActive: Boolean(normalized.isActive),
+    audienceMode: mode,
+    allowedGameModes: Array.isArray(normalized.allowedGameModes) ? normalized.allowedGameModes : ['classic_quiz'],
+    questionCount: typeof normalized.questionCount === 'number' ? normalized.questionCount : undefined,
+    maxAttempts: typeof normalized.maxAttempts === 'number' ? normalized.maxAttempts : undefined,
+    allowReplay: typeof normalized.allowReplay === 'boolean' ? normalized.allowReplay : true,
+    setSnapshot: normalized.setSnapshot || null,
+    ...(normalized.shareToken ? { shareToken: String(normalized.shareToken) } : {}),
+    ...(normalized.status ? { status: String(normalized.status) } : {})
+  };
+
+  if (mode === 'group') {
+    publicDto.groupId = String(normalized.groupId || '');
+    publicDto.groupName = String(normalized.groupName || '');
+    // Explicitly sanitize assignedStudents: expose only student name and public group affiliation; never expose access codes, passwords, credentials, or PII.
+    if (Array.isArray(normalized.assignedStudents)) {
+      publicDto.assignedStudents = normalized.assignedStudents.map((st: any) => ({
+        id: String(st.id || ''),
+        name: String(st.name || ''),
+        groupId: String(st.groupId || normalized.groupId || '')
+      }));
+    } else {
+      publicDto.assignedStudents = [];
+    }
+  }
+
+  return publicDto;
+}
+
+function sanitizePublicAssignmentInfo(hw: any): any {
+  return toPublicAssignmentDto(hw);
 }
 
 function validateServerSubmission(hw: any, body: any): {

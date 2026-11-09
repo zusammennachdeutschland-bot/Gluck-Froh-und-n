@@ -105,12 +105,9 @@ service cloud.firestore {
         && (!('ownerUid' in existing()) || existing().ownerUid == '' || existing().ownerUid == request.auth.uid);
     }
 
-    // Homework Assignments (Strictly isolated by teacher ownerUid; single-doc get allowed for active shared student links)
+    // Homework Assignments (Strictly isolated by teacher ownerUid; public get via server Express DTO API)
     match /homework_assignments/{assignmentId} {
-      allow get: if isValidId(assignmentId) && (
-        (isSignedIn() && existing().ownerUid == request.auth.uid)
-        || existing().isActive == true
-      );
+      allow get: if isSignedIn() && isValidId(assignmentId) && existing().ownerUid == request.auth.uid;
 
       allow list: if isSignedIn() && existing().ownerUid == request.auth.uid;
 
