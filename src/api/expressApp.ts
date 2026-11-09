@@ -1,13 +1,48 @@
 import express from 'express';
 import crypto from 'crypto';
+import {
+  getAuthoritativeAssignment,
+  listAuthoritativeAssignments,
+  saveAuthoritativeAssignment,
+  getAuthoritativeSubmission,
+  listAuthoritativeSubmissions,
+  saveAuthoritativeSubmission,
+  resetAdminFirestoreForTesting
+} from '../server/firebaseAdmin';
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// In-Memory Fallback Stores for Homework & Teacher Assignments
-const localAssignmentsStore: any[] = [];
-const localSubmissionsStore: any[] = [];
+// Authoritative Firestore helpers (no unbounded in-memory cache)
+export function resetServerMemoryCacheOnly(): void {
+  // Maintained for backward compatibility with test runners
+}
+
+export function resetHomeworkStoresForTesting(): void {
+  resetAdminFirestoreForTesting();
+}
+
+async function getServerAssignment(id: string): Promise<any | null> {
+  return await getAuthoritativeAssignment(id);
+}
+
+async function listServerAssignments(ownerUid: string): Promise<any[]> {
+  return await listAuthoritativeAssignments(ownerUid);
+}
+
+async function saveServerAssignment(normalized: any, verifiedUid: string): Promise<any> {
+  return await saveAuthoritativeAssignment(normalized, verifiedUid);
+}
+
+async function listServerSubmissions(ownerUid: string, assignmentId?: string | null): Promise<any[]> {
+  return await listAuthoritativeSubmissions(ownerUid, assignmentId);
+}
+
+async function saveServerSubmission(sub: any, targetHw: any): Promise<any> {
+  const { submission: saved } = await saveAuthoritativeSubmission(sub, targetHw);
+  return saved;
+}
 
 // Gold price cache
 let serverGoldCache: { data: any; timestamp: number } | null = null;
@@ -182,11 +217,7 @@ app.get('/api/tts', async (req, res) => {
   }
 });
 
-// 5. Teacher & Homework Assignments API routes with Audience Mode & Group Membership Validation
-export function resetHomeworkStoresForTesting(): void {
-  localAssignmentsStore.length = 0;
-  localSubmissionsStore.length = 0;
-}
+
 
 function resolveServerAudienceMode(hw: any): 'open' | 'group' {
   if (!hw) return 'open';
@@ -243,6 +274,88 @@ function isServerAssignmentOpen(hw: any): boolean {
   return true;
 }
 
+/**
+ * Dedicated public set-snapshot sanitizer.
+ * Strictly allowlists student-facing study fields and vocabulary cards.
+ * Strips all answer keys (customExercises.correctAnswer, answer-revealing explanation),
+ * teacher metadata (ownerUid, ownerEmail, assignedGroupId, isArchived), internal IDs, and PII.
+ * Never mutates the original snapshot or stored assignment.
+ */
+export function sanitizePublicSetSnapshot(rawSnapshot: any): any {
+  if (!rawSnapshot || typeof rawSnapshot !== 'object') return null;
+
+  // 1. Sanitize items array (allow only vocabulary study fields)
+  const rawItems = Array.isArray(rawSnapshot.items) ? rawSnapshot.items : [];
+  const sanitizedItems = rawItems.map((item: any) => {
+    if (!item || typeof item !== 'object') return {};
+    const cleanItem: any = {
+      id: String(item.id || ''),
+      german: String(item.german || ''),
+      arabic: String(item.arabic || '')
+    };
+    if (item.article) cleanItem.article = item.article;
+    if (item.english) cleanItem.english = String(item.english);
+    if (item.plural) cleanItem.plural = String(item.plural);
+    if (item.exampleSentenceGerman) cleanItem.exampleSentenceGerman = String(item.exampleSentenceGerman);
+    if (item.exampleSentenceArabic) cleanItem.exampleSentenceArabic = String(item.exampleSentenceArabic);
+    if (item.imageUrl) cleanItem.imageUrl = String(item.imageUrl);
+    if (item.emoji) cleanItem.emoji = String(item.emoji);
+    if (item.missingLetterWord) cleanItem.missingLetterWord = String(item.missingLetterWord);
+    if (Array.isArray(item.sentence4Elements)) {
+      cleanItem.sentence4Elements = item.sentence4Elements.slice(0, 4).map(String);
+    }
+    if (item.wordType) cleanItem.wordType = item.wordType;
+    if (item.conjugation && typeof item.conjugation === 'object') {
+      cleanItem.conjugation = item.conjugation;
+    }
+    if (item.category) cleanItem.category = String(item.category);
+    if (Array.isArray(item.syllables)) {
+      cleanItem.syllables = item.syllables.map(String);
+    }
+    return cleanItem;
+  });
+
+  // 2. Sanitize customExercises array (NEVER expose correctAnswer or answer-revealing explanation!)
+  const rawExercises = Array.isArray(rawSnapshot.customExercises) ? rawSnapshot.customExercises : [];
+  const sanitizedExercises = rawExercises.map((ex: any) => {
+    if (!ex || typeof ex !== 'object') return {};
+    const cleanEx: any = {
+      id: String(ex.id || ''),
+      type: ex.type || 'multiple_choice',
+      question: String(ex.question || ex.prompt || '')
+    };
+    if (Array.isArray(ex.options)) {
+      cleanEx.options = ex.options.map(String);
+    }
+    if (ex.itemRefId) {
+      cleanEx.itemRefId = String(ex.itemRefId);
+    }
+    // STRICTLY OMIT: correctAnswer, explanation, teacherNotes, answerKey
+    return cleanEx;
+  });
+
+  const sanitizedSnapshot: any = {
+    id: String(rawSnapshot.id || ''),
+    title: String(rawSnapshot.title || ''),
+    level: rawSnapshot.level || 'A1',
+    topic: String(rawSnapshot.topic || rawSnapshot.category || ''),
+    difficulty: rawSnapshot.difficulty || 'medium',
+    items: sanitizedItems
+  };
+
+  if (rawSnapshot.category) sanitizedSnapshot.category = String(rawSnapshot.category);
+  if (rawSnapshot.hasArticles !== undefined) sanitizedSnapshot.hasArticles = Boolean(rawSnapshot.hasArticles);
+  if (rawSnapshot.sentenceBuilderSupported !== undefined) {
+    sanitizedSnapshot.sentenceBuilderSupported = Boolean(rawSnapshot.sentenceBuilderSupported);
+  }
+  if (sanitizedExercises.length > 0) {
+    sanitizedSnapshot.customExercises = sanitizedExercises;
+  }
+
+  // STRICTLY EXCLUDED: ownerUid, ownerEmail, assignedGroupId, isArchived, createdAt, updatedAt, credentials, PII
+  return sanitizedSnapshot;
+}
+
 export function toPublicAssignmentDto(hw: any): any {
   if (!hw || typeof hw !== 'object') return hw;
   const normalized = normalizeServerAssignment(hw);
@@ -258,8 +371,7 @@ export function toPublicAssignmentDto(hw: any): any {
     questionCount: typeof normalized.questionCount === 'number' ? normalized.questionCount : undefined,
     maxAttempts: typeof normalized.maxAttempts === 'number' ? normalized.maxAttempts : undefined,
     allowReplay: typeof normalized.allowReplay === 'boolean' ? normalized.allowReplay : true,
-    setSnapshot: normalized.setSnapshot || null,
-    ...(normalized.shareToken ? { shareToken: String(normalized.shareToken) } : {}),
+    setSnapshot: sanitizePublicSetSnapshot(normalized.setSnapshot),
     ...(normalized.status ? { status: String(normalized.status) } : {})
   };
 
@@ -430,7 +542,7 @@ app.all('/api/teacher/assignments', async (req, res) => {
       });
     }
     const ownerUid = verifiedUid;
-    const filtered = localAssignmentsStore.filter((a) => String(a.ownerUid || '').trim() === ownerUid);
+    const filtered = await listServerAssignments(ownerUid);
     return res.json({ assignments: filtered.map(normalizeServerAssignment) });
   }
 
@@ -460,24 +572,14 @@ app.all('/api/teacher/assignments', async (req, res) => {
     delete normalized.ownerEmail;
 
     if (normalized.id) {
-      const idx = localAssignmentsStore.findIndex((a) => a.id === normalized.id);
-      if (idx >= 0) {
-        const existingOwner = String(localAssignmentsStore[idx].ownerUid || '').trim();
-        const incomingOwner = String(normalized.ownerUid || '').trim();
-        if (existingOwner && incomingOwner !== existingOwner) {
-          return res.status(403).json({
-            success: false,
-            error: 'Cannot overwrite or change ownership of an assignment belonging to another account.'
-          });
-        }
-        localAssignmentsStore[idx] = normalizeServerAssignment({
-          ...localAssignmentsStore[idx],
-          ...normalized,
-          ownerUid: existingOwner || incomingOwner
+      try {
+        const saved = await saveServerAssignment(normalized, effectiveOwnerUid);
+        return res.json({ success: true, assignment: saved });
+      } catch (err: any) {
+        return res.status(err?.status || 500).json({
+          success: false,
+          error: err?.message || 'Failed to persist assignment to database'
         });
-        delete localAssignmentsStore[idx].ownerEmail;
-      } else {
-        localAssignmentsStore.unshift(normalized);
       }
     }
     return res.json({ success: true, assignment: normalized });
@@ -518,7 +620,7 @@ app.all('/api/homework/submissions', async (req, res) => {
     const ownerUid = verifiedUid;
 
     if (assignmentId) {
-      const targetHw = localAssignmentsStore.find((a) => a.id === assignmentId);
+      const targetHw = await getServerAssignment(assignmentId);
       if (targetHw && targetHw.ownerUid && String(targetHw.ownerUid).trim() !== ownerUid) {
         return res.status(403).json({
           error: 'Forbidden: Assignment belongs to another teacher account',
@@ -526,17 +628,13 @@ app.all('/api/homework/submissions', async (req, res) => {
         });
       }
     }
-    const list = localSubmissionsStore.filter((s) => {
-      if (assignmentId && s.assignmentId !== assignmentId) return false;
-      if (String(s.ownerUid || '').trim() !== ownerUid) return false;
-      return true;
-    });
+    const list = await listServerSubmissions(ownerUid, assignmentId);
     return res.json({ submissions: list });
   }
   if (req.method === 'POST') {
     const body = req.body || {};
     // V-05: Never trust client-supplied body.assignmentFallback; require a server-known assignment
-    const targetHw = localAssignmentsStore.find((a) => a.id === body.assignmentId) || null;
+    const targetHw = await getServerAssignment(body.assignmentId);
     if (!targetHw) {
       return res.status(404).json({
         success: false,
@@ -577,44 +675,14 @@ app.all('/api/homework/submissions', async (req, res) => {
     delete cleanSub.assignmentFallback;
 
     if (cleanSub.id) {
-      const idx = localSubmissionsStore.findIndex((s) => s.id === cleanSub.id);
-      if (idx >= 0) {
-        const existing = localSubmissionsStore[idx];
-        const existingOwner = String(existing.ownerUid || '').trim();
-        if (existingOwner && resolvedOwnerUid && existingOwner !== resolvedOwnerUid) {
-          return res.status(403).json({
-            success: false,
-            error: 'Cannot overwrite submission belonging to another account'
-          });
-        }
-        const existingName = String(existing.studentName || '').trim().toLowerCase();
-        const incomingName = String(cleanSub.studentName || '').trim().toLowerCase();
-        if (existingName && incomingName && existingName !== incomingName) {
-          return res.status(403).json({
-            success: false,
-            error: 'Cannot change studentName on an existing submission'
-          });
-        }
-        if (
-          existing.attemptSecret &&
-          String(body.attemptSecret || '').trim() !== String(existing.attemptSecret).trim()
-        ) {
-          return res.status(403).json({
-            success: false,
-            error: 'Invalid attemptSecret for existing submission'
-          });
-        }
-        const existingCompleted =
-          existing.status === 'completed' || (!existing.status && Boolean(existing.completedAt));
-        if (existingCompleted) {
-          return res.status(409).json({
-            success: false,
-            error: 'Completed submission is locked and cannot be overwritten'
-          });
-        }
-        localSubmissionsStore[idx] = { ...existing, ...cleanSub };
-      } else {
-        localSubmissionsStore.unshift(cleanSub);
+      try {
+        const saved = await saveServerSubmission(cleanSub, targetHw);
+        return res.json({ success: true, submission: saved });
+      } catch (err: any) {
+        return res.status(err?.status || 500).json({
+          success: false,
+          error: err?.message || 'Failed to persist submission to database'
+        });
       }
     }
     return res.json({ success: true, submission: cleanSub });
@@ -622,22 +690,35 @@ app.all('/api/homework/submissions', async (req, res) => {
   return res.json({ success: true });
 });
 
-app.get('/api/homework/info', (req, res) => {
+app.get('/api/homework/info', async (req, res) => {
   const id = String(req.query.id || '').trim();
-  const found = localAssignmentsStore.find((a) => a.id === id);
+  const token = req.query.token !== undefined && req.query.token !== null ? String(req.query.token).trim() : '';
+  const found = await getServerAssignment(id);
   if (!found) {
-    return res.status(404).json({ error: 'Assignment not found in local relay' });
+    return res.status(404).json({ error: 'Assignment not found' });
   }
   if (!isServerAssignmentOpen(found)) {
     return res.status(403).json({ error: 'Assignment is closed or inactive' });
   }
+
+  // Strict Share Token Enforcement:
+  // If assignment has a configured shareToken, require exact match. Missing, empty, or mismatched tokens are rejected with 403.
+  const configuredShareToken =
+    found.shareToken !== undefined && found.shareToken !== null ? String(found.shareToken).trim() : '';
+
+  if (configuredShareToken) {
+    if (!token || token !== configuredShareToken) {
+      return res.status(403).json({ error: 'Forbidden: Valid share token is required to access this assignment' });
+    }
+  }
+
   return res.json(sanitizePublicAssignmentInfo(found));
 });
 
-app.post('/api/homework/submit', (req, res) => {
+app.post('/api/homework/submit', async (req, res) => {
   const body = req.body || {};
   // V-05: Never accept untrusted client-supplied body.assignmentFallback
-  const targetHw = localAssignmentsStore.find((a) => a.id === body.assignmentId) || null;
+  const targetHw = await getServerAssignment(body.assignmentId);
   if (!targetHw) {
     return res.status(404).json({
       success: false,
@@ -667,8 +748,33 @@ app.post('/api/homework/submit', (req, res) => {
   }
 
   const responses = Array.isArray(body.responses) ? body.responses : [];
-  const correctCount = responses.filter((r: any) => r && r.isCorrect).length;
-  const totalQ = responses.length;
+
+  // Server-side authoritative grading check:
+  // If targetHw has customExercises with server-stored answer keys, grade responses authoritatively
+  const serverExercises = Array.isArray(targetHw?.setSnapshot?.customExercises)
+    ? targetHw.setSnapshot.customExercises
+    : [];
+
+  const verifiedResponses = responses.map((r: any) => {
+    if (!r || typeof r !== 'object') return r;
+    const targetQId = r.exerciseId || r.questionId || r.id;
+    if (targetQId && serverExercises.length > 0) {
+      const match = serverExercises.find((ex: any) => ex.id === targetQId);
+      if (match && match.correctAnswer) {
+        const studentAns = String(r.selectedAnswer ?? r.answer ?? r.submittedAnswer ?? '').trim();
+        const expected = String(match.correctAnswer).trim();
+        const isActuallyCorrect = studentAns.toLowerCase() === expected.toLowerCase();
+        return {
+          ...r,
+          isCorrect: isActuallyCorrect
+        };
+      }
+    }
+    return r;
+  });
+
+  const correctCount = verifiedResponses.filter((r: any) => r && r.isCorrect).length;
+  const totalQ = verifiedResponses.length;
   const pct = totalQ > 0 ? Math.round((correctCount / totalQ) * 100) : 0;
   const nowIso = new Date().toISOString();
   const startMs = body.startedAt ? new Date(body.startedAt).getTime() : Date.now() - totalQ * 4000;
@@ -700,50 +806,18 @@ app.post('/api/homework/submit', (req, res) => {
     goldEarned: body.goldEarned || 0,
     maxStreak: body.maxStreak || 0,
     completedStudyPhase: Boolean(body.completedStudyPhase),
-    responses
+    responses: verifiedResponses
   };
 
-  const idx = localSubmissionsStore.findIndex((s) => s.id === submission.id);
-  if (idx >= 0) {
-    const existing = localSubmissionsStore[idx];
-    const existingOwner = String(existing.ownerUid || '').trim();
-    if (existingOwner && resolvedOwnerUid && existingOwner !== resolvedOwnerUid) {
-      return res.status(403).json({
-        success: false,
-        error: 'Cannot overwrite submission belonging to another account'
-      });
-    }
-    const existingName = String(existing.studentName || '').trim().toLowerCase();
-    const incomingName = String(submission.studentName || '').trim().toLowerCase();
-    if (existingName && incomingName && existingName !== incomingName) {
-      return res.status(403).json({
-        success: false,
-        error: 'Cannot change studentName on an existing submission'
-      });
-    }
-    if (
-      existing.attemptSecret &&
-      String(body.attemptSecret || '').trim() !== String(existing.attemptSecret).trim()
-    ) {
-      return res.status(403).json({
-        success: false,
-        error: 'Invalid attemptSecret for existing submission'
-      });
-    }
-    const existingCompleted =
-      existing.status === 'completed' || (!existing.status && Boolean(existing.completedAt));
-    if (existingCompleted) {
-      return res.status(409).json({
-        success: false,
-        error: 'Completed submission is locked and cannot be overwritten'
-      });
-    }
-    localSubmissionsStore[idx] = { ...existing, ...submission };
-  } else {
-    localSubmissionsStore.unshift(submission);
+  try {
+    const saved = await saveServerSubmission(submission, targetHw);
+    return res.json({ success: true, submission: saved });
+  } catch (err: any) {
+    return res.status(err?.status || 500).json({
+      success: false,
+      error: err?.message || 'Failed to persist submission to database'
+    });
   }
-
-  return res.json({ success: true, submission });
 });
 
 // 6. P2P-Style Workspace Delta Relay Store (per workspaceId) with Mandatory Firebase ID Token Cryptographic Verification

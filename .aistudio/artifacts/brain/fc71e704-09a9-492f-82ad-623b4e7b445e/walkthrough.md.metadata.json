@@ -1,5 +1,5 @@
 {
-  "summary":  "Updated walkthrough artifact documenting the IndexedDB queue removal integrity repair, observable removal error handling, verifyDurableRemoved read error guards, and tests RA-23 & RA-24.",
-  "updatedAt":  "2026-11-09T04:05:45.715106132Z",
+  "summary":  "Walkthrough document detailing the implementation and test verification of the Critical Security Remediation: Admin Override Isolation & Public Answer-Key Leakage.",
+  "updatedAt":  "2026-11-09T16:35:51.501643260Z",
   "userFacing":  true
 }

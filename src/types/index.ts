@@ -74,6 +74,9 @@ export interface SyncStateMetadata {
   localRevisionCounter: number;
   peerWatermarkTable: PeerWatermarkTable;
   protocolVersion?: number;
+  pairedPeers?: PairedPeer[];
+  status?: 'online' | 'syncing' | 'offline' | 'error';
+  lastSyncedTimestamp?: number;
 }
 
 // ==========================================

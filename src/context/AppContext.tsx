@@ -7671,6 +7671,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       syncStateRef.current = newState;
       syncRevisionRef.current = newState.localRevisionCounter;
       await storage.setItem('dl_sync_state', newState);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('dl_sync_state_changed', { detail: newState }));
+      }
     }
   };
 
