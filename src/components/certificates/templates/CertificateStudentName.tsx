@@ -5,6 +5,7 @@ interface CertificateStudentNameProps {
   isRtl?: boolean;
   className?: string;
   style?: React.CSSProperties;
+  color?: string;
   maxFontSizePx?: number;
   minFontSizePx?: number;
   fontFamily?: string;
@@ -26,6 +27,7 @@ export const CertificateStudentName: React.FC<CertificateStudentNameProps> = ({
   isRtl = false,
   className = '',
   style = {},
+  color,
   maxFontSizePx = 48,
   minFontSizePx = 18,
   fontFamily,
@@ -170,6 +172,7 @@ export const CertificateStudentName: React.FC<CertificateStudentNameProps> = ({
           paddingBottom: '4px',
           transform: scaleFactor < 1 ? `scale(${scaleFactor})` : undefined,
           transformOrigin: 'center center',
+          ...(color ? { color } : {}),
           ...style
         }}
       >

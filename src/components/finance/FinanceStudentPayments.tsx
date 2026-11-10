@@ -2249,7 +2249,7 @@ export const FinanceStudentPayments: React.FC = () => {
               </div>
               {exemptModalCycle && exemptModalCycle.lessonDates.length > 0 && (
                 <div className="pt-1 border-t border-surface-border/50 text-[10px] text-text-muted">
-                  <span>{_t('الحصص المشمولة:', 'Lessons:', 'Lektionen:')} {exemptModalCycle.lessonDates.map(formatLessonDateChip).join('، ')}</span>
+                  <span>{_t('الحصص المشمولة:', 'Lessons:', 'Lektionen:')} {exemptModalCycle.lessonDates.map((d) => formatLessonDateChip(d)).join('، ')}</span>
                 </div>
               )}
             </div>

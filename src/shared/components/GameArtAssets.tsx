@@ -67,7 +67,8 @@ export const SharedMysteryChestArt: React.FC<{ className?: string }> = ({ classN
 /**
  * Normalize legacy or alternate game IDs to their canonical manifest key
  */
-function resolveCanonicalGameId(gameId: string): string {
+function resolveCanonicalGameId(gameId?: string): string {
+  if (!gameId) return 'classroom';
   if (gameId === 'tic_tac_toe') return 'tictactoe';
   return gameId;
 }
@@ -494,6 +495,8 @@ export interface GameStageBannerProps {
 
 export const GameStageBanner: React.FC<GameStageBannerProps> = ({
   gameId,
+  mode,
+  badgeText,
   title,
   subtitle,
   emoji,
@@ -502,7 +505,7 @@ export const GameStageBanner: React.FC<GameStageBannerProps> = ({
   isRtl = true,
   rightContent
 }) => {
-  const canonicalId = resolveCanonicalGameId(gameId);
+  const canonicalId = resolveCanonicalGameId(gameId || mode);
   const spec = NANO_BANANA_GAME_ART_MANIFEST[canonicalId];
 
   return (
@@ -559,6 +562,11 @@ export const GameStageBanner: React.FC<GameStageBannerProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {badgeText && (
+            <span className="px-2.5 py-1 rounded-xl bg-white/15 border border-white/20 text-[11px] font-black text-amber-200 tracking-wide backdrop-blur-md">
+              {badgeText}
+            </span>
+          )}
           {rightContent}
           <GameSettingsControls />
         </div>

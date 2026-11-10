@@ -29,18 +29,517 @@ var import_vite = require("vite");
 // src/api/expressApp.ts
 var import_express = __toESM(require("express"), 1);
 var import_crypto = __toESM(require("crypto"), 1);
-var app = (0, import_express.default)();
-app.use(import_express.default.json({ limit: "50mb" }));
-app.use(import_express.default.urlencoded({ limit: "50mb", extended: true }));
-var localAssignmentsStore = [];
-var localSubmissionsStore = [];
+
+// src/server/firebaseAdmin.ts
+var import_app2 = require("firebase-admin/app");
+var import_firestore2 = require("firebase-admin/firestore");
+
+// src/shared/firebaseCloudSync.ts
+var import_app = require("firebase/app");
+var import_auth = require("firebase/auth");
+
+// src/shared/googleCredentialAuthPlugin.ts
+var import_core = require("@capacitor/core");
+var NativeGoogleCredentialAuth = (0, import_core.registerPlugin)("GoogleCredentialAuth");
+var testAdapter = null;
+function isAndroidNativePlatform() {
+  if (testAdapter?.isAndroidNative) {
+    return testAdapter.isAndroidNative();
+  }
+  if (typeof window === "undefined") return false;
+  const cap = window.Capacitor;
+  if (cap) {
+    if (typeof cap.getPlatform === "function" && cap.getPlatform() === "android") {
+      return true;
+    }
+    if (typeof cap.isNativePlatform === "function" && cap.isNativePlatform()) {
+      return true;
+    }
+  }
+  const protocol = window.location?.protocol;
+  return protocol === "capacitor:" || protocol === "file:";
+}
+
+// src/shared/firebaseCloudSync.ts
+var import_firestore = require("firebase/firestore");
+var FIREBASE_CONFIG = {
+  projectId: "glueck-c8621",
+  appId: "1:874458026984:web:f88ecbf0df451173854a5d",
+  apiKey: "AIzaSyBJVhFLw3NeS1MNHJ9ZnAipuZNwRaoaZ-g",
+  authDomain: "glueck-c8621.firebaseapp.com",
+  firestoreDatabaseId: "ai-studio-remixgluckgerman-fc71e704-09a9-492f-82ad-623b4e7b445e",
+  storageBucket: "glueck-c8621.firebasestorage.app",
+  messagingSenderId: "874458026984"
+};
+var app = (0, import_app.getApps)().length > 0 ? (0, import_app.getApp)() : (0, import_app.initializeApp)(FIREBASE_CONFIG);
+function initFirestoreDb() {
+  const hasIndexedDb = typeof window !== "undefined" && typeof window.indexedDB !== "undefined";
+  if (hasIndexedDb) {
+    try {
+      return (0, import_firestore.initializeFirestore)(
+        app,
+        {
+          localCache: (0, import_firestore.persistentLocalCache)({
+            tabManager: (0, import_firestore.persistentMultipleTabManager)()
+          }),
+          experimentalAutoDetectLongPolling: true
+        },
+        FIREBASE_CONFIG.firestoreDatabaseId
+      );
+    } catch {
+    }
+  }
+  try {
+    return (0, import_firestore.initializeFirestore)(
+      app,
+      {
+        localCache: (0, import_firestore.memoryLocalCache)(),
+        experimentalAutoDetectLongPolling: true
+      },
+      FIREBASE_CONFIG.firestoreDatabaseId
+    );
+  } catch {
+    return (0, import_firestore.getFirestore)(app, FIREBASE_CONFIG.firestoreDatabaseId);
+  }
+}
+var db = initFirestoreDb();
+try {
+  (0, import_firestore.setLogLevel)("silent");
+} catch {
+}
+var auth = (0, import_auth.getAuth)(app);
+var googleProvider = new import_auth.GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });
+var LEGACY_QUOTA_EXHAUSTED_DATE_KEY = "gluck_firestore_write_quota_date";
+if (typeof window !== "undefined") {
+  try {
+    localStorage.removeItem(LEGACY_QUOTA_EXHAUSTED_DATE_KEY);
+  } catch {
+  }
+}
+var connectionTested = false;
+async function testFirestoreConnection() {
+  if (connectionTested) return true;
+  connectionTested = true;
+  try {
+    await (0, import_firestore.getDocFromServer)((0, import_firestore.doc)(db, "test", "connection"));
+    return true;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("the client is offline")) {
+      console.error("Please check your Firebase configuration.");
+    }
+    return false;
+  }
+}
+if (typeof window !== "undefined") {
+  testFirestoreConnection().catch(() => {
+  });
+}
+if (typeof window !== "undefined") {
+  (0, import_auth.setPersistence)(auth, import_auth.browserLocalPersistence).catch(() => {
+    (0, import_auth.setPersistence)(auth, import_auth.inMemoryPersistence).catch(() => {
+    });
+  });
+  if (!isAndroidNativePlatform()) {
+    (0, import_auth.getRedirectResult)(auth).then((res) => {
+      if (res?.user) {
+        console.log("Redirect sign-in success:", res.user.email);
+      }
+    }).catch((e) => {
+      console.warn("Redirect result notice:", e);
+    });
+  }
+}
+
+// src/server/firebaseAdmin.ts
+var InMemoryAdminFirestore = class {
+  constructor() {
+    this.assignments = /* @__PURE__ */ new Map();
+    this.submissions = /* @__PURE__ */ new Map();
+    this.shouldFailWrites = false;
+    this.failureErrorMessage = "Simulated Firestore persistence failure";
+  }
+  clear() {
+    this.assignments.clear();
+    this.submissions.clear();
+    this.shouldFailWrites = false;
+  }
+  setSimulateFailure(fail, message) {
+    this.shouldFailWrites = fail;
+    if (message) this.failureErrorMessage = message;
+  }
+  getAssignmentsMap() {
+    return this.assignments;
+  }
+  getSubmissionsMap() {
+    return this.submissions;
+  }
+  collection(name) {
+    const isAssignments = name === "homework_assignments";
+    const store = isAssignments ? this.assignments : this.submissions;
+    const parent = this;
+    return {
+      doc: (id) => ({
+        get: async () => {
+          const data = store.get(id);
+          return {
+            exists: !!data,
+            id,
+            data: () => data ? JSON.parse(JSON.stringify(data)) : void 0
+          };
+        },
+        set: async (data, options) => {
+          if (parent.shouldFailWrites) {
+            throw new Error(parent.failureErrorMessage);
+          }
+          const existing = store.get(id) || {};
+          const merged = options?.merge ? { ...existing, ...data } : { ...data };
+          store.set(id, JSON.parse(JSON.stringify(merged)));
+        },
+        delete: async () => {
+          if (parent.shouldFailWrites) {
+            throw new Error(parent.failureErrorMessage);
+          }
+          store.delete(id);
+        }
+      }),
+      where: (field, op, value) => ({
+        where: (field2, op2, value2) => ({
+          get: async () => {
+            const docs = [];
+            for (const [id, data] of store.entries()) {
+              if (op === "==" && data[field] === value && op2 === "==" && data[field2] === value2) {
+                docs.push({
+                  id,
+                  data: () => JSON.parse(JSON.stringify(data))
+                });
+              }
+            }
+            return { docs };
+          }
+        }),
+        get: async () => {
+          const docs = [];
+          for (const [id, data] of store.entries()) {
+            if (op === "==" && data[field] === value) {
+              docs.push({
+                id,
+                data: () => JSON.parse(JSON.stringify(data))
+              });
+            }
+          }
+          return { docs };
+        }
+      })
+    };
+  }
+  async runTransaction(updateFunction) {
+    if (this.shouldFailWrites) {
+      throw new Error(this.failureErrorMessage);
+    }
+    const self = this;
+    const transaction = {
+      get: async (docRef) => docRef.get(),
+      set: (docRef, data, options) => docRef.set(data, options),
+      delete: (docRef) => docRef.delete()
+    };
+    return await updateFunction(transaction);
+  }
+};
+var customAdminDbOverride = null;
+var defaultInMemoryDb = null;
+function isNonTestDeploymentOrVercel() {
+  if (process.env.VERCEL === "1") return true;
+  if (process.env.VERCEL_ENV !== void 0 && process.env.VERCEL_ENV !== "") return true;
+  const nodeEnv = process.env.NODE_ENV;
+  if (nodeEnv === "production" || nodeEnv === "staging" || nodeEnv === "preview") return true;
+  return false;
+}
+function isExplicitTestEnvironment() {
+  if (globalThis.__TEST_ENV__ === false) {
+    return false;
+  }
+  return process.env.NODE_ENV === "test" || process.env.VITEST === "true" || process.env.JEST_WORKER_ID !== void 0 || process.env.IS_TEST_SUITE === "1" || Boolean(globalThis.__TEST_ENV__) || Array.isArray(process.argv) && process.argv.some((arg) => arg.includes(".test.") || arg.includes("/tests/"));
+}
+function getInMemoryAdminFirestore() {
+  if (isNonTestDeploymentOrVercel()) {
+    throw new Error("Forbidden: Cannot instantiate InMemoryAdminFirestore in production, staging, preview, or Vercel deployments.");
+  }
+  if (!isExplicitTestEnvironment()) {
+    throw new Error("Forbidden: InMemoryAdminFirestore can only be instantiated in an explicit test environment.");
+  }
+  if (!defaultInMemoryDb) {
+    defaultInMemoryDb = new InMemoryAdminFirestore();
+  }
+  return defaultInMemoryDb;
+}
+function hasFirebaseAdminCredentials() {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+    return true;
+  }
+  if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+    return true;
+  }
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    return true;
+  }
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    return true;
+  }
+  return false;
+}
+var cachedAdminApp = null;
+var cachedAdminFirestore = null;
+function initializeAdminApp() {
+  if ((0, import_app2.getApps)().length > 0) {
+    return (0, import_app2.getApp)();
+  }
+  const projectId = process.env.FIREBASE_PROJECT_ID || FIREBASE_CONFIG.projectId;
+  const saKeyJson = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  if (saKeyJson) {
+    try {
+      const parsed = JSON.parse(saKeyJson);
+      return (0, import_app2.initializeApp)({
+        credential: (0, import_app2.cert)(parsed),
+        projectId: parsed.project_id || projectId
+      });
+    } catch (err) {
+      throw new Error(`Invalid FIREBASE_SERVICE_ACCOUNT JSON: ${err?.message || err}`);
+    }
+  }
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKeyRaw = process.env.FIREBASE_PRIVATE_KEY;
+  if (clientEmail && privateKeyRaw) {
+    const privateKey = privateKeyRaw.replace(/\\n/g, "\n");
+    return (0, import_app2.initializeApp)({
+      credential: (0, import_app2.cert)({
+        projectId,
+        clientEmail,
+        privateKey
+      }),
+      projectId
+    });
+  }
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GCP_PROJECT) {
+    return (0, import_app2.initializeApp)({
+      credential: (0, import_app2.applicationDefault)(),
+      projectId
+    });
+  }
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    return (0, import_app2.initializeApp)({ projectId });
+  }
+  throw new Error(
+    "Firebase Admin credentials missing: Please configure FIREBASE_SERVICE_ACCOUNT or FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY in Vercel environment variables."
+  );
+}
+function getAuthoritativeFirestore() {
+  const isDeployment = isNonTestDeploymentOrVercel();
+  if (isDeployment) {
+    customAdminDbOverride = null;
+    const hasCreds2 = hasFirebaseAdminCredentials();
+    if (!hasCreds2) {
+      throw new Error(
+        "Firebase Admin credentials missing: Please configure FIREBASE_SERVICE_ACCOUNT or FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY in Vercel environment variables."
+      );
+    }
+    if (cachedAdminFirestore) {
+      return cachedAdminFirestore;
+    }
+    if (!cachedAdminApp) {
+      cachedAdminApp = initializeAdminApp();
+    }
+    const dbId2 = process.env.FIREBASE_DATABASE_ID || FIREBASE_CONFIG.firestoreDatabaseId;
+    const db3 = (0, import_firestore2.getFirestore)(cachedAdminApp, dbId2);
+    db3.settings({ ignoreUndefinedProperties: true });
+    cachedAdminFirestore = db3;
+    return cachedAdminFirestore;
+  }
+  if (customAdminDbOverride) {
+    if (!isExplicitTestEnvironment()) {
+      customAdminDbOverride = null;
+      throw new Error("Forbidden: Test override is only permitted in an explicit test environment.");
+    }
+    return customAdminDbOverride;
+  }
+  const hasCreds = hasFirebaseAdminCredentials();
+  if (!hasCreds) {
+    const isTest = isExplicitTestEnvironment();
+    if (!isTest) {
+      throw new Error(
+        "Firebase Admin credentials missing: Firebase Admin SDK requires credentials in production and non-test environments. Please configure FIREBASE_SERVICE_ACCOUNT or FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY in environment variables."
+      );
+    }
+    return getInMemoryAdminFirestore();
+  }
+  if (cachedAdminFirestore) {
+    return cachedAdminFirestore;
+  }
+  if (!cachedAdminApp) {
+    cachedAdminApp = initializeAdminApp();
+  }
+  const dbId = process.env.FIREBASE_DATABASE_ID || FIREBASE_CONFIG.firestoreDatabaseId;
+  const db2 = (0, import_firestore2.getFirestore)(cachedAdminApp, dbId);
+  db2.settings({ ignoreUndefinedProperties: true });
+  cachedAdminFirestore = db2;
+  return cachedAdminFirestore;
+}
+function cleanForFirestore(obj) {
+  const result = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== void 0) {
+      if (val !== null && typeof val === "object" && !Array.isArray(val) && !(val instanceof Date)) {
+        result[key] = cleanForFirestore(val);
+      } else {
+        result[key] = val;
+      }
+    }
+  }
+  return result;
+}
+async function getAuthoritativeAssignment(id) {
+  if (!id || typeof id !== "string") return null;
+  const db2 = getAuthoritativeFirestore();
+  const snap = await db2.collection("homework_assignments").doc(id.trim()).get();
+  if (!snap.exists) return null;
+  return snap.data();
+}
+async function listAuthoritativeAssignments(ownerUid) {
+  if (!ownerUid || typeof ownerUid !== "string") return [];
+  const db2 = getAuthoritativeFirestore();
+  const snap = await db2.collection("homework_assignments").where("ownerUid", "==", ownerUid.trim()).get();
+  return snap.docs.map((d) => d.data());
+}
+async function saveAuthoritativeAssignment(assignment, verifiedOwnerUid) {
+  if (!assignment || !assignment.id) {
+    throw new Error("Assignment must contain a valid id");
+  }
+  if (!verifiedOwnerUid) {
+    throw new Error("Unauthorized: verified ownerUid is required");
+  }
+  const cleanId = String(assignment.id).trim();
+  const db2 = getAuthoritativeFirestore();
+  const docRef = db2.collection("homework_assignments").doc(cleanId);
+  const existingSnap = await docRef.get();
+  if (existingSnap.exists) {
+    const existing = existingSnap.data();
+    const existingOwner = String(existing.ownerUid || "").trim();
+    if (existingOwner && existingOwner !== verifiedOwnerUid) {
+      const err = new Error("Forbidden: Cannot overwrite assignment belonging to another teacher account");
+      err.status = 403;
+      throw err;
+    }
+  }
+  const cleaned = cleanForFirestore({
+    ...assignment,
+    id: cleanId,
+    ownerUid: verifiedOwnerUid,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  });
+  delete cleaned.ownerEmail;
+  await docRef.set(cleaned, { merge: true });
+  return cleaned;
+}
+async function listAuthoritativeSubmissions(ownerUid, assignmentId) {
+  if (!ownerUid || typeof ownerUid !== "string") return [];
+  const db2 = getAuthoritativeFirestore();
+  const snap = await db2.collection("homework_submissions").where("ownerUid", "==", ownerUid.trim()).get();
+  const all = snap.docs.map((d) => d.data());
+  if (assignmentId) {
+    const cleanAssignmentId = String(assignmentId).trim();
+    return all.filter((s) => s.assignmentId === cleanAssignmentId);
+  }
+  return all;
+}
+async function saveAuthoritativeSubmission(submission, parentAssignment) {
+  if (!submission || !submission.id) {
+    throw new Error("Submission must contain a valid id");
+  }
+  if (!parentAssignment || !parentAssignment.id) {
+    const err = new Error("Parent assignment not found");
+    err.status = 404;
+    throw err;
+  }
+  const assignmentOwnerUid = String(parentAssignment.ownerUid || "").trim();
+  const subId = String(submission.id).trim();
+  const db2 = getAuthoritativeFirestore();
+  const docRef = db2.collection("homework_submissions").doc(subId);
+  const cleaned = cleanForFirestore({
+    ...submission,
+    id: subId,
+    assignmentId: String(parentAssignment.id).trim(),
+    ...assignmentOwnerUid ? { ownerUid: assignmentOwnerUid } : {},
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  });
+  delete cleaned.assignmentFallback;
+  delete cleaned.ownerEmail;
+  let isIdempotentRetry = false;
+  await db2.runTransaction(async (t) => {
+    const existingSnap = await t.get(docRef);
+    if (existingSnap.exists) {
+      const existing = existingSnap.data();
+      const existingOwner = String(existing.ownerUid || "").trim();
+      if (existingOwner && assignmentOwnerUid && existingOwner !== assignmentOwnerUid) {
+        const err = new Error("Forbidden: Cannot overwrite submission belonging to another teacher account");
+        err.status = 403;
+        throw err;
+      }
+      const existingName = String(existing.studentName || "").trim().toLowerCase();
+      const incomingName = String(cleaned.studentName || "").trim().toLowerCase();
+      if (existingName && incomingName && existingName !== incomingName) {
+        const err = new Error("Forbidden: Cannot change studentName on an existing submission");
+        err.status = 403;
+        throw err;
+      }
+      if (existing.attemptSecret && String(cleaned.attemptSecret || "").trim() !== String(existing.attemptSecret).trim()) {
+        const err = new Error("Forbidden: Invalid attemptSecret for existing submission");
+        err.status = 403;
+        throw err;
+      }
+      const existingCompleted = existing.status === "completed" || !existing.status && Boolean(existing.completedAt);
+      if (existingCompleted) {
+        const isIdentical = existing.score === cleaned.score && existing.accuracyPercent === cleaned.accuracyPercent && existing.scorePercentage === cleaned.scorePercentage && existing.studentName === cleaned.studentName;
+        if (isIdentical) {
+          isIdempotentRetry = true;
+          return;
+        }
+        const err = new Error("Conflict: Completed submission is locked and cannot be overwritten");
+        err.status = 409;
+        throw err;
+      }
+    }
+    t.set(docRef, cleaned, { merge: true });
+  });
+  return { submission: cleaned, isIdempotentRetry };
+}
+
+// src/api/expressApp.ts
+var app2 = (0, import_express.default)();
+app2.use(import_express.default.json({ limit: "50mb" }));
+app2.use(import_express.default.urlencoded({ limit: "50mb", extended: true }));
+async function getServerAssignment(id) {
+  return await getAuthoritativeAssignment(id);
+}
+async function listServerAssignments(ownerUid) {
+  return await listAuthoritativeAssignments(ownerUid);
+}
+async function saveServerAssignment(normalized, verifiedUid) {
+  return await saveAuthoritativeAssignment(normalized, verifiedUid);
+}
+async function listServerSubmissions(ownerUid, assignmentId) {
+  return await listAuthoritativeSubmissions(ownerUid, assignmentId);
+}
+async function saveServerSubmission(sub, targetHw) {
+  const { submission: saved } = await saveAuthoritativeSubmission(sub, targetHw);
+  return saved;
+}
 var serverGoldCache = null;
 var SERVER_GOLD_CACHE_TTL = 3 * 60 * 1e3;
-app.all("/api/health", (req, res) => {
+app2.all("/api/health", (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   res.status(200).json({ status: "ok" });
 });
-app.get("/api/gold-price", async (req, res) => {
+app2.get("/api/gold-price", async (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   const now = Date.now();
   if (serverGoldCache && now - serverGoldCache.timestamp < SERVER_GOLD_CACHE_TTL) {
@@ -103,15 +602,17 @@ app.get("/api/gold-price", async (req, res) => {
         success: true,
         status: "live",
         ozUsd: Math.round(ozUsd * 100) / 100,
-        usdToEgp: Math.round(usdToEgp * 100) / 100
+        usdToEgp: Math.round(usdToEgp * 100) / 100,
+        lastSuccessfulUpdateMs: now
       };
       serverGoldCache = { data: result, timestamp: now };
       return res.json(result);
     }
     if (serverGoldCache) {
+      const isFresh = now - serverGoldCache.timestamp < SERVER_GOLD_CACHE_TTL;
       return res.json({
         ...serverGoldCache.data,
-        status: "cached"
+        status: isFresh ? "cached" : "stale"
       });
     }
     const fallbackResult = {
@@ -120,14 +621,16 @@ app.get("/api/gold-price", async (req, res) => {
       source: "\u0645\u062A\u0648\u0633\u0637 \u0633\u0648\u0642 \u0627\u0644\u0630\u0647\u0628 \u0627\u0644\u0645\u0635\u0631\u064A (\u062A\u0642\u062F\u064A\u0631\u064A)",
       fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
       success: true,
-      status: "cached"
+      status: "estimated"
     };
-    serverGoldCache = { data: fallbackResult, timestamp: now };
     return res.json(fallbackResult);
   } catch (err) {
     console.error("Gold price route error:", err);
     if (serverGoldCache) {
-      return res.json(serverGoldCache.data);
+      return res.json({
+        ...serverGoldCache.data,
+        status: "stale"
+      });
     }
     return res.status(500).json({
       pricePerGram24K: 0,
@@ -135,11 +638,12 @@ app.get("/api/gold-price", async (req, res) => {
       source: "Error",
       fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
       success: false,
+      status: "unavailable",
       error: err.message || "Failed to fetch gold price"
     });
   }
 });
-app.get("/api/hod/dashboard/timetable", (req, res) => {
+app2.get("/api/hod/dashboard/timetable", (req, res) => {
   res.json({
     dayKey: (/* @__PURE__ */ new Date()).getDay().toString(),
     periodsCount: 8,
@@ -151,16 +655,23 @@ app.get("/api/hod/dashboard/timetable", (req, res) => {
     lastUpdated: (/* @__PURE__ */ new Date()).toISOString()
   });
 });
-app.post("/api/hod/dashboard/action", (req, res) => {
+app2.post("/api/hod/dashboard/action", (req, res) => {
   const { actionType, payload } = req.body;
   res.json({ success: true, actionType, id: Date.now().toString(), payload, timestamp: Date.now() });
 });
-app.get("/api/tts", async (req, res) => {
+app2.get("/api/tts", async (req, res) => {
   try {
     const text = (req.query.text || "").trim();
     const lang = (req.query.lang || "de").trim();
     if (!text) {
       return res.status(400).json({ error: "Missing text parameter" });
+    }
+    if (text.length > 500) {
+      return res.status(400).json({ error: "Text parameter exceeds maximum length of 500 characters" });
+    }
+    const allowedLangs = /* @__PURE__ */ new Set(["de", "ar", "en", "de-DE", "ar-SA", "en-US"]);
+    if (!allowedLangs.has(lang)) {
+      return res.status(400).json({ error: "Unsupported language code" });
     }
     const encoded = encodeURIComponent(text);
     const ttsUrl = `https://translate.googleapis.com/translate_tts?client=gtx&sl=${lang}&tl=${lang}&dt=t&q=${encoded}`;
@@ -227,19 +738,129 @@ function normalizeServerAssignment(hw) {
     assignedStudents: Array.from(byId.values())
   };
 }
+function isServerAssignmentOpen(hw) {
+  if (!hw || !hw.id) return false;
+  if (hw.deleted === true) return false;
+  if (hw.isActive === false) return false;
+  if (hw.status === "closed") return false;
+  return true;
+}
+function sanitizePublicSetSnapshot(rawSnapshot) {
+  if (!rawSnapshot || typeof rawSnapshot !== "object") return null;
+  const rawItems = Array.isArray(rawSnapshot.items) ? rawSnapshot.items : [];
+  const sanitizedItems = rawItems.map((item) => {
+    if (!item || typeof item !== "object") return {};
+    const cleanItem = {
+      id: String(item.id || ""),
+      german: String(item.german || ""),
+      arabic: String(item.arabic || "")
+    };
+    if (item.article) cleanItem.article = item.article;
+    if (item.english) cleanItem.english = String(item.english);
+    if (item.plural) cleanItem.plural = String(item.plural);
+    if (item.exampleSentenceGerman) cleanItem.exampleSentenceGerman = String(item.exampleSentenceGerman);
+    if (item.exampleSentenceArabic) cleanItem.exampleSentenceArabic = String(item.exampleSentenceArabic);
+    if (item.imageUrl) cleanItem.imageUrl = String(item.imageUrl);
+    if (item.emoji) cleanItem.emoji = String(item.emoji);
+    if (item.missingLetterWord) cleanItem.missingLetterWord = String(item.missingLetterWord);
+    if (Array.isArray(item.sentence4Elements)) {
+      cleanItem.sentence4Elements = item.sentence4Elements.slice(0, 4).map(String);
+    }
+    if (item.wordType) cleanItem.wordType = item.wordType;
+    if (item.conjugation && typeof item.conjugation === "object") {
+      cleanItem.conjugation = item.conjugation;
+    }
+    if (item.category) cleanItem.category = String(item.category);
+    if (Array.isArray(item.syllables)) {
+      cleanItem.syllables = item.syllables.map(String);
+    }
+    return cleanItem;
+  });
+  const rawExercises = Array.isArray(rawSnapshot.customExercises) ? rawSnapshot.customExercises : [];
+  const sanitizedExercises = rawExercises.map((ex) => {
+    if (!ex || typeof ex !== "object") return {};
+    const cleanEx = {
+      id: String(ex.id || ""),
+      type: ex.type || "multiple_choice",
+      question: String(ex.question || ex.prompt || "")
+    };
+    if (Array.isArray(ex.options)) {
+      cleanEx.options = ex.options.map(String);
+    }
+    if (ex.itemRefId) {
+      cleanEx.itemRefId = String(ex.itemRefId);
+    }
+    return cleanEx;
+  });
+  const sanitizedSnapshot = {
+    id: String(rawSnapshot.id || ""),
+    title: String(rawSnapshot.title || ""),
+    level: rawSnapshot.level || "A1",
+    topic: String(rawSnapshot.topic || rawSnapshot.category || ""),
+    difficulty: rawSnapshot.difficulty || "medium",
+    items: sanitizedItems
+  };
+  if (rawSnapshot.category) sanitizedSnapshot.category = String(rawSnapshot.category);
+  if (rawSnapshot.hasArticles !== void 0) sanitizedSnapshot.hasArticles = Boolean(rawSnapshot.hasArticles);
+  if (rawSnapshot.sentenceBuilderSupported !== void 0) {
+    sanitizedSnapshot.sentenceBuilderSupported = Boolean(rawSnapshot.sentenceBuilderSupported);
+  }
+  if (sanitizedExercises.length > 0) {
+    sanitizedSnapshot.customExercises = sanitizedExercises;
+  }
+  return sanitizedSnapshot;
+}
+function toPublicAssignmentDto(hw) {
+  if (!hw || typeof hw !== "object") return hw;
+  const normalized = normalizeServerAssignment(hw);
+  const mode = resolveServerAudienceMode(normalized);
+  const publicDto = {
+    id: String(normalized.id || ""),
+    title: String(normalized.title || ""),
+    createdAt: String(normalized.createdAt || ""),
+    isActive: Boolean(normalized.isActive),
+    audienceMode: mode,
+    allowedGameModes: Array.isArray(normalized.allowedGameModes) ? normalized.allowedGameModes : ["classic_quiz"],
+    questionCount: typeof normalized.questionCount === "number" ? normalized.questionCount : void 0,
+    maxAttempts: typeof normalized.maxAttempts === "number" ? normalized.maxAttempts : void 0,
+    allowReplay: typeof normalized.allowReplay === "boolean" ? normalized.allowReplay : true,
+    setSnapshot: sanitizePublicSetSnapshot(normalized.setSnapshot),
+    ...normalized.status ? { status: String(normalized.status) } : {}
+  };
+  if (mode === "group") {
+    publicDto.groupId = String(normalized.groupId || "");
+    publicDto.groupName = String(normalized.groupName || "");
+    if (Array.isArray(normalized.assignedStudents)) {
+      publicDto.assignedStudents = normalized.assignedStudents.map((st) => ({
+        id: String(st.id || ""),
+        name: String(st.name || ""),
+        groupId: String(st.groupId || normalized.groupId || "")
+      }));
+    } else {
+      publicDto.assignedStudents = [];
+    }
+  }
+  return publicDto;
+}
+function sanitizePublicAssignmentInfo(hw) {
+  return toPublicAssignmentDto(hw);
+}
 function validateServerSubmission(hw, body) {
   const cleanSubmittedName = String(body?.studentName || "").trim();
-  if (!hw) {
-    if (!cleanSubmittedName) {
-      return { valid: false, status: 400, error: "Missing studentName", audienceMode: "open" };
-    }
+  if (!hw || !hw.id) {
     return {
-      valid: true,
-      audienceMode: body?.audienceMode === "group" ? "group" : "open",
-      normalizedStudentId: body?.studentId ? String(body.studentId).trim() : void 0,
-      normalizedParticipantId: body?.participantId ? String(body.participantId).trim() : void 0,
-      normalizedStudentName: cleanSubmittedName,
-      normalizedGroupId: body?.groupId ? String(body.groupId).trim() : void 0
+      valid: false,
+      status: 404,
+      error: "Assignment not found",
+      audienceMode: "open"
+    };
+  }
+  if (!isServerAssignmentOpen(hw)) {
+    return {
+      valid: false,
+      status: 403,
+      error: "Assignment is closed or inactive and no longer accepts submissions",
+      audienceMode: resolveServerAudienceMode(hw)
     };
   }
   const normalizedHw = normalizeServerAssignment(hw);
@@ -324,12 +945,45 @@ function validateServerSubmission(hw, body) {
     normalizedGroupId: void 0
   };
 }
-app.all("/api/teacher/assignments", (req, res) => {
+app2.all("/api/teacher/assignments", async (req, res) => {
+  const authHeader = String(req.headers.authorization || "");
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+  if (!bearerToken) {
+    return res.status(401).json({
+      error: "Unauthorized: Firebase Bearer token is required to access teacher assignments",
+      assignments: []
+    });
+  }
+  const verification = await verifyFirebaseIdToken(bearerToken);
+  if (!verification.isValid || !verification.payload) {
+    return res.status(401).json({
+      error: `Unauthorized: ${verification.error || "Invalid Firebase ID token"}`,
+      assignments: []
+    });
+  }
+  const verifiedUid = verification.payload.sub;
   if (req.method === "GET") {
-    return res.json({ assignments: localAssignmentsStore.map(normalizeServerAssignment) });
+    const requestedOwnerUid = String(req.query.ownerUid || req.headers["x-owner-uid"] || "").trim();
+    if (requestedOwnerUid && requestedOwnerUid !== verifiedUid) {
+      return res.status(403).json({
+        error: "Forbidden: ownerUid does not match authenticated Firebase token",
+        assignments: []
+      });
+    }
+    const ownerUid = verifiedUid;
+    const filtered = await listServerAssignments(ownerUid);
+    return res.json({ assignments: filtered.map(normalizeServerAssignment) });
   }
   if (req.method === "POST") {
     const body = req.body || {};
+    const bodyOwnerUid = String(body.ownerUid || req.headers["x-owner-uid"] || "").trim();
+    if (bodyOwnerUid && bodyOwnerUid !== verifiedUid) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: Assignment ownerUid does not match authenticated Firebase token"
+      });
+    }
+    const effectiveOwnerUid = verifiedUid;
     if (body.audienceMode === "group") {
       const gid = String(body.groupId || "").trim();
       if (!gid || gid === "all") {
@@ -339,31 +993,88 @@ app.all("/api/teacher/assignments", (req, res) => {
         });
       }
     }
-    const normalized = normalizeServerAssignment(body);
+    const normalized = normalizeServerAssignment({
+      ...body,
+      ownerUid: effectiveOwnerUid
+    });
+    delete normalized.ownerEmail;
     if (normalized.id) {
-      const idx = localAssignmentsStore.findIndex((a) => a.id === normalized.id);
-      if (idx >= 0) {
-        localAssignmentsStore[idx] = normalizeServerAssignment({
-          ...localAssignmentsStore[idx],
-          ...normalized
+      try {
+        const saved = await saveServerAssignment(normalized, effectiveOwnerUid);
+        return res.json({ success: true, assignment: saved });
+      } catch (err) {
+        return res.status(err?.status || 500).json({
+          success: false,
+          error: err?.message || "Failed to persist assignment to database"
         });
-      } else {
-        localAssignmentsStore.unshift(normalized);
       }
     }
     return res.json({ success: true, assignment: normalized });
   }
   return res.json({ success: true });
 });
-app.all("/api/homework/submissions", (req, res) => {
+app2.all("/api/homework/submissions", async (req, res) => {
   if (req.method === "GET") {
-    const assignmentId = req.query.assignmentId ? String(req.query.assignmentId) : null;
-    const list = assignmentId ? localSubmissionsStore.filter((s) => s.assignmentId === assignmentId) : localSubmissionsStore;
+    const authHeader = String(req.headers.authorization || "");
+    const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+    if (!bearerToken) {
+      return res.status(401).json({
+        error: "Unauthorized: Firebase Bearer token is required to list submissions",
+        submissions: []
+      });
+    }
+    const verification = await verifyFirebaseIdToken(bearerToken);
+    if (!verification.isValid || !verification.payload) {
+      return res.status(401).json({
+        error: `Unauthorized: ${verification.error || "Invalid Firebase ID token"}`,
+        submissions: []
+      });
+    }
+    const verifiedUid = verification.payload.sub;
+    const assignmentId = req.query.assignmentId ? String(req.query.assignmentId).trim() : null;
+    const requestedOwnerUid = String(req.query.ownerUid || req.headers["x-owner-uid"] || "").trim();
+    if (requestedOwnerUid && requestedOwnerUid !== verifiedUid) {
+      return res.status(403).json({
+        error: "Forbidden: ownerUid does not match authenticated Firebase token",
+        submissions: []
+      });
+    }
+    const ownerUid = verifiedUid;
+    if (assignmentId) {
+      const targetHw = await getServerAssignment(assignmentId);
+      if (targetHw && targetHw.ownerUid && String(targetHw.ownerUid).trim() !== ownerUid) {
+        return res.status(403).json({
+          error: "Forbidden: Assignment belongs to another teacher account",
+          submissions: []
+        });
+      }
+    }
+    const list = await listServerSubmissions(ownerUid, assignmentId);
     return res.json({ submissions: list });
   }
   if (req.method === "POST") {
     const body = req.body || {};
-    const targetHw = localAssignmentsStore.find((a) => a.id === body.assignmentId) || body.assignmentFallback || null;
+    const targetHw = await getServerAssignment(body.assignmentId);
+    if (!targetHw) {
+      return res.status(404).json({
+        success: false,
+        error: "Assignment not found"
+      });
+    }
+    if (!isServerAssignmentOpen(targetHw)) {
+      return res.status(403).json({
+        success: false,
+        error: "Assignment is closed or inactive and no longer accepts submissions"
+      });
+    }
+    const hwOwnerUid = String(targetHw?.ownerUid || "").trim();
+    const bodyOwnerUid = String(body?.ownerUid || "").trim();
+    if (hwOwnerUid && bodyOwnerUid && hwOwnerUid !== bodyOwnerUid) {
+      return res.status(403).json({
+        success: false,
+        error: "Submission ownerUid does not match assignment ownerUid"
+      });
+    }
     const check = validateServerSubmission(targetHw, body);
     if (!check.valid) {
       return res.status(check.status || 403).json({
@@ -371,37 +1082,83 @@ app.all("/api/homework/submissions", (req, res) => {
         error: check.error || "Submission validation failed"
       });
     }
+    const resolvedOwnerUid = hwOwnerUid || bodyOwnerUid || void 0;
     const cleanSub = {
       ...body,
+      ...resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {},
       audienceMode: check.audienceMode,
       studentId: check.normalizedStudentId,
       participantId: check.normalizedParticipantId,
       groupId: check.normalizedGroupId,
       studentName: check.normalizedStudentName
     };
+    delete cleanSub.assignmentFallback;
     if (cleanSub.id) {
-      const idx = localSubmissionsStore.findIndex((s) => s.id === cleanSub.id);
-      if (idx >= 0) {
-        localSubmissionsStore[idx] = { ...localSubmissionsStore[idx], ...cleanSub };
-      } else {
-        localSubmissionsStore.unshift(cleanSub);
+      try {
+        const saved = await saveServerSubmission(cleanSub, targetHw);
+        return res.json({ success: true, submission: saved });
+      } catch (err) {
+        return res.status(err?.status || 500).json({
+          success: false,
+          error: err?.message || "Failed to persist submission to database"
+        });
       }
     }
     return res.json({ success: true, submission: cleanSub });
   }
   return res.json({ success: true });
 });
-app.get("/api/homework/info", (req, res) => {
+app2.get("/api/homework/info", async (req, res) => {
   const id = String(req.query.id || "").trim();
-  const found = localAssignmentsStore.find((a) => a.id === id);
+  const token = req.query.token !== void 0 && req.query.token !== null ? String(req.query.token).trim() : "";
+  const found = await getServerAssignment(id);
   if (!found) {
-    return res.status(404).json({ error: "Assignment not found in local relay" });
+    return res.status(404).json({ error: "Assignment not found" });
   }
-  return res.json(normalizeServerAssignment(found));
+  if (!isServerAssignmentOpen(found)) {
+    return res.status(403).json({ error: "Assignment is closed or inactive" });
+  }
+  const configuredShareToken = found.shareToken !== void 0 && found.shareToken !== null ? String(found.shareToken).trim() : "";
+  if (configuredShareToken) {
+    if (!token || token !== configuredShareToken) {
+      return res.status(403).json({ error: "Forbidden: Valid share token is required to access this assignment" });
+    }
+  }
+  return res.json(sanitizePublicAssignmentInfo(found));
 });
-app.post("/api/homework/submit", (req, res) => {
+app2.post("/api/homework/submit", async (req, res) => {
   const body = req.body || {};
-  const targetHw = localAssignmentsStore.find((a) => a.id === body.assignmentId) || body.assignmentFallback || null;
+  const targetHw = await getServerAssignment(body.assignmentId);
+  if (!targetHw) {
+    return res.status(404).json({
+      success: false,
+      error: "Assignment not found"
+    });
+  }
+  if (!isServerAssignmentOpen(targetHw)) {
+    return res.status(403).json({
+      success: false,
+      error: "Assignment is closed or inactive and no longer accepts submissions"
+    });
+  }
+  const configuredShareToken = targetHw.shareToken !== void 0 && targetHw.shareToken !== null ? String(targetHw.shareToken).trim() : "";
+  if (configuredShareToken) {
+    const providedToken = String(body.token || body.shareToken || req.query.token || "").trim();
+    if (providedToken && providedToken !== configuredShareToken) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: Invalid share token provided for assignment submission"
+      });
+    }
+  }
+  const hwOwnerUid = String(targetHw?.ownerUid || "").trim();
+  const bodyOwnerUid = String(body?.ownerUid || "").trim();
+  if (hwOwnerUid && bodyOwnerUid && hwOwnerUid !== bodyOwnerUid) {
+    return res.status(403).json({
+      success: false,
+      error: "Submission ownerUid does not match assignment ownerUid"
+    });
+  }
   const check = validateServerSubmission(targetHw, body);
   if (!check.valid) {
     return res.status(check.status || 403).json({
@@ -410,15 +1167,66 @@ app.post("/api/homework/submit", (req, res) => {
     });
   }
   const responses = Array.isArray(body.responses) ? body.responses : [];
-  const correctCount = responses.filter((r) => r && r.isCorrect).length;
-  const totalQ = responses.length;
+  const setSnapshot = targetHw?.setSnapshot || {};
+  const verifiedResponses = responses.map((r) => {
+    if (!r || typeof r !== "object") return r;
+    const targetQId = r.exerciseId || r.questionId || r.itemId || r.id;
+    const serverExercises = Array.isArray(setSnapshot?.customExercises) ? setSnapshot.customExercises : [];
+    if (targetQId && serverExercises.length > 0) {
+      const match = serverExercises.find((ex) => String(ex.id) === String(targetQId));
+      if (match && match.correctAnswer !== void 0 && match.correctAnswer !== null) {
+        const studentAns = String(r.selectedAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? "").trim();
+        const expected = String(match.correctAnswer).trim();
+        const isActuallyCorrect = studentAns.toLowerCase() === expected.toLowerCase();
+        return {
+          ...r,
+          isCorrect: isActuallyCorrect
+        };
+      }
+    }
+    const serverItems = Array.isArray(setSnapshot?.items) ? setSnapshot.items : [];
+    if (targetQId && serverItems.length > 0) {
+      const itemMatch = serverItems.find((it) => String(it.id) === String(targetQId));
+      if (itemMatch) {
+        const studentAns = String(r.selectedAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? "").trim();
+        const type = String(r.type || r.mode || "").toLowerCase();
+        let expected;
+        if (type.includes("article") || type.includes("der_die_das") || r.expectedField === "article") {
+          expected = itemMatch.article;
+        } else if (type.includes("missing") || r.expectedField === "missingLetterWord") {
+          expected = itemMatch.missingLetterWord || itemMatch.german;
+        } else if (type.includes("sentence") || type.includes("order") || r.expectedField === "exampleSentenceGerman") {
+          expected = itemMatch.exampleSentenceGerman || (Array.isArray(itemMatch.sentence4Elements) ? itemMatch.sentence4Elements.join(" ") : itemMatch.german);
+        } else if (type.includes("arabic") || r.expectedField === "arabic") {
+          expected = itemMatch.arabic;
+        } else if (type.includes("german") || type.includes("vocab") || type.includes("translation") || r.expectedField === "german") {
+          expected = itemMatch.german;
+        } else {
+          expected = itemMatch.german || itemMatch.arabic;
+        }
+        if (expected !== void 0 && expected !== null) {
+          const isActuallyCorrect = studentAns.toLowerCase() === String(expected).trim().toLowerCase();
+          return {
+            ...r,
+            isCorrect: isActuallyCorrect
+          };
+        }
+      }
+    }
+    return r;
+  });
+  const correctCount = verifiedResponses.filter((r) => r && r.isCorrect).length;
+  const totalQ = verifiedResponses.length;
   const pct = totalQ > 0 ? Math.round(correctCount / totalQ * 100) : 0;
   const nowIso = (/* @__PURE__ */ new Date()).toISOString();
   const startMs = body.startedAt ? new Date(body.startedAt).getTime() : Date.now() - totalQ * 4e3;
   const timeSpentSeconds = Math.max(5, Math.round((Date.now() - startMs) / 1e3));
+  const resolvedOwnerUid = hwOwnerUid || bodyOwnerUid || void 0;
   const submission = {
     id: body.id || `sub_${body.assignmentId || "hw"}_${Date.now()}`,
     assignmentId: body.assignmentId,
+    ...resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {},
+    ...body.attemptSecret ? { attemptSecret: String(body.attemptSecret).trim() } : {},
     audienceMode: check.audienceMode,
     studentId: check.normalizedStudentId,
     participantId: check.normalizedParticipantId,
@@ -439,15 +1247,17 @@ app.post("/api/homework/submit", (req, res) => {
     goldEarned: body.goldEarned || 0,
     maxStreak: body.maxStreak || 0,
     completedStudyPhase: Boolean(body.completedStudyPhase),
-    responses
+    responses: verifiedResponses
   };
-  const idx = localSubmissionsStore.findIndex((s) => s.id === submission.id);
-  if (idx >= 0) {
-    localSubmissionsStore[idx] = { ...localSubmissionsStore[idx], ...submission };
-  } else {
-    localSubmissionsStore.unshift(submission);
+  try {
+    const saved = await saveServerSubmission(submission, targetHw);
+    return res.json({ success: true, submission: saved });
+  } catch (err) {
+    return res.status(err?.status || 500).json({
+      success: false,
+      error: err?.message || "Failed to persist submission to database"
+    });
   }
-  return res.json({ success: true, submission });
 });
 var workspaceChunksRelayStore = /* @__PURE__ */ new Map();
 var cachedGoogleCerts = null;
@@ -525,14 +1335,14 @@ async function verifyFirebaseIdToken(token, expectedProjectId = "glueck-c8621", 
   if (!header.kid || typeof header.kid !== "string" || header.kid.trim() === "") {
     return { isValid: false, payload: null, error: "Missing or empty kid in JWT header" };
   }
-  let cert;
+  let cert2;
   if (certsOverride) {
-    cert = certsOverride[header.kid];
+    cert2 = certsOverride[header.kid];
   } else {
     const certs = await getGooglePublicCerts(header.kid);
-    cert = certs[header.kid];
+    cert2 = certs[header.kid];
   }
-  if (!cert) {
+  if (!cert2) {
     return {
       isValid: false,
       payload: null,
@@ -542,7 +1352,7 @@ async function verifyFirebaseIdToken(token, expectedProjectId = "glueck-c8621", 
   try {
     const verifier = import_crypto.default.createVerify("RSA-SHA256");
     verifier.update(`${parts[0]}.${parts[1]}`);
-    const isSignatureValid = verifier.verify(cert, parts[2], "base64url");
+    const isSignatureValid = verifier.verify(cert2, parts[2], "base64url");
     if (!isSignatureValid) {
       return {
         isValid: false,
@@ -599,7 +1409,7 @@ async function verifyFirebaseIdToken(token, expectedProjectId = "glueck-c8621", 
   }
   return { isValid: true, payload };
 }
-app.all("/api/workspace/delta", async (req, res) => {
+app2.all("/api/workspace/delta", async (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
@@ -669,7 +1479,7 @@ app.all("/api/workspace/delta", async (req, res) => {
   }
   return res.json({ success: true });
 });
-app.post("/api/android/generate-keystore", async (req, res) => {
+app2.post("/api/android/generate-keystore", async (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   const { storePassword, keyAlias = "glueckrelease" } = req.body || {};
   const cleanAlias = String(keyAlias || "glueckrelease").trim() || "glueckrelease";
@@ -774,27 +1584,27 @@ app.post("/api/android/generate-keystore", async (req, res) => {
     }
   }
 });
-var expressApp_default = app;
+var expressApp_default = app2;
 
 // server.ts
 async function startServer() {
-  const app2 = (0, import_express2.default)();
+  const app3 = (0, import_express2.default)();
   const PORT = 3e3;
-  app2.use(expressApp_default);
+  app3.use(expressApp_default);
   if (process.env.NODE_ENV !== "production") {
     const vite = await (0, import_vite.createServer)({
       server: { middlewareMode: true },
       appType: "spa"
     });
-    app2.use(vite.middlewares);
+    app3.use(vite.middlewares);
   } else {
     const distPath = import_path.default.join(process.cwd(), "dist");
-    app2.use(import_express2.default.static(distPath));
-    app2.get("*", (req, res) => {
+    app3.use(import_express2.default.static(distPath));
+    app3.get("*", (req, res) => {
       res.sendFile(import_path.default.join(distPath, "index.html"));
     });
   }
-  app2.listen(PORT, "0.0.0.0", () => {
+  app3.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

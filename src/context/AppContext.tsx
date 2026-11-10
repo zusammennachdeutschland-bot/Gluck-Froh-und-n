@@ -111,6 +111,7 @@ interface AppContextType {
   setTheme: (t: 'light' | 'dark' | 'amoled' | 'tinted') => void;
   toggleTheme: () => void;
   language: AppLanguage;
+  isRtl: boolean;
   setLanguage: (lang: AppLanguage) => void;
   reportLanguage: AppLanguage;
   setReportLanguage: (lang: AppLanguage) => void;
@@ -7766,6 +7767,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setTheme,
         toggleTheme,
         language,
+        isRtl: language === 'ar',
         setLanguage,
         reportLanguage,
         setReportLanguage,

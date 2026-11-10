@@ -5,6 +5,7 @@ export type GradeLevel =
   | 'Grade 1' | 'Grade 2' | 'Grade 3' | 'Grade 4' 
   | 'Grade 5' | 'Grade 6' | 'Grade 7' | 'Grade 8' 
   | 'Grade 9' | 'Grade 10' | 'Grade 11' | 'Grade 12'
+  | 'Klasse 5'
   | 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 
 export type LessonType = 'online' | 'offline';
@@ -263,7 +264,7 @@ export type AppLanguage = 'ar' | 'en' | 'de';
 
 export type AccentColor = 'blue' | 'green' | 'purple' | 'orange' | 'red' | 'teal' | 'indigo' | 'rose' | 'amber' | 'emerald' | 'fuchsia' | 'cyan' | 'violet' | 'slate' | 'pink' | 'lime' | 'darkblue' | 'white' | (string & {});
 
-export type PaymentStatus = 'paid' | 'pending' | 'partial' | 'exempted';
+export type PaymentStatus = 'paid' | 'pending' | 'partial' | 'exempted' | 'not_paid' | 'due';
 
 export type AttendanceStatus = 'present' | 'absent' | 'late';
 
@@ -272,10 +273,12 @@ export type HomeworkStatus = 'assigned' | 'completed' | 'not_completed';
 export interface TeacherProfile {
   id: string;
   displayName: string;
+  name?: string; // Compatibility alias for displayName
   displayNameEn?: string; // English / German name for Certificates & Diplomas (e.g. "Herr Omar Hassan")
   displayNameAr?: string; // Arabic name for Reports, WhatsApp & Parent summaries (e.g. "أ. عمر حسن")
   nameEn?: string; // Compatibility alias
   nameAr?: string; // Compatibility alias
+  defaultLocation?: string;
   email: string;
   avatarUrl: string;
   currency: string;
@@ -405,6 +408,10 @@ export interface VisitRecord extends SyncableRecord {
   overallCategory?: string;
   
   consolidatedNotes?: string;
+  date?: string;
+  class?: string;
+  focusAreas?: string;
+  notes?: string;
   weeklyReportSent?: boolean;
   weeklyReportDate?: string;
   isDownloaded?: boolean;
@@ -626,6 +633,7 @@ export interface SchoolSettings {
   staffAttendanceRecords?: StaffAttendanceRecord[];
   customTimedSessions?: CustomTimedSession[];
   termVisitPlannerSettings?: TermVisitPlannerSettings;
+  germanStudents?: HodGermanStudent[];
 }
 
 export interface WeeklyPlanLog {
@@ -641,6 +649,7 @@ export interface StudentActionPlan extends SyncableRecord {
   studentNameAr: string;
   studentNameEn: string;
   gradeClass: string;
+  className?: string;
   teacherId: string;
   teacherName: string;
   weaknessAreas: string[]; // Arabic selections
@@ -661,6 +670,7 @@ export interface Complaint extends SyncableRecord {
   studentNameAr: string;
   studentNameEn: string;
   gradeClass: string;
+  className?: string;
   reason: string;
   actionTaken: string;
   notes?: string;
@@ -688,6 +698,8 @@ export interface Teacher {
   isActive: boolean;
   isHod?: boolean;
   stage?: string;
+  classes?: string[];
+  assignedClasses?: string[];
 }
 
 export type DayWorkingHours = {
@@ -738,6 +750,11 @@ export interface Group extends SyncableRecord {
   coordinates?: { lat: number; lng: number };
   color: string;
   lessonDurationMinutes?: number; // Default 60 mins
+  duration?: number;
+  mode?: LessonType;
+  schedule?: string;
+  students?: string[];
+  level?: string;
   status?: 'active' | 'archived';
   whatsAppGroupLink?: string;
 }
@@ -756,6 +773,11 @@ export type PaymentPlanType = 'per_lesson' | '4_lessons' | '8_lessons' | '12_les
 
 export interface Student extends SyncableRecord {
   name: string;
+  nameEn?: string;
+  nameAr?: string;
+  displayNameEn?: string;
+  displayNameAr?: string;
+  schoolGrade?: string;
   certificateName?: string; // Transliterated/custom name used on certificates (e.g. "Rital Tarek" for "ريتال طارق")
   gender?: 'male' | 'female';
   groupId: string;
@@ -863,6 +885,7 @@ export interface LessonReport {
   recordingLink2?: string;
   savedAt?: string;
   scores?: any;
+  studentScores?: Record<string, any>;
 }
 
 export interface DeletedItem<T> {
@@ -936,6 +959,12 @@ export interface Lesson extends SyncableRecord {
   quickParentPhone?: string;
   quickNotes?: string;
   homeworkFollowUpSentAt?: string; // ISO string when follow-up was sent
+  homeworkTitle?: string;
+  homeworkDescription?: string;
+  dayOfWeek?: string;
+  attendance?: Record<string, any>;
+  whatWasTaught?: string;
+  topic?: string;
 }
 
 export type SyncStatus = 'synced' | 'pending' | 'error';
@@ -1117,6 +1146,7 @@ export interface FinanceRecurring extends SyncableRecord {
   endDate?: string;
   nextDueDate?: string;
   notificationsEnabled?: boolean;
+  autoGenerateTransaction?: boolean;
   isActive?: boolean;
   lastPaidDate?: string;
   createdAt: string;
@@ -1129,6 +1159,7 @@ export interface FinanceInstallment extends SyncableRecord {
   originalAmount: number;
   downPayment: number;
   installmentAmount: number;
+  monthlyAmount?: number;
   totalInstallments: number;
   paidInstallments: number;
   remainingAmount: number;
@@ -1175,6 +1206,7 @@ export interface PaymentRecord extends SyncableRecord {
   bundleSize?: number; // e.g. 1, 4, 8, 12
   amountDue: number;
   amountPaid: number;
+  amount?: number;
   discountAmount?: number;
   advanceAmount?: number;
   refundAmount?: number;
@@ -1327,10 +1359,14 @@ export interface CertificateRecord extends SyncableRecord {
   teacherName?: string;
   instructorName?: string;
   courseOrLevelTitle?: string;
+  courseName?: string;
+  level?: string;
   centerOrSchoolName?: string;
   score?: string; // Optional score or note (e.g., "100%", "Sehr Gut", "98/100")
   gradeOrScore?: string;
   customBadgeText?: string; // Optional custom badge text
+  badgeText?: string;
+  signatureUrl?: string;
   customBackgroundId?: string;
   customBackgroundUrl?: string;
   customBackgroundTextColor?: 'dark' | 'light' | 'gold_on_dark';
@@ -1342,6 +1378,10 @@ export interface HodGermanStudent extends SyncableRecord {
   nameAr: string;
   nameEn: string;
   gradeClass: string;
+  className?: string;
+  grade?: string;
+  status?: string;
+  gpa?: number;
   gender: 'Boy' | 'Girl';
   secondLanguage: 'German';
   busLine: string;

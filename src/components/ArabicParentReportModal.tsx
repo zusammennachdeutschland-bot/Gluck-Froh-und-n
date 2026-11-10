@@ -385,7 +385,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
     // If direct link field is empty, detect video recording links from custom edited message
     if (!finalR1 && textToCheck) {
-      const urls = textToCheck.match(/https?:\/\/[^\s\n\r"']+/g) || [];
+      const urls: string[] = textToCheck.match(/https?:\/\/[^\s\n\r"']+/g) || [];
       const match = urls.find(u => 
         u.includes('grain.co') || u.includes('grain.com') || u.includes('zoom.us') || 
         u.includes('drive.google') || u.includes('youtube.com') || u.includes('youtu.be') || 

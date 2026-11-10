@@ -72,7 +72,7 @@ export const LessonControlModal: React.FC = () => {
   const [lessonRecordingLink, setLessonRecordingLink] = useState('');
   const [lessonRecordingLink2, setLessonRecordingLink2] = useState('');
   const [showRecordingLink2, setShowRecordingLink2] = useState(false);
-  const [studentHomeworkDone, setStudentHomeworkDone] = useState<Record<string, 'yes' | 'no'>>({});
+  const [studentHomeworkDone, setStudentHomeworkDone] = useState<Record<string, 'yes' | 'no' | 'none'>>({});
   const [studentDictationGrade, setStudentDictationGrade] = useState<Record<string, number>>({});
   const [studentExamGrade, setStudentExamGrade] = useState<Record<string, number>>({});
   const [studentNotes, setStudentNotes] = useState<Record<string, string>>({});
@@ -638,7 +638,6 @@ export const LessonControlModal: React.FC = () => {
 
   const isGroupLesson = Boolean(
     targetGroup && (
-      (targetGroup.type && targetGroup.type === 'group') ||
       students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id).length > 1 ||
       activeLessonStudents.length > 1 ||
       !selectedLesson.studentId

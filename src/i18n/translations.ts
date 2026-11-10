@@ -867,7 +867,14 @@ export type TranslationKey =
   | 'student_doc_homework'
   | 'student_doc_exam'
   | 'student_doc_general'
-  | 'student_notizen';
+  | 'student_notizen'
+  | 'notifications'
+  | 'recently_deleted'
+  | 'auto_end_session'
+  | 'start_lesson_now'
+  | 'add_quick_lesson'
+  | 'upcoming_lesson_alert'
+  | 'search_placeholder';
 
 export const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
   ar: {
@@ -1738,7 +1745,15 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     student_doc_homework: "ملف واجب",
     student_doc_exam: "ملف اختبار",
     student_doc_general: "مستند طالب",
-    student_notizen: "ملاحظات",},
+    student_notizen: "ملاحظات",
+    notifications: "الإشعارات",
+    recently_deleted: "المحذوفات مؤخراً",
+    auto_end_session: "إنهاء الجلسة",
+    start_lesson_now: "ابدأ الحصة الآن",
+    add_quick_lesson: "إضافة حصة سريعة",
+    upcoming_lesson_alert: "تنبيه بحصة قادمة",
+    search_placeholder: "بحث عن طالب، مجموعة، أو حصة...",
+  },
 
   en: {
     notifications_title: 'Notifications',
@@ -2608,7 +2623,15 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     student_doc_homework: "Homework File",
     student_doc_exam: "Exam File",
     student_doc_general: "Student Doc",
-    student_notizen: "NOTES",},
+    student_notizen: "NOTES",
+    notifications: "Notifications",
+    recently_deleted: "Recently Deleted",
+    auto_end_session: "End Session",
+    start_lesson_now: "Start Lesson Now",
+    add_quick_lesson: "Add Quick Lesson",
+    upcoming_lesson_alert: "Upcoming Lesson Alert",
+    search_placeholder: "Search students, groups, or lessons...",
+  },
 
   de: {
     notifications_title: 'Benachrichtigungen',
@@ -3478,5 +3501,13 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     student_doc_homework: "Hausaufgaben-Datei",
     student_doc_exam: "Prüfungsdatei",
     student_doc_general: "Schülerdokument",
-    student_notizen: "NOTIZEN",}
+    student_notizen: "NOTIZEN",
+    notifications: "Benachrichtigungen",
+    recently_deleted: "Kürzlich gelöscht",
+    auto_end_session: "Sitzung beenden",
+    start_lesson_now: "Stunde jetzt starten",
+    add_quick_lesson: "Schnellstunde hinzufügen",
+    upcoming_lesson_alert: "Hinweis auf nächste Stunde",
+    search_placeholder: "Schüler, Gruppen oder Stunden suchen...",
+  }
 };

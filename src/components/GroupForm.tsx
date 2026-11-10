@@ -313,7 +313,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
                 onChange={(e) => setDefaultFinanceAccountId(e.target.value)}
                 className="w-full px-3 py-1.5 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold"
               >
-                <option value="">{t('choose', 'Choose...', 'Wählen...')}</option>
+                <option value="">{_t('اختر...', 'Choose...', 'Wählen...')}</option>
                 {financeAccounts.filter(a => !a.deleted).map(acc => (
                   <option key={acc.id} value={acc.id}>{acc.name}</option>
                 ))}
@@ -331,7 +331,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
                 onChange={(e) => setDefaultFinanceAccountId(e.target.value)}
                 className="w-full px-3 py-1.5 bg-surface border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-semibold"
               >
-                <option value="">{t('choose', 'Choose...', 'Wählen...')}</option>
+                <option value="">{_t('اختر...', 'Choose...', 'Wählen...')}</option>
                 {financeAccounts.filter(a => !a.deleted).map(acc => (
                   <option key={acc.id} value={acc.id}>{acc.name}</option>
                 ))}

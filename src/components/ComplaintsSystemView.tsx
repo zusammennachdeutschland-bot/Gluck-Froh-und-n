@@ -6,7 +6,7 @@ import {
   Square, Sparkles, MessageSquare, AlertCircle, Layers
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { Complaint, HodGermanStudent, Teacher, VisitRecord } from '../types';
+import { Complaint, HodGermanStudent, SchoolSettings, Teacher, VisitRecord } from '../types';
 import { storage } from '../services/storageService';
 import { generateStageManagerReportPrint } from '../utils/printComplaintUtils';
 import { normalizeClassCode, compareClassCodes } from '../utils/classNormalizer';
@@ -109,7 +109,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
   onUpdateComplaintsCount,
 }) => {
   const { profile, updateProfile, language, _t } = useApp();
-  const schoolSettings = profile?.schoolSettings || {};
+  const schoolSettings: Partial<SchoolSettings> = profile?.schoolSettings || {};
 
   // Department Teachers list
   const teachersList: Teacher[] = useMemo(() => {
@@ -219,11 +219,11 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
     if (onUpdateComplaintsCount) onUpdateComplaintsCount(updated.length);
     try {
       await storage.setItem('hod_complaints', updated);
-      if (profile && updateProfile) {
+      if (profile && profile.schoolSettings && updateProfile) {
         updateProfile({
           ...profile,
           schoolSettings: {
-            ...schoolSettings,
+            ...profile.schoolSettings,
             complaints: updated,
           }
         });
@@ -387,7 +387,8 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
     e.preventDefault();
 
     const teacherObj = teachersList.find(t => t.id === formTeacherId) || { name: 'معلم غير محدد' };
-    const studentObj = germanStudents.find(s => s.id === formStudentId) || {
+    const studentObj: Partial<HodGermanStudent> & { nameAr: string; nameEn: string; gradeClass: string } = germanStudents.find(s => s.id === formStudentId) || {
+      id: '',
       nameAr: 'طالب غير محدد',
       nameEn: 'Unknown Student',
       gradeClass: formGradeClass || '5A'
@@ -552,10 +553,10 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
             ? { ...v, weeklyReportSent: true, weeklyReportDate: nowIso }
             : v
         );
-        if (profile) {
+        if (profile && profile.schoolSettings) {
           updateProfile({
             schoolSettings: {
-              ...schoolSettings,
+              ...profile.schoolSettings,
               visitRecords: updatedVisits
             }
           });
@@ -585,7 +586,7 @@ export const ComplaintsSystemView: React.FC<ComplaintsSystemViewProps> = ({
       hodName: schoolSettings.hodName || profile?.displayName || '',
       complaints: targetComplaintsToPrint,
       reportType: dispatchReportType,
-      settings: schoolSettings,
+      settings: schoolSettings as SchoolSettings,
       visits: selectedVisits,
       includeVisits: includeVisitsInReport,
     });

@@ -353,6 +353,7 @@ export interface StaffAttendanceMetrics {
 
   // Overall / Filtered Period Metrics
   totalAbsences: number;
+  totalUnexcusedAbsences: number;
   totalLateArrivals: number;
   totalEarlyLeaves: number;
   totalDelayMinutes: number;
@@ -432,6 +433,7 @@ export function calculateStaffAttendanceMetrics(
   });
 
   let totalAbsences = 0;
+  let totalUnexcusedAbsences = 0;
   let totalLateArrivals = 0;
   let totalEarlyLeaves = 0;
   let totalDelayMinutes = 0;
@@ -470,6 +472,7 @@ export function calculateStaffAttendanceMetrics(
       }
       if (r.absenceStatus === 'unexcused') {
         stat.unexcusedAbsences += 1;
+        totalUnexcusedAbsences += 1;
       } else {
         stat.excusedAbsences += 1;
       }
@@ -529,6 +532,7 @@ export function calculateStaffAttendanceMetrics(
     teachersWithViolationsCount: weekTeachersWithViolations,
     averageAttendanceRate,
     totalAbsences,
+    totalUnexcusedAbsences,
     totalLateArrivals,
     totalEarlyLeaves,
     totalDelayMinutes,

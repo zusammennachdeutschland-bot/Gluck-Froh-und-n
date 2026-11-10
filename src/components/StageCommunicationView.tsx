@@ -221,7 +221,7 @@ export const StageCommunicationView: React.FC = () => {
       }
 
       // If stage has no specific assigned grades, match all
-      if (currentManagerGrades.length === 0) return true;
+      if (currentManagerGrades.size === 0) return true;
 
       return matchesStage(visitGradeClass);
     });

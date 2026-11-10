@@ -178,12 +178,11 @@ export const HodStudentsView: React.FC = () => {
     setStudents(updated);
     try {
       await storage.setItem('hod_german_students', updated);
-      if (profile && updateProfile) {
-        const currentSettings = profile.schoolSettings || {};
+      if (profile && profile.schoolSettings && updateProfile) {
         updateProfile({
           ...profile,
           schoolSettings: {
-            ...currentSettings,
+            ...profile.schoolSettings,
             germanStudents: updated,
           },
         });

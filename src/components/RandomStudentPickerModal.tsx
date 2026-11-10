@@ -148,6 +148,12 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
       id: `manual_custom_${idx}_${name.trim()}`,
       name: name.trim(),
       groupId: 'manual_custom',
+      grade: 'A1',
+      parentName: '',
+      parentPhone: '',
+      studentPhone: '',
+      documents: [],
+      joinedDate: '',
       status: 'active' as const,
       avatarUrl: DEFAULT_OFFLINE_AVATAR
     }));

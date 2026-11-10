@@ -285,7 +285,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       time: data.dayTimes[day] || data.scheduleTime || '17:00'
     }));
 
-    const updatedGroupData = {
+    const updatedGroupData: Group = {
       ...group,
       name: data.name,
       grade: data.grade,
