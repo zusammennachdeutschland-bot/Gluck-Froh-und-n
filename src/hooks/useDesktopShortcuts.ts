@@ -33,7 +33,7 @@ export function useDesktopShortcuts() {
         // Global Search: Ctrl+K / Cmd+K
         if ((e.ctrlKey || e.metaKey) && keyLower === 'k') {
           e.preventDefault();
-          setIsGlobalSearchOpen(prev => !prev);
+          setIsGlobalSearchOpen(!isGlobalSearchOpen);
           return;
         }
 

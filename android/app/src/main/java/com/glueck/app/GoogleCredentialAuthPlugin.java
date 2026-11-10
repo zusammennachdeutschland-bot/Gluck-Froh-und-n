@@ -197,7 +197,7 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                 }
                 call.resolve(result);
                 return;
-            } catch (GoogleIdTokenParsingException parseEx) {
+            } catch (Exception parseEx) {
                 Log.e(TAG, "Failed to parse GoogleIdTokenCredential", parseEx);
                 call.reject("Received an invalid Google ID token credential.", "INVALID_ID_TOKEN");
                 return;

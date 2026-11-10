@@ -376,7 +376,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         ? activeSelectedGroupStudents.map((s) => ({
             id: s.id,
             name: s.name,
-            ...(s.code ? { code: s.code } : {}),
+            ...((s as any).code ? { code: (s as any).code } : {}),
             groupId: selectedGroupId
           }))
         : undefined;
@@ -470,7 +470,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           ? activeSelectedGroupStudents.map((s) => ({
               id: s.id,
               name: s.name,
-              ...(s.code ? { code: s.code } : {}),
+              ...((s as any).code ? { code: (s as any).code } : {}),
               groupId: selectedGroupId
             }))
           : undefined;

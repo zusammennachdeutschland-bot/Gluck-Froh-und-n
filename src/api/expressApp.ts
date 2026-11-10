@@ -130,15 +130,17 @@ app.get('/api/gold-price', async (req, res) => {
         status: 'live',
         ozUsd: Math.round(ozUsd * 100) / 100,
         usdToEgp: Math.round(usdToEgp * 100) / 100,
+        lastSuccessfulUpdateMs: now
       };
       serverGoldCache = { data: result, timestamp: now };
       return res.json(result);
     }
 
     if (serverGoldCache) {
+      const isFresh = now - serverGoldCache.timestamp < SERVER_GOLD_CACHE_TTL;
       return res.json({
         ...serverGoldCache.data,
-        status: 'cached',
+        status: isFresh ? 'cached' : 'stale',
       });
     }
 
@@ -148,14 +150,16 @@ app.get('/api/gold-price', async (req, res) => {
       source: 'متوسط سوق الذهب المصري (تقديري)',
       fetchedAt: new Date().toISOString(),
       success: true,
-      status: 'cached',
+      status: 'estimated',
     };
-    serverGoldCache = { data: fallbackResult, timestamp: now };
     return res.json(fallbackResult);
   } catch (err: any) {
     console.error('Gold price route error:', err);
     if (serverGoldCache) {
-      return res.json(serverGoldCache.data);
+      return res.json({
+        ...serverGoldCache.data,
+        status: 'stale'
+      });
     }
     return res.status(500).json({
       pricePerGram24K: 0,
@@ -163,6 +167,7 @@ app.get('/api/gold-price', async (req, res) => {
       source: 'Error',
       fetchedAt: new Date().toISOString(),
       success: false,
+      status: 'unavailable',
       error: err.message || 'Failed to fetch gold price',
     });
   }
@@ -194,6 +199,13 @@ app.get('/api/tts', async (req, res) => {
     const lang = ((req.query.lang as string) || 'de').trim();
     if (!text) {
       return res.status(400).json({ error: 'Missing text parameter' });
+    }
+    if (text.length > 500) {
+      return res.status(400).json({ error: 'Text parameter exceeds maximum length of 500 characters' });
+    }
+    const allowedLangs = new Set(['de', 'ar', 'en', 'de-DE', 'ar-SA', 'en-US']);
+    if (!allowedLangs.has(lang)) {
+      return res.status(400).json({ error: 'Unsupported language code' });
     }
     const encoded = encodeURIComponent(text);
     const ttsUrl = `https://translate.googleapis.com/translate_tts?client=gtx&sl=${lang}&tl=${lang}&dt=t&q=${encoded}`;
@@ -731,6 +743,20 @@ app.post('/api/homework/submit', async (req, res) => {
       error: 'Assignment is closed or inactive and no longer accepts submissions'
     });
   }
+
+  // Strict Share Token Enforcement:
+  const configuredShareToken =
+    targetHw.shareToken !== undefined && targetHw.shareToken !== null ? String(targetHw.shareToken).trim() : '';
+  if (configuredShareToken) {
+    const providedToken = String(body.token || body.shareToken || req.query.token || '').trim();
+    if (providedToken && providedToken !== configuredShareToken) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Invalid share token provided for assignment submission'
+      });
+    }
+  }
+
   const hwOwnerUid = String(targetHw?.ownerUid || '').trim();
   const bodyOwnerUid = String(body?.ownerUid || '').trim();
   if (hwOwnerUid && bodyOwnerUid && hwOwnerUid !== bodyOwnerUid) {
@@ -748,20 +774,19 @@ app.post('/api/homework/submit', async (req, res) => {
   }
 
   const responses = Array.isArray(body.responses) ? body.responses : [];
+  const setSnapshot = targetHw?.setSnapshot || {};
 
-  // Server-side authoritative grading check:
-  // If targetHw has customExercises with server-stored answer keys, grade responses authoritatively
-  const serverExercises = Array.isArray(targetHw?.setSnapshot?.customExercises)
-    ? targetHw.setSnapshot.customExercises
-    : [];
-
+  // Comprehensive Server-Side Authoritative Grading:
   const verifiedResponses = responses.map((r: any) => {
     if (!r || typeof r !== 'object') return r;
-    const targetQId = r.exerciseId || r.questionId || r.id;
+    const targetQId = r.exerciseId || r.questionId || r.itemId || r.id;
+    
+    // 1. Check customExercises
+    const serverExercises = Array.isArray(setSnapshot?.customExercises) ? setSnapshot.customExercises : [];
     if (targetQId && serverExercises.length > 0) {
-      const match = serverExercises.find((ex: any) => ex.id === targetQId);
-      if (match && match.correctAnswer) {
-        const studentAns = String(r.selectedAnswer ?? r.answer ?? r.submittedAnswer ?? '').trim();
+      const match = serverExercises.find((ex: any) => String(ex.id) === String(targetQId));
+      if (match && match.correctAnswer !== undefined && match.correctAnswer !== null) {
+        const studentAns = String(r.selectedAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? '').trim();
         const expected = String(match.correctAnswer).trim();
         const isActuallyCorrect = studentAns.toLowerCase() === expected.toLowerCase();
         return {
@@ -770,6 +795,40 @@ app.post('/api/homework/submit', async (req, res) => {
         };
       }
     }
+
+    // 2. Check setSnapshot items
+    const serverItems = Array.isArray(setSnapshot?.items) ? setSnapshot.items : [];
+    if (targetQId && serverItems.length > 0) {
+      const itemMatch = serverItems.find((it: any) => String(it.id) === String(targetQId));
+      if (itemMatch) {
+        const studentAns = String(r.selectedAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? '').trim();
+        const type = String(r.type || r.mode || '').toLowerCase();
+        let expected: string | undefined;
+
+        if (type.includes('article') || type.includes('der_die_das') || r.expectedField === 'article') {
+          expected = itemMatch.article;
+        } else if (type.includes('missing') || r.expectedField === 'missingLetterWord') {
+          expected = itemMatch.missingLetterWord || itemMatch.german;
+        } else if (type.includes('sentence') || type.includes('order') || r.expectedField === 'exampleSentenceGerman') {
+          expected = itemMatch.exampleSentenceGerman || (Array.isArray(itemMatch.sentence4Elements) ? itemMatch.sentence4Elements.join(' ') : itemMatch.german);
+        } else if (type.includes('arabic') || r.expectedField === 'arabic') {
+          expected = itemMatch.arabic;
+        } else if (type.includes('german') || type.includes('vocab') || type.includes('translation') || r.expectedField === 'german') {
+          expected = itemMatch.german;
+        } else {
+          expected = itemMatch.german || itemMatch.arabic;
+        }
+
+        if (expected !== undefined && expected !== null) {
+          const isActuallyCorrect = studentAns.toLowerCase() === String(expected).trim().toLowerCase();
+          return {
+            ...r,
+            isCorrect: isActuallyCorrect
+          };
+        }
+      }
+    }
+
     return r;
   });
 

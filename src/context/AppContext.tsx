@@ -124,6 +124,7 @@ interface AppContextType {
 
   // Lernstudio Sets
   lernstudioSets: LernstudioSet[];
+  setLernstudioSets: React.Dispatch<React.SetStateAction<LernstudioSet[]>>;
   saveLernstudioSet: (set: LernstudioSet) => void;
   deleteLernstudioSet: (setId: string) => void;
 
@@ -1308,7 +1309,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     updateFullPaymentsStorage(allP => {
       let paymentsChanged = false;
       const updatedP = allP.map(p => {
-        if (!p.deleted && (p.status === 'pending' || p.status === 'not_yet' || p.status === 'unpaid')) {
+        if (!p.deleted && ((p.status as string) === 'pending' || (p.status as string) === 'not_yet' || (p.status as string) === 'unpaid')) {
           const stId = p.studentId;
           const stPaidLessonIds = stId ? paidLessonIdsByStudent.get(stId) : undefined;
           const stPaidDateSignatures = stId ? paidDateSignaturesByStudent.get(stId) : undefined;
@@ -1499,14 +1500,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     // Keep profile.schoolSettings.visitRecords synchronized with hodVisits
     setProfile(prev => {
-      const existingSettings = prev?.schoolSettings || {};
+      const existingSettings = (prev?.schoolSettings as any) || {};
       const existingVisits = existingSettings.visitRecords || [];
       const map = new Map<string, VisitRecord>();
-      existingVisits.forEach(v => v?.id && map.set(v.id, v));
+      existingVisits.forEach((v: any) => v?.id && map.set(v.id, v));
       (hodVisits || []).forEach(v => v?.id && map.set(v.id, v));
       const merged = Array.from(map.values());
 
-      if (existingVisits.length === merged.length && merged.every((v, i) => v.id === existingVisits[i]?.id)) {
+      if (existingVisits.length === merged.length && merged.every((v: any, i: number) => v.id === existingVisits[i]?.id)) {
         return prev;
       }
 
@@ -1515,7 +1516,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         schoolSettings: {
           ...existingSettings,
           visitRecords: merged
-        }
+        } as any
       };
       storage.setItem('dl_profile', updated);
       return updated;
@@ -1781,7 +1782,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       // Check pending payments for this group
       const mismatchedPayments = payments.filter(p =>
         !p.deleted &&
-        (p.status === 'pending' || p.status === 'not_yet') &&
+        ((p.status as string) === 'pending' || (p.status as string) === 'not_yet') &&
         (p.groupId === grp.id || students.some(st => (st.groupId === grp.id || (grp.name && st.groupId && grp.name.trim().toLowerCase() === st.groupId.trim().toLowerCase())) && st.id === p.studentId)) &&
         (p.bundleSize !== targetSessionCount || (isPerLesson && p.lessonDates && p.lessonDates.some(d => !d.includes('Session 1/1'))))
       );
@@ -1789,7 +1790,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (mismatchedPayments.length > 0) {
         setPayments(prev => {
           const next = prev.map(p => {
-            if (p.deleted || (p.status !== 'pending' && p.status !== 'not_yet')) return p;
+            if (p.deleted || ((p.status as string) !== 'pending' && (p.status as string) !== 'not_yet')) return p;
             const matches = p.groupId === grp.id || students.some(st => (st.groupId === grp.id || (grp.name && st.groupId && grp.name.trim().toLowerCase() === st.groupId.trim().toLowerCase())) && st.id === p.studentId);
             if (!matches) return p;
 
@@ -3516,7 +3517,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         if (s.id === id) {
           return wrapDeletion({
             ...s,
-            status: 'archived',
+            status: 'archived' as const,
             archivedGroupId: s.groupId || (s as any).archivedGroupId || '',
             groupId: '',
             updatedAt: Date.now()
@@ -3551,7 +3552,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           if (idSet.has(s.id)) {
             return wrapDeletion({
               ...s,
-              status: 'archived',
+              status: 'archived' as const,
               archivedGroupId: s.groupId || (s as any).archivedGroupId || '',
               groupId: '',
               updatedAt: Date.now()
@@ -3588,7 +3589,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           if (s.groupId === groupId) {
             return wrapDeletion({
               ...s,
-              status: 'archived',
+              status: 'archived' as const,
               archivedGroupId: groupId,
               groupId: '',
               updatedAt: Date.now()
@@ -5662,7 +5663,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               amountPaid: totalPaidOnLesson,
               studentPayments: updatedStudentPayments
             } : undefined
-          } as Lesson);
+          } as any);
         }
         return l;
       });
@@ -5757,7 +5758,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     updateFullPaymentsStorage(prev => {
       // Settle and resolve any existing unpaid or pending payment records for this student so they don't linger as debts
       const cleanedPrev = prev.map(p => {
-        if (p.studentId === data.studentId && (p.status === 'not_yet' || p.status === 'pending' || p.status === 'unpaid')) {
+        if (p.studentId === data.studentId && ((p.status as string) === 'not_yet' || p.status === 'pending' || (p.status as string) === 'unpaid')) {
           return wrapMutation({
             ...p,
             status: 'paid',
@@ -6266,8 +6267,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         startTime: '08:00',
         endTime: '16:00',
       },
-      weeklyWorkingHours: {}
-    });
+      weeklyWorkingHours: {} as any
+    } as TeacherProfile);
     setNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS);
     setInspirationSettings(INITIAL_INSPIRATION_SETTINGS);
     setInspirationMessages(INITIAL_INSPIRATION_MESSAGES);
@@ -6804,7 +6805,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings) {
         const mergedGold = goldHoldings.length > 0
-          ? mergeEntities(goldHoldings, data.goldHoldings, 'goldHoldings').merged
+          ? (mergeEntities(goldHoldings as any, data.goldHoldings as any, 'goldHoldings').merged as unknown as GoldHolding[])
           : data.goldHoldings;
         setGoldHoldings(mergedGold);
         await writeAndTrack('gluck_gold_holdings', mergedGold);
@@ -7233,7 +7234,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const startTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const now = Date.now();
     const targetGroup = groups.find(g => g.id === lesson.groupId);
-    const resolvedDuration = lesson.durationMinutes || targetGroup?.lessonDurationMinutes || profile.defaultLessonDuration || 60;
+    const resolvedDuration = lesson.durationMinutes || targetGroup?.lessonDurationMinutes || (profile as any).defaultLessonDuration || 60;
     const durationMins = resolvedDuration > 0 ? resolvedDuration : 60;
 
     const session: ActiveLessonSession = {
