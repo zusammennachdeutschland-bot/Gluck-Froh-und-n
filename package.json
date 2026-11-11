@@ -79,7 +79,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx src/tests/cloudSyncReliability.test.ts && tsx src/tests/homeworkAccountIsolation.test.ts && tsx src/tests/lessonCycleNumbering.test.ts && tsx src/tests/tasks1to7.test.ts && tsx src/tests/homeworkSystemRepair.test.ts && tsx src/tests/homeworkShareTokenSecurity.test.ts && tsx src/tests/androidNativeGoogleAuth.test.ts",
+    "test": "tsx src/tests/cloudSyncReliability.test.ts && tsx src/tests/homeworkLifecycle.test.ts && tsx src/tests/homeworkAccountIsolation.test.ts && tsx src/tests/lessonCycleNumbering.test.ts && tsx src/tests/tasks1to7.test.ts && tsx src/tests/homeworkSystemRepair.test.ts && tsx src/tests/homeworkShareTokenSecurity.test.ts && tsx src/tests/androidNativeGoogleAuth.test.ts",
     "restore-binaries": "node scripts/restore_binaries.cjs"
   },
   "dependencies": {
