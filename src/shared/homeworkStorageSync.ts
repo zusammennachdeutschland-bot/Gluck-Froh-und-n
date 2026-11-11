@@ -1121,7 +1121,10 @@ export async function saveAssignmentWithConfirmation(hw: HomeworkAssignment): Pr
   const cloudOk = await activeSaveAssignmentToCloud(normalizedHw);
   const finalHw: HomeworkAssignment = {
     ...normalizedHw,
-    cloudSynced: cloudOk
+    cloudSynced: cloudOk,
+    // Only assignments created through this confirmed save flow are eligible for safe offline retry.
+    // Legacy local-only records intentionally remain ineligible to prevent resurrection.
+    ...(cloudOk ? { cloudCreatePending: false } : { cloudCreatePending: true })
   };
   if (getActiveHomeworkScopeUid() === scopeAtStart) {
     saveLocalAssignment(finalHw, false);
@@ -1501,14 +1504,30 @@ export async function flushPendingHomeworkCloudWrites(): Promise<{
   let syncedSubmissions = 0;
 
   try {
-    // Assignments are created/deleted through the authoritative teacher API.
-    // Do not retry old local-only assignment records: they may be stale legacy data.
-    // 1. Flush pending submissions:
+    // Retry only explicitly-marked assignments created by the confirmed offline save flow.
+    // Unmarked legacy local-only records are never uploaded, preventing stale homework resurrection.
+    // 1. Flush pending assignments and submissions:
     // - If authenticated as a teacher: flush submissions belonging to active assignments of that teacher.
     // - If unauthenticated (student mode, V-02): flush pending student submissions in UNAUTHENTICATED_HOMEWORK_SCOPE
     //   without requiring teacher authentication or local teacher assignment documents.
     if (getActiveHomeworkScopeUid() === scopeAtStart && getCurrentHomeworkOwnerUid() === authUidAtStart) {
       if (authUidAtStart) {
+        const pendingAssignments = getLocalAssignments(scopeAtStart).filter(
+          (assignment) =>
+            assignment.cloudSynced === false &&
+            (assignment as any).cloudCreatePending === true &&
+            assignment.ownerUid === authUidAtStart
+        );
+        for (const assignment of pendingAssignments) {
+          if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) break;
+          const ok = await activeSaveAssignmentToCloud(assignment);
+          if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) break;
+          if (ok) {
+            syncedAssignments++;
+            saveLocalAssignment({ ...assignment, cloudSynced: true, cloudCreatePending: false } as HomeworkAssignment, false);
+          }
+        }
+
         const activeIds = new Set(
           getLocalAssignments(scopeAtStart).flatMap((a) => [a.id, sanitizeDocId(a.id)])
         );
@@ -1581,7 +1600,7 @@ export function getPendingHomeworkSyncCount(explicitUid?: string | null): number
   const activeIds = new Set(
     activeAssignments.flatMap((a) => [a.id, sanitizeDocId(a.id)])
   );
-  const pendingHw = activeAssignments.filter((a) => a.cloudSynced === false).length;
+  const pendingHw = activeAssignments.filter((a) => a.cloudSynced === false && (a as any).cloudCreatePending === true).length;
   const pendingSubs = getLocalSubmissions(scopeUid).filter(
     (s) =>
       s.cloudSynced === false &&
