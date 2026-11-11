@@ -2,13 +2,15 @@ import assert from 'node:assert/strict';
 import {
   GOOGLE_WEB_CLIENT_ID,
   __setNativeAuthTestAdapter,
-  getResolvedGoogleWebClientId
+  getResolvedGoogleWebClientId,
+  getLastAndroidAuthDiagnostic
 } from '../shared/googleCredentialAuthPlugin';
 import {
   __setFirebaseAuthTestOverrides,
   signInTeacherWithGoogle,
   signOutTeacherFirebase,
-  isUserCancellationError
+  isUserCancellationError,
+  subscribeTeacherAuth
 } from '../shared/firebaseCloudSync';
 
 interface TestCase {
@@ -396,6 +398,80 @@ test('NA-10', 'Platform Isolation & Lifecycle: Background/foreground transition 
     '874458026984-3ai954q2p8ga6h4b2b15is2gdjbi9768.apps.googleusercontent.com'
   );
   resetMocks();
+});
+
+// 11. APK SHA-1 diagnostic capture on Play Services post-selection abort & [28444] developer error detection
+test('NA-11', 'Android Native: Captures runtime APK SHA-1 diagnostic on cancelled/aborted sheet and never misclassifies [28444] developer error as cancellation', async () => {
+  resetMocks();
+  __setNativeAuthTestAdapter({
+    isAndroidNative: () => true,
+    signIn: async () => ({
+      cancelled: true,
+      elapsedMs: 1850,
+      packageName: 'com.glueck.teacher',
+      apkSha1: 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD',
+      apkSha256: '11:22:33:44',
+      reason: 'activity is cancelled by the user.'
+    })
+  });
+
+  const res = await signInTeacherWithGoogle();
+  assert.equal(res, null);
+  const diag = getLastAndroidAuthDiagnostic();
+  assert.ok(diag, 'Must record last Android auth diagnostic when sheet returns cancelled');
+  assert.equal(diag?.packageName, 'com.glueck.teacher');
+  assert.equal(diag?.apkSha1, 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD');
+
+  // Verify [28444] developer error with "statusCode=CANCELED" is NOT treated as user cancellation
+  assert.equal(
+    isUserCancellationError({
+      code: 'NO_GOOGLE_ACCOUNT',
+      message: '16: [28444] Developer console is not set up correctly. Status{statusCode=CANCELED}'
+    }),
+    false,
+    'Play Services [28444] developer error must never be swallowed as user cancellation'
+  );
+});
+
+// 12. Immediate auth subscriber notification & native profile metadata enrichment
+test('NA-12', 'Android Native: Immediately notifies subscribeTeacherAuth listeners and enriches missing Firebase user profile fields from native Google credential', async () => {
+  resetMocks();
+  const notifiedUsers: any[] = [];
+
+  __setNativeAuthTestAdapter({
+    isAndroidNative: () => true,
+    signIn: async () => ({
+      cancelled: false,
+      idToken: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1aWRfZW5yaWNoIn0.sigEnrich',
+      email: 'zusammennachdeutschland@gmail.com',
+      displayName: 'Herr Abdelrahman',
+      photoUrl: 'https://example.com/avatar.png'
+    })
+  });
+
+  __setFirebaseAuthTestOverrides({
+    signInWithGoogleIdToken: async () =>
+      ({
+        uid: 'uid_enrich_1',
+        email: null,
+        displayName: null,
+        photoURL: null
+      }) as any
+  });
+
+  const unsub = subscribeTeacherAuth((u) => {
+    if (u) notifiedUsers.push(u);
+  });
+
+  const user = await signInTeacherWithGoogle();
+  unsub();
+
+  assert.equal(user?.uid, 'uid_enrich_1');
+  assert.equal(user?.email, 'zusammennachdeutschland@gmail.com');
+  assert.equal(user?.displayName, 'Herr Abdelrahman');
+  assert.equal((user as any)?.photoURL, 'https://example.com/avatar.png');
+  assert.ok(notifiedUsers.length >= 1, 'subscribeTeacherAuth must be notified immediately upon native sign-in');
+  assert.equal(notifiedUsers[notifiedUsers.length - 1]?.uid, 'uid_enrich_1');
 });
 
 async function run() {

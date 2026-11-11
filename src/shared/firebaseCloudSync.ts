@@ -21,7 +21,12 @@ import {
   getResolvedGoogleWebClientId,
   isAndroidNativePlatform,
   invokeNativeGoogleCredentialSignIn,
-  invokeNativeGoogleCredentialSignOut
+  invokeNativeGoogleCredentialSignOut,
+  getLastAndroidAuthDiagnostic,
+  clearLastAndroidAuthDiagnostic,
+  getAndroidApkSigningInfo,
+  AndroidApkSigningInfo,
+  AndroidAuthDiagnostic
 } from './googleCredentialAuthPlugin';
 import {
   getFirestore,
@@ -306,7 +311,14 @@ export function setVercelPublicDomain(domainUrl: string): string {
 // ============================================================================
 // FIREBASE AUTHENTICATION (Unified Teacher Login across Main App & Vercel)
 // ============================================================================
-export { GOOGLE_WEB_CLIENT_ID };
+export {
+  GOOGLE_WEB_CLIENT_ID,
+  isAndroidNativePlatform,
+  getLastAndroidAuthDiagnostic,
+  clearLastAndroidAuthDiagnostic,
+  getAndroidApkSigningInfo
+};
+export type { AndroidApkSigningInfo, AndroidAuthDiagnostic };
 
 export interface FirebaseAuthTestOverrides {
   signInWithGoogleIdToken?: (idToken: string) => Promise<User | null>;
@@ -323,7 +335,9 @@ export function __setFirebaseAuthTestOverrides(overrides: FirebaseAuthTestOverri
 // Initialize default persistence & handle redirect results on load (Web only)
 if (typeof window !== 'undefined') {
   setPersistence(auth, browserLocalPersistence).catch(() => {
-    setPersistence(auth, inMemoryPersistence).catch(() => {});
+    setPersistence(auth, browserSessionPersistence).catch(() => {
+      setPersistence(auth, inMemoryPersistence).catch(() => {});
+    });
   });
   if (!isAndroidNativePlatform()) {
     getRedirectResult(auth)
@@ -361,6 +375,15 @@ export function isUserCancellationError(err: any): boolean {
   if (!err) return false;
   const code = String(err?.code || '').toLowerCase();
   const msg = String(err?.message || err || '').toLowerCase();
+  if (
+    msg.includes('28444') ||
+    msg.includes('developer_error') ||
+    msg.includes('developer console') ||
+    msg.includes('not set up correctly') ||
+    msg.includes('caller not whitelisted')
+  ) {
+    return false;
+  }
   return (
     code === 'user_cancelled' ||
     code === 'auth/popup-closed-by-user' ||
@@ -371,6 +394,17 @@ export function isUserCancellationError(err: any): boolean {
     msg.includes('popup-closed-by-user') ||
     msg.includes('cancelled-popup-request')
   );
+}
+
+function notifyTeacherAuthSubscribers(user: User | null): void {
+  if (testHomeworkAuthUser !== undefined) return;
+  teacherAuthSubscribers.forEach((cb) => {
+    try {
+      cb(user);
+    } catch {
+      // Ignore subscriber callback errors
+    }
+  });
 }
 
 async function executeGoogleSignInInternal(): Promise<User | null> {
@@ -399,7 +433,34 @@ async function executeGoogleSignInInternal(): Promise<User | null> {
         throw tokenErr;
       }
 
-      return await signInWithGoogleIdToken(rawToken);
+      const signedInUser = await signInWithGoogleIdToken(rawToken);
+      if (signedInUser) {
+        // Ensure native credential profile metadata (displayName, email, photoUrl) is immediately available on user
+        try {
+          if (!signedInUser.displayName && nativeResult.displayName) {
+            Object.defineProperty(signedInUser, 'displayName', {
+              value: nativeResult.displayName,
+              configurable: true
+            });
+          }
+          if (!signedInUser.email && nativeResult.email) {
+            Object.defineProperty(signedInUser, 'email', {
+              value: nativeResult.email,
+              configurable: true
+            });
+          }
+          if (!signedInUser.photoURL && nativeResult.photoUrl) {
+            Object.defineProperty(signedInUser, 'photoURL', {
+              value: nativeResult.photoUrl,
+              configurable: true
+            });
+          }
+        } catch {
+          // Ignore read-only property descriptors in mocked objects
+        }
+        notifyTeacherAuthSubscribers(signedInUser);
+      }
+      return signedInUser;
     } catch (err: any) {
       if (isUserCancellationError(err)) {
         return null;
@@ -442,6 +503,9 @@ async function executeGoogleSignInInternal(): Promise<User | null> {
       return await firebaseAuthTestOverrides.signInWithPopup();
     }
     const result = await signInWithPopup(auth, googleProvider);
+    if (result?.user) {
+      notifyTeacherAuthSubscribers(result.user);
+    }
     return result.user;
   } catch (err: any) {
     if (isUserCancellationError(err)) {
@@ -474,6 +538,9 @@ export async function signInWithGoogleIdToken(idToken: string): Promise<User | n
   try {
     const credential = GoogleAuthProvider.credential(cleanToken);
     const result = await signInWithCredential(auth, credential);
+    if (result?.user) {
+      notifyTeacherAuthSubscribers(result.user);
+    }
     return result.user;
   } catch (err) {
     console.warn('Google ID token sign-in notice:', err instanceof Error ? err.message : 'Auth error');
@@ -485,6 +552,19 @@ export async function signInTeacherWithEmailPassword(email: string, pass: string
   const cleanEmail = email.trim().toLowerCase();
   const cleanPass = pass.trim();
   const res = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
+  if (res?.user) {
+    notifyTeacherAuthSubscribers(res.user);
+  }
+  return res.user;
+}
+
+export async function createTeacherWithEmailPassword(email: string, pass: string): Promise<User | null> {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanPass = pass.trim();
+  const res = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
+  if (res?.user) {
+    notifyTeacherAuthSubscribers(res.user);
+  }
   return res.user;
 }
 
@@ -502,6 +582,7 @@ export async function signOutTeacherFirebase(): Promise<void> {
       return;
     }
     await signOut(auth);
+    notifyTeacherAuthSubscribers(null);
   } catch (err) {
     console.warn('Sign out notice:', err);
   }

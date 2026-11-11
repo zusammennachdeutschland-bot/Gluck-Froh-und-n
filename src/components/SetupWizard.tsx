@@ -14,11 +14,17 @@ import { getSchoolSettings, DEFAULT_SCHOOL_SETTINGS } from '../utils/schoolUtils
 import { isBackupFileSizeValid } from '../utils/backupEngine';
 import {
   signInTeacherWithGoogle,
+  signInTeacherWithEmailPassword,
+  createTeacherWithEmailPassword,
   subscribeTeacherAuth,
   getActiveCloudUser,
   downloadWorkspaceFromGoogleCloud,
   uploadWorkspaceToGoogleCloud,
-  acknowledgeAppliedRemoteRevisions
+  acknowledgeAppliedRemoteRevisions,
+  isAndroidNativePlatform,
+  getLastAndroidAuthDiagnostic,
+  getAndroidApkSigningInfo,
+  AndroidApkSigningInfo
 } from '../services/firebaseWorkspaceSync';
 import {
   enqueueDurablePendingRemoteItem,
@@ -60,7 +66,7 @@ export const SetupWizard: React.FC = () => {
     profile, updateProfile, theme, toggleTheme, language: currentAppLang, setLanguage, 
     accentColor: currentAccent, setAccentColor, updateNotificationSettings,
     updateInspirationSettings, financeAccounts, addFinanceAccount,
-    importBackupFile, performBackup, _t
+    importBackupFile, performBackup, triggerToast, _t
   } = useApp();
 
   const currentSchoolData = getSchoolSettings(profile);
@@ -87,6 +93,11 @@ export const SetupWizard: React.FC = () => {
   const [googleSignInError, setGoogleSignInError] = useState<string | null>(null);
   const [showUnauthorizedDomainHelper, setShowUnauthorizedDomainHelper] = useState(false);
   const [domainCopied, setDomainCopied] = useState(false);
+  const [showAndroidShaHelper, setShowAndroidShaHelper] = useState(false);
+  const [androidSigningInfo, setAndroidSigningInfo] = useState<AndroidApkSigningInfo | null>(null);
+  const [shaCopiedField, setShaCopiedField] = useState<'sha1' | 'sha256' | 'pkg' | null>(null);
+  const [setupEmailInput, setSetupEmailInput] = useState<string>(() => profile.email || 'zusammennachdeutschland@gmail.com');
+  const [setupPasswordInput, setSetupPasswordInput] = useState<string>('');
 
   const [connectedGoogleUser, setConnectedGoogleUser] = useState<{
     displayName?: string | null;
@@ -111,10 +122,13 @@ export const SetupWizard: React.FC = () => {
     photoURL?: string | null;
     phoneNumber?: string | null;
   }) => {
-    const nameToUse = (user.displayName || displayName || '').trim();
     const emailToUse = (user.email || email || '').trim();
+    const fallbackNameFromEmail = emailToUse ? emailToUse.split('@')[0] : '';
+    const nameToUse = (user.displayName || displayName || fallbackNameFromEmail || 'معلم Glück').trim();
     const photoToUse = user.photoURL || '';
 
+    setShowAndroidShaHelper(false);
+    setGoogleSignInError(null);
     setConnectedGoogleUser({
       displayName: nameToUse,
       email: emailToUse,
@@ -141,8 +155,13 @@ export const SetupWizard: React.FC = () => {
       email: emailToUse || email,
       avatarUrl: photoToUse || profile.avatarUrl,
       phone: user.phoneNumber || phone,
-      whatsappNumber: user.phoneNumber || whatsappNumber
+      whatsappNumber: user.phoneNumber || whatsappNumber,
+      isGoogleConnected: true
     });
+
+    if (triggerToast) {
+      triggerToast(`تم تسجيل الدخول وربط الحساب (${emailToUse || nameToUse}) بنجاح ✓`);
+    }
 
     // Auto-fetch remote cloud backup data if available!
     try {
@@ -155,7 +174,12 @@ export const SetupWizard: React.FC = () => {
             (Array.isArray(p.students) && p.students.length > 0) ||
             (Array.isArray(p.groups) && p.groups.length > 0) ||
             (Array.isArray(p.lessons) && p.lessons.length > 0) ||
-            (Array.isArray(p.financeTransactions) && p.financeTransactions.length > 0)
+            (Array.isArray(p.payments) && p.payments.length > 0) ||
+            (Array.isArray(p.financeTransactions) && p.financeTransactions.length > 0) ||
+            (Array.isArray(p.hodStudents) && p.hodStudents.length > 0) ||
+            (Array.isArray(p.schoolNotes) && p.schoolNotes.length > 0) ||
+            (Array.isArray(p.homeworkAssignments) && p.homeworkAssignments.length > 0) ||
+            (Array.isArray(p.financeAccounts) && p.financeAccounts.length > 0)
           );
         } catch {
           remoteHasActualData = false;
@@ -180,9 +204,11 @@ export const SetupWizard: React.FC = () => {
             }
             localStorage.setItem('dl_setup_completed', 'true');
             setIsOpen(false);
-            alert(
-              `أهلاً بك يا ${nameToUse || 'المعلم'}! تم جلب بياناتك السحابية وجميع طلابك ومجموعاتك بنجاح 🌟`
-            );
+            if (triggerToast) {
+              triggerToast(
+                `أهلاً بك يا ${nameToUse || 'المعلم'}! تم جلب بياناتك السحابية وجميع طلابك ومجموعاتك بنجاح 🌟`
+              );
+            }
             return;
           }
         }
@@ -200,6 +226,23 @@ export const SetupWizard: React.FC = () => {
     }
   };
 
+  const loadAndroidDiagnosticHelper = async () => {
+    const diag = getLastAndroidAuthDiagnostic();
+    if (diag?.apkSha1 || diag?.apkSha256) {
+      setAndroidSigningInfo({
+        packageName: diag.packageName || 'com.glueck.teacher',
+        apkSha1: diag.apkSha1,
+        apkSha256: diag.apkSha256
+      });
+    } else {
+      const info = await getAndroidApkSigningInfo();
+      if (info) {
+        setAndroidSigningInfo(info);
+      }
+    }
+    setShowAndroidShaHelper(true);
+  };
+
   const handleGoogleSetupSignIn = async () => {
     if (isGoogleSigningIn) return;
     setIsGoogleSigningIn(true);
@@ -209,28 +252,80 @@ export const SetupWizard: React.FC = () => {
       const user = await signInTeacherWithGoogle();
       if (user) {
         await applySignedInCloudUser(user);
+      } else if (isAndroidNativePlatform()) {
+        await loadAndroidDiagnosticHelper();
+        setGoogleSignInError(
+          'لم يكتمل تسجيل الدخول عبر نافذة Google في أندرويد. راجع بصمة SHA-1 بالأسفل أو سجّل الدخول مباشرة بالبريد وكلمة المرور السحابية.'
+        );
       }
-      // If user is null, user cancelled account selection; return quietly to unchanged screen
     } catch (err: any) {
       const code = String(err?.code || '');
       const msg = String(err?.message || err || '');
-      const isNative =
-        typeof window !== 'undefined' &&
-        ((window as any).Capacitor?.isNativePlatform?.() ||
-          window.location?.protocol === 'capacitor:' ||
-          window.location?.protocol === 'file:');
+      const isNative = isAndroidNativePlatform();
+
+      if (isNative) {
+        await loadAndroidDiagnosticHelper();
+      }
 
       if (!isNative && (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain'))) {
         setShowUnauthorizedDomainHelper(true);
         setGoogleSignInError(null);
-      } else if (code === 'NO_GOOGLE_ACCOUNT') {
+      } else if (code === 'NO_GOOGLE_ACCOUNT' || isNative) {
         setGoogleSignInError(
-          'لا يوجد حساب Google مسجل على هذا الهاتف حالياً، أو يلزم تفعيل بصمة شهادة التطبيق (SHA-1) في Firebase.'
+          'يلزم تفعيل بصمة شهادة التطبيق (SHA-1) في إعدادات Firebase، أو يمكنك تسجيل الدخول فوراً بالبريد وكلمة المرور السحابية بالأسفل.'
         );
       } else if (code === 'auth/network-request-failed' || msg.toLowerCase().includes('network')) {
         setGoogleSignInError('تعذر الاتصال بالإنترنت لإتمام تسجيل الدخول. يرجى التحقق من الشبكة.');
       } else {
         setGoogleSignInError('تعذر إتمام تسجيل الدخول بحساب Google حالياً. يرجى المحاولة مرة أخرى.');
+      }
+    } finally {
+      setIsGoogleSigningIn(false);
+    }
+  };
+
+  const handleSetupEmailPasswordSignIn = async () => {
+    const cleanEmail = setupEmailInput.trim().toLowerCase();
+    const cleanPass = setupPasswordInput.trim();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setGoogleSignInError('يرجى إدخال البريد الإلكتروني بشكل صحيح.');
+      return;
+    }
+    if (cleanPass.length < 6) {
+      setGoogleSignInError('يرجى إدخال كلمة مرور مكونة من 6 أحرف أو أرقام على الأقل.');
+      return;
+    }
+    if (isGoogleSigningIn) return;
+    setIsGoogleSigningIn(true);
+    setGoogleSignInError(null);
+    try {
+      let user = null;
+      try {
+        user = await signInTeacherWithEmailPassword(cleanEmail, cleanPass);
+      } catch (signInErr: any) {
+        const errCode = String(signInErr?.code || '');
+        if (
+          errCode === 'auth/user-not-found' ||
+          errCode === 'auth/invalid-credential' ||
+          errCode === 'auth/invalid-login-credentials'
+        ) {
+          user = await createTeacherWithEmailPassword(cleanEmail, cleanPass);
+        } else {
+          throw signInErr;
+        }
+      }
+      if (user) {
+        setSetupPasswordInput('');
+        await applySignedInCloudUser(user);
+      }
+    } catch (err: any) {
+      const errCode = String(err?.code || '');
+      if (errCode === 'auth/email-already-in-use' || errCode === 'auth/wrong-password') {
+        setGoogleSignInError(
+          'كلمة المرور غير مطابقة لهذا البريد، أو أن هذا البريد مرتبط بـ Google فقط (أضف بصمة SHA-1 الموضحة بالأسفل في Firebase لتفعيل زر Google).'
+        );
+      } else {
+        setGoogleSignInError(err?.message || 'تعذر تسجيل الدخول بالبريد وكلمة المرور.');
       }
     } finally {
       setIsGoogleSigningIn(false);
@@ -923,6 +1018,93 @@ export const SetupWizard: React.FC = () => {
                     <p className="text-[11px] text-red-500 font-medium px-1">
                       {googleSignInError}
                     </p>
+                  )}
+
+                  {showAndroidShaHelper && !connectedGoogleUser && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3.5 space-y-3">
+                      <div className="space-y-1">
+                        <div className="text-xs font-black text-amber-600 dark:text-amber-400 flex items-center justify-between gap-2">
+                          <span>📱 {_t('تفعيل دخول Google على أندرويد (SHA-1) + الدخول المباشر', 'Android Google Login SHA-1 & Direct Sign-In', 'Android SHA-1 & Direkt-Login')}</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowAndroidShaHelper(false)}
+                            className="text-slate-500 hover:text-slate-800 dark:hover:text-white px-1 cursor-pointer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                          {_t(
+                            'لتفعيل الدخول بزر Google على أندرويد، أضف بصمة SHA-1 التالية لتطبيق com.glueck.teacher في إعدادات مشروع Firebase (glueck-c8621):',
+                            'To enable 1-tap Google login on Android, add this SHA-1 fingerprint for com.glueck.teacher in Firebase Project Settings:',
+                            'Fügen Sie diesen SHA-1-Fingerabdruck in Firebase hinzu:'
+                          )}
+                        </p>
+                      </div>
+
+                      {androidSigningInfo?.apkSha1 && (
+                        <div className="bg-white/80 dark:bg-slate-900/80 border border-amber-500/20 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          <code dir="ltr" className="font-mono font-bold text-emerald-700 dark:text-emerald-400 break-all">
+                            {androidSigningInfo.apkSha1}
+                          </code>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (androidSigningInfo.apkSha1) {
+                                  navigator.clipboard?.writeText(androidSigningInfo.apkSha1);
+                                  setShaCopiedField('sha1');
+                                  setTimeout(() => setShaCopiedField(null), 2000);
+                                }
+                              }}
+                              className="px-2.5 py-1 bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 font-bold rounded-lg cursor-pointer"
+                            >
+                              {shaCopiedField === 'sha1' ? _t('تم النسخ ✓', 'Copied ✓', 'Kopiert ✓') : _t('نسخ SHA-1', 'Copy SHA-1', 'SHA-1 kopieren')}
+                            </button>
+                            <a
+                              href="https://console.firebase.google.com/project/glueck-c8621/settings/general"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1 bg-primary/15 text-primary font-bold rounded-lg hover:underline"
+                            >
+                              Firebase ↗
+                            </a>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="pt-2 border-t border-amber-500/20 space-y-2">
+                        <div className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
+                          🔑 {_t('أو سجّل الدخول وجلب بياناتك السحابية فوراً بالبريد وكلمة المرور:', 'Or sign in and restore cloud data immediately with Email & Password:', 'Oder direkt per E-Mail & Passwort anmelden:')}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <input
+                            type="email"
+                            dir="ltr"
+                            value={setupEmailInput}
+                            onChange={(e) => setSetupEmailInput(e.target.value)}
+                            placeholder="zusammennachdeutschland@gmail.com"
+                            className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-white outline-none"
+                          />
+                          <input
+                            type="password"
+                            dir="ltr"
+                            value={setupPasswordInput}
+                            onChange={(e) => setSetupPasswordInput(e.target.value)}
+                            placeholder={_t('كلمة المرور (6 أحرف فأكثر)', 'Password', 'Passwort')}
+                            className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={isGoogleSigningIn}
+                            onClick={handleSetupEmailPasswordSignIn}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition-all cursor-pointer"
+                          >
+                            {_t('دخول وجلب البيانات الآن', 'Sign In & Restore', 'Jetzt anmelden')}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   {showUnauthorizedDomainHelper && (

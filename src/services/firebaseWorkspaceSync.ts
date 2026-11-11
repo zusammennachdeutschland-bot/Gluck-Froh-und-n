@@ -21,12 +21,19 @@ import {
   setVercelPublicDomain,
   DEFAULT_VERCEL_DOMAIN,
   signInTeacherWithEmailPassword,
+  createTeacherWithEmailPassword,
   signInWithGoogleIdToken,
   emailToWorkspaceId,
   getActiveCloudUser,
   isFirestoreWriteQuotaExhaustedToday,
   clearFirestoreWriteQuotaFlag,
-  executeSafeFirestoreWrite
+  executeSafeFirestoreWrite,
+  isAndroidNativePlatform,
+  getLastAndroidAuthDiagnostic,
+  clearLastAndroidAuthDiagnostic,
+  getAndroidApkSigningInfo,
+  AndroidApkSigningInfo,
+  AndroidAuthDiagnostic
 } from '../shared/firebaseCloudSync';
 import { DEFAULT_LERNSTUDIO_SETS } from '../data/defaultLernstudioSets';
 import {
@@ -42,6 +49,7 @@ import { RecentlyDeletedData } from '../types';
 export {
   signInTeacherWithGoogle,
   signInTeacherWithEmailPassword,
+  createTeacherWithEmailPassword,
   signInWithGoogleIdToken,
   signOutTeacherFirebase,
   subscribeTeacherAuth,
@@ -52,8 +60,13 @@ export {
   getActiveCloudUser,
   isFirestoreWriteQuotaExhaustedToday,
   clearFirestoreWriteQuotaFlag,
-  DEFAULT_LERNSTUDIO_SETS
+  DEFAULT_LERNSTUDIO_SETS,
+  isAndroidNativePlatform,
+  getLastAndroidAuthDiagnostic,
+  clearLastAndroidAuthDiagnostic,
+  getAndroidApkSigningInfo
 };
+export type { AndroidApkSigningInfo, AndroidAuthDiagnostic };
 
 export function getPrimaryWorkspaceId(user: { uid: string; email?: string | null }): string {
   if (!user || !user.uid) {

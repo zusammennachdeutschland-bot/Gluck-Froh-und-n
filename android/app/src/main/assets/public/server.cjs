@@ -137,7 +137,9 @@ if (typeof window !== "undefined") {
 }
 if (typeof window !== "undefined") {
   (0, import_auth.setPersistence)(auth, import_auth.browserLocalPersistence).catch(() => {
-    (0, import_auth.setPersistence)(auth, import_auth.inMemoryPersistence).catch(() => {
+    (0, import_auth.setPersistence)(auth, import_auth.browserSessionPersistence).catch(() => {
+      (0, import_auth.setPersistence)(auth, import_auth.inMemoryPersistence).catch(() => {
+      });
     });
   });
   if (!isAndroidNativePlatform()) {
