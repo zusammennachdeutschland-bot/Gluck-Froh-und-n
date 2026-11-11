@@ -1900,7 +1900,6 @@ async function runAllIsolationTests() {
       // 2. Verify /lernstudio_sets/{setId} rules isolate Teacher A and Teacher B
       const setADoc = {
         id: 'set_teacher_a_custom',
-        ownerUid: UID_TEACHER_A,
         title: 'مجموعة كلمات المعلم أ',
         updatedAtIso: '2026-03-01T10:00:00.000Z',
         payloadJson: JSON.stringify({ id: 'set_teacher_a_custom' })
