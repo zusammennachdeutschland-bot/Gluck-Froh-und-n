@@ -103,7 +103,9 @@ export interface HomeworkAssignment {
   allowReplay: boolean;
   deadline?: string;
   isActive: boolean;
-  status?: 'active' | 'closed';
+  status?: 'active' | 'closed' | 'deleted';
+  deleted?: boolean; // Server-authoritative deletion tombstone; never restore a deleted assignment.
+  deletedAt?: string;
   audienceMode?: HomeworkAudienceMode; // 'open' | 'group'
   groupId?: string;
   groupName?: string;
