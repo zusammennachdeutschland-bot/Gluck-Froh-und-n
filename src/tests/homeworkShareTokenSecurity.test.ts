@@ -3,6 +3,7 @@ import expressApp, {
   resetHomeworkStoresForTesting,
   toPublicAssignmentDto
 } from '../api/expressApp';
+import { buildHomeworkShareUrl, createHomeworkShareToken } from '../shared/homeworkStorageSync';
 import {
   getInMemoryAdminFirestore,
   getAuthoritativeFirestore,
@@ -28,6 +29,18 @@ async function runShareTokenSecurityTests() {
     const teacherUid = 'teacher_st_uid_100';
     const securedHwId = `hw_sec_${Date.now()}`;
     const configuredToken = 'valid_secret_share_token_999';
+
+    // New links must contain a cryptographically generated access token.
+    const generatedToken = createHomeworkShareToken();
+    assert.match(generatedToken, /^[a-f0-9]{64}$/);
+    assert.notEqual(generatedToken, createHomeworkShareToken());
+    const generatedLink = buildHomeworkShareUrl({
+      id: 'hw_link_test',
+      title: 'Share link test',
+      shareToken: configuredToken
+    } as any, 'https://glueck.example.com');
+    assert.equal(new URL(generatedLink).searchParams.get('token'), configuredToken);
+    console.log('✅ [ST-00] Share links include a cryptographically strong token');
 
     // Seed an assignment with a configured shareToken
     await inMemDb.collection('homework_assignments').doc(securedHwId).set({
@@ -103,6 +116,66 @@ async function runShareTokenSecurityTests() {
     assert.equal(correctTokenData.id, securedHwId);
     assert.equal(correctTokenData.title, 'Token Protected German Assignment');
     console.log('✅ [ST-04] Correct token returns HTTP 200 with assignment data');
+    // -------------------------------------------------------------------------
+    // TEST 4A: Both public submission routes require the same share token.
+    // -------------------------------------------------------------------------
+    const submissionBase = {
+      assignmentId: securedHwId,
+      studentName: 'Cross Device Student',
+      attemptNumber: 1,
+      status: 'completed',
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      responses: [],
+      totalQuestions: 0,
+      correctAnswersCount: 0,
+      scorePercentage: 0
+    };
+
+    const missingSubmitTokenRes = await fetch(`${baseUrl}/api/homework/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...submissionBase, id: `sub_missing_${Date.now()}` })
+    });
+    assert.equal(missingSubmitTokenRes.status, 403, 'Missing share token must block submission');
+
+    const wrongSubmitTokenRes = await fetch(`${baseUrl}/api/homework/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...submissionBase,
+        id: `sub_wrong_${Date.now()}`,
+        token: 'wrong_share_token'
+      })
+    });
+    assert.equal(wrongSubmitTokenRes.status, 403, 'Wrong share token must block submission');
+
+    const legacyRouteMissingTokenRes = await fetch(`${baseUrl}/api/homework/submissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...submissionBase, id: `sub_legacy_missing_${Date.now()}` })
+    });
+    assert.equal(
+      legacyRouteMissingTokenRes.status,
+      403,
+      'Legacy public submission route must also enforce the share token'
+    );
+
+    const validSubmitTokenRes = await fetch(`${baseUrl}/api/homework/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...submissionBase,
+        id: `sub_valid_${Date.now()}`,
+        token: configuredToken
+      })
+    });
+    assert.equal(validSubmitTokenRes.status, 200, 'Correct share token must allow submission');
+    const validSubmitData = await validSubmitTokenRes.json() as any;
+    assert.equal(validSubmitData.success, true);
+    assert.equal(validSubmitData.submission.assignmentId, securedHwId);
+    console.log('✅ [ST-04A] Both submission endpoints enforce the share token; valid token persists submission');
+
 
     // -------------------------------------------------------------------------
     // TEST 5: No shareToken present in any public DTO response

@@ -35,7 +35,6 @@ import {
   saveLocalAssignment,
   saveLocalSubmission,
   getQuestionTypeMeta,
-  fetchAssignmentFromFirestore,
   fetchLernstudioSetFromFirestore,
   saveAssignmentToFirestore,
   subscribeSubmissionsFromFirestore,
@@ -240,35 +239,27 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         const urlQtc = parseQuestionTypeCountsParam(searchParams.get('qtc'));
         const hasUrlQtc = Object.keys(urlQtc).length > 0;
 
-        // 1. Check Firebase Firestore first (works seamlessly between Main App & Vercel!)
-        const cloudHw = await fetchAssignmentFromFirestore(assignmentId).catch(() => null);
-        if (cloudHw && cloudHw.setSnapshot) {
-          if (!isHomeworkAssignmentOpenForStudents(cloudHw)) {
-            setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
-            return;
-          }
-          const mergedCloud =
-            !cloudHw.questionTypeCounts && hasUrlQtc
-              ? { ...cloudHw, questionTypeCounts: urlQtc }
-              : cloudHw;
-          setAssignment(normalizeHomeworkAssignment(mergedCloud));
-          return;
-        }
+        // Public student access always goes through the authoritative server API.
+        // Firestore client rules intentionally restrict direct assignment reads to the owning teacher.
+        const shareToken = (searchParams.get('token') || '').trim();
+        const infoParams = new URLSearchParams({ id: assignmentId });
+        if (shareToken) infoParams.set('token', shareToken);
 
-        // 2. Check /api/homework/info
-        const res = await fetch(`/api/homework/info?id=${encodeURIComponent(assignmentId)}`).catch(() => null);
+        const res = await fetch(`/api/homework/info?${infoParams.toString()}`).catch(() => null);
         let data: any = {};
         if (res) {
-          const text = await res.text();
+          const responseText = await res.text();
           try {
-            data = text ? JSON.parse(text) : {};
+            data = responseText ? JSON.parse(responseText) : {};
           } catch {
             data = {};
           }
+
           if (res.status === 403) {
             setError(data?.error || 'هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
             return;
           }
+
           if (res.ok && data && data.setSnapshot) {
             if (!isHomeworkAssignmentOpenForStudents(data)) {
               setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
@@ -285,6 +276,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             }
             return;
           }
+        }
+
+        // A tokenized share link must never fall back to local or URL-reconstructed data.
+        // Otherwise a server failure could accidentally bypass the share-token gate.
+        if (shareToken) {
+          setError(data?.error || 'تعذر تحميل الواجب من الخادم. تحقق من اتصال الإنترنت أو أعد إرسال رابط المشاركة.');
+          return;
         }
 
         // 3. Check local assignments cache
@@ -1321,6 +1319,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         body: JSON.stringify({
           id: activeSubmissionIdRef.current,
           assignmentId,
+          ...(new URLSearchParams(window.location.search).get('token')?.trim()
+            ? { token: new URLSearchParams(window.location.search).get('token')!.trim() }
+            : {}),
           ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
           attemptSecret,
           audienceMode,

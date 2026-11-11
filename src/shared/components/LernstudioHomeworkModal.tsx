@@ -23,7 +23,7 @@ import {
   isAssignmentDeletedLocally,
   sanitizeDocId,
   getVercelPublicDomain,
-  saveAssignmentWithConfirmation,
+  createHomeworkShareToken,
   flushPendingHomeworkCloudWrites,
   getPendingHomeworkSyncCount,
   saveLernstudioSetToFirestore,
@@ -75,6 +75,36 @@ interface Props {
   defaultSet?: LernstudioSet | null;
   initialTab?: 'create' | 'results';
   language?: string;
+}
+
+async function persistHomeworkAssignmentToServer(assignment: HomeworkAssignment): Promise<any> {
+  const idToken = await auth?.currentUser?.getIdToken().catch(() => null);
+  if (!idToken) {
+    throw new Error('يجب تسجيل الدخول بحساب المدرس لحفظ الواجب ومشاركة رابطه.');
+  }
+
+  const response = await fetch('/api/teacher/assignments', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`
+    },
+    credentials: 'include',
+    body: JSON.stringify(assignment)
+  });
+
+  const responseText = await response.text();
+  let data: any = {};
+  try {
+    data = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    data = {};
+  }
+
+  if (!response.ok || !data?.assignment) {
+    throw new Error(data?.error || 'تعذر حفظ الواجب على الخادم؛ لم يتم إنشاء رابط مشاركة.');
+  }
+  return data.assignment;
 }
 
 function formatDurationAr(seconds?: number): string {
@@ -439,6 +469,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
       const payload: HomeworkAssignment = {
         id: generatedId,
+        shareToken: createHomeworkShareToken(),
         ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
         ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
         title: title.trim() || `واجب: ${currentSet.title}`,
@@ -472,50 +503,22 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       // Ensure the vocabulary set itself is also synced to Firestore so fallback student links can always load it
       saveLernstudioSetToFirestore(currentSet).catch(() => false);
 
-      // Save locally and verify Firestore persistence
-      const confirmRes = await saveAssignmentWithConfirmation(payload);
+      // The server's Firebase Admin write is authoritative for cross-device student access.
+      // Do not publish a share link unless the server confirms the assignment was persisted.
+      const serverAssignment = await persistHomeworkAssignmentToServer(payload);
+      const finalAssignment: HomeworkAssignment = {
+        ...payload,
+        ...serverAssignment,
+        id: payload.id,
+        ...(serverAssignment.ownerUid || resolvedOwnerUid
+          ? { ownerUid: serverAssignment.ownerUid || resolvedOwnerUid }
+          : {}),
+        audienceMode,
+        cloudSynced: true
+      };
 
-      const token = await auth?.currentUser?.getIdToken().catch(() => null);
-      const res = await fetch('/api/teacher/assignments', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        credentials: 'include',
-        body: JSON.stringify(payload)
-      }).catch(() => null);
-
-      let data: any = {};
-      if (res) {
-        const text = await res.text();
-        try {
-          data = text ? JSON.parse(text) : {};
-        } catch {
-          data = {};
-        }
-      }
-
-      const finalAssignment: HomeworkAssignment =
-        res && res.ok && data?.assignment
-          ? {
-              ...payload,
-              ...data.assignment,
-              id: payload.id,
-              ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
-              audienceMode,
-              cloudSynced: confirmRes.cloudSynced
-            }
-          : { ...payload, cloudSynced: confirmRes.cloudSynced };
-
-      if (!confirmRes.cloudSynced) {
-        const retryRes = await saveAssignmentWithConfirmation(finalAssignment);
-        finalAssignment.cloudSynced = retryRes.cloudSynced;
-      } else {
-        saveLocalAssignment(finalAssignment, false);
-      }
-
-      setCreatedCloudSynced(Boolean(finalAssignment.cloudSynced));
+      saveLocalAssignment(finalAssignment, false);
+      setCreatedCloudSynced(true);
       setCreatedAssignment(finalAssignment);
       setCreatedShareLink(buildHomeworkShareUrl(finalAssignment, vercelDomain));
       setPendingSyncCount(getPendingHomeworkSyncCount());
@@ -547,6 +550,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
         const fallbackHw: HomeworkAssignment = {
           id: 'hw_' + Math.random().toString(36).substring(2, 8),
+          shareToken: createHomeworkShareToken(),
           ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
           ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
           title: title.trim() || `واجب: ${currentSet.title}`,
@@ -570,10 +574,29 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           createdAt: new Date().toISOString(),
           createdBy: 'Teacher'
         };
-        const confirmRes = await saveAssignmentWithConfirmation(fallbackHw);
-        setCreatedCloudSynced(confirmRes.cloudSynced);
-        setCreatedAssignment({ ...fallbackHw, cloudSynced: confirmRes.cloudSynced });
-        setCreatedShareLink(buildHomeworkShareUrl(fallbackHw, vercelDomain));
+        try {
+          const serverAssignment = await persistHomeworkAssignmentToServer(fallbackHw);
+          const finalFallbackAssignment: HomeworkAssignment = {
+            ...fallbackHw,
+            ...serverAssignment,
+            id: fallbackHw.id,
+            ...(serverAssignment.ownerUid || resolvedOwnerUid
+              ? { ownerUid: serverAssignment.ownerUid || resolvedOwnerUid }
+              : {}),
+            audienceMode,
+            cloudSynced: true
+          };
+          saveLocalAssignment(finalFallbackAssignment, false);
+          setCreatedCloudSynced(true);
+          setCreatedAssignment(finalFallbackAssignment);
+          setCreatedShareLink(buildHomeworkShareUrl(finalFallbackAssignment, vercelDomain));
+        } catch (persistError) {
+          const localOnlyFallback = { ...fallbackHw, cloudSynced: false };
+          saveLocalAssignment(localOnlyFallback, false);
+          setCreatedCloudSynced(false);
+          setCreatedAssignment(localOnlyFallback);
+          setCreatedShareLink(null);
+        }
         setPendingSyncCount(getPendingHomeworkSyncCount());
       }
     } finally {

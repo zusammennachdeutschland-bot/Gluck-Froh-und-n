@@ -1836,6 +1836,20 @@ export function parseQuestionTypeCountsParam(
 }
 
 /**
+ * Creates a cryptographically strong bearer token for a public homework share link.
+ * Requires Web Crypto; never falls back to Math.random for an access credential.
+ */
+export function createHomeworkShareToken(): string {
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function') {
+    throw new Error('Secure random number generation is unavailable in this browser.');
+  }
+  const bytes = new Uint8Array(32);
+  cryptoApi.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * Generates the student/parent homework link using the Vercel public domain.
  * Encodes the audience mode ('am') and group metadata ('gid', 'gn') without exposing student lists.
  */
@@ -1844,6 +1858,7 @@ export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: s
   const mode = resolveAssignmentAudienceMode(hw);
   const params = new URLSearchParams();
   params.set('am', mode);
+  if (hw.shareToken?.trim()) params.set('token', hw.shareToken.trim());
   if (mode === 'group' && hw.groupId) {
     params.set('gid', hw.groupId);
     if (hw.groupName) params.set('gn', hw.groupName);

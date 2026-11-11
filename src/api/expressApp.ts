@@ -669,6 +669,19 @@ app.all('/api/homework/submissions', async (req, res) => {
         error: 'Assignment is closed or inactive and no longer accepts submissions'
       });
     }
+
+    const configuredShareToken =
+      targetHw.shareToken !== undefined && targetHw.shareToken !== null ? String(targetHw.shareToken).trim() : '';
+    if (configuredShareToken) {
+      const providedToken = String(body.token || body.shareToken || req.query.token || '').trim();
+      if (!providedToken || providedToken !== configuredShareToken) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Valid share token is required to submit to this assignment'
+        });
+      }
+    }
+
     const hwOwnerUid = String(targetHw?.ownerUid || '').trim();
     const bodyOwnerUid = String(body?.ownerUid || '').trim();
     if (hwOwnerUid && bodyOwnerUid && hwOwnerUid !== bodyOwnerUid) {
@@ -754,15 +767,15 @@ app.post('/api/homework/submit', async (req, res) => {
     });
   }
 
-  // Strict Share Token Enforcement:
+  // Strict Share Token Enforcement: tokenized assignments require an exact match for every submission.
   const configuredShareToken =
     targetHw.shareToken !== undefined && targetHw.shareToken !== null ? String(targetHw.shareToken).trim() : '';
   if (configuredShareToken) {
     const providedToken = String(body.token || body.shareToken || req.query.token || '').trim();
-    if (providedToken && providedToken !== configuredShareToken) {
+    if (!providedToken || providedToken !== configuredShareToken) {
       return res.status(403).json({
         success: false,
-        error: 'Forbidden: Invalid share token provided for assignment submission'
+        error: 'Forbidden: Valid share token is required to submit to this assignment'
       });
     }
   }
