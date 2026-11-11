@@ -1,0 +1,2171 @@
+import { App as CapacitorApp } from '@capacitor/app';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Lesson, Student, TeacherProfile, LessonReport } from '../types';
+import { useApp } from '../context/AppContext';
+import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay } from '../utils/phoneUtils';
+import { getTeacherArabicName } from '../utils/teacherUtils';
+import { formatTimeDisplay, parseLocalDate, getLocalDateStr } from '../utils/timeUtils';
+import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString } from '../utils/genderUtils';
+import { calculateSequentialSessionNumber, resolveLessonCycleNumber, resolveTaughtTodayTopic, resolveStudentReportAttendance, resolveReportHomework, resolvePreviousHomeworkStatusText } from '../utils/lessonUtils';
+import { getTimeBasedGreeting, getCairoHour } from '../utils/greetingUtils';
+import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
+import { 
+  X, Copy, Check, Send, Phone, Printer, Sparkles, User, MessageSquare, Users, Link2, Home, AtSign, Video, ExternalLink, Plus, RefreshCw, KeyRound, ClipboardCheck, BookOpen, Globe, Sun, Moon, Flame
+} from 'lucide-react';
+import { GroupProfileModal } from './GroupProfileModal';
+import { ReportLanguageToggle } from './ReportLanguageToggle';
+import { escapeHtml } from '../utils/securityUtils';
+import { WhatsAppDispatchQueueModal } from './WhatsAppDispatchQueueModal';
+import { recordStudentReportDispatched, isStudentReportDispatched } from '../utils/whatsappQueueUtils';
+import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
+
+export { isLikelyFemaleStudent } from '../utils/genderUtils';
+export { resolveTaughtTodayTopic, resolveStudentReportAttendance, resolveReportHomework, resolvePreviousHomeworkStatusText } from '../utils/lessonUtils';
+
+const ARABIC_DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
+const getLessonArabicDay = (dateStr?: string, fallbackDay?: string): string => {
+  if (dateStr) {
+    try {
+      const d = parseLocalDate(dateStr);
+      const dayIdx = d.getDay();
+      if (dayIdx >= 0 && dayIdx < 7) {
+        return ARABIC_DAYS[dayIdx];
+      }
+    } catch (e) {}
+  }
+  if (fallbackDay) {
+    const map: Record<string, string> = {
+      sunday: 'الأحد',
+      monday: 'الإثنين',
+      tuesday: 'الثلاثاء',
+      wednesday: 'الأربعاء',
+      thursday: 'الخميس',
+      friday: 'الجمعة',
+      saturday: 'السبت',
+      sonntag: 'الأحد',
+      montag: 'الإثنين',
+      dienstag: 'الثلاثاء',
+      mittwoch: 'الأربعاء',
+      donnerstag: 'الخميس',
+      freitag: 'الجمعة',
+      samstag: 'السبت'
+    };
+    const clean = fallbackDay.toLowerCase().trim();
+    if (map[clean]) return map[clean];
+  }
+  return '';
+};
+
+const formatArabicDate = (dateStr?: string): string => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`; // DD/MM/YYYY
+  }
+  return dateStr;
+};
+
+const formatArabicTime = (timeStr?: string): string => {
+  if (!timeStr) return '';
+  if (timeStr.includes('م') || timeStr.includes('ص')) return timeStr;
+  if (timeStr.includes('-')) {
+    const parts = timeStr.split('-').map(s => s.trim());
+    return parts.map(p => formatTimeDisplay(p, 'ar')).join(' - ');
+  }
+  return formatTimeDisplay(timeStr, 'ar');
+};
+
+const formatReportTime = (timeStr?: string, lang: string = 'ar'): string => {
+  if (!timeStr) return '';
+  if (lang === 'ar') return formatArabicTime(timeStr);
+  if (timeStr.includes('AM') || timeStr.includes('PM') || timeStr.includes('م') || timeStr.includes('ص')) return timeStr;
+  if (timeStr.includes('-')) {
+    const parts = timeStr.split('-').map(s => s.trim());
+    return parts.map(p => formatTimeDisplay(p, lang)).join(' - ');
+  }
+  return formatTimeDisplay(timeStr, lang);
+};
+
+interface ArabicParentReportModalProps {
+  lesson: Lesson;
+  student?: Student;
+  profile: TeacherProfile;
+  onClose: () => void;
+  onSaveReport?: (arabicReportText: string, updatedFields?: Record<string, any>) => void;
+  onGoToHomeScreen?: () => void;
+}
+
+export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = ({
+  lesson,
+  student,
+  profile,
+  onClose,
+  onSaveReport,
+  onGoToHomeScreen
+}) => {
+  const { students, groups, lessons, updateLesson, saveLessonReport, _t, language, t, reportLanguage, reportT } = useApp();
+  const [copied, setCopied] = useState(false);
+  const [showGroupProfile, setShowGroupProfile] = useState(false);
+  const [showDispatchQueueModal, setShowDispatchQueueModal] = useState(false);
+
+  // Check if this lesson is scheduled for today
+  const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
+
+  // Find the associated group robustly (by groupId, student's groupId, groupName, or title match)
+  const associatedGroup = groups.find(g => g.id === lesson.groupId)
+    || (student?.groupId ? groups.find(g => g.id === student.groupId) : undefined)
+    || (lesson.groupName ? groups.find(g => g.name.trim().toLowerCase() === lesson.groupName.trim().toLowerCase()) : undefined)
+    || groups.find(g => g.name && lesson.title.toLowerCase().includes(g.name.toLowerCase()));
+  const groupWhatsAppLink = associatedGroup?.whatsAppGroupLink || '';
+
+  // Check if the lesson/group operates on a cycle package (not per-lesson / single session)
+  // If the group has sessionCount > 1 (e.g. 4, 8, 12 sessions), it is strictly a cycle package!
+  const isPerLesson = Boolean(
+    (associatedGroup && (
+      associatedGroup.paymentCycle === 'per_lesson' ||
+      associatedGroup.paymentModel === 'per_session' ||
+      (associatedGroup.sessionCount !== undefined && associatedGroup.sessionCount <= 1)
+    )) ||
+    (!associatedGroup && (lesson.isQuickLesson || !lesson.totalSessionsInPackage || lesson.totalSessionsInPackage <= 1))
+  );
+
+  const hasCycle = !isPerLesson;
+  const totalCycleSessions = (associatedGroup?.sessionCount && associatedGroup.sessionCount > 1) 
+    ? associatedGroup.sessionCount 
+    : (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1 ? lesson.totalSessionsInPackage : 4);
+
+  // Find students associated with this lesson or group
+  const allGroupStudents = useMemo(() => {
+    return lesson.groupId ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === lesson.groupId) : [];
+  }, [lesson.groupId, students]);
+
+  // Scheduled students for this lesson based on alternating week schedule (or students who have explicit recorded attendance)
+  const groupStudents = useMemo(() => {
+    if (!lesson.groupId) return [];
+    return allGroupStudents.filter(s => {
+      // If student has explicit attendance record in this lesson, keep them!
+      if (lesson.report?.studentAttendance?.[s.id] !== undefined) return true;
+      if (!lesson.date) return true;
+      return isStudentMatchingLessonWeek(s.scheduleRecurrence, lesson.date);
+    });
+  }, [allGroupStudents, lesson.groupId, lesson.date, lesson.report?.studentAttendance]);
+
+  const isGroupLesson = (Boolean(lesson.groupId) || groupStudents.length > 0) && groupStudents.length > 1;
+
+  // Tabs: 'individual' | 'bulk' - Default to individual student report so it speaks in singular directly to the parent
+  const [activeTab, setActiveTab] = useState<'individual' | 'bulk'>('individual');
+
+  const initialResolvedStudent = student || 
+    students.find(s => (lesson.studentId && s.id === lesson.studentId) || (lesson.studentName && s.name && s.name.trim().toLowerCase() === lesson.studentName.trim().toLowerCase())) || 
+    (groupStudents.length > 0 ? groupStudents[0] : (lesson.studentName ? ({
+      id: lesson.studentId || lesson.id || 'quick_student',
+      name: lesson.studentName,
+      groupId: 'quick_group',
+      parentName: lesson.quickParentName,
+      parentPhone: lesson.quickParentPhone,
+      studentPhone: lesson.quickStudentPhone,
+      grade: lesson.grade || 'Grade 9',
+      currency: profile.currency,
+      notes: lesson.quickNotes || '',
+      createdAt: lesson.date || new Date().toISOString(),
+      documents: [],
+      joinedDate: lesson.date || new Date().toISOString()
+    } as unknown as Student) : undefined));
+
+  const [selectedStudentId, setSelectedStudentId] = useState<string>(
+    initialResolvedStudent?.id || ''
+  );
+
+  const activeStudent = students.find(s => s.id === selectedStudentId) || initialResolvedStudent;
+
+  // Dynamically compute the exact sequential session number strictly among NON-CANCELLED lessons
+  const cycleResolution = useMemo(() => {
+    return resolveLessonCycleNumber(lesson, lessons || [], {
+      group: associatedGroup,
+      student: activeStudent,
+      students
+    });
+  }, [lesson, lessons, associatedGroup, activeStudent, students]);
+
+  const currentSessionNumber = cycleResolution.sessionNumber >= 1 ? cycleResolution.sessionNumber : 1;
+
+  // Helper to find previous homework from earlier lesson or lesson report
+  const detectedPreviousHomework = React.useMemo(() => {
+    if (lesson.report?.arabicPreviousHomework?.trim()) {
+      return lesson.report.arabicPreviousHomework.trim();
+    }
+    if (lesson.report?.previousHomeworkDescription?.trim()) {
+      return lesson.report.previousHomeworkDescription.trim();
+    }
+
+    const studentId = activeStudent?.id || lesson.studentId;
+    const groupId = lesson.groupId || activeStudent?.groupId;
+    const studentName = (activeStudent?.name || lesson.studentName || '').trim().toLowerCase();
+
+    // Find previous candidate lessons for this group or student
+    const candidateLessons = (lessons || []).filter(l => {
+      if (l.id === lesson.id) return false;
+      if (l.deleted) return false;
+      if (l.status === 'cancelled') return false;
+
+      const matchGroup = groupId && l.groupId === groupId;
+      const matchStudent = (studentId && (l.studentId === studentId || l.report?.studentAttendance?.[studentId] !== undefined)) ||
+        (studentName && l.studentName && l.studentName.trim().toLowerCase() === studentName);
+
+      return Boolean(matchGroup || matchStudent);
+    });
+
+    if (candidateLessons.length === 0) return '';
+
+    // Sort by date and time descending
+    candidateLessons.sort((a, b) => {
+      const timeA = new Date(`${a.date}T${a.time || '00:00'}`).getTime();
+      const timeB = new Date(`${b.date}T${b.time || '00:00'}`).getTime();
+      if (!isNaN(timeA) && !isNaN(timeB) && timeA !== timeB) {
+        return timeB - timeA;
+      }
+      return (b.sessionNumber || 0) - (a.sessionNumber || 0);
+    });
+
+    const currentLessonTime = new Date(`${lesson.date}T${lesson.time || '00:00'}`).getTime();
+    
+    // Find the closest lesson prior to this one that has homework recorded
+    const earlierLesson = candidateLessons.find(l => {
+      const lTime = new Date(`${l.date}T${l.time || '00:00'}`).getTime();
+      const isPrior = !isNaN(currentLessonTime) && !isNaN(lTime) ? lTime <= currentLessonTime : true;
+      const hw = l.report?.arabicHomeworkRequired || l.report?.homeworkDescription || l.report?.homeworkTitle || l.homeworkDescription || l.homeworkTitle;
+      return isPrior && Boolean(hw && hw.trim());
+    });
+
+    const targetPrevLesson = earlierLesson || candidateLessons.find(l => {
+      const hw = l.report?.arabicHomeworkRequired || l.report?.homeworkDescription || l.report?.homeworkTitle || l.homeworkDescription || l.homeworkTitle;
+      return Boolean(hw && hw.trim());
+    });
+
+    if (targetPrevLesson) {
+      const hw = (
+        targetPrevLesson.report?.arabicHomeworkRequired ||
+        targetPrevLesson.report?.homeworkDescription ||
+        targetPrevLesson.report?.homeworkTitle ||
+        targetPrevLesson.homeworkDescription ||
+        targetPrevLesson.homeworkTitle ||
+        ''
+      ).trim();
+      return hw;
+    }
+
+    return '';
+  }, [lessons, lesson, activeStudent]);
+
+  const [previousHomework, setPreviousHomework] = useState<string>(() => {
+    return (
+      lesson.report?.arabicPreviousHomework || 
+      lesson.report?.previousHomeworkDescription || 
+      detectedPreviousHomework || 
+      ''
+    );
+  });
+
+  // Sync if active student changes or detectedPreviousHomework changes when field is empty
+  useEffect(() => {
+    if (detectedPreviousHomework && !previousHomework) {
+      setPreviousHomework(detectedPreviousHomework);
+    }
+  }, [detectedPreviousHomework]);
+
+  const parentName = activeStudent?.parentName || lesson.quickParentName || activeStudent?.name || lesson.studentName || 'ولي الأمر المحترم';
+  
+  // Resolve contact with smart fallback: phone or username
+  const resolvedContact = resolveStudentWhatsAppContact(activeStudent, {
+    quickParentPhone: lesson.quickParentPhone,
+    quickStudentPhone: lesson.quickStudentPhone
+  });
+  const parentPhone = resolvedContact.contact;
+
+  // Editable generated report
+  const [copiedCodeInModal, setCopiedCodeInModal] = useState<boolean>(false);
+  const [finalGeneratedText, setFinalGeneratedText] = useState<string>('');
+  const [isManualEdited, setIsManualEdited] = useState<boolean>(false);
+  const [reportStyle, setReportStyle] = useState<'egyptian' | 'standard' | 'concise' | 'student'>('egyptian');
+  const [styleSeed, setStyleSeed] = useState<number>(0);
+  const [recordingLink, setRecordingLink] = useState<string>(
+    lesson.report?.recordingLink || lesson.recordingLink || ''
+  );
+  const [recordingLink2, setRecordingLink2] = useState<string>(
+    lesson.report?.recordingLink2 || lesson.recordingLink2 || ''
+  );
+  const [showRecordingLink2, setShowRecordingLink2] = useState<boolean>(
+    Boolean(lesson.report?.recordingLink2 || lesson.recordingLink2)
+  );
+  const [autoSavedNotice, setAutoSavedNotice] = useState<boolean>(false);
+  const [showAbsentNamesInGroupReport, setShowAbsentNamesInGroupReport] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('dl_show_absent_names_in_group_report');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+
+  // Local student attendance state for real-time toggling & syncing
+  const [localAttendance, setLocalAttendance] = useState<Record<string, 'present' | 'late' | 'absent'>>(() => {
+    return { ...(lesson.report?.studentAttendance || {}) };
+  });
+
+  const [localReport, setLocalReport] = useState<LessonReport>(() => ({ ...(lesson.report || {}) }));
+
+  useEffect(() => {
+    if (lesson.report) {
+      setLocalReport(prev => ({ ...prev, ...lesson.report }));
+      if (lesson.report.studentAttendance) {
+        setLocalAttendance(prev => ({ ...prev, ...lesson.report?.studentAttendance }));
+      }
+    }
+  }, [lesson.report]);
+
+  const handleStudentAttendanceChange = (studentId: string, status: 'present' | 'late' | 'absent') => {
+    const keysToUpdate = [studentId];
+    if (activeStudent?.id && !keysToUpdate.includes(activeStudent.id)) keysToUpdate.push(activeStudent.id);
+    if (lesson.studentId && !keysToUpdate.includes(lesson.studentId)) keysToUpdate.push(lesson.studentId);
+    if (!keysToUpdate.includes('single')) keysToUpdate.push('single');
+
+    setLocalAttendance(prev => {
+      const next = { ...prev };
+      keysToUpdate.forEach(k => { next[k] = status; });
+      return next;
+    });
+    setIsManualEdited(false);
+
+    const currentReport = localReport || lesson.report || {};
+    const updatedStudentAttendance = {
+      ...(currentReport.studentAttendance || {})
+    };
+    keysToUpdate.forEach(k => { updatedStudentAttendance[k] = status; });
+
+    const updatedHwDone = { ...(currentReport.studentHomeworkDone || {}) };
+    const updatedDict = { ...(currentReport.studentDictationGrade || {}) };
+    const updatedExam = { ...(currentReport.studentExamGrade || {}) };
+
+    if (status === 'absent') {
+      keysToUpdate.forEach(k => {
+        delete updatedHwDone[k];
+        delete updatedDict[k];
+        delete updatedExam[k];
+      });
+    }
+
+    const updatedReport: LessonReport = {
+      ...currentReport,
+      attendanceStatus: status,
+      studentAttendance: updatedStudentAttendance,
+      studentHomeworkDone: updatedHwDone,
+      studentDictationGrade: updatedDict,
+      studentExamGrade: updatedExam
+    };
+
+    setLocalReport(updatedReport);
+
+    if (lesson.id) {
+      updateLesson(lesson.id, {
+        report: updatedReport
+      });
+      saveLessonReport(lesson.id, updatedReport);
+    }
+  };
+
+  // Auto save recording links directly to lists & lesson database
+  const persistRecordings = React.useCallback((r1?: string, r2?: string, currentText?: string) => {
+    const raw1 = r1 !== undefined ? r1 : recordingLink;
+    const raw2 = r2 !== undefined ? r2 : recordingLink2;
+    const textToCheck = currentText !== undefined ? currentText : finalGeneratedText;
+
+    let finalR1 = raw1.trim();
+    let finalR2 = raw2.trim();
+
+    // If direct link field is empty, detect video recording links from custom edited message
+    if (!finalR1 && textToCheck) {
+      const urls: string[] = textToCheck.match(/https?:\/\/[^\s\n\r"']+/g) || [];
+      const match = urls.find(u => 
+        u.includes('grain.co') || u.includes('grain.com') || u.includes('zoom.us') || 
+        u.includes('drive.google') || u.includes('youtube.com') || u.includes('youtu.be') || 
+        u.includes('loom.com') || u.includes('vimeo.com')
+      ) || (urls.length > 0 && !urls[0].includes('whatsapp') && !urls[0].includes('wa.me') ? urls[0] : undefined);
+
+      if (match) {
+        finalR1 = match;
+        setRecordingLink(match);
+      }
+    }
+
+    const rec1 = finalR1 || undefined;
+    const rec2 = finalR2 || undefined;
+
+    updateLesson(lesson.id, {
+      recordingLink: rec1,
+      recordingLink2: rec2,
+      report: {
+        ...(lesson.report || {}),
+        recordingLink: rec1,
+        recordingLink2: rec2,
+        arabicFullGeneratedReport: textToCheck,
+        arabicPreviousHomework: previousHomework.trim() || undefined,
+        previousHomeworkDescription: previousHomework.trim() || undefined
+      }
+    });
+
+    saveLessonReport(lesson.id, {
+      ...(lesson.report || {}),
+      recordingLink: rec1,
+      recordingLink2: rec2,
+      arabicFullGeneratedReport: textToCheck,
+      arabicPreviousHomework: previousHomework.trim() || undefined,
+      previousHomeworkDescription: previousHomework.trim() || undefined
+    });
+
+    if (onSaveReport) {
+      onSaveReport(textToCheck, {
+        recordingLink: rec1,
+        recordingLink2: rec2,
+        arabicPreviousHomework: previousHomework.trim() || undefined,
+        previousHomeworkDescription: previousHomework.trim() || undefined
+      });
+    }
+
+    setAutoSavedNotice(true);
+    setTimeout(() => setAutoSavedNotice(false), 2500);
+  }, [lesson.id, lesson.report, recordingLink, recordingLink2, finalGeneratedText, previousHomework, updateLesson, saveLessonReport, onSaveReport]);
+
+  // Debounce-sync recording link updates automatically to the list
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const currentR1 = lesson.recordingLink || lesson.report?.recordingLink || '';
+      const currentR2 = lesson.recordingLink2 || lesson.report?.recordingLink2 || '';
+      if (recordingLink.trim() !== currentR1.trim() || recordingLink2.trim() !== currentR2.trim()) {
+        persistRecordings();
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [recordingLink, recordingLink2, persistRecordings, lesson.recordingLink, lesson.report?.recordingLink, lesson.recordingLink2, lesson.report?.recordingLink2]);
+
+  // Helper to format recording link(s) for the Arabic report
+  const formatRecordingsArabic = (link1: string, link2: string): string => {
+    const l1 = link1.trim();
+    const l2 = link2.trim();
+    if (l1 && l2) {
+      return `\n\n🎥 تسجيلات الحصة (جزئين):\n• الجزء الأول: ${l1}\n• الجزء الثاني: ${l2}`;
+    }
+    if (l1) {
+      return `\n\n🎥 رابط تسجيل الحصة:\n${l1}`;
+    }
+    if (l2) {
+      return `\n\n🎥 رابط تسجيل الحصة:\n${l2}`;
+    }
+    return '';
+  };
+
+  const formatRecordingsByLang = (link1: string, link2: string, lang: 'ar' | 'en' | 'de'): string => {
+    if (lang === 'ar') return formatRecordingsArabic(link1, link2);
+    const l1 = link1.trim();
+    const l2 = link2.trim();
+    if (lang === 'de') {
+      if (l1 && l2) {
+        return `\n\n🎥 Unterrichtsaufnahmen (2 Teile):\n• Teil 1: ${l1}\n• Teil 2: ${l2}`;
+      }
+      if (l1) return `\n\n🎥 Unterrichtsaufnahme:\n${l1}`;
+      if (l2) return `\n\n🎥 Unterrichtsaufnahme:\n${l2}`;
+      return '';
+    }
+    if (l1 && l2) {
+      return `\n\n🎥 Lesson Recordings (2 Parts):\n• Part 1: ${l1}\n• Part 2: ${l2}`;
+    }
+    if (l1) return `\n\n🎥 Lesson Recording:\n${l1}`;
+    if (l2) return `\n\n🎥 Lesson Recording:\n${l2}`;
+    return '';
+  };
+
+  const taughtTodayInfo = useMemo(() => resolveTaughtTodayTopic(lesson, localReport), [lesson, localReport]);
+  const homeworkInfo = useMemo(
+    () => resolveReportHomework(lesson.report, localReport, reportLanguage === 'en' || reportLanguage === 'de' ? reportLanguage : 'ar'),
+    [lesson.report, localReport, reportLanguage]
+  );
+
+  const unrecordedStudents = useMemo(() => {
+    if (isGroupLesson) {
+      return groupStudents.filter(
+        st => resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true) === 'unrecorded'
+      );
+    }
+    if (activeStudent) {
+      return resolveStudentReportAttendance(activeStudent.id, lesson, localAttendance, localReport, false) === 'unrecorded'
+        ? [activeStudent]
+        : [];
+    }
+    return [];
+  }, [isGroupLesson, groupStudents, activeStudent, lesson, localAttendance, localReport]);
+
+  // Generate Bulk Group Report Text
+  const getBulkReportText = () => {
+    const taughtToday = taughtTodayInfo.text;
+    const nextHomework = homeworkInfo.text;
+    
+    const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
+    const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
+    const dateFormatted = formatArabicDate(lesson.date);
+    const timeFormatted = formatArabicTime(lesson.time);
+
+    const dayDateLine = dayName && dateFormatted 
+      ? `📅 ${isLessonToday ? 'اليوم' : 'موعد الحصة'}: ${dayName} (${dateFormatted})`
+      : dayName 
+        ? `📅 ${isLessonToday ? 'اليوم' : 'يوم الحصة'}: ${dayName}`
+        : dateFormatted 
+          ? `📅 ${isLessonToday ? 'التاريخ' : 'تاريخ الحصة'}: ${dateFormatted}` 
+          : '';
+
+    const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
+    const cycleLine = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
+
+    const recordingSection = formatRecordingsArabic(recordingLink, recordingLink2);
+
+    const teacherArName = getTeacherArabicName(profile, 'المعلم');
+    const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
+    const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
+
+    const isMorning = getCairoHour() < 12;
+
+    const absentsOrLates = groupStudents.filter(st => {
+      const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
+      return stAtt === 'absent' || stAtt === 'late';
+    });
+    const absentCount = absentsOrLates.filter(st => resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true) === 'absent').length;
+    const lateCount = absentsOrLates.filter(st => resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true) === 'late').length;
+
+    if (reportLanguage === 'en') {
+      const groupTitle = associatedGroup?.name || lesson.title || 'German Group';
+      const enTimeFormatted = formatReportTime(lesson.time, 'en');
+      const enGreeting = getTimeBasedGreeting('en', { isGroup: true });
+      let text = `${enGreeting}\n📊 Group Session Report: *${groupTitle}* 🇩🇪\n`;
+      if (dateFormatted) text += `📅 Date: ${dateFormatted}\n`;
+      if (enTimeFormatted) text += `⏰ Time: ${enTimeFormatted}\n`;
+      if (hasCycle) text += `🔢 Session: Session ${currentSessionNumber} of ${totalCycleSessions}\n`;
+      if (taughtToday) text += `\n📖 ${isLessonToday ? "Today's Topic" : 'Lesson Topic'}:\n${taughtToday}`;
+      if (nextHomework) text += `\n\n📝 Homework for all students:\n${nextHomework}`;
+      if (previousHomework.trim()) text += `\n\n📋 Previous Homework:\n• ${previousHomework.trim()}`;
+      text += formatRecordingsByLang(recordingLink, recordingLink2, 'en');
+      if (absentsOrLates.length > 0) {
+        text += `\n----------------------------------\n⚠️ Attendance Notes:\n`;
+        if (showAbsentNamesInGroupReport) {
+          absentsOrLates.forEach((st) => {
+            const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
+            const stEnName = st.certificateName || st.displayNameEn || st.nameEn;
+            const stDisplayName = stEnName || st.name;
+            text += `• ${stDisplayName}: ${stAtt === 'late' ? 'Late ⚠️' : 'Absent ❌'}\n`;
+          });
+        } else {
+          const summaryParts: string[] = [];
+          if (absentCount > 0) summaryParts.push(`Absent: ${absentCount} ❌`);
+          if (lateCount > 0) summaryParts.push(`Late: ${lateCount} ⚠️`);
+          text += `• ${summaryParts.join(' | ')}\n`;
+        }
+      }
+      text += `\n\nThank you,\n${profile.displayName || teacherSig} - German Language Teacher 🇩🇪`;
+      return text;
+    }
+
+    if (reportLanguage === 'de') {
+      const groupTitle = associatedGroup?.name || lesson.title || 'Deutsch-Gruppe';
+      const deTimeFormatted = formatReportTime(lesson.time, 'de');
+      const deGreeting = getTimeBasedGreeting('de', { isGroup: true });
+      let text = `${deGreeting}\n📊 Gruppenbericht: *${groupTitle}* 🇩🇪\n`;
+      if (dateFormatted) text += `📅 Datum: ${dateFormatted}\n`;
+      if (deTimeFormatted) text += `⏰ Uhrzeit: ${deTimeFormatted}\n`;
+      if (hasCycle) text += `🔢 Unterrichtsstunde: Sitzung ${currentSessionNumber} von ${totalCycleSessions}\n`;
+      if (taughtToday) text += `\n📖 ${isLessonToday ? 'Heute durchgenommen' : 'Im Unterricht durchgenommen'}:\n${taughtToday}`;
+      if (nextHomework) text += `\n\n📝 Hausaufgabe:\n${nextHomework}`;
+      if (previousHomework.trim()) text += `\n\n📋 Vorherige Hausaufgabe:\n• ${previousHomework.trim()}`;
+      text += formatRecordingsByLang(recordingLink, recordingLink2, 'de');
+      if (absentsOrLates.length > 0) {
+        text += `\n----------------------------------\n⚠️ Anwesenheitshinweise:\n`;
+        if (showAbsentNamesInGroupReport) {
+          absentsOrLates.forEach((st) => {
+            const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
+            const stEnName = st.certificateName || st.displayNameEn || st.nameEn;
+            const stDisplayName = stEnName || st.name;
+            text += `• ${stDisplayName}: ${stAtt === 'late' ? 'Verspätet ⚠️' : 'Abwesend ❌'}\n`;
+          });
+        } else {
+          const summaryParts: string[] = [];
+          if (absentCount > 0) summaryParts.push(`Abwesend: ${absentCount} ❌`);
+          if (lateCount > 0) summaryParts.push(`Verspätet: ${lateCount} ⚠️`);
+          text += `• ${summaryParts.join(' | ')}\n`;
+        }
+      }
+      text += `\n\nMit freundlichen Grüßen,\n${profile.displayName || teacherSig} - Deutschlehrer 🇩🇪`;
+      return text;
+    }
+
+    const renderArabicAttendanceNotes = (headerText: string): string => {
+      if (absentsOrLates.length === 0) return '';
+      let out = headerText;
+      if (showAbsentNamesInGroupReport) {
+        absentsOrLates.forEach((st) => {
+          const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
+          out += `• ${st.name}: ${stAtt === 'late' ? 'متأخر ⚠️' : 'غائب ❌'}\n`;
+        });
+      } else {
+        const parts: string[] = [];
+        if (absentCount > 0) parts.push(`عدد الغياب: ${absentCount} ❌`);
+        if (lateCount > 0) parts.push(`عدد التأخير: ${lateCount} ⚠️`);
+        out += `• ${parts.join(' | ')}\n`;
+      }
+      return out;
+    };
+
+    if (reportStyle === 'egyptian') {
+      const egyptianGreetings = isMorning ? [
+        'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، صباح الخير بحضراتكم جميعاً 👋',
+        'السلام عليكم ورحمة الله وبركاته، أهلاً بحضراتكم 👋',
+        'السلام عليكم يا فندم 👋'
+      ] : [
+        'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، مساء الخير بحضراتكم جميعاً 👋',
+        'السلام عليكم ورحمة الله وبركاته، أهلاً بحضراتكم 👋',
+        'السلام عليكم يا فندم 👋'
+      ];
+      const selectedGreeting = egyptianGreetings[styleSeed % egyptianGreetings.length];
+      const groupTitle = associatedGroup?.name || lesson.title || 'مجموعة الألماني';
+
+      const topicBlock = taughtToday ? `\n\n📖 ${isLessonToday ? 'اللي اتشرح النهاردة في الحصة' : 'اللي اتشرح في الحصة'}:\n${taughtToday}` : '';
+      const hwBlock = nextHomework ? `\n\n📝 الواجب المطلوب:\n${nextHomework}` : '';
+      const prevHwBlock = previousHomework.trim() ? `\n\n📋 الواجب السابق المطلوب كان:\n• ${previousHomework.trim()}` : '';
+
+      let text = `${selectedGreeting}
+📊 تقرير حصة الألماني لمجموعة: *${groupTitle}* 🇩🇪
+${[dayDateLine, timeLine, cycleLine].filter(Boolean).join('\n')}${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
+`;
+
+      text += renderArabicAttendanceNotes(`\n----------------------------------\n⚠️ تنبيهات الغياب والتأخير:\n`);
+      text += `\nمع تحيات: *${teacherSig}* 🇩🇪`;
+      return text;
+    }
+
+    if (reportStyle === 'concise') {
+      const conciseGreeting = isMorning ? 'السلام عليكم ورحمة الله وبركاته، صباح الخير 👋' : 'السلام عليكم ورحمة الله وبركاته، مساء الخير 👋';
+      const topicBlock = taughtToday ? `\n📌 ${isLessonToday ? 'ما تم شرحه اليوم' : 'ما تم شرحه'}: ${taughtToday}` : '';
+      const hwBlock = nextHomework ? `\n📝 الواجب المقرر: ${nextHomework}` : '';
+      const prevHwBlock = previousHomework.trim() ? `\n• الواجب السابق: ${previousHomework.trim()}` : '';
+
+      let text = `${conciseGreeting}\n⚡ تقرير سريع - ${associatedGroup?.name || lesson.title || 'حصة ألماني'} 🇩🇪
+${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
+${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
+`;
+
+      text += renderArabicAttendanceNotes(`\n⚠️ الغياب والتأخير:\n`);
+      text += `\nمع تحيات: *${teacherSig}* 🇩🇪`;
+      return text;
+    }
+
+    // Standard Arabic
+    const headerParts = [
+      isMorning ? 'السلام عليكم ورحمة الله وبركاته، صباح الخير يا فندم 👋' : 'السلام عليكم ورحمة الله وبركاته، مساء الخير يا فندم 👋',
+      `📊 تقرير الحصة لمجموعة: ${associatedGroup?.name || lesson.title || 'مجموعة اللغة الألمانية'}`,
+      dayDateLine,
+      timeLine,
+      cycleLine
+    ].filter(Boolean).join('\n');
+
+    const topicBlock = taughtToday ? `\n\n📖 ${isLessonToday ? 'تم اليوم شرح' : 'تم شرح'}:\n${taughtToday}` : '';
+    const hwBlock = nextHomework ? `\n\n📝 الواجب المقرر:\n${nextHomework}` : '';
+    const prevHwBlock = previousHomework.trim() ? `\n\n📋 الواجب السابق المطلوب كان:\n• ${previousHomework.trim()}` : '';
+
+    let text = `${headerParts}${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
+`;
+
+    text += renderArabicAttendanceNotes(`\n----------------------------------\n⚠️ تنبيهات الغياب والتأخير:\n`);
+    text += `\nمع تحيات: *${teacherSig}* 🇩🇪`;
+    return text;
+  };
+
+  // Streamlined Student Report (اليوم والتاريخ + اللي اتشرح + الهومورك اللي جاي بس)
+  const getStudentCleanReportText = () => {
+    const taughtToday = taughtTodayInfo.text;
+    const nextHomework = homeworkInfo.text;
+    const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
+    const dateFormatted = formatArabicDate(lesson.date);
+
+    if (reportLanguage === 'en') {
+      const parts: string[] = [];
+      if (dateFormatted) parts.push(`📅 Date: ${dateFormatted}`);
+      if (taughtToday) parts.push(`📖 Covered in Class:\n${taughtToday}`);
+      if (nextHomework) parts.push(`📝 Next Homework:\n${nextHomework}`);
+      return parts.join('\n\n');
+    }
+
+    if (reportLanguage === 'de') {
+      const parts: string[] = [];
+      if (dateFormatted) parts.push(`📅 Datum: ${dateFormatted}`);
+      if (taughtToday) parts.push(`📖 Im Unterricht behandelt:\n${taughtToday}`);
+      if (nextHomework) parts.push(`📝 Hausaufgabe:\n${nextHomework}`);
+      return parts.join('\n\n');
+    }
+
+    const dayDateLine =
+      dayName && dateFormatted
+        ? `📅 اليوم والتاريخ: ${dayName} (${dateFormatted})`
+        : dayName
+          ? `📅 اليوم: ${dayName}`
+          : dateFormatted
+            ? `📅 التاريخ: ${dateFormatted}`
+            : '';
+
+    const parts: string[] = [];
+    if (dayDateLine) parts.push(dayDateLine);
+    if (taughtToday) parts.push(`📖 اللي اتشرح:\n${taughtToday}`);
+    if (nextHomework) parts.push(`📝 الهومورك الجاي:\n${nextHomework}`);
+
+    return parts.join('\n\n');
+  };
+
+  // Auto-generate report based on student data or bulk mode
+  useEffect(() => {
+    if (isManualEdited) return;
+
+    if (activeTab === 'bulk') {
+      setFinalGeneratedText(getBulkReportText());
+      return;
+    }
+
+    if (reportStyle === 'student') {
+      setFinalGeneratedText(getStudentCleanReportText());
+      return;
+    }
+
+    let homeworkOption = '';
+    let dictationScore = 'مكانش فيه';
+    let examScore = 'مكانش فيه';
+    let studentNote = '';
+    let perfFeedback = '';
+    let attendanceAlert = '';
+
+    const englishStudentName = activeStudent?.certificateName || activeStudent?.displayNameEn || activeStudent?.nameEn;
+    const studentDisplayName = (reportLanguage === 'de' || reportLanguage === 'en')
+      ? (englishStudentName || activeStudent?.name || lesson.studentName || 'Student')
+      : (activeStudent?.displayNameAr || activeStudent?.nameAr || activeStudent?.name || lesson.studentName || 'الطالب');
+    const explicitGender = activeStudent ? (activeStudent.gender || lesson.report?.studentPerformance?.[activeStudent.id]?.gender) : undefined;
+    const isFemale = isLikelyFemaleStudent(studentDisplayName, explicitGender);
+    const studentRoleLabel = isFemale ? 'الطالبة' : 'الطالب';
+
+    const activeStudentId = activeStudent?.id;
+    const resolvedAtt = resolveStudentReportAttendance(activeStudentId, lesson, localAttendance, localReport, isGroupLesson);
+    const isAbsent = resolvedAtt === 'absent';
+    const isLate = resolvedAtt === 'late';
+
+    const hwDone = activeStudentId 
+      ? (localReport?.studentHomeworkDone?.[activeStudentId] ?? lesson.report?.studentHomeworkDone?.[activeStudentId]) 
+      : (lesson.report?.studentHomeworkDone?.[lesson.studentId || ''] ?? lesson.report?.studentHomeworkDone?.['single']);
+    const hasHwStatus = !isAbsent && (hwDone === 'yes' || hwDone === 'no' || hwDone === 'none');
+
+    const dictationGrade = activeStudentId 
+      ? (localReport?.studentDictationGrade?.[activeStudentId] ?? lesson.report?.studentDictationGrade?.[activeStudentId]) 
+      : (lesson.report?.studentDictationGrade?.[lesson.studentId || ''] ?? lesson.report?.studentDictationGrade?.['single']);
+    const hasDictation = !isAbsent && dictationGrade !== undefined && dictationGrade !== null && dictationGrade !== -1;
+
+    const examGrade = activeStudentId 
+      ? (localReport?.studentExamGrade?.[activeStudentId] ?? lesson.report?.studentExamGrade?.[activeStudentId]) 
+      : (lesson.report?.studentExamGrade?.[lesson.studentId || ''] ?? lesson.report?.studentExamGrade?.['single']);
+    const hasExam = !isAbsent && examGrade !== undefined && examGrade !== null && examGrade !== -1;
+
+    if (isAbsent) {
+      attendanceAlert = '❌ تنبيه: غياب عن الحصة';
+      homeworkOption = 'غياب';
+      dictationScore = '';
+      examScore = '';
+      perfFeedback = '';
+      studentNote = (activeStudentId ? (localReport?.studentNotes?.[activeStudentId] || lesson.report?.studentNotes?.[activeStudentId]) : '') || '';
+    } else {
+      if (isLate) {
+        attendanceAlert = '⚠️ تنبيه: حضور متأخر';
+      }
+
+      homeworkOption = resolvePreviousHomeworkStatusText(hwDone, 'ar');
+      dictationScore = hasDictation ? `${dictationGrade} / 10` : '';
+      examScore = hasExam ? `${examGrade} / 10` : '';
+
+      perfFeedback = activeStudentId 
+        ? (localReport?.studentPerformance?.[activeStudentId]?.generatedFeedback?.parent || lesson.report?.studentPerformance?.[activeStudentId]?.generatedFeedback?.parent || '') 
+        : '';
+
+      studentNote = (activeStudentId ? (localReport?.studentNotes?.[activeStudentId] || lesson.report?.studentNotes?.[activeStudentId]) : '') || '';
+    }
+
+    const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
+    const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
+    const dateFormatted = formatArabicDate(lesson.date);
+    const timeFormatted = formatArabicTime(lesson.time);
+
+    const dayDateLine = dayName && dateFormatted 
+      ? `📅 ${isLessonToday ? 'اليوم' : 'موعد الحصة'}: ${dayName} (${dateFormatted})`
+      : dayName 
+        ? `📅 ${isLessonToday ? 'اليوم' : 'يوم الحصة'}: ${dayName}`
+        : dateFormatted 
+          ? `📅 ${isLessonToday ? 'التاريخ' : 'تاريخ الحصة'}: ${dateFormatted}` 
+          : '';
+
+    const timeLine = timeFormatted ? `⏰ الساعة: ${timeFormatted}` : '';
+    const cycleLine = hasCycle ? `🔢 رقم الحصة: الحصة (${currentSessionNumber} من ${totalCycleSessions})` : '';
+    const codeLine = '';
+
+    const sessionTimingPhrase = isLessonToday
+      ? 'اليوم'
+      : (dayName ? `ليوم ${dayName} (${dateFormatted})` : (dateFormatted ? `بتاريخ ${dateFormatted}` : 'في الحصة'));
+
+    const sessionTopicHeader = isLessonToday
+      ? 'اللي اتشرح النهاردة في الحصة'
+      : 'اللي اتشرح في الحصة';
+
+    const sessionStandardTopicHeader = isLessonToday
+      ? 'ما تم شرحه اليوم في الحصة'
+      : 'ما تم شرحه في الحصة';
+
+    const cleanPerfFeedback = (!isLessonToday && perfFeedback)
+      ? perfFeedback.replace(/النهارده/g, 'في الحصة').replace(/النهاردة/g, 'في الحصة').replace(/\bاليوم\b/g, 'في الحصة')
+      : perfFeedback;
+
+    const taughtToday = taughtTodayInfo.text;
+    const nextHomework = homeworkInfo.text;
+    const cleanStudentNote = studentNote.trim();
+
+    const teacherArName = getTeacherArabicName(profile, 'المعلم');
+    const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
+    const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
+
+    const notesSection = cleanStudentNote ? `\n\n📌 ملاحظات المعلم:\n• ${cleanStudentNote}` : '';
+    const recordingSection = formatRecordingsArabic(recordingLink, recordingLink2);
+    const alertSection = attendanceAlert ? `\n\n${attendanceAlert}` : '';
+
+    const isMorning = getCairoHour() < 12;
+
+    // ENGLISH REPORT FORMULA
+    if (reportLanguage === 'en') {
+      const attendanceStr = isAbsent ? '❌ Absent' : isLate ? '⚠️ Late' : '✅ Present';
+      const hwStr = resolvePreviousHomeworkStatusText(hwDone, 'en');
+      const greeting = getTimeBasedGreeting('en');
+      const enTimeFormatted = formatReportTime(lesson.time, 'en');
+      const datePart = dateFormatted ? `📅 Date: ${dateFormatted}` : '';
+      const timePart = enTimeFormatted ? `⏰ Time: ${enTimeFormatted}` : '';
+      const cyclePart = hasCycle ? `🔢 Session: Session ${currentSessionNumber} of ${totalCycleSessions}` : '';
+      const headerText = [greeting, `📊 Session Report for: *${studentDisplayName}* 🇩🇪`, datePart, timePart, cyclePart].filter(Boolean).join('\n');
+      
+      let body = `${headerText}\n\n• Attendance: ${attendanceStr}`;
+      if (!isAbsent) {
+        if (hasHwStatus) {
+          if (hwDone === 'none') {
+            body += `\n• Previous Homework: None assigned`;
+          } else {
+            const prevHwEn = previousHomework.trim() ? `${previousHomework.trim()} (${hwStr})` : hwStr;
+            body += `\n• Previous Homework: ${prevHwEn}`;
+          }
+        } else if (previousHomework.trim()) {
+          body += `\n• Previous Homework: ${previousHomework.trim()}`;
+        }
+        if (dictationScore) body += `\n• Quiz / Dictation: ${dictationScore}`;
+        if (examScore) body += `\n• Exam Score: ${examScore}`;
+      }
+      if (taughtToday) body += `\n\n📖 ${isLessonToday ? "Today's Topic" : 'Lesson Topic'}:\n${taughtToday}`;
+      if (nextHomework) body += `\n\n📝 Homework:\n${nextHomework}`;
+      body += formatRecordingsByLang(recordingLink, recordingLink2, 'en');
+      if (cleanStudentNote) body += `\n\n📌 Teacher Notes:\n${cleanStudentNote}`;
+      if (perfFeedback) body += `\n\n🌟 Performance Feedback:\n${perfFeedback}`;
+      body += `\n\nThank you,\n${profile.displayName || teacherSig} - German Language Teacher 🇩🇪`;
+      setFinalGeneratedText(body);
+      return;
+    }
+
+    // GERMAN REPORT FORMULA
+    if (reportLanguage === 'de') {
+      const attendanceStr = isAbsent ? '❌ Abwesend' : isLate ? '⚠️ Verspätet' : '✅ Anwesend';
+      const hwStr = resolvePreviousHomeworkStatusText(hwDone, 'de');
+      const greeting = getTimeBasedGreeting('de');
+      const deTimeFormatted = formatReportTime(lesson.time, 'de');
+      const datePart = dateFormatted ? `📅 Datum: ${dateFormatted}` : '';
+      const timePart = deTimeFormatted ? `⏰ Uhrzeit: ${deTimeFormatted}` : '';
+      const cyclePart = hasCycle ? `🔢 Unterrichtsstunde: Sitzung ${currentSessionNumber} von ${totalCycleSessions}` : '';
+      const headerText = [greeting, `📊 Unterrichtsbericht für: *${studentDisplayName}* 🇩🇪`, datePart, timePart, cyclePart].filter(Boolean).join('\n');
+
+      let body = `${headerText}\n\n• Anwesenheit: ${attendanceStr}`;
+      if (!isAbsent) {
+        if (hasHwStatus) {
+          if (hwDone === 'none') {
+            body += `\n• Vorherige Hausaufgabe: Keine Hausaufgabe`;
+          } else {
+            const prevHwDe = previousHomework.trim() ? `${previousHomework.trim()} (${hwStr})` : hwStr;
+            body += `\n• Vorherige Hausaufgabe: ${prevHwDe}`;
+          }
+        } else if (previousHomework.trim()) {
+          body += `\n• Vorherige Hausaufgabe: ${previousHomework.trim()}`;
+        }
+        if (dictationScore) body += `\n• Diktat / Quiz: ${dictationScore}`;
+        if (examScore) body += `\n• Prüfung / Test: ${examScore}`;
+      }
+      if (taughtToday) body += `\n\n📖 ${isLessonToday ? 'Heute durchgenommen' : 'Im Unterricht durchgenommen'}:\n${taughtToday}`;
+      if (nextHomework) body += `\n\n📝 Hausaufgabe:\n${nextHomework}`;
+      body += formatRecordingsByLang(recordingLink, recordingLink2, 'de');
+      if (cleanStudentNote) body += `\n\n📌 Anmerkung der Lehrkraft:\n${cleanStudentNote}`;
+      if (perfFeedback) body += `\n\n🌟 Unterrichtsbeteiligung:\n${perfFeedback}`;
+      body += `\n\nVielen Dank,\n${profile.displayName || teacherSig} - Deutschlehrer 🇩🇪`;
+      setFinalGeneratedText(body);
+      return;
+    }
+
+    // EGYPTIAN DIALECT FORMULA (صيغة مصرية راقية ومحبوبة لأولياء الأمور)
+    if (reportStyle === 'egyptian') {
+      const egyptianGreetings = isMorning ? [
+        'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، صباح الخير يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، أهلاً بحضرتك يا فندم 👋',
+        'السلام عليكم يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، تحياتي لحضرتك يا فندم 👋',
+        `السلام عليكم ورحمة الله وبركاته، أهلاً بولي أمر ${studentRoleLabel} العزيز${isFemale ? 'ة' : ''} 👋`
+      ] : [
+        'السلام عليكم ورحمة الله وبركاته يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، مساء الخير يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، أهلاً بحضرتك يا فندم 👋',
+        'السلام عليكم يا فندم 👋',
+        'السلام عليكم ورحمة الله وبركاته، تحياتي لحضرتك يا فندم 👋',
+        `السلام عليكم ورحمة الله وبركاته، أهلاً بولي أمر ${studentRoleLabel} العزيز${isFemale ? 'ة' : ''} 👋`
+      ];
+      const selectedGreeting = egyptianGreetings[styleSeed % egyptianGreetings.length];
+      
+      const egyptianIntros = isLessonToday ? [
+        `حبيت أبلغ حضرتك بتقرير حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* اليوم 🇩🇪:`,
+        `تقرير حصة الألماني اليوم لـ ${studentRoleLabel} *${studentDisplayName}* 🇩🇪:`,
+        `ملخص حصة الألماني ومستوى ${studentRoleLabel} *${studentDisplayName}* اليوم 🇩🇪:`,
+        `تفاصيل ومتابعة حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* النهارده 🇩🇪:`,
+        `تقرير ومتابعة أداء ${studentRoleLabel} *${studentDisplayName}* في حصة الألماني 🇩🇪:`
+      ] : [
+        `حبيت أبلغ حضرتك بتقرير حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* (${sessionTimingPhrase}) 🇩🇪:`,
+        `تقرير حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* (${sessionTimingPhrase}) 🇩🇪:`,
+        `ملخص حصة الألماني ومستوى ${studentRoleLabel} *${studentDisplayName}* (${sessionTimingPhrase}) 🇩🇪:`,
+        `تفاصيل ومتابعة حصة الألماني لـ ${studentRoleLabel} *${studentDisplayName}* (${sessionTimingPhrase}) 🇩🇪:`,
+        `تقرير ومتابعة أداء ${studentRoleLabel} *${studentDisplayName}* في حصة الألماني 🇩🇪:`
+      ];
+      const selectedIntro = egyptianIntros[styleSeed % egyptianIntros.length];
+
+      const egyptianOutros = [
+        `مع تحيات: *${teacherSig}* 🇩🇪`,
+        `مع أطيب التحيات: *${teacherSig}* 🇩🇪`,
+        `تحياتي لحضرتك: *${teacherSig}* 🇩🇪`,
+        `مع تحيات معلم المادة: *${teacherSig}* 🇩🇪`
+      ];
+      const selectedOutro = egyptianOutros[styleSeed % egyptianOutros.length];
+
+      // If student was absent: do NOT print homework solved, dictation, or quiz grades
+      if (isAbsent) {
+        const topicBlock = taughtToday ? `\n\n📖 ${sessionTopicHeader} (يرجى مذاكرته وتعويضه):\n${taughtToday}` : '';
+        const hwBlock = nextHomework ? `\n\n📝 الواجب المطلوب للمرة الجاية:\n${nextHomework}` : '';
+        const absenceNotice = isLessonToday 
+          ? `• ${studentRoleLabel} غائب${isFemale ? 'ة' : ''} عن الحصة اليوم، أتمنى ${isFemale ? 'لها' : 'له'} دوام الصحة والتوفيق وأرجو الاطمئنان ${isFemale ? 'عليها' : 'عليه'} 🌸`
+          : `• ${studentRoleLabel} كان${isFemale ? 'ت' : ''} غائب${isFemale ? 'ة' : ''} عن الحصة (${sessionTimingPhrase})، نتمنى ${isFemale ? 'لها' : 'له'} دوام الصحة والتوفيق 🌸`;
+
+        const generated = `${selectedGreeting}
+${selectedIntro}
+${[dayDateLine, timeLine, cycleLine, codeLine].filter(Boolean).join('\n')}
+
+❌ تنبيه الغياب:
+${absenceNotice}${topicBlock}${hwBlock}${recordingSection}${notesSection}
+
+${selectedOutro}`;
+
+        setFinalGeneratedText(generated);
+        return;
+      }
+
+      let prevHwSection = '';
+      if (hasHwStatus) {
+        if (hwDone === 'none') {
+          prevHwSection = `\n\n📋 الواجب السابق:\n• لا يوجد واجب سابق`;
+        } else {
+          const prevHwEgyptian = previousHomework.trim()
+            ? `• الواجب كان: ${previousHomework.trim()}\n• حالة الحل: ${homeworkOption}`
+            : homeworkOption;
+          prevHwSection = `\n\n📋 حل الواجب السابق:\n${prevHwEgyptian}`;
+        }
+      }
+
+      const dictationSection = hasDictation ? `\n\n✍️ درجة الإملاء:\n${dictationGrade} / 10` : '';
+      const examSection = hasExam ? `\n\n🎯 درجة الكويز (Quiz):\n${examGrade} / 10` : '';
+      const topicBlock = taughtToday ? `\n\n📖 ${sessionTopicHeader}:\n${taughtToday}` : '';
+      const hwBlock = nextHomework ? `\n\n📝 الواجب المطلوب للمرة الجاية:\n${nextHomework}` : '';
+
+      const perfSection = perfFeedback 
+        ? (isLessonToday ? `\n\n🌟 مستوى وأداء ${studentRoleLabel} اليوم:\n• ${perfFeedback}` : `\n\n🌟 مستوى وأداء ${studentRoleLabel} في الحصة:\n• ${cleanPerfFeedback}`)
+        : '';
+
+      const generated = `${selectedGreeting}
+${selectedIntro}
+${[dayDateLine, timeLine, cycleLine, codeLine].filter(Boolean).join('\n')}${topicBlock}${hwBlock}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfSection}${alertSection}
+
+${selectedOutro}`;
+
+      setFinalGeneratedText(generated);
+      return;
+    }
+
+    // CONCISE FORMULA (صيغة كبسولة سريعة ومختصرة)
+    if (reportStyle === 'concise') {
+      const conciseGreeting = isMorning ? 'السلام عليكم ورحمة الله وبركاته، صباح الخير 👋' : 'السلام عليكم ورحمة الله وبركاته، مساء الخير 👋';
+      // If student was absent: remove the evaluation block with homework, quiz, dictation
+      if (isAbsent) {
+        const topicBlock = taughtToday ? `\n📖 ما تم شرحه: ${taughtToday}` : '';
+        const hwBlock = nextHomework ? `\n📝 الواجب المقرر: ${nextHomework}` : '';
+        const generated = `${conciseGreeting}
+⚡ كبسولة تقرير حصة الألماني:
+👤 ${studentRoleLabel}: *${studentDisplayName}*
+${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
+
+❌ حالة الحضور: ${isLessonToday ? `غائب${isFemale ? 'ة' : ''} عن الحصة اليوم` : `كان${isFemale ? 'ت' : ''} غائب${isFemale ? 'ة' : ''} عن الحصة`}${topicBlock}${hwBlock}${recordingSection}${cleanStudentNote ? `\n📌 ملاحظة: ${cleanStudentNote}` : ''}
+
+تحياتي، *${teacherSig}* 🇩🇪`;
+
+        setFinalGeneratedText(generated);
+        return;
+      }
+
+      const evalLines: string[] = [];
+      if (hasHwStatus) {
+        if (hwDone === 'none') {
+          evalLines.push(`• الواجب السابق: لا يوجد`);
+        } else {
+          const prevHwConcise = previousHomework.trim()
+            ? `${previousHomework.trim()} (${homeworkOption})`
+            : homeworkOption;
+          evalLines.push(`• الواجب السابق: ${prevHwConcise}`);
+        }
+      }
+
+      if (hasExam && hasDictation) {
+        evalLines.push(`• الكويز: ${examGrade} / 10 | الإملاء: ${dictationGrade} / 10`);
+      } else if (hasExam) {
+        evalLines.push(`• الكويز: ${examGrade} / 10`);
+      } else if (hasDictation) {
+        evalLines.push(`• الإملاء: ${dictationGrade} / 10`);
+      }
+
+      if (attendanceAlert) {
+        evalLines.push(`• ${attendanceAlert}`);
+      }
+
+      const evalSection = evalLines.length > 0 ? `\n\n📊 التقييم:\n${evalLines.join('\n')}` : '';
+      const topicBlock = taughtToday ? `\n📖 ما تم شرحه: ${taughtToday}` : '';
+      const hwBlock = nextHomework ? `\n📝 الواجب: ${nextHomework}` : '';
+      const perfSection = perfFeedback
+        ? `\n\n🌟 التقييم: ${isLessonToday ? perfFeedback : cleanPerfFeedback}`
+        : '';
+
+      const generated = `${conciseGreeting}
+🇩🇪 كبسولة تقرير حصة الألماني:
+👤 ${studentRoleLabel}: *${studentDisplayName}*
+${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
+${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStudentNote ? `\n📌 ملاحظة: ${cleanStudentNote}` : ''}
+
+تحياتي، *${teacherSig}*`;
+
+      setFinalGeneratedText(generated);
+      return;
+    }
+
+    // STANDARD ARABIC FORMULA (الصيغة الفصحى المنظمة)
+    const standardGreeting = isMorning 
+      ? 'السلام عليكم ورحمة الله وبركاته، صباح الخير يا فندم 👋' 
+      : 'السلام عليكم ورحمة الله وبركاته، مساء الخير يا فندم 👋';
+    const headerParts = [
+      standardGreeting,
+      isLessonToday ? `📊 تقرير متابعة الحصة:` : `📊 تقرير متابعة الحصة (${sessionTimingPhrase}):`,
+      `👤 ${studentRoleLabel}: ${studentDisplayName}`,
+      dayDateLine,
+      timeLine,
+      cycleLine
+    ].filter(Boolean).join('\n');
+
+    // If student was absent: remove previous homework, dictation, and exam score
+    if (isAbsent) {
+      const topicBlock = taughtToday ? `\n\n📖 ${sessionStandardTopicHeader} (يرجى الاستدراك):\n${taughtToday}` : '';
+      const hwBlock = nextHomework ? `\n\n📝 الواجب المقرر للمرة القادمة:\n${nextHomework}` : '';
+      const generated = `${headerParts}
+
+❌ حالة الحضور:
+• ${studentRoleLabel} ${isLessonToday ? `غائب${isFemale ? 'ة' : ''} عن الحصة اليوم.` : `كان${isFemale ? 'ت' : ''} غائب${isFemale ? 'ة' : ''} عن الحصة.`}${topicBlock}${hwBlock}${recordingSection}${notesSection}
+
+مع تحيات: *${teacherSig}* 🇩🇪`;
+
+      setFinalGeneratedText(generated);
+      return;
+    }
+
+    let prevHwSection = '';
+    if (hasHwStatus) {
+      if (hwDone === 'none') {
+        prevHwSection = `\n\n📋 الواجب السابق:\n• لا يوجد واجب سابق`;
+      } else {
+        const prevHwStandard = previousHomework.trim()
+          ? `• موضوع الواجب: ${previousHomework.trim()}\n• حالة الإنجاز: ${homeworkOption}`
+          : homeworkOption;
+        prevHwSection = `\n\n📋 الواجب السابق:\n${prevHwStandard}`;
+      }
+    }
+
+    const dictationSection = hasDictation ? `\n\n✍️ درجة الإملاء:\n${dictationGrade} / 10` : '';
+    const examSection = hasExam ? `\n\n🎯 درجة الامتحان (Quiz):\n${examGrade} / 10` : '';
+    const topicBlock = taughtToday ? `\n\n📖 ${isLessonToday ? 'تم اليوم شرح' : 'تم شرح'}:\n${taughtToday}` : '';
+    const hwBlock = nextHomework ? `\n\n📝 الواجب:\n${nextHomework}` : '';
+
+    const perfSection = perfFeedback 
+      ? (isLessonToday ? `\n\n🌟 أداء الحصة:\n• ${perfFeedback}` : `\n\n🌟 أداء الحصة:\n• ${cleanPerfFeedback}`)
+      : '';
+
+    const generated = `${headerParts}${topicBlock}${hwBlock}${recordingSection}${prevHwSection}${dictationSection}${examSection}${notesSection}${perfSection}${alertSection}
+
+مع تحيات: *${teacherSig}* 🇩🇪`;
+
+    setFinalGeneratedText(generated);
+  }, [
+    selectedStudentId,
+    lesson.report,
+    localReport,
+    localAttendance,
+    lesson.sessionNumber,
+    lesson.totalSessionsInPackage,
+    hasCycle,
+    currentSessionNumber,
+    totalCycleSessions,
+    activeStudent,
+    isManualEdited,
+    activeTab,
+    previousHomework,
+    recordingLink,
+    recordingLink2,
+    reportStyle,
+    styleSeed,
+    profile.displayName,
+    profile.displayNameAr,
+    profile.nameAr,
+    reportLanguage,
+    showAbsentNamesInGroupReport,
+    taughtTodayInfo,
+    homeworkInfo
+  ]);
+
+  const handleCopyText = () => {
+    persistRecordings(undefined, undefined, finalGeneratedText);
+    navigator.clipboard.writeText(finalGeneratedText);
+    setCopied(true);
+    /* confetti removed */
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleWhatsAppSend = async (target?: 'parent' | 'group' | 'student') => {
+    persistRecordings(undefined, undefined, finalGeneratedText);
+    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    if (target === 'student') {
+      if (activeStudent) {
+        recordStudentReportDispatched(lesson.id, activeStudent.id, lesson.date, 'student', 'session_modal', nowTime);
+        if (lesson.id && updateLesson) {
+          updateLesson(lesson.id, {
+            whatsAppDispatchedStudents: {
+              ...(lesson.whatsAppDispatchedStudents || {}),
+              [activeStudent.id]: nowTime
+            }
+          });
+        }
+      }
+
+      const studentReportText =
+        reportStyle === 'student' && isManualEdited
+          ? finalGeneratedText
+          : getStudentCleanReportText();
+
+      try {
+        await navigator.clipboard.writeText(studentReportText);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {}
+
+      const studentContact = resolveStudentWhatsAppContact(activeStudent, {
+        quickStudentPhone: studentPhoneVal,
+        preferStudent: true,
+        targetRecipient: 'student'
+      });
+
+      // Save report to phone internal folder (Documents/Gluck_Lernstudio/Parent_Reports) BEFORE sharing to WhatsApp
+      await saveToPhoneSubfolderAndRegister({
+        title: `تقرير طالب (واتساب): ${activeStudent?.name || 'طالب'}`,
+        fileName: `Student_Report_${activeStudent?.name || 'Student'}_${lesson.date || getLocalDateStr()}.txt`,
+        category: 'parent_reports',
+        actionType: 'whatsapp',
+        format: 'txt',
+        textContent: studentReportText,
+        studentId: activeStudent?.id,
+        studentName: activeStudent?.name,
+        groupId: lesson.groupId,
+        groupName: lesson.groupName || lesson.title,
+        recipientPhone: studentContact.hasContact ? studentContact.contact : ''
+      });
+
+      const url = buildWhatsAppUrl(
+        studentContact.hasContact ? studentContact.contact : '',
+        studentReportText
+      );
+      window.open(url, '_blank');
+      return;
+    }
+
+    if (target === 'group' || (activeTab === 'bulk' && target !== 'parent')) {
+      const groupText = activeTab === 'bulk' ? finalGeneratedText : getBulkReportText();
+      const updatedDispatched = { ...(lesson.whatsAppDispatchedStudents || {}) };
+      groupStudents.forEach((st) => {
+        recordStudentReportDispatched(lesson.id, st.id, lesson.date, 'group', 'session_modal', nowTime);
+        updatedDispatched[st.id] = nowTime;
+      });
+      if (lesson.id && updateLesson) {
+        updateLesson(lesson.id, {
+          whatsAppDispatchedStudents: updatedDispatched
+        });
+      }
+
+      try {
+        await navigator.clipboard.writeText(groupText);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      } catch (err) {
+        console.warn('Clipboard write failed:', err);
+      }
+
+      // Save group report to phone internal folder BEFORE sharing on WhatsApp
+      await saveToPhoneSubfolderAndRegister({
+        title: `تقرير مجموعة مجمع (واتساب): ${lesson.groupName || lesson.title || 'مجموعة'}`,
+        fileName: `Group_Report_${lesson.groupName || lesson.title || 'Group'}_${lesson.date || getLocalDateStr()}.txt`,
+        category: 'parent_reports',
+        actionType: 'whatsapp',
+        format: 'txt',
+        textContent: groupText,
+        groupId: lesson.groupId,
+        groupName: lesson.groupName || lesson.title
+      });
+
+      if (groupWhatsAppLink) {
+        let link = groupWhatsAppLink.trim();
+        if (!link.startsWith('http://') && !link.startsWith('https://')) {
+          link = `https://${link}`;
+        }
+        window.open(link, '_blank');
+      } else {
+        // Even if no group link registered: copy text and open WhatsApp so user can pick chat
+        const url = buildWhatsAppUrl('', groupText);
+        window.open(url, '_blank');
+      }
+      try {
+        /* confetti removed */
+      } catch (e) {}
+      return;
+    }
+
+    // Send to student's parent
+    if (activeStudent) {
+      recordStudentReportDispatched(lesson.id, activeStudent.id, lesson.date, 'parent', 'session_modal', nowTime);
+      if (lesson.id && updateLesson) {
+        updateLesson(lesson.id, {
+          whatsAppDispatchedStudents: {
+            ...(lesson.whatsAppDispatchedStudents || {}),
+            [activeStudent.id]: nowTime
+          }
+        });
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(finalGeneratedText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+
+    // Save parent report to phone internal folder BEFORE sharing on WhatsApp
+    await saveToPhoneSubfolderAndRegister({
+      title: `تقرير ولي أمر (واتساب): ${activeStudent?.name || lesson.groupName || 'طالب'}`,
+      fileName: `Parent_Report_${activeStudent?.name || 'Student'}_${lesson.date || getLocalDateStr()}.txt`,
+      category: 'parent_reports',
+      actionType: 'whatsapp',
+      format: 'txt',
+      textContent: finalGeneratedText,
+      studentId: activeStudent?.id,
+      studentName: activeStudent?.name,
+      groupId: lesson.groupId,
+      groupName: lesson.groupName || lesson.title,
+      recipientPhone: parentPhone
+    });
+
+    const fallbackUrl = buildWhatsAppUrl(parentPhone, finalGeneratedText);
+    window.open(fallbackUrl, '_blank');
+    try {
+      /* confetti removed */
+    } catch (e) {}
+  };
+
+  const handlePrint = async () => {
+    await saveToPhoneSubfolderAndRegister({
+      title: `طباعة تقرير حصة: ${activeStudent?.name || lesson.groupName || 'طالب'}`,
+      fileName: `Printed_Report_${activeStudent?.name || 'Student'}_${lesson.date || getLocalDateStr()}.txt`,
+      category: 'parent_reports',
+      actionType: 'print',
+      format: 'txt',
+      textContent: finalGeneratedText,
+      studentId: activeStudent?.id,
+      studentName: activeStudent?.name,
+      groupId: lesson.groupId,
+      groupName: lesson.groupName || lesson.title
+    });
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>تقرير الطالب - DeutschLernen</title>
+            <style>
+              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; direction: rtl; padding: 40px; line-height: 1.8; color: #333; }
+              .card { border: 1px solid #e2e8f0; padding: 30px; border-radius: 12px; background: #fff; max-width: 600px; margin: 0 auto; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+              h2 { color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-top: 0; }
+              pre { white-space: pre-wrap; font-size: 15px; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h2>تقرير ولي الأمر 📊</h2>
+              <pre>${escapeHtml(finalGeneratedText)}</pre>
+            </div>
+            <script>window.print();</script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    }
+  };
+
+  const studentPhoneVal = (activeStudent?.studentPhone || activeStudent?.phone || '').trim();
+  const parentPhoneVal = (activeStudent?.parentPhone || '').trim();
+  const hasStudentDirectPhone = Boolean(
+    studentPhoneVal &&
+    studentPhoneVal.length > 0 &&
+    (!parentPhoneVal || studentPhoneVal.replace(/\D/g, '') !== parentPhoneVal.replace(/\D/g, ''))
+  );
+
+  return (
+    <div 
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-0 overflow-hidden"
+    >
+      <div 
+        onClick={(e) => e.stopPropagation()}
+        className={`bg-surface border border-surface-border w-full max-w-xl rounded-t-[28px] sm:rounded-2xl shadow-2xl flex flex-col max-h-[92dvh] sm:max-h-[90vh] h-auto overflow-hidden animate-scale-up ${language === 'ar' ? 'text-right' : 'text-left'}`} 
+        dir={language === 'ar' ? 'rtl' : 'ltr'}
+      >
+        <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mt-3 mb-1 sm:hidden shrink-0" />
+        
+        {/* Header */}
+        <div className="bg-surface px-3.5 py-2.5 sm:px-5 sm:py-3.5 border-b border-surface-border shrink-0 space-y-2.5">
+          {/* Top Row: Title, Subtitle, and Close Button */}
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+              <div className="p-2 bg-primary-soft text-primary rounded-xl shrink-0 shadow-2xs border border-primary-border/40">
+                <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-xs sm:text-sm font-black text-text-main truncate">
+                  {t('auto_share_session_report')}
+                </h2>
+                <div className="text-[10px] sm:text-xs text-text-muted truncate flex items-center gap-1.5 flex-wrap mt-0.5">
+                  {associatedGroup ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowGroupProfile(true);
+                      }}
+                      className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1 cursor-pointer truncate"
+                      title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                    >
+                      <span className="truncate">{associatedGroup.name}</span>
+                      <Users className="w-3 h-3 opacity-80 shrink-0" />
+                    </button>
+                  ) : (
+                    <span className="truncate font-bold text-text-main">{lesson.title}</span>
+                  )}
+                  {lesson.grade ? <span className="opacity-70">• {lesson.grade}</span> : null}
+                  {hasCycle ? <span className="opacity-70">• {_t(`الحصة ${currentSessionNumber}/${totalCycleSessions}`, `Session ${currentSessionNumber}/${totalCycleSessions}`, `Std. ${currentSessionNumber}/${totalCycleSessions}`)}</span> : null}
+                  {lesson.date ? <span className="opacity-70 font-mono">• {lesson.date}</span> : null}
+                </div>
+              </div>
+            </div>
+
+            {/* Close Button */}
+            <button 
+              type="button" 
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              className="p-1.5 sm:p-2 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 rounded-xl text-text-muted hover:text-text-main transition-all cursor-pointer shrink-0 border border-surface-border active:scale-95 shadow-2xs"
+              title={t('auto_cancel')}
+            >
+              <X className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+            </button>
+          </div>
+
+          {/* Language Selection Bar */}
+          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-surface-border/50 bg-slate-50/70 dark:bg-slate-900/40 px-2.5 py-1.5 rounded-xl border border-surface-border/60">
+            <span className="text-[10px] sm:text-[11px] font-bold text-text-muted flex items-center gap-1.5 shrink-0">
+              <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span>{_t('لغة إرسال التقرير:', 'Report Language:', 'Sprache des Berichts:')}</span>
+            </span>
+            <ReportLanguageToggle
+              showLabel={false}
+              compact={false}
+              onLanguageChange={() => setIsManualEdited(false)}
+            />
+          </div>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-2.5 sm:p-3.5 space-y-2 sm:space-y-2.5 overflow-y-auto flex-1 min-h-0">
+          
+          {/* Group Toggle Tab (Only if multiple students in the group) */}
+          {isGroupLesson && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 bg-slate-100/80 dark:bg-slate-900/40 p-1 rounded-xl border border-surface-border">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveTab('bulk');
+                  setIsManualEdited(false);
+                }}
+                className={`py-2 px-2.5 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
+                  activeTab === 'bulk'
+                    ? 'bg-white dark:bg-slate-800 text-primary shadow-xs'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                <Users className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className="truncate">
+                  {_t(
+                    `📊 تقرير مجمع`,
+                    `📊 Bulk Report`,
+                    `📊 Sammelbericht`
+                  )}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveTab('individual');
+                  setIsManualEdited(false);
+                }}
+                className={`py-2 px-2.5 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
+                  activeTab === 'individual'
+                    ? 'bg-white dark:bg-slate-800 text-primary shadow-xs'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                <User className="w-4 h-4 text-primary shrink-0" />
+                <span className="truncate">{_t('👤 تقرير فردي', '👤 Individual', '👤 Einzelbericht')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDispatchQueueModal(true);
+                }}
+                className="py-2 px-2.5 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer min-w-0 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-xs hover:from-emerald-700 hover:to-teal-700 active:scale-95"
+                title={_t('إرسال تقارير الطلاب متتالية عبر واتساب مع مؤشر إنجاز', 'Sequential WhatsApp Dispatch Queue', 'WhatsApp-Warteschlange')}
+              >
+                <Flame className="w-4 h-4 text-amber-300 shrink-0" />
+                <span className="truncate">
+                  {_t(`⚡ طابور الإرسال (${groupStudents.length})`, `⚡ Queue (${groupStudents.length})`, `⚡ Warteschlange (${groupStudents.length})`)}
+                </span>
+              </button>
+            </div>
+          )}
+
+
+
+          {/* Student Selection List (For individual reports) */}
+          {activeTab === 'individual' && groupStudents.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black text-text-main block">
+                  {t('auto_select_a_student_to_preview')}
+                </label>
+                <span className="text-[10px] font-bold text-primary bg-primary-soft px-2 py-0.5 rounded-full">
+                  {groupStudents.length} طلاب
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 max-h-24 sm:max-h-28 overflow-y-auto p-1.5 bg-surface-hover/50 rounded-xl border border-surface-border/50">
+                {groupStudents.map(st => {
+                  const isSelected = selectedStudentId === st.id;
+                  const stAtt = resolveStudentReportAttendance(st.id, lesson, localAttendance, localReport, true);
+                  const dispatchedStatus = isStudentReportDispatched(st.id, {
+                    lessonId: lesson.id,
+                    dateStr: lesson.date,
+                    lessonDispatchedStudents: lesson.whatsAppDispatchedStudents
+                  });
+                  return (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedStudentId(st.id);
+                        setIsManualEdited(false);
+                      }}
+                      className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                        isSelected
+                          ? 'bg-primary border-primary text-white shadow-xs'
+                          : 'bg-surface border-surface-border text-text-muted hover:text-text-main hover:bg-slate-50'
+                      }`}
+                    >
+                      <User className="w-3.5 h-3.5" />
+                      <span>{st.name}</span>
+                      {st.scheduleRecurrence === 'biweekly_a' && <span className="text-[9px] font-bold">🅰️</span>}
+                      {st.scheduleRecurrence === 'biweekly_b' && <span className="text-[9px] font-bold">🅱️</span>}
+                      <span className={`text-[9px] px-1 rounded font-bold ${
+                        isSelected 
+                          ? 'bg-white/20 text-white' 
+                          : stAtt === 'present' ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40' : stAtt === 'late' ? 'text-amber-600 bg-amber-50 dark:bg-amber-950/40' : stAtt === 'absent' ? 'text-red-600 bg-red-50 dark:bg-red-950/40' : 'text-slate-500 bg-slate-100 dark:bg-slate-800'
+                      }`}>
+                        {stAtt === 'present' ? '✓' : stAtt === 'late' ? '!' : stAtt === 'absent' ? '✕' : '؟'}
+                      </span>
+                      {dispatchedStatus.isSent && (
+                        <span
+                          className={`text-[9px] px-1 rounded-md font-bold flex items-center gap-0.5 ${
+                            isSelected ? 'bg-emerald-300 text-emerald-950' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                          }`}
+                          title={`تم إرسال التقرير ${dispatchedStatus.time ? `(${dispatchedStatus.time})` : ''}`}
+                        >
+                          <Check className="w-2.5 h-2.5" />
+                          <span>أُرسل</span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Report Metadata */}
+          {activeTab === 'individual' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 bg-primary-soft/40 p-3 sm:p-3.5 rounded-xl border border-primary-border/40 text-xs">
+              <div>
+                <span className="text-text-muted font-bold block mb-0.5">{t('auto_student')}</span>
+                <span className="font-extrabold text-text-main text-xs sm:text-[13px] truncate block">
+                  {activeStudent?.name || lesson.studentName || t('auto_not_specified')}
+                </span>
+                {activeStudent?.grade && (
+                  <span className="text-[10px] text-primary font-bold">
+                    {activeStudent.grade}
+                  </span>
+                )}
+              </div>
+
+              {/* Attendance Quick Toggle */}
+              <div>
+                <span className="text-text-muted font-bold block mb-1">
+                  {isLessonToday
+                    ? _t('حالة الحضور اليوم:', 'Attendance Today:', 'Anwesenheit:')
+                    : _t('حالة الحضور في الحصة:', 'Attendance in Lesson:', 'Anwesenheit in der Stunde:')}
+                </span>
+                {(() => {
+                  const targetId = activeStudent?.id || lesson.studentId || 'single';
+                  const currentStAtt = resolveStudentReportAttendance(activeStudent?.id, lesson, localAttendance, localReport, isGroupLesson);
+                  return (
+                    <div className="inline-flex items-center gap-0.5 bg-surface p-0.5 rounded-lg border border-surface-border shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={() => handleStudentAttendanceChange(targetId, 'present')}
+                        className={`px-2 py-0.5 rounded text-[10.5px] font-black transition-all cursor-pointer ${
+                          currentStAtt === 'present'
+                            ? 'bg-emerald-600 text-white shadow-2xs scale-105'
+                            : 'text-text-muted hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                        title={_t('حاضر', 'Present', 'Anwesend')}
+                      >
+                        حاضر ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStudentAttendanceChange(targetId, 'late')}
+                        className={`px-2 py-0.5 rounded text-[10.5px] font-black transition-all cursor-pointer ${
+                          currentStAtt === 'late'
+                            ? 'bg-amber-500 text-white shadow-2xs scale-105'
+                            : 'text-text-muted hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                        title={_t('متأخر', 'Late', 'Verspätet')}
+                      >
+                        متأخر ⚠️
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStudentAttendanceChange(targetId, 'absent')}
+                        className={`px-2 py-0.5 rounded text-[10.5px] font-black transition-all cursor-pointer ${
+                          currentStAtt === 'absent'
+                            ? 'bg-red-600 text-white shadow-2xs scale-105'
+                            : 'text-text-muted hover:text-text-main hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                        title={_t('غائب - سيتم حذف الواجب والدرجات من التقرير فوراً', 'Absent - Removes homework and scores from text', 'Abwesend')}
+                      >
+                        غائب ❌
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+
+
+
+              <div>
+                <span className="text-text-muted font-bold block mb-0.5">
+                  {resolvedContact.isUsername 
+                    ? (language === 'ar' ? 'يوزر نيم ولي الأمر' : 'Parent Username') 
+                    : t('auto_parent_phone_7')}
+                </span>
+                <div className="font-extrabold text-text-main text-xs sm:text-[13px] truncate" dir="ltr">
+                  {resolvedContact.hasContact ? (
+                    resolvedContact.isUsername ? (
+                      <span className="inline-flex items-center gap-1 font-mono font-black text-primary text-xs">
+                        <AtSign className="w-3.5 h-3.5 text-primary shrink-0" />
+                        {cleanWhatsAppUsername(resolvedContact.contact)}
+                      </span>
+                    ) : (
+                      <span className="font-mono text-slate-700 dark:text-slate-200">{resolvedContact.contact}</span>
+                    )
+                  ) : (
+                    <span className="text-text-muted font-normal text-xs">{t('auto_not_registered')}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-2.5 sm:p-3 bg-primary-soft/40 border border-primary-border/40 rounded-xl space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-text-muted font-bold block mb-0.5">{t('auto_group')}</span>
+                  {associatedGroup ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowGroupProfile(true);
+                      }}
+                      className="font-black text-primary text-xs sm:text-sm hover:underline inline-flex items-center gap-1.5 cursor-pointer text-start"
+                      title={_t('انقر لفتح قائمة وبيانات المجموعة', 'Click to open group details & profile', 'Klicken, um Gruppendetails zu öffnen')}
+                    >
+                      <span>{associatedGroup.name}</span>
+                      <Users className="w-3.5 h-3.5 opacity-80" />
+                      <span className="text-[9px] bg-primary/15 text-primary px-1.5 py-0.2 rounded font-bold">
+                        {_t('فتح القائمة', 'Open List', 'Öffnen')}
+                      </span>
+                    </button>
+                  ) : (
+                    <span className="font-black text-primary text-xs sm:text-sm">
+                      {associatedGroup?.name || t('auto_german_group')}
+                    </span>
+                  )}
+                </div>
+                {groupWhatsAppLink ? (
+                  <span className="bg-primary/15 text-primary px-2 py-1 rounded-md text-[10px] font-black flex items-center gap-1">
+                    <Link2 className="w-3 h-3" />
+                    <span>{t('auto_whatsapp_group_connected')}</span>
+                  </span>
+                ) : (
+                  <span className="bg-primary/10 text-primary px-2 py-1 rounded-md text-[10px] font-black">
+                    {_t('سيتم نسخ التقرير وفتح واتساب لاختيار الشات', 'Text copied & WhatsApp opens to pick chat', 'Text kopiert & WhatsApp öffnet')}
+                  </span>
+                )}
+              </div>
+              <label className="flex items-center gap-2 pt-1.5 border-t border-primary-border/30 cursor-pointer select-none text-[11px] font-bold text-text-main">
+                <input
+                  type="checkbox"
+                  checked={showAbsentNamesInGroupReport}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setShowAbsentNamesInGroupReport(checked);
+                    setIsManualEdited(false);
+                    try {
+                      localStorage.setItem('dl_show_absent_names_in_group_report', String(checked));
+                    } catch {}
+                  }}
+                  className="rounded border-surface-border text-primary focus:ring-primary/30"
+                />
+                <span>{_t('إظهار أسماء الغائبين والمتأخرين في تقرير المجموعة', 'Show absent/late names in group report', 'Namen der Abwesenden/Verspäteten im Gruppenbericht anzeigen')}</span>
+              </label>
+            </div>
+          )}
+
+          {/* Previous Homework Section (الواجب السابق) */}
+          <div className="space-y-1.5 bg-surface p-2.5 sm:p-3 rounded-xl border border-surface-border">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-1.5">
+                <ClipboardCheck className="w-4 h-4 text-primary" />
+                <span className="text-xs font-black text-text-main">
+                  {isLessonToday
+                    ? _t('الواجب السابق (الذي تمت مراجعته اليوم)', 'Previous Homework (Checked Today)', 'Vorherige Hausaufgabe')
+                    : _t('الواجب السابق (الذي تمت مراجعته في الحصة)', 'Previous Homework (Checked in Lesson)', 'Vorherige Hausaufgabe')}
+                </span>
+              </div>
+              {detectedPreviousHomework && (
+                <span className="text-[10.5px] font-bold text-primary flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{_t('تم جلبه تلقائياً من الحصة السابقة', 'Loaded from previous lesson', 'Aus vorheriger Stunde geladen')}</span>
+                </span>
+              )}
+            </div>
+
+            <div className="relative flex items-center">
+              <input
+                type="text"
+                value={previousHomework}
+                onChange={(e) => {
+                  setPreviousHomework(e.target.value);
+                  setIsManualEdited(false);
+                }}
+                className="w-full pl-8 pr-3 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60 text-right font-medium"
+                placeholder={_t('اكتب كان إيه الواجب السابق هنا (مثلاً: حل صـ 25 وتدريبات القواعد)...', 'Enter previous homework details...', 'Vorherige Hausaufgabe hier eingeben...')}
+              />
+              {previousHomework && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviousHomework('');
+                    setIsManualEdited(false);
+                  }}
+                  className="absolute left-2 p-1 text-text-muted hover:text-red-500 rounded transition-colors cursor-pointer"
+                  title={_t('مسح', 'Clear', 'Löschen')}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Lecture / Session Recording Links */}
+          <div className="space-y-1.5 bg-surface p-2.5 sm:p-3 rounded-xl border border-surface-border">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-1.5">
+                <Video className="w-4 h-4 text-primary" />
+                <span className="text-xs font-black text-text-main">
+                  {_t('روابط تسجيل الحصة', 'Session Recordings', 'Aufnahmelinks der Lektion')}
+                </span>
+              </div>
+
+              {/* Open Grain Button */}
+              <a
+                href="https://grain.com/app/meetings"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black bg-primary-soft hover:bg-primary-soft/80 text-primary border border-primary-border transition-all shadow-2xs active:scale-95 cursor-pointer"
+                title="Open Grain Meetings"
+              >
+                <ExternalLink className="w-3 h-3 text-primary" />
+                <span>Open Grain</span>
+              </a>
+            </div>
+
+            {/* Part 1 Recording Input */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[11px] font-bold text-text-muted">
+                <div className="flex items-center gap-1.5">
+                  <span>{_t('التسجيل الأول (الجزء 1)', 'Recording 1 (Part 1)', 'Aufnahme 1 (Teil 1)')}</span>
+                  {autoSavedNotice && (
+                    <span className="text-[10px] text-primary flex items-center gap-1 animate-scale-up font-bold">
+                      <Check className="w-3 h-3 text-primary" />
+                      <span>{_t('تم الحفظ في القوائم تلقائياً ✓', 'Saved to lists ✓', 'Gespeichert ✓')}</span>
+                    </span>
+                  )}
+                </div>
+                {!showRecordingLink2 && !recordingLink2 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRecordingLink2(true)}
+                    className="text-[10px] font-black text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{_t('+ إضافة تسجيل ثانٍ للحصة', '+ Add Part 2 Recording', '+ Teil 2 hinzufügen')}</span>
+                  </button>
+                )}
+              </div>
+              <div className="relative flex items-center">
+                <input
+                  type="url"
+                  value={recordingLink}
+                  onChange={(e) => {
+                    setRecordingLink(e.target.value);
+                    setIsManualEdited(false);
+                  }}
+                  className="w-full pl-3 pr-16 py-2 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/50 font-mono text-left"
+                  placeholder="https://... (Grain, Zoom, YouTube, Drive)"
+                  dir="ltr"
+                />
+                {recordingLink.trim() && (
+                  <div className="absolute right-2 flex items-center gap-1">
+                    <a
+                      href={recordingLink.trim()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1 text-primary hover:text-primary-hover hover:bg-primary-soft rounded transition-colors"
+                      title={_t('فتح الرابط والتأكد منه', 'Open & Test Link', 'Link testen')}
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecordingLink('');
+                        setIsManualEdited(false);
+                      }}
+                      className="p-1 text-text-muted hover:text-red-500 rounded transition-colors"
+                      title={_t('مسح', 'Clear', 'Löschen')}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Part 2 Recording Input */}
+            {(showRecordingLink2 || recordingLink2.trim()) && (
+              <div className="space-y-1 pt-1.5 border-t border-slate-100 dark:border-surface-border">
+                <div className="flex items-center justify-between text-[11px] font-bold text-text-muted">
+                  <span>{_t('التسجيل الثاني (الجزء 2)', 'Recording 2 (Part 2)', 'Aufnahme 2 (Teil 2)')}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecordingLink2('');
+                      setShowRecordingLink2(false);
+                      setIsManualEdited(false);
+                    }}
+                    className="text-[10px] font-bold text-red-500 hover:underline flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>{_t('إلغاء الجزء الثاني', 'Remove Part 2', 'Teil 2 entfernen')}</span>
+                  </button>
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    type="url"
+                    value={recordingLink2}
+                    onChange={(e) => {
+                      setRecordingLink2(e.target.value);
+                      setIsManualEdited(false);
+                    }}
+                    className="w-full pl-3 pr-16 py-2 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/50 font-mono text-left"
+                    placeholder="https://... (Grain, Zoom, YouTube, Drive - Part 2)"
+                    dir="ltr"
+                  />
+                  {recordingLink2.trim() && (
+                    <div className="absolute right-2 flex items-center gap-1">
+                      <a
+                        href={recordingLink2.trim()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1 text-primary hover:text-primary-hover hover:bg-primary-soft rounded transition-colors"
+                        title={_t('فتح الرابط والتأكد منه', 'Open & Test Link', 'Link testen')}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRecordingLink2('');
+                          setIsManualEdited(false);
+                        }}
+                        className="p-1 text-text-muted hover:text-red-500 rounded transition-colors"
+                        title={_t('مسح', 'Clear', 'Löschen')}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Preview & Editor Textarea */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between flex-wrap gap-1.5">
+              <label className="text-xs font-black text-text-main flex items-center gap-1.5">
+                <MessageSquare className="w-4 h-4 text-primary" />
+                <span>{t('auto_preview_edit_message')}</span>
+              </label>
+
+              {/* Style selector and re-roll button */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="inline-flex items-center p-0.5 bg-surface border border-surface-border rounded-lg shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportStyle('egyptian');
+                      setIsManualEdited(false);
+                    }}
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${
+                      reportStyle === 'egyptian'
+                        ? 'bg-primary text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    🇪🇬 مصري راقي
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportStyle('standard');
+                      setIsManualEdited(false);
+                    }}
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${
+                      reportStyle === 'standard'
+                        ? 'bg-primary text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    📜 فصحى
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportStyle('concise');
+                      setIsManualEdited(false);
+                    }}
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${
+                      reportStyle === 'concise'
+                        ? 'bg-primary text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    ⚡ مختصر
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportStyle('student');
+                      setIsManualEdited(false);
+                    }}
+                    className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${
+                      reportStyle === 'student'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                    title="نسخة منقحة للطالب: اليوم والتاريخ واللي اتشرح والهومورك الجاي بس"
+                  >
+                    🎓 للطالب
+                  </button>
+                </div>
+
+
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStyleSeed(prev => prev + 1);
+                    setIsManualEdited(false);
+                  }}
+                  className="px-2 py-1 bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-primary border border-surface-border rounded-lg text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer"
+                  title={_t('تغيير صياغة التقرير', 'Cycle Report Phrasing', 'Formulierung ändern')}
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>{_t('صيغة أخرى', 'Alternate Wording', 'Andere Formulierung')}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCopyText();
+                  }}
+                  className="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer ml-1"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 text-primary" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copied ? t('auto_copied') : t('auto_copy_text')}</span>
+                </button>
+              </div>
+            </div>
+
+            <textarea
+              value={finalGeneratedText}
+              onChange={(e) => {
+                setFinalGeneratedText(e.target.value);
+                setIsManualEdited(true);
+              }}
+              className="w-full h-28 sm:h-36 bg-surface-hover/80 border border-surface-border rounded-xl p-2.5 sm:p-3 text-xs font-semibold leading-relaxed text-text-main focus:outline-none focus:ring-2 focus:ring-primary/10 resize-none font-sans"
+            />
+          </div>
+
+        </div>
+
+        {/* Footer Actions - Clean, unified, responsive action bar */}
+        <div className="p-2.5 sm:p-3 bg-surface border-t border-surface-border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0 pb-[max(10px,env(safe-area-inset-bottom,10px))] shadow-lg z-10">
+          <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+            {/* Primary WhatsApp Action:
+                - In Group Report Mode (`activeTab === 'bulk'`): HIDE "An Eltern senden"! Show ONLY "An WhatsApp-Gruppe senden".
+                - In Individual Report Mode (`activeTab === 'individual'`): Show "Send to Parent" (or Send via WhatsApp)
+            */}
+            {activeTab === 'bulk' ? (
+              <button
+                id="send-whatsapp-group-btn"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleWhatsAppSend('group');
+                }}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs min-h-[40px] whitespace-nowrap"
+                title={_t('إرسال تقرير الحصة لجروب الواتساب', 'Send report to WhatsApp Group', 'Bericht an WhatsApp-Gruppe senden')}
+              >
+                <Users className="w-4 h-4 shrink-0" />
+                <span className="truncate">
+                  {groupWhatsAppLink
+                    ? t('auto_send_to_whatsapp_group')
+                    : _t('إرسال لجروب الواتساب', 'Send to WhatsApp Group', 'An WhatsApp-Gruppe senden')}
+                </span>
+              </button>
+            ) : (
+              <button
+                id="send-whatsapp-parent-btn"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleWhatsAppSend('parent');
+                }}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs min-h-[40px] whitespace-nowrap"
+                title={_t(`إرسال تقرير لولي أمر (${activeStudent?.name || 'الطالب'})`, `Send to parent (${activeStudent?.name || 'Student'})`, `An Eltern senden`)}
+              >
+                <Send className="w-4 h-4 shrink-0" />
+                <span className="truncate">
+                  {_t(
+                    `إرسال لولي الأمر (${activeStudent?.name || 'الطالب'})`,
+                    `Send to Parent (${activeStudent?.name || 'Student'})`,
+                    `An Eltern senden`
+                  )}
+                </span>
+              </button>
+            )}
+
+            {/* Direct Student WhatsApp Button (Always available in individual mode; sends streamlined student version) */}
+            {activeTab === 'individual' && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleWhatsAppSend('student');
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[40px] whitespace-nowrap shrink-0"
+                title={_t('إرسال نسخة الطالب المنقحة (اليوم والتاريخ + اللي اتشرح + الهومورك الجاي بس)', 'Send clean student version (Date, Topic & Next Homework only)', 'Kurzversion an Schüler senden')}
+              >
+                <Send className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{_t('للطالب نفسه', 'To Student', 'An Schüler')}</span>
+              </button>
+            )}
+
+            {/* Quick WhatsApp Dispatch Queue Button */}
+            {groupStudents.length > 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDispatchQueueModal(true);
+                }}
+                className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-95 text-white font-black text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[40px] whitespace-nowrap shrink-0"
+                title={_t('فتح طابور إرسال رسائل الواتساب المتتالية لجميع الطلاب مع مؤشر إنجاز', 'Open WhatsApp Dispatch Queue for all students', 'WhatsApp-Warteschlange starten')}
+              >
+                <Flame className="w-4 h-4 shrink-0 text-amber-300" />
+                <span className="truncate">{_t('طابور الإرسال ⚡', 'Dispatch Queue ⚡', 'Warteschlange ⚡')}</span>
+              </button>
+            )}
+
+            {/* Print Button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePrint();
+              }}
+              className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[40px] shrink-0"
+              title={t('auto_print')}
+            >
+              <Printer className="w-4 h-4" />
+              <span className="hidden sm:inline">{t('auto_print')}</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Call Parent Button (Individual tab only) */}
+            {activeTab === 'individual' && resolvedContact.hasContact && !resolvedContact.isUsername && (
+              <a
+                href={`tel:${resolvedContact.contact}`}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-surface-border min-h-[40px]"
+                title={t('auto_phone_call')}
+              >
+                <Phone className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span className="hidden sm:inline">{t('auto_phone_call')}</span>
+              </a>
+            )}
+
+            {/* Go to Homescreen / Startseite Button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                persistRecordings(undefined, undefined, finalGeneratedText);
+                if (onGoToHomeScreen) {
+                  onGoToHomeScreen();
+                } else {
+                  onClose();
+                }
+              }}
+              className="bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 text-text-main font-bold text-xs py-2.5 px-3.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-surface-border min-h-[40px]"
+            >
+              <Home className="w-4 h-4 shrink-0 text-slate-500" />
+              <span className="truncate">{t('auto_go_to_homescreen')}</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      {showGroupProfile && associatedGroup && (
+        <GroupProfileModal
+          group={associatedGroup}
+          onClose={() => setShowGroupProfile(false)}
+        />
+      )}
+
+      {showDispatchQueueModal && (
+        <WhatsAppDispatchQueueModal
+          isOpen={showDispatchQueueModal}
+          onClose={() => setShowDispatchQueueModal(false)}
+          lesson={lesson}
+          initialStudents={groupStudents}
+          initialGroup={associatedGroup}
+          title={associatedGroup?.name || lesson.title}
+        />
+      )}
+    </div>
+  );
+};

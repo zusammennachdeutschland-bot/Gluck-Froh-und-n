@@ -1,0 +1,2807 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Users, Search, Plus, Trash2, Edit3, Sparkles, Upload, 
+  X, Copy, RefreshCw, CheckCircle2, Bus, GraduationCap, 
+  ShieldCheck, FileSpreadsheet, ArrowUpDown, ClipboardCheck, 
+  FileCode, ExternalLink, Code2, AlertCircle, CheckSquare, 
+  Square, Filter, Layers, AlertTriangle, Target, Download,
+  SlidersHorizontal, Check, ArrowRightLeft
+} from 'lucide-react';
+import { useApp } from '../context/AppContext';
+import { HodGermanStudent, Complaint, StudentActionPlan } from '../types';
+import { storage } from '../services/storageService';
+import { ActionPlansView } from './ActionPlansView';
+import { HodFamiliesView, findSiblingGroups, SiblingGroup } from './HodFamiliesView';
+import { 
+  normalizeClassCode, 
+  extractGradeFromClass, 
+  compareClassCodes,
+  generateUnifiedGermanPrompt 
+} from '../utils/classNormalizer';
+
+export const EXTERNAL_AI_PROMPT_TEXT = generateUnifiedGermanPrompt();
+
+export const HodStudentsView: React.FC = () => {
+  const { profile, updateProfile, _t } = useApp();
+  
+  // Roster State
+  const [students, setStudents] = useState<HodGermanStudent[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Families / Siblings Page State
+  const [isFamiliesViewOpen, setIsFamiliesViewOpen] = useState(false);
+  const [familiesInitialSearch, setFamiliesInitialSearch] = useState('');
+
+  // Search & Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [classFilter, setClassFilter] = useState<string>('all');
+  const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
+  const [selectedClass, setSelectedClass] = useState<string>('all');
+  const [genderFilter, setGenderFilter] = useState<'all' | 'Boy' | 'Girl'>('all');
+  const [busFilter, setBusFilter] = useState<'all' | 'bus' | 'nobus'>('all');
+
+  // Multi-selection checkboxes
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+
+  // Sorting
+  const [sortField, setSortField] = useState<'nameAr' | 'nameEn' | 'gradeClass' | 'busLine'>('gradeClass');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // Single Student Delete Modal (Custom Modal to bypass browser window.confirm issues)
+  const [studentToDelete, setStudentToDelete] = useState<HodGermanStudent | null>(null);
+
+  // Student Complaints Modal State
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [selectedStudentForComplaintsModal, setSelectedStudentForComplaintsModal] = useState<HodGermanStudent | null>(null);
+
+  // Student Action Plans State
+  const [actionPlans, setActionPlans] = useState<StudentActionPlan[]>([]);
+  const [selectedStudentForActionPlanModal, setSelectedStudentForActionPlanModal] = useState<HodGermanStudent | null>(null);
+
+  // Bulk Delete Modal
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [targetDeleteClass, setTargetDeleteClass] = useState<string>('');
+  const [targetDeleteGrade, setTargetDeleteGrade] = useState<string>('');
+
+  // Move Student States
+  const [studentToMove, setStudentToMove] = useState<HodGermanStudent | null>(null);
+  const [targetMoveClass, setTargetMoveClass] = useState<string>('10A');
+  const [customMoveClass, setCustomMoveClass] = useState<string>('');
+  const [isCustomMoveClass, setIsCustomMoveClass] = useState(false);
+
+  // Bulk Move Selected Students
+  const [isBulkMoveModalOpen, setIsBulkMoveModalOpen] = useState(false);
+  const [targetBulkMoveClass, setTargetBulkMoveClass] = useState<string>('10A');
+  const [customBulkMoveClass, setCustomBulkMoveClass] = useState<string>('');
+  const [isCustomBulkMoveClass, setIsCustomBulkMoveClass] = useState(false);
+
+  // Move Entire Class to Another Class
+  const [classToMoveFrom, setClassToMoveFrom] = useState<string | null>(null);
+  const [targetWholeClassMove, setTargetWholeClassMove] = useState<string>('10B');
+  const [customWholeClassMove, setCustomWholeClassMove] = useState<string>('');
+  const [isCustomWholeClassMove, setIsCustomWholeClassMove] = useState(false);
+
+  // Add/Edit Modal
+  const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<HodGermanStudent | null>(null);
+  const [studentForm, setStudentForm] = useState<{
+    nameAr: string;
+    nameEn: string;
+    gradeClass: string;
+    gender: 'Boy' | 'Girl';
+    busLine: string;
+  }>({
+    nameAr: '',
+    nameEn: '',
+    gradeClass: '10A',
+    gender: 'Boy',
+    busLine: 'N/A',
+  });
+
+  // External AI Prompt Generator & Paste JSON Modal
+  const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
+  const [promptTargetGrade, setPromptTargetGrade] = useState<string>('');
+  const [promptTargetClass, setPromptTargetClass] = useState<string>('');
+  const [promptLanguage, setPromptLanguage] = useState<'ar' | 'en' | 'bilingual'>('ar');
+  const [promptCopied, setPromptCopied] = useState(false);
+  const [pastedAiJsonText, setPastedAiJsonText] = useState('');
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const [pasteSuccessCount, setPasteSuccessCount] = useState<number | null>(null);
+
+  // Toast Banner
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Helper migration for existing storage records with normalization
+  const sanitizeStudentData = (rawList: any[]): HodGermanStudent[] => {
+    return rawList.map((s, idx) => ({
+      id: s.id || `gs-loaded-${Date.now()}-${idx}`,
+      nameAr: s.nameAr || s.name || 'طالب جديد',
+      nameEn: s.nameEn || (s.name ? 'Student ' + (idx + 1) : 'New Student'),
+      gradeClass: normalizeClassCode(s.gradeClass || '10A'),
+      gender: s.gender === 'Girl' ? 'Girl' : 'Boy',
+      secondLanguage: 'German',
+      busLine: s.busLine || 'N/A',
+      createdAt: s.createdAt || new Date().toISOString(),
+    }));
+  };
+
+  // Load persistence & automatically normalize existing students in database
+  useEffect(() => {
+    async function loadGermanStudents() {
+      setIsLoading(true);
+      try {
+        const stored = await storage.getItem<HodGermanStudent[]>('hod_german_students');
+        const storedComplaints = await storage.getItem<Complaint[]>('hod_complaints');
+        if (storedComplaints && Array.isArray(storedComplaints)) {
+          setComplaints(storedComplaints);
+        }
+        const storedPlans = await storage.getItem<StudentActionPlan[]>('hod_student_action_plans');
+        if (storedPlans && Array.isArray(storedPlans)) {
+          setActionPlans(storedPlans);
+        }
+        if (stored !== null && stored !== undefined && Array.isArray(stored)) {
+          const sanitized = sanitizeStudentData(stored);
+          setStudents(sanitized);
+          // Check if any student class was changed during normalization and persist
+          const hasChanges = stored.some((s, i) => String(s.gradeClass || '').trim().toUpperCase() !== sanitized[i]?.gradeClass);
+          if (hasChanges) {
+            await storage.setItem('hod_german_students', sanitized);
+          }
+        } else {
+          const profileBackup = profile?.schoolSettings?.germanStudents;
+          if (profileBackup !== undefined && profileBackup !== null && Array.isArray(profileBackup)) {
+            const sanitized = sanitizeStudentData(profileBackup);
+            setStudents(sanitized);
+            await storage.setItem('hod_german_students', sanitized);
+          } else {
+            setStudents([]);
+            await storage.setItem('hod_german_students', []);
+          }
+        }
+      } catch (err) {
+        console.error('Failed loading german students:', err);
+        setStudents([]);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadGermanStudents();
+  }, []);
+
+  // Save persistence
+  const persistStudents = async (updated: HodGermanStudent[]) => {
+    setStudents(updated);
+    try {
+      await storage.setItem('hod_german_students', updated);
+      if (profile && profile.schoolSettings && updateProfile) {
+        updateProfile({
+          ...profile,
+          schoolSettings: {
+            ...profile.schoolSettings,
+            germanStudents: updated,
+          },
+        });
+      }
+    } catch (err) {
+      console.error('Error persisting german students:', err);
+    }
+  };
+
+  // Unique Classes list for filters & bulk delete
+  const uniqueClasses = useMemo(() => {
+    const set = new Set<string>();
+    students.forEach(s => {
+      if (s.gradeClass) set.add(normalizeClassCode(s.gradeClass));
+    });
+    return Array.from(set).sort(compareClassCodes);
+  }, [students]);
+
+  // Classes from the school timetable schedule
+  const scheduleClasses = useMemo(() => {
+    const set = new Set<string>();
+    const schedules = profile?.schoolSettings?.teacherSchedules || {};
+    Object.values(schedules).forEach((teacherDays: any) => {
+      if (teacherDays && typeof teacherDays === 'object') {
+        Object.values(teacherDays).forEach((periods: any) => {
+          if (Array.isArray(periods)) {
+            periods.forEach((p: any) => {
+              if (p?.className) set.add(normalizeClassCode(p.className));
+            });
+          }
+        });
+      }
+    });
+    const mainSchedule = profile?.schoolSettings?.schedule || {};
+    Object.values(mainSchedule).forEach((periods: any) => {
+      if (Array.isArray(periods)) {
+        periods.forEach((p: any) => {
+          if (p?.className) set.add(normalizeClassCode(p.className));
+        });
+      }
+    });
+    return Array.from(set).sort(compareClassCodes);
+  }, [profile?.schoolSettings]);
+
+  // Combined known classes from both student roster & timetable schedules
+  const allKnownClasses = useMemo(() => {
+    const set = new Set<string>([...uniqueClasses, ...scheduleClasses]);
+    return Array.from(set).sort(compareClassCodes);
+  }, [uniqueClasses, scheduleClasses]);
+
+  // Unique Grades/Levels list (e.g., Grade 5, Grade 6...)
+  const uniqueGrades = useMemo(() => {
+    const set = new Set<string>();
+    students.forEach(s => {
+      if (s.gradeClass) {
+        const gr = extractGradeFromClass(s.gradeClass);
+        if (gr) set.add(gr);
+      }
+    });
+    return Array.from(set).sort((a, b) => {
+      const numA = parseInt(a, 10);
+      const numB = parseInt(b, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+  }, [students]);
+
+  // Complete grades 1-12 list plus any existing grades in student records
+  const allSchoolGrades = useMemo(() => {
+    const set = new Set<string>();
+    for (let i = 1; i <= 12; i++) {
+      set.add(String(i));
+    }
+    uniqueGrades.forEach(g => set.add(g));
+    return Array.from(set).sort((a, b) => {
+      const numA = parseInt(a, 10);
+      const numB = parseInt(b, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+  }, [uniqueGrades]);
+
+  // Student counts per grade
+  const studentCountsByGrade = useMemo(() => {
+    const counts: Record<string, number> = {};
+    students.forEach(s => {
+      if (s.secondLanguage === 'German' && s.gradeClass) {
+        const gr = extractGradeFromClass(s.gradeClass);
+        if (gr) counts[gr] = (counts[gr] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [students]);
+
+  // Student counts per class
+  const studentCountsByClass = useMemo(() => {
+    const counts: Record<string, number> = {};
+    students.forEach(s => {
+      if (s.secondLanguage === 'German' && s.gradeClass) {
+        const cls = s.gradeClass.trim().toUpperCase();
+        counts[cls] = (counts[cls] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [students]);
+
+  // Classes for the currently selected grade in the grid
+  const classesForSelectedGrade = useMemo(() => {
+    if (!selectedGrade) return [];
+    const existing = uniqueClasses.filter(c => extractGradeFromClass(c) === selectedGrade);
+    const set = new Set<string>(existing);
+    
+    // Provide standard 5 sections (A, B, C, D, E) for numeric grades
+    if (/^\d+$/.test(selectedGrade)) {
+      ['A', 'B', 'C', 'D', 'E'].forEach(letter => {
+        set.add(`${selectedGrade}${letter}`);
+      });
+    }
+    return Array.from(set).sort(compareClassCodes);
+  }, [selectedGrade, uniqueClasses]);
+
+  // Grade & Class Selection Matrix Handlers
+  const handleSelectGrade = (grade: string) => {
+    if (selectedGrade === grade && selectedClass === 'all') {
+      // Toggle off
+      setSelectedGrade(null);
+      setSelectedClass('all');
+      setClassFilter('all');
+    } else {
+      setSelectedGrade(grade);
+      setSelectedClass('all');
+      setClassFilter(`grade:${grade}`);
+    }
+  };
+
+  const handleSelectClass = (cls: string) => {
+    if (cls === 'all') {
+      setSelectedClass('all');
+      if (selectedGrade) {
+        setClassFilter(`grade:${selectedGrade}`);
+      } else {
+        setClassFilter('all');
+      }
+    } else {
+      setSelectedClass(cls);
+      setClassFilter(cls);
+    }
+  };
+
+  const handleClearAllFilters = () => {
+    setSelectedGrade(null);
+    setSelectedClass('all');
+    setClassFilter('all');
+    setGenderFilter('all');
+    setBusFilter('all');
+    setSearchQuery('');
+  };
+
+  const applyGradeClassFilter = (filterVal: string) => {
+    setClassFilter(filterVal);
+    if (filterVal === 'all') {
+      setSelectedGrade(null);
+      setSelectedClass('all');
+    } else if (filterVal.startsWith('grade:')) {
+      const gr = filterVal.replace('grade:', '');
+      setSelectedGrade(gr);
+      setSelectedClass('all');
+    } else {
+      const gr = extractGradeFromClass(filterVal);
+      setSelectedGrade(gr);
+      setSelectedClass(filterVal);
+    }
+  };
+
+  // Set default target class/grade when bulk modal opens
+  useEffect(() => {
+    if (uniqueClasses.length > 0 && !targetDeleteClass) {
+      setTargetDeleteClass(uniqueClasses[0]);
+    }
+    if (uniqueGrades.length > 0 && !targetDeleteGrade) {
+      setTargetDeleteGrade(uniqueGrades[0]);
+    }
+  }, [uniqueClasses, uniqueGrades, targetDeleteClass, targetDeleteGrade]);
+
+  const isAnyFilterActive = Boolean(
+    (classFilter && classFilter !== 'all') ||
+    (genderFilter && genderFilter !== 'all') ||
+    (busFilter && busFilter !== 'all') ||
+    searchQuery.trim().length > 0
+  );
+
+  // INSTANT SEARCH ENGINE (Filtering dynamically across: nameAr, nameEn, busLine, gradeClass)
+  const filteredStudents = useMemo(() => {
+    if (!isAnyFilterActive) return [];
+
+    return students.filter(s => {
+      // German language rule strictly enforced
+      if (s.secondLanguage !== 'German') return false;
+
+      // Class or Grade Filter
+      if (classFilter !== 'all') {
+        if (classFilter.startsWith('grade:')) {
+          const targetGrade = classFilter.replace('grade:', '').toUpperCase();
+          const studentGrade = extractGradeFromClass(s.gradeClass || '').toUpperCase();
+          if (studentGrade !== targetGrade) return false;
+        } else if ((s.gradeClass || '').toUpperCase() !== classFilter.toUpperCase()) {
+          return false;
+        }
+      }
+
+      // Gender Filter
+      if (genderFilter !== 'all' && s.gender !== genderFilter) {
+        return false;
+      }
+
+      // Bus Filter
+      if (busFilter === 'bus') {
+        if (!s.busLine || s.busLine === 'N/A' || s.busLine === 'بدون باص' || s.busLine === 'No Bus') return false;
+      } else if (busFilter === 'nobus') {
+        if (s.busLine && s.busLine !== 'N/A' && s.busLine !== 'بدون باص' && s.busLine !== 'No Bus') return false;
+      }
+
+      // Instant Global Search Engine (filters across nameAr, nameEn, busLine, gradeClass)
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchNameAr = (s.nameAr || '').toLowerCase().includes(q);
+        const matchNameEn = (s.nameEn || '').toLowerCase().includes(q);
+        const matchClass = (s.gradeClass || '').toLowerCase().includes(q);
+        const matchBus = (s.busLine || '').toLowerCase().includes(q);
+        return matchNameAr || matchNameEn || matchClass || matchBus;
+      }
+
+      return true;
+    }).sort((a, b) => {
+      let comp = 0;
+      if (sortField === 'nameAr') {
+        comp = (a.nameAr || '').localeCompare(b.nameAr || '', 'ar');
+      } else if (sortField === 'nameEn') {
+        comp = (a.nameEn || '').localeCompare(b.nameEn || '', 'en');
+      } else if (sortField === 'gradeClass') {
+        comp = compareClassCodes(a.gradeClass || '', b.gradeClass || '');
+      } else if (sortField === 'busLine') {
+        comp = (a.busLine || '').localeCompare(b.busLine || '', 'ar');
+      }
+      return sortOrder === 'asc' ? comp : -comp;
+    });
+  }, [students, classFilter, genderFilter, busFilter, searchQuery, sortField, sortOrder, isAnyFilterActive]);
+
+  // Checkbox Selection Logic
+  const isAllFilteredSelected = useMemo(() => {
+    if (filteredStudents.length === 0) return false;
+    return filteredStudents.every(s => selectedStudentIds.includes(s.id));
+  }, [filteredStudents, selectedStudentIds]);
+
+  const handleToggleSelectAll = () => {
+    if (isAllFilteredSelected) {
+      const filteredSet = new Set(filteredStudents.map(s => s.id));
+      setSelectedStudentIds(prev => prev.filter(id => !filteredSet.has(id)));
+    } else {
+      const newIds = new Set([...selectedStudentIds, ...filteredStudents.map(s => s.id)]);
+      setSelectedStudentIds(Array.from(newIds));
+    }
+  };
+
+  const handleToggleSelectRow = (id: string) => {
+    setSelectedStudentIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  // Quick Counters Bar Stats
+  const stats = useMemo(() => {
+    const totalGerman = students.length;
+    const boysCount = students.filter(s => s.gender === 'Boy').length;
+    const girlsCount = students.filter(s => s.gender === 'Girl').length;
+    const busRidersCount = students.filter(s => s.busLine && s.busLine !== 'N/A' && s.busLine !== 'بدون باص' && s.busLine !== 'No Bus').length;
+    const classesCount = uniqueClasses.length;
+    return { totalGerman, boysCount, girlsCount, busRidersCount, classesCount };
+  }, [students, uniqueClasses]);
+
+  // Sibling Groups & Per-Student Sibling Lookup
+  const siblingGroups = useMemo(() => {
+    return findSiblingGroups(students);
+  }, [students]);
+
+  const studentFamilyMap = useMemo(() => {
+    const map = new Map<string, SiblingGroup>();
+    siblingGroups.forEach(group => {
+      group.students.forEach(st => {
+        map.set(st.id, group);
+      });
+    });
+    return map;
+  }, [siblingGroups]);
+
+  const classStudentCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of students) {
+      const c = (s.gradeClass || '').toUpperCase();
+      map.set(c, (map.get(c) || 0) + 1);
+    }
+    return map;
+  }, [students]);
+
+  const gradeStudentCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of students) {
+      const raw = (s.gradeClass || '').trim();
+      const match = raw.match(/^(\d+|[A-Za-z]+)/);
+      const gradeStr = match ? match[1].toUpperCase() : raw.toUpperCase();
+      map.set(gradeStr, (map.get(gradeStr) || 0) + 1);
+    }
+    return map;
+  }, [students]);
+
+  // Open Add Modal
+  const handleOpenAdd = () => {
+    setEditingStudent(null);
+    setStudentForm({
+      nameAr: '',
+      nameEn: '',
+      gradeClass: classFilter !== 'all' ? classFilter : (uniqueClasses[0] || '5A'),
+      gender: 'Boy',
+      busLine: 'N/A',
+    });
+    setIsAddEditModalOpen(true);
+  };
+
+  // Open Edit Modal
+  const handleOpenEdit = (s: HodGermanStudent) => {
+    setEditingStudent(s);
+    setStudentForm({
+      nameAr: s.nameAr || s.name || '',
+      nameEn: s.nameEn || '',
+      gradeClass: s.gradeClass,
+      gender: s.gender,
+      busLine: s.busLine || 'N/A',
+    });
+    setIsAddEditModalOpen(true);
+  };
+
+  // Save Student (Add/Edit)
+  const handleSaveStudentSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!studentForm.nameAr.trim() && !studentForm.nameEn.trim()) return;
+
+    const finalAr = studentForm.nameAr.trim() || studentForm.nameEn.trim();
+    const finalEn = studentForm.nameEn.trim() || studentForm.nameAr.trim();
+    const standardizedClass = normalizeClassCode(studentForm.gradeClass.trim());
+
+    if (editingStudent) {
+      const updated = students.map(s => 
+        s.id === editingStudent.id 
+          ? { 
+              ...s, 
+              nameAr: finalAr,
+              nameEn: finalEn,
+              gradeClass: standardizedClass,
+              gender: studentForm.gender,
+              busLine: studentForm.busLine.trim() || 'N/A',
+              secondLanguage: 'German' as const
+            }
+          : s
+      );
+      persistStudents(updated);
+      showToast(_t('تم تحديث بيانات الطالب', 'Student updated', 'Schüler aktualisiert'));
+    } else {
+      const newStudent: HodGermanStudent = {
+        id: `gs-${Date.now()}`,
+        nameAr: finalAr,
+        nameEn: finalEn,
+        gradeClass: standardizedClass,
+        gender: studentForm.gender,
+        secondLanguage: 'German',
+        busLine: studentForm.busLine.trim() || 'N/A',
+        createdAt: new Date().toISOString(),
+      };
+      persistStudents([newStudent, ...students]);
+      showToast(_t('تمت إضافة الطالب بنجاح', 'Student added', 'Schüler hinzugefügt'));
+    }
+    setIsAddEditModalOpen(false);
+  };
+
+  // ================= UNIFY & STANDARDIZE ALL EXISTING CLASSES =================
+  const handleUnifyAllClasses = async () => {
+    let changedCount = 0;
+    const updated = students.map(s => {
+      const normalized = normalizeClassCode(s.gradeClass);
+      if (normalized !== s.gradeClass) {
+        changedCount++;
+        return { ...s, gradeClass: normalized };
+      }
+      return s;
+    });
+
+    if (changedCount === 0) {
+      showToast(_t('جميع أسماء وفصول الطلاب موحدة ومنسقة بالفعل (10A, 10B, 7A...) ✓', 'All student classes are already standardized (10A, 10B...) ✓', 'Alle Klassen bereits standardisiert ✓'));
+      return;
+    }
+
+    await persistStudents(updated);
+    showToast(_t(`تم بنجاح توحيد وتنسيق فصول (${changedCount}) طالب لتتوافق مع كافة الفلاتر والجداول! ✓`, `Successfully normalized (${changedCount}) student classes! ✓`, `(${changedCount}) Schülerklassen standardisiert! ✓`));
+  };
+
+  // ================= DELETION HANDLERS =================
+
+  // Direct Single Student Delete (Triggers custom confirmation or immediate deletion)
+  const handleDeleteStudentDirect = (id: string) => {
+    const target = students.find(s => s.id === id);
+    const updated = students.filter(s => s.id !== id);
+    persistStudents(updated);
+    setSelectedStudentIds(prev => prev.filter(i => i !== id));
+    showToast(_t(`تم حذف الطالب (${target?.nameAr || 'المحدد'}) بنجاح`, `Deleted student (${target?.nameAr || 'selected'})`, 'Schüler gelöscht'));
+    setStudentToDelete(null);
+  };
+
+  // Bulk Delete: Selected Checkboxes
+  const handleDeleteSelectedStudents = () => {
+    if (selectedStudentIds.length === 0) return;
+    const count = selectedStudentIds.length;
+    const updated = students.filter(s => !selectedStudentIds.includes(s.id));
+    persistStudents(updated);
+    setSelectedStudentIds([]);
+    showToast(_t(`تم حذف ${count} طالب من القائمة`, `Deleted ${count} selected students`, `${count} Schüler gelöscht`));
+    setIsBulkDeleteModalOpen(false);
+  };
+
+  // Bulk Delete: By Specific Class (e.g. "5A")
+  const handleDeleteByClass = (targetClass: string) => {
+    if (!targetClass) return;
+    const countToDelete = students.filter(s => s.gradeClass.toUpperCase() === targetClass.toUpperCase()).length;
+    if (countToDelete === 0) {
+      showToast(_t(`لا يوجد طلاب في الفصل (${targetClass})`, `No students found in class ${targetClass}`, `Keine Schüler in Klasse ${targetClass}`));
+      return;
+    }
+    const updated = students.filter(s => s.gradeClass.toUpperCase() !== targetClass.toUpperCase());
+    persistStudents(updated);
+    setSelectedStudentIds(prev => prev.filter(id => {
+      const st = students.find(s => s.id === id);
+      return st && st.gradeClass.toUpperCase() !== targetClass.toUpperCase();
+    }));
+    showToast(_t(`تم حذف ${countToDelete} طالب من فصل (${targetClass})`, `Deleted ${countToDelete} students from class ${targetClass}`, `${countToDelete} Schüler gelöscht`));
+    setIsBulkDeleteModalOpen(false);
+  };
+
+  // Bulk Delete: By Grade/Level (e.g. Grade "5")
+  const handleDeleteByGrade = (targetGrade: string) => {
+    if (!targetGrade) return;
+    const countToDelete = students.filter(s => {
+      const match = s.gradeClass.trim().match(/^(\d+|[A-Za-z]+)/);
+      const gradeStr = match ? match[1].toUpperCase() : s.gradeClass.trim().toUpperCase();
+      return gradeStr === targetGrade.toUpperCase();
+    }).length;
+
+    if (countToDelete === 0) {
+      showToast(_t(`لا يوجد طلاب في الصف (${targetGrade})`, `No students found in grade ${targetGrade}`, `Keine Schüler in Stufe ${targetGrade}`));
+      return;
+    }
+
+    const updated = students.filter(s => {
+      const match = s.gradeClass.trim().match(/^(\d+|[A-Za-z]+)/);
+      const gradeStr = match ? match[1].toUpperCase() : s.gradeClass.trim().toUpperCase();
+      return gradeStr !== targetGrade.toUpperCase();
+    });
+
+    persistStudents(updated);
+    setSelectedStudentIds([]);
+    showToast(_t(`تم حذف ${countToDelete} طالب من الصف (${targetGrade})`, `Deleted ${countToDelete} students from grade ${targetGrade}`, `${countToDelete} Schüler gelöscht`));
+    setIsBulkDeleteModalOpen(false);
+  };
+
+  // Bulk Delete: Filtered Search Results
+  const handleDeleteFilteredStudents = () => {
+    if (filteredStudents.length === 0) return;
+    const filteredIds = new Set(filteredStudents.map(s => s.id));
+    const count = filteredStudents.length;
+    const updated = students.filter(s => !filteredIds.has(s.id));
+    persistStudents(updated);
+    setSelectedStudentIds([]);
+    showToast(_t(`تم حذف ${count} طالب من نتائج البحث الحالية`, `Deleted ${count} filtered students`, `${count} Schüler gelöscht`));
+    setIsBulkDeleteModalOpen(false);
+  };
+
+  // Bulk Delete: ALL Students Completely
+  const handleDeleteAllStudents = () => {
+    const total = students.length;
+    persistStudents([]);
+    setSelectedStudentIds([]);
+    showToast(_t(`تم مسح قائمة جميع الطلاب (${total} طالب) بالكامل`, `Cleared all ${total} students from roster`, `Alle ${total} Schüler gelöscht`));
+    setIsBulkDeleteModalOpen(false);
+  };
+
+  // Move Single Student to Another Class
+  const handleMoveStudentToClass = async (studentId: string, newClassCode: string) => {
+    const normClass = normalizeClassCode(newClassCode);
+    if (!normClass) return;
+    const target = students.find(s => s.id === studentId);
+    const updated = students.map(s => s.id === studentId ? { ...s, gradeClass: normClass } : s);
+    await persistStudents(updated);
+    showToast(_t(`تم نقل الطالب (${target?.nameAr || 'المحدد'}) إلى فصل (${normClass}) بنجاح!`, `Moved student to class (${normClass})!`, `Schüler in Klasse (${normClass}) verschoben!`));
+    setStudentToMove(null);
+  };
+
+  // Bulk Move Selected Students to Another Class
+  const handleMoveSelectedStudentsToClass = async (newClassCode: string) => {
+    const normClass = normalizeClassCode(newClassCode);
+    if (!normClass || selectedStudentIds.length === 0) return;
+    const count = selectedStudentIds.length;
+    const idSet = new Set(selectedStudentIds);
+    const updated = students.map(s => idSet.has(s.id) ? { ...s, gradeClass: normClass } : s);
+    await persistStudents(updated);
+    setSelectedStudentIds([]);
+    showToast(_t(`تم نقل (${count}) طلاب إلى فصل (${normClass}) بنجاح!`, `Moved (${count}) students to class (${normClass})!`, `(${count}) Schüler in Klasse (${normClass}) verschoben!`));
+    setIsBulkMoveModalOpen(false);
+  };
+
+  // Move Whole Class to Another Class (e.g. all students from 5A to 5B)
+  const handleMoveWholeClassToClass = async (fromClass: string, newClassCode: string) => {
+    const normFrom = normalizeClassCode(fromClass);
+    const normTo = normalizeClassCode(newClassCode);
+    if (!normFrom || !normTo || normFrom === normTo) return;
+    const targetStudents = students.filter(s => s.gradeClass.toUpperCase() === normFrom.toUpperCase());
+    const count = targetStudents.length;
+    if (count === 0) {
+      showToast(_t(`لا يوجد طلاب في فصل (${normFrom})`, `No students in class (${normFrom})`, `Keine Schüler`));
+      return;
+    }
+    const updated = students.map(s => s.gradeClass.toUpperCase() === normFrom.toUpperCase() ? { ...s, gradeClass: normTo } : s);
+    await persistStudents(updated);
+    showToast(_t(`تم نقل جميع طلاب فصل (${normFrom}) وعددهم (${count}) إلى فصل (${normTo}) بنجاح!`, `Moved all ${count} students from ${normFrom} to ${normTo}!`, `Alle ${count} Schüler in Klasse ${normTo} verschoben!`));
+    setClassToMoveFrom(null);
+    if (classFilter === normFrom || selectedClass === normFrom) {
+      applyGradeClassFilter(normTo);
+    }
+  };
+
+  // Copy Single Row
+  const handleCopyStudentRow = (s: HodGermanStudent) => {
+    const text = `👤 ${s.nameAr} (${s.nameEn}) | 🏫 ${s.gradeClass} | ${s.gender === 'Boy' ? '👦 Boy' : '👧 Girl'} | 🚌 ${s.busLine} | 🇩🇪 German`;
+    navigator.clipboard.writeText(text);
+    showToast(_t('تم نسخ بيانات الطالب', 'Student row copied', 'Schüler kopiert'));
+  };
+
+  // Copy Full Roster Text for WhatsApp
+  const handleCopyFullRosterText = () => {
+    if (filteredStudents.length === 0) return;
+    let title = `📊 *قائمة طلاب اللغة الألمانية - German Student Roster*\n`;
+    if (classFilter !== 'all') title += `🏫 الفصل / Class: ${classFilter}\n`;
+    title += `إجمالي الطلاب: ${filteredStudents.length} (👦 ${stats.boysCount} Boys | 👧 ${stats.girlsCount} Girls)\n\n`;
+
+    const rows = filteredStudents.map((s, idx) => 
+      `${idx + 1}. ${s.gender === 'Boy' ? '👦' : '👧'} ${s.nameAr} | ${s.nameEn} - [${s.gradeClass}] - 🚌 ${s.busLine}`
+    ).join('\n');
+
+    const fullText = title + rows + `\n\n🇩🇪 قسم اللغة الألمانية - German Department`;
+    navigator.clipboard.writeText(fullText);
+    showToast(_t('تم نسخ القائمة ثنائية اللغة للواتساب', 'Bilingual Roster copied for WhatsApp', 'WhatsApp-Liste kopiert'));
+  };
+
+  // Export CSV
+  const handleExportCsv = () => {
+    if (filteredStudents.length === 0) return;
+    const headers = 'ID,NameArabic,NameEnglish,Class,Gender,SecondLanguage,BusLine\n';
+    const rows = filteredStudents.map(s => 
+      `"${s.id}","${s.nameAr}","${s.nameEn}","${s.gradeClass}","${s.gender}","German","${s.busLine}"`
+    ).join('\n');
+    const blob = new Blob(['\uFEFF' + headers + rows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `German_Students_Bilingual_Roster_${classFilter !== 'all' ? classFilter : 'All'}.csv`;
+    link.click();
+    showToast(_t('تم تصدير القائمة بنجاح (CSV)', 'Bilingual roster exported to CSV', 'CSV exportiert'));
+  };
+
+  // Computed Dynamic AI Prompt text based on selected target grade / class and language
+  const activePromptText = useMemo(() => {
+    return generateUnifiedGermanPrompt(promptTargetGrade || undefined, promptTargetClass || undefined, promptLanguage);
+  }, [promptTargetGrade, promptTargetClass, promptLanguage]);
+
+  // Copy System Prompt Text for External AI
+  const handleCopyPromptText = () => {
+    navigator.clipboard.writeText(activePromptText);
+    setPromptCopied(true);
+    showToast(_t('تم نسخ برومبت الـ AI المنسق والموضح للـ Clipboard!', 'Standardized AI Prompt copied to clipboard!', 'Standardisierter KI-Prompt kopiert!'));
+    setTimeout(() => setPromptCopied(false), 3000);
+  };
+
+  // Parse Pasted AI JSON Output
+  const handleParseAndImportPastedJson = () => {
+    if (!pastedAiJsonText.trim()) {
+      setPasteError(_t('يرجى لصق مخرجات الـ AI أولاً', 'Please paste AI response text first', 'Bitte fügen Sie zuerst den KI-Text ein'));
+      return;
+    }
+
+    setPasteError(null);
+    setPasteSuccessCount(null);
+
+    let cleanText = pastedAiJsonText.trim();
+    const jsonMatch = cleanText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (jsonMatch && jsonMatch[1]) {
+      cleanText = jsonMatch[1].trim();
+    } else {
+      const firstBracket = cleanText.indexOf('[');
+      const lastBracket = cleanText.lastIndexOf(']');
+      if (firstBracket !== -1 && lastBracket > firstBracket) {
+        cleanText = cleanText.substring(firstBracket, lastBracket + 1);
+      }
+    }
+
+    try {
+      const parsed = JSON.parse(cleanText);
+      if (!Array.isArray(parsed)) {
+        throw new Error(_t('المخرجات ملصقة ليست مصفوفة JSON صالحة [ ... ]', 'Pasted JSON must be an array of student objects [ ... ]', 'Muss ein JSON-Array sein'));
+      }
+
+      if (parsed.length === 0) {
+        throw new Error(_t('مصفوفة الـ JSON فارغة ولا تحتوي على طلاب', 'JSON array is empty', 'JSON-Array ist leer'));
+      }
+
+      const newStudents: HodGermanStudent[] = parsed.map((item: any, idx: number) => {
+        const ar = item.nameAr || item.name_ar || item.arabicName || item.name || 'طالب جديد';
+        const en = item.nameEn || item.name_en || item.englishName || (item.name ? item.name : 'New Student');
+        const gender = (item.gender === 'Girl' || item.gender === 'girl' || item.gender === 'أنثى' || item.gender === 'بنت') ? 'Girl' : 'Boy';
+        const rawClass = (item.gradeClass || item.class || item.grade || promptTargetClass || (promptTargetGrade ? `${promptTargetGrade}A` : '10A')).toString();
+        const gradeClass = normalizeClassCode(rawClass, promptTargetGrade || undefined);
+        const busLine = item.busLine || item.bus || item.bus_line || 'N/A';
+
+        return {
+          id: `gs-ext-${Date.now()}-${idx}`,
+          nameAr: ar,
+          nameEn: en,
+          gradeClass,
+          gender,
+          secondLanguage: 'German',
+          busLine: busLine.toString(),
+          createdAt: new Date().toISOString(),
+        };
+      });
+
+      const updated = [...newStudents, ...students];
+      persistStudents(updated);
+      setPasteSuccessCount(newStudents.length);
+      showToast(_t(`تم استيراد ${newStudents.length} طالب بنجاح وتوحيد فصولهم بدقة!`, `Successfully imported ${newStudents.length} students with unified classes!`, `${newStudents.length} Schüler importiert!`));
+      setPastedAiJsonText('');
+    } catch (err: any) {
+      console.error('Failed parsing pasted AI JSON:', err);
+      setPasteError(err.message || _t('فشل تحليل كود הـ JSON الملصق. تأكد من صحة التنسيق.', 'Failed to parse JSON. Please verify format.', 'JSON-Analyse fehlgeschlagen.'));
+    }
+  };
+
+  if (isFamiliesViewOpen) {
+    return (
+      <HodFamiliesView
+        students={students}
+        initialSearch={familiesInitialSearch}
+        onBack={() => {
+          setIsFamiliesViewOpen(false);
+          setFamiliesInitialSearch('');
+        }}
+        onSelectClass={(cls) => {
+          setIsFamiliesViewOpen(false);
+          setFamiliesInitialSearch('');
+          applyGradeClassFilter(cls);
+        }}
+        _t={_t}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3.5 max-w-7xl mx-auto pb-12 animate-fade-in">
+      {/* Toast Banner */}
+      {toastMessage && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-emerald-600 text-white px-2.5 py-1 rounded-xl shadow-xl font-bold text-[11px] animate-bounce">
+          <CheckCircle2 className="w-4 h-4" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Header Banner & High-Density Summary */}
+      <div className="bg-surface border border-surface-border rounded-xl p-3 sm:p-3.5 shadow-2xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="p-2 bg-primary/10 text-primary rounded-xl border border-primary/20 shrink-0">
+              <GraduationCap className="w-4 h-4" />
+            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm sm:text-base font-black text-text-main">
+                {_t('قوائم وسجلات طلاب اللغة الألمانية', 'German Students Roster', 'Schülerverzeichnis')}
+              </h2>
+              <span className="px-2 py-0.5 bg-primary-soft text-primary rounded-md text-[10px] font-extrabold border border-primary-border">
+                🇩🇪 Deutsch
+              </span>
+            </div>
+          </div>
+
+          {/* Top Quick Actions - Neatly Aligned in a Single Row on Mobile Phone Screens */}
+          <div className="grid grid-cols-3 gap-1.5 w-full sm:w-auto sm:flex sm:items-center sm:gap-2">
+            {/* Add Student Button (Primary Action) */}
+            <button
+              onClick={handleOpenAdd}
+              className="px-2 sm:px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-[10.5px] sm:text-xs font-bold shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{_t('إضافة طالب', 'Add Student', 'Schüler hinzufügen')}</span>
+            </button>
+
+            {/* Prompt & Import Button (Secondary Action) */}
+            <button
+              onClick={() => {
+                setIsPromptModalOpen(true);
+                setPasteError(null);
+                setPasteSuccessCount(null);
+              }}
+              className="px-2 sm:px-3 py-1.5 bg-surface-hover hover:bg-surface-border text-text-main border border-surface-border rounded-xl text-[10.5px] sm:text-xs font-bold shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+            >
+              <Code2 className="w-3.5 h-3.5 text-text-muted shrink-0" />
+              <span className="truncate">{_t('استيراد البيانات', 'Prompt & Import', 'Prompt & Datenimport')}</span>
+            </button>
+
+            {/* Delete / Clear Options Button (Utility Action) */}
+            <button
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              className="px-2 sm:px-3 py-1.5 bg-surface-hover hover:bg-surface-border text-text-muted hover:text-text-main border border-surface-border rounded-xl text-[10.5px] sm:text-xs font-bold shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+              title={_t('خيارات الحذف والتصفية حسب الفصل/الصف', 'Delete options by class/grade', 'Löschoptionen nach Klasse/Stufe')}
+            >
+              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{_t('خيارات الحذف', 'Delete Options', 'Löschoptionen')}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Quick Counters Bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 border-t border-surface-border">
+          <div className="bg-surface-hover/70 border border-surface-border p-2 rounded-xl flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-surface text-text-main border border-surface-border flex items-center justify-center font-bold text-[11px] shrink-0">
+              📊
+            </div>
+            <div>
+              <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{_t('إجمالي الطلاب', 'Total German', 'Gesamt Deutsch')}</div>
+              <div className="text-[11px] font-black text-text-main">{stats.totalGerman}</div>
+            </div>
+          </div>
+
+          <div className="bg-surface-hover/70 border border-surface-border p-2 rounded-xl flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-surface text-text-main border border-surface-border flex items-center justify-center font-bold text-[11px] shrink-0">
+              👦
+            </div>
+            <div>
+              <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{_t('بنين', 'Boys', 'Jungen')}</div>
+              <div className="text-[11px] font-black text-text-main">{stats.boysCount}</div>
+            </div>
+          </div>
+
+          <div className="bg-surface-hover/70 border border-surface-border p-2 rounded-xl flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-surface text-text-main border border-surface-border flex items-center justify-center font-bold text-[11px] shrink-0">
+              👧
+            </div>
+            <div>
+              <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{_t('بنات', 'Girls', 'Mädchen')}</div>
+              <div className="text-[11px] font-black text-text-main">{stats.girlsCount}</div>
+            </div>
+          </div>
+
+          <div className="bg-surface-hover/70 border border-surface-border p-2 rounded-xl flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-surface text-text-main border border-surface-border flex items-center justify-center font-bold text-[11px] shrink-0">
+              🚌
+            </div>
+            <div>
+              <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{_t('ركاب الباص', 'Bus Riders', 'Busnutzer')}</div>
+              <div className="text-[11px] font-black text-text-main">{stats.busRidersCount}</div>
+            </div>
+          </div>
+
+          <div className="bg-surface-hover/70 border border-surface-border p-2 rounded-xl flex items-center gap-2 col-span-2 sm:col-span-1">
+            <div className="w-7 h-7 rounded-lg bg-surface text-text-main border border-surface-border flex items-center justify-center font-bold text-[11px] shrink-0">
+              🏫
+            </div>
+            <div>
+              <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{_t('عدد الفصول', 'Classes', 'Klassen')}</div>
+              <div className="text-[11px] font-black text-text-main">{stats.classesCount}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* FLOATING ACTION TOOLBAR WHEN CHECKBOXES ARE SELECTED */}
+      {selectedStudentIds.length > 0 && (
+        <div className="bg-primary-soft border border-primary-border rounded-xl p-2.5 px-4 flex items-center justify-between gap-1.5 shadow-md animate-fade-in text-primary">
+          <div className="flex items-center gap-2 text-[11px] font-black">
+            <CheckSquare className="w-4 h-4 text-primary" />
+            <span>
+              {_t(`تم تحديد (${selectedStudentIds.length}) طالب من القائمة`, `Selected (${selectedStudentIds.length}) students`, `${selectedStudentIds.length} Schüler ausgewählt`)}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedStudentIds([])}
+              className="px-2.5 py-1 bg-surface hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
+            >
+              {_t('إلغاء التحديد', 'Deselect All', 'Auswahl aufheben')}
+            </button>
+
+            {/* Bulk Move Button */}
+            <button
+              onClick={() => {
+                setTargetBulkMoveClass(uniqueClasses[0] || '10A');
+                setIsBulkMoveModalOpen(true);
+              }}
+              className="px-3 py-1 bg-primary hover:bg-primary-hover text-white rounded-lg text-[11px] font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span>{_t(`نقل المحددين (${selectedStudentIds.length}) لفصل آخر`, `Move Selected (${selectedStudentIds.length}) to Class`, `Ausgewählte (${selectedStudentIds.length}) verschieben`)}</span>
+            </button>
+
+            <button
+              onClick={handleDeleteSelectedStudents}
+              className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[11px] font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{_t(`حذف الطلاب المحددين (${selectedStudentIds.length})`, `Delete Selected (${selectedStudentIds.length})`, `Ausgewählte löschen (${selectedStudentIds.length})`)}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* INSTANT SEARCH ENGINE & FILTERS BAR */}
+      <div className="bg-surface border border-surface-border rounded-xl p-3 sm:p-4 shadow-2xs space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+          {/* PROMINENT TOP INSTANT SEARCH BAR */}
+          <div className="relative sm:col-span-6">
+            <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-primary" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder={_t('شريط البحث السريع: اسم عربي، اسم إنجليزي، رقم الباص، الفصل...', 'Instant Search: Arabic Name, English Name, Bus Line, Class...', 'Schnellsuche: Name (Ar/En), Bus, Klasse...')}
+              className="w-full pl-3 pr-9 py-2 bg-surface-hover border border-primary/30 rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 placeholder:text-text-muted/70 shadow-2xs"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-main"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Gender Filter */}
+          <div className="sm:col-span-3">
+            <select
+              value={genderFilter}
+              onChange={e => setGenderFilter(e.target.value as any)}
+              className="w-full px-2.5 py-2 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="all">{_t('النوع: الكل', 'Gender: All', 'Geschlecht: Alle')}</option>
+              <option value="Boy">👦 {_t('بنين (Boy)', 'Boy', 'Jungen')}</option>
+              <option value="Girl">👧 {_t('بنات (Girl)', 'Girl', 'Mädchen')}</option>
+            </select>
+          </div>
+
+          {/* Bus Filter */}
+          <div className="sm:col-span-3">
+            <select
+              value={busFilter}
+              onChange={e => setBusFilter(e.target.value as any)}
+              className="w-full px-2.5 py-2 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="all">{_t('الباص: الكل', 'Bus: All', 'Bus: Alle')}</option>
+              <option value="bus">🚌 {_t('ركاب الباص', 'Bus Riders', 'Mit Bus')}</option>
+              <option value="nobus">🚶 {_t('بدون باص (N/A)', 'No Bus (N/A)', 'Ohne Bus')}</option>
+            </select>
+          </div>
+        </div>
+
+        {/* 2-TIER GRADE & CLASS MATRIX (شبكة اختيار المرحلة ثم الفصل) */}
+        <div className="pt-2 border-t border-surface-border/70 space-y-2">
+          {/* Step 1: Grade Selection Header & Controls */}
+          <div className="flex items-center justify-between flex-wrap gap-1">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+              <span className="text-[11px] font-black text-text-main flex items-center gap-1">
+                <GraduationCap className="w-3.5 h-3.5 text-primary" />
+                <span>{_t('1️⃣ شبكة المراحل الدراسية (Grades 1 - 12):', '1️⃣ Grades Grid (1 - 12):', '1️⃣ Klassenstufen (1 - 12):')}</span>
+              </span>
+            </div>
+
+            {selectedGrade && (
+              <button
+                type="button"
+                onClick={handleClearAllFilters}
+                className="text-[10px] text-text-muted hover:text-rose-500 font-bold transition-colors cursor-pointer flex items-center gap-0.5"
+              >
+                <X className="w-3 h-3" />
+                <span>{_t('إلغاء تحديد المرحلة', 'Clear Grade', 'Stufe abwählen')}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Grades Matrix Buttons (Grades 1 to 12) */}
+          <div className="grid grid-cols-6 sm:grid-cols-6 md:grid-cols-12 gap-1.5">
+            {allSchoolGrades.map(g => {
+              const isSelected = selectedGrade === g;
+              const count = studentCountsByGrade[g] || 0;
+              return (
+                <button
+                  type="button"
+                  key={`grade-btn-${g}`}
+                  onClick={() => handleSelectGrade(g)}
+                  className={`py-1.5 px-1 rounded-xl text-center border transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
+                    isSelected
+                      ? 'bg-primary text-white border-primary shadow-sm ring-2 ring-primary/30 font-black'
+                      : count > 0
+                        ? 'bg-surface-hover hover:border-primary/50 text-text-main border-surface-border font-bold'
+                        : 'bg-surface/60 hover:bg-surface-hover text-text-muted/60 hover:text-text-main border-surface-border/50 font-medium'
+                  }`}
+                  title={_t(`الصف ${g} (${count} طالب)`, `Grade ${g} (${count} students)`, `Stufe ${g} (${count} Schüler)`)}
+                >
+                  <span className="text-[11px] leading-none">
+                    {/^\d+$/.test(g) ? `G${g}` : g}
+                  </span>
+                  {count > 0 ? (
+                    <span className={`text-[9px] leading-tight px-1 rounded-full font-black ${
+                      isSelected ? 'bg-white/25 text-white' : 'bg-primary/10 text-primary'
+                    }`}>
+                      {count}
+                    </span>
+                  ) : (
+                    <span className="text-[8.5px] leading-tight opacity-40">-</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Step 2: Classes of Selected Grade (Appears immediately when a grade is chosen) */}
+          {selectedGrade && (
+            <div className="mt-2.5 p-2.5 bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-xl space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="flex items-center justify-between flex-wrap gap-1">
+                <span className="text-[11px] font-black text-primary flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>
+                    {_t(
+                      `2️⃣ فصول المرحلة / الصف ${selectedGrade} (حدد فصلاً أو اعرض الكل):`,
+                      `2️⃣ Classes for Grade ${selectedGrade} (Select class or all):`,
+                      `2️⃣ Klassen für Stufe ${selectedGrade}:`
+                    )}
+                  </span>
+                </span>
+                <span className="text-[10px] font-bold text-text-muted bg-surface px-2 py-0.5 rounded-md border border-surface-border">
+                  {_t(`طلاب الصف: ${studentCountsByGrade[selectedGrade] || 0}`, `Grade Total: ${studentCountsByGrade[selectedGrade] || 0}`, `Gesamt: ${studentCountsByGrade[selectedGrade] || 0}`)}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {/* All Classes of this Grade button */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectClass('all')}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black border transition-all cursor-pointer shadow-2xs flex items-center gap-1 active:scale-95 ${
+                    selectedClass === 'all'
+                      ? 'bg-primary text-white border-primary shadow-xs ring-1 ring-primary/30'
+                      : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border'
+                  }`}
+                >
+                  <span>✨</span>
+                  <span>{_t(`جميع فصول الصف ${selectedGrade} (الكل)`, `All Grade ${selectedGrade} Classes`, `Alle Klassen Stufe ${selectedGrade}`)}</span>
+                  {studentCountsByGrade[selectedGrade] !== undefined && (
+                    <span className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-black ${
+                      selectedClass === 'all' ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                    }`}>
+                      {studentCountsByGrade[selectedGrade]}
+                    </span>
+                  )}
+                </button>
+
+                {/* Individual Classes (e.g. 5A, 5B, 5C, 5D, 5E) */}
+                {classesForSelectedGrade.map(cls => {
+                  const isClsActive = selectedClass === cls;
+                  const count = studentCountsByClass[cls] || 0;
+                  return (
+                    <button
+                      type="button"
+                      key={`class-pill-${cls}`}
+                      onClick={() => handleSelectClass(cls)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer shadow-2xs flex items-center gap-1 active:scale-95 ${
+                        isClsActive
+                          ? 'bg-primary text-white border-primary shadow-xs ring-1 ring-primary/30 font-black'
+                          : count > 0
+                            ? 'bg-surface hover:bg-surface-hover text-text-main border-surface-border font-bold'
+                            : 'bg-surface/70 hover:bg-surface text-text-muted border-surface-border/60'
+                      }`}
+                    >
+                      <span>🏫</span>
+                      <span>{cls}</span>
+                      {count > 0 && (
+                        <span className={`text-[9.5px] px-1 rounded-full font-black ${
+                          isClsActive ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                        }`}>
+                          {count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Class Actions Toolbar (when a specific class is selected) */}
+              {selectedClass && selectedClass !== 'all' && (
+                <div className="mt-2.5 p-2 bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-xl flex items-center justify-between flex-wrap gap-2 text-[11px] animate-fade-in">
+                  <div className="flex items-center gap-1.5 font-bold text-text-main">
+                    <span className="text-primary font-black">🏫 {_t('إدارة فصل:', 'Manage Class:', 'Klasse:')}</span>
+                    <span className="px-2 py-0.5 bg-primary text-white rounded-md font-black text-xs shadow-2xs">
+                      {selectedClass}
+                    </span>
+                    <span className="text-text-muted text-[11px]">
+                      ({classStudentCountMap.get(selectedClass.toUpperCase()) || 0} {_t('طلاب مسجلين', 'students registered', 'Schüler')})
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const otherClasses = uniqueClasses.filter(c => c.toUpperCase() !== selectedClass.toUpperCase());
+                        setTargetWholeClassMove(otherClasses[0] || '10B');
+                        setIsCustomWholeClassMove(false);
+                        setClassToMoveFrom(selectedClass);
+                      }}
+                      className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-lg font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer text-[11px]"
+                      title={_t('نقل جميع طلاب هذا الفصل بالكامل إلى فصل آخر', 'Move all students in this class to another', 'Alle Schüler dieser Klasse verschieben')}
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>{_t(`نقل طلاب (${selectedClass})`, `Move Class Students`, `Klasse verschieben`)}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteByClass(selectedClass)}
+                      className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer text-[11px]"
+                      title={_t('مسح وإفراغ جميع طلاب هذا الفصل بالكامل', 'Clear all students from this class', 'Alle Schüler dieser Klasse löschen')}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{_t(`مسح طلاب (${selectedClass})`, `Clear Class`, `Klasse leeren`)}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Export & Action Tools */}
+        <div className="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-surface-border/60 text-[11px]">
+          <div className="text-[11px] font-bold text-text-muted flex items-center gap-1.5 flex-wrap">
+            <span>{_t('النتائج المعروضة:', 'Displayed Results:', 'Ergebnisse:')}</span>
+            <span className="text-primary font-black bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20">
+              {isAnyFilterActive ? `${filteredStudents.length} / ${students.length}` : `0 / ${students.length}`}
+            </span>
+            {!isAnyFilterActive ? (
+              <span className="text-[10.5px] text-amber-600 dark:text-amber-400 font-bold">
+                ({_t('اختر مرحلة أو فصلاً من الشبكة أعلاه', 'Select a grade/class above', 'Stufe/Klasse wählen')})
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleClearAllFilters}
+                className="text-[10.5px] text-text-muted hover:text-rose-500 font-bold underline cursor-pointer transition-colors mx-1"
+              >
+                {_t('إلغاء الفلتر', 'Clear Filter', 'Zurücksetzen')}
+              </button>
+            )}
+            {searchQuery && (
+              <span className="text-[10px] text-primary italic font-medium">
+                (تصفية فورية بـ: "{searchQuery}")
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Families & Siblings Finder Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setFamiliesInitialSearch('');
+                setIsFamiliesViewOpen(true);
+              }}
+              className="px-2.5 py-1 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-[11px] font-black border border-violet-500 shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              title="فتح صفحة العائلات والبحث عن أسماء الإخوة والأشقاء"
+            >
+              <span>👨‍👩‍👧‍👦</span>
+              <span>العائلات ({siblingGroups.length})</span>
+            </button>
+
+            <button
+              onClick={handleCopyFullRosterText}
+              disabled={!isAnyFilterActive || filteredStudents.length === 0}
+              className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border disabled:opacity-40 disabled:cursor-not-allowed text-text-main rounded-lg text-[11px] font-bold border border-surface-border flex items-center gap-1 transition-all cursor-pointer"
+              title={_t('نسخ القائمة ثنائية اللغة للواتساب', 'Copy for WhatsApp', 'Für WhatsApp kopieren')}
+            >
+              <Copy className="w-3 h-3 text-emerald-600" />
+              <span>{_t('نسخة واتساب ثنائية اللغة', 'Bilingual WhatsApp', 'WhatsApp-Liste')}</span>
+            </button>
+
+            <button
+              onClick={handleExportCsv}
+              disabled={!isAnyFilterActive || filteredStudents.length === 0}
+              className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border disabled:opacity-40 disabled:cursor-not-allowed text-text-main rounded-lg text-[11px] font-bold border border-surface-border flex items-center gap-1 transition-all cursor-pointer"
+              title={_t('تصدير CSV ثنائي اللغة', 'Export CSV', 'CSV exportieren')}
+            >
+              <FileSpreadsheet className="w-3 h-3 text-blue-600" />
+              <span>{_t('تصدير CSV', 'CSV', 'CSV')}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* HIGH-DENSITY COMPACT TABLE LAYOUT (STRICTLY NO CARDS) */}
+      <div className="bg-surface border border-surface-border rounded-xl shadow-2xs overflow-hidden">
+        {isLoading ? (
+          <div className="p-8 text-center text-text-muted text-[11px] animate-pulse">
+            {_t('جاري تحميل قائمة الطلاب ثنائية اللغة...', 'Loading roster...', 'Schülerliste wird geladen...')}
+          </div>
+        ) : students.length === 0 ? (
+          <div className="p-8 text-center space-y-3">
+            <div className="w-12 h-12 rounded-full bg-surface-hover flex items-center justify-center mx-auto text-text-muted">
+              <Users className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-text-main">
+                {_t('قائمة الطلاب فارغة حالياً', 'No German students found', 'Keine Deutschschüler gefunden')}
+              </p>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                {_t('يمكنك البدء بإضافة طالب جديد أو استيراد الطلاب.', 'You can add a student or import records.', 'Sie können Schüler hinzufügen oder importieren.')}
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <button
+                onClick={handleOpenAdd}
+                className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white text-[11px] font-bold rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{_t('إضافة طالب جديد', 'Add New Student', 'Neuen Schüler hinzufügen')}</span>
+              </button>
+              <button
+                onClick={() => setIsPromptModalOpen(true)}
+                className="px-3 py-1.5 bg-surface-hover hover:bg-surface-border text-text-main border border-surface-border text-[11px] font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span>{_t('استيراد بالـ AI Prompt', 'Import via AI Prompt', 'Per KI importieren')}</span>
+              </button>
+            </div>
+          </div>
+        ) : !isAnyFilterActive ? (
+          <div className="p-8 sm:p-12 text-center space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto shadow-2xs">
+              <Filter className="w-6 h-6" />
+            </div>
+            <div className="max-w-md mx-auto space-y-1.5">
+              <h3 className="text-sm sm:text-base font-black text-text-main">
+                {_t('اختر مرحلة أو فصلاً لعرض الطلاب', 'Select a Grade or Class to view students', 'Wählen Sie eine Klasse oder Stufe')}
+              </h3>
+              <p className="text-[11.5px] text-text-muted font-medium leading-relaxed">
+                {_t(
+                  `مسجل بالمدرسة ${students.length} طالب. للحفاظ على خفة وسرعة التطبيق، اختر المرحلة، الفصل أو ابحث بالاسم لعرض الطلاب المطلوبين.`,
+                  `${students.length} students registered. To keep the app blazing fast, select a grade, class, or search by name to view students.`,
+                  `${students.length} Schüler registriert. Bitte wählen Sie eine Klasse oder suchen Sie nach Schülern.`
+                )}
+              </p>
+            </div>
+
+            {/* Quick Filter Badges for 1-click selection */}
+            {(uniqueGrades.length > 0 || uniqueClasses.length > 0) && (
+              <div className="pt-2 space-y-2.5 max-w-lg mx-auto">
+                {uniqueGrades.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-bold text-text-muted">
+                      {_t('المراحل الدراسية:', 'Grades:', 'Klassenstufen:')}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-1.5">
+                      {uniqueGrades.map(g => (
+                        <button
+                          key={`quick-grade-${g}`}
+                          type="button"
+                          onClick={() => applyGradeClassFilter(`grade:${g}`)}
+                          className="px-3 py-1 bg-primary/10 hover:bg-primary hover:text-white text-primary border border-primary/20 rounded-lg text-[11px] font-bold transition-all cursor-pointer shadow-2xs active:scale-95"
+                        >
+                          📚 {_t(`الصف ${g} (الكل)`, `Grade ${g}`, `Stufe ${g}`)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {uniqueClasses.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-[11px] font-bold text-text-muted">
+                      {_t('الفصول المباشرة:', 'Direct Classes:', 'Klassen:')}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-1.5">
+                      {uniqueClasses.slice(0, 10).map(c => (
+                        <button
+                          key={`quick-class-${c}`}
+                          type="button"
+                          onClick={() => applyGradeClassFilter(c)}
+                          className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border border border-surface-border rounded-lg text-[11px] font-bold text-text-main transition-all cursor-pointer shadow-2xs active:scale-95"
+                        >
+                          🏫 {c}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : filteredStudents.length === 0 ? (
+          <div className="p-8 text-center space-y-3">
+            <div className="w-12 h-12 rounded-full bg-surface-hover flex items-center justify-center mx-auto text-text-muted">
+              <Users className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-text-main">
+                {searchQuery 
+                  ? _t(`لم نجد نتائج تطابق شريط البحث: "${searchQuery}"`, `No students matched search: "${searchQuery}"`, `Keine Ergebnisse für "${searchQuery}"`)
+                  : _t('لا توجد نتائج تطابق الفلتر المختار', 'No students match the selected filter', 'Keine Treffer für gewählten Filter')}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="max-h-[620px] overflow-y-auto scrollbar-thin">
+            {/* Selection Toolbar Banner */}
+            {selectedStudentIds.length > 0 && (
+              <div className="bg-primary/10 border-b border-primary/20 px-3 py-2 flex items-center justify-between gap-2 flex-wrap text-xs sticky top-0 z-20 backdrop-blur-md">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-primary text-white rounded-md font-black text-[11px]">
+                    {selectedStudentIds.length}
+                  </span>
+                  <span className="font-bold text-primary text-[11.5px]">
+                    {_t('طالب محدد في القائمة', 'students selected', 'Schüler ausgewählt')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTargetBulkMoveClass(uniqueClasses[0] || '10A');
+                      setIsCustomBulkMoveClass(false);
+                      setCustomBulkMoveClass('');
+                      setIsBulkMoveModalOpen(true);
+                    }}
+                    className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    <span>{_t('نقل المحددين إلى فصل آخر', 'Move to Class', 'In Klasse verschieben')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteSelectedStudents}
+                    className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{_t('حذف المحددين', 'Delete Selected', 'Ausgewählte löschen')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudentIds([])}
+                    className="px-2 py-1 bg-surface-hover hover:bg-surface text-text-muted hover:text-text-main border border-surface-border rounded-lg text-[11px] font-bold transition-all cursor-pointer"
+                  >
+                    {_t('إلغاء التحديد', 'Clear Selection', 'Auswahl aufheben')}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <table className="w-full text-right border-collapse text-[11px]">
+              {/* Sticky Header */}
+              <thead className="sticky top-0 z-10 bg-surface-hover/95 backdrop-blur border-b border-surface-border text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                <tr>
+                  {/* Select All Checkbox */}
+                  <th className="py-2 px-2 text-center w-8 border-r border-surface-border/50">
+                    <button
+                      onClick={handleToggleSelectAll}
+                      className="text-text-muted hover:text-primary transition-colors cursor-pointer"
+                      title={_t('تحديد/إلغاء تحديد الكل', 'Toggle Select All', 'Alle auswählen')}
+                    >
+                      {isAllFilteredSelected ? (
+                        <CheckSquare className="w-4 h-4 text-primary" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                    </button>
+                  </th>
+
+                  <th className="py-2 px-2.5 text-center w-10 border-r border-surface-border/50">#</th>
+                  
+                  {/* Arabic Name Column */}
+                  <th className="py-2 px-3 border-r border-surface-border/50 cursor-pointer hover:text-text-main" onClick={() => {
+                    setSortField('nameAr');
+                    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                  }}>
+                    <div className="flex items-center gap-1">
+                      <span>الاسم بالعربية (Arabic Name)</span>
+                      <ArrowUpDown className="w-3 h-3 opacity-60" />
+                    </div>
+                  </th>
+
+                  {/* English Name Column */}
+                  <th className="py-2 px-3 border-r border-surface-border/50 cursor-pointer hover:text-text-main" onClick={() => {
+                    setSortField('nameEn');
+                    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                  }}>
+                    <div className="flex items-center gap-1">
+                      <span>Full Name in English</span>
+                      <ArrowUpDown className="w-3 h-3 opacity-60" />
+                    </div>
+                  </th>
+
+                  {/* Class Column */}
+                  <th className="py-2 px-2.5 w-20 border-r border-surface-border/50 text-center cursor-pointer hover:text-text-main" onClick={() => {
+                    setSortField('gradeClass');
+                    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                  }}>
+                    <div className="flex items-center justify-center gap-1">
+                      <span>Class</span>
+                      <ArrowUpDown className="w-3 h-3 opacity-60" />
+                    </div>
+                  </th>
+
+                  {/* Gender Column */}
+                  <th className="py-2 px-2.5 w-24 border-r border-surface-border/50 text-center">
+                    Gender
+                  </th>
+
+                  {/* Bus Line Column */}
+                  <th className="py-2 px-3 w-32 border-r border-surface-border/50 cursor-pointer hover:text-text-main" onClick={() => {
+                    setSortField('busLine');
+                    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                  }}>
+                    <div className="flex items-center gap-1">
+                      <span>Bus Line</span>
+                      <ArrowUpDown className="w-3 h-3 opacity-60" />
+                    </div>
+                  </th>
+
+                  {/* Actions Column */}
+                  <th className="py-2 px-2.5 w-24 text-center">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+
+              {/* Ultra-Compact High-Density Rows (py-1.5) */}
+              <tbody className="divide-y divide-surface-border/60">
+                {filteredStudents.map((s, idx) => {
+                  const isSelected = selectedStudentIds.includes(s.id);
+                  return (
+                    <tr
+                      key={s.id}
+                      className={`hover:bg-surface-hover/70 transition-colors group text-[11.5px] font-medium ${
+                        isSelected ? 'bg-primary/5 dark:bg-primary/10' : ''
+                      }`}
+                    >
+                      {/* Checkbox */}
+                      <td className="py-1.5 px-2 text-center border-r border-surface-border/40">
+                        <button
+                          onClick={() => handleToggleSelectRow(s.id)}
+                          className="text-text-muted hover:text-primary transition-colors cursor-pointer"
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="w-4 h-4 text-primary" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </button>
+                      </td>
+
+                      {/* Index */}
+                      <td className="py-1.5 px-2.5 text-center text-text-muted font-bold border-r border-surface-border/40 text-[10.5px]">
+                        {idx + 1}
+                      </td>
+
+                      {/* Arabic Name (nameAr) */}
+                      <td className="py-1.5 px-3 font-bold text-text-main border-r border-surface-border/40">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-[11px] shrink-0">
+                              {s.gender === 'Boy' ? '👦' : '👧'}
+                            </span>
+                            <span className="truncate max-w-[180px] sm:max-w-none">{s.nameAr || s.name}</span>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            {(() => {
+                              const fam = studentFamilyMap.get(s.id);
+                              if (!fam || fam.students.length < 2) return null;
+                              const otherSiblings = fam.students.filter(st => st.id !== s.id);
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFamiliesInitialSearch(fam.familyNameAr);
+                                    setIsFamiliesViewOpen(true);
+                                  }}
+                                  className="px-1.5 py-0.5 bg-violet-500/10 hover:bg-violet-500/20 text-violet-700 dark:text-violet-300 rounded text-[10px] font-black border border-violet-500/25 flex items-center gap-1 cursor-pointer transition-all"
+                                  title={`إخوة الطالب: ${otherSiblings.map(x => `${x.nameAr} (${x.gradeClass})`).join(' ، ')}`}
+                                >
+                                  <span>👨‍👩‍👧‍👦</span>
+                                  <span>إخوة ({otherSiblings.length})</span>
+                                </button>
+                              );
+                            })()}
+                            {(() => {
+                              const studentPlans = actionPlans.filter(p => 
+                                p.studentId === s.id || 
+                                (p.studentNameAr && p.studentNameAr.trim() === (s.nameAr || '').trim()) || 
+                                (p.studentNameEn && p.studentNameEn.trim() === (s.nameEn || '').trim())
+                              );
+                              if (studentPlans.length === 0) return null;
+                              const activeCount = studentPlans.filter(p => p.status === 'ACTIVE').length;
+                              return (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedStudentForActionPlanModal(s);
+                                  }}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-black border flex items-center gap-1 cursor-pointer transition-all ${
+                                    activeCount > 0
+                                      ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                                      : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                                  }`}
+                                  title={_t('عرض خطة الدعم الأكاديمي لهذا الطالب', 'View action plans', 'Förderplan anzeigen')}
+                                >
+                                  <Target className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                  <span>{activeCount > 0 ? `دعم (${activeCount})` : 'مكتمل'}</span>
+                                </button>
+                              );
+                            })()}
+
+                            {(() => {
+                              const studentComplaints = complaints.filter(c => 
+                                c.studentId === s.id || 
+                                (c.studentNameAr && c.studentNameAr.trim() === (s.nameAr || '').trim()) || 
+                                (c.studentNameEn && c.studentNameEn.trim() === (s.nameEn || '').trim())
+                              );
+                              if (studentComplaints.length === 0) return null;
+                              return (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedStudentForComplaintsModal(s);
+                                  }}
+                                  className="px-1.5 py-0.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 rounded text-[10px] font-black border border-rose-500/20 flex items-center gap-1 cursor-pointer transition-all"
+                                  title={_t('عرض الشكاوى المسجلة لهذا الطالب', 'View complaints', 'Beschwerden anzeigen')}
+                                >
+                                  <AlertTriangle className="w-3 h-3 text-rose-600" />
+                                  <span>{studentComplaints.length}</span>
+                                </button>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* English Name (nameEn) */}
+                      <td className="py-1.5 px-3 font-semibold text-text-main/90 border-r border-surface-border/40 ltr text-left">
+                        <span className="truncate max-w-[180px] sm:max-w-none">{s.nameEn || s.nameAr}</span>
+                      </td>
+
+                      {/* Class Badge */}
+                      <td className="py-1.5 px-2.5 text-center border-r border-surface-border/40 font-bold">
+                        <span className="inline-block px-2 py-0.5 bg-primary/10 text-primary rounded-md border border-primary/20 text-[10.5px]">
+                          {s.gradeClass}
+                        </span>
+                      </td>
+
+                      {/* Gender Badge */}
+                      <td className="py-1.5 px-2.5 text-center border-r border-surface-border/40">
+                        {s.gender === 'Boy' ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md text-[10px] font-bold border border-blue-500/20">
+                            👦 Boy
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-pink-500/10 text-pink-600 dark:text-pink-400 rounded-md text-[10px] font-bold border border-pink-500/20">
+                            👧 Girl
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Bus Line */}
+                      <td className="py-1.5 px-3 border-r border-surface-border/40 text-text-main font-medium">
+                        <div className="flex items-center gap-1.5">
+                          <Bus className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                          <span className={s.busLine && s.busLine !== 'N/A' && s.busLine !== 'بدون باص' ? 'font-bold text-amber-700 dark:text-amber-400' : 'text-text-muted font-normal'}>
+                            {s.busLine || 'N/A'}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-1.5 px-2.5 text-center">
+                        <div className="flex items-center justify-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => handleCopyStudentRow(s)}
+                            className="p-1 hover:bg-surface-border text-text-muted hover:text-text-main rounded transition-all cursor-pointer"
+                            title={_t('نسخ الصف', 'Copy row', 'Zeile kopieren')}
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setStudentToMove(s);
+                              setTargetMoveClass(s.gradeClass || uniqueClasses[0] || '10A');
+                            }}
+                            className="p-1 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded transition-all cursor-pointer"
+                            title={_t('نقل الطالب إلى فصل آخر', 'Move student to class', 'Schüler verschieben')}
+                          >
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEdit(s)}
+                            className="p-1 hover:bg-primary/10 text-text-muted hover:text-primary rounded transition-all cursor-pointer"
+                            title={_t('تعديل', 'Edit', 'Bearbeiten')}
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          
+                          {/* DELETE BUTTON (Triggers custom confirm modal to guarantee smooth execution without window.confirm blockage) */}
+                          <button
+                            onClick={() => setStudentToDelete(s)}
+                            className="p-1 hover:bg-rose-500/10 text-rose-600 hover:text-rose-700 dark:text-rose-400 rounded transition-all cursor-pointer"
+                            title={_t('حذف الطالب', 'Delete student', 'Schüler löschen')}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ================= MODAL: BULK DELETE & CLEAR ROSTER OPTIONS ================= */}
+      {isBulkDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-2.5 animate-fade-in overflow-y-auto">
+          <div className="bg-surface border border-surface-border rounded-xl max-w-lg w-full p-2.5 sm:p-3 shadow-2xl space-y-2 my-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-2.5 border-b border-surface-border">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center border border-rose-500/20">
+                  <Trash2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-[11px] font-black text-text-main">
+                    {_t('خيارات تصفية وحذف الطلاب', 'Delete & Clear Roster Options', 'Löschoptionen für Schüler')}
+                  </h3>
+                  <p className="text-[10.5px] text-text-muted">
+                    {_t('اختر حذف طلاب فصل معين، صف دراسي كامل، الطلاب المحددين، أو إخلاء القائمة بالكامل.', 'Delete students by class, grade, selected list, or clear all.', 'Schüler nach Klasse, Stufe oder komplett löschen.')}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsBulkDeleteModalOpen(false)}
+                className="p-1 hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 divide-y divide-surface-border">
+              {/* Option 1: Delete Selected Checkboxes */}
+              <div className="pt-2 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-text-main flex items-center gap-1.5">
+                    <CheckSquare className="w-4 h-4 text-primary" />
+                    <span>{_t('1. حذف الطلاب المحددين مربعات الاختيار:', '1. Delete Selected Checkboxes:', '1. Ausgewählte löschen:')}</span>
+                  </span>
+                  <span className="text-[11px] font-black text-primary">
+                    {selectedStudentIds.length} {_t('طالب محدد', 'selected', 'ausgewählt')}
+                  </span>
+                </div>
+                <button
+                  onClick={handleDeleteSelectedStudents}
+                  disabled={selectedStudentIds.length === 0}
+                  className="w-full py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{_t(`حذف الطلاب المحددين (${selectedStudentIds.length})`, `Delete Selected (${selectedStudentIds.length})`, `Ausgewählte löschen (${selectedStudentIds.length})`)}</span>
+                </button>
+              </div>
+
+              {/* Option 2: Delete By Specific Class (e.g., 5A) */}
+              <div className="pt-3 space-y-2">
+                <label className="text-[11px] font-bold text-text-main flex items-center gap-1.5">
+                  <GraduationCap className="w-4 h-4 text-blue-600" />
+                  <span>{_t('2. حذف طلاب فصل دراسي محدد (Class):', '2. Delete by Class:', '2. Nach Klasse löschen:')}</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={targetDeleteClass}
+                    onChange={e => setTargetDeleteClass(e.target.value)}
+                    className="flex-1 px-2 py-1 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                  >
+                    {uniqueClasses.length === 0 && <option value="">{_t('لا توجد فصول', 'No classes', 'Keine Klassen')}</option>}
+                    {uniqueClasses.map(c => {
+                      const count = classStudentCountMap.get(c.toUpperCase()) || 0;
+                      return (
+                        <option key={c} value={c}>
+                          🏫 الفصل: {c} ({count} طالب)
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <button
+                    onClick={() => handleDeleteByClass(targetDeleteClass)}
+                    disabled={!targetDeleteClass || uniqueClasses.length === 0}
+                    className="px-2 py-1 bg-surface-hover hover:bg-surface-border text-text-muted hover:text-text-main border border-surface-border disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-[11px] font-bold transition-all cursor-pointer shrink-0"
+                  >
+                    {_t(`حذف فصل (${targetDeleteClass || '-'})`, `Delete Class`, `Klasse löschen`)}
+                  </button>
+                </div>
+              </div>
+
+              {/* Option 3: Delete By Grade Level (e.g., Grade 5) */}
+              <div className="pt-3 space-y-2">
+                <label className="text-[11px] font-bold text-text-main flex items-center gap-1.5">
+                  <Layers className="w-4 h-4 text-primary" />
+                  <span>{_t('3. حذف طلاب صف دراسي كامل (Grade):', '3. Delete by Grade Level:', '3. Nach Stufe löschen:')}</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={targetDeleteGrade}
+                    onChange={e => setTargetDeleteGrade(e.target.value)}
+                    className="flex-1 px-2 py-1 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                  >
+                    {uniqueGrades.length === 0 && <option value="">{_t('لا توجد صفوف', 'No grades', 'Keine Stufen')}</option>}
+                    {uniqueGrades.map(g => {
+                      const count = gradeStudentCountMap.get(g.toUpperCase()) || 0;
+                      return (
+                        <option key={g} value={g}>
+                          📚 الصف الدراسـي: {g} ({count} طالب)
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <button
+                    onClick={() => handleDeleteByGrade(targetDeleteGrade)}
+                    disabled={!targetDeleteGrade || uniqueGrades.length === 0}
+                    className="px-2 py-1 bg-surface-hover hover:bg-surface-border text-text-muted hover:text-text-main border border-surface-border disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-[11px] font-bold transition-all cursor-pointer shrink-0"
+                  >
+                    {_t(`حذف الصف (${targetDeleteGrade || '-'})`, `Delete Grade`, `Stufe löschen`)}
+                  </button>
+                </div>
+              </div>
+
+              {/* Option 4: Delete Filtered Search Results */}
+              {searchQuery && (
+                <div className="pt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-text-main flex items-center gap-1.5">
+                      <Filter className="w-4 h-4 text-purple-600" />
+                      <span>{_t('4. حذف نتائج البحث الحالية:', '4. Delete Filtered Search Results:', '4. Suchergebnisse löschen:')}</span>
+                    </span>
+                    <span className="text-[11px] font-black text-purple-600">
+                      {filteredStudents.length} {_t('طالب مطابق للبحث', 'matched', 'Treffer')}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleDeleteFilteredStudents}
+                    className="w-full py-2 bg-primary hover:bg-primary-hover text-white text-[11px] font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{_t(`حذف نتائج البحث (${filteredStudents.length} طالب)`, `Delete Search Results (${filteredStudents.length})`, `Suchergebnisse löschen (${filteredStudents.length})`)}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Option 5: Clear All Students Completely */}
+              <div className="pt-3 space-y-2">
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="text-[11px] text-rose-800 dark:text-rose-300 space-y-1">
+                    <p className="font-extrabold">{_t('تنبيه: مسح القائمة بالكامل (Clear All Roster)', 'Warning: Clear All Students', 'Warnung: Alle Schüler löschen')}</p>
+                    <p className="leading-relaxed opacity-90">
+                      {_t(`سيؤدي هذا الإجراء إلى حذف جميع الطلاب المسجلين (${students.length} طالب) نهائياً من النظام.`, `This will delete all ${students.length} registered students permanently.`, `Löscht alle ${students.length} Schüler dauerhaft.`)}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleDeleteAllStudents}
+                  disabled={students.length === 0}
+                  className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-black rounded-xl shadow-md flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{_t(`حذف جميع الطلاب بالكامل (${students.length} طالب)`, `Clear All Roster (${students.length} Students)`, `Alle Schüler löschen (${students.length})`)}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: CONFIRM SINGLE STUDENT DELETE ================= */}
+      {studentToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-2.5 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-xl max-w-md w-full p-2.5 sm:p-3 shadow-2xl space-y-2 my-auto">
+            <div className="flex items-center gap-1.5 text-rose-600">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center border border-rose-500/20 shrink-0">
+                <Trash2 className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <h3 className="text-[11px] font-black text-text-main">
+                  {_t('تاكيد حذف الطالب', 'Confirm Delete Student', 'Schüler löschen bestätigen')}
+                </h3>
+                <p className="text-[11px] text-text-muted">
+                  {_t('هل أنت متأكد من حذف هذا الطالب من القائمة؟', 'Are you sure you want to delete this student?', 'Sind Sie sicher, dass Sie diesen Schüler löschen möchten?')}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-surface-hover/80 border border-surface-border rounded-xl text-[11px] space-y-1">
+              <div className="font-extrabold text-text-main flex items-center gap-1.5">
+                <span>{studentToDelete.gender === 'Boy' ? '👦' : '👧'}</span>
+                <span>{studentToDelete.nameAr}</span>
+              </div>
+              <div className="text-text-muted ltr text-left font-semibold">
+                {studentToDelete.nameEn}
+              </div>
+              <div className="flex items-center gap-2 pt-1 text-[11px] font-bold text-text-muted">
+                <span className="px-1.5 py-0.5 bg-primary/10 text-primary rounded border border-primary/20">
+                  🏫 {studentToDelete.gradeClass}
+                </span>
+                <span>🚌 {studentToDelete.busLine || 'N/A'}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                onClick={() => setStudentToDelete(null)}
+                className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                onClick={() => handleDeleteStudentDirect(studentToDelete.id)}
+                className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-xl text-[11px] font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{_t('نعم، حذف الطالب', 'Yes, Delete', 'Ja, löschen')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL 1: EXTERNAL AI PROMPT GENERATOR & PASTE DATA ================= */}
+      {isPromptModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-2.5 animate-fade-in overflow-y-auto">
+          <div className="bg-surface border border-surface-border rounded-xl max-w-2xl w-full p-3 sm:p-4 shadow-2xl space-y-3 my-auto max-h-[92vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-2.5 border-b border-surface-border">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-600 text-white flex items-center justify-center shadow-xs">
+                  <Code2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-text-main">
+                    {_t('مُولّد ومُنسّق استيراد الطلاب بالذكاء الاصطناعي', 'AI Student Import & Class Normalizer', 'KI-Schülerimport & Klassen-Normalisierer')}
+                  </h3>
+                  <p className="text-[10.5px] text-text-muted">
+                    {_t('توجيه الـ AI لاستخراج طلاب الألماني فقط وتوحيد أسماء الفصول (10A, 10B, 7A...) لتظهر بدقة في كافة الفلاتر.', 'Instruct AI to extract German students and normalize classes (10A, 10B...) for flawless filtering.', 'KI anweisen, Deutschschüler zu extrahieren und Klassen zu vereinheitlichen.')}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsPromptModalOpen(false)}
+                className="p-1 hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Unify Existing Records Banner */}
+            <div className="p-2.5 bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <div className="text-[11px] font-black text-primary flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span>{_t('توحيد وتنسيق فصول الطلاب الحاليين المسجلين:', 'Unify Existing Students Classes:', 'Bestehende Klassen vereinheitlichen:')}</span>
+                </div>
+                <div className="text-[10px] text-text-muted">
+                  {_t('تحويل المسميات مثل "FIRST SECONDARY 10A" تلقائياً إلى "10A" لضبط الفلاتر', 'Converts labels like "FIRST SECONDARY 10A" into "10A"', 'Wandelt Labels wie "FIRST SECONDARY 10A" in "10A" um')}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleUnifyAllClasses}
+                className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-lg text-[10.5px] font-bold shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap active:scale-95"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>{_t(`توحيد الفصول الآن (${students.length} طالب)`, `Unify Classes (${students.length} students)`, `Klassen vereinheitlichen (${students.length})`)}</span>
+              </button>
+            </div>
+
+            {/* STEP 1: Customize & Copy System Prompt */}
+            <div className="space-y-2 pt-1 border-t border-surface-border">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-[11px] font-extrabold text-text-main flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-black">1</span>
+                  <span>{_t('تخصيص ونسخ البرومبت (Prompt Customization & Copy):', 'Customize & Copy Prompt:', 'Prompt anpassen & kopieren:')}</span>
+                </label>
+
+                {/* Target Grade / Class & Language Quick Selectors */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {/* Language switch */}
+                  <div className="flex items-center gap-0.5 bg-surface-hover p-0.5 rounded-lg border border-surface-border">
+                    <button
+                      type="button"
+                      onClick={() => setPromptLanguage('ar')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${promptLanguage === 'ar' ? 'bg-primary text-white shadow-xs' : 'text-text-muted hover:text-text-main'}`}
+                    >
+                      العربية
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPromptLanguage('en')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${promptLanguage === 'en' ? 'bg-primary text-white shadow-xs' : 'text-text-muted hover:text-text-main'}`}
+                    >
+                      English
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPromptLanguage('bilingual')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${promptLanguage === 'bilingual' ? 'bg-primary text-white shadow-xs' : 'text-text-muted hover:text-text-main'}`}
+                    >
+                      {_t('ثنائي', 'Bilingual', 'Zweisprachig')}
+                    </button>
+                  </div>
+
+                  <select
+                    value={promptTargetGrade}
+                    onChange={e => {
+                      setPromptTargetGrade(e.target.value);
+                      if (e.target.value && !promptTargetClass) {
+                        setPromptTargetClass(`${e.target.value}A`);
+                      }
+                    }}
+                    className="px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10.5px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                  >
+                    <option value="">{_t('المرحلة (تلقائي)', 'Grade (Auto)', 'Stufe (Auto)')}</option>
+                    {allSchoolGrades.map(g => (
+                      <option key={`prompt-g-${g}`} value={g}>الصف {g} (Grade {g})</option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="text"
+                    value={promptTargetClass}
+                    onChange={e => setPromptTargetClass(e.target.value)}
+                    placeholder={_t('الفصل (مثال: 10A)', 'Class (e.g. 10A)', 'Klasse (z.B. 10A)')}
+                    className="w-24 px-2 py-1 bg-surface-hover border border-surface-border rounded-lg text-[10.5px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-text-muted/60 uppercase"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Pick Known Classes from Timetable & Student Roster */}
+              {allKnownClasses.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  <span className="text-[10px] text-text-muted font-bold">
+                    {_t('فصول الجدول المسجلة:', 'Classes from Schedule:', 'Klassen aus Stundenplan:')}
+                  </span>
+                  {allKnownClasses.map(cls => (
+                    <button
+                      key={`p-cls-${cls}`}
+                      type="button"
+                      onClick={() => {
+                        setPromptTargetClass(cls);
+                        const gr = extractGradeFromClass(cls);
+                        if (gr) setPromptTargetGrade(gr);
+                      }}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                        promptTargetClass.toUpperCase() === cls.toUpperCase()
+                          ? 'bg-primary text-white shadow-xs'
+                          : 'bg-surface border border-surface-border text-text-muted hover:text-text-main hover:border-primary/50'
+                      }`}
+                    >
+                      {cls}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Strict Class Unification Banner */}
+              <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-2 text-[10.5px] text-emerald-800 dark:text-emerald-300 font-semibold leading-relaxed">
+                <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-black text-emerald-950 dark:text-emerald-200">
+                    {_t('توحيد أسماء الفصول مشدد بالبرومبت:', 'Strict Class Code Standardization:', 'Strenge Klassencode-Standardisierung:')}
+                  </span>{' '}
+                  <span>
+                    {_t(
+                      'البرومبت يُلزم الذكاء الاصطناعي باستخراج طلاب الألماني فقط وكتابة الفصل بالصيغة القياسية الموحدة [رقم الصف][حرف الفصل] (مثل 10A, 11B, 7A...) مع تحويل الحروف العربية (أ=A، ب=B) والمراحل (أولى ثانوي=10) لضمان الربط التام مع جدول الحصص.',
+                      'The prompt instructs AI to extract German students with standardized class codes [Grade][Section] (e.g. 10A, 11B, 7A) matching timetable lessons.',
+                      'Der Prompt weist die KI an, Klassencodes einheitlich (z.B. 10A, 11B, 7A) passend zum Stundenplan zu extrahieren.'
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              {/* Copy Button Row */}
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-text-muted font-bold">
+                  {_t('البرومبت يوجه الذكاء الاصطناعي لاستخراج طلاب الألماني فقط وتوحيد الفصل إلى رمز موحد:', 'Instructs AI to extract German students and standardize class codes:', 'Weist KI an, Deutschschüler zu extrahieren und Klassencodes zu standardisieren:')}
+                </span>
+                <button
+                  onClick={handleCopyPromptText}
+                  className={`px-3 py-1 rounded-xl text-[10.5px] font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs ${
+                    promptCopied 
+                      ? 'bg-emerald-600 text-white' 
+                      : 'bg-primary hover:bg-primary-hover text-white'
+                  }`}
+                >
+                  {promptCopied ? <ClipboardCheck className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{promptCopied ? _t('تم النسخ بنجاح! ✓', 'Copied! ✓', 'Kopiert! ✓') : _t('نسخ البرومبت (Copy Prompt)', 'Copy Prompt', 'Prompt kopieren')}</span>
+                </button>
+              </div>
+
+              <div className="p-2.5 bg-surface-hover/90 border border-surface-border rounded-xl text-[10px] sm:text-[10.5px] font-mono text-text-main leading-relaxed relative group ltr text-left select-all max-h-36 overflow-y-auto">
+                {activePromptText}
+              </div>
+
+              {/* Quick Launch External Links */}
+              <div className="flex items-center gap-2 pt-0.5">
+                <span className="text-[10.5px] font-bold text-text-muted">{_t('افتح أداة AI خارجية:', 'Open External AI Tool:', 'Externe KI öffnen:')}</span>
+                <a
+                  href="https://chatgpt.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border inline-flex items-center gap-1 transition-all"
+                >
+                  <span>ChatGPT</span>
+                  <ExternalLink className="w-3 h-3 text-emerald-500" />
+                </a>
+                <a
+                  href="https://gemini.google.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-2.5 py-1 bg-surface-hover hover:bg-surface-border text-text-main rounded-lg text-[10.5px] font-bold border border-surface-border inline-flex items-center gap-1 transition-all"
+                >
+                  <span>Google Gemini</span>
+                  <ExternalLink className="w-3 h-3 text-blue-500" />
+                </a>
+              </div>
+            </div>
+
+            {/* STEP 2: Paste Output & Import */}
+            <div className="space-y-2 pt-2 border-t border-surface-border">
+              <label className="text-[11px] font-extrabold text-text-main flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-[10px] font-black">2</span>
+                  <span>{_t('الصق النتيجة المستخرجة من الـ AI هنا (Paste AI JSON Output):', 'Paste AI Output Here:', 'KI-Ergebnis hier einfügen:')}</span>
+                </div>
+              </label>
+
+              <textarea
+                value={pastedAiJsonText}
+                onChange={e => {
+                  setPastedAiJsonText(e.target.value);
+                  setPasteError(null);
+                  setPasteSuccessCount(null);
+                }}
+                rows={4}
+                placeholder={_t('الصق كود الـ JSON الناتج من ChatGPT أو Gemini هنا...\n\nمثال:\n[\n  {"nameAr": "أحمد علي", "nameEn": "Ahmed Ali", "gender": "Boy", "gradeClass": "10A", "busLine": "Line 04"}\n]', 'Paste JSON output here...\n\nExample:\n[\n  {"nameAr": "Ahmed Ali", "nameEn": "Ahmed Ali", "gender": "Boy", "gradeClass": "10A", "busLine": "Line 04"}\n]', 'Fügen Sie hier das JSON-Ergebnis ein...')}
+                className="w-full p-2.5 bg-surface-hover border border-surface-border rounded-xl text-[10.5px] font-mono text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 placeholder:text-text-muted/60"
+              />
+
+              {pasteError && (
+                <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-[11px] text-rose-600 dark:text-rose-400 font-bold flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{pasteError}</span>
+                </div>
+              )}
+
+              {pasteSuccessCount !== null && (
+                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{_t(`تم استيراد وتوحيد فصول ${pasteSuccessCount} طالب بنجاح!`, `Successfully imported and normalized ${pasteSuccessCount} students!`, `${pasteSuccessCount} Schüler erfolgreich importiert!`)}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  onClick={() => setIsPromptModalOpen(false)}
+                  className="px-2.5 py-1.5 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
+                >
+                  {_t('إغلاق', 'Close', 'Schließen')}
+                </button>
+                <button
+                  onClick={handleParseAndImportPastedJson}
+                  disabled={!pastedAiJsonText.trim()}
+                  className="px-3 py-1.5 bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <FileCode className="w-3.5 h-3.5" />
+                  <span>{_t('استيراد وتوحيد الفصول الآن', 'Import & Normalize Classes Now', 'Jetzt importieren & normalisieren')}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL 3: ADD / EDIT STUDENT ================= */}
+      {isAddEditModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-2.5 animate-fade-in overflow-y-auto">
+          <div className="bg-surface border border-surface-border rounded-xl max-w-md w-full p-2.5 sm:p-3 shadow-2xl space-y-2 my-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-2.5 border-b border-surface-border">
+              <h3 className="text-[11px] font-black text-text-main flex items-center gap-2">
+                <span>{editingStudent ? _t('تعديل بيانات الطالب', 'Edit Student Details', 'Schüler bearbeiten') : _t('إضافة طالب ألماني جديد', 'Add New German Student', 'Neuen Deutschschüler hinzufügen')}</span>
+              </h3>
+              <button
+                onClick={() => setIsAddEditModalOpen(false)}
+                className="p-1 hover:bg-surface-hover text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveStudentSubmit} className="space-y-3">
+              {/* Arabic Name */}
+              <div>
+                <label className="block text-[11px] font-bold text-text-main mb-1">
+                  {_t('الاسم بالكامل بالعربية (Arabic Full Name):', 'Arabic Full Name:', 'Vollständiger Name auf Arabisch:')}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={studentForm.nameAr}
+                  onChange={e => setStudentForm({ ...studentForm, nameAr: e.target.value })}
+                  placeholder={_t('مثال: أحمد محمود العبد', 'e.g., Ahmed Mahmoud', 'z.B. Ahmed Mahmoud')}
+                  className="w-full px-2 py-1 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              {/* English Name */}
+              <div>
+                <label className="block text-[11px] font-bold text-text-main mb-1">
+                  {_t('الاسم بالكامل بالإنجليزي (English Full Name):', 'English Full Name:', 'Vollständiger Name auf Englisch:')}
+                </label>
+                <input
+                  type="text"
+                  value={studentForm.nameEn}
+                  onChange={e => setStudentForm({ ...studentForm, nameEn: e.target.value })}
+                  placeholder={_t('e.g., Ahmed Mahmoud Elabd', 'e.g., Ahmed Mahmoud Elabd', 'z.B. Ahmed Mahmoud Elabd')}
+                  className="w-full px-2 py-1 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary ltr text-left font-mono"
+                />
+              </div>
+
+              {/* Class & Gender */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold text-text-main">
+                      {_t('الفصل (Class):', 'Class:', 'Klasse:')}
+                    </label>
+                    {studentForm.gradeClass && (
+                      <span className="text-[10px] text-primary font-mono font-bold">
+                        {normalizeClassCode(studentForm.gradeClass)}
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={studentForm.gradeClass}
+                    onChange={e => setStudentForm({ ...studentForm, gradeClass: e.target.value.toUpperCase() })}
+                    onBlur={() => {
+                      if (studentForm.gradeClass.trim()) {
+                        setStudentForm(prev => ({ ...prev, gradeClass: normalizeClassCode(prev.gradeClass) }));
+                      }
+                    }}
+                    placeholder="10A, 11B, 7A..."
+                    className="w-full px-2 py-1 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary uppercase"
+                  />
+                  <p className="text-[9.5px] text-text-muted mt-0.5">
+                    {_t('الصيغة الموحدة: [رقم الصف][حرف الفصل] (مثل: 10A، 11B)', 'Unified: [Grade][Section] (e.g. 10A, 11B)', 'Format: [Stufe][Klasse]')}
+                  </p>
+                  {allKnownClasses.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1 max-h-16 overflow-y-auto pt-0.5">
+                      {allKnownClasses.map(c => (
+                        <button
+                          key={`qp-${c}`}
+                          type="button"
+                          onClick={() => setStudentForm({ ...studentForm, gradeClass: c })}
+                          className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold font-mono transition-all cursor-pointer ${
+                            normalizeClassCode(studentForm.gradeClass) === c
+                              ? 'bg-primary text-white shadow-xs'
+                              : 'bg-surface border border-surface-border text-text-muted hover:text-text-main hover:bg-surface-hover'
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-text-main mb-1">
+                    {_t('النوع (Gender):', 'Gender:', 'Geschlecht:')}
+                  </label>
+                  <select
+                    value={studentForm.gender}
+                    onChange={e => setStudentForm({ ...studentForm, gender: e.target.value as any })}
+                    className="w-full px-2 py-1 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                  >
+                    <option value="Boy">👦 {_t('بنين (Boy)', 'Boy', 'Junge')}</option>
+                    <option value="Girl">👧 {_t('بنات (Girl)', 'Girl', 'Mädchen')}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Bus Line & Second Language Rule */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-text-main mb-1">
+                    {_t('رقم الخط / الباص (Bus Line):', 'Bus Line Number:', 'Buslinie:')}
+                  </label>
+                  <input
+                    type="text"
+                    value={studentForm.busLine}
+                    onChange={e => setStudentForm({ ...studentForm, busLine: e.target.value })}
+                    placeholder="Line 04, N/A..."
+                    className="w-full px-2 py-1 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-bold text-text-main focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-text-main mb-1">
+                    {_t('اللغة الثانية (Second Lang):', 'Second Language:', 'Zweite Sprache:')}
+                  </label>
+                  <div className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl text-[11px] font-black flex items-center gap-1">
+                    <span>🇩🇪 German (ألماني)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-surface-border">
+                <button
+                  type="button"
+                  onClick={() => setIsAddEditModalOpen(false)}
+                  className="px-2 py-1 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-[11px] font-bold border border-surface-border transition-all cursor-pointer"
+                >
+                  {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                </button>
+                <button
+                  type="submit"
+                  className="px-2.5 py-1 bg-primary hover:bg-primary-hover text-white rounded-xl text-[11px] font-bold shadow-xs transition-all cursor-pointer"
+                >
+                  {editingStudent ? _t('حفظ التعديلات', 'Save Changes', 'Änderungen speichern') : _t('إضافة الطالب الآن', 'Add Student Now', 'Schüler jetzt hinzufügen')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* ================= MODAL: STUDENT COMPLAINTS HISTORY ================= */}
+      {selectedStudentForComplaintsModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-xl w-full max-w-lg p-3 shadow-2xl space-y-2 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-surface-border pb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 bg-rose-500/10 text-rose-600 rounded-lg">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                </span>
+                <div>
+                  <h3 className="text-[11px] font-black text-text-main">
+                    {_t('سجل الشكاوى والملاحظات للطالب', 'Student Complaints History', 'Beschwerde-Verlauf')}
+                  </h3>
+                  <p className="text-[11px] text-text-muted font-bold">
+                    {selectedStudentForComplaintsModal.nameAr} ({selectedStudentForComplaintsModal.nameEn}) - [{selectedStudentForComplaintsModal.gradeClass}]
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setSelectedStudentForComplaintsModal(null)}
+                className="p-1 text-text-muted hover:text-text-main"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+              {(() => {
+                const s = selectedStudentForComplaintsModal;
+                const studentComplaints = complaints.filter(c => 
+                  c.studentId === s.id || 
+                  (c.studentNameAr && c.studentNameAr.trim() === (s.nameAr || '').trim()) || 
+                  (c.studentNameEn && c.studentNameEn.trim() === (s.nameEn || '').trim())
+                );
+
+                if (studentComplaints.length === 0) {
+                  return (
+                    <div className="text-center p-3 text-text-muted text-[11px] font-bold">
+                      {_t('لا توجد شكاوى مسجلة لهذا الطالب.', 'No complaints logged for this student.', 'Keine Beschwerden.')}
+                    </div>
+                  );
+                }
+
+                return studentComplaints.map(c => {
+                  const isTeacherToStudent = c.direction === 'TEACHER_TO_STUDENT';
+                  return (
+                    <div key={c.id} className="p-3 bg-surface-hover border border-surface-border rounded-xl space-y-2 text-[11px]">
+                      <div className="flex items-center justify-between">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                          isTeacherToStudent ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20' : 'bg-indigo-500/10 text-indigo-600 border border-indigo-500/20'
+                        }`}>
+                          {isTeacherToStudent ? '👨‍🏫 معلم ضد طالب' : '👦 طالب ضد معلم'}
+                        </span>
+                        <span className="text-[10px] text-text-muted font-bold">
+                          {new Date(c.timestamp).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="font-extrabold text-text-main">
+                          👨‍🏫 المعلم المعني: {c.teacherName}
+                        </div>
+                        <div className="font-bold text-text-main">
+                          📌 السبب: <span className="text-rose-600 dark:text-rose-400">{c.reason}</span>
+                        </div>
+                        <div className="font-bold text-emerald-600 dark:text-emerald-400">
+                          ⚡ الإجراء: {c.actionTaken}
+                        </div>
+                        {c.notes && (
+                          <div className="text-[11px] text-text-muted italic bg-surface p-2 rounded-lg border border-surface-border/50">
+                            📝 {c.notes}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="pt-1 flex items-center justify-between text-[10px] text-text-muted border-t border-surface-border/50">
+                        <span>{c.term} - {c.month}</span>
+                        <span className={c.weeklyReportSent ? 'text-blue-600 font-bold' : 'text-amber-600 font-bold'}>
+                          {c.weeklyReportSent ? '📑 مدرجة بتقرير أسبوعي' : '🆕 بانتظار التقرير الأسبوعي'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            <div className="pt-2 border-t border-surface-border text-right">
+              <button
+                onClick={() => setSelectedStudentForComplaintsModal(null)}
+                className="px-2.5 py-1 bg-surface-hover text-text-main rounded-xl text-[11px] font-bold border border-surface-border cursor-pointer"
+              >
+                {_t('إغلاق', 'Close', 'Schließen')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STUDENT ACTION PLAN EMBEDDED MODAL */}
+      {selectedStudentForActionPlanModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 animate-fade-in overflow-y-auto">
+          <div className="bg-surface border border-surface-border rounded-xl w-full max-w-3xl p-3 shadow-2xl space-y-2 max-h-[90vh] flex flex-col my-auto">
+            <div className="flex items-center justify-between border-b border-surface-border pb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-2 bg-amber-500/10 text-amber-600 rounded-xl">
+                  <Target className="w-3.5 h-3.5" />
+                </span>
+                <div>
+                  <h3 className="text-[11px] font-black text-text-main">
+                    خطط الدعم الأكاديمي للطالب ({selectedStudentForActionPlanModal.nameAr || selectedStudentForActionPlanModal.name})
+                  </h3>
+                  <p className="text-[11px] text-text-muted">
+                    الفصل: {selectedStudentForActionPlanModal.gradeClass} - ({selectedStudentForActionPlanModal.nameEn})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedStudentForActionPlanModal(null)}
+                className="p-1 text-text-muted hover:text-text-main cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1">
+              <ActionPlansView embeddedStudentId={selectedStudentForActionPlanModal.id} />
+            </div>
+
+            <div className="pt-2 border-t border-surface-border text-right">
+              <button
+                onClick={() => setSelectedStudentForActionPlanModal(null)}
+                className="px-2.5 py-1 bg-surface-hover text-text-main rounded-xl text-[11px] font-bold border border-surface-border cursor-pointer"
+              >
+                {_t('إغلاق', 'Close', 'Schließen')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SINGLE STUDENT MOVE TO CLASS MODAL */}
+      {studentToMove && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-text-main">
+                    {_t('نقل الطالب إلى فصل / مجموعة أخرى', 'Move Student to Another Class', 'Schüler in andere Klasse verschieben')}
+                  </h3>
+                  <p className="text-xs text-text-muted">
+                    {studentToMove.nameAr} ({studentToMove.nameEn})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStudentToMove(null)}
+                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-[11px] text-text-muted bg-surface-hover/50 p-2.5 rounded-lg border border-surface-border-soft flex items-center justify-between">
+                <span className="font-bold">{_t('الفصل الحالي:', 'Current Class:', 'Aktuelle Klasse:')}</span>
+                <span className="text-text-main font-black bg-surface px-2 py-0.5 rounded border border-surface-border">
+                  {studentToMove.gradeClass}
+                </span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-text-main">
+                    {_t('اختر الفصل المستهدف الجديد:', 'Select Target Class:', 'Zielklasse wählen:')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomMoveClass(!isCustomMoveClass)}
+                    className="text-[10px] text-primary hover:underline font-bold"
+                  >
+                    {isCustomMoveClass ? _t('اختر من القائمة', 'Select from list', 'Aus Liste') : _t('+ كتابة فصل جديد', '+ Type new class', '+ Neue Klasse')}
+                  </button>
+                </div>
+
+                {!isCustomMoveClass ? (
+                  <select
+                    value={targetMoveClass}
+                    onChange={(e) => setTargetMoveClass(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                  >
+                    {uniqueClasses.map(cls => (
+                      <option key={cls} value={cls}>
+                        {cls} ({studentCountsByClass[cls] || 0} {_t('طلاب', 'students', 'Schüler')})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={customMoveClass}
+                    onChange={(e) => setCustomMoveClass(e.target.value)}
+                    placeholder={_t('مثال: 5B أو 10C...', 'e.g. 5B or 10C...', 'z.B. 5B oder 10C...')}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 uppercase"
+                  />
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setStudentToMove(null)}
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = isCustomMoveClass ? customMoveClass.trim() : targetMoveClass;
+                  if (target) {
+                    handleMoveStudentToClass(studentToMove.id, target);
+                  }
+                }}
+                disabled={isCustomMoveClass && !customMoveClass.trim()}
+                className="px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>{_t('تأكيد النقل', 'Confirm Move', 'Verschieben bestätigen')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK MOVE STUDENTS TO CLASS MODAL */}
+      {isBulkMoveModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <ArrowRightLeft className="w-6 h-6 text-primary shrink-0" />
+                <div>
+                  <h3 className="text-sm font-black text-text-main">
+                    {_t('نقل الطلاب المحددين جماعياً إلى فصل جديد', 'Bulk Move Selected Students', 'Ausgewählte Schüler in Klasse verschieben')}
+                  </h3>
+                  <p className="text-xs text-text-muted">
+                    {_t(`سيتم نقل ${selectedStudentIds.length} طالب دفعة واحدة`, `Moving ${selectedStudentIds.length} students at once`, `${selectedStudentIds.length} Schüler werden verschoben`)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBulkMoveModalOpen(false)}
+                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-text-main">
+                    {_t('اختر الفصل المستهدف الجديد للطلاب:', 'Select Target Class for Students:', 'Zielklasse für Schüler wählen:')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomBulkMoveClass(!isCustomBulkMoveClass)}
+                    className="text-[10px] text-primary hover:underline font-bold"
+                  >
+                    {isCustomBulkMoveClass ? _t('اختر من القائمة', 'Select from list', 'Aus Liste') : _t('+ كتابة فصل جديد', '+ Type new class', '+ Neue Klasse')}
+                  </button>
+                </div>
+
+                {!isCustomBulkMoveClass ? (
+                  <select
+                    value={targetBulkMoveClass}
+                    onChange={(e) => setTargetBulkMoveClass(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                  >
+                    {uniqueClasses.map(cls => (
+                      <option key={cls} value={cls}>
+                        {cls} ({studentCountsByClass[cls] || 0} {_t('طلاب', 'students', 'Schüler')})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={customBulkMoveClass}
+                    onChange={(e) => setCustomBulkMoveClass(e.target.value)}
+                    placeholder={_t('مثال: 5B أو 10C...', 'e.g. 5B or 10C...', 'z.B. 5B oder 10C...')}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 uppercase"
+                  />
+                )}
+              </div>
+
+              <div className="max-h-36 overflow-y-auto bg-surface-hover/50 p-2 rounded-lg border border-surface-border-soft space-y-1">
+                {selectedStudentIds.map(id => {
+                  const st = students.find(s => s.id === id);
+                  return (
+                    <div key={id} className="text-xs font-bold text-text-main flex items-center justify-between">
+                      <span>{st?.nameAr || st?.nameEn || id}</span>
+                      <span className="text-[10px] text-text-muted font-normal">
+                        {st?.gradeClass || 'N/A'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setIsBulkMoveModalOpen(false)}
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = isCustomBulkMoveClass ? customBulkMoveClass.trim() : targetBulkMoveClass;
+                  if (target) {
+                    handleMoveSelectedStudentsToClass(target);
+                  }
+                }}
+                disabled={isCustomBulkMoveClass && !customBulkMoveClass.trim()}
+                className="px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>{_t(`نقل (${selectedStudentIds.length}) طالب إلى (${isCustomBulkMoveClass ? (customBulkMoveClass || '...') : targetBulkMoveClass})`, `Move (${selectedStudentIds.length}) students`, `(${selectedStudentIds.length}) Schüler verschieben`)}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MOVE WHOLE CLASS TO ANOTHER CLASS MODAL */}
+      {classToMoveFrom && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <ArrowRightLeft className="w-6 h-6 text-primary shrink-0" />
+                <div>
+                  <h3 className="text-sm font-black text-text-main">
+                    {_t(`نقل جميع طلاب فصل (${classToMoveFrom}) إلى فصل آخر`, `Move All Students in Class (${classToMoveFrom})`, `Alle Schüler aus (${classToMoveFrom}) verschieben`)}
+                  </h3>
+                  <p className="text-xs text-text-muted">
+                    {_t(`إجمالي عدد الطلاب في هذا الفصل: ${students.filter(s => s.gradeClass.toUpperCase() === classToMoveFrom.toUpperCase()).length} طالب`, `Total students: ${students.filter(s => s.gradeClass.toUpperCase() === classToMoveFrom.toUpperCase()).length}`, `Gesamt: ${students.filter(s => s.gradeClass.toUpperCase() === classToMoveFrom.toUpperCase()).length} Schüler`)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setClassToMoveFrom(null)}
+                className="p-1 text-text-muted hover:text-text-main rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-[11px] text-text-muted bg-surface-hover/50 p-2.5 rounded-lg border border-surface-border-soft flex items-center justify-between">
+                <span className="font-bold">{_t('الفصل المصدر (الحالي):', 'Source Class:', 'Ausgangsklasse:')}</span>
+                <span className="text-primary font-black">
+                  {classToMoveFrom}
+                </span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-text-main">
+                    {_t('اختر الفصل الجديد الذي سينتقل إليه الطلاب:', 'Select New Target Class:', 'Neue Zielklasse wählen:')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomWholeClassMove(!isCustomWholeClassMove)}
+                    className="text-[10px] text-primary hover:underline font-bold"
+                  >
+                    {isCustomWholeClassMove ? _t('اختر من القائمة', 'Select from list', 'Aus Liste') : _t('+ كتابة فصل جديد', '+ Type new class', '+ Neue Klasse')}
+                  </button>
+                </div>
+
+                {!isCustomWholeClassMove ? (
+                  <select
+                    value={targetWholeClassMove}
+                    onChange={(e) => setTargetWholeClassMove(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                  >
+                    {uniqueClasses.filter(c => c.toUpperCase() !== classToMoveFrom.toUpperCase()).map(cls => (
+                      <option key={cls} value={cls}>
+                        {cls} ({studentCountsByClass[cls] || 0} {_t('طلاب', 'students', 'Schüler')})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={customWholeClassMove}
+                    onChange={(e) => setCustomWholeClassMove(e.target.value)}
+                    placeholder={_t('مثال: 5C أو 11A...', 'e.g. 5C or 11A...', 'z.B. 5C oder 11A...')}
+                    className="w-full px-3 py-2.5 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40 uppercase"
+                  />
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setClassToMoveFrom(null)}
+                className="px-3.5 py-2 text-xs font-bold text-text-muted hover:text-text-main rounded-xl border border-surface-border hover:bg-surface-hover transition-colors"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = isCustomWholeClassMove ? customWholeClassMove.trim() : targetWholeClassMove;
+                  if (target) {
+                    handleMoveWholeClassToClass(classToMoveFrom, target);
+                  }
+                }}
+                disabled={isCustomWholeClassMove && !customWholeClassMove.trim()}
+                className="px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>{_t(`نقل طلاب الفصل بالكامل إلى (${isCustomWholeClassMove ? (customWholeClassMove || '...') : targetWholeClassMove})`, `Move Class to (${isCustomWholeClassMove ? customWholeClassMove : targetWholeClassMove})`, `Klasse verschieben`)}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

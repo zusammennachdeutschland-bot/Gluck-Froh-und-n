@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg">
+
+    <!-- Day Navigation Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#222222"
+        android:padding="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:gravity="center"
+            android:text="◀"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#38BDF8"
+            android:background="#1E293B" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:text="📅 جدول الحصص (اليوم)"
+            android:textStyle="bold"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF" />
+
+        <TextView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:gravity="center"
+            android:text="▶"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#38BDF8"
+            android:background="#1E293B" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginStart="6dp"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="⟳ اليوم"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="#10B981"
+            android:background="#064E3B" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:padding="6dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="8dp"
+            android:background="@drawable/widget_item_bg">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🕒"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="مجموعة الثانوي B1"
+                    android:textStyle="bold"
+                    android:textSize="13sp"
+                    android:textColor="#FFFFFF" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="شرح القواعد • الوحدة 3"
+                    android:textSize="11sp"
+                    android:textColor="#9CA3AF" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="05:00 م"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#38BDF8" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

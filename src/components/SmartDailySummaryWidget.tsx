@@ -1,0 +1,280 @@
+import React, { useMemo } from 'react';
+import { useApp } from '../context/AppContext';
+import { calculateDuePaymentCycles } from '../utils/paymentUtils';
+import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
+import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+
+import { Sparkles, Clock, Users, BookOpen, AlertCircle, Wallet } from 'lucide-react';
+
+export const SmartDailySummaryWidget: React.FC = () => {
+  const { lessons, students, groups, payments, profile, language, t } = useApp();
+
+  // Helper for inline translations
+  
+
+  const todayStr = formatLocalDate();
+
+  const summary = useMemo(() => {
+    const active = lessons
+      .filter(l => !l.deleted && l.date === todayStr && l.status !== 'cancelled')
+      .filter(l => {
+        if (
+          l.groupId && 
+          l.groupId !== 'quick_group' && 
+          l.status === 'scheduled' && 
+          (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes && !l.report.homeworkTitle && l.report.quizScore === undefined)) &&
+          (!l.studentPayments || Object.keys(l.studentPayments).length === 0) &&
+          (!l.amountPaid || l.amountPaid === 0)
+        ) {
+          const grp = groups.find(g => g.id === l.groupId && !g.deleted);
+          if (grp) {
+            if (grp.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly') {
+              if (!isDateMatchingGroupRecurrence(grp.scheduleRecurrence, l.date)) {
+                return false;
+              }
+            }
+            const activeSlots = getGroupScheduleSlots(grp);
+            if (activeSlots.length > 0) {
+              const lDate = parseLocalDate(l.date);
+              const lDayNum = lDate.getDay();
+              const matchesSlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === l.time);
+              if (!matchesSlot) return false;
+            }
+          }
+        }
+        return true;
+      });
+
+    const seen = new Set<string>();
+    const todaysLessons: typeof lessons = [];
+    active.forEach(l => {
+      const key = l.groupId && l.groupId !== 'quick_group'
+        ? `${l.groupId}_${l.date}_${l.time}`
+        : l.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        todaysLessons.push(l);
+      }
+    });
+
+    todaysLessons.sort((a, b) => a.time.localeCompare(b.time));
+
+    const todaysLessonsCount = todaysLessons.length;
+
+    // Unique students attending today
+    const studentSet = new Set<string>();
+    todaysLessons.forEach(l => {
+      if (l.studentId) {
+        studentSet.add(l.studentId);
+      } else if (l.groupId && l.groupId !== 'quick_group') {
+        const groupStudents = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === l.groupId);
+        if (groupStudents.length > 0) {
+          groupStudents.forEach(s => studentSet.add(s.id));
+        } else {
+          studentSet.add(`group_${l.groupId}`);
+        }
+      } else if (l.studentName) {
+        studentSet.add(l.studentName);
+      }
+    });
+    const todaysStudentsCount = studentSet.size;
+
+    // Revenue collected today (matching Payments View)
+    const paidOnly = payments.filter(p => p.status === 'paid');
+    const dailyPayments = paidOnly.filter(p => {
+      const d = p.paidDate || p.dueDate;
+      return d && d.startsWith(todayStr);
+    });
+    const collectedToday = dailyPayments.reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
+
+    // Overdue students count
+    const dueCycles = calculateDuePaymentCycles(students, groups, lessons, payments);
+    const lateStudentsCount = new Set(dueCycles.map(c => c.studentId)).size;
+
+    // First lesson time today
+    const firstLessonTime = todaysLessons[0]?.time || null;
+
+    const formatTime12h = (timeStr: string) => {
+      if (!timeStr) return '';
+      const parts = timeStr.split(':');
+      let h = parseInt(parts[0], 10);
+      const m = parts[1] || '00';
+      if (isNaN(h)) return timeStr;
+      if (language === 'ar') {
+        const period = h >= 12 ? 'مساءً' : 'صباحاً';
+        h = h % 12 || 12;
+        return `${h}:${m} ${period}`;
+      } else if (language === 'de') {
+        return `${timeStr} Uhr`;
+      } else {
+        const period = h >= 12 ? 'PM' : 'AM';
+        h = h % 12 || 12;
+        return `${h}:${m} ${period}`;
+      }
+    };
+
+    const currency = profile.currency || (t('auto_egp'));
+
+    let text = '';
+    if (todaysLessonsCount === 0) {
+      if (lateStudentsCount > 0) {
+        if (language === 'ar') {
+          text = `لا توجد حصص مجدولة لليوم. يوجد ${lateStudentsCount} طلاب متأخرون في الدفع.`;
+        } else if (language === 'de') {
+          text = `Keine Stunden für heute geplant. Es gibt ${lateStudentsCount} Schüler mit überfälligen Zahlungen.`;
+        } else {
+          text = `No lessons scheduled for today. There are ${lateStudentsCount} student(s) with overdue payments.`;
+        }
+      } else {
+        text = t('smart_summary_no_lessons_regular');
+      }
+    } else {
+      let lateText = '';
+      if (lateStudentsCount > 0) {
+        if (language === 'ar') lateText = `يوجد ${lateStudentsCount} طلاب متأخرون في الدفع.`;
+        else if (language === 'de') lateText = `Es gibt ${lateStudentsCount} Schüler mit überfälligen Zahlungen.`;
+        else lateText = `There are ${lateStudentsCount} student(s) with overdue payments.`;
+      } else {
+        if (language === 'ar') lateText = 'جميع الدفوعات منتظمة.';
+        else if (language === 'de') lateText = 'Alle Zahlungen sind pünktlich.';
+        else lateText = 'All payments are up to date.';
+      }
+
+      let firstText = '';
+      if (firstLessonTime) {
+        if (language === 'ar') firstText = `أول حصة تبدأ الساعة ${formatTime12h(firstLessonTime)}.`;
+        else if (language === 'de') firstText = `Die erste Stunde beginnt um ${formatTime12h(firstLessonTime)}.`;
+        else firstText = `First lesson starts at ${formatTime12h(firstLessonTime)}.`;
+      }
+
+      if (language === 'ar') {
+        text = `لديك اليوم ${todaysLessonsCount} حصص، و ${todaysStudentsCount} طالبًا. تم تحصيل ${collectedToday.toLocaleString()} ${currency} اليوم. ${lateText} ${firstText}`;
+      } else if (language === 'de') {
+        text = `Sie haben heute ${todaysLessonsCount} Stunde(n) und ${todaysStudentsCount} Schüler. Heute eingenommen: ${collectedToday.toLocaleString()} ${currency}. ${lateText} ${firstText}`;
+      } else {
+        text = `You have ${todaysLessonsCount} lesson(s) today with ${todaysStudentsCount} student(s). Collected today: ${collectedToday.toLocaleString()} ${currency}. ${lateText} ${firstText}`;
+      }
+    }
+
+    return {
+      todaysLessonsCount,
+      todaysStudentsCount,
+      collectedToday,
+      lateStudentsCount,
+      firstLessonTime: firstLessonTime ? formatTime12h(firstLessonTime) : null,
+      text,
+      currency
+    };
+  }, [lessons, students, groups, payments, profile, todayStr, language, t]);
+
+  return (
+    <div className="relative overflow-hidden bg-surface border border-primary-border dark:border-primary-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all">
+      {/* Subtle Background Glow Accent */}
+      <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 dark:bg-primary/10 rounded-full blur-2xl pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-32 h-32 bg-primary/5 dark:bg-primary/10 rounded-full blur-2xl pointer-events-none" />
+
+      {/* Header */}
+      <div className="flex items-center justify-between mb-1.5 relative z-10">
+        <div className="flex items-center gap-1.5">
+          <div className="p-1 rounded-md bg-primary-soft text-primary border border-primary-border">
+            <Sparkles className="w-3.5 h-3.5 text-primary dark:text-primary animate-pulse" />
+          </div>
+          <h3 className="text-xs font-black uppercase tracking-wider text-text-main">
+            {t('smart_summary_title')}
+          </h3>
+        </div>
+        <span className="text-[9px] font-extrabold bg-primary-soft text-primary px-2 py-0.5 rounded-full border border-primary-border">
+          {t('smart_summary_badge')}
+        </span>
+      </div>
+
+      {/* Narrative Card */}
+      <div className="relative z-10 bg-surface-hover border border-surface-border rounded-lg p-1.5 sm:p-2 mb-1.5 transition-all">
+        <p className="text-xs leading-relaxed text-text-main font-medium">
+          {summary.text}
+        </p>
+      </div>
+
+      {/* Metrics Row */}
+      <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
+        {/* Lessons count */}
+        <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+          <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0">
+            <BookOpen className="w-3 h-3" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[9px] text-text-muted font-bold truncate">
+              {t('smart_summary_todays_lessons')}
+            </p>
+            <p className="text-xs font-extrabold text-text-main font-mono">
+              {summary.todaysLessonsCount}
+            </p>
+          </div>
+        </div>
+
+        {/* Students count */}
+        <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+          <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0">
+            <Users className="w-3 h-3" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[9px] text-text-muted font-bold truncate">
+              {t('smart_summary_todays_students')}
+            </p>
+            <p className="text-xs font-extrabold text-text-main font-mono">
+              {summary.todaysStudentsCount}
+            </p>
+          </div>
+        </div>
+
+        {/* Expected Income */}
+        <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+          <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0">
+            <Wallet className="w-3 h-3" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[9px] text-text-muted font-bold truncate">
+              {t('daily_stats_revenue_today')}
+            </p>
+            <p className="text-xs font-extrabold text-primary font-mono">
+              {summary.collectedToday.toLocaleString()} <span className="text-[9px]">{summary.currency}</span>
+            </p>
+          </div>
+        </div>
+
+        {/* First Lesson / Overdue Alert */}
+        <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
+          {summary.firstLessonTime ? (
+            <>
+              <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0">
+                <Clock className="w-3 h-3" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[9px] text-text-muted font-bold truncate">
+                  {t('smart_summary_first_lesson')}
+                </p>
+                <p className="text-xs font-extrabold text-text-main font-mono truncate">
+                  {summary.firstLessonTime}
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="p-1 rounded-md bg-primary-soft text-primary shrink-0">
+                <AlertCircle className="w-3 h-3" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[9px] text-text-muted font-bold truncate">
+                  {t('smart_summary_overdue_students')}
+                </p>
+                <p className="text-xs font-extrabold text-primary font-mono">
+                  {summary.lateStudentsCount}
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

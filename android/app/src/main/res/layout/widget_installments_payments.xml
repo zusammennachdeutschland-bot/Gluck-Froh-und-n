@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_installments_container"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg">
+
+    <!-- Header -->
+    <LinearLayout
+        android:id="@+id/widget_installments_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#222222"
+        android:padding="10dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="💳 الأقساط والمدفوعات المستحقة"
+            android:textStyle="bold"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF" />
+
+        <TextView
+            android:id="@+id/tv_total_finance_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="متابعة مالية"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="#F59E0B" />
+    </LinearLayout>
+
+    <!-- 3 Cards Layout -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="8dp"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <!-- Card 1: Due Installments -->
+        <LinearLayout
+            android:id="@+id/card_due_installments"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:padding="6dp"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:background="@drawable/widget_item_bg">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="💳 أقساط"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#F59E0B" />
+
+            <TextView
+                android:id="@+id/tv_installments_amount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="0 EGP"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF" />
+
+            <TextView
+                android:id="@+id/tv_installments_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0 مستحق"
+                android:textSize="10sp"
+                android:textColor="#9CA3AF" />
+        </LinearLayout>
+
+        <!-- Card 2: Recurring Bills -->
+        <LinearLayout
+            android:id="@+id/card_due_recurring"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:padding="6dp"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:background="@drawable/widget_item_bg">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔄 متكرر"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#8B5CF6" />
+
+            <TextView
+                android:id="@+id/tv_recurring_amount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="0 EGP"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF" />
+
+            <TextView
+                android:id="@+id/tv_recurring_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0 فاتورة"
+                android:textSize="10sp"
+                android:textColor="#9CA3AF" />
+        </LinearLayout>
+
+        <!-- Card 3: Student Overdue -->
+        <LinearLayout
+            android:id="@+id/card_due_students"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:padding="6dp"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:background="@drawable/widget_item_bg">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="👥 طلاب"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#EF4444" />
+
+            <TextView
+                android:id="@+id/tv_students_amount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="0 EGP"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF" />
+
+            <TextView
+                android:id="@+id/tv_students_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0 متأخر"
+                android:textSize="10sp"
+                android:textColor="#9CA3AF" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
