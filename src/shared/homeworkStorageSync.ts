@@ -2013,9 +2013,6 @@ export async function syncAndFetchTeacherAssignments(
       return getLocalAssignments(scopeAtStart).filter((hw) => hw.ownerUid === authUidAtStart && !(hw as any).deleted);
     }
   }
-  // Flush queued writes only after the cloud read succeeds.
-  flushPendingHomeworkCloudWrites().catch(() => {});
-
   // Guard against stale async completion after account switch or logout
   if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
     return [];
@@ -2029,6 +2026,9 @@ export async function syncAndFetchTeacherAssignments(
     if (isAssignmentDeletedLocally(hw.id, scopeAtStart)) return;
     saveLocalAssignment({ ...hw, ...(authUidAtStart ? { ownerUid: authUidAtStart } : {}), cloudSynced: true }, false);
   });
+
+  // Apply cloud deletion tombstones before flushing any queued local writes.
+  flushPendingHomeworkCloudWrites().catch(() => {});
 
   // Push any local assignments missing from cloud ONLY if they belong to the currently authenticated UID
   const localAssignments = getLocalAssignments(scopeAtStart);
