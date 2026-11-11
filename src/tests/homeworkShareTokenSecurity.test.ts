@@ -146,6 +146,11 @@ async function runShareTokenSecurityTests() {
       'https://localhost',
       'Allowed Capacitor origin must receive CORS headers on actual API responses'
     );
+    assert.match(
+      correctTokenRes.headers.get('cache-control') || '',
+      /no-store/i,
+      'Public homework info must not be cached after teacher deletion'
+    );
     const correctTokenData = (await correctTokenRes.json()) as any;
     assert.equal(correctTokenData.id, securedHwId);
     assert.equal(correctTokenData.title, 'Token Protected German Assignment');
