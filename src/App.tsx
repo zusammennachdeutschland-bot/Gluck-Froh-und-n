@@ -707,7 +707,7 @@ export default function App() {
       }
 
       const keys = [
-        'dl_theme', 'dl_accent_color', 'dl_quick_todos', 'dl_language', 'dl_profile',
+        'dl_theme', 'dl_accent_color', 'dl_quick_todos', 'dl_language', 'dl_report_language', 'dl_profile',
         'dl_groups', 'dl_students', 'dl_lessons', 'dl_payments', 'dl_certificates',
         'dl_notifications', 'dl_notification_settings', 'dl_inspiration_settings', 'dl_inspiration_messages',
         'dl_last_backup_time', 'dl_dismissed_dashboard_lessons', 'dl_recently_deleted',

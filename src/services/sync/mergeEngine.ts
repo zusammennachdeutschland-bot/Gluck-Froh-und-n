@@ -702,11 +702,15 @@ export function mergeEntities<T extends SyncableRecord>(
         }
       }
 
-      // Preserve local soft-deletion tombstones against stale remote non-deleted items unless remote has strictly newer timestamp
+      // Preserve local soft-deletion tombstones against stale or drifted remote non-deleted items
       if (
         localItem.deleted &&
         !incomingItem.deleted &&
-        !(incomingTime > localTime && (incomingVer >= localVer || incomingRev > localRev))
+        !(
+          incomingVer > localVer ||
+          incomingRev > localRev ||
+          (incomingTime > localTime + 10000 && (incomingVer >= localVer || incomingRev >= localRev))
+        )
       ) {
         shouldAcceptIncoming = false;
       }

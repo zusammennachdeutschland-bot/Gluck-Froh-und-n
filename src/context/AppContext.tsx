@@ -726,7 +726,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Unified Report Language State (Shared across all reports & reminder messages)
   const [reportLanguage, setReportLanguageState] = useState<AppLanguage>(() => {
-    const saved = (initialData['dl_report_language'] || storage.getItem('dl_report_language')) as AppLanguage;
+    const localFallback = typeof window !== 'undefined' ? localStorage.getItem('dl_report_language') : null;
+    const saved = (initialData['dl_report_language'] || localFallback) as AppLanguage;
     if (saved && ['ar', 'en', 'de'].includes(saved)) return saved;
     return 'ar'; // Default report language is Arabic
   });

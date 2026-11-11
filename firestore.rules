@@ -141,6 +141,7 @@ service cloud.firestore {
         && isValidHomeworkSubmission(incoming())
         && incoming().id == submissionId
         && exists(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId))
+        && (!('deleted' in get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data) || get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data.deleted != true)
         && get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data.isActive == true
         && (
           incoming().ownerUid == get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data.ownerUid
@@ -168,14 +169,15 @@ service cloud.firestore {
               )
             )
           )
-          // Tier 2: Student updating their own active attempt (cannot overwrite another student, change studentName, downgrade completed status, or bypass attemptSecret)
+          // Tier 2: Student updating their own active attempt (cannot overwrite another student, change studentName, alter a completed submission, or bypass attemptSecret)
           || (
             incoming().ownerUid == existing().ownerUid
             && incoming().studentName == existing().studentName
             && (!('attemptSecret' in existing()) || existing().attemptSecret == '' || ('attemptSecret' in incoming() && incoming().attemptSecret == existing().attemptSecret))
             && (existing().completedAt == '' || incoming().completedAt != '')
-            && (!('status' in existing()) || existing().status != 'completed' || (!('status' in incoming()) || incoming().status == 'completed'))
+            && (!('status' in existing()) || existing().status != 'completed')
             && exists(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId))
+            && (!('deleted' in get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data) || get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data.deleted != true)
             && get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data.isActive == true
             && (
               get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data.ownerUid == incoming().ownerUid

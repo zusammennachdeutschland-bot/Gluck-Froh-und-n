@@ -2098,15 +2098,25 @@ export async function syncAndFetchTeacherAssignments(
       if (localHw.ownerUid !== authUidAtStart) {
         continue;
       }
-      if (!cloudAssignmentIds.has(localHw.id) || !cloudAssignmentIds.has(sanitizeDocId(localHw.id)) || localHw.cloudSynced === false) {
-        const { cloudCreatePending: _pending, ...cleanForCloud } = localHw as any;
-        const ok = await activeSaveAssignmentToCloud(cleanForCloud as HomeworkAssignment).catch(() => false);
-        if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
-          return [];
+      const isMissingFromCloud =
+        !cloudAssignmentIds.has(localHw.id) && !cloudAssignmentIds.has(sanitizeDocId(localHw.id));
+      if (isMissingFromCloud) {
+        if (localHw.cloudSynced === true && !(localHw as any).cloudCreatePending) {
+          // Assignment was previously confirmed synced to cloud, but is now absent from cloud -> deleted remotely!
+          deleteLocalAssignment(localHw.id, false);
+          continue;
+        } else if ((localHw as any).cloudCreatePending === true || localHw.cloudSynced === false) {
+          const { cloudCreatePending: _pending, ...cleanForCloud } = localHw as any;
+          const ok = await activeSaveAssignmentToCloud(cleanForCloud as HomeworkAssignment).catch(() => false);
+          if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
+            return [];
+          }
+          if (ok) {
+            saveLocalAssignment({ ...localHw, ownerUid: authUidAtStart, cloudSynced: true, cloudCreatePending: false } as HomeworkAssignment, false);
+          }
         }
-        if (ok) {
-          saveLocalAssignment({ ...localHw, ownerUid: authUidAtStart, cloudSynced: true, cloudCreatePending: false } as HomeworkAssignment, false);
-        }
+      } else if (localHw.cloudSynced === false || (localHw as any).cloudCreatePending === true) {
+        saveLocalAssignment({ ...localHw, ownerUid: authUidAtStart, cloudSynced: true, cloudCreatePending: false } as HomeworkAssignment, false);
       }
 
       // V-03: Also check if any legacy/unclaimed submissions exist for this owned assignment and backfill them

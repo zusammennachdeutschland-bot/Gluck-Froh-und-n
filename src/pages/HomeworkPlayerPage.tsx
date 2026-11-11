@@ -1397,7 +1397,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         data = {};
       }
 
-      if (res.ok && data.submission) {
+      const isSynced = confirmRes.cloudSynced || Boolean(res && res.ok && data?.submission);
+      if (res && res.ok && data?.submission) {
         const mergedFinal: HomeworkSubmission = {
           ...syncedSubmissionObj,
           ...data.submission,
@@ -1409,12 +1410,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           attemptNumber: currentAttemptNumber,
           status: 'completed',
           completedAt: completedAtIso,
-          cloudSynced: confirmRes.cloudSynced
+          cloudSynced: isSynced
         };
-        saveLocalSubmission(mergedFinal, !confirmRes.cloudSynced);
+        saveLocalSubmission(mergedFinal, !isSynced);
+        setCloudSyncState(isSynced ? 'synced' : 'pending_retry');
         setFinalScore(mergedFinal);
         playLernstudioSound('fanfare_victory');
       } else {
+        setCloudSyncState(confirmRes.cloudSynced ? 'synced' : 'pending_retry');
         setFinalScore(syncedSubmissionObj);
         playLernstudioSound('fanfare_victory');
       }

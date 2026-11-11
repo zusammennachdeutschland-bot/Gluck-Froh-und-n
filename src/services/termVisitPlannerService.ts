@@ -178,6 +178,33 @@ export function generateTermVisitPlan(
   });
 
   // 3. Reconcile Historical Visit Records (Source of Truth)
+  const isSameTerm = (termA?: string, termB?: string): boolean => {
+    if (!termA || !termB) return true;
+    const cleanA = termA.trim().toLowerCase();
+    const cleanB = termB.trim().toLowerCase();
+    if (cleanA === cleanB) return true;
+
+    const isA1 = cleanA.includes('1') || cleanA.includes('اول') || cleanA.includes('أول');
+    const isA2 = cleanA.includes('2') || cleanA.includes('ثاني') || cleanA.includes('ثان');
+    const isB1 = cleanB.includes('1') || cleanB.includes('اول') || cleanB.includes('أول');
+    const isB2 = cleanB.includes('2') || cleanB.includes('ثاني') || cleanB.includes('ثان');
+
+    if (isA1 && isB2) return false;
+    if (isA2 && isB1) return false;
+
+    // Check year annotations like "(Old Year)" or different year numbers
+    const matchYearA = cleanA.match(/\b(20\d\d)\b/);
+    const matchYearB = cleanB.match(/\b(20\d\d)\b/);
+    if (matchYearA && matchYearB && matchYearA[1] !== matchYearB[1]) {
+      return false;
+    }
+    if (cleanA.includes('old year') !== cleanB.includes('old year')) {
+      return false;
+    }
+
+    return true;
+  };
+
   const termVisits = historicalVisits.filter(v => {
     if (!v) return false;
 
@@ -187,25 +214,27 @@ export function generateTermVisitPlan(
 
     const vDate = v.visitedDate || v.date || v.visitedAt || (v as any).createdAt;
 
-    // Term name check (flexible)
-    const vTermClean = (v.term || '').toString().trim().toLowerCase();
-    const currentTermClean = (term || '').toString().trim().toLowerCase();
-    const matchesTermName = !v.term || 
-                            vTermClean === currentTermClean || 
-                            vTermClean.includes('term') || 
-                            vTermClean.includes('الفصل') || 
-                            currentTermClean.includes('term');
-
     // Date range check
+    let hasDate = false;
     let withinTermDates = true;
     if (vDate) {
       const dateStr = String(vDate).split('T')[0];
       if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        hasDate = true;
         withinTermDates = dateStr >= startDate && dateStr <= endDate;
       }
     }
 
-    return matchesTermName || withinTermDates;
+    if (hasDate) {
+      // If a specific date is recorded, it MUST fall within the term date range
+      if (!withinTermDates) return false;
+      // If term is also explicitly specified, it must not conflict with current term
+      if (v.term && !isSameTerm(v.term, term)) return false;
+      return true;
+    }
+
+    // No date recorded: rely on term matching
+    return isSameTerm(v.term, term);
   });
 
   // Mark completed requirements
