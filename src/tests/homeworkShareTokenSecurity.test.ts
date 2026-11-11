@@ -26,6 +26,32 @@ async function runShareTokenSecurityTests() {
   try {
     resetHomeworkStoresForTesting();
 
+    // Capacitor Android WebView must be able to complete the authenticated API preflight.
+    const nativePreflight = await fetch(`${baseUrl}/api/teacher/assignments`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://localhost',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization,content-type'
+      }
+    });
+    assert.equal(nativePreflight.status, 204, 'Allowed Capacitor origin must pass CORS preflight');
+    assert.equal(nativePreflight.headers.get('access-control-allow-origin'), 'https://localhost');
+    assert.match(nativePreflight.headers.get('access-control-allow-headers') || '', /authorization/i);
+    assert.match(nativePreflight.headers.get('access-control-allow-headers') || '', /content-type/i);
+
+    const rejectedPreflight = await fetch(`${baseUrl}/api/teacher/assignments`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://untrusted.example',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization,content-type'
+      }
+    });
+    assert.equal(rejectedPreflight.status, 403, 'Untrusted origins must not receive CORS permission');
+    assert.equal(rejectedPreflight.headers.get('access-control-allow-origin'), null);
+    console.log('✅ [CORS-01] Capacitor preflight is allowed only for explicit app origins');
+
     const teacherUid = 'teacher_st_uid_100';
     const securedHwId = `hw_sec_${Date.now()}`;
     const configuredToken = 'valid_secret_share_token_999';
