@@ -132,11 +132,18 @@ async function runShareTokenSecurityTests() {
     // TEST 4: Configured shareToken + correct token -> 200 OK Authorized
     // -------------------------------------------------------------------------
     console.log('Testing [ST-04] Configured shareToken + correct token...');
-    const correctTokenRes = await fetch(`${baseUrl}/api/homework/info?id=${securedHwId}&token=${configuredToken}`);
+    const correctTokenRes = await fetch(`${baseUrl}/api/homework/info?id=${securedHwId}&token=${configuredToken}`, {
+      headers: { Origin: 'https://localhost' }
+    });
     assert.equal(
       correctTokenRes.status,
       200,
       'Correct token must receive HTTP 200'
+    );
+    assert.equal(
+      correctTokenRes.headers.get('access-control-allow-origin'),
+      'https://localhost',
+      'Allowed Capacitor origin must receive CORS headers on actual API responses'
     );
     const correctTokenData = (await correctTokenRes.json()) as any;
     assert.equal(correctTokenData.id, securedHwId);
