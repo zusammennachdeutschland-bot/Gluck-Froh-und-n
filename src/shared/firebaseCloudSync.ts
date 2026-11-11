@@ -708,28 +708,80 @@ export async function saveAssignmentToFirestore(
   explicitOwnerUid?: string
 ): Promise<boolean> {
   if (!assignment || !assignment.id) return false;
-  const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
+  const rawOwnerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
   const recordOwnerUid = assignment.ownerUid?.trim() || '';
-  if (!ownerUid || (recordOwnerUid && recordOwnerUid !== ownerUid)) return false;
+  if (!rawOwnerUid || (recordOwnerUid && recordOwnerUid !== rawOwnerUid)) return false;
 
-  // All assignment writes go through Firebase Admin now. This keeps the server's
-  // transaction-based owner check and deletion tombstone authoritative across devices.
-  const currentUser = auth.currentUser;
-  if (!currentUser || currentUser.uid !== ownerUid) return false;
-  try {
-    const idToken = await currentUser.getIdToken();
-    const response = await fetch('/api/teacher/assignments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-      credentials: 'include',
-      body: JSON.stringify({ ...assignment, ownerUid })
-    });
-    if (!response.ok) return false;
-    const data = await response.json().catch(() => null);
-    return data?.success === true && Boolean(data?.assignment?.id);
-  } catch {
-    return false;
+  const ownerUid = rawOwnerUid.slice(0, 128);
+  const safeId = sanitizeDocId(assignment.id);
+  const path = `homework_assignments/${safeId}`;
+  const isActive = assignment.isActive !== false && (assignment as any).deleted !== true && assignment.status !== 'closed';
+  const createdAt = (assignment.createdAt || new Date().toISOString()).slice(0, 60);
+  const title = (assignment.title || 'واجب منزلي').slice(0, 290);
+  const shareToken = assignment.shareToken?.trim() ? assignment.shareToken.trim().slice(0, 128) : undefined;
+
+  const normalized: HomeworkAssignment = {
+    ...assignment,
+    id: safeId,
+    ownerUid,
+    title,
+    createdAt,
+    isActive,
+    ...(shareToken ? { shareToken } : {}),
+    cloudSynced: true
+  };
+  // V-06: Strip teacher ownerEmail from public/Firestore homework assignment document
+  delete normalized.ownerEmail;
+  delete (normalized as any).cloudCreatePending;
+  if (normalized.setSnapshot && typeof normalized.setSnapshot === 'object') {
+    const cleanSnap = { ...normalized.setSnapshot };
+    delete (cleanSnap as any).ownerEmail;
+    normalized.setSnapshot = cleanSnap;
   }
+
+  let firestoreSaved = false;
+  try {
+    const payloadJson = JSON.stringify(normalized).slice(0, 490000);
+    await executeConfirmedFirestoreWrite(
+      () =>
+        setDoc(doc(db, 'homework_assignments', safeId), {
+          id: safeId,
+          ownerUid,
+          title,
+          createdAt,
+          isActive,
+          ...(shareToken ? { shareToken } : {}),
+          payloadJson
+        }),
+      12000,
+      2
+    );
+    firestoreSaved = true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+
+  let apiSaved = false;
+  const currentUser = auth.currentUser;
+  if (currentUser && currentUser.uid === ownerUid) {
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch('/api/teacher/assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        credentials: 'include',
+        body: JSON.stringify({ ...normalized, ownerUid })
+      });
+      if (response.ok) {
+        const data = await response.json().catch(() => null);
+        apiSaved = data?.success === true && Boolean(data?.assignment?.id);
+      }
+    } catch {
+      // Ignore server API unavailability (e.g. Android APK or unconfigured Admin SDK)
+    }
+  }
+
+  return firestoreSaved || apiSaved;
 }
 
 async function withFirestoreReadTimeout<T>(promise: Promise<T>, timeoutMs = 4000): Promise<T> {
@@ -875,21 +927,38 @@ export async function deleteAssignmentFromFirestore(
 ): Promise<boolean> {
   if (!assignmentId) return false;
   const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
-  const currentUser = auth.currentUser;
-  if (!ownerUid || !currentUser || currentUser.uid !== ownerUid) return false;
+  if (!ownerUid) return false;
+  const safeId = sanitizeDocId(assignmentId);
+  const path = `homework_assignments/${safeId}`;
+
+  let firestoreDeleted = false;
   try {
-    const idToken = await currentUser.getIdToken();
-    const response = await fetch(`/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${idToken}` },
-      credentials: 'include'
-    });
-    if (!response.ok) return false;
-    const data = await response.json().catch(() => null);
-    return data?.success === true && data?.deleted === true;
-  } catch {
-    return false;
+    await executeConfirmedFirestoreWrite(() => deleteDoc(doc(db, 'homework_assignments', safeId)));
+    firestoreDeleted = true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
+
+  let apiDeleted = false;
+  const currentUser = auth.currentUser;
+  if (currentUser && currentUser.uid === ownerUid) {
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(`/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${idToken}` },
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const data = await response.json().catch(() => null);
+        apiDeleted = data?.success === true && data?.deleted === true;
+      }
+    } catch {
+      // Ignore server API unavailability
+    }
+  }
+
+  return firestoreDeleted || apiDeleted;
 }
 
 export async function deleteSubmissionsForAssignmentFromFirestore(

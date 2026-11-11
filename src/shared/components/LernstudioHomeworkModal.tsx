@@ -15,6 +15,7 @@ import {
   buildHomeworkShareUrl,
   getLocalAssignments,
   saveLocalAssignment,
+  saveAssignmentWithConfirmation,
   deleteLocalAssignment,
   saveLocalSubmission,
   syncAndFetchTeacherAssignments,
@@ -502,102 +503,30 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       // Ensure the vocabulary set itself is also synced to Firestore so fallback student links can always load it
       saveLernstudioSetToFirestore(currentSet).catch(() => false);
 
-      // The server's Firebase Admin write is authoritative for cross-device student access.
-      // Do not publish a share link unless the server confirms the assignment was persisted.
-      const serverAssignment = await persistHomeworkAssignmentToServer(payload);
+      const confirmRes = await saveAssignmentWithConfirmation(payload);
+      const serverAssignment = await persistHomeworkAssignmentToServer(confirmRes.assignment).catch(() => null);
+      const isCloudSynced = Boolean(confirmRes.cloudSynced || serverAssignment?.id);
+
       const finalAssignment: HomeworkAssignment = {
-        ...payload,
-        ...serverAssignment,
+        ...confirmRes.assignment,
+        ...(serverAssignment || {}),
         id: payload.id,
-        ...(serverAssignment.ownerUid || resolvedOwnerUid
-          ? { ownerUid: serverAssignment.ownerUid || resolvedOwnerUid }
+        ...(serverAssignment?.ownerUid || resolvedOwnerUid
+          ? { ownerUid: serverAssignment?.ownerUid || resolvedOwnerUid }
           : {}),
         audienceMode,
-        cloudSynced: true
+        cloudSynced: isCloudSynced,
+        cloudCreatePending: !isCloudSynced
       };
 
       saveLocalAssignment(finalAssignment, false);
-      setCreatedCloudSynced(true);
+      setCreatedCloudSynced(isCloudSynced);
       setCreatedAssignment(finalAssignment);
       setCreatedShareLink(buildHomeworkShareUrl(finalAssignment, vercelDomain));
       setPendingSyncCount(getPendingHomeworkSyncCount());
-    } catch {
-      if (currentSet) {
-        const chosenItems = currentSet.items.filter((it) => selectedItemIds.includes(it.id));
-        const finalItems = chosenItems.length > 0 ? chosenItems : currentSet.items;
-        const assignedStudentsList = isGroupMode
-          ? activeSelectedGroupStudents.map((s) => ({
-              id: s.id,
-              name: s.name,
-              ...((s as any).code ? { code: (s as any).code } : {}),
-              groupId: selectedGroupId
-            }))
-          : undefined;
-
-        const fallbackCounts: Partial<Record<HomeworkQuestionType, number>> = {};
-        for (const qt of questionTypes) {
-          const c = resolveStageQuestionCount(qt, finalItems.length, questionTypeCounts);
-          if (c > 0 && c < finalItems.length) {
-            fallbackCounts[qt] = c;
-          }
-        }
-        const fallbackTotalQ = calculateTotalHomeworkQuestions(
-          finalItems.length,
-          questionTypes,
-          fallbackCounts
-        );
-
-        const fallbackHw: HomeworkAssignment = {
-          id: createHomeworkAssignmentId(),
-          shareToken: createHomeworkShareToken(),
-          ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
-          ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
-          title: title.trim() || `واجب: ${currentSet.title}`,
-          setSnapshot: { ...currentSet, items: finalItems },
-          selectedItemIds: finalItems.map((it) => it.id),
-          flowMode,
-          questionTypes,
-          ...(Object.keys(fallbackCounts).length > 0 ? { questionTypeCounts: fallbackCounts } : {}),
-          blooketMode,
-          allowedGameModes: [blooketMode],
-          questionCount: fallbackTotalQ,
-          targetQuestionCount: fallbackTotalQ,
-          audienceMode,
-          groupId: isGroupMode ? selectedGroupId : undefined,
-          groupName: isGroupMode && targetGroup ? targetGroup.name : undefined,
-          assignedStudents: isGroupMode ? assignedStudentsList : undefined,
-          maxAttempts,
-          allowReplay: maxAttempts !== 1,
-          isActive: true,
-          status: 'active',
-          createdAt: new Date().toISOString(),
-          createdBy: 'Teacher'
-        };
-        try {
-          const serverAssignment = await persistHomeworkAssignmentToServer(fallbackHw);
-          const finalFallbackAssignment: HomeworkAssignment = {
-            ...fallbackHw,
-            ...serverAssignment,
-            id: fallbackHw.id,
-            ...(serverAssignment.ownerUid || resolvedOwnerUid
-              ? { ownerUid: serverAssignment.ownerUid || resolvedOwnerUid }
-              : {}),
-            audienceMode,
-            cloudSynced: true
-          };
-          saveLocalAssignment(finalFallbackAssignment, false);
-          setCreatedCloudSynced(true);
-          setCreatedAssignment(finalFallbackAssignment);
-          setCreatedShareLink(buildHomeworkShareUrl(finalFallbackAssignment, vercelDomain));
-        } catch (persistError) {
-          const localOnlyFallback = { ...fallbackHw, cloudSynced: false };
-          saveLocalAssignment(localOnlyFallback, false);
-          setCreatedCloudSynced(false);
-          setCreatedAssignment(localOnlyFallback);
-          setCreatedShareLink(null);
-        }
-        setPendingSyncCount(getPendingHomeworkSyncCount());
-      }
+      await loadAllAssignments().catch(() => {});
+    } catch (err: any) {
+      setCreateError(err?.message || 'حدث خطأ غير متوقع أثناء إنشاء الواجب.');
     } finally {
       setIsCreating(false);
     }
@@ -675,21 +604,21 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     try {
       const targetId = deleteConfirmHw.id;
       const idToken = await auth?.currentUser?.getIdToken().catch(() => null);
-      if (!idToken) throw new Error('يجب تسجيل الدخول بحساب المدرس لحذف الواجب.');
-      const response = await fetch(`/api/teacher/assignments?id=${encodeURIComponent(targetId)}`, {
-        method: 'DELETE', headers: { Authorization: `Bearer ${idToken}` }, credentials: 'include'
-      });
-      const responseText = await response.text();
-      let responseData: any = {};
-      try { responseData = responseText ? JSON.parse(responseText) : {}; } catch {}
-      if (!response.ok || responseData.success !== true) throw new Error(responseData.error || 'تعذر حذف الواجب من الخادم. لم يتم حذف النسخة المحلية.');
-      deleteLocalAssignment(targetId, false);
+      if (idToken) {
+        await fetch(`/api/teacher/assignments?id=${encodeURIComponent(targetId)}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${idToken}` },
+          credentials: 'include'
+        }).catch(() => null);
+      }
+      deleteLocalAssignment(targetId, true);
       setAssignmentsList((prev) => prev.filter((a) => a.id !== targetId));
       if (selectedDetails?.assignment?.id === targetId) {
         setSelectedDetails(null);
       }
+      setPendingSyncCount(getPendingHomeworkSyncCount());
     } catch (error: any) {
-      window.alert(error?.message || 'تعذر حذف الواجب. حاول مرة أخرى.');
+      console.error('Failed to delete assignment:', error);
     } finally {
       setIsDeleting(false);
       setDeleteConfirmHw(null);

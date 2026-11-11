@@ -226,6 +226,7 @@ async function runAll18ServerlessPersistenceTests() {
       body: JSON.stringify({
         id: subP07Id,
         assignmentId: hwId1,
+        token: 'tok_valid_p02',
         studentName: 'Amina Youssef',
         responses: [{ questionId: 'q1', selectedOption: 'B', isCorrect: true }]
       })
@@ -266,6 +267,7 @@ async function runAll18ServerlessPersistenceTests() {
       body: JSON.stringify({
         id: `sub_fail_${Date.now()}`,
         assignmentId: hwId1,
+        token: 'tok_valid_p02',
         studentName: 'Tariq',
         responses: []
       })
@@ -395,6 +397,7 @@ async function runAll18ServerlessPersistenceTests() {
       body: JSON.stringify({
         id: subSecretId,
         assignmentId: hwId1,
+        token: 'tok_valid_p02',
         studentName: 'Zainab',
         attemptSecret: 'sec_original_123',
         status: 'in_progress'
@@ -409,6 +412,7 @@ async function runAll18ServerlessPersistenceTests() {
       body: JSON.stringify({
         id: subSecretId,
         assignmentId: hwId1,
+        token: 'tok_valid_p02',
         studentName: 'Zainab',
         attemptSecret: 'sec_attacker_456'
       })
@@ -424,6 +428,7 @@ async function runAll18ServerlessPersistenceTests() {
     const retryPayload = {
       id: retrySubId,
       assignmentId: hwId1,
+      token: 'tok_valid_p02',
       studentName: 'Nadia',
       status: 'completed',
       responses: [
@@ -462,6 +467,7 @@ async function runAll18ServerlessPersistenceTests() {
           body: JSON.stringify({
             id,
             assignmentId: hwId1,
+            token: 'tok_valid_p02',
             studentName: `Student ${i}`,
             responses: [{ questionId: 'q1', isCorrect: true }]
           })
@@ -483,6 +489,7 @@ async function runAll18ServerlessPersistenceTests() {
       body: JSON.stringify({
         id: retrySubId,
         assignmentId: hwId1,
+        token: 'tok_valid_p02',
         studentName: 'Nadia',
         responses: [
           { questionId: 'q1', selectedOption: 'A', isCorrect: false },

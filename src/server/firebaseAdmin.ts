@@ -507,7 +507,7 @@ export async function saveAuthoritativeSubmission(
   await db.runTransaction(async (t: any) => {
     const existingSnap = await t.get(docRef);
     if (existingSnap.exists) {
-      const existing = existingSnap.data();
+      const existing = decodeSubmissionDocument(existingSnap.data()) || existingSnap.data();
 
       // 1. Verify ownerUid
       const existingOwner = String(existing.ownerUid || '').trim();

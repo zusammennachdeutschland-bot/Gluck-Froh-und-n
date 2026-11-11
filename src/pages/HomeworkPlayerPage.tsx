@@ -35,6 +35,7 @@ import {
   saveLocalAssignment,
   saveLocalSubmission,
   getQuestionTypeMeta,
+  fetchAssignmentFromFirestore,
   fetchLernstudioSetFromFirestore,
   saveAssignmentToFirestore,
   subscribeSubmissionsFromFirestore,
@@ -238,10 +239,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         const searchParams = new URLSearchParams(window.location.search);
         const urlQtc = parseQuestionTypeCountsParam(searchParams.get('qtc'));
         const hasUrlQtc = Object.keys(urlQtc).length > 0;
-
-        // Public student access always goes through the authoritative server API.
-        // Firestore client rules intentionally restrict direct assignment reads to the owning teacher.
         const shareToken = (searchParams.get('token') || '').trim();
+        const urlOwnerUid = (searchParams.get('ou') || '').trim();
+
         const infoParams = new URLSearchParams({ id: assignmentId });
         if (shareToken) infoParams.set('token', shareToken);
 
@@ -265,10 +265,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
               return;
             }
-            const mergedApi =
-              !data.questionTypeCounts && hasUrlQtc
-                ? { ...data, questionTypeCounts: urlQtc }
-                : data;
+            const mergedApi = {
+              ...data,
+              ...(!data.questionTypeCounts && hasUrlQtc ? { questionTypeCounts: urlQtc } : {}),
+              ...(!data.ownerUid && urlOwnerUid ? { ownerUid: urlOwnerUid } : {})
+            };
             const normalized = normalizeHomeworkAssignment(mergedApi);
             setAssignment(normalized);
             if (Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
@@ -278,34 +279,71 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           }
         }
 
-        // A tokenized share link must never fall back to local or URL-reconstructed data.
-        // Otherwise a server failure could accidentally bypass the share-token gate.
-        if (shareToken) {
-          setError(data?.error || 'تعذر تحميل الواجب من الخادم. تحقق من اتصال الإنترنت أو أعد إرسال رابط المشاركة.');
-          return;
-        }
-
-        // 3. Check local assignments cache
+        // 2. Check local assignments cache (verifying shareToken if configured on the local record)
         const localFound = getLocalAssignments().find((a) => a.id === assignmentId);
         if (localFound && localFound.setSnapshot) {
+          const localToken = (localFound.shareToken || '').trim();
+          if (localToken && shareToken !== localToken) {
+            setError('رابط الواجب غير صالح أو يتطلب رمز مشاركة صحيح من المعلم.');
+            return;
+          }
           if (!isHomeworkAssignmentOpenForStudents(localFound)) {
             setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
             return;
           }
-          const mergedLocal =
-            !localFound.questionTypeCounts && hasUrlQtc
-              ? { ...localFound, questionTypeCounts: urlQtc }
-              : localFound;
+          const mergedLocal = {
+            ...localFound,
+            ...(!localFound.questionTypeCounts && hasUrlQtc ? { questionTypeCounts: urlQtc } : {}),
+            ...(!localFound.ownerUid && urlOwnerUid ? { ownerUid: urlOwnerUid } : {})
+          };
           setAssignment(normalizeHomeworkAssignment(mergedLocal));
           return;
         }
 
-        // 4. Fallback: Parse query parameters from share URL (ONLY allowed for 'open' assignments)
+        // 3. Check Firestore directly if authenticated as owning teacher
+        if (getCurrentHomeworkOwnerUid()) {
+          const cloudFound = await fetchAssignmentFromFirestore(assignmentId).catch(() => null);
+          if (cloudFound && cloudFound.setSnapshot) {
+            const cloudToken = (cloudFound.shareToken || '').trim();
+            if (cloudToken && shareToken !== cloudToken) {
+              setError('رابط الواجب غير صالح أو يتطلب رمز مشاركة صحيح من المعلم.');
+              return;
+            }
+            if (!isHomeworkAssignmentOpenForStudents(cloudFound)) {
+              setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
+              return;
+            }
+            const mergedCloud = {
+              ...cloudFound,
+              ...(!cloudFound.questionTypeCounts && hasUrlQtc ? { questionTypeCounts: urlQtc } : {}),
+              ...(!cloudFound.ownerUid && urlOwnerUid ? { ownerUid: urlOwnerUid } : {})
+            };
+            setAssignment(normalizeHomeworkAssignment(mergedCloud));
+            return;
+          }
+        }
+
+        // 4. Fallback: Reconstruct assignment from share URL query parameters + vocabulary set
         const amParam = searchParams.get('am');
-        const gidParam = searchParams.get('gid');
+        const gidParam = (searchParams.get('gid') || '').trim();
+        const gnParam = (searchParams.get('gn') || '').trim();
+        const stParam = (searchParams.get('st') || '').trim();
+        const isGroupUrl = amParam === 'group' || Boolean(gidParam && gidParam !== 'all');
+
+        const parsedUrlGroupStudents = stParam
+          ? stParam
+              .split('|')
+              .map((entry) => {
+                const [rawId, ...nameParts] = entry.split('~');
+                const id = (rawId || '').trim();
+                const name = nameParts.join('~').trim();
+                return id && name ? { id, name, groupId: gidParam } : null;
+              })
+              .filter((x): x is { id: string; name: string; groupId: string } => Boolean(x))
+          : [];
 
         // CRITICAL: Never construct a group-less open fallback assignment when the link belongs to a specific group!
-        if (amParam === 'group' || (gidParam && gidParam !== 'all')) {
+        if (isGroupUrl && (!gidParam || gidParam === 'all' || parsedUrlGroupStudents.length === 0)) {
           setError(
             'هذا الواجب مخصص لمجموعة محددة، وتعذر تحميل قائمة طلاب المجموعة حالياً. يرجى التحقق من اتصال الإنترنت أو التواصل مع المعلم.'
           );
@@ -355,7 +393,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             const fallbackHw: HomeworkAssignment = {
               id: assignmentId,
               title: titleParam,
-              audienceMode: 'open',
+              ...(shareToken ? { shareToken } : {}),
+              ...(urlOwnerUid ? { ownerUid: urlOwnerUid } : {}),
+              audienceMode: isGroupUrl ? 'group' : 'open',
+              ...(isGroupUrl
+                ? {
+                    groupId: gidParam,
+                    groupName: gnParam || undefined,
+                    assignedStudents: parsedUrlGroupStudents
+                  }
+                : {}),
               setSnapshot: {
                 id: foundSet.id,
                 title: foundSet.title,
@@ -377,7 +424,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               createdAt: new Date().toISOString(),
               createdBy: 'Teacher'
             };
-            setAssignment(fallbackHw);
+            setAssignment(normalizeHomeworkAssignment(fallbackHw));
             return;
           }
         }

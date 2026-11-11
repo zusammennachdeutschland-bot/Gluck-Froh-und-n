@@ -565,8 +565,15 @@ app.all('/api/teacher/assignments', async (req, res) => {
       });
     }
     const ownerUid = verifiedUid;
-    const filtered = await listServerAssignments(ownerUid);
-    return res.json({ assignments: filtered.map(normalizeServerAssignment) });
+    try {
+      const filtered = await listServerAssignments(ownerUid);
+      return res.json({ assignments: filtered.map(normalizeServerAssignment) });
+    } catch (err: any) {
+      return res.status(err?.status || 500).json({
+        error: err?.message || 'Failed to list teacher assignments',
+        assignments: []
+      });
+    }
   }
 
   if (req.method === 'DELETE') {
@@ -652,22 +659,37 @@ app.all('/api/homework/submissions', async (req, res) => {
     }
     const ownerUid = verifiedUid;
 
-    if (assignmentId) {
-      const targetHw = await getServerAssignment(assignmentId);
-      if (targetHw && targetHw.ownerUid && String(targetHw.ownerUid).trim() !== ownerUid) {
-        return res.status(403).json({
-          error: 'Forbidden: Assignment belongs to another teacher account',
-          submissions: []
-        });
+    try {
+      if (assignmentId) {
+        const targetHw = await getServerAssignment(assignmentId);
+        if (targetHw && targetHw.ownerUid && String(targetHw.ownerUid).trim() !== ownerUid) {
+          return res.status(403).json({
+            error: 'Forbidden: Assignment belongs to another teacher account',
+            submissions: []
+          });
+        }
       }
+      const list = await listServerSubmissions(ownerUid, assignmentId);
+      return res.json({ submissions: list });
+    } catch (err: any) {
+      return res.status(err?.status || 500).json({
+        error: err?.message || 'Failed to list submissions',
+        submissions: []
+      });
     }
-    const list = await listServerSubmissions(ownerUid, assignmentId);
-    return res.json({ submissions: list });
   }
   if (req.method === 'POST') {
     const body = req.body || {};
     // V-05: Never trust client-supplied body.assignmentFallback; require a server-known assignment
-    const targetHw = await getServerAssignment(body.assignmentId);
+    let targetHw: any = null;
+    try {
+      targetHw = await getServerAssignment(body.assignmentId);
+    } catch (err: any) {
+      return res.status(err?.status || 500).json({
+        success: false,
+        error: err?.message || 'Failed to load assignment from database'
+      });
+    }
     if (!targetHw) {
       return res.status(404).json({
         success: false,
@@ -739,7 +761,12 @@ app.all('/api/homework/submissions', async (req, res) => {
 app.get('/api/homework/info', async (req, res) => {
   const id = String(req.query.id || '').trim();
   const token = req.query.token !== undefined && req.query.token !== null ? String(req.query.token).trim() : '';
-  const found = await getServerAssignment(id);
+  let found: any = null;
+  try {
+    found = await getServerAssignment(id);
+  } catch (err: any) {
+    return res.status(err?.status || 500).json({ error: err?.message || 'Assignment lookup unavailable' });
+  }
   if (!found) {
     return res.status(404).json({ error: 'Assignment not found' });
   }
@@ -764,7 +791,15 @@ app.get('/api/homework/info', async (req, res) => {
 app.post('/api/homework/submit', async (req, res) => {
   const body = req.body || {};
   // V-05: Never accept untrusted client-supplied body.assignmentFallback
-  const targetHw = await getServerAssignment(body.assignmentId);
+  let targetHw: any = null;
+  try {
+    targetHw = await getServerAssignment(body.assignmentId);
+  } catch (err: any) {
+    return res.status(err?.status || 500).json({
+      success: false,
+      error: err?.message || 'Failed to load assignment from database'
+    });
+  }
   if (!targetHw) {
     return res.status(404).json({
       success: false,

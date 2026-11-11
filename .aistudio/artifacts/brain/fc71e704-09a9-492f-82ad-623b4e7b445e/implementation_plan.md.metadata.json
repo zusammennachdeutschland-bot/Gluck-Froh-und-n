@@ -1,6 +1,0 @@
-{
-  "summary":  "Implementation plan for replacing the Android browser redirect OAuth flow with a native AndroidX Credential Manager Google Sign-In dialog over the Glück app, removing Capacitor 6 peer dependency conflicts, and preserving Firebase session state across Android, Web, and Desktop.",
-  "updatedAt":  "2026-11-09T08:32:17.053643079Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}
