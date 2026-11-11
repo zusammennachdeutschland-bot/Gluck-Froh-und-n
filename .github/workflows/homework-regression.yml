@@ -1,0 +1,40 @@
+name: Homework Regression Checks
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'src/api/**'
+      - 'src/shared/**'
+      - 'src/pages/HomeworkPlayerPage.tsx'
+      - 'src/tests/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/homework-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  homework-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Run regression tests
+        run: npm test
