@@ -285,8 +285,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           setError('تعذر الاتصال بخادم الواجبات. اتصل بالإنترنت ثم أعد فتح الرابط.');
           return;
         }
-        if (!res.ok && res.status !== 404) {
-          setError(data?.error || 'تعذر التحقق من حالة الواجب على الخادم. حاول مرة أخرى.');
+        if (!res.ok) {
+          setError(
+            res.status === 404
+              ? 'هذا الواجب غير موجود على الخادم أو تم حذفه. لا يمكن فتح نسخة قديمة من الرابط.'
+              : data?.error || 'تعذر التحقق من حالة الواجب على الخادم. حاول مرة أخرى.'
+          );
           return;
         }
 
