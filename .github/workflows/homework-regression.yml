@@ -11,6 +11,17 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/homework-regression.yml'
+  push:
+    branches:
+      - 'fix/**'
+    paths:
+      - 'src/api/**'
+      - 'src/shared/**'
+      - 'src/pages/HomeworkPlayerPage.tsx'
+      - 'src/tests/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/homework-regression.yml'
   workflow_dispatch:
 
 permissions:
