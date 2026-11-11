@@ -2036,9 +2036,6 @@ export async function syncAndFetchTeacherAssignments(
     }
   }
 
-  // Apply cloud deletion tombstones before flushing any queued local writes.
-  flushPendingHomeworkCloudWrites().catch(() => {});
-
   // Push any local assignments missing from cloud ONLY if they belong to the currently authenticated UID
   const localAssignments = getLocalAssignments(scopeAtStart);
   const activeAssignmentIds = new Set(
@@ -2066,6 +2063,9 @@ export async function syncAndFetchTeacherAssignments(
       activeAssignmentIds.has(sanitizeDocId(s.assignmentId))
   );
   writeLocalSubmissionsList(validLocalSubmissions, scopeAtStart);
+
+  // All cloud tombstones and stale local records have now been applied.
+  flushPendingHomeworkCloudWrites().catch(() => {});
 
   if (authUidAtStart) {
     const cloudAssignmentIds = new Set(cloudAssignments.map((a) => a.id));
