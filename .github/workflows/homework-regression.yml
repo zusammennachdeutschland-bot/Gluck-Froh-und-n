@@ -137,7 +137,7 @@ jobs:
       - name: Commit repaired Gradle wrapper to the PR branch
         if: github.event_name == 'pull_request' && github.head_ref == 'fix/homework-create-android-api'
         run: |
-          git add android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.properties
+          git add android/gradlew android/gradlew.bat android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.properties
           if ! git diff --cached --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
