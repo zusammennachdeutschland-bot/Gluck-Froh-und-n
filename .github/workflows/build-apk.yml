@@ -153,6 +153,9 @@ jobs:
       - name: Typecheck & Build Web Application
         run: npm run lint && CI=true npm run build
 
+      - name: Run Automated Regression Tests
+        run: npm test
+
       - name: Verify Web Build Output
         run: |
           if [ ! -f "dist/index.html" ]; then
