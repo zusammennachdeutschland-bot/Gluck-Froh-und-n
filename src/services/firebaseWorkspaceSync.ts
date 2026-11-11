@@ -524,6 +524,83 @@ export function mergeWithBuiltinLernstudioSets(customSets: any[]): any[] {
   return combined;
 }
 
+/**
+ * Lernstudio custom sets are intentionally global across teacher accounts.
+ * Only this collection is shared; teacher CRM, homework and finance remain in UID workspaces.
+ */
+async function readSharedLernstudioSets(): Promise<any[]> {
+  const snap = await getDocs(collection(db, 'lernstudio_sets'));
+  const byId = new Map<string, any>();
+  snap.forEach((docSnap: any) => {
+    const data = docSnap.data();
+    if (!data || typeof data.payloadJson !== 'string') return;
+    try {
+      const parsed = JSON.parse(data.payloadJson);
+      if (!parsed || typeof parsed !== 'object' || !parsed.id) return;
+      if (data.deleted === true || parsed.deleted === true) {
+        byId.delete(String(parsed.id));
+        return;
+      }
+      byId.set(String(parsed.id), parsed);
+    } catch {
+      // Ignore malformed shared set documents without affecting the teacher workspace.
+    }
+  });
+  return Array.from(byId.values());
+}
+
+function mergeSharedLernstudioSets(localSets: any[], sharedSets: any[]): any[] {
+  const byId = new Map<string, any>();
+  for (const set of Array.isArray(localSets) ? localSets : []) {
+    if (set && set.id && !BUILTIN_LERNSTUDIO_MAP.has(set.id)) byId.set(String(set.id), set);
+  }
+  for (const set of Array.isArray(sharedSets) ? sharedSets : []) {
+    if (!set || !set.id || BUILTIN_LERNSTUDIO_MAP.has(set.id)) continue;
+    const id = String(set.id);
+    const local = byId.get(id);
+    const localTime = Number(local?.updatedAt) || Date.parse(local?.updatedAtIso || '') || 0;
+    const sharedTime = Number(set.updatedAt) || Date.parse(set.updatedAtIso || '') || 0;
+    if (!local || sharedTime >= localTime) byId.set(id, set);
+  }
+  return Array.from(byId.values()).filter((set) => !set.deleted);
+}
+
+async function writeSharedLernstudioSetChanges(changedSets: any[]): Promise<void> {
+  const unique = new Map<string, any>();
+  for (const set of Array.isArray(changedSets) ? changedSets : []) {
+    if (set && typeof set.id === 'string' && set.id.trim()) unique.set(set.id, set);
+  }
+  for (const [id, set] of unique) {
+    if (BUILTIN_LERNSTUDIO_MAP.has(id)) continue;
+    const target = doc(db, 'lernstudio_sets', id);
+    const existingSnap = await getDoc(target);
+    const existingData = existingSnap.exists() ? existingSnap.data() : null;
+    let existingSet: any = null;
+    try {
+      existingSet = existingData?.payloadJson ? JSON.parse(existingData.payloadJson) : null;
+    } catch {
+      existingSet = null;
+    }
+    const localTime = Number(set.updatedAt) || Date.parse(set.updatedAtIso || '') || Date.now();
+    const remoteTime = Number(existingSet?.updatedAt) || Date.parse(existingData?.updatedAtIso || '') || 0;
+    if (existingData && remoteTime > localTime) continue;
+    const deleted = set.deleted === true;
+    const payload = JSON.stringify(set);
+    if (payload.length > 500000) {
+      throw new Error(`Lernstudio set "${id}" exceeds the shared Firestore document size limit.`);
+    }
+    const docData: any = {
+      id,
+      title: String(set.title || (deleted ? 'Deleted set' : 'Untitled set')).slice(0, 300),
+      payloadJson: payload,
+      updatedAtIso: new Date(localTime).toISOString(),
+      ...(typeof set.category === 'string' ? { category: set.category.slice(0, 100) } : {}),
+      ...(deleted ? { deleted: true } : {})
+    };
+    await executeSafeFirestoreWrite(() => setDoc(target, docData));
+  }
+}
+
 function sanitizeHeavyInlineMedia(data: any): any {
   if (!data || typeof data !== 'object') return data;
   const clone = { ...data };
@@ -1540,6 +1617,16 @@ export async function uploadWorkspaceToGoogleCloud(
       hasBaselineSeeded
     } = computeWorkspaceDelta(uid, parsed);
 
+    // Keep the shared Lernstudio library independent from each teacher's private workspace.
+    // Upload current custom sets to support first-time migration, plus explicit deletion tombstones.
+    const sharedSetChanges = [
+      ...filterCustomOrModifiedLernstudioSets(parsed.lernstudioSets || []),
+      ...(Array.isArray(changedEntities.lernstudioSets) ? changedEntities.lernstudioSets.filter((s: any) => s?.deleted) : [])
+    ];
+    if (sharedSetChanges.length > 0) {
+      await writeSharedLernstudioSetChanges(sharedSetChanges);
+    }
+
     // If nothing changed at all since last sync, perform 0 network writes!
     if (hasBaselineSeeded && !options?.forceFullBaseline && totalChangedCount === 0) {
       setLastCloudSyncTime(nowIso);
@@ -2245,6 +2332,9 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       }
     }
 
+    // Read the global Lernstudio library independently of this account's private workspace.
+    const sharedLernstudioSets = await readSharedLernstudioSets();
+
     // Merge any newer chunks/deltas from fast relay server (excluding control docs)
     const relayDocs = await fetchChunksFromRelayServer(resolvedWorkspaceId);
     for (const rDoc of relayDocs) {
@@ -2255,7 +2345,7 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       }
     }
 
-    if (rawDocsMap.size === 0) {
+    if (rawDocsMap.size === 0 && sharedLernstudioSets.length === 0) {
       return {
         hasRemoteData: false,
         backupJsonStr: null,
@@ -2288,7 +2378,7 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       }
     });
 
-    if (docsByCategory.size === 0) {
+    if (docsByCategory.size === 0 && sharedLernstudioSets.length === 0) {
       return {
         hasRemoteData: false,
         backupJsonStr: null,
@@ -2302,6 +2392,9 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
       primaryId,
       maxUpdatedAtIso
     });
+    reassembled.lernstudioSets = mergeWithBuiltinLernstudioSets(
+      mergeSharedLernstudioSets(reassembled.lernstudioSets || [], sharedLernstudioSets)
+    );
 
     // Attach downloaded revision tokens and workspaceId inside the snapshot envelope
     // so downstream import coordinators can acknowledge the exact revisions ONLY after durable import succeeds.
