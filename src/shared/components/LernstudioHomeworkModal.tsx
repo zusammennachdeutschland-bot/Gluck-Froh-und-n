@@ -546,7 +546,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       setCreatedAssignment(null);
       setCreatedShareLink(null);
       setCreatedCloudSynced(false);
-      const message = String(error?.message || '').trim();
+      const rawMessage = String(error?.message || '').trim();
+      const message = /failed to fetch|networkerror|load failed/i.test(rawMessage)
+        ? 'تعذر الاتصال بخادم الواجبات. تأكد من اتصال الإنترنت ثم حاول مرة أخرى.'
+        : rawMessage;
       setCreateError(message || 'تعذر إنشاء الواجب على الخادم. لم يتم إنشاء رابط مشاركة؛ حاول مرة أخرى.');
     } finally {
       setIsCreating(false);
