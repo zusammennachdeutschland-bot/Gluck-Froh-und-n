@@ -767,6 +767,10 @@ app.all('/api/homework/submissions', async (req, res) => {
 });
 
 app.get('/api/homework/info', async (req, res) => {
+  // Never let a browser/CDN reuse an old public assignment response after teacher deletion.
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   const id = String(req.query.id || '').trim();
   const token = req.query.token !== undefined && req.query.token !== null ? String(req.query.token).trim() : '';
   const found = await getServerAssignment(id);
