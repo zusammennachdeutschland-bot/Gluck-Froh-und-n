@@ -337,19 +337,55 @@ export async function fetchHomeworkApi(
   timeoutMs = 20000
 ): Promise<Response> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutMessage = 'انتهت مهلة الاتصال بخادم الواجبات. تحقق من الإنترنت ثم حاول مرة أخرى.';
+  const clearRequestTimeout = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = undefined;
+  };
+
+  timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
   try {
-    return await fetch(getHomeworkApiUrl(path), {
+    const response = await fetch(getHomeworkApiUrl(path), {
       ...init,
       signal: controller.signal
     });
+
+    // fetch() resolves when response headers arrive, not when the body has been
+    // downloaded. Keep the timeout active until the caller consumes the body.
+    const wrapBodyReader = <T extends 'text' | 'json' | 'arrayBuffer' | 'blob' | 'formData'>(method: T) => {
+      const original = response[method].bind(response) as (...args: any[]) => Promise<any>;
+      return async (...args: any[]) => {
+        try {
+          return await original(...args);
+        } catch (error) {
+          if (timedOut) throw new Error(timeoutMessage);
+          throw error;
+        } finally {
+          clearRequestTimeout();
+        }
+      };
+    };
+
+    response.text = wrapBodyReader('text') as typeof response.text;
+    response.json = wrapBodyReader('json') as typeof response.json;
+    response.arrayBuffer = wrapBodyReader('arrayBuffer') as typeof response.arrayBuffer;
+    response.blob = wrapBodyReader('blob') as typeof response.blob;
+    response.formData = wrapBodyReader('formData') as typeof response.formData;
+
+    if (!response.body) clearRequestTimeout();
+    return response;
   } catch (error: any) {
-    if (controller.signal.aborted) {
-      throw new Error('انتهت مهلة الاتصال بخادم الواجبات. تحقق من الإنترنت ثم حاول مرة أخرى.');
+    clearRequestTimeout();
+    if (timedOut || controller.signal.aborted) {
+      throw new Error(timeoutMessage);
     }
     throw error;
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
 
