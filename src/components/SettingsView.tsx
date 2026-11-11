@@ -19,7 +19,6 @@ import { CustomColorPickerModal } from './CustomColorPickerModal';
 import { ContactsUnificationModal } from './ContactsUnificationModal';
 import { DownloadedFilesSection } from './DownloadedFilesSection';
 import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
-import { SmartDataCleanupCard } from './SmartDataCleanupCard';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
 import { AndroidKeystoreSection } from './AndroidKeystoreSection';
 import { getActiveCloudUser, getLastCloudSyncTime } from '../services/firebaseWorkspaceSync';
@@ -520,7 +519,6 @@ export const SettingsView: React.FC = () => {
         {activeCategory === null ? (
           <div className="hidden lg:flex flex-col gap-3.5 animate-fade-in">
             <GoogleCloudSyncCard />
-            <SmartDataCleanupCard />
           </div>
         ) : (
           <div className="animate-fade-in bg-surface rounded-xl border border-surface-border shadow-2xs p-3.5 sm:p-4 min-h-[50vh]">
