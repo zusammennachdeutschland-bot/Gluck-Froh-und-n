@@ -307,6 +307,30 @@ export function getHomeworkApiUrl(path: string): string {
  * All homework API calls are bounded. A stalled WebView request must never leave
  * the UI in an endless loading state.
  */
+export async function getHomeworkAuthToken(timeoutMs = 15000): Promise<string> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('يجب تسجيل الدخول بحساب المدرس أولاً.');
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const token = await Promise.race([
+      currentUser.getIdToken(),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error('انتهت مهلة التحقق من جلسة المدرس. سجّل الدخول مرة أخرى ثم حاول.')),
+          timeoutMs
+        );
+      })
+    ]);
+    if (!token) throw new Error('تعذر التحقق من جلسة المدرس. سجّل الدخول مرة أخرى.');
+    return token;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 export async function fetchHomeworkApi(
   path: string,
   init: RequestInit = {},
@@ -755,7 +779,7 @@ export async function saveAssignmentToFirestore(
   const currentUser = auth.currentUser;
   if (!currentUser || currentUser.uid !== ownerUid) return false;
   try {
-    const idToken = await currentUser.getIdToken();
+    const idToken = await getHomeworkAuthToken();
     const response = await fetchHomeworkApi('/api/teacher/assignments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
