@@ -4,6 +4,7 @@ import {
   getAuthoritativeAssignment,
   listAuthoritativeAssignments,
   saveAuthoritativeAssignment,
+  softDeleteAuthoritativeAssignment,
   getAuthoritativeSubmission,
   listAuthoritativeSubmissions,
   saveAuthoritativeSubmission,
@@ -568,6 +569,16 @@ app.all('/api/teacher/assignments', async (req, res) => {
     return res.json({ assignments: filtered.map(normalizeServerAssignment) });
   }
 
+  if (req.method === 'DELETE') {
+    const id = String(req.query.id || req.body?.id || '').trim();
+    if (!id) return res.status(400).json({ success: false, error: 'Homework id is required' });
+    try {
+      const deleted = await softDeleteAuthoritativeAssignment(id, verifiedUid);
+      return res.json({ success: true, deleted: true, assignmentId: deleted.id });
+    } catch (err: any) {
+      return res.status(err?.status || 500).json({ success: false, error: err?.message || 'Failed to delete homework' });
+    }
+  }
   if (req.method === 'POST') {
     const body = req.body || {};
     const bodyOwnerUid = String(body.ownerUid || req.headers['x-owner-uid'] || '').trim();

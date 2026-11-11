@@ -24,6 +24,7 @@ import {
   sanitizeDocId,
   getVercelPublicDomain,
   createHomeworkShareToken,
+  createHomeworkAssignmentId,
   flushPendingHomeworkCloudWrites,
   getPendingHomeworkSyncCount,
   saveLernstudioSetToFirestore,
@@ -456,7 +457,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         questionTypes,
         sanitizedCounts
       );
-      const generatedId = 'hw_' + Math.random().toString(36).substring(2, 8);
+      const generatedId = createHomeworkAssignmentId();
 
       const assignedStudentsList = isGroupMode
         ? activeSelectedGroupStudents.map((s) => ({
@@ -549,7 +550,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         );
 
         const fallbackHw: HomeworkAssignment = {
-          id: 'hw_' + Math.random().toString(36).substring(2, 8),
+          id: createHomeworkAssignmentId(),
           shareToken: createHomeworkShareToken(),
           ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
           ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
@@ -675,11 +676,22 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     setIsDeleting(true);
     try {
       const targetId = deleteConfirmHw.id;
-      deleteLocalAssignment(targetId, true);
+      const idToken = await auth?.currentUser?.getIdToken().catch(() => null);
+      if (!idToken) throw new Error('يجب تسجيل الدخول بحساب المدرس لحذف الواجب.');
+      const response = await fetch(`/api/teacher/assignments?id=${encodeURIComponent(targetId)}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${idToken}` }, credentials: 'include'
+      });
+      const responseText = await response.text();
+      let responseData: any = {};
+      try { responseData = responseText ? JSON.parse(responseText) : {}; } catch {}
+      if (!response.ok || responseData.success !== true) throw new Error(responseData.error || 'تعذر حذف الواجب من الخادم. لم يتم حذف النسخة المحلية.');
+      deleteLocalAssignment(targetId, false);
       setAssignmentsList((prev) => prev.filter((a) => a.id !== targetId));
       if (selectedDetails?.assignment?.id === targetId) {
         setSelectedDetails(null);
       }
+    } catch (error: any) {
+      window.alert(error?.message || 'تعذر حذف الواجب. حاول مرة أخرى.');
     } finally {
       setIsDeleting(false);
       setDeleteConfirmHw(null);

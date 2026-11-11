@@ -337,6 +337,52 @@ export function cleanForFirestore<T extends Record<string, any>>(obj: T): T {
   return result as T;
 }
 
+function decodeAssignmentDocument(raw: any): any {
+  if (!raw || typeof raw !== 'object') return null;
+  let payload: any = {};
+  if (typeof raw.payloadJson === 'string') { try { payload = JSON.parse(raw.payloadJson); } catch { payload = {}; } }
+  const decoded = { ...payload, ...raw };
+  decoded.id = String(raw.id || payload.id || '');
+  decoded.ownerUid = String(raw.ownerUid || payload.ownerUid || '').trim();
+  decoded.isActive = typeof raw.isActive === 'boolean' ? raw.isActive : payload.isActive !== false;
+  decoded.deleted = raw.deleted === true || payload.deleted === true;
+  if (decoded.deleted) { decoded.isActive = false; decoded.status = 'deleted'; }
+  delete decoded.payloadJson;
+  return decoded;
+}
+function encodeAssignmentDocument(assignment: any): Record<string, any> {
+  return cleanForFirestore({
+    id: assignment.id, ownerUid: assignment.ownerUid,
+    title: String(assignment.title || 'Hausaufgabe').slice(0, 290),
+    createdAt: String(assignment.createdAt || new Date().toISOString()).slice(0, 60),
+    isActive: assignment.isActive !== false && assignment.deleted !== true,
+    ...(assignment.deleted === true ? { deleted: true, deletedAt: assignment.deletedAt || new Date().toISOString() } : {}),
+    payloadJson: JSON.stringify(assignment)
+  });
+}
+function decodeSubmissionDocument(raw: any): any {
+  if (!raw || typeof raw !== 'object') return null;
+  let payload: any = {};
+  if (typeof raw.payloadJson === 'string') { try { payload = JSON.parse(raw.payloadJson); } catch { payload = {}; } }
+  const decoded = { ...payload, ...raw };
+  decoded.id = String(raw.id || payload.id || '');
+  decoded.assignmentId = String(raw.assignmentId || payload.assignmentId || '');
+  decoded.ownerUid = String(raw.ownerUid || payload.ownerUid || '').trim();
+  delete decoded.payloadJson;
+  return decoded;
+}
+function encodeSubmissionDocument(submission: any): Record<string, any> {
+  return cleanForFirestore({
+    id: submission.id, assignmentId: submission.assignmentId, ownerUid: submission.ownerUid,
+    studentName: String(submission.studentName || 'طالب').slice(0, 140),
+    score: Math.max(0, Math.min(100000, Number(submission.score ?? submission.correctAnswersCount) || 0)),
+    accuracyPercent: Math.max(0, Math.min(100, Number(submission.accuracyPercent ?? submission.scorePercentage ?? submission.accuracy) || 0)),
+    completedAt: String(submission.completedAt || ''), status: String(submission.status || 'in_progress'),
+    ...(submission.attemptSecret ? { attemptSecret: String(submission.attemptSecret).slice(0, 120) } : {}),
+    payloadJson: JSON.stringify(submission)
+  });
+}
+
 // --- Authoritative Assignment Operations ---
 
 export async function getAuthoritativeAssignment(id: string): Promise<any | null> {
@@ -344,14 +390,14 @@ export async function getAuthoritativeAssignment(id: string): Promise<any | null
   const db = getAuthoritativeFirestore();
   const snap = await db.collection('homework_assignments').doc(id.trim()).get();
   if (!snap.exists) return null;
-  return snap.data();
+  return decodeAssignmentDocument(snap.data());
 }
 
 export async function listAuthoritativeAssignments(ownerUid: string): Promise<any[]> {
   if (!ownerUid || typeof ownerUid !== 'string') return [];
   const db = getAuthoritativeFirestore();
   const snap = await db.collection('homework_assignments').where('ownerUid', '==', ownerUid.trim()).get();
-  return snap.docs.map((d: any) => d.data());
+  return snap.docs.map((d: any) => decodeAssignmentDocument(d.data())).filter(Boolean);
 }
 
 export async function saveAuthoritativeAssignment(assignment: any, verifiedOwnerUid: string): Promise<any> {
@@ -365,29 +411,42 @@ export async function saveAuthoritativeAssignment(assignment: any, verifiedOwner
   const cleanId = String(assignment.id).trim();
   const db = getAuthoritativeFirestore();
   const docRef = db.collection('homework_assignments').doc(cleanId);
-
-  // Check existing document to enforce owner immutability
-  const existingSnap = await docRef.get();
-  if (existingSnap.exists) {
-    const existing = existingSnap.data();
-    const existingOwner = String(existing.ownerUid || '').trim();
-    if (existingOwner && existingOwner !== verifiedOwnerUid) {
-      const err: any = new Error('Forbidden: Cannot overwrite assignment belonging to another teacher account');
-      err.status = 403;
-      throw err;
+  const cleaned = cleanForFirestore({ ...assignment, id: cleanId, ownerUid: verifiedOwnerUid, isActive: assignment.isActive !== false, updatedAt: new Date().toISOString() });
+  delete cleaned.ownerEmail;
+  const encoded = encodeAssignmentDocument(cleaned);
+  // Owner check and write happen atomically to prevent cross-account ID collisions.
+  await db.runTransaction(async (transaction: any) => {
+    const existingSnap = await transaction.get(docRef);
+    if (existingSnap.exists) {
+      const existing = decodeAssignmentDocument(existingSnap.data());
+      if (String(existing?.ownerUid || '').trim() !== verifiedOwnerUid) {
+        const err: any = new Error('Forbidden: This homework ID belongs to another account or an unclaimed legacy record.'); err.status = 403; throw err;
+      }
+      if (existing?.deleted === true) {
+        const err: any = new Error('This homework was deleted and cannot be reactivated. Create a new homework instead.'); err.status = 410; throw err;
+      }
     }
-  }
-
-  const cleaned = cleanForFirestore({
-    ...assignment,
-    id: cleanId,
-    ownerUid: verifiedOwnerUid,
-    updatedAt: new Date().toISOString()
+    transaction.set(docRef, encoded);
   });
-  delete cleaned.ownerEmail; // Never store teacher email in assignment document
-
-  await docRef.set(cleaned, { merge: true });
   return cleaned;
+}
+
+export async function softDeleteAuthoritativeAssignment(id: string, verifiedOwnerUid: string): Promise<any> {
+  if (!id || !verifiedOwnerUid) { const err: any = new Error('Assignment id and authenticated owner are required'); err.status = 400; throw err; }
+  const db = getAuthoritativeFirestore();
+  const docRef = db.collection('homework_assignments').doc(String(id).trim());
+  let deletedAssignment: any = null;
+  await db.runTransaction(async (transaction: any) => {
+    const snap = await transaction.get(docRef);
+    if (!snap.exists) { const err: any = new Error('Assignment not found'); err.status = 404; throw err; }
+    const existing = decodeAssignmentDocument(snap.data());
+    if (existing.ownerUid !== verifiedOwnerUid) { const err: any = new Error('Forbidden: This homework belongs to another teacher account'); err.status = 403; throw err; }
+    if (existing.deleted === true) { deletedAssignment = existing; return; }
+    deletedAssignment = cleanForFirestore({ ...existing, ownerUid: verifiedOwnerUid, deleted: true, isActive: false, status: 'deleted', deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    delete deletedAssignment.ownerEmail;
+    transaction.set(docRef, encodeAssignmentDocument(deletedAssignment));
+  });
+  return deletedAssignment;
 }
 
 // --- Authoritative Submission Operations ---
@@ -397,14 +456,14 @@ export async function getAuthoritativeSubmission(id: string): Promise<any | null
   const db = getAuthoritativeFirestore();
   const snap = await db.collection('homework_submissions').doc(id.trim()).get();
   if (!snap.exists) return null;
-  return snap.data();
+  return decodeSubmissionDocument(snap.data());
 }
 
 export async function listAuthoritativeSubmissions(ownerUid: string, assignmentId?: string | null): Promise<any[]> {
   if (!ownerUid || typeof ownerUid !== 'string') return [];
   const db = getAuthoritativeFirestore();
   const snap = await db.collection('homework_submissions').where('ownerUid', '==', ownerUid.trim()).get();
-  const all = snap.docs.map((d: any) => d.data());
+  const all = snap.docs.map((d: any) => decodeSubmissionDocument(d.data())).filter(Boolean);
   if (assignmentId) {
     const cleanAssignmentId = String(assignmentId).trim();
     return all.filter((s: any) => s.assignmentId === cleanAssignmentId);
@@ -426,6 +485,7 @@ export async function saveAuthoritativeSubmission(
   }
 
   const assignmentOwnerUid = String(parentAssignment.ownerUid || '').trim();
+  if (!assignmentOwnerUid || parentAssignment.deleted === true || parentAssignment.isActive === false || parentAssignment.status === 'closed') { const err: any = new Error('Assignment is unavailable or has no valid teacher owner'); err.status = 403; throw err; }
   const subId = String(submission.id).trim();
   const db = getAuthoritativeFirestore();
   const docRef = db.collection('homework_submissions').doc(subId);
@@ -449,7 +509,7 @@ export async function saveAuthoritativeSubmission(
 
       // 1. Verify ownerUid
       const existingOwner = String(existing.ownerUid || '').trim();
-      if (existingOwner && assignmentOwnerUid && existingOwner !== assignmentOwnerUid) {
+      if (existingOwner !== assignmentOwnerUid) {
         const err: any = new Error('Forbidden: Cannot overwrite submission belonging to another teacher account');
         err.status = 403;
         throw err;
@@ -495,7 +555,7 @@ export async function saveAuthoritativeSubmission(
       }
     }
 
-    t.set(docRef, cleaned, { merge: true });
+    t.set(docRef, encodeSubmissionDocument(cleaned));
   });
 
   return { submission: cleaned, isIdempotentRetry };

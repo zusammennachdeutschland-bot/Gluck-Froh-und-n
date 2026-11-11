@@ -1043,13 +1043,8 @@ export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): v
     return;
   }
 
-  if (isAssignmentDeletedLocally(hw.id, scopeUid) || (hw as any).deleted) {
-    if (!syncCloud) {
-      activeDeleteAssignmentFromCloud(hw.id, activeUid || undefined).catch(() => {});
-      activeDeleteSubmissionsForAssignmentFromCloud(hw.id, activeUid || undefined).catch(() => {});
-    }
-    return;
-  }
+  if ((hw as any).deleted) { deleteLocalAssignment(hw.id, false); return; }
+  if (isAssignmentDeletedLocally(hw.id, scopeUid)) return;
 
   const currentList = getLocalAssignments(scopeUid);
   const existing = currentList.find((a) => a.id === hw.id);
@@ -1187,7 +1182,7 @@ export function getLocalSubmissions(explicitUid?: string | null): HomeworkSubmis
       if (!s || !s.assignmentId) return false;
       if (deletedSet.has(s.assignmentId) || deletedSet.has(sanitizeDocId(s.assignmentId))) return false;
       const recOwner = s.ownerUid?.trim() || '';
-      if (isAuthenticatedScope && recOwner && recOwner !== scopeUid) {
+      if (isAuthenticatedScope && recOwner !== scopeUid) {
         return false;
       }
       return true;
@@ -1215,7 +1210,7 @@ function writeLocalSubmissionsList(list: HomeworkSubmission[], explicitUid?: str
       if (!s || !s.assignmentId) return false;
       if (deletedSet.has(s.assignmentId) || deletedSet.has(sanitizeDocId(s.assignmentId))) return false;
       const recOwner = s.ownerUid?.trim() || '';
-      if (isAuthenticatedScope && recOwner && recOwner !== scopeUid) {
+      if (isAuthenticatedScope && recOwner !== scopeUid) {
         return false;
       }
       return true;
@@ -1839,6 +1834,14 @@ export function parseQuestionTypeCountsParam(
  * Creates a cryptographically strong bearer token for a public homework share link.
  * Requires Web Crypto; never falls back to Math.random for an access credential.
  */
+export function createHomeworkAssignmentId(): string {
+  const cryptoApi = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+  if (!cryptoApi?.getRandomValues) throw new Error('Secure random generation is unavailable; cannot create a homework ID.');
+  const bytes = new Uint8Array(16);
+  cryptoApi.getRandomValues(bytes);
+  return 'hw_' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export function createHomeworkShareToken(): string {
   const cryptoApi = globalThis.crypto;
   if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function') {
@@ -1996,16 +1999,22 @@ export async function syncAndFetchTeacherAssignments(
   const scopeAtStart = getActiveHomeworkScopeUid();
   const authUidAtStart = getCurrentHomeworkOwnerUid();
 
-  // 1. Flush any pending local-only writes in the background without blocking UI rendering
+  // Read authoritative cloud state first. A failed read must never be treated as an empty account.
+  let cloudAssignments: HomeworkAssignment[] = [];
+  let cloudSubmissions: HomeworkSubmission[] = [];
+  if (authUidAtStart) {
+    try {
+      [cloudAssignments, cloudSubmissions] = await Promise.all([
+        activeFetchAllAssignmentsFromCloud(authUidAtStart),
+        activeFetchAllSubmissionsFromCloud(authUidAtStart)
+      ]);
+    } catch {
+      if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) return [];
+      return getLocalAssignments(scopeAtStart).filter((hw) => hw.ownerUid === authUidAtStart && !(hw as any).deleted);
+    }
+  }
+  // Flush queued writes only after the cloud read succeeds.
   flushPendingHomeworkCloudWrites().catch(() => {});
-
-  // 2. Fetch from Firebase Firestore strictly scoped to the authenticated ownerUid
-  const [cloudAssignments, cloudSubmissions] = authUidAtStart
-    ? await Promise.all([
-        activeFetchAllAssignmentsFromCloud(authUidAtStart).catch(() => [] as HomeworkAssignment[]),
-        activeFetchAllSubmissionsFromCloud(authUidAtStart).catch(() => [] as HomeworkSubmission[])
-      ])
-    : [[] as HomeworkAssignment[], [] as HomeworkSubmission[]];
 
   // Guard against stale async completion after account switch or logout
   if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
@@ -2016,11 +2025,8 @@ export async function syncAndFetchTeacherAssignments(
     if (authUidAtStart && hw.ownerUid && hw.ownerUid !== authUidAtStart) {
       return;
     }
-    if (isAssignmentDeletedLocally(hw.id, scopeAtStart) || (hw as any).deleted) {
-      activeDeleteAssignmentFromCloud(hw.id, authUidAtStart || undefined).catch(() => {});
-      activeDeleteSubmissionsForAssignmentFromCloud(hw.id, authUidAtStart || undefined).catch(() => {});
-      return;
-    }
+    if ((hw as any).deleted) { deleteLocalAssignment(hw.id, false); return; }
+    if (isAssignmentDeletedLocally(hw.id, scopeAtStart)) return;
     saveLocalAssignment({ ...hw, ...(authUidAtStart ? { ownerUid: authUidAtStart } : {}), cloudSynced: true }, false);
   });
 

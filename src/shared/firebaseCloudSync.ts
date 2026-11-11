@@ -722,12 +722,12 @@ export async function saveAssignmentToFirestore(
   const path = `homework_assignments/${safeId}`;
   try {
     // Privacy hardening (V-06): strip personal teacher ownerEmail before writing to public student-accessible homework_assignments document
-    const cleanAssignment: HomeworkAssignment = {
-      ...assignment,
-      id: safeId,
-      ownerUid,
-      cloudSynced: true
-    };
+    const existingSnap = await withFirestoreReadTimeout(getDoc(doc(db, 'homework_assignments', safeId)), 4000).catch(() => null);
+    if (existingSnap?.exists()) {
+      const existingData = existingSnap.data();
+      if (String(existingData?.ownerUid || '').trim() !== ownerUid || existingData?.deleted === true) return false;
+    }
+    const cleanAssignment: HomeworkAssignment = { ...assignment, id: safeId, ownerUid, cloudSynced: true };
     delete cleanAssignment.ownerEmail;
     const payloadJson = JSON.stringify(cleanAssignment).slice(0, 490000);
     await executeConfirmedFirestoreWrite(
@@ -825,6 +825,7 @@ export async function fetchAllAssignmentsFromFirestore(
             ...parsed,
             ownerUid,
             ...(typeof data.ownerEmail === 'string' && data.ownerEmail ? { ownerEmail: data.ownerEmail } : {}),
+              ...(data.deleted === true || parsed.deleted === true ? { deleted: true, isActive: false, status: 'deleted' } : {}),
             cloudSynced: true
           });
         }
@@ -835,7 +836,7 @@ export async function fetchAllAssignmentsFromFirestore(
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
-    return [];
+    throw error;
   }
 }
 
@@ -869,6 +870,7 @@ export function subscribeAssignmentsFromFirestore(
               ...parsed,
               ownerUid,
               ...(typeof data.ownerEmail === 'string' && data.ownerEmail ? { ownerEmail: data.ownerEmail } : {}),
+              ...(data.deleted === true || parsed.deleted === true ? { deleted: true, isActive: false, status: 'deleted' } : {}),
               cloudSynced: true
             });
           }
@@ -1128,7 +1130,7 @@ export async function fetchAllSubmissionsFromFirestore(
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
-    return [];
+    throw error;
   }
 }
 

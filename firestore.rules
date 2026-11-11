@@ -119,6 +119,7 @@ service cloud.firestore {
 
       allow update: if isSignedIn()
         && isValidId(assignmentId)
+        && (!('deleted' in existing()) || existing().deleted != true)
         && isValidHomeworkAssignment(incoming())
         && incoming().id == assignmentId
         && (
