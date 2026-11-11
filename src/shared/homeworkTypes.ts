@@ -113,6 +113,7 @@ export interface HomeworkAssignment {
   createdAt: string;
   createdBy: string;
   cloudSynced?: boolean;
+  cloudCreatePending?: boolean; // Only true for a new assignment created offline and safe to retry under its owner account.
 }
 
 export interface HomeworkSummaryStats {
