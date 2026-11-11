@@ -1965,6 +1965,68 @@ async function runAllIsolationTests() {
     }
   );
 
+  await runTest(
+    'HW-DELETE-LINK',
+    'A deleted homework link is blocked and cannot accept student submissions',
+    async () => {
+      const server = expressApp.listen(0);
+      try {
+        const addr = server.address();
+        const port = typeof addr === 'object' && addr ? addr.port : 0;
+        const baseUrl = `http://127.0.0.1:${port}`;
+        const tokenA = makeTestBearerToken(UID_TEACHER_A, EMAIL_TEACHER_A);
+        const tokenB = makeTestBearerToken(UID_TEACHER_B, EMAIL_TEACHER_B);
+        const assignmentId = 'hw_deleted_link_regression';
+
+        const create = await fetch(`${baseUrl}/api/teacher/assignments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenA}` },
+          body: JSON.stringify(makeAssignment({
+            id: assignmentId,
+            title: 'واجب اختبار الحذف',
+            ownerUid: UID_TEACHER_A,
+            shareToken: 'deleted-link-token'
+          }))
+        });
+        assert.equal(create.status, 200);
+
+        const before = await fetch(`${baseUrl}/api/homework/info?id=${assignmentId}&token=deleted-link-token`);
+        assert.equal(before.status, 200);
+
+        const otherTeacherDelete = await fetch(`${baseUrl}/api/teacher/assignments?id=${assignmentId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${tokenB}` }
+        });
+        assert.equal(otherTeacherDelete.status, 403);
+
+        const deleted = await fetch(`${baseUrl}/api/teacher/assignments?id=${assignmentId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${tokenA}` }
+        });
+        assert.equal(deleted.status, 200);
+        assert.equal((await deleted.json()).deleted, true);
+
+        const after = await fetch(`${baseUrl}/api/homework/info?id=${assignmentId}&token=deleted-link-token`);
+        assert.equal(after.status, 403);
+
+        const submitAfterDelete = await fetch(`${baseUrl}/api/homework/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: 'sub_after_deleted_link',
+            assignmentId,
+            token: 'deleted-link-token',
+            studentName: 'طالب',
+            responses: []
+          })
+        });
+        assert.equal(submitAfterDelete.status, 403);
+      } finally {
+        server.close();
+      }
+    }
+  );
+
   console.log(`\n🎉 ALL ${passed} HOMEWORK ACCOUNT ISOLATION & SECURITY RULES TESTS PASSED!`);
 }
 

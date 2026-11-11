@@ -397,7 +397,9 @@ export async function listAuthoritativeAssignments(ownerUid: string): Promise<an
   if (!ownerUid || typeof ownerUid !== 'string') return [];
   const db = getAuthoritativeFirestore();
   const snap = await db.collection('homework_assignments').where('ownerUid', '==', ownerUid.trim()).get();
-  return snap.docs.map((d: any) => decodeAssignmentDocument(d.data())).filter(Boolean);
+  return snap.docs
+    .map((d: any) => decodeAssignmentDocument(d.data()))
+    .filter((assignment: any) => assignment && assignment.deleted !== true);
 }
 
 export async function saveAuthoritativeAssignment(assignment: any, verifiedOwnerUid: string): Promise<any> {

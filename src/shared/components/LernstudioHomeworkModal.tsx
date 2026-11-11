@@ -34,7 +34,6 @@ import {
   getCurrentHomeworkOwnerUid,
   getCurrentHomeworkOwnerEmail,
   migrateLegacyHomeworkForAccount,
-  backfillLegacyCloudHomeworkForAccount,
   resolveAssignmentAudienceMode,
   resolveStageQuestionCount,
   calculateTotalHomeworkQuestions
@@ -248,7 +247,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           ownedStudentIds: (studentsRef.current || []).map((st) => st.id)
         };
         migrateLegacyHomeworkForAccount(migOpts);
-        backfillLegacyCloudHomeworkForAccount(migOpts).catch(() => {});
       }
       setPendingSyncCount(getPendingHomeworkSyncCount(u?.uid || null));
     });

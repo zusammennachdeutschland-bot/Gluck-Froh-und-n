@@ -1501,30 +1501,9 @@ export async function flushPendingHomeworkCloudWrites(): Promise<{
   let syncedSubmissions = 0;
 
   try {
-    // 1. Teacher assignments are only flushed when an authenticated teacher (or test transport) is active
-    if (authUidAtStart || testCloudTransport) {
-      const localHw = getLocalAssignments(scopeAtStart);
-      for (const hw of localHw) {
-        if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
-          break;
-        }
-        if (authUidAtStart && hw.ownerUid && hw.ownerUid !== authUidAtStart) {
-          continue;
-        }
-        if (hw.cloudSynced === false) {
-          const ok = await activeSaveAssignmentToCloud(hw);
-          if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
-            break;
-          }
-          if (ok) {
-            syncedAssignments++;
-            saveLocalAssignment({ ...hw, cloudSynced: true }, false);
-          }
-        }
-      }
-    }
-
-    // 2. Flush pending submissions:
+    // Assignments are created/deleted through the authoritative teacher API.
+    // Do not retry old local-only assignment records: they may be stale legacy data.
+    // 1. Flush pending submissions:
     // - If authenticated as a teacher: flush submissions belonging to active assignments of that teacher.
     // - If unauthenticated (student mode, V-02): flush pending student submissions in UNAUTHENTICATED_HOMEWORK_SCOPE
     //   without requiring teacher authentication or local teacher assignment documents.
