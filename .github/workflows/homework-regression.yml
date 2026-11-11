@@ -50,6 +50,9 @@ jobs:
       - name: Run regression tests
         run: npm test
 
+      - name: Restore pristine binaries
+        run: node scripts/restore_binaries.cjs
+
       - name: Build web and server bundles
         run: CI=true npm run build
 
