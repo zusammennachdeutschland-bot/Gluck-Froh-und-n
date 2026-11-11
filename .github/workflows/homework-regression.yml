@@ -49,3 +49,62 @@ jobs:
 
       - name: Run regression tests
         run: npm test
+
+      - name: Build web and server bundles
+        run: CI=true npm run build
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Setup Android SDK Environment
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          if [ -d "$SDK_ROOT/cmdline-tools/latest/bin" ]; then
+            echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          fi
+          if [ -d "$SDK_ROOT/platform-tools" ]; then
+            echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          fi
+
+      - name: Install Android SDK Platform 36 & Build-Tools
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          SDKMANAGER=""
+          if [ -n "$SDK_ROOT" ] && [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          elif command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          else
+            echo "ERROR: sdkmanager not found"
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          validate-wrappers: false
+
+      - name: Build Android Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew clean assembleDebug --stacktrace
+
+      - name: Verify Android Debug APK
+        run: |
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          echo "Android debug APK built successfully."
