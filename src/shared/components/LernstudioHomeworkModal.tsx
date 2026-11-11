@@ -155,6 +155,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   // Reuse the same id/token after an ambiguous timeout so retries are idempotent.
   const pendingHomeworkIdentityRef = useRef<{ id: string; shareToken: string; key: string } | null>(null);
 
+  useEffect(() => {
+    if (!isOpen) {
+      pendingHomeworkIdentityRef.current = null;
+    }
+  }, [isOpen]);
+
   // Results & Monitoring Tab State
   const [assignmentsList, setAssignmentsList] = useState<any[]>([]);
   const [filterGroup, setFilterGroup] = useState<string>('all');
