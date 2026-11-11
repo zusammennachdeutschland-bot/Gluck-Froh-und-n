@@ -699,11 +699,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   };
 
   const filteredAssignments = useMemo(() => {
-    if (filterGroup === 'all') return assignmentsList;
+    const visibleAssignments = assignmentsList.filter((a) =>
+      a?.deleted !== true && a?.isActive !== false && a?.status !== 'deleted' && a?.status !== 'closed'
+    );
+    if (filterGroup === 'all') return visibleAssignments;
     if (filterGroup === 'open_only') {
-      return assignmentsList.filter((a) => resolveAssignmentAudienceMode(a) === 'open');
+      return visibleAssignments.filter((a) => resolveAssignmentAudienceMode(a) === 'open');
     }
-    return assignmentsList.filter(
+    return visibleAssignments.filter(
       (a) => resolveAssignmentAudienceMode(a) === 'group' && a.groupId === filterGroup
     );
   }, [assignmentsList, filterGroup]);
