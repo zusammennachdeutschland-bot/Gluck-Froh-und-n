@@ -538,7 +538,7 @@ async function readSharedLernstudioSets(): Promise<any[]> {
       const parsed = JSON.parse(data.payloadJson);
       if (!parsed || typeof parsed !== 'object' || !parsed.id) return;
       if (data.deleted === true || parsed.deleted === true) {
-        byId.delete(String(parsed.id));
+        byId.set(String(parsed.id), { ...parsed, deleted: true });
         return;
       }
       byId.set(String(parsed.id), parsed);
@@ -557,6 +557,10 @@ function mergeSharedLernstudioSets(localSets: any[], sharedSets: any[]): any[] {
   for (const set of Array.isArray(sharedSets) ? sharedSets : []) {
     if (!set || !set.id || BUILTIN_LERNSTUDIO_MAP.has(set.id)) continue;
     const id = String(set.id);
+    if (set.deleted === true) {
+      byId.delete(id);
+      continue;
+    }
     const local = byId.get(id);
     const localTime = Number(local?.updatedAt) || Date.parse(local?.updatedAtIso || '') || 0;
     const sharedTime = Number(set.updatedAt) || Date.parse(set.updatedAtIso || '') || 0;
