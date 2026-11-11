@@ -156,7 +156,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [createdCloudSynced, setCreatedCloudSynced] = useState<boolean>(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   // Reuse the same id/token after an ambiguous timeout so retries are idempotent.
-  const pendingHomeworkIdentityRef = useRef<{ id: string; shareToken: string } | null>(null);
+  const pendingHomeworkIdentityRef = useRef<{ id: string; shareToken: string; key: string } | null>(null);
 
   // Results & Monitoring Tab State
   const [assignmentsList, setAssignmentsList] = useState<any[]>([]);
@@ -457,10 +457,24 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         questionTypes,
         sanitizedCounts
       );
-      const pendingIdentity = pendingHomeworkIdentityRef.current || {
-        id: createHomeworkAssignmentId(),
-        shareToken: createHomeworkShareToken()
-      };
+      const retryKey = JSON.stringify({
+        setId: currentSet.id,
+        title: title.trim(),
+        audienceMode,
+        groupId: isGroupMode ? selectedGroupId : '',
+        itemIds: finalItems.map((item) => item.id),
+        questionTypes,
+        questionCounts: sanitizedCounts,
+        maxAttempts
+      });
+      const pendingIdentity =
+        pendingHomeworkIdentityRef.current?.key === retryKey
+          ? pendingHomeworkIdentityRef.current
+          : {
+              id: createHomeworkAssignmentId(),
+              shareToken: createHomeworkShareToken(),
+              key: retryKey
+            };
       pendingHomeworkIdentityRef.current = pendingIdentity;
       const generatedId = pendingIdentity.id;
 
