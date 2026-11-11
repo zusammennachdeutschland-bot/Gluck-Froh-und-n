@@ -135,17 +135,6 @@ jobs:
           zipStorePath=wrapper/dists
           EOF
 
-      - name: Commit repaired Gradle wrapper to the PR branch
-        if: github.event_name == 'pull_request' && github.head_ref == 'fix/homework-create-android-api'
-        run: |
-          git add android/gradlew android/gradlew.bat android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.properties
-          if ! git diff --cached --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -m "fix: repair Gradle wrapper binary [skip ci]"
-            git push origin "HEAD:${GITHUB_HEAD_REF}"
-          fi
-
       - name: Build Android Debug APK
         run: |
           cd android
