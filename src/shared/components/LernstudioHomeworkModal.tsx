@@ -468,7 +468,15 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         blooketMode,
         deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : '',
         ownerUid: resolvedOwnerUid || '',
-        assignedStudentIds: isGroupMode ? activeSelectedGroupStudents.map((student) => student.id).sort() : []
+        groupName: isGroupMode && targetGroup ? targetGroup.name : '',
+        assignedStudents: isGroupMode
+          ? activeSelectedGroupStudents.map((student) => ({
+              id: student.id,
+              name: student.name,
+              code: (student as any).code || '',
+              groupId: selectedGroupId
+            })).sort((a, b) => a.id.localeCompare(b.id))
+          : []
       });
       const pendingIdentity =
         pendingHomeworkIdentityRef.current?.key === retryKey
