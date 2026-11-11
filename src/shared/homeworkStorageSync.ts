@@ -1520,7 +1520,8 @@ export async function flushPendingHomeworkCloudWrites(): Promise<{
         );
         for (const assignment of pendingAssignments) {
           if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) break;
-          const ok = await activeSaveAssignmentToCloud(assignment);
+          const { cloudCreatePending: _cloudCreatePending, ...assignmentForCloud } = assignment as any;
+          const ok = await activeSaveAssignmentToCloud(assignmentForCloud as HomeworkAssignment);
           if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) break;
           if (ok) {
             syncedAssignments++;
