@@ -463,7 +463,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         itemIds: finalItems.map((item) => item.id),
         questionTypes,
         questionCounts: sanitizedCounts,
-        maxAttempts
+        maxAttempts,
+        flowMode,
+        blooketMode,
+        deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : '',
+        ownerUid: resolvedOwnerUid || '',
+        assignedStudentIds: isGroupMode ? activeSelectedGroupStudents.map((student) => student.id).sort() : []
       });
       const pendingIdentity =
         pendingHomeworkIdentityRef.current?.key === retryKey
