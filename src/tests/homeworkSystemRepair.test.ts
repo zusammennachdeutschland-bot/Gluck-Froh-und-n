@@ -46,6 +46,8 @@ import {
   buildDeterministicSubmissionId,
   buildHomeworkShareUrl,
   saveLocalAssignment,
+  saveAssignmentWithConfirmation,
+  __setHomeworkAuthUserForTests,
   getLocalAssignments,
   deleteLocalAssignment,
   saveLocalSubmission,
@@ -932,7 +934,15 @@ async function runTests() {
   // PERSISTENCE & SYNC TESTS (29–33) + EXPRESS API VERIFICATION
   // =========================================================================
 
-  await runScenario(29, 'Confirmed cloud write sets cloudSynced = true', async () => {
+  await runScenario(29, 'A newly-created offline assignment retries only under its authenticated owner', async () => {
+    __setHomeworkAuthUserForTests({ uid: 'teacher-uid-29', email: 'teacher29@example.com' });
+    let attempts = 0;
+    __setHomeworkSyncTransportForTests({
+      saveAssignment: async () => ++attempts > 1,
+      saveSubmission: async () => true,
+      fetchAssignment: async () => null,
+      fetchSubmissionsForAssignment: async () => []
+    });
     const hw = normalizeHomeworkAssignment(
       makeAssignment({
         id: 'hw-sync-29',
@@ -941,13 +951,15 @@ async function runTests() {
         cloudSynced: false
       })
     );
-    saveLocalAssignment(hw, false);
+    const saved = await saveAssignmentWithConfirmation(hw);
+    assert.equal(saved.cloudSynced, false);
     assert.equal(getPendingHomeworkSyncCount(), 1);
 
     const result = await flushPendingHomeworkCloudWrites();
     assert.equal(result.syncedAssignments, 1);
     assert.equal(getPendingHomeworkSyncCount(), 0);
     assert.equal(getLocalAssignmentById('hw-sync-29')?.cloudSynced, true);
+    assert.equal(getLocalAssignmentById('hw-sync-29')?.cloudCreatePending, false);
   });
 
   await runScenario(30, 'Failed cloud write keeps cloudSynced = false and queues pending sync', async () => {
@@ -958,6 +970,7 @@ async function runTests() {
       fetchSubmissionsForAssignment: async () => []
     });
 
+    __setHomeworkAuthUserForTests({ uid: 'teacher-uid-30', email: 'teacher30@example.com' });
     const hw = normalizeHomeworkAssignment(
       makeAssignment({
         id: 'hw-sync-30',
@@ -966,7 +979,7 @@ async function runTests() {
         cloudSynced: false
       })
     );
-    saveLocalAssignment(hw, false);
+    await saveAssignmentWithConfirmation(hw);
 
     const sub = makeSubmission({
       id: buildDeterministicSubmissionId(hw.id, undefined, 'طارق', 1, 'pid-30'),
@@ -995,7 +1008,8 @@ async function runTests() {
       fetchSubmissionsForAssignment: async () => []
     });
 
-    saveLocalAssignment(
+    __setHomeworkAuthUserForTests({ uid: 'teacher-uid-31', email: 'teacher31@example.com' });
+    await saveAssignmentWithConfirmation(
       normalizeHomeworkAssignment(
         makeAssignment({
           id: 'hw-sync-31',
@@ -1003,8 +1017,7 @@ async function runTests() {
           audienceMode: 'open',
           cloudSynced: false
         })
-      ),
-      false
+      )
     );
     saveLocalSubmission(
       makeSubmission({
