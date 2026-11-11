@@ -514,8 +514,9 @@ export function mergeWithBuiltinLernstudioSets(customSets: any[]): any[] {
       byId.set(s.id, s);
     }
   }
-  // Start with incoming custom sets that are not deleted
-  const combined: any[] = [...incoming.filter((s) => s && !s.deleted && !BUILTIN_LERNSTUDIO_MAP.has(s.id))];
+  // Keep deletion tombstones in the cloud snapshot so every account can apply them.
+  // The app import layer filters tombstones from the visible library after merge.
+  const combined: any[] = [...incoming.filter((s) => s && !BUILTIN_LERNSTUDIO_MAP.has(s.id))];
   // Always attach built-in curriculum sets from the local app bundle
   for (const defSet of DEFAULT_LERNSTUDIO_SETS) {
     if (!defSet || !defSet.id) continue;
@@ -557,10 +558,6 @@ function mergeSharedLernstudioSets(localSets: any[], sharedSets: any[]): any[] {
   for (const set of Array.isArray(sharedSets) ? sharedSets : []) {
     if (!set || !set.id || BUILTIN_LERNSTUDIO_MAP.has(set.id)) continue;
     const id = String(set.id);
-    if (set.deleted === true) {
-      byId.delete(id);
-      continue;
-    }
     const local = byId.get(id);
     const localTime = Number(local?.updatedAt) || Date.parse(local?.updatedAtIso || '') || 0;
     const sharedTime = Number(set.updatedAt) || Date.parse(set.updatedAtIso || '') || 0;
