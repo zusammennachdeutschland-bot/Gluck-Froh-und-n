@@ -298,9 +298,20 @@ export function getVercelPublicDomain(): string {
  */
 export function getHomeworkApiUrl(path: string): string {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return isAndroidNativePlatform()
-    ? `${getVercelPublicDomain()}${normalizedPath}`
-    : normalizedPath;
+  if (!isAndroidNativePlatform()) return normalizedPath;
+
+  // Native app API traffic must use HTTPS and the configured host origin only.
+  // Ignore accidental HTTP values or saved path/query fragments in local settings.
+  try {
+    const configuredUrl = new URL(getVercelPublicDomain());
+    const safeOrigin =
+      configuredUrl.protocol === 'https:' && configuredUrl.hostname
+        ? configuredUrl.origin
+        : DEFAULT_VERCEL_DOMAIN;
+    return `${safeOrigin}${normalizedPath}`;
+  } catch {
+    return `${DEFAULT_VERCEL_DOMAIN}${normalizedPath}`;
+  }
 }
 
 /**
