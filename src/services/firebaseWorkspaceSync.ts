@@ -574,22 +574,13 @@ async function writeSharedLernstudioSetChanges(changedSets: any[]): Promise<void
   for (const [id, set] of unique) {
     if (BUILTIN_LERNSTUDIO_MAP.has(id)) continue;
     const target = doc(db, 'lernstudio_sets', id);
-    const existingSnap = await getDoc(target);
-    const existingData = existingSnap.exists() ? existingSnap.data() : null;
-    let existingSet: any = null;
-    try {
-      existingSet = existingData?.payloadJson ? JSON.parse(existingData.payloadJson) : null;
-    } catch {
-      existingSet = null;
-    }
     const localTime = Number(set.updatedAt) || Date.parse(set.updatedAtIso || '') || Date.now();
-    const remoteTime = Number(existingSet?.updatedAt) || Date.parse(existingData?.updatedAtIso || '') || 0;
-    if (existingData && remoteTime > localTime) continue;
     const deleted = set.deleted === true;
-    const payload = JSON.stringify(set);
-    if (existingData && existingData.payloadJson === payload && Boolean(existingData.deleted) === deleted) {
-      continue;
-    }
+    const payloadSet = { ...set };
+    // Shared library records do not carry one teacher account's identity into another.
+    delete payloadSet.ownerUid;
+    delete payloadSet.ownerEmail;
+    const payload = JSON.stringify(payloadSet);
     if (payload.length > 500000) {
       throw new Error(`Lernstudio set "${id}" exceeds the shared Firestore document size limit.`);
     }
@@ -601,7 +592,24 @@ async function writeSharedLernstudioSetChanges(changedSets: any[]): Promise<void
       ...(typeof set.category === 'string' ? { category: set.category.slice(0, 100) } : {}),
       ...(deleted ? { deleted: true } : {})
     };
-    await executeSafeFirestoreWrite(() => setDoc(target, docData));
+
+    // Transactional read/compare/write prevents a slower device from overwriting a newer shared edit.
+    await executeSafeFirestoreWrite(() => runTransaction(db, async (transaction) => {
+      const existingSnap = await transaction.get(target);
+      if (existingSnap.exists()) {
+        const existingData = existingSnap.data();
+        let existingSet: any = null;
+        try {
+          existingSet = existingData?.payloadJson ? JSON.parse(existingData.payloadJson) : null;
+        } catch {
+          existingSet = null;
+        }
+        const remoteTime = Number(existingSet?.updatedAt) || Date.parse(existingData?.updatedAtIso || '') || 0;
+        if (remoteTime > localTime) return;
+        if (existingData?.payloadJson === payload && Boolean(existingData?.deleted) === deleted) return;
+      }
+      transaction.set(target, docData);
+    }));
   }
 }
 
