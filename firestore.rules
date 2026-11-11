@@ -32,11 +32,12 @@ service cloud.firestore {
 
     function isValidLernstudioSet(data) {
       return data.keys().hasAll(['id', 'title', 'payloadJson', 'updatedAtIso'])
-        && data.keys().hasOnly(['id', 'title', 'category', 'payloadJson', 'updatedAtIso', 'ownerEmail', 'ownerUid'])
+        && data.keys().hasOnly(['id', 'title', 'category', 'payloadJson', 'updatedAtIso', 'deleted'])
         && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 300
         && data.payloadJson is string && data.payloadJson.size() >= 2 && data.payloadJson.size() <= 500000
-        && data.updatedAtIso is string && data.updatedAtIso.size() >= 1 && data.updatedAtIso.size() <= 64;
+        && data.updatedAtIso is string && data.updatedAtIso.size() >= 1 && data.updatedAtIso.size() <= 64
+        && (!('deleted' in data) || data.deleted is bool);
     }
 
     function isValidHomeworkAssignment(data) {
@@ -85,24 +86,20 @@ service cloud.firestore {
       allow get: if isValidId(docId);
     }
 
-    // Lernstudio Vocabulary Sets (Single-doc get allowed for shared student links; list/write/delete isolated by ownerUid)
+    // Shared Lernstudio library: every authenticated teacher account sees and manages the same custom sets.
+    // Public single-document get remains available for student share links; enumeration requires sign-in.
     match /lernstudio_sets/{setId} {
       allow get: if isValidId(setId);
-      allow list: if isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow list: if isSignedIn();
       allow create: if isSignedIn()
         && isValidId(setId)
         && isValidLernstudioSet(incoming())
-        && incoming().id == setId
-        && (!('ownerUid' in incoming()) || incoming().ownerUid == request.auth.uid);
+        && incoming().id == setId;
       allow update: if isSignedIn()
         && isValidId(setId)
         && isValidLernstudioSet(incoming())
-        && incoming().id == setId
-        && (!('ownerUid' in existing()) || existing().ownerUid == '' || existing().ownerUid == request.auth.uid)
-        && (!('ownerUid' in incoming()) || incoming().ownerUid == request.auth.uid);
-      allow delete: if isSignedIn()
-        && isValidId(setId)
-        && (!('ownerUid' in existing()) || existing().ownerUid == '' || existing().ownerUid == request.auth.uid);
+        && incoming().id == setId;
+      allow delete: if isSignedIn() && isValidId(setId);
     }
 
     // Homework Assignments (Strictly isolated by teacher ownerUid; public get via server Express DTO API)
