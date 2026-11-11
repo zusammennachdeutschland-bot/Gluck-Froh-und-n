@@ -875,29 +875,19 @@ export async function deleteAssignmentFromFirestore(
 ): Promise<boolean> {
   if (!assignmentId) return false;
   const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
-  if (!ownerUid) return false;
-  const safeId = sanitizeDocId(assignmentId);
-  const path = `homework_assignments/${safeId}`;
+  const currentUser = auth.currentUser;
+  if (!ownerUid || !currentUser || currentUser.uid !== ownerUid) return false;
   try {
-    const existingSnap = await withFirestoreReadTimeout(getDoc(doc(db, 'homework_assignments', safeId)), 4000).catch(() => null);
-    if (existingSnap && existingSnap.exists()) {
-      const data = existingSnap.data();
-      let docOwnerUid = typeof data?.ownerUid === 'string' ? data.ownerUid.trim() : '';
-      if (!docOwnerUid && data?.payloadJson) {
-        try {
-          docOwnerUid = (JSON.parse(data.payloadJson)?.ownerUid || '').trim();
-        } catch {
-          // Ignore
-        }
-      }
-      if (docOwnerUid && docOwnerUid !== ownerUid) {
-        return false;
-      }
-    }
-    await executeConfirmedFirestoreWrite(() => deleteDoc(doc(db, 'homework_assignments', safeId)));
-    return true;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(`/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${idToken}` },
+      credentials: 'include'
+    });
+    if (!response.ok) return false;
+    const data = await response.json().catch(() => null);
+    return data?.success === true && data?.deleted === true;
+  } catch {
     return false;
   }
 }
