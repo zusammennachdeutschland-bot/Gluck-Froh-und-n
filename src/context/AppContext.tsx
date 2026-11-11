@@ -942,22 +942,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       rawSets = DEFAULT_LERNSTUDIO_SETS;
     }
 
-    // Strict Deduplication by ID and Title
+    // Deduplicate by stable ID only. Different teachers may intentionally create
+    // distinct shared sets with the same title, so title-based filtering loses valid sets.
     const seenIds = new Set<string>();
-    const seenTitles = new Set<string>();
     const deduped: LernstudioSet[] = [];
 
     for (const set of rawSets) {
       if (!set || !set.id || seenIds.has(set.id)) continue;
-      const titleKey = (set.title || '').trim().toLowerCase();
-
-      // If duplicate title found (e.g. from previous duplicate exports), keep only the first/primary set
-      if (titleKey && seenTitles.has(titleKey)) {
-        continue;
-      }
-
       seenIds.add(set.id);
-      if (titleKey) seenTitles.add(titleKey);
       deduped.push(set);
     }
 
